@@ -88,7 +88,6 @@ import {
     metaOverlayCacheTtlMs,
     readWriteEpoch,
 } from './meta-overlay-cache.js';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 interface StoredRow {
     id: string;
@@ -181,14 +180,13 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
             // bound at all.
             return opts?.limit === undefined ? matched : matched.slice(0, opts.limit);
         },
-        async findOne(object: string, query?: EngineFindOneQueryInput) {
-            assertEngineFindOnePredicate(object, query);
-            return null;
-        },
-        // ⛔ No `insert` / `update` / `delete` on this double, deliberately —
-        // the path under test is READ-then-register and touches no write verb,
-        // so declaring them would add a dispatch contract
-        // (`check:engine-double-contract`) nothing here exercises. A write is
+        // ⛔ No `findOne` / `insert` / `update` / `delete` on this double,
+        // deliberately —
+        // the overlay path under test issues exactly one verb — `find` — so
+        // declaring any other would add a dispatch contract
+        // (`check:engine-double-contract`) no case here exercises. An
+        // unexercised double is a pin that cannot fail, and the pinned ledger
+        // would have to learn a double that protects nothing. A write is
         // simulated by advancing the seam directly, which is exactly the
         // observable a real engine write produces: `executeWithMiddleware`
         // calls `writeEpoch.bump('write')` ahead of the middleware chain. That
