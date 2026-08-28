@@ -221,10 +221,18 @@ export function resolveInstalledSpecVersion(): string | null {
   } catch {
     // fall through to the ESM anchor
   }
-  // ESM build: anchor a require at this module's own URL. In the CJS build
-  // this branch is only reachable when the branch above already failed, and
-  // its transformed `import.meta.url` is `undefined` there — `createRequire`
-  // then throws and the catch below answers `null`, the documented posture.
+  // Anchor a require at this module's own URL. `import.meta.url` reads as
+  // written in the ESM build; in the CJS build tsup's `shims: true` (declared
+  // and argued in this package's `tsup.config.ts` — #12971) rewrites it to a
+  // real `__filename`-derived URL, so BOTH formats anchor on this module's own
+  // file and resolve the SAME `@objectstack/spec/package.json`.
+  //
+  // ⛔ That shim is what makes this line legal in the CJS output at all: at
+  // this build `target` esbuild emits `import.meta` verbatim, and outside an
+  // ES module that is a PARSE-time error — the whole `require` entry point
+  // becomes unloadable and the `catch` below never runs. Never assume the
+  // catch covers a missing shim; it cannot, and this file has already paid
+  // for the assumption once.
   try {
     const req = createRequire(import.meta.url);
     const pkg = req('@objectstack/spec/package.json') as { version?: string };
