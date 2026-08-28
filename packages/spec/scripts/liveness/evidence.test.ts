@@ -369,8 +369,27 @@ describe('shipped ledgers', () => {
     }
     expect(outOfRange).toEqual([]);
     // Same non-vacuity guard as above, one level down: a parser that stopped
-    // retaining lines would satisfy the assertion above by extracting nothing.
-    expect(citations).toBeGreaterThan(100);
+    // retaining lines would satisfy the assertion above by extracting nothing
+    // (the #5623 lesson — "all in range" over zero citations is what a degraded
+    // parser prints too). The GUARDED FAILURE MODE IS EXACTLY ZERO, so zero is
+    // exactly what the floor tests, and the sibling floor above keeps its own
+    // number because the `local` PATH population it guards is not draining.
+    //
+    // Why not a bigger number here, when this one used to be 100 (#13003): the
+    // symbol-anchor migration (#12516's grammar, adopted batch by batch under
+    // #13003) RETIRES line citations by design — 300 at that card's filing, 175
+    // after batch 2, 82 after batch 3 — so any floor above zero reds on
+    // legitimate drainage and re-opens the same escalation one batch later.
+    // Ruled 2026-08-28 on #13003 (comment 5458356183): lower to `> 0`, the only
+    // floor that never lies during the migration while still catching
+    // extracts-nothing at full strength.
+    //
+    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
+    // retired — DELETE this assertion AND this comment IN THE SAME PR that
+    // retires it, together with the `outOfRange` assertion above, which has
+    // nothing left to check. That is the conscious decision at zero the `> 0`
+    // floor exists to force. Never let it pass silently on an empty population.
+    expect(citations).toBeGreaterThan(0);
   });
 
   it('every local `path#symbol` anchor names a symbol its file contains (#12516)', () => {
