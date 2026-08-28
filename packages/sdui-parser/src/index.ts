@@ -9,6 +9,12 @@
 export * from './types.js';
 export { parseJsx, interpretBrace } from './parse.js';
 export { validateTree } from './validate.js';
+export {
+  checkDashboardWidgetOptions,
+  CONSUMED_WIDGET_OPTION_KEYS,
+  DASHBOARD_WIDGET_HOST_TYPES,
+  UNCONSUMED_WIDGET_OPTION,
+} from './dashboard-widget-options.js';
 export { generateDts, propsName, generateBlockList } from './codegen.js';
 export type { CodegenOptions } from './codegen.js';
 export { inputTypeArms, canonicalizeInputType, MANIFEST_INPUT_TYPES } from './input-type.js';
