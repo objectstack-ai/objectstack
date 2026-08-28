@@ -3,6 +3,22 @@
 import { describe, it, expect } from 'vitest';
 import { buildAggregationPipeline, postProcessAggregation } from './mongodb-aggregation.js';
 
+/**
+ * [#11151] The aggregand `sum` and `avg` now consume: the field path, with a
+ * BOOLEAN rendered as the number it is worth. Spelled once here because the
+ * pins below are about ALIAS ROUTING and stage shape — which accumulator lands
+ * under which key — and the accumulator's own internals are pinned, with the
+ * reasons, in `mongodb-11151-boolean-aggregand-answers.test.ts`.
+ *
+ * ⛔ `min` / `max` deliberately do NOT take this wrapper: they are order
+ * statistics and #11249 ruled they answer `false` / `true`, not `0` / `1`. The
+ * `builds min/max aggregations` case below reads their bare field path and is
+ * the pin that says so from this file.
+ */
+const coerced = (path: string) => ({
+  $cond: [{ $eq: [{ $type: path }, 'bool'] }, { $cond: [path, 1, 0] }, path],
+});
+
 describe('MongoDB Aggregation Pipeline Builder', () => {
   it('builds empty pipeline for no options', () => {
     expect(buildAggregationPipeline({})).toEqual([]);
@@ -32,7 +48,7 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
       groupBy: ['region'],
     });
     expect(pipeline).toEqual([
-      { $group: { _id: { region: '$region' }, total_amount: { $sum: '$amount' } } },
+      { $group: { _id: { region: '$region' }, total_amount: { $sum: coerced('$amount') } } },
       { $project: { _id: 0, region: '$_id.region', total_amount: 1 } },
     ]);
   });
@@ -50,8 +66,8 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
     const groupStage = pipeline[0];
     expect(groupStage.$group._id).toEqual({ customer_id: '$customer_id' });
     expect(groupStage.$group.order_count).toEqual({ $sum: 1 });
-    expect(groupStage.$group.total).toEqual({ $sum: '$amount' });
-    expect(groupStage.$group.average).toEqual({ $avg: '$amount' });
+    expect(groupStage.$group.total).toEqual({ $sum: coerced('$amount') });
+    expect(groupStage.$group.average).toEqual({ $avg: coerced('$amount') });
   });
 
   it('adds $sort stage', () => {
