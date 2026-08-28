@@ -15,8 +15,7 @@
   订阅了的会话确实收得到(与 timeline 差 ~1 秒),但推送式**不可重读** —— 新上下文或当时
   没订阅就取不回,故只作旁证,⛔ 不作决策依据。⛔ `auto_merge` 字段不只是空,是**不稳
   定**:同一 PR 一分钟内先 `set` 后 `None`(2026-08-26 实测),入队后又回落为 off(维护者
-  2026-08-11 裁定)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。队列分支(ls-remote 拼写
-  见「零成本等价物」)正命中即已入队,缺席不作反证 —— 队列满载时分支尚未建出。
+  2026-08-11 裁定)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。
 - **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被
   踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查永远两个
@@ -57,13 +56,14 @@
   按下条序列以队列分支/timeline 入队事件确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空
   本接口给不了(`pull_request_read` 与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果
   读数只有队列分支、timeline 入队事件、最终落地三种;已死假说:已绿 PR 会静默空转。
-- enable 后的验证序列(2026-08-25 增补):① 先验队列分支
-  `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`(零配额,给条目 ~20–30s 建出;正命中即已入
-  队,在 PR 读数发僵时仍决断);② 分支在 ⇒ 结束,⛔ 不翻转;③ 缺席 ⇒ 先
-  `update_pull_request_branch` 逼出暗冲突(静默冲突不踢已挂 PR,只是永不入队 —— 实测一张挂
-  40+ 分钟,update-branch 才吐出 merge conflict);④ 无冲突仍缺席才重挂一次,重试回 405
-  `Pull Request is in the merge queue` = 决断阳性;⑤ ⛔ enable 与它的队列验证之间永不插 `disable`
-  ——「入队」webhook 可能乱序迟到,armed 窗口里补的 disable 会撤掉已发生的真实入队。
+- **队列 ref 答 BUILD 不答成员资格**(旧读法「存在即在队」作废):`gh-readonly-queue/*` **只在存在
+  时**有意义(= 有 build 在跑),⛔ 缺席不是任何方向的读数。**阳性探针按成本序**:①
+  `update_pull_request_branch` 回「Branches that are queued for merging cannot be updated」= 在队,正常返回顺
+  带逼出暗冲突(它不踢已挂 PR、只是永不入队);② `merge_pull_request` 回 405「Pull Request is in the
+  merge queue」= 在队(2026-08-28 两席各一次,均零 ref),405「Merge commits are not allowed」= 不在队,改
+  挂 auto-merge。`enable_pr_auto_merge` 回应只答本次调用:时戳形有动作、空字段形无动作;⛔
+  enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入队)。**踢出成因两
+  则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;止血修复合入
   后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,⛔ 禁止条件反射式重投;第
   三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run 全部 `success` = 队列重建的
