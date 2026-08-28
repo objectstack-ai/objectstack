@@ -18,6 +18,7 @@
 // as an applied one.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   SYS_FILE_BACKFILL_OBJECT,
   applySysFileOrganizationBackfill,
@@ -38,6 +39,47 @@ interface FakeSchema {
   tenancy?: { enabled?: boolean; tenantField?: string; organizationField?: string };
 }
 
+/**
+ * The double's WHERE evaluator — module scope, so it closes over nothing and
+ * says the whole of what it implements in one place.
+ *
+ * ⛔ It REFUSES what it does not implement. A matcher that walks
+ * `Object.entries` reads a top-level combinator (`$and` / `$or` / `$not`) as a
+ * FIELD NAME and then answers about a column that does not exist — a
+ * silently-wrong double, which would let this sweep grow a predicate shape
+ * nothing here actually evaluates. The sweep issues exactly two predicate
+ * shapes; anything else is a loud failure, never a quiet `false`.
+ */
+function matchesWhere(record: Record<string, unknown>, where: any): boolean {
+  if (!where) return true;
+  for (const [field, condition] of Object.entries(where)) {
+    if (field.startsWith('$')) {
+      throw new Error(
+        `fake engine: unsupported WHERE combinator '${field}' — this double implements only `
+        + 'field equality, `{ field: null }` and `{ field: { $in: [...] } }`. '
+        + 'Teach it the combinator before the sweep starts issuing one.',
+      );
+    }
+    const value = record[field];
+    if (condition === null) {
+      if (value !== null && value !== undefined && value !== '') return false;
+    } else if (condition && typeof condition === 'object') {
+      const operators = Object.keys(condition as Record<string, unknown>);
+      if (operators.length !== 1 || operators[0] !== '$in') {
+        throw new Error(
+          `fake engine: unsupported operator(s) [${operators.join(', ')}] on field '${field}' — `
+          + 'this double implements only `$in`.',
+        );
+      }
+      const accepted = (condition as { $in: unknown[] }).$in;
+      if (!accepted.map(String).includes(String(value))) return false;
+    } else if (String(value) !== String(condition)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function createFakeEngine(init: {
   schemas: Record<string, FakeSchema>;
   rows: Record<string, Array<Record<string, unknown>>>;
@@ -46,22 +88,6 @@ function createFakeEngine(init: {
   const rows: Record<string, Array<Record<string, unknown>>> = {};
   for (const [object, list] of Object.entries(init.rows)) rows[object] = list.map((r) => ({ ...r }));
   const updates: Array<{ object: string; data: Record<string, unknown>; context: unknown }> = [];
-
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where) return true;
-    for (const [field, condition] of Object.entries(where)) {
-      const value = row[field];
-      if (condition === null) {
-        if (value !== null && value !== undefined && value !== '') return false;
-      } else if (condition && typeof condition === 'object' && '$in' in (condition as any)) {
-        const set = (condition as any).$in as unknown[];
-        if (!set.map(String).includes(String(value))) return false;
-      } else if (String(value) !== String(condition)) {
-        return false;
-      }
-    }
-    return true;
-  };
 
   const engine: SysFileBackfillEngine & {
     _rows: (object: string) => Array<Record<string, unknown>>;
@@ -75,7 +101,7 @@ function createFakeEngine(init: {
     async find(object: string, options?: any) {
       const table = rows[object];
       if (!table) throw new Error(`object '${object}' is not mounted on this install`);
-      let out = table.filter((r) => matches(r, options?.where));
+      let out = table.filter((r) => matchesWhere(r, options?.where));
       if (options?.orderBy?.[0]?.field === 'id') {
         out = [...out].sort((a, b) => String(a.id).localeCompare(String(b.id)));
       }
@@ -84,6 +110,9 @@ function createFakeEngine(init: {
       return out.slice(offset, offset + limit).map((r) => ({ ...r }));
     },
     async update(object: string, data: any, options?: any) {
+      // The producer's own dispatch predicate, so this double can never accept
+      // an update shape the real `ObjectQL.update` refuses.
+      assertEngineUpdateDispatch(data, options);
       if (init.failUpdateFor?.has(String(data?.id))) {
         throw new Error(`simulated write refusal for ${data.id}`);
       }

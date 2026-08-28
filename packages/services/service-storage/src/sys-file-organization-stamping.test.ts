@@ -23,6 +23,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineFindOnePredicate,
+  assertEngineUpdateDispatch,
+} from '@objectstack/objectql';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter';
 import { StorageMetadataStore } from './metadata-store';
@@ -41,14 +46,23 @@ function createRecordingEngine() {
       inserts.push({ object, data: { ...data }, options });
       return { ...data };
     },
+    // Each verb opens with the producer's OWN dispatch predicate, so this
+    // double can never accept a call shape the real `ObjectQL` refuses.
     async findOne(object: string, query?: any) {
+      assertEngineFindOnePredicate(object, query);
       const hit = inserts.find(
         (i) => i.object === object && String(i.data.id) === String(query?.where?.id),
       );
       return hit ? { ...hit.data } : null;
     },
-    async update(_object: string, data: any) { return { ...data }; },
-    async delete() { return 1; },
+    async update(_object: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
+      return { ...data };
+    },
+    async delete(_object: string, options?: any) {
+      assertEngineDeleteDispatch(options);
+      return 1;
+    },
     async find() { return []; },
     async count() { return 0; },
     async aggregate() { return []; },
