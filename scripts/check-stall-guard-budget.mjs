@@ -108,12 +108,15 @@
  * what the run does.
  *
  * The same measurement bounds this gate's promise, and the bound is worth
- * stating because it is not obvious: on the ci.yml family `T - C` is 10 minutes
- * while prep plus the slowest healthy run is ~16.7, so a freeze arriving at the
- * very END of a healthy shard, on the DEFERRED path only, still loses to the job
- * timeout. The undeferred path (`T - W` = 20 against ~16.7) covers it. That is a
- * property of the checked-in values, not of this gate; it is recorded here so
- * the next reader does not mistake a green line for "every stall is covered".
+ * stating because it is not obvious: on the ci.yml family `T - C` is 10 minutes,
+ * while the worst single shard above spent 15m10s (35s prep + 14m35s of healthy
+ * run) before it would have frozen. So a freeze arriving at the very END of a
+ * healthy shard, on the DEFERRED path only, still loses to the job timeout
+ * (15.2 + 20 > 30). The undeferred path covers it (15.2 + 10 < 30, 4.8m spare).
+ * That is a property of the checked-in values, not of this gate, and this gate
+ * cannot judge it -- the run length is exactly the term no static sweep can
+ * read. It is recorded here, and filed as #12846, so the next reader does not
+ * mistake a green line for "every stall is covered".
  *
  * ## Non-vacuity: a sweep that finds nothing satisfies this gate perfectly
  *
