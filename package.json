@@ -125,6 +125,7 @@
     "check:refd-timer-probe": "node scripts/check-refd-timer-probe.mjs --self-test && node scripts/check-refd-timer-probe.mjs",
     "check:type-source-resolution": "node scripts/check-type-source-resolution.mjs --self-test && node scripts/check-type-source-resolution.mjs",
     "check:undeclared-dep-imports": "node scripts/check-undeclared-dep-imports.mjs --self-test && node scripts/check-undeclared-dep-imports.mjs",
+    "check:keyed-text-bounds": "node scripts/check-keyed-text-bounds.mjs --self-test && node scripts/check-keyed-text-bounds.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
     "check:published-readme-links": "node scripts/check-published-readme-links.mjs --self-test && node scripts/check-published-readme-links.mjs",

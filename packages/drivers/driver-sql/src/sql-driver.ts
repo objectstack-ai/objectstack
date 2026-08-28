@@ -8209,17 +8209,17 @@ export class SqlDriver implements IDataDriver {
         // aggregates on Postgres — the one dialect that stores `Field.boolean`
         // as a real `boolean` column and defines no `sum`/`avg`/`min`/`max`
         // over it (SQLSTATE `42883`, measured on PG 16.13; SQLite stores 0/1
-        // INTEGER and MySQL `tinyint(1)`, so both compute natively). #11249
-        // ruled the answers (maintainer 2026-08-23): `sum`/`avg` answer
-        // arithmetic over 1/0, and `min`/`max` answer `false`/`true` — a
-        // member of the input domain — so this face must ANSWER; refusing
-        // cannot satisfy the ruled contract. `cast(?? as int)` keeps the
-        // column in a knex identifier binding exactly as the uncast form does.
-        // `count`/`count_distinct` are deliberately NOT cast (both lower to
-        // `count`, defined over boolean everywhere — their answers were
-        // correct before this and must not move). The 1/0 the cast computes
-        // for `min`/`max` is presented back as a JSON boolean below, where the
-        // result column is tracked.
+        // INTEGER and MySQL `tinyint(1)`, so both compute natively). The
+        // answers are ruled: this face must ANSWER — refusing cannot satisfy
+        // the contract — and [#11152] (maintainer 2026-08-28, superseding
+        // #11249's `false`/`true` for the order statistics) pins ALL FOUR as
+        // numbers: `sum`/`avg` arithmetic over 1/0, `min`/`max` the `0`/`1`
+        // the cast computes, presented as-is (see the presentation note
+        // below). `cast(?? as int)` keeps the column in a knex identifier
+        // binding exactly as the uncast form does. `count`/`count_distinct`
+        // are deliberately NOT cast (both lower to `count`, defined over
+        // boolean everywhere — their answers were correct before this and
+        // must not move).
         const castBooleanAggregand =
           this.isPostgres &&
           lowering.sql !== 'count' &&
@@ -8244,24 +8244,23 @@ export class SqlDriver implements IDataDriver {
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
-            // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
-            // not only under `readPresentationKind`'s dialect gate. That gate
-            // mirrors `formatOutput`'s ROW reads (SQLite + MySQL since #11782;
-            // SQLite-only when this landed), where the storage-form dialects
-            // hand back a number — but on this door the backend ALSO answers
-            // `min`/`max` as 1/0 on Postgres (the `cast(?? as int)` above,
-            // over a column whose row reads need no presentation), and the
-            // ruled contract is `false` / `true` in JSON: order statistics
-            // return a member of the input domain, and SQL drivers convert at
-            // the driver boundary. The `??` fallback is what carries Postgres.
-            // `presentReadValue('boolean', …)` leaves `null` (no rows / all
-            // NULL) untouched and is idempotent on a value already boolean.
-            const kind =
-              this.readPresentationKind(table, agg.field) ??
-              (table !== null && this.booleanFields[table]?.includes(agg.field)
-                ? ('boolean' as const)
-                : null);
-            if (kind) presentedOutput.set(agg.alias, kind);
+            // [#11152] A BOOLEAN aggregand is the ruled exception to "the
+            // result still needs the column's presentation": the maintainer's
+            // 2026-08-28 ruling (superseding #11249's `false`/`true`, which
+            // #11635 implemented here) pins that booleans aggregate as NUMBERS
+            // on every face, with no per-aggregate exception — `min`/`max`
+            // answer `0`/`1`, the same numeric domain `sum`/`avg` answer in.
+            // Every dialect's backend already computes exactly that number
+            // (SQLite 0/1 INTEGER storage, MySQL `tinyint(1)`, Postgres via
+            // the `cast(?? as int)` above), so the ruled answer is the value
+            // with NO boolean presentation — the `'boolean'` kind is skipped
+            // rather than mapped. ROW reads are untouched: `find()` still
+            // presents a declared boolean as a JSON boolean; it is the
+            // AGGREGATION context that is numeric by rule. Temporal kinds
+            // still present (`sql-driver-aggregate-temporal-output.test.ts`),
+            // and the SQLite-only numeric repair still applies.
+            const kind = this.readPresentationKind(table, agg.field);
+            if (kind && kind !== 'boolean') presentedOutput.set(agg.alias, kind);
           }
         } else {
           if (fieldExpr === '*') {

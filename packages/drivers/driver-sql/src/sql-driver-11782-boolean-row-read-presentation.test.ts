@@ -15,7 +15,9 @@
  * - `find().flag`                → `1` / `0`   (`typeof number`)
  * - `distinct('flag')`           → `[0, 1]`    (`typeof number`)
  * - `aggregate` groupBy(`flag`)  → keys `1`/`0` (`typeof number`)
- * - `aggregate` `min`/`max`      → `false`/`true` (correct since #11635/#11785)
+ * - `aggregate` `min`/`max`      → `false`/`true` (the #11635/#11785-era
+ *   presentation; see the #11152 note below — those two cells answer `0`/`1`
+ *   now, BY RULING, not by regression)
  *
  * while SQLite and Postgres answered `true`/`false` on all four. The boolean
  * read coercion in `formatOutput` — and its per-column mirror
@@ -28,6 +30,20 @@
  * two dialects whose stored boolean is a number (SQLite INTEGER 0/1, MySQL
  * `tinyint(1)`); Postgres stores a real `boolean` node-pg parses, so its
  * stored form already IS the presented form and it stays ungated.
+ *
+ * ## [#11152] The `min`/`max` CELLS are superseded — the row-read doors are NOT
+ *
+ * The maintainer's 2026-08-28 ruling on #11152 (applied in that card's comment
+ * 5448627494, verbatim 「12745 A回，其他同意。」, superseding #11249) pins that
+ * **booleans aggregate as numbers on every face**: `min(flag)`/`max(flag)`
+ * answer the JSON NUMBERS `0`/`1`, so the aggregate-result boolean
+ * presentation this suite once asserted is deliberately removed again. ⚠️
+ * Everything ELSE this suite pins stands unchanged and load-bearing: `find()`
+ * rows, `distinct()` values and aggregate GROUP KEYS still present a declared
+ * boolean as a JSON boolean — it is the AGGREGATION result that is numeric by
+ * rule, not the column. The cross-door test below is now the pin that holds
+ * exactly that boundary: same column, boolean domain on the three row-value
+ * doors, ruled numbers on the two order-statistic cells.
  *
  * ## Assertion conventions
  *
@@ -139,7 +155,7 @@ describe(`[#11782] driver-sql — boolean row reads answer JSON booleans (${cell
 
   // ─── Cross-door agreement — the assertion the triage note asked for ──────
 
-  it('find(), distinct() and aggregate() answer the SAME JSON booleans for the same column', async () => {
+  it('find(), distinct() and group keys answer the SAME JSON booleans; min/max answer the ruled numbers', async () => {
     const found = new Set(
       ((await driver.find(TABLE, {})) as any[]).map((r) => r.flag),
     );
@@ -160,8 +176,11 @@ describe(`[#11782] driver-sql — boolean row reads answer JSON booleans (${cell
     expect(found, 'find()').toEqual(domain);
     expect(listed, 'distinct()').toEqual(domain);
     expect(groupKeys, 'aggregate group keys').toEqual(domain);
-    expect(agg[0].lo, 'min(flag)').toBe(false);
-    expect(agg[0].hi, 'max(flag)').toBe(true);
+    // [#11152] The two order-statistic cells are the ruled exception (see the
+    // head note): numbers, strictly — `false`/`true`, the #11249-era answer,
+    // is exactly the wrong spelling these two lines exist to exclude.
+    expect(agg[0].lo, 'min(flag)').toBe(0);
+    expect(agg[0].hi, 'max(flag)').toBe(1);
   });
 
   it('aggregate group keys carry per-group counts under the presented key', async () => {
