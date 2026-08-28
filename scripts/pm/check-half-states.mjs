@@ -12241,12 +12241,30 @@ function selfTest() {
   const busy = { unclaimed: 15, inFlight: 7 };
   const idleLane = { unclaimed: 15, inFlight: 0 };
 
+  // The `@ <repo>` specimens below DERIVE both board names rather than spelling
+  // them, because `seatLane` judges an at-repo suffix against the LIVE resolved
+  // sweep repo — `SWEEP_REPO`, not a constant. A row that hard-codes `objectui`
+  // as the sibling and `objectstack` as the own board therefore asserts THIS
+  // BOARD instead of the property, and inverts wholesale wherever the file is
+  // installed next: run verbatim in objectui on 2026-08-28 the suite failed
+  // exactly the four rows those two names feed, which is the one thing a file
+  // adopted BY COPY (see `resolveSweepRepo`) may not do. `OWN_BOARD` is the
+  // resolved repo's name half — the same half the predicate compares, derived
+  // here rather than shared, so a predicate that switched to the OWNER half
+  // still goes red. `SIBLING_BOARD` is a real neighbouring board picked so the
+  // two can never coincide, which is what stops the FOREIGN rows going
+  // vacuously green on a board that happens to be named after the specimen.
+  const OWN_BOARD = SWEEP_REPO.repo.split('/')[1];
+  const SIBLING_BOARD = OWN_BOARD === 'objectui' ? 'objectstack' : 'objectui';
+  const ownLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${OWN_BOARD} — ${status}`);
+  const siblingLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${SIBLING_BOARD} — ${status}`);
+
   // The lane parse, across the three measured title shapes.
   t('H32 lane: a plain domain lane is own-board', seatLane(seat(HELD)).lane, 'domain:spec');
   t('H32 lane: …and not foreign', seatLane(seat(HELD)).foreign, false);
-  t('H32 lane: an `@ sibling` suffix is FOREIGN', seatLane(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')).foreign, true);
-  t('H32 lane: an `@ own-repo` suffix is NOT foreign', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).foreign, false);
-  t('H32 lane: …and keeps the bare lane label', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).lane, 'domain:devx');
+  t('H32 lane: an `@ sibling` suffix is FOREIGN', seatLane(siblingLaneSeat()).foreign, true);
+  t('H32 lane: an `@ own-repo` suffix is NOT foreign', seatLane(ownLaneSeat()).foreign, false);
+  t('H32 lane: …and keeps the bare lane label', seatLane(ownLaneSeat()).lane, 'domain:devx');
   t('H32 lane: a repo-scoped seat has no countable lane', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).lane, null);
   t('H32 lane: …and is foreign', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).foreign, true);
   t('H32 lane: a lane-less seat (skills) is foreign', seatLane(seat('[PM seat] skills — 🟢 os-zhuang (session_x)')).foreign, true);
@@ -12255,7 +12273,7 @@ function selfTest() {
 
   // The held/vacant gate — an unheld seat is a ROUTING gap, never 怠工.
   t('H32 held: 🟢 with a holder', seatIsHeld(seat(HELD)), true);
-  t('H32 held: ⏳ vacant is NOT held', seatIsHeld(seat('[PM seat] domain:devx @ objectui — ⏳ vacant')), false);
+  t('H32 held: ⏳ vacant is NOT held', seatIsHeld(siblingLaneSeat('⏳ vacant')), false);
   t('H32 held: 🔴 收班 vacant is NOT held', seatIsHeld(seat('[PM seat] domain:spec — 🔴 收班 vacant · 上一班 os-warren')), false);
   t('H32 held: ⏸️ paused is NOT held', seatIsHeld(seat('[PM seat] domain:spec — ⏸️ paused')), false);
   t('H32 held: a Routine seat is excluded (no claim cadence of its own)', seatIsHeld(seat('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
@@ -12267,7 +12285,7 @@ function selfTest() {
   t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), busy, NOW32), null);
   t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
   t('H32: a vacant seat is out of scope however deep the queue', h32SeatIdleOverQueue(seat('[PM seat] domain:spec — ⏳ vacant'), marker('收班', 6000), idleLane, NOW32), null);
-  t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(seat('[PM seat] domain:devx @ objectui — 🟢 os-x'), marker('Round-start marker', 600), idleLane, NOW32), null);
+  t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(siblingLaneSeat(), marker('Round-start marker', 600), idleLane, NOW32), null);
   t('H32: a non-seat card is out of scope', h32SeatIdleOverQueue({ ...issue(['pm:queue']), title: HELD }, marker('x', 600), idleLane, NOW32), null);
 
   // The threshold, at both edges of SEAT_IDLE_STALE_MINUTES.
@@ -12313,7 +12331,7 @@ function selfTest() {
 
   // The gathering gate buys a fetch only for seats the row can speak about.
   t('H32 gate: a held own-board seat is a candidate', h32NeedsSeatComments(seat(HELD)), true);
-  t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')), false);
+  t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(siblingLaneSeat()), false);
   t('H32 gate: a vacant seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:spec — ⏳ vacant')), false);
   t('H32 gate: a non-seat card buys no fetch', h32NeedsSeatComments(issue(['pm:queue'])), false);
 
