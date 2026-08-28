@@ -135,8 +135,33 @@
  * extractor and the shared scanner disagree about how many docblocks 9 of the
  * 1,053 `packages/spec/src` sources contain. That is a row whose verdict
  * changes under the shared mask, which this header has always said is a finding
- * to read rather than something to absorb, so it is filed rather than fixed
- * here.
+ * to read rather than something to absorb, so it was filed rather than fixed
+ * here. The SECOND SHRINK below is that filing coming back.
+ *
+ * ## SECOND SHRINK (#12833): the one row whose verdict moved
+ *
+ * `packages/lint/scripts/check-doc-formula-expressions.mjs` is converted and its
+ * row is deleted here, in the same PR, which is the half the `stale` branch
+ * exists to demand. `tsdocExampleBodies()` now takes its docblock runs from
+ * `scanSource().comment` instead of a lazy `/**`-to-terminator regex, so the
+ * three literal forms that regex is blind to no longer open phantom docblocks.
+ *
+ * What the conversion found, re-measured on `28a5c3e002` (the population has
+ * grown to 1,061 files / 13.7 MB since the SECOND ROUND read it): both of that
+ * row's numbers reproduce exactly, the two sets of 9 files still overlap in only
+ * 5, and the scan recovers 5 real docblocks the regex was swallowing whole.
+ *
+ * And a third number the row could not have predicted: the gate's own
+ * `@example` body set does NOT move -- 416 bodies, byte for byte identical
+ * either way -- because none of the 5 recovered docblocks carries an `@example`
+ * and none of the phantoms fabricated one. The measuring round's expectation
+ * was that the count would go UP and that the new bodies would be the
+ * interesting part of the diff; on this tree it does not, and the conversion is
+ * verdict-preserving like the other nine. That is not a reason to leave the
+ * extractor alone, and it is recorded here so nobody re-derives the row from
+ * the unchanged count: "surface 2 admits 0 sites today" was the output of an
+ * extractor provably blind to 13 KB of its own population, and it is a reading
+ * now. Both directions are pinned in that gate's own `--self-test`.
  *
  * A recorded row that the scan no longer finds FAILS as stale. That is the
  * property `check-self-test-wired.mjs` names as the difference between a rule
@@ -270,8 +295,6 @@ const LEDGER = new Map([
     { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/create-objectstack/src/index.ts): deletes no live code -- it has no block arm at all -- and therefore KEEPS 2,744 chars of block-comment prose, the FABRICATION direction. Its line arm is anchored and reaches only whole-line comments' }],
   ['packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across all 152 *.test.ts in packages/drivers/driver-sql/src, 2.0 MB): 54 files disagree. Mostly the safe direction -- 4,582 chars of trailing line-comment prose KEPT by the anchored line arm -- but the block arm also DELETES 228 chars of live code in logger-receiver-detach.test.ts, where a fixture STRING quotes a docblock and the naive block regex eats the string. Its own direct-OS_TEST_URL offender set is empty under both strippers' }],
-  ['packages/lint/scripts/check-doc-formula-expressions.mjs',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (collectSpecFiles(), 1,053 .ts/.tsx under packages/spec/src, 13.4 MB): tsdocExampleBodies() is an EXTRACTOR rather than a stripper, so it was measured as one -- do the spans it claims are docblocks hold characters the shared scanner calls code? On 9 files they do, up to 13,139 chars in kernel/manifest.test.ts, where a glob string opens a phantom docblock that then swallows the real ones behind it. THE ONLY ROW WHOSE OWN VERDICT MOVES: its docblock COUNT differs from the shared scanner\'s on 9 files too -- an OVERLAPPING BUT DIFFERENT set of 9, not the same one -- so this gate is under-reading @example bodies it believes it read. Filed rather than fixed here, per this header' }],
   ['packages/lint/src/validate-expressions.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-expressions.ts, 75,403 chars): agrees with the shared mask. The unanchored trailing line arm is the dangerous spelling and it holds here only because that one rule source happens to carry no doubled slash inside a regex literal or string -- a property of today\'s file, not of this stripper' }],
   ['packages/lint/src/validate-org-axis-red-lines.test.ts',
