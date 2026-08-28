@@ -138,26 +138,40 @@ const BASELINE_PATH = 'scripts/dual-build-cjs-loads.baseline.json';
  * derivation for every card in the tree, including the one shape it exists to
  * catch.
  *
- * Three literals, because three different edits move this gate's verdict and
- * no narrower set is complete:
+ * Two literals -- the two files whose CONTENT this gate's verdict is a
+ * function of, and which it can name at a precision worth having:
  *
  *   `packages/**\/package.json`    declares the `require` condition -- adding
  *                                  one puts a new entry into the population.
+ *                                  74 tracked files, 1.0% of the tree.
  *   `packages/**\/tsup.config.ts`  decides the emitted bytes; DROPPING
  *                                  `shims: true` is how a fixed package
  *                                  regresses, and it is a one-line edit that
- *                                  touches no source file at all.
- *   `packages/**\/src/**`          #12843 arrived here and nowhere else: one
- *                                  source line, no manifest change, no config
- *                                  change. A declaration that omitted this
- *                                  would be precise and USELESS -- silent for
- *                                  exactly the change kind that motivated it.
+ *                                  touches no source file at all. 20 tracked
+ *                                  files, 0.3%.
+ *
+ * ⛔ A third literal is deliberately NOT declared, and the omission is
+ * measured rather than an oversight. #12843 arrived through
+ * `packages/**\/src/**` -- one source line, no manifest change, no config
+ * change -- so that spelling has the best recall of the three. It reaches
+ * **4482 files, 62.2% of the tracked tree** (98.8% of them really are in a
+ * dual-built package, so the imprecision is not the problem). Declaring it
+ * would name this gate on nearly every card in the repo, which is the trade
+ * `scripts/pm/bare-root-worklist.mjs` records as REFUSE-WIDE for rows at 39%,
+ * one column narrower than this one: recall bought at the cost of precision,
+ * on the column whose whole value is precision. And this gate does not READ
+ * those files at all -- it reads `dist/` -- so declaring them would be
+ * declaring a population the gate does not walk, which that ledger names as
+ * the costlier error of the two. The recall is not lost: the gate is a step in
+ * **Build Core**, a required context that runs on every PR, so the cost of the
+ * omission is one CI round trip, not a missed defect. The row in that ledger
+ * carries this measurement.
  *
  * ⛔ Spelled as LITERALS, never built from `SCAN_ROOT` -- the extractor reads
  * source text, so a computed template would produce no hint and leave the gate
  * as invisible as no declaration at all. Pinned in `--self-test`.
  */
-const ROOT_DIR_WATCH_HINTS = ['packages/**/package.json', 'packages/**/tsup.config.ts', 'packages/**/src/**'];
+const ROOT_DIR_WATCH_HINTS = ['packages/**/package.json', 'packages/**/tsup.config.ts'];
 
 /**
  * ## AGREES -- the third invariant, and the one loading alone cannot give you
@@ -622,7 +636,8 @@ export async function selfTest() {
   // ── the declaration itself ────────────────────────────────────────────────
   const selfSrc = readFileSync(fileURLToPath(import.meta.url), 'utf8');
   t('the watch hints are spelled as literals the extractor can read', ROOT_DIR_WATCH_HINTS.every((h) => selfSrc.includes(`'${h}'`)));
-  t('the watch hints cover the manifest, the tsup config AND the sources', ROOT_DIR_WATCH_HINTS.length === 3 && ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(`${SCAN_ROOT}/`)));
+  t('the watch hints cover the manifest and the tsup config', ROOT_DIR_WATCH_HINTS.length === 2 && ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(`${SCAN_ROOT}/`)));
+  t('⛔ the wide source spelling stays UNDECLARED — the measured refusal above', !ROOT_DIR_WATCH_HINTS.some((h) => h.endsWith('/src/**')));
   t('no hint collapses to the bare scan root', !ROOT_DIR_WATCH_HINTS.some((h) => h.replace(/\/\*+$/, '') === SCAN_ROOT));
 
   // ── the exports resolver ──────────────────────────────────────────────────
