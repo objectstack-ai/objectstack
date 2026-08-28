@@ -2467,6 +2467,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/seed-write-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/select-only-write-visibility.test.ts",
       "verb": "delete",
       "pinned": 1

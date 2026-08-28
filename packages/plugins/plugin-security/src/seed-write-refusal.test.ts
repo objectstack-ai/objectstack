@@ -45,6 +45,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import {
@@ -131,8 +132,11 @@ function makeQl(
     async find(object: string, q: any) {
       if (object !== 'sys_position') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) =>
+      const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
+          // Refuse what this double does not implement, rather than reading a
+          // combinator as a field name and silently matching nothing.
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (v && typeof v === 'object' && !Array.isArray(v)) {
             const inList = (v as any).$in;
             if (Array.isArray(inList)) return inList.includes(r[k]);
@@ -141,6 +145,10 @@ function makeQl(
           return r[k] === v;
         }),
       );
+      // The caller's bound is applied AFTER the filter, by presence: a double
+      // that silently drops `limit` answers a different question than the real
+      // engine and hides a paging defect from every test that uses it.
+      return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
     },
     async insert(object: string, data: any) {
       if (opts.insertThrows) throw opts.insertThrows();
@@ -148,11 +156,17 @@ function makeQl(
       rows.push({ ...data });
       return { id: data.id };
     },
-    async update(object: string, data: any) {
+    // Pinned to ObjectQL.update's own dispatch predicate: a fake looser than
+    // the real engine is how a dead call shape ships with its suite green.
+    async update(object: string, data: any, options?: any) {
       if (opts.updateThrows) throw opts.updateThrows();
-      if (object !== 'sys_position') return;
-      const r = rows.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      if (object !== 'sys_position') return dispatch.kind === 'by-id' ? null : 0;
+      const targets = dispatch.kind === 'by-id'
+        ? rows.filter((r) => r.id === dispatch.id)
+        : rows;
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
   };
 }
