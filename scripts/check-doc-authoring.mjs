@@ -371,22 +371,104 @@ const INTERNAL_ID = new RegExp(INTERNAL_ID_SOURCE, 'g');
 //      matcher would have under-reported by exactly the shape it was written to
 //      catch.
 //
-// ## What is deliberately NOT in scope, and why that is not a loophole
+// ## The three ADJACENT populations, folded in by the 2026-08-26 triage
 //
-// Three ADJACENT populations under the same root carry ids in text a customer
-// also sees, measured the day this rule landed: the `strictObject` unknown-key
-// error-map options (`guidance` / `history` / `aliases` / `retiredForms`, 181
-// literals), the `retiredKey()` tombstone prescriptions (176), and `.describe()`
-// docs prose (182). Each is larger than this rule's whole population, each has
-// its own pinning tests, and — for the tombstones — AGENTS.md positively
-// requires the prescription to carry a durable reference. Folding them in here
-// would be a corpus-wide convention change riding on a card that adjudicated
-// refusal messages, which is the rider this repo files issues instead of
-// making. They are filed, and this comment is the pointer for whoever gets that
-// ruling: widening this rule means widening MESSAGE_POSITIONS below, not adding
-// an exemption. There is no exemption list here, by design, exactly as in
-// Rule 2.
+// This rule shipped holding `message:` alone, and named three neighbouring
+// populations as deliberately out of scope pending a ruling: the `strictObject`
+// unknown-key error-map options (`guidance` / `guidanceSets` / `history` /
+// `aliases` / `retiredForms` / `surface`), the `retiredKey()` tombstone
+// prescriptions, and `.describe()` docs prose. That ruling arrived as
+// ruling-INHERITANCE rather than a new decision — the founding rationale is
+// "the ban follows the audience, not the file type", and re-checking it against
+// each bucket answers the question without a new maintainer call:
+//
+//   - `strictObject` guidance and tombstone prescriptions are the SAME audience
+//     at the SAME moment as a refusal message. The `guidance` map is consulted
+//     on `unrecognized_keys` and printed verbatim at the refusing author; a
+//     tombstone prescription IS the parse error (`retiredKey` builds
+//     `z.never({ error: () => guidance })`). Rule 2's argument transfers with
+//     nothing changed.
+//   - `.describe()` prose projects into `content/docs/references/**` and the
+//     generated skill artifacts. A customer reading the docs site cannot
+//     resolve an internal tracker id either, and the published-catalog slice of
+//     this same population was already taken by Rule 2.
+//
+// **ADR ids and migration commands STAY.** AGENTS.md positively requires a
+// tombstone prescription to carry a durable reference — "the FROM → TO mapping,
+// the ADR the removal rests on, or the migration command" — and an ADR id is
+// customer-resolvable in a way `#NNNN` is not. The issue id sitting BESIDE an
+// ADR id is exactly the strippable half; the ADR id is what makes stripping it
+// safe. A tombstone whose only reference is the issue id is a decision, not a
+// mechanical edit, and is escalated rather than stripped silently.
+//
+// There is still NO exemption mechanism, in either direction: widening this
+// rule meant widening the RECOGNISED POSITIONS below, exactly as this comment
+// used to prescribe.
+//
+// ## Why the positions alone are not enough: the hoisted-const spelling
+//
+// A position-only matcher reads `guidance: { where: '…' }` and stops at the
+// first `VariableDeclaration` it climbs into. That is most of this population
+// walking free: the guidance maps are overwhelmingly HOISTED — declared once as
+// `const TOOL_RETIRED_KEY_GUIDANCE = {…}` / `const NOTIFY_KEY_GUIDANCE = {…}`
+// and referenced as `guidance: NOTIFY_KEY_GUIDANCE` — and so are whole refusal
+// messages (`message: CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED`). That last
+// shape is not a hypothetical about the new buckets: it was hiding FOUR ids
+// from the `message:` rule itself, which had reported this population clean
+// since the day it landed. A rule that reads only the literal's own position is
+// blind to every sink whose text was given a name.
+//
+// So {@link collectTextSinkConsts} runs a per-file pass first: any module-local
+// const whose contents flow into a recognised sink is itself a sink, to a fixed
+// point (a const referenced by a const referenced by a `guidance:`). It is
+// name-based within one module rather than a scope analysis — deliberately, and
+// it errs toward INCLUSION, which is the safe direction for a rule whose
+// failure mode is silence.
 const SPEC_SOURCE_ROOT = 'packages/spec/src';
+
+/**
+ * `StrictObjectOptions` keys whose values are printed at the refusing author.
+ *
+ * Every one of these lands in the unknown-key error message built by
+ * `strictObjectError` (packages/spec/src/shared/strict-object.ts): `surface`
+ * names the surface in the opening sentence, `history` is the "what used to
+ * happen silently" clause, and `aliases` / `guidance` / `guidanceSets` /
+ * `retiredForms` are the per-key prescriptions appended as bullets.
+ *
+ * `extraKeys` is deliberately absent: it carries KEY NAMES for the "did you
+ * mean" fallback, not prose, so including it would report identifiers as text.
+ */
+const STRICT_OPTION_KEYS = new Set([
+  'surface', 'history', 'aliases', 'guidance', 'guidanceSets', 'retiredForms',
+]);
+
+/**
+ * The calls that take a `StrictObjectOptions` in argument position 0.
+ *
+ * Anchored to the call rather than to the key names alone: `guidance` and
+ * `history` are ordinary English words, and a rule that fired on any property
+ * so named anywhere in the tree would report schema shapes and config records
+ * as refusal prose. A const annotated `StrictObjectOptions` (or named
+ * `*_STRICT_OPTIONS`) is the other recognised anchor — that is how the shared
+ * visibility/editability option sets are written.
+ */
+const STRICT_OBJECT_CALLS = new Set(['strictObject', 'strictObjectError']);
+
+/**
+ * Calls whose argument 0 IS the customer-facing prescription.
+ *
+ * `retiredKey(guidance)` builds `z.never({ error: () => guidance })` plus a
+ * `[REMOVED] …` describe, so its argument is printed at the author on parse AND
+ * projected into the generated docs — both audiences from one literal.
+ */
+const TOMBSTONE_CALLS = new Set(['retiredKey']);
+
+/**
+ * Wrappers that pass their argument through unchanged, so the climb continues
+ * rather than stopping. `Object.freeze({ … })` around a guidance table is the
+ * measured case; a stop here would drop the whole table.
+ */
+const TRANSPARENT_CALLS = new Set(['freeze']);
 
 /**
  * zod validators whose trailing positional argument is a refusal message.
@@ -578,19 +660,140 @@ function collectSpecSourceFiles(root = SPEC_SOURCE_ROOT) {
   return files.sort();
 }
 
+/** The callee's plain name, for `f(…)` and `x.f(…)` alike. */
+function calleeName(call, ts) {
+  const callee = call.expression;
+  return ts.isPropertyAccessExpression(callee) ? callee.name.getText() : callee.getText();
+}
+
 /**
- * Does this string literal sit in a refusal-message position?
+ * Is this property assignment a `StrictObjectOptions` key, in a position where
+ * the value is really printed at the author?
+ *
+ * Climbs from the property to whichever encloses it first: a
+ * {@link STRICT_OBJECT_CALLS} call (the options are argument 0 — the shape is
+ * argument 1, and a shape key that happens to be named `guidance` holds a zod
+ * schema, not prose) or a `StrictObjectOptions`-typed / `*_STRICT_OPTIONS`
+ * const, which is how the shared visibility and editability option sets are
+ * written.
+ */
+function inStrictOptions(prop, ts) {
+  let cur = prop;
+  for (let hops = 0; cur.parent && hops < 30; hops++) {
+    const p = cur.parent;
+    if (ts.isCallExpression(p)) {
+      return STRICT_OBJECT_CALLS.has(calleeName(p, ts)) && p.arguments.indexOf(cur) === 0;
+    }
+    if (ts.isVariableDeclaration(p)) {
+      const nm = p.name.getText();
+      return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(p.type ? p.type.getText() : '');
+    }
+    if (ts.isReturnStatement(p) || ts.isArrowFunction(p) || ts.isFunctionDeclaration(p)) return false;
+    cur = p;
+  }
+  return false;
+}
+
+/** Every identifier name mentioned anywhere inside an expression. */
+function identifiersIn(node, ts, out = new Set()) {
+  const visit = (n) => {
+    if (ts.isIdentifier(n)) { out.add(n.text); return; }
+    if (ts.isPropertyAccessExpression(n)) { visit(n.expression); return; }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+  return out;
+}
+
+/**
+ * Module-local const names whose CONTENTS reach a customer-facing sink.
+ *
+ * The blind spot this closes is argued in the Rule 3 header: the guidance maps
+ * and a good share of the refusal messages are hoisted into a named const and
+ * referenced from the sink, so a matcher that only reads a literal's own
+ * position never reaches them. Seeded from every recognised sink and from the
+ * two naming conventions, then closed to a FIXED POINT so a const referenced by
+ * a const referenced by a `guidance:` is covered too.
+ *
+ * Name-based within one module rather than a scope analysis, deliberately: a
+ * shadowed local of the same name would be a false positive, which costs an
+ * author one rewritten sentence, while the missing analysis costs silence — and
+ * silence is the failure this whole file is a monument to.
+ *
+ * @returns {Map<string, string>} const name → the bucket it feeds.
+ */
+function collectTextSinkConsts(sf, ts) {
+  const sinks = new Map();
+  const decls = new Map();
+  const seed = (expr, bucket) => {
+    for (const id of identifiersIn(expr, ts)) if (!sinks.has(id)) sinks.set(id, bucket);
+  };
+
+  const visit = (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      decls.set(n.name.text, n.initializer);
+      if (/_RETIRED_KEY_GUIDANCE$/.test(n.name.text)) sinks.set(n.name.text, 'tombstone');
+      const ty = n.type ? n.type.getText() : '';
+      if (/_STRICT_OPTIONS$/.test(n.name.text) || /\bStrictObjectOptions\b/.test(ty)) {
+        sinks.set(n.name.text, 'strictObject');
+      }
+    }
+    if (ts.isPropertyAssignment(n)) {
+      const name = n.name.getText();
+      if (name === 'message') seed(n.initializer, 'message');
+      else if (STRICT_OPTION_KEYS.has(name) && inStrictOptions(n, ts)) seed(n.initializer, 'strictObject');
+    }
+    if (ts.isCallExpression(n)) {
+      const name = calleeName(n, ts);
+      if (name === 'describe' && n.arguments[0]) seed(n.arguments[0], 'describe');
+      if (TOMBSTONE_CALLS.has(name) && n.arguments[0]) seed(n.arguments[0], 'tombstone');
+      if (POSITIONAL_MESSAGE_CALLS.has(name) && n.arguments.length > 1) {
+        for (const a of n.arguments.slice(1)) seed(a, 'message');
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(sf, visit);
+
+  // Close over const→const references. Bounded: the deepest real chain is two
+  // hops, and an unbounded loop over a cyclic reference would not terminate.
+  for (let pass = 0; pass < 8; pass++) {
+    let grew = false;
+    for (const [name, bucket] of [...sinks]) {
+      const init = decls.get(name);
+      if (!init) continue;
+      for (const id of identifiersIn(init, ts)) {
+        if (!sinks.has(id) && decls.has(id)) { sinks.set(id, bucket); grew = true; }
+      }
+    }
+    if (!grew) break;
+  }
+
+  // An identifier that is not a declaration in THIS file is an import or a
+  // parameter; its literals are not here to judge.
+  for (const name of [...sinks.keys()]) if (!decls.has(name)) sinks.delete(name);
+  return sinks;
+}
+
+/**
+ * Does this string literal sit in a customer-facing text position?
  *
  * Climbs OUT through `+` concatenation, parentheses, conditionals and template
- * spans before asking — the whole reason this rule is an AST walk. Returns the
- * position's name (for the failure text) or `undefined`.
+ * spans before asking — the whole reason this rule is an AST walk — and now
+ * also through the object/array/`new Map([…])` structure a guidance table is
+ * written in, so a nested prescription is reached rather than abandoned at its
+ * own key.
+ *
+ * @returns {{where: string, bucket: string}|undefined}
  */
-function messagePosition(node, ts) {
+function customerTextPosition(node, ts, sinkConsts = new Map()) {
   let cur = node;
+  let strictKey;
   // A bound, not a belief: refusal prose in this tree reaches ~14 concatenated
   // operands, and an unbounded climb would walk to the SourceFile and start
-  // reporting whole modules as messages.
-  for (let hops = 0; cur.parent && hops < 60; hops++) {
+  // reporting whole modules as messages. Raised from 60 with the structural
+  // hops a nested guidance table adds.
+  for (let hops = 0; cur.parent && hops < 90; hops++) {
     const p = cur.parent;
     if (
       (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.PlusToken)
@@ -603,44 +806,78 @@ function messagePosition(node, ts) {
     ) { cur = p; continue; }
 
     if (ts.isPropertyAssignment(p) && p.initializer === cur) {
-      return p.name.getText() === 'message' ? 'message:' : undefined;
+      const name = p.name.getText();
+      if (name === 'message') return { where: 'message:', bucket: 'message' };
+      if (!strictKey && STRICT_OPTION_KEYS.has(name) && inStrictOptions(p, ts)) strictKey = name;
+      cur = p; continue;
     }
+    // The structure a guidance table is written in — keep climbing.
+    if (
+      ts.isObjectLiteralExpression(p)
+      || ts.isArrayLiteralExpression(p)
+      || ts.isSpreadAssignment(p)
+      || ts.isShorthandPropertyAssignment(p)
+      || ts.isNewExpression(p)
+    ) { cur = p; continue; }
+
     if (ts.isCallExpression(p)) {
-      const callee = p.expression;
-      const name = ts.isPropertyAccessExpression(callee) ? callee.name.getText() : callee.getText();
-      return POSITIONAL_MESSAGE_CALLS.has(name) && p.arguments.indexOf(cur) > 0
-        ? `.${name}(…, message)`
+      const name = calleeName(p, ts);
+      if (TRANSPARENT_CALLS.has(name)) { cur = p; continue; }
+      const idx = p.arguments.indexOf(cur);
+      if (name === 'describe' && idx === 0) return { where: '.describe()', bucket: 'describe' };
+      if (TOMBSTONE_CALLS.has(name) && idx === 0) return { where: `${name}()`, bucket: 'tombstone' };
+      if (STRICT_OBJECT_CALLS.has(name) && strictKey && idx === 0) {
+        return { where: `strictObject ${strictKey}`, bucket: 'strictObject' };
+      }
+      return POSITIONAL_MESSAGE_CALLS.has(name) && idx > 0
+        ? { where: `.${name}(…, message)`, bucket: 'message' }
         : undefined;
     }
-    if (ts.isVariableDeclaration(p) || ts.isReturnStatement(p) || ts.isArrowFunction(p)) return undefined;
+
+    if (ts.isVariableDeclaration(p)) {
+      const nm = p.name.getText();
+      if (!sinkConsts.has(nm)) return undefined;
+      return {
+        where: `via ${nm}`,
+        bucket: strictKey ? 'strictObject' : sinkConsts.get(nm),
+      };
+    }
+    if (ts.isReturnStatement(p) || ts.isArrowFunction(p)) return undefined;
     cur = p;
   }
   return undefined;
 }
 
 /**
- * Refusal messages in one spec source, and how many message strings were seen
- * at all.
+ * Customer-facing text in one spec source, and how many such strings were seen
+ * at all — PER BUCKET.
  *
  * The second number is not decoration. This rule's population is expected to be
  * EMPTY in the steady state, so "no violations" is the same output as "the
  * detector no longer recognises how messages are spelled" — the failure this
- * whole file is a monument to. `seen` is what {@link main} asserts against, so
- * a detector that has gone blind reds instead of congratulating itself.
+ * whole file is a monument to. {@link main} asserts against it, so a detector
+ * that has gone blind reds instead of congratulating itself.
+ *
+ * It is per-bucket for the same reason #4932's floor is per-ROOT and not on the
+ * total: one populous bucket holds a total up while another empties, and "part
+ * of the population was read" is precisely the verdict this rule must not
+ * resolve in the corpus's favour. `.describe()` alone would keep a total
+ * positive forever while the `guidance` matcher rotted.
  */
-function findMessageIdViolations(source, file, ts) {
+function findCustomerTextIdViolations(source, file, ts) {
   const out = [];
-  let seen = 0;
+  const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
   const sf = parseSourceFile(file, source);
+  const sinkConsts = collectTextSinkConsts(sf, ts);
   const visit = (node) => {
     if (
       ts.isStringLiteral(node)
       || ts.isNoSubstitutionTemplateLiteral(node)
       || ts.isTemplateExpression(node)
     ) {
-      const where = messagePosition(node, ts);
-      if (where) {
-        seen += 1;
+      const pos = customerTextPosition(node, ts, sinkConsts);
+      if (pos) {
+        seen[pos.bucket] += 1;
         const text = node.getText(sf);
         const ids = text.match(INTERNAL_ID);
         if (ids) {
@@ -648,7 +885,8 @@ function findMessageIdViolations(source, file, ts) {
             file: posix(file),
             line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
             ids,
-            where,
+            where: pos.where,
+            bucket: pos.bucket,
             text: text.length > 120 ? `${text.slice(0, 120)}…` : text,
           });
         }
@@ -1025,7 +1263,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec refusal-message internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message and the repo#NNNN spelling; green when removed; a `.default()` VALUE and a `.describe()` do not fire; test bodies out, and a tree with no recognised message string reports seen=0 so a blinded detector reds instead of passing) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, and `.describe()` prose; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position and `extraKeys` key names all pass; test bodies out, and the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1057,42 +1295,56 @@ function selfTestRule3(expect) {
     // A test body carrying an id: in the tree, out of the population.
     write('packages/spec/src/ui/pin.test.ts',
       "expect(issue.message).toContain('400 INVALID_FILTER, #5869');");
-    // A TSDoc / `.describe()` id: a different population, deliberately untouched
-    // by this rule. If it ever fires here, the scope has silently widened.
+    // A clean member of each of the three folded-in buckets, so every bucket's
+    // `seen` floor is satisfied on the green tree and the per-bucket blindness
+    // assertion below has something to go blind ABOUT.
     write('packages/spec/src/data/doc.ts', [
       "import { z } from 'zod';",
-      '/** Removed in protocol 17 (#4286). */',
-      "export const D = z.string().describe('A machine name (#4286).');",
+      "import { strictObject } from '../shared/strict-object';",
+      "import { retiredKey } from '../shared/retired-key';",
+      '/** TSDoc ids are a COMMENT, never a string literal — out of reach by construction. */',
+      "export const D = z.string().describe('A machine name.');",
+      'export const T = strictObject({',
+      "  surface: 'this doc',",
+      "  history: 'an unknown key here was dropped silently.',",
+      "  guidance: { where: 'not a doc key — delete it.' },",
+      '}, {',
+      "  cursor: retiredKey('`cursor` was removed in protocol 17 (ADR-0049). Use `after`.'),",
+      '});',
     ].join('\n'));
     const target = write('packages/spec/src/ui/action.zod.ts', CLEAN);
 
     const scan = () => {
       let out = [];
-      let seen = 0;
+      const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
       for (const f of collectSpecSourceFiles()) {
-        const r = findMessageIdViolations(readFileSync(f, 'utf8'), f, ts);
+        const r = findCustomerTextIdViolations(readFileSync(f, 'utf8'), f, ts);
         out = out.concat(r.violations);
-        seen += r.seen;
+        for (const b of Object.keys(seen)) seen[b] += r.seen[b];
       }
       return { violations: out, seen };
     };
 
     process.chdir(dir);
 
-    // GREEN, and the detector is demonstrably NOT blind: it saw the clean
-    // message. Reporting both numbers is the point — "0 violations" and "0
-    // messages found" are the same line to a reader who only checks the first.
+    // GREEN, and the detector is demonstrably NOT blind in ANY bucket. Reporting
+    // the counts is the point — "0 violations" and "0 strings found" are the same
+    // line to a reader who only checks the first, and a per-bucket floor is the
+    // only shape that catches ONE matcher rotting while the others carry the total.
     let r = scan();
     expect('a clean spec tree is green', r.violations.length, 0);
-    expect('the detector actually recognised a message string', r.seen >= 1, true);
+    expect('the detector recognised a message string', r.seen.message >= 1, true);
+    expect('the detector recognised a strictObject option string', r.seen.strictObject >= 1, true);
+    expect('the detector recognised a tombstone prescription', r.seen.tombstone >= 1, true);
+    expect('the detector recognised a `.describe()` string', r.seen.describe >= 1, true);
 
-    // Scope, both directions, before any red: a test body is out and a
-    // `.describe()` is out — each is satisfied by a wrong scope in the other
-    // direction if asserted alone.
+    // Scope: a test body is out, an ordinary source is in. Asserted as a pair
+    // because either half alone is satisfied by a wrong scope in the other
+    // direction.
     const scanned = collectSpecSourceFiles();
     expect('test bodies are not scanned', scanned.includes('packages/spec/src/ui/pin.test.ts'), false);
     expect('ordinary sources are scanned', scanned.includes('packages/spec/src/data/doc.ts'), true);
-    expect('a `.describe()` id is NOT this rule\'s population',
+    expect('an ADR id on a tombstone does NOT fire — it is the durable reference AGENTS.md requires',
       r.violations.some((v) => v.file === 'packages/spec/src/data/doc.ts'), false);
 
     // RED #1 — the founding shape: `message:` and the id on DIFFERENT lines of a
@@ -1157,29 +1409,200 @@ function selfTestRule3(expect) {
     r = scan();
     expect('the `repo#NNNN` spelling is RED here too', r.violations.length, 1);
 
-    // Precision — a validator's VALUE argument is not prose. `.min(3, …)` takes
-    // a message; `.default('#4286')` does not, and an open "any string after
-    // position 0" rule would report it.
+    // ── The three buckets folded in by the 2026-08-26 triage ────────────────
+    //
+    // Same discipline as everything above: each is a PAIR, and each is written
+    // in the spelling the tree really uses — inline for the nested `guidance`
+    // map, hoisted-const for the rest, because hoisting is what a
+    // position-only matcher is blind to.
+
+    // RED #5 — an inline `guidance` prescription, nested one key deep inside
+    // the options object. The literal's own position is a property named
+    // `where`; only the climb reaches `guidance`.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'export const S = strictObject({',
+      "  surface: 'this action',",
+      "  history: 'an unknown key here was dropped silently.',",
+      '  guidance: {',
+      "    where: '`where` has never been an action key (#4001). Delete it.',",
+      '  },',
+      "}, { name: z.string() });",
+    ].join('\n'));
+    r = scan();
+    expect('an id in a nested strictObject `guidance` prescription is RED', r.violations.length, 1);
+    expect('the guidance red names the position', r.violations[0]?.where, 'strictObject guidance');
+    expect('the guidance red names the bucket', r.violations[0]?.bucket, 'strictObject');
+
+    // RED #6 — the same prescription HOISTED into a named const, which is how
+    // this tree overwhelmingly writes it. Without the sink-alias pass the climb
+    // stops at the VariableDeclaration and this is silently clean.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'const ACTION_RETIRED_KEY_GUIDANCE = {',
+      "  legacyMode: '`legacyMode` was removed in protocol 17 (#4286). Delete the key.',",
+      '};',
+      'export const S = strictObject({',
+      "  surface: 'this action',",
+      "  history: 'an unknown key here was dropped silently.',",
+      '  guidance: ACTION_RETIRED_KEY_GUIDANCE,',
+      "}, { name: z.string() });",
+    ].join('\n'));
+    r = scan();
+    expect('an id in a HOISTED guidance const is RED (the spelling a position-only matcher misses)',
+      r.violations.length, 1);
+    expect('the hoisted red names the const it travelled through',
+      r.violations[0]?.where, 'via ACTION_RETIRED_KEY_GUIDANCE');
+
+    // RED #7 — a hoisted REFUSAL MESSAGE. Not a hypothetical about the new
+    // buckets: this shape was hiding four ids from the `message:` rule itself,
+    // which had reported its population clean since the day it landed.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'const URL_NO_USER_REFUSED =',
+      "  'this `config.url` names no user while `credentialsRef` binds a secret '",
+      "  + '— a pair that cannot work as written (#9041).';",
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      '  message: URL_NO_USER_REFUSED,',
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a HOISTED refusal message is RED', r.violations.length, 1);
+    expect('the hoisted message red names its const', r.violations[0]?.where, 'via URL_NO_USER_REFUSED');
+    expect('the hoisted message red is bucketed as a message', r.violations[0]?.bucket, 'message');
+
+    // RED #8 — a `retiredKey()` tombstone prescription.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { retiredKey } from '../shared/retired-key';",
+      'export const S = z.object({',
+      "  cursor: retiredKey('`cursor` was removed in protocol 17 (#3894). Use `after`.'),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a `retiredKey()` prescription is RED', r.violations.length, 1);
+    expect('the tombstone red names the position', r.violations[0]?.where, 'retiredKey()');
+    expect('the tombstone red names the bucket', r.violations[0]?.bucket, 'tombstone');
+
+    // RED #9 — a per-value prescription in a `new Map([[k, v]])`, and one in an
+    // `Object.freeze({…})` table. Both are transparent structure the climb has
+    // to pass through to reach the const that names them.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'const CHATTER_POSITION_RETIRED = new Map([',
+      "  ['right', '`right` was removed in protocol 17 (#6176). Use `main`.'],",
+      ']);',
+      'const FROZEN_GUIDANCE = Object.freeze({',
+      "  tenantId: '`tenantId` never scoped anything (#2377). Delete it.',",
+      '});',
+      'export const S = strictObject({',
+      "  surface: 'this component',",
+      "  history: 'an unknown key here was dropped silently.',",
+      '  guidance: FROZEN_GUIDANCE,',
+      '  retiredForms: CHATTER_POSITION_RETIRED,',
+      "}, { name: z.string() });",
+    ].join('\n'));
+    r = scan();
+    expect('ids inside `new Map([…])` and `Object.freeze({…})` guidance tables are RED',
+      r.violations.length, 2);
+
+    // RED #10 — `.describe()` docs prose, the third bucket.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "export const S = z.string().describe('Machine name. The alias was dropped in #4286.');",
+    ].join('\n'));
+    r = scan();
+    expect('an id in `.describe()` prose is RED', r.violations.length, 1);
+    expect('the describe red names the position', r.violations[0]?.where, '.describe()');
+    expect('the describe red names the bucket', r.violations[0]?.bucket, 'describe');
+
+    // ── Precision: what must NEVER fire ─────────────────────────────────────
+
+    // A validator's VALUE argument is not prose. `.min(3, …)` takes a message;
+    // `.default('#4286')` does not, and an open "any string after position 0"
+    // rule would report it.
     writeFileSync(target, [
       "import { z } from 'zod';",
       "export const S = z.object({ a: z.string().default('#4286') });",
     ].join('\n'));
     expect('precision — a `.default()` VALUE is not a message', scan().violations.length, 0);
 
+    // `guidance` and `history` are ordinary English words. A property so named
+    // OUTSIDE a strictObject options position is a config record or a schema
+    // shape, not refusal prose, and reporting it is how a gate gets routed
+    // around. Both anchors are exercised: the wrong CALL, and the SHAPE
+    // argument of the right call (argument 1, where a key named `guidance`
+    // holds a zod schema rather than text).
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'export const Config = z.object({}).parse({',
+      "  history: 'migrated from the old table in #4286',",
+      "  guidance: { note: 'see #4286' },",
+      '});',
+      'export const S = strictObject({',
+      "  surface: 'this action',",
+      "  history: 'an unknown key here was dropped silently.',",
+      '}, {',
+      "  guidance: z.string().default('#4286'),",
+      '});',
+    ].join('\n'));
+    expect('precision — `history`/`guidance` outside a strictObject options position do not fire',
+      scan().violations.length, 0);
+
+    // `extraKeys` carries KEY NAMES for the "did you mean" fallback, not prose.
+    // It is deliberately absent from STRICT_OPTION_KEYS, and an author who adds
+    // it there would start reporting identifiers as text.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'export const S = strictObject({',
+      "  surface: 'this action',",
+      "  history: 'an unknown key here was dropped silently.',",
+      "  extraKeys: ['tag4286'],",
+      "}, { name: z.string() });",
+    ].join('\n'));
+    expect('precision — `extraKeys` is key names, not prose', scan().violations.length, 0);
+
     // GREEN again from the same scan, so every red above was the id and nothing
     // else about the tree.
     writeFileSync(target, CLEAN);
     r = scan();
     expect('stripping the id makes it green again', r.violations.length, 0);
-    expect('and the detector is still not blind', r.seen >= 1, true);
+    expect('and the detector is still not blind', r.seen.message >= 1, true);
 
-    // The blindness assertion itself must be able to fire: a tree whose only
-    // sources declare no message at all is `seen === 0`, which main() reds on.
+    // The blindness assertion itself must be able to fire, PER BUCKET. This is
+    // the case a total floor cannot see: three buckets still populated, one
+    // gone silent. Emptying only the `.describe()` bucket must still register
+    // as blindness in that bucket while the others stay positive.
+    write('packages/spec/src/data/doc.ts', [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      "import { retiredKey } from '../shared/retired-key';",
+      'export const T = strictObject({',
+      "  surface: 'this doc',",
+      "  history: 'an unknown key here was dropped silently.',",
+      "  guidance: { where: 'not a doc key — delete it.' },",
+      '}, {',
+      "  cursor: retiredKey('`cursor` was removed in protocol 17 (ADR-0049). Use `after`.'),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('one bucket can go blind while the others stay populated — describe', r.seen.describe, 0);
+    expect('...and the surviving buckets really did stay positive (so the zero above is about '
+      + 'that bucket, not an emptied tree)',
+      r.seen.message >= 1 && r.seen.strictObject >= 1 && r.seen.tombstone >= 1, true);
+
+    // ...and the whole-population version: no recognised string of any kind.
     writeFileSync(target, "export const S = 1;\n");
     write('packages/spec/src/data/doc.ts', "export const D = 2;\n");
     write('packages/spec/src/ui/pin.test.ts', "export const T = 3;\n");
-    expect('a tree with no recognised message string reports seen=0 (main reds on it)',
-      scan().seen, 0);
+    r = scan();
+    expect('a tree with no recognised customer-facing string reports every bucket 0 (main reds)',
+      Object.values(r.seen).reduce((a, b) => a + b, 0), 0);
 
     // Empty is a hard error, not a pass — same discipline as the other two rules.
     rmSync(join(dir, 'packages', 'spec', 'src'), { recursive: true, force: true });
@@ -1264,12 +1687,14 @@ function main() {
     return;
   }
   const messageIdViolations = [];
-  let messageStringsSeen = 0;
+  const seenByBucket = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
   for (const file of specSources) {
-    const r = findMessageIdViolations(readFileSync(file, 'utf8'), file, ts);
+    const r = findCustomerTextIdViolations(readFileSync(file, 'utf8'), file, ts);
     messageIdViolations.push(...r.violations);
-    messageStringsSeen += r.seen;
+    for (const b of Object.keys(seenByBucket)) seenByBucket[b] += r.seen[b];
   }
+  const blindBuckets = Object.keys(seenByBucket).filter((b) => seenByBucket[b] === 0);
+  const totalTextSeen = Object.values(seenByBucket).reduce((a, b) => a + b, 0);
 
   let failed = false;
 
@@ -1310,42 +1735,60 @@ function main() {
     );
   }
 
-  if (messageStringsSeen === 0) {
+  if (blindBuckets.length > 0) {
     failed = true;
     console.error(
       `\n✗ doc authoring guard: ${specSources.length} spec source(s) were parsed and NOT ONE`
-      + `\nrefusal-message string was recognised, so "no violations" below would be a verdict on`
-      + `\na population this run never located.`
-      + `\n\nThat is the dormant-gate shape, not a clean tree: the spec really does declare`
-      + `\nrefusal prose, so a zero here means the DETECTOR stopped matching how it is spelled —`
-      + `\nan options-object key renamed away from \`message\`, a new validator helper, a wrapper`
-      + `\nthat builds the string somewhere \`messagePosition()\` does not climb to.`
-      + `\n\nFix \`messagePosition()\` / POSITIONAL_MESSAGE_CALLS in scripts/check-doc-authoring.mjs`
-      + `\nand add the new spelling to --self-test in the same edit. Do NOT delete this assertion:`
-      + `\nit is the only thing standing between this rule and a permanent green.\n`,
+      + `\ncustomer-facing string was recognised in ${blindBuckets.length === 1 ? 'this position' : 'these positions'}:`
+      + `\n\n  ${blindBuckets.join(', ')}`
+      + `\n\nso "no violations" below would be a verdict on a population this run never located.`
+      + `\n\nThat is the dormant-gate shape, not a clean tree: the spec really does declare refusal`
+      + `\nprose, unknown-key guidance, tombstone prescriptions and \`.describe()\` docs, so a zero`
+      + `\nhere means the DETECTOR stopped matching how one of them is spelled — an options-object`
+      + `\nkey renamed away from \`message\`, a new validator helper, a \`strictObject\` wrapper under`
+      + `\na new name, a guidance table moved behind a helper \`customerTextPosition()\` does not`
+      + `\nclimb through.`
+      + `\n\nThe floor is PER BUCKET and not on the total, deliberately: \`.describe()\` alone would`
+      + `\nhold a total positive forever while the \`guidance\` matcher rotted unseen.`
+      + `\n\nFix \`customerTextPosition()\` / \`collectTextSinkConsts()\` / STRICT_OPTION_KEYS /`
+      + `\nSTRICT_OBJECT_CALLS / TOMBSTONE_CALLS / POSITIONAL_MESSAGE_CALLS in`
+      + `\nscripts/check-doc-authoring.mjs and add the new spelling to --self-test in the same edit.`
+      + `\nDo NOT delete this assertion: it is the only thing standing between this rule and a`
+      + `\npermanent green.\n`,
     );
   }
 
   if (messageIdViolations.length > 0) {
     failed = true;
-    console.error(`\n✗ Internal issue-id reference(s) in CUSTOMER-FACING spec refusal messages:\n`);
+    console.error(`\n✗ Internal issue-id reference(s) in CUSTOMER-FACING spec text:\n`);
     for (const v of messageIdViolations) {
       console.error(`  ${v.file}:${v.line}  ${v.ids.join(' ')}  [${v.where}]`);
       console.error(`    ${v.text}`);
     }
+    const byBucket = {};
+    for (const v of messageIdViolations) byBucket[v.bucket] = (byBucket[v.bucket] ?? 0) + 1;
     console.error(
-      `\n${messageIdViolations.length} message string(s). These are printed AT the customer, verbatim,`
-      + `\nthe moment their metadata is refused — by \`os validate\`, by a publish gate, by a parse.`
-      + `\nThat reader has no tracker, no \`git log\` and no ADRs, so \`#NNNN\` is a citation-shaped`
-      + `\ntoken resolving to nothing in the one place they most need the sentence to be actionable.`
-      + `\n\nStrip the id from the string. Where the reference is genuinely load-bearing for an`
-      + `\nINTERNAL reader, move it to an adjacent \`//\` comment; otherwise just remove it — git`
-      + `\nhistory keeps the anchor. Prefer a customer-resolvable anchor where one exists: an ADR`
-      + `\nnumber, a protocol version, an error code (\`400 INVALID_FILTER\` traces the runtime twin`
-      + `\nfar better than the id that used to ride beside it).`
+      `\n${messageIdViolations.length} string(s): `
+      + `${Object.entries(byBucket).map(([b, n]) => `${b} ${n}`).join(' · ')}.`
+      + `\n\nRefusal messages, unknown-key \`guidance\` and tombstone prescriptions are printed AT the`
+      + `\ncustomer, verbatim, the moment their metadata is refused — by \`os validate\`, by a publish`
+      + `\ngate, by a parse. \`.describe()\` prose projects into content/docs/references/** and the`
+      + `\ngenerated skill artifacts. Neither reader has a tracker, \`git log\` or the ADRs, so`
+      + `\n\`#NNNN\` is a citation-shaped token resolving to nothing — in the refusal case, in the one`
+      + `\nplace they most need the sentence to be actionable.`
+      + `\n\nStrip the id from the string; repair the sentence around it rather than rewriting it.`
+      + `\nWhere the id was the whole parenthetical, the parenthetical goes with it. Where the`
+      + `\nreference is genuinely load-bearing for an INTERNAL reader, move it to an adjacent \`//\``
+      + `\ncomment; otherwise just remove it — git history keeps the anchor.`
+      + `\n\n⛔ KEEP the customer-resolvable references: an ADR id, a protocol version, an error code`
+      + `\n(\`400 INVALID_FILTER\` traces the runtime twin far better than the id beside it), and the`
+      + `\nmigration command. AGENTS.md positively requires a tombstone prescription to carry a`
+      + `\ndurable reference — "the FROM → TO mapping, the ADR the removal rests on, or the`
+      + `\nmigration command" — so an issue id NEXT TO an ADR id is the strippable half, and a`
+      + `\ntombstone whose ONLY reference is the issue id is escalated, never stripped bare.`
       + `\n\nA test twin pinning the old wording moves WITH the string — keep it pinning the new`
-      + `\ntext, and add the negative pin (the message must not match an issue id).`
-      + `\n\nThere is no per-message exemption to reach for, by design.`
+      + `\ntext, and add the negative pin (the text must not match an issue id).`
+      + `\n\nThere is no per-string exemption to reach for, by design.`
       + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
     );
   }
@@ -1355,8 +1798,10 @@ function main() {
   console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
   console.log(`✓ doc authoring guard: ${published.length} published skill files clean — no internal issue-id references.`);
   console.log(
-    `✓ doc authoring guard: ${messageStringsSeen} refusal-message string(s) across `
-    + `${specSources.length} spec sources clean — no internal issue-id references.`,
+    `✓ doc authoring guard: ${totalTextSeen} customer-facing string(s) across `
+    + `${specSources.length} spec sources clean — no internal issue-id references `
+    + `(message ${seenByBucket.message} · strictObject ${seenByBucket.strictObject} · `
+    + `tombstone ${seenByBucket.tombstone} · describe ${seenByBucket.describe}).`,
   );
 }
 
