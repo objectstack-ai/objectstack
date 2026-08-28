@@ -103,7 +103,6 @@ import {
   SysOauthClientAssertion,
   SysJwks,
   SysSsoProvider,
-  SysScimProvider,
   SysScimConnectionBinding,
   SysScimConnectionCredential,
   SysScimGroup,
@@ -248,9 +247,9 @@ const config: ObjectStackDefinition = defineStack({
     SysOauthClientAssertion,
     SysJwks,
     SysSsoProvider,
-    SysScimProvider,
     // Stable @better-auth/scim 1.7.x model set + the ObjectStack-owned
-    // credential store (#3653). SysScimProvider above retires under #11757.
+    // credential store (#3653). The rc.1-era SysScimProvider retired under
+    // #11757.
     SysScimConnectionBinding,
     SysScimConnectionCredential,
     SysScimGroup,

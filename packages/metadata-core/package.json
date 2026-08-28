@@ -14,8 +14,7 @@
     },
     "./testing": {
       "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js",
-      "require": "./dist/testing.cjs"
+      "import": "./dist/testing.js"
     }
   },
   "files": [

@@ -73,6 +73,10 @@ const CONFORMANCE_OBJECT = {
     // Nullable, and it must stay that way — see `AggregationRow.stage`.
     stage: { type: 'string' },
     score: { type: 'number' },
+    // [#11152] Declared `type: 'boolean'` on purpose — see `AggregationRow.flag`.
+    // SQLite stores it 0/1 INTEGER, and the ruled boolean cases (min=0/max=1,
+    // sum=3, avg=0.5) are answered in exactly that numeric domain.
+    flag: { type: 'boolean' },
   },
 };
 
@@ -124,15 +128,21 @@ describe('[#6409] TursoDriver remote — aggregate vocabulary conformance', () =
    */
   it('the fixture is all six rows, with the nulls stored AS nulls', () => {
     const rows = stub.raw
-      .prepare('select id, region, stage, score from conformance_agg order by id')
-      .all() as Array<{ id: string; region: string; stage: string | null; score: number }>;
+      .prepare('select id, region, stage, score, flag from conformance_agg order by id')
+      .all() as Array<{ id: string; region: string; stage: string | null; score: number; flag: number }>;
     expect(rows.map((r) => String(r.id))).toEqual(['1', '2', '3', '4', '5', '6']);
     for (const r of rows) {
       const seeded = AGGREGATION_ROWS.find((s) => s.id === String(r.id))!;
-      expect([r.region, r.stage, Number(r.score)], r.id)
-        .toEqual([seeded.region, seeded.stage, seeded.score]);
+      // [#11152] `flag` is read below the transport, so what this asserts is the
+      // STORAGE form — SQLite's 0/1 INTEGER — which is why the comparison goes
+      // through `Number(seeded.flag)` rather than the JSON boolean.
+      expect([r.region, r.stage, Number(r.score), Number(r.flag)], r.id)
+        .toEqual([seeded.region, seeded.stage, seeded.score, Number(seeded.flag)]);
     }
     expect(rows.filter((r) => r.stage === null)).toHaveLength(2);
+    // [#11152] 3 true / 3 false, as stored — the property every boolean case
+    // hangs off.
+    expect(rows.filter((r) => Number(r.flag) === 1)).toHaveLength(3);
   });
 
   for (const c of AGGREGATION_CASES) {

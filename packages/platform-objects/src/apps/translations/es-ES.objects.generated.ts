@@ -1894,47 +1894,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_scim_provider: {
-    label: "Proveedor SCIM",
-    pluralLabel: "Proveedores SCIM",
-    description: "Conexiones SCIM 2.0 (tokens bearer) que los IdP externos usan para aprovisionar/desaprovisionar los usuarios de este entorno",
-    fields: {
-      id: {
-        label: "ID"
-      },
-      provider_id: {
-        label: "ID de proveedor",
-        help: "Identificador de proveedor SCIM estable (p. ej. «okta-scim»)"
-      },
-      provider_key: {
-        label: "Provider Key",
-        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
-      },
-      scim_token: {
-        label: "Token SCIM (hash)",
-        help: "Credencial bearer con hash de esta conexión SCIM: el texto plano se muestra una sola vez al generar el token. Sensible; no lo exponga."
-      },
-      organization_id: {
-        label: "Organización",
-        help: "Ámbito de organización de este token (los tokens por organización limitan el aprovisionamiento a esa organización)"
-      },
-      user_id: {
-        label: "Propiedad de",
-        help: "Usuario que generó este token (cuando la propiedad de proveedor está habilitada)"
-      },
-      created_at: {
-        label: "Creado el"
-      },
-      updated_at: {
-        label: "Actualizado el"
-      }
-    },
-    _views: {
-      all: {
-        label: "Todos"
-      }
-    }
-  },
   sys_scim_connection_binding: {
     label: "SCIM Connection Binding",
     pluralLabel: "SCIM Connection Bindings",

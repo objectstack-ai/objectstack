@@ -32,7 +32,7 @@
  */
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
-import { ObjectStackClient, ScopedProjectClient } from './index';
+import { ObjectStackClient, ScopedEnvironmentClient } from './index';
 import type { CloneDataResult } from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
@@ -70,7 +70,7 @@ import type { ResolvedBook } from '@objectstack/spec/system';
 import type { Environment } from '@objectstack/spec/cloud';
 
 declare const client: ObjectStackClient;
-declare const scoped: ScopedProjectClient;
+declare const scoped: ScopedEnvironmentClient;
 
 /**
  * Compiled, never invoked. Every statement is an assertion tsc evaluates; none
@@ -133,7 +133,7 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error ExecutionLog does not satisfy `T extends FlowParsed`
     await client.automation.getFlow<ExecutionLog>('flow_a');
 
-    // ── shape class 6: the ScopedProjectClient MIRROR carries the same types ─
+    // ── shape class 6: the ScopedEnvironmentClient MIRROR carries the same types ─
     expectTypeOf(await scoped.automation.getFlow('flow_a')).toEqualTypeOf<FlowParsed>();
     expectTypeOf(await scoped.automation.getRun('flow_a', 'run_1')).toEqualTypeOf<ExecutionLog>();
     expectTypeOf(await scoped.packages.list()).toEqualTypeOf<{
@@ -230,7 +230,7 @@ export function searchResultIsNotTheGlobalSearchShape(): void {
  * all, whose published type was inferred from `unwrapResponse< …any… >`.
  *
  * Re-measured at `origin/main` the population is **39**, not the 38 the card
- * recorded — its own single-line reproducer cannot see `projects.get`, whose
+ * recorded — its own single-line reproducer cannot see `environments.get`, whose
  * type argument spans several lines. Of the 39, exactly **three** had a
  * verifiable published type to bind to; the other 36 are recorded on the
  * methods themselves and filed (#12034, #12036, #12038). The bar was not "a
@@ -376,7 +376,7 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
  *    (`restoredVersion`) whose false declaration this family just paid to
  *    remove.
  *
- * 2. `Environment` is the obvious-looking binding for `client.projects.*` and
+ * 2. `Environment` is the obvious-looking binding for `client.environments.*` and
  *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
  *    call speaks snake_case (measured from this repo's own CLI consumers:
  *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would

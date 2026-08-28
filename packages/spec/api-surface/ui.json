@@ -148,6 +148,7 @@
     "FieldWidgetProps (type)",
     "FieldWidgetPropsParsed (type)",
     "FieldWidgetPropsSchema (const)",
+    "FilterCondition (type)",
     "FormButtonConfig (type)",
     "FormButtonConfigSchema (const)",
     "FormField (type)",

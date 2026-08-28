@@ -9,21 +9,23 @@
  * - **`sum` / `avg` answer arithmetic** — `3` / `0.5` over a 3-true/3-false
  *   fixture. The #11065 family shape, landed on `driver-memory` and on every
  *   SQL dialect (#11635).
- * - **`min` / `max` answer `false` / `true`** — #11249 (maintainer 2026-08-23,
- *   recorded on that card's comment 5386670755, verbatim and untranslated:
- *   「10950 不考虑存量，其他接受你的建议」). Order statistics return a member of
- *   the input domain, so the JSON boolean IS the contract and `0` / `1` is not
- *   a spelling of it.
+ * - **`min` / `max` answer `0` / `1`** — #11152 (maintainer 2026-08-28,
+ *   applied on that card's comment 5448627494, ruling verbatim and
+ *   untranslated: 「12745 A回，其他同意。」), SUPERSEDING #11249's
+ *   `false` / `true`: booleans aggregate as NUMBERS on every face, with no
+ *   per-aggregate exception, so one boolean column's aggregates answer in one
+ *   numeric domain rather than three-numbers-two-booleans.
  *
- * Measured on `origin/main` @ `23843d3f4` before the fix, through the harness
- * below: `sum` = `0`, `avg` = `null`, `min` = `null`, `max` = `null` — all four
- * wrong, whole-table and per group, while `count` = 6 and `count_distinct` = 2
- * already agreed.
+ * Measured on `origin/main` @ `23843d3f4` before the #11151 fix, through the
+ * harness below: `sum` = `0`, `avg` = `null`, `min` = `null`, `max` = `null` —
+ * all four wrong, whole-table and per group, while `count` = 6 and
+ * `count_distinct` = 2 already agreed. Between #11151 and #11152 the order
+ * statistics answered #11249's `false` / `true`; measured red against the
+ * ruled `0` / `1` (the #11152 conformance cases) before this file flipped.
  *
- * ## The two independent defects behind those four cells
+ * ## The two independent defects behind the original four cells
  *
- * They are NOT one fix applied twice, and each is asserted here against the
- * half it governs:
+ * They were NOT one fix applied twice:
  *
  * 1. **The lowering** (`mongodb-aggregation.ts`) emitted a bare
  *    `{$sum: '$flag'}` / `{$avg: '$flag'}`. MongoDB's arithmetic accumulators
@@ -32,14 +34,18 @@
  *    coercion.
  * 2. **The instrument** (`mongodb-pipeline-evaluator.testkit.ts`) applied that
  *    same "ignore non-numeric" rule to `$min` / `$max`, which are order
- *    statistics over BSON canonical order and rank booleans perfectly well. The
- *    `{$min: '$flag'}` lowering was, and remains, correct.
+ *    statistics over BSON canonical order and rank booleans perfectly well.
+ *    The bare `{$min: '$flag'}` lowering was faithful mongod semantics — and
+ *    the #11152 ruling is exactly why faithfulness is not enough: bare, this
+ *    face answers a member of the input domain (`false`/`true`) where the
+ *    platform contract says `0`/`1`, so the lowering now wraps `min`/`max` in
+ *    the SAME `$cond` coercion `sum`/`avg` use, and the numbers get ranked.
  *
- * ⛔ Applying (1)'s coercion to `$min` / `$max` would answer `0` / `1` and break
- * #11249 in the opposite direction. {@link describe} block "the emitted lowering
- * keeps the two halves apart" pins that it was not, reading the emitted stages
- * rather than trusting the values — the values alone cannot tell a `$min` over a
- * boolean from a `$min` over a coerced `1`/`0` once the evaluator ranks both.
+ * The {@link describe} block "the emitted lowering carries the coercion on all
+ * four arms" pins the stages by reading them rather than trusting the values —
+ * the values alone cannot tell a `$min` over a coerced `1`/`0` from a
+ * post-processing conversion, and the stage is the contract surface a real
+ * mongod would execute.
  *
  * ## ⚠️ What this suite deliberately does NOT answer
  *
@@ -52,11 +58,11 @@
  *
  * ## The fixture
  *
- * `AGGREGATION_ROWS` — the shared aggregate-vocabulary fixture — plus a boolean
- * `flag` column. The distribution is {@link FLAG_BY_ID}, the one already landed
- * on `main` in `driver-sql`'s #11635 suite, chosen over the other distribution
- * in this card's record (`true,false,true,true,false,false`) so the two faces'
- * grouped numbers are comparable rather than merely both 3-true/3-false.
+ * `AGGREGATION_ROWS` — the shared aggregate-vocabulary fixture, whose `flag`
+ * boolean column (added by #11152) carries the distribution this file
+ * previously held as a private `FLAG_BY_ID` map: 3 true / 3 false, `west`
+ * `[T,F,F,F]`, `east` `[T,T]`. The private map is deleted in favour of the
+ * fixture column so the faces can never silently disagree on grouped values.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -76,29 +82,13 @@ import {
 const MEASURE = 'measure';
 
 /**
- * The `flag` column, keyed by fixture row id: 3 true / 3 false, with `east`
- * (rows 5–6) all-true. The per-group split is deliberately asymmetric —
- * `west` is `[T,F,F,F]` and `east` `[T,T]` — so `east`'s grouped `min` is
- * `true`: a measure computed over the whole table, or a sticky per-column
- * constant, goes red on that cell rather than passing by symmetry.
- */
-const FLAG_BY_ID: Record<string, boolean> = {
-  '1': true,
-  '2': false,
-  '3': false,
-  '4': false,
-  '5': true,
-  '6': true,
-};
-
-/**
- * The six shared rows plus `flag`, and two columns that exist only to drive the
- * empty-input branch of an order statistic: `voidcol` is an explicit `null` on
- * every row, and no row carries `absent` at all.
+ * The six shared rows — `flag` included, straight from the fixture — plus a
+ * column that exists only to drive the empty-input branch of an order
+ * statistic: `voidcol` is an explicit `null` on every row, and no row carries
+ * `absent` at all.
  */
 const ROWS: Doc[] = (AGGREGATION_ROWS as unknown as Doc[]).map((row) => ({
   ...row,
-  flag: FLAG_BY_ID[row.id as string],
   voidcol: null,
 }));
 
@@ -148,29 +138,32 @@ describe('[#11151] the ruled arithmetic half — sum / avg count a boolean as 1 
   });
 });
 
-describe('[#11151] the ruled order-statistic half — min / max answer JSON booleans', () => {
-  // Asserted STRICTLY. `0` / `1` satisfies a `Number()` reading and is exactly
-  // the answer #11249 ruled against, so a loose comparison here would pass on
-  // the one wrong value this half exists to exclude.
-  it('min(flag) answers false — the boolean, not 0 and not null', () => {
-    expect(measure('min', 'flag')).toBe(false);
+describe('[#11152] the ruled order-statistic half — min / max answer JSON numbers', () => {
+  // Asserted STRICTLY. `false` / `true` — the #11249-era answer this face gave
+  // until #11152 superseded it — satisfies a loose reading, so a coerced
+  // comparison here would pass on the one wrong spelling this half exists to
+  // exclude.
+  it('min(flag) answers 0 — the number, not false and not null', () => {
+    expect(measure('min', 'flag')).toBe(0);
   });
 
-  it('max(flag) answers true — the boolean, not 1 and not null', () => {
-    expect(measure('max', 'flag')).toBe(true);
+  it('max(flag) answers 1 — the number, not true and not null', () => {
+    expect(measure('max', 'flag')).toBe(1);
   });
 
-  it('grouped min/max answer per-group members, and east’s min is true', () => {
-    // `east` is the load-bearing cell: all-true, so its `min` is `true`. A
-    // whole-table computation or a sticky `false` fails here and only here.
-    expect(byRegion('min', 'flag')).toEqual({ west: false, east: true });
-    expect(byRegion('max', 'flag')).toEqual({ west: true, east: true });
+  it('grouped min/max answer per-group numbers, and east’s min is 1', () => {
+    // `east` is the load-bearing cell: all-true, so its `min` is `1`. A
+    // whole-table computation or a sticky `0` fails here and only here.
+    expect(byRegion('min', 'flag')).toEqual({ west: 0, east: 1 });
+    expect(byRegion('max', 'flag')).toEqual({ west: 1, east: 1 });
   });
 
   it('min/max over a column that is null or absent everywhere answer null', () => {
     // The manual's rule: null and missing are IGNORED, and a group left with
-    // nothing answers `null`. Not folded to `false`, which is what a boolean
-    // face that manufactured a default would do.
+    // nothing answers `null`. Not folded to `0`, which is what a boolean face
+    // that manufactured a default would do — the `$cond` coercion's else
+    // branch passes null/missing through untouched, so the accumulator's own
+    // rule still applies.
     expect(measure('min', 'voidcol'), 'explicit null on every row').toBeNull();
     expect(measure('max', 'voidcol'), 'explicit null on every row').toBeNull();
     expect(measure('min', 'absent'), 'a column no row carries').toBeNull();
@@ -178,7 +171,7 @@ describe('[#11151] the ruled order-statistic half — min / max answer JSON bool
   });
 });
 
-describe('[#11151] the emitted lowering keeps the two halves apart', () => {
+describe('[#11152] the emitted lowering carries the coercion on all four arms', () => {
   const emit = (func: string): unknown =>
     buildAggregationPipeline({
       aggregations: [{ function: func, field: 'flag', alias: MEASURE }] as AggregationInput[],
@@ -193,16 +186,16 @@ describe('[#11151] the emitted lowering keeps the two halves apart', () => {
     expect(emit('avg')).toEqual({ $group: { _id: null, [MEASURE]: { $avg: COERCED } } });
   });
 
-  it('⛔ min and max are left BARE — the coercion is not applied to them', () => {
-    // The load-bearing pin of this file. `$min`/`$max` over a coerced aggregand
-    // would answer `0`/`1` — arithmetic where #11249 ruled for a member of the
-    // input domain — and the VALUES cannot catch it once the evaluator ranks
-    // booleans, because both spellings then produce an answer. Only the emitted
-    // stage distinguishes them.
-    expect(emit('min')).toEqual({ $group: { _id: null, [MEASURE]: { $min: '$flag' } } });
-    expect(emit('max')).toEqual({ $group: { _id: null, [MEASURE]: { $max: '$flag' } } });
-    expect(JSON.stringify(emit('min')), 'no $cond reached the min arm').not.toContain('$cond');
-    expect(JSON.stringify(emit('max')), 'no $cond reached the max arm').not.toContain('$cond');
+  it('min and max wrap the SAME coercion — the #11152 ruling, in the stage', () => {
+    // The load-bearing pin of this file, direction FLIPPED by the #11152
+    // ruling (2026-08-28, superseding #11249): a bare `$min`/`$max` would
+    // answer `false`/`true` — a member of the input domain, where the ruled
+    // contract says `0`/`1` on every face — and the VALUES cannot catch a
+    // conversion smuggled in anywhere else (post-processing, the evaluator),
+    // because both spellings then produce the ruled number. The emitted stage
+    // is what a real mongod would execute, so the coercion is pinned THERE.
+    expect(emit('min')).toEqual({ $group: { _id: null, [MEASURE]: { $min: COERCED } } });
+    expect(emit('max')).toEqual({ $group: { _id: null, [MEASURE]: { $max: COERCED } } });
   });
 
   it('a fieldless sum/avg is unchanged — the coercion needs a path to coerce', () => {
@@ -267,6 +260,8 @@ describe('[#11151] the evaluator REFUSES a type it does not rank, rather than an
   it('the types it DOES rank all answer, so the refusal above is not blanket', () => {
     expect(measure('min', 'score'), 'number').toBe(10);
     expect(measure('min', 'stage'), 'string').toBe('lost');
-    expect(measure('min', 'flag'), 'boolean').toBe(false);
+    // A boolean aggregand reaches the ranker AS the coerced number since
+    // #11152 — the answer proves the coercion path ranks, not bare booleans.
+    expect(measure('min', 'flag'), 'boolean, coerced to its number').toBe(0);
   });
 });

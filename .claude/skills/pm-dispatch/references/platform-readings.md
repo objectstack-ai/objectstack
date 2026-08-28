@@ -176,9 +176,15 @@
   同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走
   REST `POST /issues/{n}/labels`,⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;
   写后照标签纪律回读。
-- **`issue_read` 的 `get_labels` 只解析 Issue 型**:传 PR 号回 GraphQL「Could not resolve to an Issue」
-  —— REST「PR 也是 issue」的惯例在此方法不成立;PR 的标签读数走 `pull_request_read get`(labels
-  随响应回来),⛔ 不为它花一次 search 调用(2026-08-27 两个 dev 独立实测,失效是响亮报错)。
+- **PR 标签的三条读腿全盲、两条静默**(2026-08-28 同日实测):① `issue_read get_labels` 传 PR 号
+  回「Could not resolve to an Issue」—— REST「PR 也是 issue」的惯例在此方法不成立;**响亮失败即
+  路由信号**,改走腿③。② `pull_request_read get` 的 `labels` **时缺时滞**:dev 席同一张新 PR 两读
+  整个字段缺席(非空数组),PM 席三张老 PR 三读齐备 ⇒ 连盲都不稳定,比整类缺席更险。③
+  payload 档:issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中**零**,PR 侧拼写是
+  `data-name="NAME"`(片链到 `issues?q=…label%3A…`)。⇒ **读成功而标签空/缺席 ⛔ 不读
+  作「没有标签」**:按 `data-name=` 确认,否则整集作 UNKNOWN、优先加法端点(可达时);⛔ 单读与
+  单次**即时**读回都不决断(compare-read-back 报 3 个,数分钟后再读只回 1 个,两个 auto 标签无写
+  入而消失)⇒ union-write 欠一次**延迟确认**;必需标签(如 `skip-changeset`)其后每次触碰重核。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已认领卡与空闲卡
   响应逐字节相同,清单只是**候选名单**:认领前必须过完整 `issue_read`(它才返回 `assignees`)。
 - **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments
@@ -212,12 +218,6 @@
   再报 blocked**(2026-08-22 同席同分钟:`git rev-parse … && git push origin <分支> 2>&1 | tail` 被拒,裸
   `git push origin <分支>` 放行并成功 —— 只差链接与管道,拒绝文案不点名违规元素;判定还跨
   天翻面)⇒ ⛔ 一次拒绝不是能力边界,`permissions.allow` 条目才是仓库侧唯一确定性通道。
-- **`refs/remotes/origin/main` 全 worktree 共享,别的 agent 一次 fetch 就推进它**(worktree 只隔离工作树
-  与 HEAD,`.git/` 下 refs、stash 栈、config、hooks 皆共享):`git reset --soft origin/main` 把你分支点之
-  后**他人已合并的文件**整批 stage 成你的改动 —— 报成功、唯一症状是 `git status` 里的他
-  人文件(实测一次 stage 进四个 agent 的合并文件,commit 前才逮住);「我从哪开始」的
-  reset/diff/log/rebase 一律锚建分支时记录的 base sha(`BASE=$(git rev-parse HEAD)`),⛔ 永不锚
-  `origin/main`。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上缺一个已合
   修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即
   是。

@@ -144,7 +144,7 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
     });
 
     it('is mirrored on the environment-scoped client (/environments/:id/batch)', async () => {
-        const scoped = client.project('proj-alpha');
+        const scoped = client.environment('proj-alpha');
         const { results } = await scoped.data.batchTransaction([
             { object: 'project', action: 'create', data: { name: 'Scoped' } },
         ]);

@@ -5,7 +5,7 @@
  * It declared `{ object, id, deleted: boolean }` while
  * `DeleteDataResponseSchema` declares `{ object, id, success: boolean }`. Both
  * `delete` surfaces (`client.data.delete` and the project-scoped
- * `client.project(id).data.delete`) are pure `unwrapResponse` / `_unwrap`
+ * `client.environment(id).data.delete`) are pure `unwrapResponse` / `_unwrap`
  * passthroughs — no runtime rewriting anywhere — so a consumer writing
  * `r.deleted` compiled fine and read `undefined` against every server path
  * that exists (#5581 / PR #5641 brought the ObjectQL fallback to `success`
@@ -74,7 +74,7 @@ describe('[#5638] DeleteDataResult === DeleteDataResponseSchema', () => {
 
   for (const [surface, del] of [
     ['client.data.delete', (c: ObjectStackClient) => c.data.delete('task', 't1')],
-    ['client.project(id).data.delete', (c: ObjectStackClient) => c.project('proj-xyz').data.delete('task', 't1')],
+    ['client.environment(id).data.delete', (c: ObjectStackClient) => c.environment('proj-xyz').data.delete('task', 't1')],
   ] as const) {
     describe(surface, () => {
       it('hands back the spec body, and `success` is reachable through the declared type', async () => {

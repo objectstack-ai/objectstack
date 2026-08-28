@@ -1342,16 +1342,30 @@ export class InMemoryDriver implements IDataDriver {
               return nums.length > 0 ? sum / nums.length : null;
           }
               
+          // [#11152] `min`/`max` read a BOOLEAN as the number it is worth —
+          // maintainer ruling 2026-08-28 (superseding #11249's `false`/`true`):
+          // booleans aggregate as NUMBERS on every face, no per-aggregate
+          // exception, so the order statistics answer 0/1 in the same numeric
+          // domain the `sum`/`avg` arms above already answer in. The coercion
+          // is BOOLEAN-ONLY for the same reason theirs is: strings and dates
+          // reach the same raw comparison they always did. The analytics face
+          // carries the identical rule in its `$min`/`$max` mingo arms
+          // (`memory-analytics.ts`, `buildAggregator`) — one face aligned
+          // alone leaves the other free to keep its own answer.
           case 'min': {
               // Handle comparable values
-              const valid = values.filter(v => v !== null && v !== undefined);
+              const valid = values
+                  .filter(v => v !== null && v !== undefined)
+                  .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v));
               if (valid.length === 0) return null;
               // Works for numbers and strings
               return valid.reduce((min, v) => (v < min ? v : min), valid[0]);
           }
 
           case 'max': {
-              const valid = values.filter(v => v !== null && v !== undefined);
+              const valid = values
+                  .filter(v => v !== null && v !== undefined)
+                  .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v));
               if (valid.length === 0) return null;
               return valid.reduce((max, v) => (v > max ? v : max), valid[0]);
           }

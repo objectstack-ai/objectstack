@@ -80,7 +80,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_scim_group_member',
     'sys_scim_identity_tombstone',
     'sys_scim_projection_grant',
-    'sys_scim_provider',
     'sys_scim_subject',
     'sys_scim_user',
     'sys_secret',

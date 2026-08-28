@@ -233,15 +233,8 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
       + 'bridged mechanically by objectql-adapter.ts and gated by the dedicated sso/scim block in '
       + 'better-auth-schema-parity.test.ts.',
   },
-  sys_scim_provider: {
-    reason:
-      'rc.1-era SCIM connection row. The installed stable @better-auth/scim@1.7.1 no longer derives '
-      + 'a scimProvider model at all (re-measured 2026-08-27, #3653), so no better-auth column can '
-      + 'change hands on this table any more; it retires under #11757 and stays only until that '
-      + 'lands. (No noBetterAuthColumns flag: this object declares no extension fields, so the '
-      + 'flag would assert a licence nothing uses; the parity gate\'s exact-set assertion is the '
-      + 'tripwire that fires if a scimProvider model ever reappears.)',
-  },
+  // (The rc.1-era `sys_scim_provider` exemption retired with its object under
+  // #11757 — the stale-entry assertion below is what forced it out.)
   // The stable @better-auth/scim 1.7.x model set (#3653). Same bridge shape as
   // sys_sso_provider: SCIMOptions still accepts no `schema`/`modelName`/`fields`
   // option on the installed 1.7.1 (re-measured 2026-08-27), so getAuthTables()

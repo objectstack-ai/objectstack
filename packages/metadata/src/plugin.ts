@@ -17,6 +17,7 @@ import {
     applyArtifactForwardConversions,
     detectUnboundFormViewPredicateRoots,
     BOUND_FORM_VIEW_PREDICATE_ROOTS,
+    BOUND_FORM_FIELD_PREDICATE_ROOTS,
     type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
 
@@ -89,7 +90,16 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     positions: 'position',
     permissions: 'permission',
     sharingRules: 'sharing_rule',
-    policies: 'policy',
+    // `policies: 'policy'` removed at #12894: the stack schema is a
+    // `strictObject` that declares no top-level `policies` key, so a
+    // definition carrying one is refused by the strict parse a few lines
+    // below — the entry could never match, and nothing was ever registered
+    // under `policy` from this map. The word is real, but it lives ONE LEVEL
+    // DOWN: on a permission set it is an alias for `rowLevelSecurity`
+    // (`PERMISSION_SET_KEY_ALIASES`, packages/spec/src/security/permission.zod.ts)
+    // — a key on an ITEM, never a collection. Third retirement of this exact
+    // shape in this map (`themes` and `roles` above); the reasons are kept
+    // in place because the first two are what made this one findable.
     apis: 'api',
     webhooks: 'webhook',
     agents: 'agent',
@@ -749,9 +759,11 @@ export class MetadataPlugin implements Plugin {
      * this runtime (#12915 scope C — maintainer ruling 2026-08-28, 「同意C」).
      *
      * A form-view predicate binds `record` / `previous` / `parent` (runtime
-     * record forms) or `data` (metadata-editing forms); the contract states
-     * beside that vocabulary that a bare identifier is UNBOUND and the
-     * predicate faults, and `visibleWhen`'s fault fallback is `true`. On a real
+     * record forms) or `data` (metadata-editing forms) — and a FIELD-level one
+     * also binds `current_user` and its ADR-0068 aliases (objectui#6010),
+     * which a SECTION-level one does not. The contract states beside that
+     * vocabulary that a bare identifier is UNBOUND and the predicate faults,
+     * and `visibleWhen`'s fault fallback is `true`. On a real
      * 17.1-built artifact that combination dead-ends record creation in the
      * console: the conditionally hidden field renders, and its unconditional
      * `required: true` — authored to be gated by the visibility that no longer
@@ -796,12 +808,29 @@ export class MetadataPlugin implements Plugin {
         const views = [...new Set(findings.map((f) => f.view))];
         const roots = [...new Set(findings.map((f) => f.root))];
         const quote = (list: readonly string[]) => list.map((v) => `'${v}'`).join(', ');
+
+        // The bound vocabulary differs between a field slot and a section slot
+        // (a field also binds the `current_user` family, objectui#6010), so
+        // print only the rule(s) the findings actually implicate. Printing one
+        // flat list would either understate the field vocabulary — reading as
+        // "your legitimate current_user predicate is broken" — or quote a
+        // section rule at an operator whose artifact has no section findings.
+        const surfaces = new Set(findings.map((f) => f.surface));
+        const vocabulary = [
+            surfaces.has('field')
+                ? `on a form FIELD: ${quote(BOUND_FORM_FIELD_PREDICATE_ROOTS)}`
+                : null,
+            surfaces.has('section')
+                ? `on a form SECTION: ${quote(BOUND_FORM_VIEW_PREDICATE_ROOTS)}`
+                : null,
+        ].filter(Boolean).join('; ');
+
         ctx.logger.warn(
             `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
             + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
             + `${result.runtimeSpecVersion}) and carries ${findings.length} form-view predicate(s) whose `
-            + `root identifier is NOT bound on this surface — ${quote(roots)} `
-            + `(bound roots: ${quote(BOUND_FORM_VIEW_PREDICATE_ROOTS)}) — across `
+            + `root identifier is NOT bound where it evaluates — ${quote(roots)} `
+            + `(bound roots ${vocabulary}) — across `
             + `${views.length} view(s): ${views.join(', ')} (first at ${findings[0]!.path}). `
             + `Each one faults at evaluation and visibility fails OPEN, so a field the predicate was `
             + `authored to HIDE renders anyway — and an unconditional 'required: true' on such a field `
