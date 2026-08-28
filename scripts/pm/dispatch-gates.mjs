@@ -8814,6 +8814,12 @@ function selfTest() {
         driftLines(unresolvableRepo).join('\n'),
         driftLines(unbornRepo).join('\n'),
       ]).size === 3);
+    // Arrival, not just rendering: a sentence `driftLines` returns and the
+    // banner drops is a sentence nobody reads, and the banner is the only
+    // consumer there is. Pinned from the REAL reading rather than a literal,
+    // because that is the half a literal cannot vouch for.
+    t('and the banner a reader actually sees carries it, from that real reading',
+      bannerLines({ identity: hereIdentity, paths: [], drift: unbornRepo }).join('\n').includes('STALENESS NOT MEASURED'));
     // Upstream moves in a file the answer is NOT derived from.
     writeFileSync(join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
