@@ -50,8 +50,8 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
-| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -64,19 +64,19 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if operation succeeded |
 | **success** | `boolean` | ✅ | Whether this record was processed successfully |
-| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back . |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen`  on update, or the create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 ### Nested Shape: `BatchOperationResult.errors[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -84,13 +84,13 @@ const result = BatchConfigSchema.parse(data);
 
 ### Nested Shape: `BatchOperationResult.droppedFields[number]`
 
-A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)
+A write-path strip event: caller-supplied fields legally dropped from the payload
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
 
 
 ---
@@ -115,8 +115,8 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
-| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -158,8 +158,8 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
-| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -184,9 +184,9 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -198,10 +198,10 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if operation succeeded |
 | **success** | `boolean` | ✅ | Whether this record was processed successfully |
-| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back (#7539). |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped (the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code — rows before the failure stay written and keep reporting success, since nothing was rolled back . |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` / TRUE `readonlyWhen`  on update, or the create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
@@ -216,7 +216,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
 | **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
 
 
@@ -264,7 +264,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **results** | `any[]` | ✅ | Per-operation result, index-aligned with the request operations |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'>; index: integer }[]` | optional | Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'>; index: integer }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` or a TRUE `readonlyWhen` predicate. This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
 
 ### Nested Shape: `CrossObjectBatchResponse.droppedFields[number]`
 
@@ -274,7 +274,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
 | **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
 
 
@@ -295,8 +295,8 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
-| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -335,8 +335,8 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
-| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---

@@ -23,7 +23,7 @@ const result = ToolSchema.parse(data);
 
 ## Tool
 
-AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).
+AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition.
 
 ### Properties
 
@@ -33,7 +33,7 @@ AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Auth
 | **label** | `string` | ✅ | Tool display name |
 | **description** | `string` | ✅ | Tool description for LLM function calling |
 | **parameters** | `Record<string, any>` | ✅ | JSON Schema for tool parameters |
-| **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated (liveness #1878/#1893). |
+| **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated. |
 | **objectName** | `string` | optional | Target object name (snake_case) |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this tool. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
