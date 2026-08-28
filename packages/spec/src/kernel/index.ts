@@ -38,6 +38,13 @@ export * from './metadata-type-redaction';
 // Pre-parse unknown-key walker over EVERY metadata collection (#3786). Lives
 // here, not in data/, because covering every type means importing every schema.
 export * from './metadata-authoring-lint';
+// [#12414] entry-nameability: `metadata-authoring-lint` IMPORTS (does not
+// re-declare) `UnknownAuthoringKeyFinding` from `../data/authoring-key-lint`,
+// so the `export *` above does not carry it — the finding type its lint
+// functions return was unnameable from this entry. Same invariant (maintainer
+// ruling recorded on #11350), same repair: re-export from the declaring
+// module, which is already public on `/data`.
+export type { UnknownAuthoringKeyFinding } from '../data/authoring-key-lint';
 export * from './package-artifact.zod';
 export * from './package-registry.zod';
 export * from './package-upgrade.zod';

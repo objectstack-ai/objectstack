@@ -444,6 +444,7 @@
     "UninstallPackageRequestSchema (const)",
     "UninstallPackageResponse (type)",
     "UninstallPackageResponseSchema (const)",
+    "UnknownAuthoringKeyFinding (interface)",
     "UpgradeImpactLevel (type)",
     "UpgradeImpactLevelSchema (const)",
     "UpgradePackageRequest (type)",
