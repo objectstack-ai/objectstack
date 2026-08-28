@@ -22,6 +22,12 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // mark `plugin-security` and `service-analytics` stamp at theirs — never a
 // local flag, never a second spelling of the same idea.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+// [#12260] The SANCTIONED renderer for OPERATION-level refusal copy. The
+// Operation Message Catalog is the ONE seat for these sentences — its own
+// header bars both a package-local string table and a second rendering
+// mechanism for a second producer, and #12493 landed this middleware's key
+// (`record_write_denied`) into it ahead of this consumer half.
+import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import {
@@ -610,7 +616,7 @@ export class SharingServicePlugin implements Plugin {
       if (this.options.enforce === false) {
         ctx.logger.info('SharingServicePlugin: enforcement disabled (enforce=false) — share-link service still registered');
       } else {
-        const mw = buildSharingMiddleware(this.service, ctx.logger as any);
+        const mw = buildSharingMiddleware(this.service, ctx.logger as any, pluginMessageTranslator(ctx));
         if (typeof engine.registerMiddleware === 'function') {
           engine.registerMiddleware(mw, { object: '*' });
           ctx.logger.info('SharingServicePlugin: enforcement middleware installed');
@@ -955,6 +961,73 @@ export class SharingServicePlugin implements Plugin {
 }
 
 /**
+ * [#12260] The END USER's half of the by-id write refusal.
+ *
+ * This middleware's refusal declares `{ code: 'FORBIDDEN', status: 403 }`, so
+ * `@objectstack/rest` answers it through the DECLARED-status arm and ships
+ * `error.message` to the client as the body's human-readable `error` — which
+ * Console renders verbatim in a toast. One hardcoded English sentence
+ * therefore reached a business user in a fully Chinese deployment as the only
+ * thing they were told about why their save failed.
+ *
+ * Rendered through the SHARED Operation Message Catalog
+ * (`@objectstack/spec/system`), not a second mechanism: same `errors.<key>`
+ * override address, same resolution ladder (deployment override -> locale
+ * catalog -> `en` -> the key), same guarantee that a misbehaving i18n service
+ * cannot turn a 403 into a 500. `plugin-security`'s `userFacingDenialMessage`
+ * is the sibling consumer this mirrors, and `plugin-approvals`'
+ * `userFacingRefusal` (#11993) is the same conversion one card earlier.
+ *
+ * ⛔ ONE key for BOTH write verbs, which is the catalog's own ruling and not a
+ * shortcut taken here: the user's situation (they can see this record, they
+ * cannot change it) and their remedy (ask its owner, or an administrator) are
+ * identical for `update` and `delete`. WHICH verb was refused is a developer
+ * fact and stays on `developerMessage`, on the structured `details`, and — for
+ * `delete` — on the ADR-0111 D10 breadcrumb that keeps its own wording.
+ *
+ * The `FORBIDDEN:` prefix is NOT part of what this renders. It is wire
+ * contract (ADR-0111's `CODE: message` idiom, which the share routes read and
+ * strip) and it is applied by the caller around this sentence.
+ *
+ * The translator is resolved LAZILY, per refusal, for the reason ADR-0029 D8
+ * makes structural: the i18n service is contributed by a different plugin that
+ * may start after this one, so a lookup captured when the middleware was built
+ * would pin `undefined` for the life of the process. Absent is a SUPPORTED
+ * stack, not a degraded one — the built-in catalog still renders the caller's
+ * locale; what the translator adds is the documented override address
+ * `errors.record_write_denied`.
+ */
+function userFacingWriteDenial(
+  locale: string | undefined,
+  messageTranslator?: () => ValidationMessageTranslator | undefined,
+): string {
+  let translate: ValidationMessageTranslator | undefined;
+  try {
+    translate = messageTranslator?.();
+  } catch {
+    // i18n is optional and late-bound; the built-in catalog still renders the
+    // caller's locale without it.
+    translate = undefined;
+  }
+  return renderOperationMessage({ messageKey: 'record_write_denied' }, { locale, translate });
+}
+
+/**
+ * [#12260] The deployment i18n lookup this plugin hands its middleware, read
+ * through `PluginContext` on every refusal rather than captured at start().
+ * See {@link userFacingWriteDenial} for why late binding is the requirement
+ * and not a defensive habit.
+ */
+function pluginMessageTranslator(ctx: PluginContext): () => ValidationMessageTranslator | undefined {
+  return () => {
+    const i18n = ctx.getService<II18nService>('i18n');
+    const t = i18n?.t;
+    if (typeof t !== 'function') return undefined;
+    return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+  };
+}
+
+/**
  * Build the engine middleware that injects read filters and gates
  * write operations. Exported so it can be unit-tested without booting
  * a kernel. `log` is optional — the [ADR-0111 D10] delete-denial breadcrumb
@@ -971,6 +1044,15 @@ export class SharingServicePlugin implements Plugin {
 export function buildSharingMiddleware(
   service: SharingService,
   log?: { warn?: (msg: string, meta?: any) => void },
+  /**
+   * [#12260] Deployment i18n lookup for the by-id write refusal's user-facing
+   * sentence — an `II18nService.t`-compatible function, resolved LAZILY per
+   * refusal. Optional and additive: every existing caller (six suites in
+   * `plugin-security`, two here) passes two arguments and is unchanged, and a
+   * stack without it still renders the caller's locale from the built-in
+   * catalog. See {@link userFacingWriteDenial}.
+   */
+  messageTranslator?: () => ValidationMessageTranslator | undefined,
 ): EngineMiddleware {
   return async function sharingMiddleware(ctx: OperationContext, next: () => Promise<void>) {
     const op = ctx.operation;
@@ -1116,11 +1198,36 @@ export function buildSharingMiddleware(
               { object: ctx.object, recordId: String(id), userId: exec?.userId },
             );
           }
+          // [#12260] The DEVELOPER's half — the verb, the object's API name and
+          // the row id. This USED TO BE the whole message, which is how it
+          // reached an end user's toast in English; the catalog sentence
+          // deliberately names none of it (the only spellings available here
+          // are an API name and an opaque id, the #7414 vocabulary that must
+          // not reach a toast). It is kept where a developer reads it and a
+          // user never does: on the error, and in the log line below. REST
+          // ships neither `developerMessage` nor `details` on a FORBIDDEN
+          // body — only `DELETE_RESTRICTED` forwards a `developerMessage` —
+          // so this adds nothing to the wire.
+          const developerMessage =
+            `[sharing] ${verb} denied on ${ctx.object} ${id}: the caller holds no ${verb} authority ` +
+            `over this row (owner match, share depth and Modify All Data all answered no)`;
+          log?.warn?.(developerMessage, {
+            object: ctx.object,
+            recordId: String(id),
+            operation: verb,
+            userId: exec?.userId,
+          });
+          // The `FORBIDDEN:` PREFIX STAYS. It is not user copy — it is the
+          // ADR-0111 `CODE: message` idiom the share routes read and strip,
+          // and it sits beside the `code`/`status` the `/data` door
+          // classifies on. Only the SENTENCE after it moved.
           const err: any = new Error(
-            `FORBIDDEN: insufficient privileges to ${op} ${ctx.object} ${id}`,
+            `FORBIDDEN: ${userFacingWriteDenial(exec?.locale, messageTranslator)}`,
           );
           err.code = 'FORBIDDEN';
           err.status = 403;
+          err.developerMessage = developerMessage;
+          err.details = { operation: verb, object: ctx.object, recordId: String(id) };
           throw err;
         }
         return next();

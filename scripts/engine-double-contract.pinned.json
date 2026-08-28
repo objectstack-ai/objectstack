@@ -2642,6 +2642,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts",
       "verb": "findOne",
       "pinned": 1
