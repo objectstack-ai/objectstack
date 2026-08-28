@@ -24,7 +24,11 @@
 // `permission` metadata root, so the route is the `retiredKey()` tombstone
 // (the `rls.priority` posture) — the key stays in the walked shape as
 // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-// prescription. Sources are rewritten by the D2 conversion
-// `permission-allow-restore-purge-removed`, which strips the key from every
-// object grant in `permissions[].objects`.
+// prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+// the key's own retired default (`false`), which the published 17.x toolchain
+// materialized into every built artifact's entries, parses as inert residue
+// and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+// shape; every other value keeps this refusal. Sources are rewritten by the
+// D2 conversion `permission-allow-restore-purge-removed`, which strips the
+// key from every object grant in `permissions[].objects`.
 export const entry = 'security/ObjectPermission:allowPurge';
