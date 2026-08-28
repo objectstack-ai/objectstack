@@ -134,6 +134,10 @@
  * the wire) and leaves sections 2 and 5 GREEN, those being the ABSENCE
  * assertions the unrepaired door also satisfies.
  *
+ * ⚠️ [#12509] The numbers below record a run against THIS FILE'S PRE-#12509
+ * row set (the third `DEMOTED` row and the `SHAPES` table have both moved
+ * since), so re-running the ablation today will not reproduce 155.
+ *
  * Measured: 30 failed / 125 passed of 155. Sections 1, 3 and 4 went red as
  * predicted — and so did the CONVERGENCE block of section 5, which the
  * prediction had lumped in with its real-producer sibling. It was wrong to:
@@ -333,9 +337,19 @@ describe('[#12405] an UNREGISTERED producer spelling rides `declaredCode`', () =
   /**
    * Two spellings of the status channel, because both are produced in this
    * repo (`metadata-protocol` throws `status`, runtime action execution and
-   * the lifecycle hooks throw `statusCode`), and one throw whose status the
-   * resolver has to default — the shape a producer that names the condition
-   * but not the band produces.
+   * the lifecycle hooks throw `statusCode`), and a declared 5xx — the band
+   * where the demote and the 5xx sanitisation regime meet.
+   *
+   * ⚠️ [#12509] The third row used to be a throw whose status the resolver had
+   * to DEFAULT ("names the condition but not the band"). That shape no longer
+   * demotes to the wire: the 2026-08-27 ruling withholds a code the
+   * fallback-to-500 picked up from an undeclared producer, because a driver
+   * errno arrives on exactly that shape and naming the backend is one of the
+   * two disclosures the 5xx message withhold exists to prevent. It is replaced
+   * by a producer that declares the 5xx it means, which keeps its spelling.
+   * ⛔ Do not restore the old row here — the withhold has its own pin, in
+   * `package-door-5xx-demoted-code-withhold.test.ts`, and a second copy of the
+   * shape in this file would make one ruling readable in two voices.
    */
   const DEMOTED: Array<{ name: string; error: unknown; status: number; code: string; declaredCode: string }> = [
     {
@@ -353,11 +367,11 @@ describe('[#12405] an UNREGISTERED producer spelling rides `declaredCode`', () =
       declaredCode: 'ORG_LICENCE_INVALID',
     },
     {
-      name: 'an app spelling with no declared status at all',
-      error: thrown('the widget refused', { code: 'WIDGET_REFUSED_THE_WRITE' }),
+      name: 'an app spelling on a DECLARED 500 — the author channel survives 5xx sanitisation (#12509)',
+      error: thrown('the importer gave up', { status: 500, code: 'ACME_IMPORT_ABORTED' }),
       status: 500,
       code: 'INTERNAL_ERROR',
-      declaredCode: 'WIDGET_REFUSED_THE_WRITE',
+      declaredCode: 'ACME_IMPORT_ABORTED',
     },
   ];
 
@@ -642,7 +656,12 @@ describe('[#12405] the wire `declaredCode` IS the shared rule, not a second copy
   const SHAPES: unknown[] = [
     thrown('app spelling, declared 409', { status: 409, code: 'CLOSE_PERIOD_LOCKED' }),
     thrown('app spelling, declared 403 via statusCode', { statusCode: 403, code: 'ORG_LICENCE_INVALID' }),
+    // [#12509] Kept — it now exercises the WITHHOLD through the shared rule
+    // (the comparison below reads `demotedDeclaredCode`, so it followed the
+    // ruling without an edit, which is the property this block is for). The
+    // declared 500 beside it is what keeps the anti-vacuity count honest.
     thrown('app spelling, no declared status', { code: 'WIDGET_REFUSED_THE_WRITE' }),
+    thrown('app spelling, declared 500', { status: 500, code: 'ACME_IMPORT_ABORTED' }),
     thrown('registered code', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
     thrown('a record-validation failure', { name: 'ValidationError', code: 'VALIDATION_FAILED', fields: [] }),
     thrown('a bare fault', {}),
