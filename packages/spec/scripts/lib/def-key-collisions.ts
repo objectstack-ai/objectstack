@@ -35,9 +35,19 @@
  * > same schema instance.
  *
  * Identity, not today's byte-equality. The permitted shape is the package's
- * self-alias convention — `export const ThemeMode = ThemeModeSchema`, and
- * fourteen more across `api`, `system` and `ui` — where the second write is the
- * same object and therefore cannot change what is published. Anything else is
+ * self-alias convention: a second export name bound to the very same schema
+ * object, as `src/api/endpoint.zod.ts` does with
+ * `export const ApiEndpoint = Object.assign(ApiEndpointSchema, { create })` —
+ * `Object.assign` returns its target, so `ApiEndpoint` and `ApiEndpointSchema`
+ * are one object and the second write cannot change what is published. A plain
+ * re-export (`export const Foo = FooSchema`) is the same shape by the same test.
+ *
+ * How many of these the package carries, and which def keys they land on, is
+ * deliberately NOT restated here: the population moves, and nothing checks a
+ * comment. `build-schemas.ts` prints it on every run instead (#12588 — the
+ * `N emit(s) collapsed into M existing def key(s) — all self-aliases` line,
+ * built from `findSelfAliasedDefKeys` below, which lists each def key and the
+ * export keys that reach it). Read that run, not this paragraph. Anything else is
  * two independent declarations under one published name: even if their JSON
  * happens to match today, the next edit to either one makes the artifact
  * depend on export order again, silently. So the guard refuses at the point
@@ -183,7 +193,9 @@ export function formatDefKeyCollisions(collisions: readonly DefKeyCollision[]): 
     `    one name meaning one thing. Record the rename in scripts/lib/renamed-defs.ts when the OLD\n` +
     `    def key stops being emitted;\n` +
     `  - a duplicate DECLARATION of one schema: delete it and re-export the survivor, so both\n` +
-    `    names resolve to a single object (\`export const ThemeMode = ThemeModeSchema\` — that\n` +
-    `    shape is allowed here precisely because it cannot change what is published).\n`
+    `    names resolve to a single object — \`export const Foo = FooSchema\`, or the\n` +
+    `    \`Object.assign(FooSchema, { … })\` form src/api/endpoint.zod.ts uses for \`ApiEndpoint\`.\n` +
+    `    Either shape is allowed here precisely because it cannot change what is published;\n` +
+    `    a build's own summary lists the self-aliases it already carries.\n`
   );
 }
