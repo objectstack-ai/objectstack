@@ -43,6 +43,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { SqlDriver } from '../src/index.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The repo's ONE answer to "is this span a comment, or code?". The naive block
+// regex this replaces had no idea what a string literal is: in
+// `logger-receiver-detach.test.ts` a fixture STRING quotes a docblock and the
+// sweep ate the string. `stripComments` (not `maskComments`) is the projection
+// this file wants -- the guard below reports bare file names, never a line or
+// an offset. The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts`
+// beside it is a hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 import {
   LIVE_SCHEMA_PREFIX,
   MYSQL_CELL,
@@ -127,11 +135,9 @@ describe('live-dialect matrix — per-file schema isolation (#9350)', () => {
 });
 
 describe('live-dialect matrix — the cell is the only route to a live server (#9350)', () => {
-  /** Source with line and block comments removed, so prose about the env var is not a hit. */
+  /** Source with comments removed, so prose about the env var is not a hit. */
   const codeOf = (file: string): string =>
-    readFileSync(join(SRC_DIR, file), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/^[ \t]*\/\/.*$/gm, '');
+    stripComments(readFileSync(join(SRC_DIR, file), 'utf8'));
 
   /**
    * The needle is ASSEMBLED rather than written as a literal.

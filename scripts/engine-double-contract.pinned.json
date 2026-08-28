@@ -1357,6 +1357,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-sole-organization-read-failure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-sole-organization-read-failure.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-sole-organization-read-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-state-machine-exempt.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3122,6 +3137,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/backfill-sys-file-organizations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-storage/src/file-reference-lifecycle.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3159,6 +3179,21 @@
     {
       "file": "packages/services/service-storage/src/stranded-orphan-inventory.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

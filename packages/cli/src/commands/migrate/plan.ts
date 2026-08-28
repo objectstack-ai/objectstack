@@ -99,6 +99,12 @@ export default class MigratePlan extends Command {
         // this — it flushes the deferred DDL after confirmation and needs a
         // real file to flush into.
         readOnlyProbe: true,
+        // #12938 — diff the object set this deployment actually serves. Without
+        // it the plan covers the five-table data stack alone: on a control plane
+        // carrying ~80 `sys_*` tables that printed "in sync" while the driver's
+        // own boot detector reported ten findings on the same database, and the
+        // command those findings name is this one.
+        composeHostStack: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
@@ -150,6 +156,22 @@ export default class MigratePlan extends Command {
                 },
               }
             : {}),
+          // [#12938] What the diffed object set was composed from — present
+          // only when there WAS a deployment to compose, so a project with
+          // neither a config nor a compiled artifact emits the same document it
+          // always did. A consumer asserting coverage needs `hostConfigLoaded`
+          // and not just `managedTables`: a config that fails to load also
+          // raises the count (the platform floor still lands), and a count alone
+          // cannot tell that apart from a deployment that is genuinely small.
+          ...(stack.composition.notes.length > 0
+            ? {
+                composition: {
+                  hostConfig: stack.composition.hostConfigPath,
+                  hostConfigLoaded: stack.composition.hostConfigLoaded,
+                  notes: stack.composition.notes,
+                },
+              }
+            : {}),
           ...(occupancy.status === 'busy'
             ? { occupancy: { status: 'busy', signal: occupancy.signal, detail: occupancy.detail } }
             : {}),
@@ -172,6 +194,10 @@ export default class MigratePlan extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
+      // What the object set was composed from (#12938) — never silent about a
+      // host config it could not load, and empty (so this block prints nothing)
+      // when there was no deployment to compose.
+      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
       console.log('');
 
       if (drift.length === 0 && pending.length === 0) {

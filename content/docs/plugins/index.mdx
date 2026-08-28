@@ -284,22 +284,21 @@ const dbPlugin: PluginMetadata = {
 
 ObjectStack supports plugin security features:
 
-- **Configuration Validation**: Plugins can define a Zod `configSchema` for runtime validation
 - **Signature Verification**: Cryptographic signatures for plugin integrity
 - **Permission Enforcement**: Fine-grained access control for plugin operations
 
-```typescript
-import { z } from 'zod';
+Plugin configuration is the plugin's own concern: take it as a constructor or
+factory argument and parse it at your own seam (a Zod `schema.parse` in the
+factory, constructor or `init`). The kernel-side `configSchema` metadata field
+was retired under ADR-0049 — the kernel never received a plugin's config, so
+the field could not validate anything.
 
+```typescript
 const securePlugin: PluginMetadata = {
   name: 'com.example.secure',
   version: '1.0.0',
-  configSchema: z.object({
-    apiKey: z.string().min(1),
-    region: z.enum(['us', 'eu', 'ap']),
-  }),
   signature: 'ed25519:key-1:<base64url-signature>',
-  
+
   async init(ctx) { /* ... */ },
 };
 ```

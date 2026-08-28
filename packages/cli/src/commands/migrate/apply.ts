@@ -126,7 +126,16 @@ export default class MigrateApply extends Command {
     try {
       // `deferSchemaDdl` is what makes the prompt below meaningful: without it
       // the boot has already created tables and added columns by this point.
-      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'], deferSchemaDdl: true });
+      // `composeHostStack` (#12938): reconcile the object set this deployment
+      // actually serves. It must be the SAME set `os migrate plan` diffed —
+      // the plan the operator just read is the thing being confirmed — so the
+      // two commands pass it identically.
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        deferSchemaDdl: true,
+        composeHostStack: true,
+      });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
@@ -139,6 +148,16 @@ export default class MigrateApply extends Command {
         if (flags.json) { await emitJson({ error: 'no_sql_driver' }, 0, { compact: true }); return; }
         printWarning('Schema migration is only supported on SQL drivers (SQLite / Postgres). No SQL driver is active.');
         return;
+      }
+
+      // What the object set was composed from (#12938) — printed BEFORE the
+      // in-sync early return below, not with the plan. "Already in sync" over a
+      // set that is a fraction of the target's tables is precisely the reading
+      // this card exists to stop, so the account of what was composed has to
+      // reach the operator on that path too.
+      if (!flags.json) {
+        for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
+        if (stack.composition.notes.length > 0) console.log('');
       }
 
       const drift = await stack.driver.detectManagedDrift();

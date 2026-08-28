@@ -403,20 +403,14 @@ packages/plugins/plugin-slack-integration/
 
 ### Configuration Management
 ```typescript
-// A plugin object may carry a Zod `configSchema` describing its settings.
-// NOTE: the kernel RECORDS the schema but does not enforce it yet — `use()`
-// takes no config argument, so the loader has nothing to parse and logs
-// "config validation postponed" instead of running the schema. Treat
-// `configSchema` as a declaration of shape, and validate values you actually
-// depend on yourself.
+// A plugin owns its config: `use()` takes no config argument and the kernel
+// never receives one, so validate the values you depend on at your own seam
+// (a Zod `schema.parse` in the plugin's factory, constructor or `init`).
+// The old `configSchema` metadata field was retired under ADR-0049 — the
+// loader only ever logged "config validation postponed" and returned.
 export const slackPlugin: Plugin = {
   name: 'slack-integration',
   version: '0.1.0',
-  configSchema: z.object({
-    apiKey: z.string().describe('Slack API Key'),
-    channel: z.string().default('#general'),
-    enabled: z.boolean().default(true),
-  }),
   async init(ctx) {
     // Runtime-resolved values come from the `settings` service, not from a
     // `config` object on the context — there is no `ctx.config`.
@@ -487,10 +481,11 @@ const message = i18n.t('slack.button.send', context.locale);
 **Example:** Wiring, not config, is what the kernel currently enforces at boot. A plugin that declares a dependency the kernel never received fails `bootstrap()` outright — `[Kernel] Dependency 'com.objectstack.engine.objectql' not found for plugin 'com.objectstack.audit'` — and a dependency cycle throws `[Kernel] Circular dependency detected: <plugin>`. Boot stops there instead of a request failing later.
 
 <Callout type="warn">
-  Plugin `configSchema` is **not** part of this fail-fast path yet. The loader
-  stores the schema and postpones the check, so a missing or malformed value in
-  a plugin's config will not stop boot today. Validate config you depend on in
-  your own `init`.
+  Plugin config is **not** part of this fail-fast path. The old `configSchema`
+  metadata field was retired under ADR-0049 — the loader never enforced it —
+  so a missing or malformed value in a plugin's config will not stop boot.
+  Parse config you depend on yourself, in your plugin's factory, constructor
+  or `init`.
 </Callout>
 
 ## Comparison: Kernel vs Alternatives

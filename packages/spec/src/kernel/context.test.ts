@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   RuntimeMode,
   KernelContextSchema,
-  PreviewModeConfigSchema,
   TenantRuntimeContextSchema,
   type KernelContext,
   type TenantRuntimeContext,
@@ -14,13 +13,15 @@ describe('RuntimeMode', () => {
     expect(() => RuntimeMode.parse('production')).not.toThrow();
     expect(() => RuntimeMode.parse('test')).not.toThrow();
     expect(() => RuntimeMode.parse('provisioning')).not.toThrow();
-    expect(() => RuntimeMode.parse('preview')).not.toThrow();
   });
 
   it('should reject invalid runtime modes', () => {
     expect(() => RuntimeMode.parse('staging')).toThrow();
     expect(() => RuntimeMode.parse('debug')).toThrow();
     expect(() => RuntimeMode.parse('')).toThrow();
+    // 'preview' was RETIRED (#11846) — the full prescription pins live in
+    // preview-mode-retirement.test.ts; this list only records the narrowing.
+    expect(() => RuntimeMode.parse('preview')).toThrow();
   });
 });
 
@@ -91,82 +92,19 @@ describe('KernelContextSchema', () => {
   });
 
   it('should accept all runtime modes in context', () => {
-    const modes = ['development', 'production', 'test', 'provisioning', 'preview'] as const;
+    // 'preview' left this list in #11846 — see preview-mode-retirement.test.ts.
+    const modes = ['development', 'production', 'test', 'provisioning'] as const;
     modes.forEach(mode => {
       const parsed = KernelContextSchema.parse({ ...validContext, mode });
       expect(parsed.mode).toBe(mode);
     });
   });
 
-  it('should accept preview mode with previewMode config', () => {
-    const parsed = KernelContextSchema.parse({
-      ...validContext,
-      mode: 'preview',
-      previewMode: {
-        autoLogin: true,
-        simulatedRole: 'admin',
-        simulatedUserName: 'Demo Admin',
-        readOnly: true,
-        expiresInSeconds: 3600,
-        bannerMessage: 'You are viewing a demo of this application.',
-      },
-    });
-    expect(parsed.mode).toBe('preview');
-    expect(parsed.previewMode?.autoLogin).toBe(true);
-    expect(parsed.previewMode?.simulatedRole).toBe('admin');
-    expect(parsed.previewMode?.simulatedUserName).toBe('Demo Admin');
-    expect(parsed.previewMode?.readOnly).toBe(true);
-    expect(parsed.previewMode?.expiresInSeconds).toBe(3600);
-    expect(parsed.previewMode?.bannerMessage).toContain('demo');
-  });
-
-  it('should accept context without previewMode (optional)', () => {
+  it('should accept a context that does not author previewMode (retired key, absence is legal)', () => {
     const parsed = KernelContextSchema.parse(validContext);
-    expect(parsed.previewMode).toBeUndefined();
-  });
-});
-
-describe('PreviewModeConfigSchema', () => {
-  it('should apply defaults for zero-config preview', () => {
-    const parsed = PreviewModeConfigSchema.parse({});
-    expect(parsed.autoLogin).toBe(true);
-    expect(parsed.simulatedRole).toBe('admin');
-    expect(parsed.simulatedUserName).toBe('Preview User');
-    expect(parsed.readOnly).toBe(false);
-    expect(parsed.expiresInSeconds).toBe(0);
-    expect(parsed.bannerMessage).toBeUndefined();
-  });
-
-  it('should accept all simulated roles', () => {
-    const roles = ['admin', 'user', 'viewer'] as const;
-    roles.forEach(role => {
-      const parsed = PreviewModeConfigSchema.parse({ simulatedRole: role });
-      expect(parsed.simulatedRole).toBe(role);
-    });
-  });
-
-  it('should reject invalid simulated role', () => {
-    expect(() => PreviewModeConfigSchema.parse({ simulatedRole: 'superadmin' })).toThrow();
-  });
-
-  it('should accept read-only preview for marketplace demos', () => {
-    const parsed = PreviewModeConfigSchema.parse({
-      autoLogin: true,
-      simulatedRole: 'viewer',
-      readOnly: true,
-      bannerMessage: 'This is a preview. Sign up to get started!',
-    });
-    expect(parsed.readOnly).toBe(true);
-    expect(parsed.simulatedRole).toBe('viewer');
-    expect(parsed.bannerMessage).toContain('preview');
-  });
-
-  it('should reject negative expiresInSeconds', () => {
-    expect(() => PreviewModeConfigSchema.parse({ expiresInSeconds: -1 })).toThrow();
-  });
-
-  it('should reject non-integer expiresInSeconds', () => {
-    expect(() => PreviewModeConfigSchema.parse({ expiresInSeconds: 1.5 })).toThrow();
+    // The non-strict strip path: absence must stay absence. The retirement
+    // pins for the AUTHORED case live in preview-mode-retirement.test.ts.
+    expect(parsed).not.toHaveProperty('previewMode');
   });
 });
 

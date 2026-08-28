@@ -5,7 +5,6 @@
  * 
  * Provides security features for the ObjectStack microkernel:
  * - Plugin signature verification
- * - Plugin configuration validation
  * - Permission and capability enforcement
  * 
  * @module @objectstack/core/security
@@ -35,10 +34,11 @@ export {
   verifyPluginArtifact,
 } from './plugin-artifact-signature.js';
 
-export {
-  PluginConfigValidator,
-  createPluginConfigValidator,
-} from './plugin-config-validator.js';
+// `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
+// 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
+// The kernel never received a plugin's config to validate — factories close
+// over it — so the class had zero live callers; plugins parse their own
+// config at their own seam instead.
 
 export {
   PluginPermissionEnforcer,

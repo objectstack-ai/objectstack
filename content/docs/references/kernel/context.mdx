@@ -5,9 +5,6 @@ description: Context protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Runtime Mode Enum
-Defines the operating mode of the kernel
-
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/context.zod.ts`
 </Callout>
@@ -15,8 +12,8 @@ Defines the operating mode of the kernel
 ## TypeScript Usage
 
 ```typescript
-import { KernelContextSchema, PreviewModeConfigSchema, RuntimeMode, TenantRuntimeContextSchema } from '@objectstack/spec/kernel';
-import type { KernelContext, PreviewModeConfig, RuntimeMode, TenantRuntimeContext } from '@objectstack/spec/kernel';
+import { KernelContextSchema, RuntimeMode, TenantRuntimeContextSchema } from '@objectstack/spec/kernel';
+import type { KernelContext, RuntimeMode, TenantRuntimeContext } from '@objectstack/spec/kernel';
 
 // Validate data
 const result = KernelContextSchema.parse(data);
@@ -31,41 +28,14 @@ const result = KernelContextSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **instanceId** | `string` | ✅ | Unique UUID for this running kernel process |
-| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | optional (default: `"production"`) | Kernel operating mode |
+| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning'>` | optional (default: `"production"`) | Kernel operating mode |
 | **version** | `string` | ✅ | Kernel version |
 | **appName** | `string` | optional | Host application name |
 | **cwd** | `string` | ✅ | Current working directory |
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
 | **features** | `Record<string, boolean>` | optional (default: `{}`) | Global feature toggles |
-| **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
-
-### Nested Shape: `KernelContext.previewMode`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **autoLogin** | `boolean` | optional (default: `true`) | Auto-login as simulated user, skipping login/registration pages |
-| **simulatedRole** | `Enum<'admin' \| 'user' \| 'viewer'>` | optional (default: `"admin"`) | Permission role for the simulated preview user |
-| **simulatedUserName** | `string` | optional (default: `"Preview User"`) | Display name for the simulated preview user |
-| **readOnly** | `boolean` | optional (default: `false`) | Restrict the preview session to read-only operations |
-| **expiresInSeconds** | `integer` | optional (default: `0`) | Preview session duration in seconds (0 = no expiration) |
-| **bannerMessage** | `string` | optional | Banner message displayed in the UI during preview mode |
-
-
----
-
-## PreviewModeConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **autoLogin** | `boolean` | optional (default: `true`) | Auto-login as simulated user, skipping login/registration pages |
-| **simulatedRole** | `Enum<'admin' \| 'user' \| 'viewer'>` | optional (default: `"admin"`) | Permission role for the simulated preview user |
-| **simulatedUserName** | `string` | optional (default: `"Preview User"`) | Display name for the simulated preview user |
-| **readOnly** | `boolean` | optional (default: `false`) | Restrict the preview session to read-only operations |
-| **expiresInSeconds** | `integer` | optional (default: `0`) | Preview session duration in seconds (0 = no expiration) |
-| **bannerMessage** | `string` | optional | Banner message displayed in the UI during preview mode |
+| **previewMode** | `never` | optional | [REMOVED] `context.previewMode` was removed in @objectstack/spec 17 (#11846, ADR-0049 enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, `simulatedRole`, `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`) had a consumer in any repo, so an authored block parsed cleanly and configured NOTHING, while its own docstring promised an auth bypass ("skips authentication screens", "simulates an admin identity") and named a production guard no runtime ever received. Delete the key. Preview/demo deployments belong to the deployment layer, which owns auth per-project (`ArtifactKernelFactory` in the cloud distribution); `OS_PREVIEW_MODE` stays there as a routing-only switch. If a preview experience becomes a product capability it re-declares fresh, with the production-posture hard-refusal as the first-landed half (#11846 ruling record). |
 
 
 ---
@@ -80,7 +50,6 @@ Kernel operating mode
 * `production`
 * `test`
 * `provisioning`
-* `preview`
 
 
 ---
@@ -94,30 +63,19 @@ Tenant-aware kernel runtime context
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **instanceId** | `string` | ✅ | Unique UUID for this running kernel process |
-| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning' \| 'preview'>` | optional (default: `"production"`) | Kernel operating mode |
+| **mode** | `Enum<'development' \| 'production' \| 'test' \| 'provisioning'>` | optional (default: `"production"`) | Kernel operating mode |
 | **version** | `string` | ✅ | Kernel version |
 | **appName** | `string` | optional | Host application name |
 | **cwd** | `string` | ✅ | Current working directory |
 | **workspaceRoot** | `string` | optional | Workspace root if different from cwd |
 | **startTime** | `integer` | ✅ | Boot timestamp (ms) |
 | **features** | `Record<string, boolean>` | optional (default: `{}`) | Global feature toggles |
-| **previewMode** | `{ autoLogin: boolean; simulatedRole: Enum<'admin' \| 'user' \| 'viewer'>; simulatedUserName: string; readOnly: boolean; … }` | optional | Preview/demo mode configuration (used when mode is "preview") |
+| **previewMode** | `never` | optional | [REMOVED] `context.previewMode` was removed in @objectstack/spec 17 (#11846, ADR-0049 enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, `simulatedRole`, `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`) had a consumer in any repo, so an authored block parsed cleanly and configured NOTHING, while its own docstring promised an auth bypass ("skips authentication screens", "simulates an admin identity") and named a production guard no runtime ever received. Delete the key. Preview/demo deployments belong to the deployment layer, which owns auth per-project (`ArtifactKernelFactory` in the cloud distribution); `OS_PREVIEW_MODE` stays there as a routing-only switch. If a preview experience becomes a product capability it re-declares fresh, with the production-posture hard-refusal as the first-landed half (#11846 ruling record). |
 | **tenantId** | `string` | ✅ | Resolved tenant identifier |
 | **tenantPlan** | `Enum<'free' \| 'pro' \| 'enterprise'>` | ✅ | Tenant subscription plan |
 | **tenantRegion** | `string` | optional | Tenant deployment region |
 | **tenantDbUrl** | `string` | ✅ | Tenant database connection URL |
 | **tenantQuotas** | `{ maxUsers?: integer; maxStorage?: integer; apiRateLimit?: integer; maxObjects?: integer; … }` | optional | Tenant resource quotas |
-
-### Nested Shape: `TenantRuntimeContext.previewMode`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **autoLogin** | `boolean` | optional (default: `true`) | Auto-login as simulated user, skipping login/registration pages |
-| **simulatedRole** | `Enum<'admin' \| 'user' \| 'viewer'>` | optional (default: `"admin"`) | Permission role for the simulated preview user |
-| **simulatedUserName** | `string` | optional (default: `"Preview User"`) | Display name for the simulated preview user |
-| **readOnly** | `boolean` | optional (default: `false`) | Restrict the preview session to read-only operations |
-| **expiresInSeconds** | `integer` | optional (default: `0`) | Preview session duration in seconds (0 = no expiration) |
-| **bannerMessage** | `string` | optional | Banner message displayed in the UI during preview mode |
 
 ### Nested Shape: `TenantRuntimeContext.tenantQuotas`
 
