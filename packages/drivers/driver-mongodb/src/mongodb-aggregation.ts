@@ -468,6 +468,60 @@ export function buildAggregationPipeline(opts: {
 }
 
 /**
+ * [#11151] `path`, with a BOOLEAN rendered as the number it is worth — the
+ * aggregand expression `$sum` and `$avg` consume on this face.
+ *
+ * ## What it is for
+ *
+ * MongoDB's `$sum` and `$avg` are ARITHMETIC accumulators and ignore every
+ * non-numeric value, a boolean included. So a whole boolean column summed to
+ * `$sum`'s identity `0` and averaged to `null` here, while `SUM(col)` /
+ * `AVG(col)` answer `3` / `0.5` over the same 3-true/3-false rows on every SQL
+ * dialect (#11635), `driver-memory` answers those numbers on both of its faces
+ * (#11065), and objectql's in-memory fallback answers them too because its
+ * `toNumber` is `Number(v)` and `Number(true) === 1`. A rate measure over a
+ * flag column — an SLA-violation rate, a win rate — is the ordinary shape of
+ * that query, and the two answers are not two spellings of one: a dashboard
+ * tile bound to the measure renders a percentage under SQL and a blank here,
+ * indistinguishable from "no matching rows". `sum`'s `0` is the worse half,
+ * being a plausible number rather than a visible hole.
+ *
+ * The expression is the one #11065 landed on `driver-memory`'s analytics face
+ * (`memory-analytics.ts`, `numericAggregandExpr`), reproduced rather than
+ * imported: this driver shares no line of code with that one, and the shared
+ * contract between them is the VALUES in `@objectstack/spec/data`, not a
+ * helper.
+ *
+ * ## Why an EXPRESSION and not post-processing
+ *
+ * {@link postProcessAggregation} runs after the pipeline's own `$sort` and
+ * `$limit` stages, so a measure left unresolved until then would be sorted as
+ * whatever it was — and `order` over a `sum` or `avg` measure is an ordinary
+ * analytics query. Keeping the rule inside the `$group` expression leaves every
+ * later stage looking at the number it expects.
+ *
+ * ## ⛔ Why it is NOT applied to `min` / `max`
+ *
+ * `$min` / `$max` are ORDER STATISTICS over BSON canonical comparison order,
+ * not arithmetic accumulators: they rank booleans and return a MEMBER of the
+ * input domain. #11249 ruled (maintainer 2026-08-23) that a boolean aggregand
+ * answers `false` / `true` there — the JSON boolean, not `0` / `1` — so
+ * wrapping those two arms in this coercion would break the ruled contract in
+ * the opposite direction from the defect it fixes.
+ *
+ * ## The narrowness is deliberate
+ *
+ * Only `bool` is rewritten. Null, missing and a non-numeric string reach the
+ * accumulator exactly as before and are ignored by it exactly as before.
+ * Coercing wider would mean adopting `toNumber`'s other half, which maps a
+ * non-numeric string to `0` and so averages garbage as zero rather than
+ * excluding it — a separate question from this one.
+ */
+function numericAggregandExpr(path: string): Document {
+  return { $cond: [{ $eq: [{ $type: path }, 'bool'] }, { $cond: [path, 1, 0] }, path] };
+}
+
+/**
  * Build a single MongoDB accumulator expression from an aggregation descriptor.
  */
 function buildAccumulator(agg: AggregationInput): Document {
@@ -490,11 +544,14 @@ function buildAccumulator(agg: AggregationInput): Document {
         ? { $sum: 1 }
         : { $sum: { $cond: [{ $eq: [{ $ifNull: [fieldRef, null] }, null] }, 0, 1] } };
 
+    // [#11151] `sum` / `avg` coerce a BOOLEAN aggregand; see
+    // {@link numericAggregandExpr} for why, and for why `min` / `max` below
+    // deliberately do NOT.
     case 'sum':
-      return { $sum: fieldRef ?? 0 };
+      return { $sum: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
     case 'avg':
-      return { $avg: fieldRef ?? 0 };
+      return { $avg: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
     case 'min':
       return { $min: fieldRef ?? 0 };
