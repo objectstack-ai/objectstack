@@ -474,7 +474,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscription** | `{ subscriptionId: string; events: string[]; objects?: string[]; filters?: any; … }` | ✅ | Subscription configuration |
 
-### Nested Shape: `WebSocketMessage.subscription`
+### Nested Shape: `WebSocketMessage[type='subscribe'].subscription`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -499,7 +499,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **request** | `{ subscriptionId: string }` | ✅ | Unsubscribe request |
 
-### Nested Shape: `WebSocketMessage.request`
+### Nested Shape: `WebSocketMessage[type='unsubscribe'].request`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -539,7 +539,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **presence** | `{ userId: string; sessionId: string; status: Enum<'online' \| 'away' \| 'busy' \| 'offline'>; lastSeen: string; … }` | ✅ | Presence state |
 
-### Nested Shape: `WebSocketMessage.presence`
+### Nested Shape: `WebSocketMessage[type='presence'].presence`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -567,7 +567,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **cursor** | `{ userId: string; sessionId: string; documentId: string; position?: object; … }` | ✅ | Cursor position |
 
-### Nested Shape: `WebSocketMessage.cursor`
+### Nested Shape: `WebSocketMessage[type='cursor'].cursor`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -595,7 +595,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **operation** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … }` | ✅ | Edit operation |
 
-### Nested Shape: `WebSocketMessage.operation`
+### Nested Shape: `WebSocketMessage[type='edit'].operation`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

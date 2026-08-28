@@ -195,7 +195,7 @@ This schema accepts one of the following structures:
 | **replicaId** | `string` | ✅ | ID of replica that performed last write |
 | **vectorClock** | `{ clock: Record<string, integer> }` | optional | Optional vector clock for causality tracking |
 
-### Nested Shape: `CRDTState.vectorClock`
+### Nested Shape: `CRDTState[type='lww-register'].vectorClock`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -241,7 +241,7 @@ This schema accepts one of the following structures:
 | **type** | `'or-set'` | ✅ |  |
 | **elements** | `{ value: any; timestamp: string; replicaId: string; uid: string; … }[]` | ✅ | Set elements with metadata |
 
-### Nested Shape: `CRDTState.elements[number]`
+### Nested Shape: `CRDTState[type='or-set'].elements[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -268,7 +268,7 @@ This schema accepts one of the following structures:
 | **lamportClock** | `integer` | ✅ | Current Lamport clock value |
 | **vectorClock** | `{ clock: Record<string, integer> }` | ✅ | Vector clock for causality |
 
-### Nested Shape: `CRDTState.operations[number]`
+### Nested Shape: `CRDTState[type='text'].operations[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -280,7 +280,7 @@ This schema accepts one of the following structures:
 | **timestamp** | `string` | ✅ | ISO 8601 datetime of operation |
 | **lamportTimestamp** | `integer` | ✅ | Lamport timestamp for ordering |
 
-### Nested Shape: `CRDTState.vectorClock`
+### Nested Shape: `CRDTState[type='text'].vectorClock`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

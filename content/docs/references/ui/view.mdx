@@ -1873,7 +1873,7 @@ This schema accepts one of the following structures:
 | **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
 | **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
-### Nested Shape: `ViewData.read`
+### Nested Shape: `ViewData[provider='api'].read`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1883,7 +1883,7 @@ This schema accepts one of the following structures:
 | **params** | `Record<string, any>` | optional | Query parameters |
 | **body** | `any` | optional | Request body for POST/PUT/PATCH |
 
-### Nested Shape: `ViewData.write`
+### Nested Shape: `ViewData[provider='api'].write`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1990,7 +1990,7 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
-### Nested Shape: `ViewItem.config`
+### Nested Shape: `ViewItem[viewKind='list'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2044,7 +2044,7 @@ This schema accepts one of the following structures:
 | **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItem.protection`
+### Nested Shape: `ViewItem[viewKind='list'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2079,7 +2079,7 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
-### Nested Shape: `ViewItem.config`
+### Nested Shape: `ViewItem[viewKind='form'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2109,7 +2109,7 @@ This schema accepts one of the following structures:
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
 | **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItem.protection`
+### Nested Shape: `ViewItem[viewKind='form'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2165,7 +2165,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
-### Nested Shape: `ViewItemWire.config`
+### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2219,7 +2219,7 @@ This schema accepts one of the following structures:
 | **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItemWire.protection`
+### Nested Shape: `ViewItemWire[viewKind='list'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2227,7 +2227,7 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
-### Nested Shape: `ViewItemWire.columnState`
+### Nested Shape: `ViewItemWire[viewKind='list'].columnState`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2264,7 +2264,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
-### Nested Shape: `ViewItemWire.config`
+### Nested Shape: `ViewItemWire[viewKind='form'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2294,7 +2294,7 @@ This schema accepts one of the following structures:
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
 | **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItemWire.protection`
+### Nested Shape: `ViewItemWire[viewKind='form'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2302,7 +2302,7 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
-### Nested Shape: `ViewItemWire.columnState`
+### Nested Shape: `ViewItemWire[viewKind='form'].columnState`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
