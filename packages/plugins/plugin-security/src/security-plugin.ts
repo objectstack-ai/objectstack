@@ -1950,8 +1950,59 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 2. CRUD permission check
-      if (permissionSets.length > 0) {
+      // [#12597] The referential FK-CLEAR write is exempt from the object-level
+      // CRUD check — and from THAT CHECK ALONE.
+      //
+      // Maintainer ruling 2026-08-28 (second round, option B). Deleting a record
+      // makes the engine clear every optional lookup pointing at it
+      // (`deleteBehavior: 'set_null'`). That UPDATE is engine-owned referential
+      // integrity, not an exercise of the caller's authority over the
+      // referencing object, and it already says so: `cascadeDeleteRelations`
+      // stamps the server-DERIVED `__referentialFieldClear` marker on its
+      // context (#3023). The marker cannot be forged from a request —
+      // `assembleExecutionContext` builds an inbound envelope from a CLOSED
+      // field set and no `__` operation-private key is in it (#6216 / #7284).
+      //
+      // What it fixes: a role holding full delete rights on A and NO grant at
+      // all on B could delete an A only while B was EMPTY. The moment a real row
+      // referenced it, the cleanup UPDATE 403'd on B and the deployment saw one
+      // generic "you do not have permission" — the same button, dead, for a
+      // reason no permission screen showed. #12166 moved the pre-delete reference
+      // CHECK to the system identity; this is the WRITE half of the same action.
+      //
+      // ⛔ NOT `isSystem`. The bypass at the top of this middleware is TOTAL —
+      // `content/docs/permissions/system-context.mdx`: "Elevation is total, and
+      // it is not granular." Measured on the round-1 probe, it would ALSO switch
+      // off field-level security on the FK column, the RLS `using` row scope and
+      // the RLS post-image `check`, none of which is a referential-integrity
+      // question; a declared RLS `check` that holds or not depending on the code
+      // path is the declared-≠-enforced shape this project prices highest. So
+      // the exemption is spelled HERE, at the one gate that refuses for a reason
+      // referential integrity answers, and every later step of this middleware
+      // runs unchanged — each pinned in this package's
+      // `delete-reference-cleanup-system-identity.test.ts`, whose `#12597`
+      // describe carries one arm per surviving guard.
+      //
+      // Two narrowings the bare marker would not give:
+      //   • `update` ONLY. A marker rides a context, and a context reaches
+      //     whatever that write's own hooks do next; the engine stamps this one
+      //     on the `set_null` UPDATE alone, so any other operation carrying it is
+      //     INHERITANCE, never the ruled write.
+      //   • the ADR-0090 D10 delegator half goes with it, because it is the SAME
+      //     object-level grant question asked of the second principal. An agent
+      //     whose delegator is exempt here does not act beyond that user's reach;
+      //     leaving it standing would make the delete succeed directly and refuse
+      //     on-behalf-of — the invisible coupling this card exists to remove.
+      //
+      // ⛔ The `cascade` arm (the child-row DELETE) is NOT covered: it carries no
+      // marker, keeps the operator's own delete authority, and stays excluded by
+      // ruling for the third time. Deleting whole rows is data destruction, not
+      // integrity maintenance.
+      const referentialFieldClearWrite =
+        opCtx.operation === 'update' && opCtx.context?.__referentialFieldClear === true;
+
+      // 2. CRUD permission check ([#12597] except the referential FK clear)
+      if (permissionSets.length > 0 && !referentialFieldClearWrite) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,

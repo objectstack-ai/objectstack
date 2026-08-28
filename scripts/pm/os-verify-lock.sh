@@ -802,9 +802,38 @@ open_file_pids() {
   printf 'unknown'
 }
 
+# Seconds → the same seconds, plus a scaled reading a human can hold. The
+# scaled part is a CONVENIENCE and the `%ss` prefix is the fact: every branch
+# prints the exact second count first, so no reading here is ever the only
+# copy of the number.
+#
+# ⚠ THE HOUR BRANCH IS NOT COSMETIC SUGAR ON THE MINUTE ONE. Two of this
+# script's call sites -- `--report`'s span and the floor it reaches back to --
+# are CALENDAR-scale figures, and the question a reader brings to them ("does
+# this population cover my hold from the 26th?") is answered by comparing
+# against a date. Rendered minute-only, an 8h24m window prints `504m05s` and
+# the reader has to divide before they can compare. The report elsewhere
+# refuses to leave arithmetic on the page -- the arrival-depth block spells out
+# `⇒ waiters already ahead = this minus 1` for exactly this reason -- so
+# leaving a division here was the odd one out.
+#
+# ⛔ The 3600 threshold is deliberate and the sub-hour text is deliberately
+# UNTOUCHED: the long-hold warning fires at 900s and `900s (15m00s)` reads
+# correctly at minute scale. Widening the hour branch downward would "unify"
+# the formats and make that warning worse.
+#
+# ⛔ bash 3.2 floor: plain arithmetic and `printf` only. In particular the
+# minute term is `s % 3600 / 60`, NOT `s / 60` -- the latter is the natural
+# typo and it prints 3661s as `1h61m01s`, a well-formed string that is wrong.
 human_s() {
   local s="$1"
-  if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
+  if ((s >= 3600)); then
+    printf '%ss (%dh%02dm%02ds)' "$s" $((s / 3600)) $((s % 3600 / 60)) $((s % 60))
+  elif ((s >= 60)); then
+    printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60))
+  else
+    printf '%ss' "$s"
+  fi
 }
 
 # Epoch seconds → a UTC instant a reader can compare against a dated report, or
@@ -945,14 +974,40 @@ ledger_append() {
 #
 # ⚠️ The repair is NOT a bigger constant, and the reason is that the number to
 # size it against does not exist. The ledger cannot price a p95 of legitimate
-# holds: it lives in this container's /tmp and starts empty on every reset, so
-# the population it holds is one shift's worth of whatever ran since — read on
-# 2026-08-27 it was 24 records, max hold 344s, max wait 3s, ZERO queue-timeouts
-# and arrival depth 1 on every single record, i.e. not one contended run of the
-# kind this card is about. Picking `HARD_CAP_S * 6` off the back of four
-# hand-correlated anecdotes would be a constant with the same standing as the
-# one it replaced, and it would be wrong again the first time three long holds
-# queue up instead of two.
+# holds: its population starts where the ledger FILE starts and no earlier —
+# for reasons nobody has characterised, stated below — so what it holds is
+# whatever ran since, a stretch of hours in every reading so far and never a
+# fleet history. Read on 2026-08-27 it was 24 records, max hold 344s, max wait 3s,
+# ZERO queue-timeouts and arrival depth 1 on every single record, i.e. not one
+# contended run of the kind this card is about. Picking `HARD_CAP_S * 6` off
+# the back of four hand-correlated anecdotes would be a constant with the same
+# standing as the one it replaced, and it would be wrong again the first time
+# three long holds queue up instead of two.
+#
+# ⛔ WHAT USED TO STAND WHERE THAT FLOOR STANDS, AND WHY IT IS GONE. This
+# paragraph reasoned from "it lives in this container's /tmp and starts empty
+# on every reset". That mechanism is NOT RELIABLE, and it was measured not
+# holding — twice, against two different ledger files: on 2026-08-28T01:00Z all
+# 74 records in the live ledger, and the file's own birth time, PREDATED the
+# boot `/proc/uptime` reported, the oldest by 8h11m; at 08:26Z the same day, on
+# a ledger born after that reading, all 14 records and the file's birth
+# predated the reported boot again, the oldest by 2h03m. Both readings carry
+# both controls, in one command: a file touched at that moment read as AFTER
+# the derived boot, so the comparison can return either answer; and PID 1
+# started under half a second after that boot, so `/proc/uptime` and the
+# process tree agree with EACH OTHER. It is the FILESYSTEM that did not restart
+# with them, not the clock that is wrong. The default path cannot carry the
+# claim either: `OS_VERIFY_LOCK_LEDGER` redirects the ledger, and a path is a
+# LOCATION while a population is an INTERVAL. `--report`'s scope block states
+# this same floor the same way, and for this same reason.
+#
+# ⛔ AND THE OPPOSITE PREMISE IS NOT CLAIMED: nothing above measured that /tmp
+# SURVIVES a reset. Two readings disqualify a mechanism; they do not establish
+# its negation, and WHY these files outlive a reported boot is uncharacterised
+# — establishing that is a real measurement across several restarts and several
+# hosts, not a comment edit. ⭐ The arithmetic above needs NEITHER answer: it
+# rests on the population being BOUNDED and thin, which every reading agrees
+# on, and never on why it begins where it does.
 #
 # What the bound is actually FOR is discarding a place nobody is coming back
 # for. So it asks that, and nothing else: the age is the time since the slot
@@ -2811,6 +2866,41 @@ mode_self_test() {
     "$(printf '%s\n' "$rpt" | grep -c 'where the hold time in THIS ledger went')" 1
   st_case 'and the fleet-scale heading is gone, not merely annotated' \
     "$(printf '%s\n' "$rpt" | grep -c 'this is where hold time actually goes')" 0
+
+  # `human_s`, which supplies the AGE in that floor line and the width in the
+  # `spanning` line above it. Fixed inputs to fixed strings, for the same
+  # reason `utc_stamp` is pinned that way just below: the failure here is not
+  # an error, it is a well-formed duration carrying the wrong reading, and only
+  # a fixed expected value separates those.
+  st_case 'human_s leaves a sub-minute duration as bare seconds' \
+    "$(human_s 45)" '45s'
+  st_case 'and renders a minute-scale duration in minutes, as it always did' \
+    "$(human_s 754)" '754s (12m34s)'
+  # ⛔ Pinned because it must NOT move: the long-hold warning fires at 900s and
+  # reads correctly at minute scale. A future "unification" that pulls the hour
+  # branch below an hour would make that warning worse, not better.
+  st_case 'and leaves the 900s long-hold scale reading in minutes' \
+    "$(human_s 900)" '900s (15m00s)'
+  st_case 'and keeps the last sub-hour second in minutes, not hours' \
+    "$(human_s 3599)" '3599s (59m59s)'
+  st_case 'and switches to hours at exactly one hour' \
+    "$(human_s 3600)" '3600s (1h00m00s)'
+  # ⛔ THE LOAD-BEARING CASE. Writing the minute term as `s / 60` instead of
+  # `s % 3600 / 60` renders this as `1h61m01s` -- well-formed, wrong, and
+  # invisible to any case that merely checks an `h` appeared.
+  st_case 'and carries minutes WITHIN the hour, not minutes since zero' \
+    "$(human_s 3661)" '3661s (1h01m01s)'
+  # The two figures this card was filed over, read from a live --report.
+  st_case 'and renders the reported span as hours rather than 504 minutes' \
+    "$(human_s 30245)" '30245s (8h24m05s)'
+  st_case 'and the population floor age beside it, rather than 514 minutes' \
+    "$(human_s 30841)" '30841s (8h34m01s)'
+  # The scaled reading is a convenience; the second count is the fact. This
+  # asserts the fact survived in every branch, which is what lets the scaled
+  # part be approximate-looking without any information being lost.
+  st_case 'and prints the exact second count in every branch, hours included' \
+    "$(human_s 45; printf ' '; human_s 754; printf ' '; human_s 30245)" \
+    '45s 754s (12m34s) 30245s (8h24m05s)'
 
   # `utc_stamp`, which supplies the instant in that floor. A KNOWN epoch mapped
   # to a KNOWN string, because the failure mode here is not an error: it is a

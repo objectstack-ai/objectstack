@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
-import { assertProtocolCompat } from '@objectstack/metadata-core';
+import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
@@ -645,9 +645,52 @@ export class AppPlugin implements Plugin {
                 | { registerInMemory?: (t: string, n: string, d: unknown) => void }
                 | undefined;
             if (typeof metadata?.registerInMemory === 'function') {
-                const securityBundle: any = this.bundle.manifest
+                const rawSecurityBundle: any = this.bundle.manifest
                     ? { ...this.bundle.manifest, ...this.bundle }
                     : this.bundle;
+                // [#12844] Same bytes, same conversion policy — one funnel.
+                //
+                // On an artifact boot these declarations reach the metadata
+                // registry through TWO independent readers: the artifact door
+                // (`MetadataPlugin._parseAndRegisterArtifact`), which since
+                // #12772 replays the versioned ADR-0087 forward conversion
+                // over the definition before its strict parse, and this block,
+                // which received the same JSON from `loadArtifactBundle` (no
+                // validation, no conversion). Reading it raw here made
+                // "artifact metadata is converted at ingestion" only half
+                // true: the two copies of the same permission set differed,
+                // and which one a consumer saw depended on registration order
+                // and read path. Nothing read the difference when this was
+                // filed — the retired keys involved gate nothing BY THE
+                // DEFINITION of their retirement — but that is a property of
+                // those keys, not of this path: the next retired key whose
+                // value a consumer does read would diverge silently at
+                // registration and explode at whatever seam re-validates
+                // (e.g. a Studio re-save through `saveMetaItem`, which rejects
+                // with the current schema).
+                //
+                // So this reader consumes the door's OWN policy function
+                // rather than a second opinion about it — the whole
+                // definition, exactly as the door converts it, so no
+                // conversion-specific knowledge leaks in here (the
+                // `roles` -> `positions` entry rewrites a COLLECTION KEY, not
+                // an item, and a projection would silently miss it).
+                //
+                // Not surfaced operator-visibly: on an artifact boot the door
+                // already prints one deduped summary per conversion for these
+                // very bytes, and a second copy of it would double the boot
+                // log without adding a fact. `debug` keeps it diagnosable.
+                const forwardConverted = applyArtifactForwardConversions(rawSecurityBundle);
+                if (forwardConverted.notices.length > 0) {
+                    ctx.logger.debug('[AppPlugin] applied ADR-0087 forward conversion to stack-declared security metadata', {
+                        appId,
+                        verdict: forwardConverted.verdict,
+                        authoredFloor: forwardConverted.authoredFloor,
+                        runtimeSpecVersion: forwardConverted.runtimeSpecVersion,
+                        notices: forwardConverted.notices.length,
+                    });
+                }
+                const securityBundle: any = forwardConverted.definition;
                 const SECURITY_FIELDS: Array<[string, string]> = [
                     ['positions', 'position'],
                     ['permissions', 'permission'],

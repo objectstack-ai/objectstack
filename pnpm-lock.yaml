@@ -2323,6 +2323,12 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/driver-memory':
+        specifier: workspace:*
+        version: link:../../drivers/driver-memory
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2333,15 +2339,9 @@ importers:
         specifier: ^2.14.0
         version: 2.14.0
     devDependencies:
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../../drivers/driver-memory
       '@objectstack/driver-mongodb':
         specifier: workspace:*
         version: link:../../drivers/driver-mongodb
-      '@objectstack/driver-sql':
-        specifier: workspace:*
-        version: link:../../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm

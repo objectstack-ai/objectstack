@@ -3048,3 +3048,240 @@ describe('LifecycleService teardown (#4747)', () => {
     svc.stop();
   });
 });
+
+// [#12853] `loadGovernance`'s tenant scan used to fail into a bare
+// `catch { /* No sys_organization (single-tenant kernel) */ }`, which made "this
+// deployment has tuned no tenant" and "the read that would have found the
+// tenants never happened" the same observable value: an empty
+// `snapshot.tenantOverrides`.
+//
+// That value is not inert. `reap()` and `archiveObject()` read it to decide
+// which cutoff each tenant's rows are DELETED on, so an empty map falls every
+// tenant back to the global window — wrong in both directions, and the
+// expensive direction is a tenant configured to retain LONGER having its rows
+// expired early. Nothing reported it: `GovernanceSnapshot` has no field saying
+// the tenant pass did not complete, and the catch logged nothing.
+//
+// The repair discriminates by error TYPE through the declared
+// `isMissingTableError` predicate — an unprovisioned `sys_organization` really
+// does mean "no tenant overrides" — and every other cause aborts the sweep
+// BEFORE any policy is applied, reported through `report.errors` and a `warn`.
+// Aborting, not logging-and-continuing: a log cannot bring back a reaped row,
+// and the rows a deferred sweep leaves are still there for the next one.
+//
+// The pins below are about the CONSEQUENCE, not about a throw: what must be
+// observable is that no candidate row is read and no row is deleted on a window
+// nobody managed to verify. Every expectation is a LITERAL, and each refusal is
+// paired with a positive control on the same harness, so a fixture that had
+// stopped reaping at all could not satisfy them vacuously.
+describe('LifecycleService.sweep — governance tenant scan failure (#12853)', () => {
+  const TELEMETRY_OBJ: LifecycleObjectLike = {
+    name: 'sys_job_run',
+    lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any,
+  };
+
+  /** Settings service backed by a value map, with per-tenant values. */
+  function fakeSettings(values: Record<string, unknown>, tenantValues: Record<string, Record<string, unknown>> = {}) {
+    return {
+      async get(_ns: string, key: string, ctx?: Record<string, unknown>) {
+        const tenantId = ctx?.tenantId as string | undefined;
+        if (tenantId && tenantValues[tenantId] && key in tenantValues[tenantId]) {
+          return { value: tenantValues[tenantId][key], source: 'tenant' };
+        }
+        if (key in values) return { value: values[key], source: 'global' };
+        return { value: undefined, source: 'default' };
+      },
+    };
+  }
+
+  /**
+   * An engine that answers both reads this sweep issues: the governance tenant
+   * scan on `sys_organization`, and `batchedReap`'s candidate page for the
+   * declared object. The candidate page always yields exactly one row, so a
+   * reap that RUNS always issues a delete — which is what makes "no delete"
+   * a refusal rather than an empty fixture.
+   */
+  function orgScanEngine(orgs: Array<{ id: string }>) {
+    let orgReadThrows: unknown;
+    let candidateRow = 0;
+    const { engine, deletes, finds } = captureEngine([TELEMETRY_OBJ], {
+      findImpl: (object: string) => {
+        if (object === 'sys_organization') {
+          if (orgReadThrows !== undefined) throw orgReadThrows;
+          return orgs;
+        }
+        return [{ id: `row-${++candidateRow}` }];
+      },
+    });
+    return {
+      engine,
+      deletes,
+      /** The `where` of every candidate read the reaper issued. */
+      reapReads: () => finds.filter((f) => f.object === 'sys_job_run').map((f) => f.where),
+      /** Did the tenant scan actually run? */
+      orgReads: () => finds.filter((f) => f.object === 'sys_organization').length,
+      failOrgReadWith: (error: unknown) => { orgReadThrows = error; },
+      healOrgRead: () => { orgReadThrows = undefined; },
+    };
+  }
+
+  /** The real driver phrasings, verbatim. */
+  const connectionDropped = () => Object.assign(new Error('connection reset by peer'), { code: 'ECONNRESET' });
+  const tableNotProvisioned = () =>
+    Object.assign(new Error('SQLITE_ERROR: no such table: sys_organization'), { code: 'SQLITE_ERROR' });
+
+  const abortedError = (message: string) =>
+    `governance snapshot could not be loaded (${message}) — sweep aborted before any policy ` +
+    'was applied, so no rows were reaped for this object';
+  const abortedWarn = (message: string) =>
+    `[lifecycle] governance snapshot could not be loaded (${message}); sweep aborted before any ` +
+    'policy was applied — no rows were reaped, and the next scheduled sweep retries';
+
+  // ── POSITIVE CONTROLS ─────────────────────────────────────────────────────
+
+  it('control: a tenant scan that RUNS gives the regulated tenant its own longer window', async () => {
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { sys_job_run: { maxAge: '90d' } } } },
+    );
+
+    const report = await service(box.engine, { getSettings: () => settings }).sweep();
+
+    // The tenant pass on the tenant's own rows, then the global pass for
+    // everyone else — this is the behaviour a failed scan silently destroys.
+    expect(box.reapReads()).toEqual([
+      { created_at: { $lt: isoCutoff('90d') }, organization_id: 'org_reg' },
+      {
+        created_at: { $lt: isoCutoff('30d') },
+        $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+      },
+    ]);
+    expect(box.deletes).toHaveLength(2);
+    expect(report.errors).toEqual([]);
+    expect(report.swept).toHaveLength(1);
+  });
+
+  it('control: a tenant scan that RUNS and finds no organization reaps on one global pass', async () => {
+    const box = orgScanEngine([]);
+
+    const report = await service(box.engine, { getSettings: () => fakeSettings({}) }).sweep();
+
+    expect(box.orgReads()).toBe(1);
+    expect(box.reapReads()).toEqual([{ created_at: { $lt: isoCutoff('30d') } }]);
+    expect(box.deletes).toHaveLength(1);
+    expect(report.errors).toEqual([]);
+  });
+
+  // ── THE ONE BENIGN CAUSE ──────────────────────────────────────────────────
+
+  it('an UNPROVISIONED sys_organization is truthful emptiness: the sweep reaps on the global window', async () => {
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    box.failOrgReadWith(tableNotProvisioned());
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { sys_job_run: { maxAge: '90d' } } } },
+    );
+
+    const report = await service(box.engine, { getSettings: () => settings }).sweep();
+
+    // Proof the benign branch was actually EXERCISED — the scan ran and threw.
+    // Without it, the reap below is equally consistent with a harness that
+    // never scans.
+    expect(box.orgReads()).toBe(1);
+    expect(box.reapReads()).toEqual([{ created_at: { $lt: isoCutoff('30d') } }]);
+    expect(box.deletes).toHaveLength(1);
+    expect(report.errors).toEqual([]);
+    expect(report.swept).toHaveLength(1);
+  });
+
+  // ── THE FIX — a scan that could not run must not decide a deletion window ──
+
+  it('a dropped connection aborts the sweep: nothing is read as a candidate and nothing is deleted', async () => {
+    const warn = vi.fn();
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    box.failOrgReadWith(connectionDropped());
+    // The tenant that would have been found keeps rows THREE TIMES longer than
+    // the global window. Pre-fix this sweep reaped its rows at the 30d cutoff.
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { sys_job_run: { maxAge: '90d' } } } },
+    );
+
+    const report = await service(box.engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), warn },
+    }).sweep();
+
+    // Proof the scan really ran and really threw.
+    expect(box.orgReads()).toBe(1);
+    // THE CONSEQUENCE, and the reason this card exists: no candidate row was
+    // even READ against a window nobody verified, so none was deleted.
+    expect(box.reapReads()).toEqual([]);
+    expect(box.deletes).toEqual([]);
+    expect(report.swept).toEqual([]);
+    // Surfaced through the channels that already exist — no new report field.
+    expect(report.errors).toEqual([
+      { object: 'sys_job_run', error: abortedError('connection reset by peer') },
+    ]);
+    expect(warn).toHaveBeenCalledWith(abortedWarn('connection reset by peer'));
+  });
+
+  it('a permission refusal aborts it the same way', async () => {
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    box.failOrgReadWith(Object.assign(new Error('permission denied for table sys_organization'), { code: '42501' }));
+
+    const report = await service(box.engine, { getSettings: () => fakeSettings({}) }).sweep();
+
+    expect(box.deletes).toEqual([]);
+    expect(report.errors).toEqual([
+      { object: 'sys_job_run', error: abortedError('permission denied for table sys_organization') },
+    ]);
+  });
+
+  it('a missing COLUMN on an existing sys_organization stays loud (the superstring case)', async () => {
+    // Postgres phrases this as `column "x" of relation "y" does not exist`,
+    // which CONTAINS a complete, legal missing-table phrase.
+    // `isMissingTableError`'s front-exclusion is what keeps it loud, and this
+    // pin stops a future hand-rolled message test reading it as benign and
+    // silently re-arming the wrong-window reap.
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    box.failOrgReadWith(Object.assign(
+      new Error('column "id" of relation "sys_organization" does not exist'),
+      { code: '42703' },
+    ));
+
+    const report = await service(box.engine, { getSettings: () => fakeSettings({}) }).sweep();
+
+    expect(box.deletes).toEqual([]);
+    expect(report.errors).toEqual([
+      {
+        object: 'sys_job_run',
+        error: abortedError('column "id" of relation "sys_organization" does not exist'),
+      },
+    ]);
+  });
+
+  // ── THE CONTRACT THE ABORT KEEPS ──────────────────────────────────────────
+
+  it('the abort is REPORTED, never thrown — `sweep()` still resolves, and the next sweep runs', async () => {
+    const box = orgScanEngine([{ id: 'org_reg' }]);
+    box.failOrgReadWith(connectionDropped());
+    const svc = service(box.engine, { getSettings: () => fakeSettings({}) });
+
+    // Resolves. The scheduler enters this as `void this.sweep()`, where a
+    // rejection would be unhandled — the objection #8906 recorded when it
+    // declined to rethrow from `checkGovernance`.
+    const first = await svc.sweep();
+    expect(first.errors).toHaveLength(1);
+    expect(box.deletes).toEqual([]);
+
+    // …and the `sweeping` latch was released, so a transient outage costs one
+    // sweep, not the schedule.
+    box.healOrgRead();
+    const second = await svc.sweep();
+    expect(second.errors).toEqual([]);
+    expect(box.reapReads()).toEqual([{ created_at: { $lt: isoCutoff('30d') } }]);
+    expect(box.deletes).toHaveLength(1);
+  });
+});

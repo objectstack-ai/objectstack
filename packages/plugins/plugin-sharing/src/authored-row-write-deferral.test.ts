@@ -11,6 +11,13 @@
 // middleware's, not the row-gate's `(row-level security)` — so the refusal
 // landed BEFORE RLS was consulted and the declared widener was never asked.
 //
+// [#12260] That English sentence is HISTORY as of this card: the refusal's
+// user-facing half now renders from the Operation Message Catalog
+// (`record_write_denied`) and the verb/object/id it used to name moved to
+// `developerMessage`. The tell is unchanged in substance — `[sharing] …` vs
+// the row gate's `(row-level security)` — only its channel moved. See
+// `write-denial-user-copy.test.ts`.
+//
 // The discriminator is not "carries sharing rules" (#5493's own wording) but
 // **whether record sharing enforces on the object at all** (round-2 refinement,
 // issue comment 5226364929): `checkEdit` abstains — and `canEdit` therefore
@@ -52,6 +59,7 @@
 // and that everything that is not a literal `admit` leaves the refusal intact.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SharingService, type SharingSecurityProbe } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 
@@ -311,6 +319,8 @@ interface WriteOutcome {
   code?: string;
   status?: number;
   message: string;
+  /** [#12260] The developer half the user-facing sentence no longer carries. */
+  developerMessage?: string;
 }
 
 interface Stack {
@@ -376,7 +386,10 @@ function makeStack(opts: {
           reached = true;
         });
       } catch (e: any) {
-        return { ok: false, code: e?.code, status: e?.status, message: String(e?.message ?? e) };
+        return {
+          ok: false, code: e?.code, status: e?.status,
+          message: String(e?.message ?? e), developerMessage: e?.developerMessage,
+        };
       }
       return reached
         ? { ok: true, message: 'written' }
@@ -405,7 +418,15 @@ function expectSharingRefusal(out: WriteOutcome, operation: 'update' | 'delete',
   expect(out.ok, `expected a refusal, got a completed ${operation}`).toBe(false);
   expect(out.code, 'ADR-0112 error code').toBe('FORBIDDEN');
   expect(out.status, 'ADR-0112 HTTP status').toBe(403);
-  expect(out.message).toContain(`FORBIDDEN: insufficient privileges to ${operation} ${object} ${id}`);
+  // [#12260] The SENTENCE moved onto the Operation Message Catalog (key
+  // `record_write_denied`), so the discriminator this file turns on moved with
+  // it: the verb, the object's API name and the row id are now developer copy.
+  // Both halves are asserted, because both are how this refusal is told apart
+  // from `plugin-security`'s row gate — which answers `PERMISSION_DENIED` with
+  // its own `(row-level security)` breadcrumb and never writes `[sharing]`.
+  // The `FORBIDDEN:` prefix is wire contract and is unchanged.
+  expect(out.message).toBe(`FORBIDDEN: ${BUILTIN_OPERATION_MESSAGES.en.record_write_denied}`);
+  expect(out.developerMessage).toContain(`[sharing] ${operation} denied on ${object} ${id}`);
 }
 
 const rowById = (stack: Stack, object: string, id: string) =>
