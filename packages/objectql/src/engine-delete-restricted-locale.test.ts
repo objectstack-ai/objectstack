@@ -169,7 +169,7 @@ describe('#7307 DELETE_RESTRICTED — user copy vs developer guidance', () => {
         it('renders the toast sentence in the caller locale, with TRANSLATED labels', async () => {
             const err = await refuseDelete(engine, 'zh-CN');
             expect(err.message).toBe(
-                '该部门正被 1 条零星申请记录通过「申报部门」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
+                '该部门正被 1 条零星申请记录通过「申报部门」引用，且该字段为必填、无法清空，请先删除或改派这些记录。',
             );
         });
 

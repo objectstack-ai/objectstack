@@ -8,8 +8,9 @@
  *      ADR-0087 forward conversion (#12772), then strict-parses. Canonical.
  *   2. `AppPlugin`'s ADR-0057 block (this package) — receives the same JSON
  *      from `loadArtifactBundle` (no validation, no conversion) and registers
- *      `positions` / `permissions` / `capabilities` / `sharingRules` /
- *      `policies` through `metadata.registerInMemory`.
+ *      `positions` / `permissions` / `capabilities` / `sharingRules` through
+ *      `metadata.registerInMemory`. (It also carried a `policies` entry until
+ *      #12894 retired it as a dead pointer — the test below is what stays.)
  *
  * Before this fix reader 2 registered the RAW bytes, so the two copies of the
  * same item differed and which one a consumer saw depended on registration
@@ -355,12 +356,19 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
     });
 
     it('policies: not an authorable stack collection at all — neither reader can see one', async () => {
-        // `AppPlugin`'s SECURITY_FIELDS and `ARTIFACT_FIELD_TO_TYPE` both carry
-        // a `policies` → `policy` entry, but `ObjectStackDefinitionSchema` is a
-        // strictObject with no `policies` key: on the permission set `policies`
-        // is an ALIAS for `rowLevelSecurity`. A top-level `policies` collection
-        // is refused by the door outright, so it can never reach either
-        // registry — both entries are dead pointers.
+        // `AppPlugin`'s SECURITY_FIELDS and `ARTIFACT_FIELD_TO_TYPE` each
+        // carried a `policies` → `policy` entry until #12894 removed both:
+        // `ObjectStackDefinitionSchema` is a strictObject with no `policies`
+        // key, so a top-level `policies` collection is refused by the door
+        // outright and neither entry could ever match. On the permission set
+        // `policies` is an ALIAS for `rowLevelSecurity` — a key on an ITEM.
+        //
+        // This case is unchanged by that removal, and deliberately so: it pins
+        // the SCHEMA fact the removal rests on, which is what makes the entries
+        // dead. What stops them being re-added is `check:stack-collection-maps`,
+        // which now reconciles both maps (`ARTIFACT_FIELD_TO_TYPE` and
+        // `SECURITY_FIELDS`) against this schema — a green run of THIS test is
+        // not evidence the pointers are gone.
         const withPolicies = { ...bytes(), policies: [{ name: 'p1', label: 'P1' }] };
         const parsed = ObjectStackDefinitionSchema.safeParse(withPolicies);
         expect(parsed.success).toBe(false);

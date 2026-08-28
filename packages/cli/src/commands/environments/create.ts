@@ -9,7 +9,14 @@ import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 /**
  * `os environments create` — provision a new environment.
  *
- * Delegates to `ProjectProvisioningService.provisionProject` on the server.
+ * Calls `client.environments.create`, i.e. `POST /api/v1/cloud/environments` on
+ * the control plane. This docblock names the ENDPOINT rather than a server
+ * class on purpose: it used to name `ProjectProvisioningService.provisionProject`,
+ * which the control plane does not have (measured 2026-08-28 — zero hits for
+ * that spelling in the cloud repo's `packages/service-cloud/src`). The server
+ * lives in a repo this one never compiles against, so a class name here rots
+ * with nothing to catch it.
+ *
  * On success, optionally activates the new environment for the current session
  * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
  * (unless `--no-activate` is passed).
@@ -81,7 +88,7 @@ export default class EnvironmentsCreate extends Command {
         metadata = { artifact_path: abs };
       }
 
-      const res = await client.projects.create({
+      const res = await client.environments.create({
         organization_id: flags.org,
         display_name: flags.name,
         plan: flags.plan,
@@ -90,12 +97,12 @@ export default class EnvironmentsCreate extends Command {
         ...(metadata ? { metadata } : {}),
       });
 
-      if (flags.activate && res?.project?.id) {
+      if (flags.activate && res?.environment?.id) {
         try {
-          await client.projects.activate(res.project.id);
+          await client.environments.activate(res.environment.id);
           const cfg = await readAuthConfig().catch(() => null);
           if (cfg) {
-            cfg.activeEnvironmentId = res.project.id;
+            cfg.activeEnvironmentId = res.environment.id;
             cfg.lastUsedAt = new Date().toISOString();
             await writeAuthConfig(cfg);
           }
@@ -110,7 +117,7 @@ export default class EnvironmentsCreate extends Command {
       } else if (flags.format === 'yaml') {
         await formatOutput(res, 'yaml');
       } else {
-        const p = res?.project ?? {};
+        const p = res?.environment ?? {};
         console.log(`\n✓ Environment created: ${p.display_name ?? p.id} (${p.id})`);
         if (flags.activate) {
           console.log(`  active environment set to ${p.id}`);

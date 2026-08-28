@@ -90,7 +90,16 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     positions: 'position',
     permissions: 'permission',
     sharingRules: 'sharing_rule',
-    policies: 'policy',
+    // `policies: 'policy'` removed at #12894: the stack schema is a
+    // `strictObject` that declares no top-level `policies` key, so a
+    // definition carrying one is refused by the strict parse a few lines
+    // below — the entry could never match, and nothing was ever registered
+    // under `policy` from this map. The word is real, but it lives ONE LEVEL
+    // DOWN: on a permission set it is an alias for `rowLevelSecurity`
+    // (`PERMISSION_SET_KEY_ALIASES`, packages/spec/src/security/permission.zod.ts)
+    // — a key on an ITEM, never a collection. Third retirement of this exact
+    // shape in this map (`themes` and `roles` above); the reasons are kept
+    // in place because the first two are what made this one findable.
     apis: 'api',
     webhooks: 'webhook',
     agents: 'agent',

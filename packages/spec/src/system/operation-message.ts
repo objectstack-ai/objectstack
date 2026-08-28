@@ -221,19 +221,19 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This {{object}} is still referenced by {{dependentObject}} record(s) through “{{field}}”, which is required and cannot be cleared. Delete or reassign them first.',
   },
   'zh-CN': {
-    permission_denied: '您没有执行此操作的权限,如需访问请联系管理员。',
-    record_access_denied: '您无权访问这条记录,如需访问请联系该记录的负责人或管理员。',
-    record_change_not_allowed: '您无权将这条记录保存为当前填写的内容,请修改后重试,或联系管理员。',
-    record_write_denied: '您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。',
-    approval_recall_not_submitter: '只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。',
+    permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
+    record_access_denied: '您无权访问这条记录，如需访问请联系该记录的负责人或管理员。',
+    record_change_not_allowed: '您无权将这条记录保存为当前填写的内容，请修改后重试，或联系管理员。',
+    record_write_denied: '您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。',
+    approval_recall_not_submitter: '只有提交人可以撤回这条审批请求，如需撤回请联系提交人或管理员。',
     delete_restricted:
-      '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
+      '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用，请先删除或改派这些记录。',
     delete_restricted_required:
-      '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
+      '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用，且该字段为必填、无法清空，请先删除或改派这些记录。',
     delete_restricted_opaque:
-      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
+      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用，请先删除或改派这些记录。',
     delete_restricted_required_opaque:
-      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
+      '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用，且该字段为必填、无法清空，请先删除或改派这些记录。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',

@@ -246,7 +246,7 @@ const OWNER_ZH = ctxFor(U_OWNER, 'zh-CN');
  * in `packages/spec/src/system/operation-message.test.ts`; the two move
  * together.
  */
-const ZH_SENTENCE = '您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。';
+const ZH_SENTENCE = '您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。';
 
 /** The legacy hardcoded reason, kept as a literal so its ABSENCE is pinned. */
 const LEGACY_EN = 'insufficient privileges to';

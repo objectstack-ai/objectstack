@@ -44,23 +44,23 @@ export default class EnvironmentsSwitch extends Command {
       requireAuth(token);
 
       // Sanity-check the id resolves — fail fast before writing the cred file
-      const lookup = await client.projects.get(args.id);
-      const project = lookup?.project;
-      if (!project?.id) {
+      const lookup = await client.environments.get(args.id);
+      const environment = lookup?.environment;
+      if (!environment?.id) {
         throw new Error(`Environment ${args.id} not found`);
       }
 
       if (flags.remote) {
-        await client.projects.activate(project.id);
+        await client.environments.activate(environment.id);
       }
 
       const cfg = await readAuthConfig();
-      cfg.activeEnvironmentId = project.id;
+      cfg.activeEnvironmentId = environment.id;
       cfg.lastUsedAt = new Date().toISOString();
       await writeAuthConfig(cfg);
 
-      console.log(`\n✓ Active environment: ${project.display_name ?? project.id}`);
-      console.log(`  id: ${project.id}`);
+      console.log(`\n✓ Active environment: ${environment.display_name ?? environment.id}`);
+      console.log(`  id: ${environment.id}`);
       if (!flags.remote) {
         console.log('  (local only — server session unchanged)');
       }

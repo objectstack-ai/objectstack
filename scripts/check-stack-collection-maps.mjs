@@ -11,19 +11,29 @@
 // ## The hole this closes (#6242)
 //
 // `ObjectStackDefinitionSchema` (`packages/spec/src/stack.zod.ts`) decides which
-// collections a stack may declare. SEVEN other places re-enumerate that same set
+// collections a stack may declare. EIGHT other places re-enumerate that same set
 // by hand: the map-format field list, the plural->singular map, the artifact
 // category enum, the ObjectQL registration seam, the artifact-ingest field map,
-// the runtime's app-payload probe and the showcase coverage manifest -- and
-// until this gate NOTHING compared any of them to the schema or to each other.
-// They drifted independently and invisibly:
+// the runtime's app-payload probe, AppPlugin's ADR-0057 security surface and the
+// showcase coverage manifest -- and until this gate NOTHING compared any of them
+// to the schema or to each other. They drifted independently and invisibly:
 //
-// (Eight, when this gate was written: ObjectQL declared its list TWICE, once per
-// registration seam, and the two copies had drifted four collections apart --
-// recorded here as a waiver row until #7049 hoisted the single
-// `METADATA_ARRAY_KEYS` both seams now read. A divergence between two copies is
-// the one deviation no reading of either copy alone produces, which is the
-// argument for this gate in one line.)
+// (Counted differently when this gate was written: ObjectQL declared its list
+// TWICE, once per registration seam, and the two copies had drifted four
+// collections apart -- recorded here as a waiver row until #7049 hoisted the
+// single `METADATA_ARRAY_KEYS` both seams now read. A divergence between two
+// copies is the one deviation no reading of either copy alone produces, which is
+// the argument for this gate in one line.)
+//
+// `SECURITY_FIELDS` joined as the eighth at #12894, and how it was missing is
+// the point rather than a footnote: it is the ONLY one of the eight that pairs
+// its keys as `[collection, kind]` TUPLES, so the two extractors this gate
+// already had (object keys, flat string arrays) could not read it and the site
+// was skipped instead of failing. It carried a `policies` dead pointer -- the
+// same retired kind waived on two other sites -- and removing that entry from
+// the artifact door while leaving this one unpinned would have left exactly one
+// place where the fourth instance of a twice-retired pattern could land back
+// unnoticed.
 //
 //   - `PLURAL_TO_SINGULAR` carries `ragPipelines`, which the schema does not
 //     declare.
@@ -248,6 +258,43 @@ export function stringArrayItems(body) {
       const end = mask.indexOf(ch, i + 1);
       if (end === -1) break;
       out.push(body.slice(i + 1, end));
+      i = end;
+    }
+  }
+  return out;
+}
+
+/**
+ * The FIRST string of each depth-1 tuple in an array-of-tuples body -- the
+ * `Array<[collectionKey, metadataType]>` shape `SECURITY_FIELDS` uses.
+ *
+ * A separate extractor rather than a flag on `stringArrayItems`, because the two
+ * disagree about what "the site enumerates" means: the flat form's strings ARE
+ * the keys, and here only the tuple's head is, with the tail naming the metadata
+ * kind. Reading a tuple site with the flat extractor returns an empty list at
+ * depth 0 -- which reconciles against everything and reports no drift, the
+ * silent-no-op shape this gate exists to refuse. (The caller turns an empty
+ * result into a FAILURE for that reason; this extractor makes the non-empty
+ * answer available instead.)
+ */
+export function tupleFirstItems(body) {
+  const mask = maskLiterals(body);
+  const out = [];
+  let depth = 0;
+  let taken = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = mask[i];
+    if (ch === '{' || ch === '[' || ch === '(') {
+      depth++;
+      if (depth === 1) taken = false;
+      continue;
+    }
+    if (ch === '}' || ch === ']' || ch === ')') { depth--; continue; }
+    if (depth === 1 && !taken && (ch === "'" || ch === '"')) {
+      const end = mask.indexOf(ch, i + 1);
+      if (end === -1) break;
+      out.push(body.slice(i + 1, end));
+      taken = true;
       i = end;
     }
   }
@@ -498,10 +545,13 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['workflows', 'policies', 'ragPipelines'],
+        keys: ['workflows', 'ragPipelines'],
         reason:
           'DRIFT — retired kinds still mapped, inert for the same reason as the ObjectQL loops: a parsed '
-          + 'artifact cannot carry the fields (#6242 row 4).',
+          + 'artifact cannot carry the fields (#6242 row 4). `policies` left this row at #12894, removed '
+          + 'from the map rather than re-waived: it was the THIRD entry retired here for one reason (after '
+          + '`themes` and `roles`), and the map now carries the reason in place so a fourth reader does not '
+          + 'have to rediscover it.',
       },
       {
         direction: 'missing',
@@ -564,6 +614,48 @@ const SITES = [
           + 'asymmetric — a false positive throws on a brand-new empty environment, a false negative only '
           + 'degrades to a no-op plugin. So it lists the user-visible app payload, not every legal '
           + 'collection. Pinned rather than completed, so a NEW collection has to be considered here once.',
+      },
+    ],
+  },
+  {
+    // The EIGHTH enumeration, added at #12894 with the `policies` dead pointer
+    // it carried. Unlike `APP_CATEGORY_KEYS` above -- same file, different
+    // question -- this list is a REGISTRATION list: every pair it names really
+    // does write into the metadata registry, so a key the schema does not
+    // declare is not a harmless extra word, it is a registration that silently
+    // never happens.
+    //
+    // Pinned in the `extra` direction above all: this is the second registrar
+    // of the artifact boot's security collections (`ARTIFACT_FIELD_TO_TYPE` is
+    // the first), and the two had drifted in MIRROR-IMAGE ways -- `policies`
+    // dead in both, `capabilities` live here and absent there. Reconciling both
+    // against one schema is what makes that pair of facts visible at all.
+    id: 'SECURITY_FIELDS',
+    file: 'packages/runtime/src/app-plugin.ts',
+    what: "AppPlugin's ADR-0057 stack-declared security metadata -> registerInMemory kind",
+    extract: (src) => {
+      const b = sliceBody(src, 'const SECURITY_FIELDS: Array<[string, string]> = [');
+      return b && tupleFirstItems(b.body);
+    },
+    waivers: [
+      {
+        direction: 'missing',
+        keys: [
+          'datasources', 'datasourceMapping', 'translations', 'objects', 'objectExtensions', 'apps',
+          'views', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
+          'emailTemplates', 'docs', 'books', 'apis', 'webhooks', 'agents', 'tools', 'skills',
+          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data',
+        ],
+        reason:
+          'DELIBERATE — a four-collection SUBSET, not an enumeration of the collection set. This block '
+          + 'exists so the boot seeders (plugin-security / plugin-sharing) and the runtime resolvers can '
+          + 'read stack-declared SECURITY metadata through `list(...)` on a boot where the artifact door '
+          + 'never runs; every other collection reaches the registry through the door or its own seam. '
+          + 'Recorded as one row rather than left implicit so that a NEW security collection has to be '
+          + 'considered here once — which is the direction this site was actually wrong in: `capabilities` '
+          + 'is registered here and NOT by the door, making this block that collection\'s sole registrar on '
+          + 'an artifact boot (#12894 half 2, carried to #12892 for the ownership decision — measured, '
+          + 'deliberately not changed here).',
       },
     ],
   },
@@ -775,6 +867,11 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     ['a', 'b', 'e'],
   );
   eq(
+    'tupleFirstItems() takes the head of each tuple, not every string',
+    tupleFirstItems(`['a', 'x'], /* ['q', 'q'] */ ['b', 'y'], // ['d', 'd']\n ['c', 'z'],`),
+    ['a', 'b', 'c'],
+  );
+  eq(
     'objectEntries() reads top-level keys only',
     objectEntries(`a: 'x', b: { c: 'y' }, 'd': 'z',`).map((e) => e.key),
     ['a', 'b', 'd'],
@@ -826,7 +923,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     for (const f of failures) console.error(`  • ${f}\n`);
     return 1;
   }
-  console.log('✓ check-stack-collection-maps --self-test: 12 assertions over synthetic sources');
+  console.log('✓ check-stack-collection-maps --self-test: 13 assertions over synthetic sources');
   return 0;
 }
 

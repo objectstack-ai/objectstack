@@ -17,7 +17,7 @@ describe('operation message catalog', () => {
 
   it('renders the caller locale, not English', () => {
     const zh = renderOperationMessage({ messageKey: 'delete_restricted', params: PARAMS }, { locale: 'zh-CN' });
-    expect(zh).toBe('该部门正被 1 条零星申请记录通过「申报部门」引用,请先删除或改派这些记录。');
+    expect(zh).toBe('该部门正被 1 条零星申请记录通过「申报部门」引用，请先删除或改派这些记录。');
   });
 
   it('falls back to en for an unknown locale, and en is the declared fallback', () => {
@@ -115,7 +115,7 @@ describe('operation message catalog — permission_denied (#7414)', () => {
 
   it('renders the caller locale, not English', () => {
     expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'zh-CN' }))
-      .toBe('您没有执行此操作的权限,如需访问请联系管理员。');
+      .toBe('您没有执行此操作的权限，如需访问请联系管理员。');
     expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'en' }))
       .toBe('You do not have permission to perform this action. Contact your administrator if you need access.');
   });
@@ -205,11 +205,11 @@ describe('operation message catalog — the row-level user copy (#7451)', () => 
 
   it('renders the caller locale, not English', () => {
     expect(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale: 'zh-CN' }))
-      .toBe('您无权访问这条记录,如需访问请联系该记录的负责人或管理员。');
+      .toBe('您无权访问这条记录，如需访问请联系该记录的负责人或管理员。');
     expect(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale: 'en' }))
       .toBe('You do not have access to this record. Contact the person who owns it, or your administrator, if you need access.');
     expect(renderOperationMessage({ messageKey: 'record_change_not_allowed' }, { locale: 'zh-CN' }))
-      .toBe('您无权将这条记录保存为当前填写的内容,请修改后重试,或联系管理员。');
+      .toBe('您无权将这条记录保存为当前填写的内容，请修改后重试，或联系管理员。');
   });
 
   it('matches a base language against a regional catalog key (ja → ja-JP)', () => {
@@ -322,11 +322,11 @@ describe('operation message catalog — sharing write denial and approvals recal
 
   it('renders the caller locale, not English', () => {
     expect(renderOperationMessage({ messageKey: 'record_write_denied' }, { locale: 'zh-CN' }))
-      .toBe('您无权修改或删除这条记录,如需修改请联系该记录的负责人或管理员。');
+      .toBe('您无权修改或删除这条记录，如需修改请联系该记录的负责人或管理员。');
     expect(renderOperationMessage({ messageKey: 'record_write_denied' }, { locale: 'en' }))
       .toBe('You do not have access to change or delete this record. Contact the person who owns it, or your administrator, if you need to make changes.');
     expect(renderOperationMessage({ messageKey: 'approval_recall_not_submitter' }, { locale: 'zh-CN' }))
-      .toBe('只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。');
+      .toBe('只有提交人可以撤回这条审批请求，如需撤回请联系提交人或管理员。');
     expect(renderOperationMessage({ messageKey: 'approval_recall_not_submitter' }, { locale: 'en' }))
       .toBe('Only the person who submitted this approval request can recall it. Contact the submitter, or your administrator, if it needs to be recalled.');
   });
