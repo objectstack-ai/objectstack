@@ -17,6 +17,7 @@ import type {
   ValidationResult,
 } from './types.js';
 import { inputTypeArms } from './input-type.js';
+import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
 
 /** Base props every node may carry (mirrors BaseSchema) — never "unknown prop". */
 const BASE_PROPS = new Set([
@@ -127,6 +128,20 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
           tag: node.type,
         });
       }
+
+      // Dashboard widgets: an `options` key riding the spec's `.passthrough()`
+      // that no renderer consumes is legal, silent and inert — warn, naming
+      // the consumed set (objectui#5709 ruling; census + scope in
+      // `./dashboard-widget-options.ts`). Like `not-a-container`, this runs
+      // only for a component the manifest knows: an unresolved tag already
+      // drew `unknown-component`, and deep diagnostics on it would be noise.
+      //
+      // LOCKSTEP: this call site and the module behind it are the byte-equal
+      // port of objectui's copy (objectstack#12810). The two copies must agree
+      // on the accepted grammar AND on diagnostic codes — if they drift, the
+      // save gate and the renderer speak different dialects and a page can save
+      // clean and render inert. Change this only together with objectui.
+      diagnostics.push(...checkDashboardWidgetOptions(node));
     }
 
     if (node.children) node.children.forEach(visit);

@@ -2,6 +2,15 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
+// The repo's ONE answer to "is this span a comment, or code?". The naive block
+// regex this replaces had no idea what a string literal is: it opened a phantom
+// comment at a block-comment opener sitting INSIDE a string and ran to the next
+// terminator far below, deleting live code on 5 of this app's 91 sources.
+// `stripComments` (not `maskComments`) is the projection this file wants -- the
+// one guard below reports bare file paths, never a line or an offset. The
+// `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts` beside it is a
+// hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import stack from '../objectstack.config.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
@@ -44,15 +53,10 @@ function sourceFiles(dir: string = SRC_ROOT): string[] {
  * Source text with comments removed, so a source-scan guard judges CODE.
  * Documentation must stay free to name a retired key (this file's own comments
  * do, and so do the ones explaining the rename) without tripping the guard that
- * bans authoring it. Block comments go first; then whole-line `//` comments —
- * never a trailing `//`, which would eat the `//` in a URL inside a string.
+ * bans authoring it.
  */
 function codeOf(file: string): string {
-  return readFileSync(file, 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((line: string) => !line.trimStart().startsWith('//'))
-    .join('\n');
+  return stripComments(readFileSync(file, 'utf8'));
 }
 
 /** Every `functions` entry, whichever spelling it was authored in. */

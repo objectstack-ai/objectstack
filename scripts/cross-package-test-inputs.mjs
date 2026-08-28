@@ -532,6 +532,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/check-published-files.mjs',
       'scripts/check-cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',
+      // That same test imports `stripComments` from `js-comment-mask.mjs` to
+      // separate code from prose in the 423 sources it walks -- the conversion
+      // #12398 began. Unlike the three mentions above this is a real coupling
+      // rather than a scanner artefact: the import refs the scan extracts, and
+      // therefore its reachability verdict, are a function of the module's
+      // scanning behaviour. The `.d.mts` sibling is declared alongside it
+      // because it is what gives `stripComments` its type, so this package's
+      // typecheck verdict is a function of it too.
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
     ],
     heldBy: {
       // The pair #10566 was measured on. That test's walk of `PACKAGES_DIR`
@@ -678,6 +688,50 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // all under `src`.
       'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
     },
+  },
+  '@objectstack/runtime': {
+    // src/error-envelope.conformance.test.ts imports `stripComments` from
+    // `js-comment-mask.mjs` to decide which text in the ten dispatcher modules
+    // it scans is a comment and which emits an error body -- the conversion
+    // #12398 began. The coupling is real: the four per-module counts that guard
+    // reports are a function of the module's scanning behaviour, so a change to
+    // it has to re-run this package's suite. The `.d.mts` sibling is declared
+    // alongside it because it is what gives `stripComments` its type, so this
+    // package's typecheck verdict is a function of it too.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/driver-sql': {
+    // src/live-dialect-matrix.isolation.test.ts imports `stripComments` from
+    // `js-comment-mask.mjs` to decide which text in this package's 152 test
+    // sources is a comment and which is a direct `OS_TEST_*_URL` read -- the
+    // conversion #12398 began. The coupling is real: that guard's offender set
+    // is a function of the module's scanning behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is declared alongside it
+    // because it is what gives `stripComments` its type, so this package's
+    // typecheck verdict is a function of it too.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/example-showcase': {
+    // test/inert-wirings.test.ts imports `stripComments` from
+    // `js-comment-mask.mjs` to decide which text under this app's `src/` is a
+    // comment and which is an authored wiring -- the same conversion #12398
+    // made for the route-ledger guards. The coupling is real: that guard's
+    // offender set is a function of the module's scanning behaviour, so a
+    // change to it has to re-run this package's suite. The `.d.mts` sibling is
+    // declared alongside it because it is what gives `stripComments` its type,
+    // so this package's typecheck verdict is a function of it too -- the reason
+    // the `@objectstack/cli` entry above declares the pair rather than the
+    // module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
   },
   'create-objectstack': {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative

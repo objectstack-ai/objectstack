@@ -1,6 +1,6 @@
 # ADR-0006: Environment & Project — v4 (drop dev-workspace Project, unify on Package)
 
-**Status**: Accepted (v4 — supersedes v3)
+**Status**: Accepted (v4 — supersedes v3) — API-surface vocabulary boundary recorded 2026-08-27 (#12473): the v5.0 `project` → `environment` rename stops at the CLI's user-facing vocabulary; three API surfaces keep `project` deliberately (see the addendum)
 **Date**: 2026-05-20 (v4)
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: v1 (strict tree), v2 (siblings + sys_deployment join), v3 (siblings + deferred dev-workspace `sys_project`)
@@ -252,3 +252,132 @@ when needed.
 - Power Platform: Solution → Environment model (same shape, different names)
 - Salesforce: Unlocked Package → Org model (no "Project" table either)
 - npm + lockfile: identity + immutable version + installation pointer
+
+---
+
+## Addendum (2026-08-27, #12473) — the rename stops at the CLI's user-facing vocabulary: three API surfaces keep `project` deliberately
+
+**Provenance.** Maintainer ruling on
+[#12473](https://github.com/objectstack-ai/objectstack/issues/12473), 2026-08-27,
+adjudicated in the PM decision-inbox batch, accepting that card's option 3 —
+verbatim, untranslated: 「其他同意」. The ruling names this addendum as the
+deliverable and names nothing else: no code change rides it, because on this
+question **not touching the code is the decision**.
+
+**Why the boundary is written here rather than left implicit.** The v5.0 breaking
+rename `project` → `environment` — AGENTS.md, top of file: *"No aliases. See
+ADR-0006. 'Project' now only means the npm/monorepo sense."* — was carried
+through the CLI in three passes: the command name (#10967), the entity noun in
+every string `os environments` prints (#12153), and the comment axis (#12432).
+Each pass correctly fenced the API surface out of its own scope, and none could
+close the question, so the same seam produced a fourth card (#12464) and then a
+decision card, inside one week. An unwritten boundary is re-litigated by whoever
+next reads the two spellings side by side — human or agent — and the cost of
+option 3 is exactly this section. If you arrived here from such a sighting: it is
+deliberate, it is below, and the way to change it is D2, not a PR.
+
+### D1 — Three surfaces retain `project` deliberately
+
+Identified by **quoted phrase, not line number**. The card that ordered this
+addendum anchored one of the three to a line number, and that anchor was already
+stale when the addendum was written; the phrases below were measured on `main`
+on 2026-08-27.
+
+1. **The SDK method namespace** — the `projects` block on the `@objectstack/client`
+   client class (`packages/client/src/index.ts`), reached by callers as
+   `client.projects.list`, `client.projects.get`, `client.projects.create`,
+   `client.projects.update`, `client.projects.delete`, `client.projects.activate`
+   and the remaining methods of that block, including the environment-scoped
+   `projects.packages` methods nested inside it. Note what is *already* renamed
+   underneath it: every method in the block calls `/api/v1/cloud/environments`.
+   The namespace identifier is the only `project` spelling left on that face —
+   and it is a **published** method name, so renaming it breaks every caller,
+   while an alias is precisely what this rename does not get.
+
+2. **The control-plane response fields** — the response envelope keys `project`
+   and `projects` that the `/api/v1/cloud/environments` endpoints return. What
+   this repository can measure is the **consumer** side, and this addendum claims
+   nothing beyond it: the SDK declares the unwrapped shapes (`{ projects: any[];
+   total: number }` on list, `{ project: any; database: any }` on create,
+   `{ project: any }` on update), and the CLI reads `res?.projects ?? []` in
+   `packages/cli/src/commands/environments/list.ts` and `res?.project` in the
+   sibling `create.ts` and `show.ts`. The **producer** is the cloud control plane
+   in `objectstack-ai/cloud`, which is not this repository: these fields cannot be
+   renamed from here at all, which is why the rename of this surface is a
+   cross-repo coordination, not a local edit.
+
+3. **The SDK JSDoc that travels with them** — the sentence *"Provision a new
+   project. Delegates to `ProjectProvisioningService.provisionProject` on the
+   server."*, on the `create` method of that same namespace. It is retained by the
+   same ruling and for a reason of its own: it names a server-side class that is
+   part of the contract in point 2, so renaming the sentence alone would make the
+   comment describe the running system **less** accurately, not more. Editing it
+   is executing option 2 below, which is permanently declined.
+
+⇒ A PR that "tidies" any of these three is not a cleanup. Under Prime Directive
+13 it reverses a recorded decision, and the route for that is D2 — not a
+changeset, and not a drive-by rename.
+
+### D2 — Option 1 (full rename) is pre-registered: **deferred, not abandoned**
+
+Option 1 is to rename **both** halves together — the SDK method namespace to
+`environments` and the wire fields to `environment` / `environments` — with no
+aliases, as a breaking major coordinated with `objectstack-ai/cloud`, carrying a
+migration entry. That is the option consistent with the no-alias rename, and it
+remains the direction of travel: the target-state vocabulary has one word for
+this concept, and it is `environment`.
+
+It is **pre-registered to reopen at the next planned SDK/protocol breaking
+major.** What defers it is not that the drift is acceptable forever, but that
+today it would buy a zero-pull cross-repo breaking change: no user is blocked by
+the `project` spelling, and the only measured cost of the drift so far is
+internal — the card stream this addendum exists to stop. At the next such major
+the coordination is already being paid for, and the rename rides with it.
+
+To whoever plans that major: this entry is your trigger. Reopen #12473's option
+1, coordinate the producer change with the cloud repository, and retire this
+addendum's D1 in the same release rather than adding an alias to soften it. The
+standing startup-stage retirement rule does **not** force this earlier — it
+governs deprecated-alias retirements, not a zero-pull cross-repo major.
+
+### D3 — Option 2 (SDK-only half-rename) is **permanently declined**, and this is why
+
+Option 2 is to rename the SDK namespace to `environments` while the wire fields
+stay `project` / `projects`. It is the cheapest-looking move on the board and it
+is refused permanently, for three reasons that do not expire with the price:
+
+- **The two halves of one contract would say different things.** The SDK would
+  teach `environment`; the payload it hands back would say `project`. A contract
+  that contradicts itself across a single call is worse than one that is
+  uniformly out of date, because the reader cannot tell which half is the
+  mistake.
+- **The mapping layer becomes permanent.** The CLI's translation between the two
+  spellings exists today as an artifact of an unfinished rename, and it is
+  cheap only while it is understood as temporary. Half-renaming promotes it to
+  a load-bearing, permanently-maintained seam that every future consumer must
+  reimplement.
+- **It is the worst shape for AI authors** — the axis this project weighs
+  explicitly. An agent that reads the SDK learns one vocabulary, an agent that
+  reads a response payload learns another, and every generated call site has to
+  infer which side of the mapping it is standing on. Uniform-but-old is
+  learnable; split-brain is a guess per call site, and a wrong guess typechecks.
+
+A prohibition without a reason gets stepped over by the next author who finds it
+inconvenient. The reason is above; if it is ever wrong, the reversal is a new
+ruling, not a rename PR.
+
+### What this addendum does not change
+
+No code, no schema, no route, no changeset. The three surfaces in D1 are correct
+as they stand today, and the correct action on them is **none**. The CLI's
+user-facing vocabulary stays fully renamed — `os environments`, its printed
+nouns, and its comments are all `environment`, and nothing here reopens them.
+Nothing here touches the `objectstack-ai/cloud` producer either.
+
+### Why an addendum, not a new ADR
+
+The question is this record's own: where the boundary between the two senses of
+"project" sits, and which surfaces the v5.0 rename reaches. A separate ADR would
+put the boundary in one file and the rename it bounds in another, so the reader
+who follows AGENTS.md's *"See ADR-0006"* would arrive at the record that does not
+carry the answer — the exact failure this addendum was ordered to fix.

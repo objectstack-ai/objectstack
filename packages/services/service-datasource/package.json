@@ -27,14 +27,14 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "pg-connection-string": "^2.14.0"
   },
   "devDependencies": {
-    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-mongodb": "workspace:*",
-    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",

@@ -8,15 +8,24 @@
  * sync, and hands back the live SQL driver so the command can call
  * `detectManagedDrift()` / `applyMigrationEntries()`.
  *
- * Migration only sees the objects present in the loaded metadata (compiled
- * artifact). Run `os build` first so your objects are visible; tables/columns
- * not in the loaded metadata are never examined or altered.
+ * Migration only ever sees the objects this boot REGISTERED; tables/columns
+ * outside that set are never examined or altered. The two SCHEMA commands
+ * (`plan`/`apply`) therefore pass `composeHostStack` so the set is the one the
+ * deployment's own `os serve` boot registers — its `objectstack.config.ts` plus
+ * the platform floor `serve` composes unconditionally (#12938). The DATA
+ * subcommands keep their own narrower set (`./data-migration-plugins.ts`).
+ * A project with neither a config nor a compiled artifact still diffs the data
+ * stack alone — run `os build` first so its objects are visible.
  */
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
+import {
+  buildSchemaMigrationPlugins,
+  type SchemaMigrationComposition,
+} from './schema-migration-plugins.js';
 
 export type { PendingSchemaWork };
 
@@ -58,6 +67,15 @@ export interface SchemaStack {
    * plan. Returns the work it actually ran (`[]` when nothing was deferred).
    */
   flushSchemaDdl: () => Promise<PendingSchemaWork[]>;
+  /**
+   * What the host composition added, and anything it could not (#12938) — the
+   * host config it composed, whether that config actually loaded, the platform
+   * floor it added. `notes` is always `[]` unless the boot asked for
+   * `composeHostStack`, and `[]` even then when there was nothing to compose,
+   * so a project with neither a config nor a compiled artifact renders
+   * byte-identically to before this existed.
+   */
+  composition: SchemaMigrationComposition;
   shutdown: () => Promise<void>;
 }
 
@@ -188,6 +206,24 @@ export async function bootSchemaStack(
      */
     extraPlugins?: unknown[];
     /**
+     * Compose the SAME object set this deployment's `os serve` boot registers —
+     * its `objectstack.config.ts` and the platform floor `serve` composes
+     * unconditionally (#12938). Set by the two SCHEMA commands, `os migrate
+     * plan` and `os migrate apply`, and by nothing else.
+     *
+     * Off by default and opted into at the call site rather than deduced here:
+     * the DATA subcommands declare their own, narrower set through
+     * `buildDataMigrationPlugins`, and a capability that appears because of a
+     * default nobody wrote down is invisible at every call site (AGENTS.md →
+     * Route & surface ownership §2).
+     *
+     * What it composes, why exactly that, and the Phase-2 suppression that keeps
+     * a `plan` from writing are all in `./schema-migration-plugins.ts`'s header.
+     * With neither a host config nor a compiled artifact present it composes
+     * NOTHING, so an artifact-less run is unchanged.
+     */
+    composeHostStack?: boolean;
+    /**
      * Boot WITHOUT touching the target database (#3917).
      *
      * Boot schema-sync issues create-table / add-column DDL, and the artifact's
@@ -291,6 +327,20 @@ export async function bootSchemaStack(
   if (defer) {
     await kernel.use(new DeferSchemaDdlPlugin() as any);
   }
+  // #12938 — the deployment's own object set, when this command asked for it.
+  // Registered here, after the data stack, for the same reason `extraPlugins`
+  // is: the presence tests it performs read what `createStandaloneStack`
+  // produced, and the DDL deferral above must already be armed.
+  const composition = opts.composeHostStack === true
+    ? await buildSchemaMigrationPlugins({
+        basePlugins: stack.plugins,
+        cwd: opts.projectRoot ?? process.cwd(),
+        skipSeedData: defer,
+      })
+    : { plugins: [], hostConfigPath: null, hostConfigLoaded: false, notes: [] } satisfies SchemaMigrationComposition;
+  for (const plugin of composition.plugins) {
+    await kernel.use(plugin as any);
+  }
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
   }
@@ -334,6 +384,7 @@ export async function bootSchemaStack(
     flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
       ? await driver.flushDeferredSchemaDdl()
       : []),
+    composition,
     /**
      * Tear the one-shot stack down through the kernel's own teardown — the
      * same `kernel.shutdown()` `os serve` runs on SIGTERM, so a one-shot

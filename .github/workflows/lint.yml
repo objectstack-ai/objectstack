@@ -390,6 +390,27 @@ jobs:
           node scripts/check-comment-mask-adoption.mjs --self-test
           node scripts/check-comment-mask-adoption.mjs
 
+      # A package's published `src/**` may only import workspace packages its own
+      # manifest DECLARES (#10062). The class was filed with one member and a
+      # mitigation — "type-only, so nothing lands in the emitted JavaScript" —
+      # and grew to four with no signal, one of them a VALUE import whose
+      # implementation the bundler then INLINED into a second package's dist.
+      # Both halves of the mitigation are now ledger EVIDENCE instead of prose:
+      # a `type-only` row reds the moment its import stops being type-only.
+      # Node builtins plus the shared comment mask only — no node_modules, so a
+      # reviewer can run it in place. Its `--self-test` runs FIRST: the
+      # production run over a fixed tree is green by construction, so it cannot
+      # tell a working matcher from a dead one, and the specifier FLOOR is the
+      # other half (a dead matcher finds nothing, and nothing is what success
+      # looks like — so it refuses with exit 2 rather than passing).
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      # Scans ~2k non-test src files across 78 workspace packages, no spawns; ~1s.
+      - name: Published src imports only declared workspace deps
+        run: |
+          node scripts/check-undeclared-dep-imports.mjs --self-test
+          node scripts/check-undeclared-dep-imports.mjs
+
       # The bash-3.2 floor, over every shell file the repo ships (#12221).
       # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
       # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
@@ -1036,6 +1057,40 @@ jobs:
       # either spelling.
       - name: PM ci-failure self-test
         run: node scripts/pm/ci-failure.mjs --self-test
+
+      # os-regen-merge self-test (#12893). Mirrors the `Verify-lock entry-point
+      # self-test` step above 1:1 — same directory, same split between the tool
+      # and its self-test. `scripts/pm/os-regen-merge.sh` is the mechanized merge
+      # sequence for a branch touching os-regen-driven generated artifacts, and it
+      # has NO CI path at all: it is run BY HAND inside a feature branch's
+      # worktree, on a merge that exists only there. Its header says so, and that
+      # is deliberate.
+      #
+      # The SELF-TEST is a different animal from the script it tests. It needs no
+      # worktree, no remote and no merge — only `git` and a temp dir — and it
+      # builds five small fixture repos to pin 23 cases: the PER-FILE merge-side
+      # selection and its per-path notices, the staged-diff sentence, the
+      # uncommitted-hand-off refusal, and the four pre-existing refusals. A few
+      # seconds, no network.
+      #
+      # Left unwired it rots the way this repo has already recorded and fixed
+      # twice (#11514, #6008): the next refactor of the script reds nothing. Two
+      # of the 23 cases are SOURCE SCANS of the script's own text — they assert
+      # step 2 keeps the non-staging `git restore --source` spelling and never the
+      # staging `git checkout` one — which is to say they are precisely the rows a
+      # future edit invalidates silently and precisely the rows no reviewer reads.
+      # Nothing but this step is an instrument for them.
+      #
+      # Unconditional and un-`if:`-ed, like every self-test around it — an
+      # exemption is precisely what a self-test must not have, or the gap simply
+      # moves. One `--self-test` per `run:` block, deliberately: the masking shape
+      # `check-step-collectors.mjs` guards is a block driving TWO OR MORE distinct
+      # scripts. A discovery collector over `scripts/pm/*.sh --self-test` — which
+      # would also catch the next such script arriving unwired — is ruled out of
+      # this card: two literal steps do not yet justify the machinery, and a third
+      # is when to revisit it.
+      - name: os-regen-merge self-test
+        run: bash scripts/pm/os-regen-merge.sh --self-test
 
       # Claude hook guard self-tests (#11514, objectstack half of
       # objectstack-ai/objectui#5754). `.claude/hooks/` holds the enforcement
