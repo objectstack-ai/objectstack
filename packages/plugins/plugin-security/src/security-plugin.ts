@@ -1979,8 +1979,9 @@ export class SecurityPlugin implements Plugin {
       // path is the declared-≠-enforced shape this project prices highest. So
       // the exemption is spelled HERE, at the one gate that refuses for a reason
       // referential integrity answers, and every later step of this middleware
-      // runs unchanged — each pinned in
-      // `delete-reference-cleanup-crud-exemption.test.ts`.
+      // runs unchanged — each pinned in this package's
+      // `delete-reference-cleanup-system-identity.test.ts`, whose `#12597`
+      // describe carries one arm per surviving guard.
       //
       // Two narrowings the bare marker would not give:
       //   • `update` ONLY. A marker rides a context, and a context reaches
