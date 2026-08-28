@@ -89,6 +89,10 @@ const FAMILY: Record<string, string[]> = {
   'migrate resume': [],
   'migrate summary-nulls': [],
   'migrate value-shapes': [],
+  // Report-only is its DEFAULT and the only form driven here: without
+  // `--delete` it boots, reports and writes nothing, so the family gains a
+  // member without this fixture gaining a destructive run.
+  'secret orphans': [],
   'storage orphans': [],
 };
 
