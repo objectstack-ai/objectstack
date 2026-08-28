@@ -121,7 +121,7 @@ export const TimeRelativeTriggerSchema = lazySchema(() =>
           'expression: \'0 8 * * *\' } }`. Omitting it means daily at 08:00 UTC.',
         runAs:
           '`runAs` is a FLOW-level key, not part of the descriptor. A sweep has no trigger ' +
-          'user, so under the default `runAs: \'user\'` its data operations are REFUSED ' +
+          'user, so under the default `runAs: \'user\'` its data operations are REFUSED' +
           ' — declare `runAs: \'system\'` beside `nodes`/`edges`.',
       },
       history:

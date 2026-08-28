@@ -1569,7 +1569,7 @@ export const ListViewSchema = lazySchema(() => strictObject({
     + 're-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
     + "on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` "
     + 'instead — the bare-string form, promoted with the action\'s own label, params and `visible`; a '
-    + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time "
+    + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time"
     + '. Toolbar url/api actions can also interpolate the current selection via '
     + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),

@@ -194,7 +194,8 @@ describe('[#5384] every stored-envelope key carries a wrong-layer prescription o
     // The prescription, not merely a rejection: it must name the layer that
     // owns the key and tell the author what to do instead.
     expect(unknown!.message).toContain('storage bookkeeping');
-    expect(unknown!.message).toContain('#5309');
+    expect(unknown!.message, 'the prescription names the owning layer and the remedy,\n'
+      + 'never a tracker id').not.toMatch(/#\d{3,5}/);
   });
 
   it('CONTROL — the same body without a bookkeeping key parses, so the case above cannot pass vacuously', () => {

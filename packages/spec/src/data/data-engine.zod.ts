@@ -223,7 +223,7 @@ export const ENGINE_UPDATE_UPSERT_REMOVED =
   + 'declared and allowlisted but never implemented: no engine or driver path ever read it, so '
   + '`{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. '
   + 'Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row '
-  + "throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row "
+  + 'throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row '
   + 'first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if '
   + 'ever built, must reconcile with that gate by design rather than through this silent flag.';
 

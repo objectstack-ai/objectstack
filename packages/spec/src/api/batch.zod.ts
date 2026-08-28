@@ -199,13 +199,13 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
     + 'marks rows that were written then undone with code ROLLED_BACK and rows never reached with '
     + 'NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped '
     + '(the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code '
-    + '— rows before the failure stay written and keep reporting success, since nothing was rolled back '
+    + '— rows before the failure stay written and keep reporting success, since nothing was rolled back'
     + '.'),
   data: RecordDataSchema.optional().describe('Full record data (if returnRecords=true)'),
   index: z.number().optional().describe('Index of the record in the request array'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields LEGALLY stripped from ' +
-    'THIS row before it was written — static `readonly` / TRUE `readonlyWhen` ' +
+    'THIS row before it was written — static `readonly` / TRUE `readonlyWhen`' +
     ' on update, or the create-ingress strip. Per-row because a batch can drop ' +
     'different fields on different rows (`readonlyWhen` is record-state-dependent). Present ' +
     'ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). ' +

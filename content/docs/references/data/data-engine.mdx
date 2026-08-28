@@ -632,7 +632,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
@@ -775,7 +775,7 @@ Options for DataEngine.update operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
 
@@ -836,7 +836,7 @@ Options for DataEngine.update operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
@@ -1154,7 +1154,7 @@ QueryAST-aligned options for DataEngine.update operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
+| **upsert** | `never` | optional | [REMOVED] `update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was declared and allowlisted but never implemented: no engine or driver path ever read it, so `{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row throws RECORD_NOT_FOUND (the by-id not-found gate) rather than inserting, so read the row first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if ever built, must reconcile with that gate by design rather than through this silent flag. |
 | **multi** | `boolean` | optional (default: `false`) |  |
 | **returning** | `boolean` | optional (default: `false`) |  |
 

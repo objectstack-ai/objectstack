@@ -77,14 +77,14 @@ const RESTART_REPLACEMENT =
 
 const AUTO_RESTART_RETIRED =
   '`PluginHealthCheck.autoRestart` was removed in @objectstack/spec 18 '
-  + '(ADR-0049 enforce-or-remove) — it never restarted a plugin. '
+  + '(ADR-0049 enforce-or-remove) — it never restarted a plugin.'
   + RESTART_NOT_IMPLEMENTED
   + ' Delete the key. ' + RESTART_REPLACEMENT;
 
 const MAX_RESTART_ATTEMPTS_RETIRED =
   '`PluginHealthCheck.maxRestartAttempts` was removed in @objectstack/spec 18 '
   + '(ADR-0049 enforce-or-remove) — it capped a restart that never '
-  + 'happened. ' + RESTART_NOT_IMPLEMENTED
+  + 'happened.' + RESTART_NOT_IMPLEMENTED
   + ' The cap counted destroy calls, so raising it only scheduled further '
   + '"restarts" of a plugin that was never brought back up. Delete the key. '
   + RESTART_REPLACEMENT;
@@ -92,7 +92,7 @@ const MAX_RESTART_ATTEMPTS_RETIRED =
 const RESTART_BACKOFF_RETIRED =
   '`PluginHealthCheck.restartBackoff` was removed in @objectstack/spec 18 '
   + '(ADR-0049 enforce-or-remove) — it delayed a restart that never '
-  + 'happened. ' + RESTART_NOT_IMPLEMENTED
+  + 'happened.' + RESTART_NOT_IMPLEMENTED
   + ' The chosen strategy only moved when the destroy landed. Delete the key. '
   + RESTART_REPLACEMENT;
 

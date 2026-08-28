@@ -1487,7 +1487,7 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     '(`highlightFields`, `stageField`, `fieldGroups`) for hints and `listViews` ' +
     'for named list views.',
   defaultDetailForm:
-    '`defaultDetailForm` was never implemented and was removed from the spec ' +
+    '`defaultDetailForm` was never implemented and was removed from the spec' +
     '. Curate the record page by assigning a custom Page schema; form ' +
     'layout derives from `fieldGroups` + `Field.group`.',
   softDelete:

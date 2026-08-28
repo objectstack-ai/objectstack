@@ -1048,7 +1048,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       'Structured spec-validation findings behind `error`, present when the '
       + 'apply was refused by the seed bodies\' own schema — the declared '
       + '422 `seedRequestValidationError` mints. The per-path '
-      + 'detail lives HERE, once; `error` stays a one-sentence headline '
+      + 'detail lives HERE, once; `error` stays a one-sentence headline'
       + '. Absent on non-validation failures (driver faults, '
       + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),

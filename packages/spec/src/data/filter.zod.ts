@@ -325,7 +325,7 @@ const setMembershipSchema = (op: '$in' | '$nin') =>
 /** The `describe()` both `$in` and `$nin` carry, stating the one ruled-out member shape. */
 const SET_MEMBER_DESCRIPTION =
   'Membership list. Members are literal values of any type the column stores. A '
-  + '{ $field } reference is NOT a member shape: no backend resolves one inside a list '
+  + '{ $field } reference is NOT a member shape: no backend resolves one inside a list'
   + ' — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead.';
 
 /**

@@ -149,7 +149,7 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
 
     it.each(['cursor', 'distinct'])('%s is rejected with its #4286 tombstone', async (key) => {
         await expect(engine.find('task', { [key]: 'x' } as any))
-            .rejects.toThrow(/#4286, ADR-0049/);
+            .rejects.toThrow(/ADR-0049/);
     });
 
     it('update `upsert` is rejected with its #8057 tombstone — it was accepted and silently dropped', async () => {
@@ -158,7 +158,7 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         // prescription: delete the key; create-if-absent is explicit now that
         // the by-id branch throws on a missing row (#7867's not-found gate).
         await expect(engine.update('task', { title: 'Z' }, { where: { id: a.id }, upsert: true } as any))
-            .rejects.toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*never implemented.*Delete the key.*not-found gate/s);
+            .rejects.toThrow(/`update\.options\.upsert` was removed .*ADR-0049.*never implemented.*Delete the key.*not-found gate/s);
     });
 
     it('a null-valued `upsert` stays a withdrawal — no intent a drop could lose', async () => {

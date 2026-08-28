@@ -231,7 +231,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
     'granting the bit delivered nothing (a compliance/GDPR erase the author believed was ' +
     'permission-locked was not — the operation itself does not exist). Delete the key — a ' +
     'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
-    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative ' +
+    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative' +
     ' alongside the operation it gates. ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
