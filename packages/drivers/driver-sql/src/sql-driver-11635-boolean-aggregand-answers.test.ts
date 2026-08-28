@@ -6,14 +6,17 @@
  *
  * ## The ruling this suite pins
  *
- * #11249 (maintainer 2026-08-23, recorded in its comment 5386670755, verbatim
- * and untranslated: 「10950 不考虑存量，其他接受你的建议」) adopted:
+ * #11152 (maintainer 2026-08-28, applied in its comment 5448627494, ruling
+ * verbatim and untranslated: 「12745 A回，其他同意。」 — option A on that
+ * card) adopted, superseding #11249's `false`/`true` for the order
+ * statistics:
  *
- * - **`min` / `max` over a boolean aggregand answer `false` / `true` in
- *   JSON** — order statistics return a member of the input domain, and SQL
- *   drivers convert at the driver boundary.
+ * - **Booleans aggregate as NUMBERS on every face, with no per-aggregate
+ *   exception**: `min` / `max` over a boolean aggregand answer **`0` / `1`**
+ *   — the same numeric domain `sum` / `avg` answer in, so one column's five
+ *   aggregates answer in one domain rather than three-numbers-two-booleans.
  * - **`sum` / `avg` answer arithmetic** (`3` / `0.5` on the 3-true/3-false
- *   fixture) — the settled #11065 family shape.
+ *   fixture) — the settled #11065 family shape, unchanged.
  *
  * ## The two measured gaps this suite exists to keep closed
  *
@@ -26,30 +29,37 @@
  *   wrapping SQLSTATE `42883`. A face that refuses cannot satisfy the ruled
  *   contract; the lowering now casts (`avg(cast("flag" as int))`) on PG only.
  * - **MySQL 8.0.46 answered `min` = `0`, `max` = `1`** over `tinyint(1)` —
- *   the backend computes, but the boolean read-presentation was gated to
- *   SQLite (mirroring `formatOutput`'s row reads), so the driver boundary
- *   leaked the storage form. `min`/`max` results over a declared boolean are
- *   now presented on every dialect.
+ *   which under #11249 was the defect this suite went red on, and under the
+ *   #11152 ruling is the CORRECT answer on every dialect: the boolean
+ *   read-presentation `#11635` added for `min`/`max` results is removed
+ *   again, so the numeric answer the backend computes is the answer.
  *
  * ## Assertion conventions, and why they differ per function
  *
- * `min` / `max` are asserted STRICTLY (`toBe(false)` / `toBe(true)`): the JSON
- * boolean IS the ruled contract, and `0`/`1` — the exact value this suite went
- * red on — satisfies a `Number()` reading. `sum` / `avg` / `count` /
+ * `min` / `max` are asserted STRICTLY (`toBe(0)` / `toBe(1)` via
+ * `Object.is`-style `toBe` on the number): the JSON NUMBER is the ruled
+ * contract, and `false`/`true` — the #11249-era value this suite previously
+ * pinned — satisfies a loose equality reading. `sum` / `avg` / `count` /
  * `count_distinct` are asserted through `Number(...)`: node-pg and mysql2 both
  * hand EXACT-numeric results (`sum` → bigint/DECIMAL, `avg` → numeric) back as
  * strings — `"3"`, `"0.5000"` — for boolean and integer aggregands alike, so a
  * literal comparison would pin the dialect client's wire type, not this card's
- * values (the same reading the #11455 suite's control records).
+ * values (the same reading the #11455 suite's control records). ⚠️ `min`/`max`
+ * over an INTEGER-family result are handed back as numbers by both clients
+ * (int4 / tinyint parse to JS numbers), so the strict spelling is assertable
+ * on every dialect.
  *
  * ## The fixture
  *
- * `AGGREGATION_ROWS` — the shared aggregate-vocabulary fixture — plus a `flag`
- * boolean column, 3 true / 3 false, declared `type: 'boolean'` (the #11635
- * acceptance shape). The per-group split is deliberately asymmetric: `west`
- * holds `[T,F,F,F]` and `east` `[T,T]`, so `east`'s grouped `min` is TRUE —
- * a presentation that computed over the whole table, or answered a sticky
- * per-column constant, goes red on that cell rather than passing by symmetry.
+ * `AGGREGATION_ROWS` — the shared aggregate-vocabulary fixture, whose `flag`
+ * boolean column (added by #11152) IS the distribution this suite previously
+ * carried as a private `FLAG_BY_ID` map: 3 true / 3 false, declared
+ * `type: 'boolean'`. The private map is deleted in favour of the fixture
+ * column so the two can never silently disagree on grouped values. The
+ * per-group split is deliberately asymmetric: `west` holds `[T,F,F,F]` and
+ * `east` `[T,T]`, so `east`'s grouped `min` is `1` — a face that computed
+ * over the whole table, or answered a sticky per-column constant, goes red on
+ * that cell rather than passing by symmetry.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -59,19 +69,6 @@ import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const TABLE = 'bool_aggregand_answers';
-
-/**
- * The `flag` column, keyed by fixture row id: 3 true / 3 false, with `east`
- * (rows 5–6) all-true — see the head note for why the asymmetry is the point.
- */
-const FLAG_BY_ID: Record<string, boolean> = {
-  '1': true,
-  '2': false,
-  '3': false,
-  '4': false,
-  '5': true,
-  '6': true,
-};
 
 const aggOn = (func: string, field = 'flag'): DriverQuery =>
   ({ aggregations: [{ function: func, field, alias: 'n' }] }) as DriverQuery;
@@ -94,12 +91,10 @@ describe(`[#11635] driver-sql — boolean aggregands answer the ruled values (${
         },
       },
     ]);
+    // The fixture rows carry `flag` themselves since #11152 — seeded verbatim,
+    // so this suite and the conformance suites measure one distribution.
     for (const row of AGGREGATION_ROWS) {
-      await driver.create(
-        TABLE,
-        { ...row, flag: FLAG_BY_ID[row.id] },
-        { bypassTenantAudit: true },
-      );
+      await driver.create(TABLE, { ...row }, { bypassTenantAudit: true });
     }
   });
 
@@ -130,19 +125,22 @@ describe(`[#11635] driver-sql — boolean aggregands answer the ruled values (${
     expect(Number(rows[0].n)).toBe(0.5);
   });
 
-  // ─── The ruled order-statistic half — JSON booleans, STRICTLY ────────────
+  // ─── The ruled order-statistic half — JSON NUMBERS, STRICTLY ─────────────
+  // [#11152 ruling, 2026-08-28] `0`/`1`, not `false`/`true` (#11249,
+  // superseded): booleans aggregate as numbers with no per-aggregate
+  // exception.
 
-  it('min(flag) answers false — the JSON boolean, not 0', async () => {
+  it('min(flag) answers 0 — the JSON number, not false', async () => {
     const rows = await driver.aggregate(TABLE, aggOn('min'));
-    expect(rows[0].n).toBe(false);
+    expect(rows[0].n).toBe(0);
   });
 
-  it('max(flag) answers true — the JSON boolean, not 1', async () => {
+  it('max(flag) answers 1 — the JSON number, not true', async () => {
     const rows = await driver.aggregate(TABLE, aggOn('max'));
-    expect(rows[0].n).toBe(true);
+    expect(rows[0].n).toBe(1);
   });
 
-  it('grouped min/max answer per-group members: west [T,F,F,F], east [T,T]', async () => {
+  it('grouped min/max answer per-group numbers: west [T,F,F,F], east [T,T]', async () => {
     const rows = await driver.aggregate(TABLE, {
       groupBy: ['region'],
       aggregations: [
@@ -156,18 +154,18 @@ describe(`[#11635] driver-sql — boolean aggregands answer the ruled values (${
         { lo: r.lo, hi: r.hi },
       ]),
     );
-    // `east` is the load-bearing cell: all-true, so its `min` is `true` — a
-    // whole-table computation or a sticky `false` fails here and only here.
-    expect(byRegion.east, 'east').toEqual({ lo: true, hi: true });
-    expect(byRegion.west, 'west').toEqual({ lo: false, hi: true });
+    // `east` is the load-bearing cell: all-true, so its `min` is `1` — a
+    // whole-table computation or a sticky `0` fails here and only here.
+    expect(byRegion.east, 'east').toEqual({ lo: 1, hi: 1 });
+    expect(byRegion.west, 'west').toEqual({ lo: 0, hi: 1 });
   });
 
   // ─── The empty window: null stays null, never a manufactured false ───────
 
   // `min`/`max` over no rows is undefined — the same judgement
-  // `emptyGroupValueFor` (@objectstack/spec/data) records — and the boolean
-  // presentation must pass the backend's NULL through, not fold it to `false`.
-  it('min(flag) over an empty window answers null, not false', async () => {
+  // `emptyGroupValueFor` (@objectstack/spec/data) records — and the numeric
+  // answer must pass the backend's NULL through, never fold it to `0`.
+  it('min(flag) over an empty window answers null, not 0', async () => {
     const rows = await driver.aggregate(TABLE, {
       where: { region: 'north' },
       aggregations: [{ function: 'min', field: 'flag', alias: 'n' }],
