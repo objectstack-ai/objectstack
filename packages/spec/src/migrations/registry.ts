@@ -7939,10 +7939,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -7953,10 +7956,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -7987,9 +7993,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowPurge',
     // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
     // inbox batch 5, accepting #1883's recommendation B). `allowRestore` claimed to
@@ -8014,9 +8024,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
