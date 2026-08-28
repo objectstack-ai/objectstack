@@ -2044,3 +2044,174 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
     expect(misspelt.name).toBe('account_list');
   });
 });
+
+// ==========================================
+// Meta history / diagnostics response conformance (#12038)
+// ==========================================
+//
+// The #3877 conformance half of the #12038 bindings — one handwritten,
+// verbatim-shaped capture per newly bound schema (the AuditMetaItemResponse
+// pattern above), asserting the parse PRESERVES every member and that the
+// honest-empty body is a declared, legal answer. The four invented client-test
+// mocks the survey flagged (§3b) are NOT reused here — none of them described
+// a shape these routes ever answered.
+
+import {
+  GetPublishedMetaItemResponseSchema,
+  ListDraftsResponseSchema,
+  GetMetaDiagnosticsResponseSchema,
+  FindReferencesToMetaResponseSchema,
+  RollbackMetaItemResponseSchema,
+  DiffMetaItemResponseSchema,
+} from './protocol.zod';
+
+describe('ListDraftsResponseSchema declares the pending-drafts body (#12038)', () => {
+  /** A verbatim-shaped capture of a real `listDrafts` return (one org draft). */
+  const realResponse = {
+    drafts: [
+      {
+        type: 'view',
+        name: 'account_pipeline',
+        organizationId: 'org_01',
+        packageId: 'com.example.crm',
+        updatedAt: '2026-08-27T09:12:44.000Z',
+        updatedBy: 'admin@objectos.ai',
+      },
+      {
+        type: 'object',
+        name: 'lead_source',
+        organizationId: null,
+        packageId: null,
+        updatedAt: null,
+        updatedBy: null,
+      },
+    ],
+  };
+
+  it('parses the real draft rows and PRESERVES every member', () => {
+    const result = ListDraftsResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('the honest-empty answer parses — {drafts: []} is a declared, legal body', () => {
+    expect(ListDraftsResponseSchema.safeParse({ drafts: [] }).success).toBe(true);
+  });
+});
+
+describe('GetMetaDiagnosticsResponseSchema declares the validation-sweep body (#12038)', () => {
+  /** A verbatim-shaped capture of a real `getMetaDiagnostics` return (one failing view). */
+  const realResponse = {
+    entries: [
+      {
+        type: 'view',
+        name: 'broken_pipeline',
+        diagnostics: {
+          valid: false,
+          errors: [{ path: 'columns.0.field', message: 'Unknown field: statuss', code: 'invalid_field' }],
+          warnings: [{ path: 'filters', message: 'Empty filter group' }],
+        },
+      },
+    ],
+    total: 1,
+    scannedTypes: 12,
+    scannedItems: 184,
+    stats: {
+      view: { count: 42, locked: 3, packages: ['com.example.crm'] },
+      object: { count: 17, locked: 0, packages: ['com.example.crm', 'com.example.docs'] },
+    },
+  };
+
+  it('parses the real sweep shape and PRESERVES every member', () => {
+    const result = GetMetaDiagnosticsResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('the honest-empty sweep parses — no failing entries is a declared, legal body', () => {
+    const empty = { entries: [], total: 0, scannedTypes: 0, scannedItems: 0, stats: {} };
+    expect(GetMetaDiagnosticsResponseSchema.safeParse(empty).success).toBe(true);
+  });
+});
+
+describe('FindReferencesToMetaResponseSchema declares the reverse-references body (#12038)', () => {
+  /** A verbatim-shaped capture of a real `findReferencesToMeta` return. */
+  const realResponse = {
+    references: [
+      { type: 'view', name: 'account_list', label: 'Accounts', path: 'columns.2.field', kind: 'field' },
+      { type: 'flow', name: 'lead_convert', path: 'nodes.3.object', kind: 'object' },
+    ],
+  };
+
+  it('parses the real reference rows and PRESERVES every member', () => {
+    const result = FindReferencesToMetaResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('the honest-empty answer parses — {references: []} is the declared answer on kernels without reference tracking', () => {
+    expect(FindReferencesToMetaResponseSchema.safeParse({ references: [] }).success).toBe(true);
+  });
+});
+
+describe('RollbackMetaItemResponseSchema declares the item-rollback body (#12038)', () => {
+  /** A verbatim-shaped capture of a real `rollbackMetaItem` return. */
+  const realResponse = {
+    success: true,
+    version: 'W/"7"',
+    seq: 7,
+    restoredFromVersion: 4,
+    message: 'Rolled back to version 4',
+  };
+
+  it('parses the real rollback receipt and PRESERVES every member', () => {
+    const result = RollbackMetaItemResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('`message` is genuinely optional — the messageless receipt parses', () => {
+    const { message: _omitted, ...rest } = realResponse;
+    expect(RollbackMetaItemResponseSchema.safeParse(rest).success).toBe(true);
+  });
+});
+
+describe('DiffMetaItemResponseSchema declares the structural-diff body (#12038)', () => {
+  /** A verbatim-shaped capture of a real `diffMetaItem` return. */
+  const realResponse = {
+    type: 'object',
+    name: 'customer',
+    fromVersion: 2,
+    toVersion: 5,
+    added: [{ path: 'fields.priority', value: { type: 'select', options: ['low', 'high'] } }],
+    removed: [{ path: 'fields.legacy_code', value: { type: 'text' } }],
+    changed: [{ path: 'label', from: 'Customer', to: 'Account' }],
+  };
+
+  it('parses the real diff shape and PRESERVES every member', () => {
+    const result = DiffMetaItemResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('null version sides are declared — a first-version diff parses', () => {
+    const firstVersion = { ...realResponse, fromVersion: null, toVersion: null };
+    expect(DiffMetaItemResponseSchema.safeParse(firstVersion).success).toBe(true);
+  });
+});
+
+describe('GetPublishedMetaItemResponseSchema stays opaque by ruling (#12038 1C)', () => {
+  it('accepts an arbitrary metadata item body and PRESERVES it — no shape is imposed', () => {
+    const itemBody = { name: 'all_leads', type: 'grid', object: 'lead', columns: [{ field: 'name' }] };
+    const result = GetPublishedMetaItemResponseSchema.safeParse(itemBody);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(itemBody);
+  });
+
+  it('imposes nothing on the body — opacity is the ruled contract, not an accident', () => {
+    // The ruling (1C) forbids a discriminated union frozen against today's
+    // type registry; `unknown` accepts every body, including non-objects.
+    expect(GetPublishedMetaItemResponseSchema.safeParse('raw-string-body').success).toBe(true);
+    expect(GetPublishedMetaItemResponseSchema.safeParse(null).success).toBe(true);
+  });
+});

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import type { z } from 'zod';
 import {
   BookSchema,
   resolveBookTree,
@@ -10,8 +11,14 @@ import {
   resolveBookClaimedDocs,
   resolveDocAudiences,
   docAudienceAllows,
+  ResolvedEntrySchema,
+  ResolvedGroupSchema,
+  ResolvedBookSchema,
   type Book,
   type ResolverDoc,
+  type ResolvedEntry,
+  type ResolvedGroup,
+  type ResolvedBook,
 } from './book.zod';
 import { DocSchema } from './doc.zod';
 
@@ -320,5 +327,49 @@ describe('retired book translation maps (#4667)', () => {
       name: 'crm_guide', label: 'CRM Guide',
       groups: [{ key: 'basics', label: 'Basics', include: 'crm_*' }],
     })).not.toThrow();
+  });
+});
+
+// ==========================================
+// book-tree response contract (#12038)
+// ==========================================
+
+describe('ResolvedBookSchema is the book-tree response contract (#12038)', () => {
+  // The conformance suite for the `GET /meta/book/:name/tree` ledger rows
+  // (#3877's no-row-without-conformance rule). Stronger than the handwritten
+  // captures its meta.* siblings use: `resolveBookTree()` is pure and lives in
+  // this file's module, so the suite drives the REAL producer and parses what
+  // it actually returns.
+  const spine: Book = {
+    name: 'crm_guide',
+    label: 'CRM Guide',
+    groups: [
+      { key: 'basics', label: 'Basics', include: 'crm_*' },
+      { key: 'links', label: 'Links', pages: ['---', { href: 'https://example.com', label: 'Site', badge: 'new' }] },
+    ],
+  };
+  const resolverDocs: ResolverDoc[] = [
+    { name: 'crm_intro', label: 'Intro', description: 'Start here', order: 1 },
+    { name: 'crm_setup', label: 'Setup', order: 2 },
+  ];
+
+  it('parses the real resolver output and PRESERVES it', () => {
+    const tree = resolveBookTree(BookSchema.parse(spine) as Book, resolverDocs);
+    const result = ResolvedBookSchema.safeParse(tree);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(JSON.parse(JSON.stringify(tree)));
+  });
+
+  it('the honest-empty tree parses — a book whose rules match nothing is a declared, legal body', () => {
+    const empty = { name: 'crm_guide', groups: [] };
+    expect(ResolvedBookSchema.safeParse(empty).success).toBe(true);
+  });
+
+  it('each schema stays type-identical to the interface the resolver is typed by', () => {
+    // The interfaces remain the compile-time source `resolveBookTree` is typed
+    // by; these pins are what keeps the Zod transcription from drifting.
+    expectTypeOf<z.infer<typeof ResolvedEntrySchema>>().toEqualTypeOf<ResolvedEntry>();
+    expectTypeOf<z.infer<typeof ResolvedGroupSchema>>().toEqualTypeOf<ResolvedGroup>();
+    expectTypeOf<z.infer<typeof ResolvedBookSchema>>().toEqualTypeOf<ResolvedBook>();
   });
 });

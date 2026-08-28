@@ -50,7 +50,23 @@ import type {
 import type { ActionDescriptor, ExecutionLog, FlowParsed } from '@objectstack/spec/automation';
 import type { ExplainDecision } from '@objectstack/spec/security';
 import type { InstalledPackage } from '@objectstack/spec/kernel';
-import type { PackageRollbackResponse } from '@objectstack/spec/api';
+import type {
+    ListDraftsResponse,
+    GetMetaDiagnosticsResponse,
+    FindReferencesToMetaResponse,
+    AuditMetaItemResponse,
+    RollbackMetaItemResponse,
+    DiffMetaItemResponse,
+    PackagePublishResult,
+    DiscardPackageDraftsResponse,
+    ListPackageCommitsResponse,
+    RevertPackageCommitResponse,
+    RollbackToPackageCommitResponse,
+    PackageExportManifest,
+    ReassignOrphanedMetadataResponse,
+    DuplicatePackageResponse,
+} from '@objectstack/spec/api';
+import type { ResolvedBook } from '@objectstack/spec/system';
 import type { Environment } from '@objectstack/spec/cloud';
 
 declare const client: ObjectStackClient;
@@ -286,17 +302,79 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
 }
 
 /**
+ * [#12038] The 16 bindings of the recorded five-part ruling (1C · 2C · 3A ·
+ * 4A · 5A): the meta.* history/diagnostics family and the packages.*
+ * lifecycle family, each bound to the describe-only transcription of its
+ * producer's declared return (`@objectstack/spec/api`), schema → ledger row →
+ * annotation, in that order. Type-level for the reason this file's header
+ * gives; each `toEqualTypeOf` is red while the method still returns `any`.
+ */
+export async function returnTypePrecisionPins12038(): Promise<void> {
+    // ── the meta.* eight ──────────────────────────────────────────────────
+    expectTypeOf(await client.meta.listDrafts()).toEqualTypeOf<ListDraftsResponse>();
+    expectTypeOf(await client.meta.getDiagnostics()).toEqualTypeOf<GetMetaDiagnosticsResponse>();
+    expectTypeOf(await client.meta.getReferences('view', 'account_list')).toEqualTypeOf<FindReferencesToMetaResponse>();
+    expectTypeOf(await client.meta.getBookTree('handbook')).toEqualTypeOf<ResolvedBook>();
+    expectTypeOf(await client.meta.getAudit('view', 'account_list')).toEqualTypeOf<AuditMetaItemResponse>();
+    expectTypeOf(await client.meta.rollbackItem('view', 'account_list', 3)).toEqualTypeOf<RollbackMetaItemResponse>();
+    expectTypeOf(await client.meta.diffItem('view', 'account_list')).toEqualTypeOf<DiffMetaItemResponse>();
+    // Ruling 1C: `getPublished` is bound to `unknown` BY RULING — an
+    // arbitrary metadata item body, never a union frozen against the type
+    // registry. `unknown` (not `any`) is the binding: callers must narrow.
+    expectTypeOf(await client.meta.getPublished('view', 'account_list')).toEqualTypeOf<unknown>();
+    // Ruling 2C: `migrateStored` is the one method that STAYS unbound — its
+    // report's only named type lives in `@objectstack/metadata-protocol`,
+    // which this package does not depend on. Pinned so a well-meaning sweep
+    // does not "fix" it against the ruling.
+    expectTypeOf(await client.meta.migrateStored()).toBeAny();
+
+    // ── the packages.* eight ──────────────────────────────────────────────
+    expectTypeOf(await client.packages.publish('com.acme.crm')).toEqualTypeOf<PackagePublishResult>();
+    expectTypeOf(await client.packages.discardDrafts('com.acme.crm')).toEqualTypeOf<DiscardPackageDraftsResponse>();
+    expectTypeOf(await client.packages.listCommits('com.acme.crm')).toEqualTypeOf<ListPackageCommitsResponse>();
+    expectTypeOf(await client.packages.revertCommit('com.acme.crm', 'cmt_1')).toEqualTypeOf<RevertPackageCommitResponse>();
+    expectTypeOf(await client.packages.rollback('com.acme.crm', 'cmt_1')).toEqualTypeOf<RollbackToPackageCommitResponse>();
+    expectTypeOf(await client.packages.export('com.acme.crm')).toEqualTypeOf<PackageExportManifest>();
+    expectTypeOf(await client.packages.adoptOrphans('com.acme.crm')).toEqualTypeOf<ReassignOrphanedMetadataResponse>();
+    expectTypeOf(await client.packages.duplicate('com.acme.crm', 'com.acme.copy')).toEqualTypeOf<DuplicatePackageResponse>();
+
+    // ── direction 2: a WRONG shape must now be rejected ───────────────────
+    // Each suppression is unused — a TS2578 error — while the method still
+    // returns `any`.
+
+    // @ts-expect-error the timeline is enveloped in `{ commits }` (the handler's wrapper), not a bare array
+    const wrongCommits: ListPackageCommitsResponse['commits'] = await client.packages.listCommits('com.acme.crm');
+
+    // The 3A distinction, pinned at the binding: the COMMIT rollback answers
+    // `revertedCommits`/`failed`, never the retired version-rollback shape.
+    // @ts-expect-error the COMMIT-rollback payload carries no `restoredVersion`
+    void (await client.packages.rollback('com.acme.crm', 'cmt_1')).restoredVersion;
+
+    // @ts-expect-error a diagnostics sweep is not its entries array
+    const wrongDiagnostics: GetMetaDiagnosticsResponse['entries'] = await client.meta.getDiagnostics();
+
+    // Ruling 1C's other half: `unknown` is not `any` — an unnarrowed
+    // published body must not be treated as an arbitrary record.
+    // @ts-expect-error the published body is `unknown` and must be narrowed before member access
+    void (await client.meta.getPublished('view', 'account_list')).columns;
+
+    void wrongCommits;
+    void wrongDiagnostics;
+}
+
+/**
  * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
  * counted as evidence that this card's change was needed. Each pins a
- * near-miss in a DEPENDENCY that the next sweep would otherwise reach for.
+ * near-miss trap the next sweep would otherwise reach for.
  *
- * 1. `PackageRollbackResponse` sits one import away from
- *    `client.packages.rollback` and is the wrong type for it: it declares the
- *    VERSION rollback (`{ success, restoredVersion?, message? }`, per its
- *    file header `POST /api/v1/packages/:packageId/rollback — Rollback a
- *    package`), while the client method posts `{ commitId }` and the
- *    dispatcher routes it to `rollbackToPackageCommit` — the ADR-0067 COMMIT
- *    rollback. Binding it would compile and be false.
+ * 1. [#12038 3A] The near-miss this guard used to pin from the other
+ *    direction — `PackageRollbackResponse`, the VERSION-rollback declaration
+ *    the spec had bound to the live COMMIT-rollback path — is RETIRED
+ *    (ADR-0087 discipline; `package-api.test.ts` pins the absence). The
+ *    guard now pins the NEW truth: `RollbackToPackageCommitResponse` is the
+ *    COMMIT rollback, and it must never grow the version-rollback vocabulary
+ *    (`restoredVersion`) whose false declaration this family just paid to
+ *    remove.
  *
  * 2. `Environment` is the obvious-looking binding for `client.projects.*` and
  *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
@@ -304,12 +382,12 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
  *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would
  *    typecheck, be false, and break those callers.
  */
-declare const versionRollbackPayload: PackageRollbackResponse['data'];
+declare const commitRollbackPayload: RollbackToPackageCommitResponse;
 declare const specEnvironmentRow: Environment;
 
-export function packageRollbackResponseIsNotTheCommitRollbackShape(): void {
-    // @ts-expect-error the VERSION-rollback payload carries no commit identity
-    void versionRollbackPayload.commitId;
+export function commitRollbackResponseIsNotTheVersionRollbackShape(): void {
+    // @ts-expect-error the COMMIT-rollback payload carries no version identity
+    void commitRollbackPayload.restoredVersion;
 }
 
 export function environmentIsNotTheCloudWireRow(): void {
@@ -327,7 +405,8 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins).toBe('function');
         expect(typeof searchResultIsNotTheGlobalSearchShape).toBe('function');
         expect(typeof returnTypePrecisionPins11925).toBe('function');
-        expect(typeof packageRollbackResponseIsNotTheCommitRollbackShape).toBe('function');
+        expect(typeof returnTypePrecisionPins12038).toBe('function');
+        expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });
 
