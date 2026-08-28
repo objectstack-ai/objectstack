@@ -283,6 +283,30 @@ const SKIP_DIRS = new Set([
 /** Where shipped object declarations are discovered. */
 const OBJECT_FILE_SUFFIX = '.object.ts';
 
+/**
+ * The subtrees this gate's population lives in, declared so a dispatch brief
+ * can NAME it. Without this the gate is reachable only by its own script path,
+ * so a card editing an object file -- the population it judges -- would never
+ * be told to run it: the invisible-population species
+ * `scripts/pm/bare-root-worklist.mjs` exists to count. `hintCovers` refuses a
+ * separator-less literal as too generic, so the glob form is the reachable one.
+ *
+ * ⚠️ These are a DECLARATION, not the walk. The walk is the whole repository
+ * minus `SKIP_DIRS`, deliberately: a boundary-scoped sweep is the defect this
+ * gate exists to close, so narrowing the WALK to these roots would rebuild that
+ * hole one level up. `hintProblem` holds the two together from the other side
+ * -- an object file discovered OUTSIDE every hint is a refusal naming this
+ * constant -- so the declaration can never silently under-name the population
+ * while the sweep quietly keeps covering it.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+
+/** Object files the sweep found outside every declared watch hint. */
+function unhintedFiles(relPaths) {
+  const roots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  return relPaths.filter((p) => !roots.some((r) => p === r || p.startsWith(`${r}/`)));
+}
+
 // ---------------------------------------------------------------------------
 // Source structure -- comments masked, string CONTENT blanked for structure
 
@@ -760,12 +784,15 @@ export function sweep(root) {
   const files = walkObjectFiles(root);
   const objects = [];
   const refusals = [];
+  const relFiles = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join('/');
+    relFiles.push(rel);
     const parsed = parseObjectFile(abs, rel, readFileSync(abs, 'utf8'), textFamily);
     objects.push(...parsed.objects);
     refusals.push(...parsed.refusals);
   }
+  const unhinted = unhintedFiles(relFiles);
 
   const counts = {
     files: files.length,
@@ -775,7 +802,7 @@ export function sweep(root) {
     keyedTextColumns: objects.reduce((n, o) => n + o.keyedTextColumns.length, 0),
   };
 
-  return { family: emitter.family, files, objects, refusals, counts };
+  return { family: emitter.family, files, relFiles, unhinted, objects, refusals, counts };
 }
 
 /**
@@ -878,6 +905,16 @@ function main() {
   const family = familyProblem(result.family);
   if (family !== null) return refuse(family);
 
+  if (result.unhinted.length > 0) {
+    return refuse(
+      `${result.unhinted.length} object file(s) sit outside every declared watch hint `
+      + `(${ROOT_DIR_WATCH_HINTS.join(', ')}):\n  ${result.unhinted.join('\n  ')}\n`
+      + 'The SWEEP covers them -- it walks the whole repository -- but no dispatch brief can NAME\n'
+      + 'this gate for a card that edits them, so the card is told to run everything except the one\n'
+      + 'gate that judges its diff. Add the subtree to ROOT_DIR_WATCH_HINTS in the same PR.',
+    );
+  }
+
   if (result.refusals.length > 0) {
     console.error(`check:keyed-text-bounds: ${result.refusals.length} declaration(s) this scan cannot classify\n`);
     for (const r of result.refusals) console.error(`  ${r.file}:${r.line}\n    ${r.message}`);
@@ -929,7 +966,8 @@ function main() {
   const pending = ALLOWLIST.filter((r) => r.kind === 'pending').length;
   const unboundable = ALLOWLIST.length - pending;
   console.log(
-    `✓ check:keyed-text-bounds: ${result.counts.files} *${OBJECT_FILE_SUFFIX} files, `
+    `✓ check:keyed-text-bounds: ${result.counts.files} *${OBJECT_FILE_SUFFIX} files under `
+    + `${ROOT_DIR_WATCH_HINTS.join(' + ')} (walk is repo-wide; 0 outside), `
     + `${result.counts.objects} object declarations, ${result.counts.indexEntries} declared index entries, `
     + `${result.counts.textFields} text-family fields; ${result.counts.keyedTextColumns} keyed text-family `
     + `columns judged, ${result.counts.keyedTextColumns - ALLOWLIST.length} bounded. `
@@ -1227,6 +1265,18 @@ export function selfTest() {
     t('a tree whose keyed-text INTERSECTION collapses trips its own floor',
       floorProblem({ files: 999, objects: 999, indexEntries: 999, textFields: 999, keyedTextColumns: 0 }) !== null);
     t('the floors pass at the values measured on fa5d137ab0', floorProblem(MEASURED) === null);
+
+    // ── the watch-hint declaration vs the repo-wide walk ─────────────────
+    const outsideHints = run({ 'tools/stray.object.ts': objectFile(`{ name: 'o', fields: { c: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['c'] }] }`) });
+    t('an object file OUTSIDE every watch hint is still SWEPT -- the walk is repo-wide',
+      outsideHints.relFiles.includes('tools/stray.object.ts') && outsideHints.objects.length === 1,
+      JSON.stringify(outsideHints.relFiles));
+    t('...and is REPORTED as unhinted, so the declaration cannot silently under-name the population',
+      outsideHints.unhinted.length === 1 && outsideHints.unhinted[0] === 'tools/stray.object.ts');
+    const insideHints = run({ 'packages/p/src/a.object.ts': objectFile(`{ name: 'o', fields: {}, indexes: [] }`) });
+    t('an object file inside a declared hint is not reported as unhinted', insideHints.unhinted.length === 0);
+    t('every declared watch hint is a reachable glob, never a separator-less bare word',
+      ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')));
 
     // ── package attribution, which the per-package allowlist rests on ─────
     t('packageOf attributes a plugin path to the plugin',
