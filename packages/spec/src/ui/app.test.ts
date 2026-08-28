@@ -1482,7 +1482,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       // false belief one step further from the evidence.
       expect(msg).toMatch(/BOTH trees/s);
       expect(msg).toMatch(/areas\[\]\.navigation/s);
-      expect(msg).toMatch(/both stripped\s+server-side/s);
+      expect(msg).toMatch(/re-checked in the shell/s);
       // The asymmetry that SURVIVES #4722 — and the reason this is the layer
       // an author must reach for: `requiredPermissions` is enforced before the
       // body ships, `visible` is not evaluated until it is already in the
