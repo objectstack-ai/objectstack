@@ -72,10 +72,13 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         ]);
         // Bare roots: no `record.` prefix anywhere in those three sources.
         for (const field of gated) expect(field.visibleWhen.source).not.toContain('record.');
-        // …and the fixture also carries the two SILENT controls: a `record.`-rooted
-        // predicate whose string literal contains identifier-shaped text, and a
-        // second view that is entirely healthy.
-        expect(leadFields.at(-1).visibleWhen.source).toBe('record.note != "status unqualified"');
+        // …and the fixture also carries the SILENT controls: a `record.`-rooted
+        // predicate whose string literal contains identifier-shaped text, a
+        // FIELD-level `current_user` predicate (which resolves at that level
+        // since objectui#6010 and must never be flagged), and a second view
+        // that is entirely healthy.
+        expect(leadFields.at(-2).visibleWhen.source).toBe('record.note != "status unqualified"');
+        expect(leadFields.at(-1).visibleWhen.source).toBe('current_user.role == "admin"');
         expect(fixture.views[1].form.sections[0].fields[1].visibleWhen.source)
             .toBe('record.status == "closed"');
     });
@@ -98,7 +101,14 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         expect(notice).toContain('3 form-view predicate(s)');
         expect(notice).toContain("'status'");
         expect(notice).toContain("'duplicate_of_type'");
-        expect(notice).toContain("'record', 'previous', 'parent', 'data'");
+        // The vocabulary is printed PER SURFACE, and only for the surfaces the
+        // findings actually implicate — these are all field findings, so the
+        // section rule is not quoted at an operator who has no section problem.
+        expect(notice).toContain(
+            "bound roots on a form FIELD: 'record', 'previous', 'parent', 'data', "
+            + "'current_user', 'user', 'ctx', 'os'",
+        );
+        expect(notice).not.toContain('form SECTION');
         // Which view, with the first path as the anchor.
         expect(notice).toContain('1 view(s): crm_lead');
         expect(notice).toContain('views[0].form.sections[0].fields[4].visibleWhen');
@@ -152,6 +162,68 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-record-rooted');
 
         expect(unboundRootWarnings(ctx)).toEqual([]);
+    });
+
+    it('says NOTHING about an old artifact whose only predicates are field-level current_user tests', async () => {
+        // The regression this patch exists for. `current_user` and its ADR-0068
+        // alias roots resolve at FIELD level (objectui#6010), so a legacy
+        // artifact using them is healthy on this surface — flagging it would be
+        // the cry-wolf class the card forbids.
+        for (const source of [
+            'current_user.role == "admin"',
+            'user.roles.size() > 0',
+            'ctx.user.isPlatformAdmin',
+            'os.user.role == "admin"',
+        ]) {
+            const fixture = loadFixture();
+            fixture.views = [{
+                form: {
+                    type: 'simple',
+                    data: { provider: 'object', object: 'crm_lead' },
+                    sections: [{
+                        name: 'lead',
+                        fields: [{ field: 'internal_note', visibleWhen: { dialect: 'cel', source } }],
+                    }],
+                },
+            }];
+            expect(fixture.manifest.engines.protocol).toBe('^17.0.0-rc.1');
+
+            const plugin = newPlugin();
+            const ctx = fakeCtx();
+            await plugin._parseAndRegisterArtifact(ctx, fixture, `fixture-cu-${source}`);
+
+            expect(unboundRootWarnings(ctx), source).toEqual([]);
+        }
+    });
+
+    it('DOES flag the same root at section level, and prints the section vocabulary there', async () => {
+        // The other half of the split: the contract says `current_user` is
+        // unbound on a SECTION predicate and faults open.
+        const fixture = loadFixture();
+        fixture.views = [{
+            form: {
+                type: 'simple',
+                data: { provider: 'object', object: 'crm_lead' },
+                sections: [{
+                    name: 'lead',
+                    visibleWhen: { dialect: 'cel', source: 'current_user.role == "admin"' },
+                    fields: [{ field: 'internal_note' }],
+                }],
+            },
+        }];
+
+        const plugin = newPlugin();
+        const ctx = fakeCtx();
+        await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-section-cu');
+
+        const warnings = unboundRootWarnings(ctx);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]!).toContain("'current_user'");
+        expect(warnings[0]!).toContain(
+            "bound roots on a form SECTION: 'record', 'previous', 'parent', 'data'",
+        );
+        // No field findings here, so the field rule is not quoted.
+        expect(warnings[0]!).not.toContain('form FIELD');
     });
 
     it('does not cry wolf on identifier-shaped text inside a string literal', async () => {

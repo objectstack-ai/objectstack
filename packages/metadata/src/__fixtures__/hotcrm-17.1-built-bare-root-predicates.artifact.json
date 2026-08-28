@@ -55,6 +55,10 @@
               {
                 "field": "note",
                 "visibleWhen": { "dialect": "cel", "source": "record.note != \"status unqualified\"" }
+              },
+              {
+                "field": "internal_note",
+                "visibleWhen": { "dialect": "cel", "source": "current_user.role == \"admin\"" }
               }
             ]
           }
