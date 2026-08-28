@@ -372,14 +372,19 @@ export function judge(site, defaults) {
   // The binding budget. A step-level `timeout-minutes` starts its clock at the
   // step, a job-level one at the job -- whichever is smaller kills first, and
   // for the job-level clock the prep time is spent before the step even starts.
+  //
+  // `typeof === 'number'`, deliberately, NOT `Number(x)`: `Number(null)` is 0 and
+  // `Number('')` is 0, so a `timeout-minutes:` written with no value would coerce
+  // to a real-looking zero-minute budget and produce a confident verdict about a
+  // field nobody filled in. YAML gives a genuine number for the spelling that
+  // means one; everything else is unresolved and says so.
   const declared = [];
-  if (Number.isFinite(Number(site.stepTimeout))) declared.push({ minutes: Number(site.stepTimeout), source: 'step timeout-minutes' });
-  if (Number.isFinite(Number(site.jobTimeout))) declared.push({ minutes: Number(site.jobTimeout), source: 'job timeout-minutes' });
-  if (site.stepTimeout !== undefined && !Number.isFinite(Number(site.stepTimeout))) {
-    return { problem: `the step's timeout-minutes is ${JSON.stringify(site.stepTimeout)}, which is not a number -- the budget could not be resolved.` };
-  }
-  if (site.jobTimeout !== undefined && !Number.isFinite(Number(site.jobTimeout))) {
-    return { problem: `the job's timeout-minutes is ${JSON.stringify(site.jobTimeout)}, which is not a number -- the budget could not be resolved.` };
+  for (const [value, source] of [[site.stepTimeout, 'step timeout-minutes'], [site.jobTimeout, 'job timeout-minutes']]) {
+    if (value === undefined) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return { problem: `the ${source} is ${JSON.stringify(value)}, which is not a positive number of minutes -- the budget could not be resolved, so the invariant could not be checked.` };
+    }
+    declared.push({ minutes: value, source });
   }
   const binding = declared.length
     ? declared.reduce((a, b) => (b.minutes < a.minutes ? b : a))
@@ -632,6 +637,17 @@ export async function selfTest() {
     const noTimeoutRun = drive(noTimeout);
     assert('a job with no timeout-minutes is judged against GitHub\'s 360 default', noTimeoutRun.code === 0, noTimeoutRun.out);
     assert('...and the default is NAMED rather than silently assumed', /GitHub default/.test(noTimeoutRun.out), noTimeoutRun.out);
+
+    const emptyTimeout = fixture({
+      'a.yml': `name: fixture\non: push\njobs:\n  probe:\n    timeout-minutes:\n    runs-on: ubuntu-latest\n    steps:\n      - name: guarded\n        run: |\n          ${GUARDED}\n`,
+    });
+    const emptyTimeoutRun = drive(emptyTimeout);
+    assert('a timeout-minutes with no value REFUSES -- it must not coerce to a 0-minute budget', emptyTimeoutRun.code === EXIT_REFUSED, emptyTimeoutRun.out);
+
+    const exprTimeout = fixture({
+      'a.yml': `name: fixture\non: push\njobs:\n  probe:\n    timeout-minutes: \${{ fromJSON(needs.x.outputs.t) }}\n    runs-on: ubuntu-latest\n    steps:\n      - name: guarded\n        run: |\n          ${GUARDED}\n`,
+    });
+    assert('a timeout-minutes that is an expression REFUSES rather than guessing', drive(exprTimeout).code === EXIT_REFUSED);
 
     const unresolvable = fixture({
       'a.yml': workflow({ jobTimeout: 30, command: 'node scripts/run-with-stall-guard.mjs --log x --stall-minutes "${{ matrix.window }}" -- pnpm test' }),
