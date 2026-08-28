@@ -49,13 +49,17 @@
  *    That disagreement is the trap's whole purpose (the payload-diff idiom must
  *    see record fields only) and is pinned as DECLARED so it cannot be mistaken
  *    for a residue of the defect above.
- *  - SYMBOL KEYS carry the identical disagreement and are deliberately left
- *    carrying it. Publishing them is a one-word change here
- *    (`Object.getOwnPropertyNames` -> `Reflect.ownKeys`), but whether a record
- *    payload may hold a symbol key at all is a question about the PAYLOAD
- *    contract — the boundary #12397 drew and this card does not cross. It is
- *    reported open on #12578 and pinned below in its open state, so answering
- *    it changes a recorded fact instead of an unnoticed one.
+ *  - SYMBOL KEYS used to carry the identical disagreement, pinned open below:
+ *    the write succeeded silently, persisted into `data`, and only the
+ *    enumeration face omitted it. [#12603] The maintainer ruling (2026-08-27,
+ *    Option C refusal arm) answered the payload-contract question this file
+ *    left open: a record payload is a declarable, string-keyed field set, and
+ *    no metadata schema can declare a symbol field. `set` and `defineProperty`
+ *    now REFUSE a symbol-keyed write, loudly, before it ever reaches `data` —
+ *    Option B (publish via `Reflect.ownKeys`) was declined, because it would
+ *    have made the undeclarable key kind a published contract instead of
+ *    closing it. The case below is INVERTED accordingly, in place: it used to
+ *    pin the disagreement open, and now pins the refusal.
  *
  * `wrapDeclarativeHook` is driven directly rather than through `ObjectQL`, for
  * the reason the sibling trap-set files give: the subject is the wrapper's
@@ -195,31 +199,52 @@ describe('[#12578] the flat-input `ownKeys` reports the payload own-key set, and
     expect(seen.readMulti).toBe(false);
   });
 
-  it('OPEN QUESTION, pinned in its open state — a symbol key carries the same disagreement', async () => {
-    // Reported on #12578 rather than decided here: publishing symbol keys
-    // through `ownKeys` is `Reflect.ownKeys` in one line, but whether the
-    // record payload may CARRY a symbol key is a payload-contract question and
-    // a maintainer floor (#12397's boundary).
+  it('[#12603] REFUSAL, not agreement — a symbol key is rejected before it can ever reach data', async () => {
+    // INVERTS the OPEN QUESTION pin this case used to carry (verbatim, before
+    // this card): `input[sym] = value` succeeded silently, persisted into
+    // `data`, and only `Reflect.ownKeys`/`getOwnPropertySymbols` omitted it —
+    // two instruments said own, enumeration said no, and the payload the
+    // engine persisted held it regardless.
     //
-    // What the measurement establishes, and what this case records: symbol keys
-    // already reach `data` through the `set` trap and already persist. So the
-    // open question is about what the enumeration face should PUBLISH, not
-    // about what a hook can already put on the row.
+    // Maintainer ruling, 2026-08-27, Option C refusal arm: a record payload is
+    // a declarable, string-keyed field set — no metadata schema can declare a
+    // symbol field, so the write is refused at the boundary instead of hidden
+    // after it lands. There is no longer a persisted symbol key for the three
+    // instruments to disagree about, so this is a refusal pin, not an
+    // agreement pin — asserted for both traps the ruling names.
     const raw: any = { data: { subject: 'help' }, options: {} };
-    const sym = Symbol.for('objectstack.test.12578');
-    const seen: Record<string, unknown> = {};
-    await runHook(raw, (input) => {
-      input[sym] = 'symvalue';
-      seen.ownness = ownness(input, sym);
-      seen.symbols = Object.getOwnPropertySymbols(input);
-    });
+    const sym = Symbol.for('objectstack.test.12603');
 
-    // Today: two instruments say own, enumeration says no — the defect's shape,
-    // deliberately left standing on this half.
-    expect(seen.ownness).toEqual({ enumeration: false, hasOwnProperty: true, descriptor: true });
-    expect(seen.symbols).toEqual([]);
-    // …while the payload the engine persists holds it.
-    expect(Object.getOwnPropertySymbols(raw.data)).toEqual([sym]);
-    expect((raw.data as any)[sym]).toBe('symvalue');
+    let setThrew: unknown;
+    await runHook(raw, (input) => {
+      try {
+        input[sym] = 'symvalue';
+      } catch (e) {
+        setThrew = e;
+      }
+    });
+    expect(setThrew).toBeInstanceOf(TypeError);
+    const setMessage = (setThrew as TypeError).message;
+    expect(setMessage).toMatch(/symbol/i); // names the key kind
+    expect(setMessage).toMatch(/hook input/i); // names the surface
+    // Refused BEFORE `data` is touched — nothing persisted, sibling field intact.
+    expect(Object.getOwnPropertySymbols(raw.data)).toEqual([]);
+    expect(raw.data.subject).toBe('help');
+
+    let definePropertyThrew: unknown;
+    await runHook(raw, (input) => {
+      try {
+        Object.defineProperty(input, sym, { value: 'dp-value', enumerable: true, configurable: true });
+      } catch (e) {
+        definePropertyThrew = e;
+      }
+    });
+    expect(definePropertyThrew).toBeInstanceOf(TypeError);
+    expect((definePropertyThrew as TypeError).message).toMatch(/symbol/i);
+    expect(Object.getOwnPropertySymbols(raw.data)).toEqual([]);
+
+    // The three instruments now agree there is no such key at all — the
+    // refusal closes the disagreement this file otherwise exists to police.
+    expect(ownness(raw.data, sym)).toEqual(NOT_OWN);
   });
 });

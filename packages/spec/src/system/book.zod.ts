@@ -229,6 +229,40 @@ export interface ResolvedBook {
   groups: ResolvedGroup[];
 }
 
+/**
+ * The rendered-tree shapes above, as Zod — the response contract of
+ * `GET /meta/book/:name/tree`, which answers `resolveBookTree()`'s
+ * `ResolvedBook` verbatim (#12038, a describe-only transcription: the
+ * interfaces above stay the compile-time source `resolveBookTree` is typed
+ * by, and the `book-tree response contract` block in `book.test.ts` pins each
+ * schema type-identical to its interface so the two spellings cannot drift).
+ * Re-exported into `@objectstack/spec/api` (ruling 5A) so the route-ledger
+ * resolver can name it.
+ */
+export const ResolvedEntrySchema = lazySchema(() => z.object({
+  doc: z.string().optional().describe('Doc name, or undefined for an external link / separator.'),
+  href: z.string().optional().describe('External link target, when the entry is a link.'),
+  label: z.string().optional().describe('Display label, when one resolved.'),
+  description: z.string().optional().describe('Doc description, when one resolved.'),
+  badge: z.string().optional().describe('Badge text (e.g. "beta"), when declared.'),
+  icon: z.string().optional().describe('Icon name, when declared.'),
+  separator: z.boolean().optional().describe('True for a `---` separator node.'),
+}));
+
+/** One resolved group (section) of the tree — see {@link ResolvedEntrySchema}. */
+export const ResolvedGroupSchema = lazySchema(() => z.object({
+  key: z.string().describe('The group\'s key (from the spine, or `uncategorized`).'),
+  label: z.string().describe('The group\'s display label.'),
+  entries: z.array(ResolvedEntrySchema).describe('The group\'s resolved entries, in render order.'),
+}));
+
+/** The whole resolved tree `GET /meta/book/:name/tree` answers. */
+export const ResolvedBookSchema = lazySchema(() => z.object({
+  name: z.string().describe('The book\'s machine name.'),
+  label: z.string().optional().describe('The book\'s display label, when it declares one.'),
+  groups: z.array(ResolvedGroupSchema).describe('The resolved groups, in render order.'),
+}));
+
 const UNCATEGORIZED_KEY = 'uncategorized';
 
 /** Compile a `*`-glob over doc names to a RegExp anchored on the whole name. */

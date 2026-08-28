@@ -25,6 +25,15 @@ import { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-h
 // the value `createStandaloneStack` actually returns, never against a copy of
 // it. `@objectstack/spec` is a plain `dependencies` entry of this package.
 import { RestApiConfigSchema } from '@objectstack/spec/api';
+// [#12450] The CONSUMER seam itself, imported at MODULE LOAD (the #10126 rule
+// below): `@objectstack/rest` is a plain `dependencies` entry of this package,
+// and this package's vitest config aliases it to REST's SOURCE — so the case
+// that drives it measures the seam as it stands in this checkout, not as it
+// stands in some build artifact. The dependency only runs this way:
+// `@objectstack/runtime` depends on `@objectstack/rest`, so the producer→consumer
+// coupling cannot be written from inside `packages/rest` without a cycle, and
+// this file is where it has to live.
+import { RestServer } from '@objectstack/rest';
 // The REAL resolution, imported — not reproduced. `@objectstack/plugin-security`
 // is a plain `dependencies` entry of this package (and another test in this same
 // package, src/domains/share-links-enforcement-context.test.ts, already imports
@@ -153,6 +162,34 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
       (i) => i.path.join('.') === 'projectResolution',
     );
     expect(issue?.code).toBe('invalid_value');
+  });
+
+  it('[#12450] the emitted `api` block also survives the REAL RestServer construction', () => {
+    // The case above proves the emitted value is DECLARED. It cannot prove that
+    // the seam which CONSUMES it runs that declaration — and until #12450 that
+    // seam did not: `RestServer` `.omit()`ed `projectResolution` out of its own
+    // parse, so the undeclared strategy constructed a server happily for as long
+    // as this factory shipped it. A schema pin is not an execution pin, and that
+    // gap is exactly #11637's defect class.
+    //
+    // ⭐ THIS is the case that goes RED if this factory ever emits an undeclared
+    // strategy again — measured against `result.api`, the REAL boot output, never
+    // a restatement of it. Its sibling in
+    // `packages/rest/src/rest-config-parse-not-cast.test.ts` pins what the seam
+    // does with such a value once it arrives; only this one can see what the
+    // platform actually hands it.
+    const httpServer = {
+      get: () => {}, post: () => {}, put: () => {}, delete: () => {}, patch: () => {},
+      use: () => {}, listen: () => {}, close: () => {},
+    } as any;
+    const protocol = {
+      getMetaItems: async ({ type }: { type: string }) => ({ type, items: [] }),
+    } as any;
+    const rest = new RestServer(httpServer, protocol, { api: { ...result.api } } as any);
+    // Read back off the normalized config: a strategy that parsed and was then
+    // dropped in normalization would still answer a correct mount path.
+    expect((rest as any).config.api.projectResolution).toBe('auto');
+    expect((rest as any).config.api.enableProjectScoping).toBe(false);
   });
 
   it('the surfaced config feeds the REAL appSecurityPluginOptions → the app profile', () => {

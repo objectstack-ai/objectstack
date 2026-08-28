@@ -13,7 +13,7 @@
     "automation/ActionDescriptor:supportsPause = false",
     "automation/ActionDescriptor:supportsRetry = true",
     "automation/ApprovalEscalation:action = \"notify\"",
-    "automation/ApprovalEscalation:enabled = false",
+    "automation/ApprovalEscalation:enabled = true",
     "automation/ApprovalEscalation:notifySubmitter = true",
     "automation/ApprovalNodeConfig:behavior = \"first_response\"",
     "automation/ApprovalNodeConfig:lockRecord = true",

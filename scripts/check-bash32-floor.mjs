@@ -85,6 +85,35 @@
  * cover: they execute the real path with the builtin disabled, so a dynamically
  * built `mapfile` fails there and nowhere else. Two instruments, one class.
  *
+ * ## The 4.0 operator set, and what is deliberately NOT in the table
+ *
+ * A denylist's absences read as approvals, so the absences are written down
+ * here rather than left to be re-derived one card at a time. After the sweep,
+ * every OPERATOR bash 4.0 added has a row: `|&`, `&>>`, `;&`, `;;&`,
+ * `${x^^}`/`${x,,}`, and the `{x..y..incr}` brace increment. Out, with reasons:
+ *
+ *   `**` (globstar). Not a construct on its own — `**` without `shopt -s
+ *   globstar` is two ordinary globs and legal on 3.2, so what is refusable is
+ *   the option, and the `shopt-4` row already refuses it. A literal `**` token
+ *   would also fire on arithmetic exponentiation and on every doubled asterisk
+ *   in a `find` argument.
+ *
+ *   New FLAGS on builtins already refused whole (`mapfile -d`, `readarray -C`).
+ *   A `builtin` row refuses its builtin at every flag, so these need no row.
+ *
+ *   Variables added after 4.0 — `BASH_XTRACEFD` (4.1), `BASH_ARGV0` (5.0),
+ *   `SRANDOM` (5.1), `PROMPT_DIRTRIM`. Outside the 4.0 line this sweep drew.
+ *   They are named here so the next reader inherits the list instead of
+ *   rediscovering it, which is the cost this section exists to stop paying.
+ *
+ * One entry has LEFT this list, and the departure is recorded because a list of
+ * absences that quietly shrinks is as misleading as one that never existed.
+ * `test -v` / `[ -v ]` was written here as an open hole — the `-v` unary is one
+ * construct with THREE spellings and the `has-v` row saw only `[[` — and it is
+ * now closed: that row covers all three. The false-positive judgement the
+ * closure needed is written at the row itself rather than here, because that is
+ * where a future reader tempted to loosen the pattern will be standing.
+ *
  * ## Population
  *
  * Tracked files under `POPULATION_ROOTS` that are shell: a `.sh` name, or a
@@ -176,6 +205,32 @@ const CMD_POS =
  * actually decides findings: that each `pattern` matches a real, parseable
  * instance of the construct it claims to describe, and matches nothing in the
  * exempt forms beside it.
+ *
+ * The four rows added by the 4.0 operator sweep (`pipe-both`,
+ * `case-fallthrough-next`, `brace-increment`, `bashpid`) are the exception:
+ * their versions were read off the bash NEWS text itself, which was reachable
+ * from the seat that added them. `|&` is "a synonym for `2>&1 |`", `;&` and
+ * `;;&` are the two new case terminators, and `$BASHPID` is "a new variable" —
+ * all four entries under bash 4.0.
+ *
+ * `has-v` is the second exception, and the only row whose version has been read
+ * from a primary source in BOTH of bash's own release documents. It is recorded
+ * at length because the row was challenged and the challenge was refused on
+ * measurement, which is the expensive half to re-derive. #12760 reported the
+ * `-v` unary as bash 4.1 and proposed correcting this row's `4.2` down. In the
+ * bash maintainer's NEWS the line
+ *
+ *     f.  test/[/[[ have a new -v variable unary operator, which returns
+ *         success if `variable' has been set.
+ *
+ * occurs exactly ONCE in the whole file, under "the new features added to
+ * bash-4.2 since the release of bash-4.1"; CHANGES carries the same line under
+ * `bash-4.2-alpha`. The 4.1 reading is the one that section header invites — it
+ * names two versions and the second is the wrong one to take. `4.2` stands. The
+ * later entries corroborate it rather than competing with it: 4.3 "The
+ * test/[/[[ `-v variable' binary operator now understands array" references,
+ * and 5.1 "`test -v N' can now test whether or not positional parameter N is
+ * set." Both extend an operator that already exists.
  *
  * `kind` selects the exemption rule, and is the whole of E2/E3:
  *
@@ -308,14 +363,104 @@ export const CONSTRUCTS = [
     probe: 'case x in x) echo a ;;& *) echo b ;; esac',
     exemptProbe: 'case x in x) echo a ;; esac',
   },
+  //
+  // ⚠️ The two `case` terminators bash 4.0 added are a PAIR, and the row above
+  // owns only one of them. Bash's own names, from the 4.0 NEWS: `;&` "causes
+  // execution to continue with the action associated with the next pattern",
+  // `;;&` "causes the shell to test the next set of patterns". So the id
+  // `case-fallthrough` above sits on `;;&` for historical reasons — the row
+  // below is the actual fall-through. The ids are not renamed here: an id is
+  // what a finding is reported under, and this card's job is closing an
+  // ABSENCE, not renaming what is present.
+  //
+  // The lookbehind is load-bearing and not cosmetic: `;;&` CONTAINS `;&`, so a
+  // bare `;&` token double-flags every `;;&` line, and half of each pair of
+  // findings then names the wrong construct and the wrong repair. Both
+  // directions of the disjointness are pinned in `--self-test`, because a
+  // one-sided pin passes with the lookbehind deleted.
+  {
+    id: 'case-fallthrough-next',
+    since: '4.0',
+    kind: 'syntax',
+    spelling: ';& case terminator — fall through to the next action, untested',
+    token: String.raw`(?<!;);&`,
+    breaks: 'a syntax error at parse time, so the script does not start',
+    fix: 'repeat the body, or restructure as `if`',
+    probe: 'case x in x) echo a ;& *) echo b ;; esac',
+    exemptProbe: 'case x in x) echo a; echo b ;; esac',
+  },
+  //
+  // The `-v` unary is ONE construct with THREE spellings: bash 4.2 gave it to
+  // `test`, `[` and `[[` together. Until #12760 this row was anchored to the
+  // `[[` spelling alone, so two thirds of the construct walked past — the
+  // denylist-absence shape again, one level down, INSIDE a row that already
+  // existed and therefore read as covered.
+  //
+  // Widening it is NOT the mechanical edit the four 4.0 operator rows were,
+  // because `[ -v` is also the opening of an ordinary bracket EXPRESSION:
+  // `tr -d '[ -v]'` is the character range space-to-v, and a `sed` class or a
+  // `case` glob carries the same shape legitimately. A wrong widening reddens
+  // the tree on CORRECT 3.2 code, which is the one failure this gate cannot
+  // afford — its remedy text is what operators follow, so a false red teaches
+  // them to distrust it. Three discriminators, each pinned in both directions
+  // in `--self-test`, and each load-bearing on a line the other two miss:
+  //
+  //   1. COMMAND POSITION — `kind: 'builtin'`, so CMD_POS applies. `test` and
+  //      `[` are builtins and `[[` is a reserved word, so all three take effect
+  //      only where a command can start. This is E3 unchanged, and it is shell
+  //      semantics rather than a heuristic: `[[` outside command position is
+  //      not the operator at all. A bracket expression is an ARGUMENT — in
+  //      `tr -d '[ -v]'` the `[` sits after a quote, which is no separator.
+  //      (`coproc` is the precedent for a reserved word carried as `builtin`.)
+  //   2. `-v` IS A WHOLE WORD — `[ \t]+` on BOTH sides. A range closes its class
+  //      immediately after the `v`, so it never reaches an operand. This is the
+  //      one that carries a `case` glob at the start of a line, where
+  //      discriminator 1 matches and cannot help.
+  //   3. AN OPERAND FOLLOWS. The unary takes a variable name, an array
+  //      reference (4.3), a positional parameter (5.1) or an expansion — never
+  //      a `]`. This is the one that carries `[ -v ]`, which is not the unary
+  //      at all but a 3.2-LEGAL one-argument `test` asking whether the string
+  //      `-v` is non-empty.
+  //
+  // The two failure DIRECTIONS differ across the spellings, the way the
+  // `&>>`/`|&` pair does, and the message now says so. Measured on bash 5.2.21
+  // with `-Z` standing in for `-v`, since an unrecognised unary takes the same
+  // path today that `-v` takes on 3.2 — a proxy, stated as one:
+  //
+  //   `[[ -Z name ]]`  `bash -n` FAILS: "conditional binary operator expected",
+  //                    "syntax error near `name'". A parse error, so not one
+  //                    line of the script runs.
+  //   `[ -Z name ]`    both PARSE; at run time "unary operator expected" goes
+  //   `test -Z name`   to stderr, the test is FALSE, and the run CONTINUES.
+  //
+  // So the row that matched only `[[` carried the QUIET description — which
+  // belonged to the two spellings it could not see, and not to the one it could.
+  //
+  // The attributions above are MEASURED rather than asserted. Each
+  // discriminator was removed on disk in turn and `--self-test` read back:
+  //
+  //   drop 1 and 3, keep the word boundary   4 legs red — `run_test -v`, the
+  //                                          quoted mention, `[ -v ]`
+  //   drop all three                         7 legs red — adding the `tr`,
+  //                                          `sed` and `case`-glob lines
+  //   narrow back to `[[` alone              10 legs red — including both new
+  //                                          coverage-floor entries
+  //
+  // So `tr -d '[ -v]'` is carried TWICE over — the quote and the closing `]`
+  // each suffice alone — while the `case` glob rests on the word boundary alone
+  // and `[ -v ]` on the operand rule alone. No control below is decoration, and
+  // no discriminator above is redundant.
   {
     id: 'has-v',
     since: '4.2',
-    kind: 'syntax',
-    spelling: '[[ -v name ]]',
-    token: String.raw`\[\[[ \t]+-v[ \t]`,
-    breaks: '`-v: unary operator expected`, and the test evaluates FALSE — the quiet direction',
-    fix: '[[ -n "${name+set}" ]]',
+    kind: 'builtin',
+    spelling: '[[ -v name ]] / [ -v name ] / test -v name',
+    token: String.raw`(?:\[\[?|test)[ \t]+-v[ \t]+(?=[A-Za-z0-9_"'$])`,
+    breaks:
+      'with `[[`, a PARSE error ("conditional binary operator expected") and the script does not '
+      + 'start; with `[` and `test`, "unary operator expected" on stderr, the test evaluates FALSE, '
+      + 'and the run CONTINUES past it — the quiet direction',
+    fix: '[[ -n "${name+set}" ]], or [ -n "${name+set}" ] for the single-bracket spellings',
     probe: '[[ -v name ]] && echo yes',
     exemptProbe: '[[ -n "${name+set}" ]] && echo yes',
   },
@@ -340,6 +485,66 @@ export const CONSTRUCTS = [
     fix: '>> file 2>&1',
     probe: 'echo hi &>> /dev/null',
     exemptProbe: 'echo hi >> /dev/null 2>&1',
+  },
+  //
+  // `|&` is the row above's twin: same bash release, same table, and until this
+  // sweep only one of the two was known here — which is the whole shape of a
+  // denylist defect, because an absence from a denylist reads as an approval.
+  // The two differ in the DIRECTION of the 3.2 failure, and the messages say
+  // so: `&>>` is parsed as `&` then `>>` and quietly BACKGROUNDS the command,
+  // while `|&` does not parse at all.
+  {
+    id: 'pipe-both',
+    since: '4.0',
+    kind: 'syntax',
+    spelling: '|& pipe-both operator',
+    token: String.raw`\|&`,
+    breaks:
+      'a syntax error at parse time ("syntax error near unexpected token &") — the script does '
+      + 'not start, so not one line of it runs',
+    fix: '2>&1 | — which is what bash 4.0 documents `|&` as a synonym for',
+    probe: 'echo a |& cat',
+    exemptProbe: 'echo a 2>&1 | cat',
+  },
+  //
+  // The sweep's one QUIET row. `{x..y}` is old enough for the floor; the
+  // optional `..incr` third field is 4.0, and a bash that cannot parse a
+  // sequence expression does not complain — it leaves the whole brace word
+  // LITERAL (measured on this host with a deliberately unparseable increment:
+  // `{1..10..x}` prints back as its own ten characters). So the 3.2 symptom is
+  // a loop that runs exactly ONCE, over a nonsense value, at exit 0.
+  //
+  // The pattern is deliberately tighter than the other `syntax` rows: a
+  // sequence expression's fields are alphanumeric runs and an integer step, so
+  // requiring that shape keeps ordinary brace LISTS of relative paths —
+  // `cp {../a,../b} .`, which carries two `..` runs inside one pair of braces —
+  // out of the findings. Pinned both ways below.
+  {
+    id: 'brace-increment',
+    since: '4.0',
+    kind: 'syntax',
+    spelling: '{x..y..incr} brace-expansion increment',
+    token: String.raw`\{[A-Za-z0-9]+\.\.[A-Za-z0-9]+\.\.[-+]?[0-9]+\}`,
+    breaks:
+      'NOT an error — the brace word is left literal, so the loop runs ONCE over the string '
+      + '`{1..10..2}` itself and the run exits 0. The quiet direction, and the reason this row exists',
+    fix: '`seq FIRST INCR LAST` in a `for` loop, or an explicit counter',
+    probe: 'for i in {1..10..2}; do echo "$i"; done',
+    exemptProbe: 'for i in {1..10}; do echo "$i"; done',
+  },
+  {
+    id: 'bashpid',
+    since: '4.0',
+    kind: 'variable',
+    spelling: 'BASHPID',
+    token: String.raw`\$\{?BASHPID(?:[^A-Za-z0-9_]|$)`,
+    breaks:
+      'unbound. Under `set -u` that is fatal; without it the read yields EMPTY, so a pid-derived '
+      + 'lock name or tempdir collapses to a shared constant and stops separating processes',
+    fix: '`$$` read through a `${...:-}` guard — noting `$$` is the PARENT shell\'s pid inside a '
+      + 'subshell, which is the difference BASHPID exists for',
+    probe: 'lock="/tmp/l.$BASHPID"',
+    exemptProbe: 'lock="/tmp/l.${BASHPID:-$$}"',
   },
   {
     id: 'epoch-vars',
@@ -602,6 +807,151 @@ function selfTest() {
   t('3.2-legal `;;` is not flagged', ids('case x in x) echo a ;; esac').length === 0);
   t('3.2-legal `read -n 1` is not flagged', ids('read -n 1 ch').length === 0);
   t('3.2-legal `exec 9>` is not flagged', ids('exec 9>"$lock"').length === 0);
+
+  // --- ⭐ a COVERAGE FLOOR: deleting a row must redden this self-test -------
+  //
+  // Every leg above that iterates `CONSTRUCTS` is parameterised BY the table,
+  // so deleting a row deletes its own tests and the suite stays green with the
+  // coverage gone — which is the exact species this gate exists to refuse, one
+  // level up, in the instrument instead of the tree. These cases are not
+  // parameterised: they name real lines and require that SOMETHING still
+  // refuses each one. Written against behaviour rather than ids, so renaming a
+  // row is free and removing its coverage is loud. `&>>` is in the list as the
+  // control — it is the row whose presence made the `|&` absence legible.
+  //
+  // The two `-v` spellings are here for a VARIANT of the same reason. They live
+  // on a row that already existed, so deleting the row is not the only way to
+  // lose them: narrowing its pattern back to the `[[` spelling would too, and
+  // that is a one-character edit no row count would notice.
+  for (const [label, line] of [
+    ['&>> (append-both)', 'exec "$@" &>> "$logfile"'],
+    ['|& (pipe-both)', 'make build |& tee build.log'],
+    [';& (case fall-through)', 'case "$1" in -v) verbose=1 ;& *) run ;; esac'],
+    ['{x..y..incr} (brace increment)', 'for i in {0..100..10}; do echo "$i%"; done'],
+    ['$BASHPID', 'tmp="$TMPDIR/work.$BASHPID"'],
+    ['[ -v (single-bracket unary)', 'if [ -v CONFIG_PATH ]; then :; fi'],
+    ['test -v (bare `test` unary)', 'test -v CONFIG_PATH && echo set'],
+  ]) {
+    t(`the table still refuses ${label}`, scanText('f.sh', line).length > 0, line);
+  }
+
+  // --- ⭐ the two `case` terminators stay DISJOINT --------------------------
+  //
+  // `;;&` CONTAINS `;&`. Without the `;&` row's lookbehind every `;;&` line
+  // yields two findings, one of them naming the wrong construct and the wrong
+  // repair. Pinned in BOTH directions: a one-sided pin passes with the
+  // lookbehind deleted, because `;&` matching `;;&` is invisible from the
+  // `;&`-only side.
+  t(
+    '`;;&` is the case-fallthrough row ALONE',
+    ids('case x in x) echo a ;;& *) echo b ;; esac').join() === 'case-fallthrough',
+    `got ${JSON.stringify(ids('case x in x) echo a ;;& *) echo b ;; esac'))}`,
+  );
+  t(
+    '`;&` is the case-fallthrough-next row ALONE',
+    ids('case x in x) echo a ;& *) echo b ;; esac').join() === 'case-fallthrough-next',
+    `got ${JSON.stringify(ids('case x in x) echo a ;& *) echo b ;; esac'))}`,
+  );
+
+  // --- ⭐ the `-v` unary: three spellings, one release, one bracket trap ----
+  //
+  // bash 4.2 gave `-v` to `test`, `[` and `[[` in one release, so the three are
+  // one construct on one row. These legs are deliberately NOT parameterised by
+  // `CONSTRUCTS`: a table-driven leg supplies ONE probe per ROW, which is
+  // exactly how two thirds of this construct stayed unseen while the suite
+  // stayed green. A per-row probe cannot pin a per-SPELLING gap.
+  //
+  // ⚠️ Every positive pins the ARRIVAL, not the departure. `length > 0` is
+  // satisfied by a row that reports these lines under the WRONG id and prints
+  // the wrong remedy, and "no longer the empty result" is not the claim here.
+  for (const [label, line] of [
+    ['[[ -v name ]]', '[[ -v name ]] && echo yes'],
+    ['[ -v name ]', '[ -v name ] && echo yes'],
+    ['test -v name', 'if test -v name; then :; fi'],
+  ]) {
+    t(
+      `\`${label}\` is reported as has-v — the arrival, not merely a non-empty result`,
+      ids(line).includes('has-v'),
+      `got ${JSON.stringify(ids(line))}`,
+    );
+    const vParse = spawnSync('bash', ['-n'], { input: `${line}\n`, encoding: 'utf8' });
+    t(`\`${label}\` is shell this host can parse`, vParse.status === 0, (vParse.stderr || '').trim());
+  }
+  t('has-v after `&&` → RED', ids('cd "$d" && [ -v name ]').includes('has-v'));
+  t('has-v inside `$( )` → RED', ids('n=$( [ -v name ] && echo 1 )').includes('has-v'));
+  t('has-v after `while` → RED', ids('while [[ -v name ]]; do :; done').includes('has-v'));
+  t('has-v with a quoted operand → RED', ids('[ -v "$name" ]').includes('has-v'));
+  t('has-v with a 4.3 array reference → RED', ids('[[ -v arr[0] ]] && echo yes').includes('has-v'));
+  t('has-v with a 5.1 positional parameter → RED', ids('test -v 1 && echo yes').includes('has-v'));
+  t('and the single-bracket 3.2 repair stays green', !ids('[ -n "${name+set}" ]').includes('has-v'));
+
+  // ⭐ The false-positive half — the whole reason this row was filed rather
+  // than swept. Every line below is CORRECT 3.2 shell, and a row that reddens
+  // any of them teaches operators to distrust the remedy text they are supposed
+  // to follow. The discriminator carrying each is named, because the three are
+  // not redundant: the first three lines are each carried by a DIFFERENT one.
+  t(
+    'a `tr` bracket EXPRESSION is not the unary — carried TWICE over',
+    ids("tr -d '[ -v]' < in > out").length === 0,
+    'the `[` sits after a quote (not a command separator) AND the class closes at `-v]`; '
+      + 'measured, either one alone keeps this green',
+  );
+  t(
+    'a `sed` character class likewise — a second idiom, the same shape',
+    ids("sed 's/[ -v]//g' file.txt").length === 0,
+  );
+  t(
+    'a `case` glob at the START of a line — carried by the WORD BOUNDARY alone',
+    ids('  [ -v]) echo "in range" ;;').length === 0,
+    'command position DOES match here; the class closing at `-v]` is what saves it',
+  );
+  t(
+    '`[ -v ]` is a 3.2-LEGAL one-argument test — carried by the OPERAND rule alone',
+    ids('[ -v ] && echo nonempty').length === 0,
+    'position and word boundary both match here; only the absent operand saves it',
+  );
+  t('a command whose name merely ENDS in `test` is not `test`', ids('run_test -v "$case"').length === 0);
+  t(
+    'and a mention inside a quoted argument invokes nothing (E3)',
+    ids('echo "use test -v name to check whether it is set"').length === 0,
+  );
+  //
+  // ⚠️ A negative control is satisfied by a pattern that matches NOTHING at
+  // all, so the halves above are paired with the red they are one token from.
+  t(
+    'minimal pair: adding an OPERAND flips `[ -v ]` red',
+    ids('[ -v ] && echo nonempty').length === 0 && ids('[ -v x ] && echo nonempty').includes('has-v'),
+    'were the red half green, every negative above would pass on a dead row',
+  );
+  t(
+    'and the negatives are not passing on a dead row: it still fires',
+    ids('[ -v name ] && echo yes').includes('has-v'),
+  );
+
+  // --- ⭐ the 3.2 replacements the new rows point at must stay GREEN --------
+  //
+  // The load-bearing half. A `|&` pattern that also matched `2>&1 |` would red
+  // every correct pipeline in the repo — the gate refusing its own remedy — and
+  // the failure text tells operators to write exactly that.
+  t('`2>&1 |`, the replacement `|&` is a synonym FOR, is not flagged', ids('echo a 2>&1 | cat').length === 0);
+  t('an ordinary pipe is not flagged', ids('grep -c . f | wc -l').length === 0);
+  t('an ordinary background `&` is not flagged', ids('long_job &').length === 0);
+  t('3.2-legal `{1..10}` (no increment) is not flagged', ids('echo {1..10}').length === 0);
+  t('3.2-legal `{a..z}` is not flagged', ids('echo {a..z}').length === 0);
+  t(
+    'a brace LIST of relative paths is not a sequence expression',
+    ids('cp {../a,../b} .').length === 0,
+    'two `..` runs inside one brace pair, and no increment',
+  );
+  t('a `for` over an explicit list is not flagged', ids('for i in 0 10 20; do echo "$i"; done').length === 0);
+
+  // --- E2 again, for the row the sweep added --------------------------------
+  t('E2 `$BASHPID` is an unguarded read → RED', ids('p=$BASHPID').includes('bashpid'));
+  t('E2 `${BASHPID}` is an unguarded read → RED', ids('p=${BASHPID}').includes('bashpid'));
+  t('E2 `${BASHPID:-$$}` is the repair → green', !ids('p="${BASHPID:-$$}"').includes('bashpid'));
+  t('E2 a bare word is not a read: `unset BASHPID` → green', !ids('unset BASHPID').includes('bashpid'));
+  t('E2 `$BASHPIDX` is a different name → green', !ids('p=$BASHPIDX').includes('bashpid'));
+  t('and `$$` — the 3.2 spelling — is not flagged', ids('p=$$').length === 0);
 
   // --- population membership -----------------------------------------------
   t('a .sh name is shell', isShell('scripts/x.sh', 'echo hi').by === 'extension');

@@ -1972,8 +1972,13 @@ const FormFieldBaseSchema = lazySchema(() => {
    * `current_user` note above describes, arriving from the other end. Prefix
    * every reference with `data.` whether the field sits at the top level or
    * inside a repeater.
+   *
+   * ⛔ **No `features.*` on any form-view predicate — refused at parse**
+   * (ruled 2026-08-27, objectui#6262). Unlike the two fault-open notes above,
+   * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
+   * the ruling and the scanner.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
@@ -2131,9 +2136,11 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * {@link FormFieldSchema.visibleWhen}: `record` (+ `previous`, `parent`) in
    * runtime forms, `data` in metadata-editing forms — and, as there, **no
    * `current_user`**: it is unbound at this level, so such a predicate faults
-   * and falls back to visible (#6146).
+   * and falls back to visible (#6146). ⛔ No `features.*` either — that one is
+   * refused at parse (ruled 2026-08-27, objectui#6262; see
+   * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open.'),
+  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
@@ -2408,6 +2415,124 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
 }
 
 /**
+ * ## Form-view predicates may not name the `features.*` scope root
+ *
+ * Ruled 2026-08-27 on objectui#6262 (maintainer, decision-inbox batch 2 —
+ * option B, vocabulary narrowing): **form views may not name `features.*` in
+ * predicates**, and the exclusion is declared and enforced HERE, at the
+ * authoring/publish door, with a loud rejection.
+ *
+ * ### Why the root is excluded rather than wired up
+ *
+ * A form view is one authored artifact served on two kinds of route, and
+ * `features.*` got two different verdicts from the same predicate text:
+ *
+ * - inside an app (`/apps/:appName/*`) the `features` scope root resolves
+ *   against the real auth-config flags (`GET /api/v1/auth/config`);
+ * - on the console's standalone form routes (`/forms/:name`, public
+ *   `/f/:slug`) no app context exists, the root is UNBOUND, the predicate
+ *   faults — and `visibleWhen`'s fault fallback is `true`, so the field or
+ *   section a feature flag was meant to hide is shown to **everyone**.
+ *
+ * That is a fail-OPEN asymmetry on an access-shaped key. It was measured
+ * before being ruled on (objectui#6262, 2026-08-25, re-verified at dispatch):
+ * ZERO authored `features.*` form-view predicates exist across
+ * apps/examples/content, against an 18-hit positive control on authored
+ * `visibleWhen` predicates generally — so the honest fix is to narrow the
+ * vocabulary at the door, not to build an auth-config fetch + pre-load
+ * semantics on a route with zero consumers.
+ *
+ * ### Exactly this surface, nothing else
+ *
+ * The exclusion covers every predicate a FORM VIEW carries: section-level
+ * `visibleWhen`, field-level `visibleWhen` (including sub-fields of
+ * composite/repeater/record fields at any depth), and per-option
+ * `visibleWhen` on options authored inline in the form view. App-context
+ * predicate surfaces (`action.visible`, bulk-action `visible`, page/app
+ * predicates) keep `features.*` exactly as before — those render only where
+ * the root is bound.
+ *
+ * ### What the scanner can and cannot decide
+ *
+ * Parse time sees the CEL *source string*. The scanner strips string literals
+ * (so `"features"` inside quoted text cannot false-positive) and then looks
+ * for `features` in ROOT position — not preceded by `.` or an identifier
+ * character — so `record.features_enabled` and `record.features.x` (a record
+ * field that happens to be named `features`) stay legal. An AST-only envelope
+ * (`{ dialect, ast }`, no `source`) is opaque at this layer and passes — the
+ * authoring shape is the source string, and build emits the AST from sources
+ * this gate has already accepted.
+ */
+const FORM_VIEW_FEATURES_RULING = 'ruled 2026-08-27 on objectui#6262';
+
+/** CEL string literals (both quote styles, with escapes) — stripped before the root scan. */
+const CEL_STRING_LITERAL_RE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g;
+
+/**
+ * `features` in root position: start-of-source or a non-identifier,
+ * non-member-access character before it, and no identifier character after —
+ * catches `features.x`, `features['x']`, bare `features` and `has(features.x)`
+ * while leaving `record.features` (member access) and `features_enabled`
+ * (longer identifier) alone.
+ */
+const FEATURES_ROOT_RE = /(?:^|[^.\w])features(?![\w])/;
+
+/**
+ * Scan one parsed form-view predicate (an {@link Expression} envelope — the
+ * bare-string shorthand is already normalized by the time a refinement sees
+ * it) for the excluded `features.*` root. Returns the author-facing refusal,
+ * or `undefined` when the predicate conforms.
+ */
+function checkFormViewPredicateFeaturesRoot(predicate: unknown): string | undefined {
+  if (predicate === null || typeof predicate !== 'object') return undefined;
+  const { dialect, source } = predicate as { dialect?: unknown; source?: unknown };
+  if (dialect !== 'cel' || typeof source !== 'string') return undefined;
+  if (!FEATURES_ROOT_RE.test(source.replace(CEL_STRING_LITERAL_RE, ''))) return undefined;
+  return 'Form-view predicates may not name the `features.*` scope root '
+    + `(${FORM_VIEW_FEATURES_RULING}). A form view also renders on routes with no app context `
+    + '(the console\'s standalone `/forms/:name` and the public `/f/:slug`), where `features` is '
+    + 'UNBOUND: the predicate faults and `visibleWhen` fails OPEN, so the field or section a '
+    + 'feature flag was meant to hide is shown to everyone. Gate by record state instead '
+    + '(`record.*`), or put the feature-gated surface on an app page or action — the surfaces '
+    + 'where `features.*` stays bound.';
+}
+
+/** The subset of a parsed form field the `features.*` root scan reads. */
+type FormFieldPredicateCarrier = {
+  visibleWhen?: unknown;
+  options?: ReadonlyArray<{ visibleWhen?: unknown } | null | undefined>;
+  fields?: ReadonlyArray<string | FormFieldPredicateCarrier | null | undefined>;
+};
+
+/**
+ * Walk one form-view field (and its sub-fields, and its inline options) and
+ * report every predicate naming the excluded `features.*` root. Legacy
+ * bare-string field entries carry no predicate and are skipped.
+ */
+function refineFormFieldFeaturesRoot(
+  field: string | FormFieldPredicateCarrier | null | undefined,
+  path: ReadonlyArray<string | number>,
+  ctx: z.RefinementCtx,
+): void {
+  if (field === null || field === undefined || typeof field === 'string') return;
+  const refusal = checkFormViewPredicateFeaturesRoot(field.visibleWhen);
+  if (refusal) ctx.addIssue({ code: 'custom', path: [...path, 'visibleWhen'], message: refusal });
+  field.options?.forEach((option, optionIndex) => {
+    const optionRefusal = checkFormViewPredicateFeaturesRoot(option?.visibleWhen);
+    if (optionRefusal) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [...path, 'options', optionIndex, 'visibleWhen'],
+        message: optionRefusal,
+      });
+    }
+  });
+  field.fields?.forEach((sub, subIndex) => {
+    refineFormFieldFeaturesRoot(sub, [...path, 'fields', subIndex], ctx);
+  });
+}
+
+/**
  * Form View Schema
  * Defines the layout for creating or editing a single record.
  *
@@ -2669,10 +2794,13 @@ export const FormViewSchema = lazySchema(() => strictObject({
   // Reject it loudly at parse instead. `.extend()` keeps this check (zod 4
   // attaches refinements to the schema), so the flattened runtime-overlay
   // variant in ViewMetadataSchema enforces it too.
-  if (view.type === 'split') return;
+  //
+  // ⚠️ This refinement runs BEFORE the `.overwrite()` fold — see
+  // {@link foldFormGroupsIntoSections} — so every check here must keep
+  // reading BOTH buckets (`sections` AND the legacy `groups` alias).
   for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
     sections?.forEach((section, index) => {
-      if (section?.pane != null) {
+      if (view.type !== 'split' && section?.pane != null) {
         ctx.addIssue({
           code: 'custom',
           path: [key, index, 'pane'],
@@ -2681,11 +2809,20 @@ export const FormViewSchema = lazySchema(() => strictObject({
             `form views (this form is '${view.type}'). Remove the key or change the form type.`,
         });
       }
+      // The `features.*` scope-root exclusion (ruled 2026-08-27, objectui#6262
+      // — see {@link checkFormViewPredicateFeaturesRoot}): every predicate
+      // this form view carries — section-level, field-level at any depth,
+      // per-option — is refused when it names the root that is unbound on the
+      // standalone form routes. Runs on every form `type`, split included.
+      const sectionRefusal = checkFormViewPredicateFeaturesRoot(section?.visibleWhen);
+      if (sectionRefusal) {
+        ctx.addIssue({ code: 'custom', path: [key, index, 'visibleWhen'], message: sectionRefusal });
+      }
+      section?.fields?.forEach((field, fieldIndex) => {
+        refineFormFieldFeaturesRoot(field, [key, index, 'fields', fieldIndex], ctx);
+      });
     });
   }
-  // ⚠️ Anything added below this loop still runs BEFORE the `.overwrite()`
-  // fold — see {@link foldFormGroupsIntoSections} — so a refinement that
-  // reads sections must keep reading BOTH buckets.
 }).overwrite(foldFormGroupsIntoSections));
 
 /**

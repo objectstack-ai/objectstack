@@ -543,7 +543,7 @@ diverges from the live schema, and the physical column wins at write time.
 |---------|-------------|
 | `os migrate plan` | Dry-run: show how the database has drifted from metadata, categorised safe / needs-confirm / destructive (no changes applied) |
 | `os migrate apply` | Reconcile the database to metadata. Applies loosening changes; destructive ones require `--allow-destructive` |
-| `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — the one drift op `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
+| `os migrate multi-value-columns` | Migrate a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — one of two drift ops `apply` never reconciles for you. Dry run by default; `--apply` runs the statement the finding prints |
 
 ```bash
 os migrate plan                              # Preview drift (no changes)
@@ -632,7 +632,7 @@ occupancy on its own.
 | Category | Examples | Applied by |
 |----------|----------|------------|
 | `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index, replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` |
+| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_widen_varchar_to_text`, which nothing applies |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE` | `os migrate apply --allow-destructive` |
 
 #### Index drift
@@ -667,7 +667,7 @@ it reconciles via a table rebuild (copy → swap) that preserves your data.
 
 #### `os migrate multi-value-columns`
 
-The one drift op `os migrate apply` will **never** apply for you.
+`os migrate apply` will **never** apply this drift op — and it isn't the only one: `manual_widen_varchar_to_text` (an unbounded text-family field left on a pre-existing `varchar` column) is also never applied, but has no `os migrate` subcommand of its own. This section covers the op that does.
 
 A field that gains `multiple: true` over a database that already exists keeps
 its old `varchar` / `text` column: the additive sync adds columns, and never

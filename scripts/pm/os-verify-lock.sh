@@ -92,6 +92,49 @@
 # a kill -9 at any point releases the lock the moment the process dies.
 #
 # ---------------------------------------------------------------------------
+# WHAT THIS LOCK DOES NOT COVER — THE GUARANTEE IS NARROWER THAN THE NAME
+#
+# What this lock guarantees is: NO CONCURRENT LOCKED HEAVY JOB. What every
+# reader has assumed it means is: AN IDLE BOX. Those are not the same sentence,
+# and until this block existed nothing anywhere said so.
+#
+# The gap is not a defect in the acquisition path — exclusion works exactly as
+# described above. It is a POPULATION gap. Only what comes through this entry
+# point is serialised, and the discipline routes builds and test suites here and
+# nothing else. Gate scripts (`pnpm check:*`, the `node scripts/check-*.mjs`
+# family) are neither a build nor a suite, so nothing routes them; neither is a
+# dev server, a `pnpm install`, a docs build, or any free-hand command a sibling
+# agent types at a prompt. All of it runs ALONGSIDE a holder, on the same cores.
+#
+# ⚠️ THE FAILURE MODE IS SILENCE, which is why this is stated and not merely
+# true. Nothing is red, nothing is skipped, no verdict changes, and a wall-clock
+# absolute taken while holding the lock looks EXACTLY as authoritative as one
+# taken on a quiet box. A timing card acquires, believes it has the machine, and
+# publishes seconds it never measured the conditions of.
+#
+# Observed once, in this container, during a real cost measurement (2026-08-25,
+# alongside a locked 13m14s hold): a neighbour's UNLOCKED gate script at ~130%
+# CPU, with 1-minute load averaging 4.36 and peaking at 6.97 on 4 cores. ⛔ That
+# is a HISTORICAL OBSERVATION OF ONE RUN — not a constant, not a prediction, and
+# not something this script measures. Do not quote it as current. What is
+# durable, and what the messages below carry, is the BOUNDARY; the magnitude on
+# any given day is whatever the neighbours happen to be doing.
+#
+# ⛔ THIS IS A DISCLOSURE, NOT A REPAIR, and the difference is deliberate.
+# Routing CPU-heavy gate runs through this entry point would make the name match
+# the guarantee — and it would trade every seat's PARALLELISM for contention on
+# a resource the lock does not cover today. The direction of that trade is
+# unmeasured, so it is a separate card that owes the measurement as its
+# evidence, not a rider on the sentence that admits the gap. Nothing here
+# refuses, shortens or reshapes a hold on account of coverage: same doctrine as
+# the filter preflight and declared unlocked mode — say the true thing loudly,
+# never silently narrow what the caller asked for.
+#
+# Consequence for anyone quoting a number from this wrapper: the seconds are
+# SHARED-BOX seconds. State that beside the absolute, or quote RATIOS, which are
+# what survived when #11707 re-ran a set of absolutes on another machine.
+#
+# ---------------------------------------------------------------------------
 # THE LOCK IS LINUX-ONLY, AND A HOST WITHOUT `flock` SAYS SO RATHER THAN STOPS
 #
 # Maintainer ruling, 2026-08-22: the shared verification lock is declared
@@ -243,6 +286,24 @@ set -uo pipefail
 # single foreground agent call (harness ceiling: 10 minutes). Everything above
 # this is unrepresentable through this entry point — that is the point of the
 # entry point, so it is a constant and not an option.
+#
+# ⛔ THIS IS NOT THE NUMBER TO RAISE, AND THE REASON IS ARITHMETIC RATHER THAN
+# TASTE. It was filed as one (#12538): holds on this lock were measured at 1164s
+# while the budget is 540s, so "raise the budget above the p95 legitimate hold"
+# reads as the obvious repair. It cannot be done. The budget is spent INSIDE one
+# foreground agent turn, and that turn is killed at ~600s by a ceiling nothing in
+# this file can move. A budget of, say, 1200s does not buy 1200s of waiting; it
+# buys a SIGTERM at 600s — no VERDICT line, no ledger record, no NOT MEASURED
+# note, the caller left with the one outcome this whole file exists to prevent
+# (see the bash 3.2 block above: 20 seconds of spinning and ZERO verdicts). The
+# cap at 540s is what keeps the refusal REPORTABLE, with ~60s of headroom for the
+# verdict and the ledger append. Raising it converts an honest exit 99 into an
+# unreportable exit 143.
+#
+# So a wait longer than one turn is not a longer BUDGET. It is a place kept
+# ACROSS turns — the slot mechanism further down, whose ageing bound is the
+# number that actually has to cover a long hold. The card's arithmetic is real;
+# it just indicts SLOT_MAX_AGE_S, not this constant.
 readonly HARD_CAP_S=540
 readonly DEFAULT_WAIT_S=540
 
@@ -275,10 +336,12 @@ HOLDER_FILE="${LOCK_FILE}.holder"
 LEDGER_FILE="${OS_VERIFY_LOCK_LEDGER:-${LOCK_FILE}.ledger}"
 readonly TICKET_MAX_AGE_S=$((HARD_CAP_S + 300))
 
-# How long a PARKED slot keeps the arrival stamp it is holding a place with.
-# Three budgets: long enough that an agent doing lock-free work between
-# attempts still finds its place, short enough that the priority a slot carries
-# over later arrivals is bounded and declared rather than indefinite.
+# How long a PARKED slot keeps the arrival stamp it is holding a place with,
+# measured from when it was LAST RELINQUISHED rather than from the original
+# arrival — see the ageing paragraph in the slots block below for why the clock
+# moved. Long enough that an agent doing lock-free work between attempts still
+# finds its place; short enough that a place nobody is coming back for stops
+# carrying priority over later arrivals.
 readonly SLOT_MAX_AGE_S=$((HARD_CAP_S * 3))
 
 # Past this the ledger stops growing. A record is ~150 bytes, so this is tens
@@ -448,9 +511,18 @@ queue_usable() {
 
 # ticket file: "<pid> <starttime> <arrival-epoch> <label>"
 #
-# A PARKED slot writes pid 0 and starttime 0 -- there is no process behind it,
-# which is the whole point -- so pid 0 is what tells the two kinds apart. It is
-# not a value a real ticket can carry: no waiter here runs as pid 0.
+# A PARKED slot writes pid 0 -- there is no process behind it, which is the
+# whole point -- so pid 0 is what tells the two kinds apart. It is not a value a
+# real ticket can carry: no waiter here runs as pid 0.
+#
+# In a parked record the STARTTIME field carries the relinquish time instead:
+# there is no process, so there is no start time to hold, and the age that
+# decides whether the place is still wanted is measured from there (see the
+# ageing paragraph in the slots block). The field is reused rather than appended
+# because the label is last and must stay last -- a label containing spaces
+# cannot be allowed to displace a field. A 0 there means no relinquish time was
+# recorded (a record written before this, or one whose clock failed), and those
+# age from arrival exactly as they did.
 #
 # Three states, not two, and the third is why this is a classifier rather than
 # the predicate it replaced. `dead` is removed from disk, `active` is queued,
@@ -480,6 +552,18 @@ ticket_state() {
   }
   age=$((now - stamp))
   if [[ "$pid" == 0 ]]; then
+    # A parked place ages from when it was PUT DOWN, not from when it was first
+    # taken. `start` carries that instant for a parked record; a 0 or an
+    # unreadable one falls back to the arrival stamp, which is what every record
+    # written before this did. `since` can only move the age DOWN -- the
+    # relinquish is never earlier than the arrival -- so a clock that went
+    # backwards cannot lengthen a place's life past the arrival-based bound.
+    local since="$stamp"
+    case "$start" in
+      '' | *[!0-9]*) ;;
+      *) ((start > since)) && since="$start" ;;
+    esac
+    age=$((now - since))
     ((age <= SLOT_MAX_AGE_S)) && {
       printf 'parked'
       return 0
@@ -506,6 +590,16 @@ ticket_state() {
     # identity rather than requiring the dying process to have written it. It
     # costs nothing and wedges nothing: parked blocks nobody, and the ageing
     # bound below is the same one every other parked place is held to.
+    #
+    # This shape carries no relinquish time -- the field holds the dead
+    # process's real start time -- so it ages from ARRIVAL, the shorter of the
+    # two windows. Stated rather than fixed, because the direction is the safe
+    # one: such a place expires EARLIER than a politely parked one, never later,
+    # so the worst case is a caller sent to the back, never a line-cut that
+    # outlives its bound. It is also transient in practice -- SIGTERM (what the
+    # foreground ceiling sends) leaves through the trap and parks properly, and
+    # the next resume rewrites the record, so only a slot SIGKILLed on every
+    # turn it ever takes stays in this shape.
     case "${file##*/}" in
       *-s?*)
         ((age <= SLOT_MAX_AGE_S)) && {
@@ -617,13 +711,22 @@ take_ticket() {
 }
 
 # Turn our ticket into a kept place instead of deleting it. Writing pid 0 is
-# what makes it parked; the arrival stamp is preserved verbatim.
+# what makes it parked; the arrival stamp is preserved verbatim, because that
+# stamp IS the place. The relinquish time goes where the starttime was -- a
+# parked record has no process, so it has no start time, and the age that
+# decides whether this place is still wanted runs from here.
+#
+# A clock that will not answer is not a reason to refuse the park: the place is
+# worth more than the freshness of its age. Such a record writes 0 and is aged
+# from arrival, exactly as records written before this mechanism are.
 park_ticket() {
-  local pid0 start0 stamp0 label0
+  local pid0 start0 stamp0 label0 parked_at
   [[ -n "$TICKET" && -f "$TICKET" ]] || return 1
   read -r pid0 start0 stamp0 label0 < "$TICKET" 2> /dev/null || return 1
   case "$stamp0" in '' | *[!0-9]*) return 1 ;; esac
-  printf '0 0 %s %s\n' "$stamp0" "${label0:-?}" > "$TICKET" 2> /dev/null || return 1
+  parked_at="$(now_s 2> /dev/null)" || parked_at=0
+  case "$parked_at" in '' | *[!0-9]*) parked_at=0 ;; esac
+  printf '0 %s %s %s\n' "$parked_at" "$stamp0" "${label0:-?}" > "$TICKET" 2> /dev/null || return 1
   return 0
 }
 
@@ -702,6 +805,36 @@ open_file_pids() {
 human_s() {
   local s="$1"
   if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
+}
+
+# Epoch seconds → a UTC instant a reader can compare against a dated report, or
+# NOTHING (return 1) when this host's `date` cannot produce one. Two spellings
+# exist and they are not interchangeable: GNU takes `-d @N`, BSD/macOS takes
+# `-r N`. ⚠ The failure this guards is not the rejected flag -- it is that on
+# macOS `-d` means something else entirely (it sets the DST flag), so
+# `date -u -d @N '+…'` there formats NOW and returns a perfectly well-formed
+# string for the WRONG INSTANT. A shape check cannot tell that apart from a real
+# conversion, so neither spelling is trusted on shape: each is probed against an
+# epoch whose answer is known, and only a `date` that turns 0 into 1970-01-01 is
+# asked to turn anything else into anything. Same discipline as
+# `stamp_resolution` above, for the same reason -- a caller that cannot get a
+# right answer here must be handed no answer, never a confident wrong one.
+utc_stamp() {
+  local fmt='+%Y-%m-%dT%H:%M:%SZ' out
+  if [[ "$(date -u -d @0 "$fmt" 2> /dev/null)" == '1970-01-01T00:00:00Z' ]]; then
+    out="$(date -u -d "@${1}" "$fmt" 2> /dev/null)"
+  elif [[ "$(date -u -r 0 "$fmt" 2> /dev/null)" == '1970-01-01T00:00:00Z' ]]; then
+    out="$(date -u -r "$1" "$fmt" 2> /dev/null)"
+  else
+    return 1
+  fi
+  case "$out" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+      printf '%s' "$out"
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 # --- the ledger -------------------------------------------------------------
@@ -794,11 +927,43 @@ ledger_append() {
 # while parked it was not waiting. It resumes its place among the callers
 # waiting now, which is the honest meaning of the place it kept.
 #
-# And the priority a slot carries is bounded: the retained arrival stamp ages
-# out at SLOT_MAX_AGE_S from the ORIGINAL arrival, after which the slot is
+# And the priority a slot carries is bounded: past SLOT_MAX_AGE_S the slot is
 # pruned like any dead ticket and the caller starts a fresh one at the back.
 # Without that bound a long-lived slot would cut ahead of newer arrivals
 # indefinitely, which is the same unfairness in the other direction.
+#
+# ⭐ THAT AGE IS MEASURED FROM THE LAST RELINQUISH, NOT FROM THE ORIGINAL
+# ARRIVAL, and the difference is the whole of #12538. Measured against the
+# original-arrival clock: legitimate holds on this lock reach 1164s, and a
+# caller queued behind two of them needs to keep its place for ~40 minutes,
+# while the bound was 27 (3 × the cap). So the caller that did everything right
+# — named a slot, came back every turn, never ran unlocked — was still dropped
+# to the back of the queue by the ageing bound, for the offence of the queue
+# ahead of it being long. That is waiter asymmetry (mechanism 1 at the top of
+# this file) reappearing a third time: obeying the cap remains the losing
+# strategy, now because obedience takes more turns than the place survives.
+#
+# ⚠️ The repair is NOT a bigger constant, and the reason is that the number to
+# size it against does not exist. The ledger cannot price a p95 of legitimate
+# holds: it lives in this container's /tmp and starts empty on every reset, so
+# the population it holds is one shift's worth of whatever ran since — read on
+# 2026-08-27 it was 24 records, max hold 344s, max wait 3s, ZERO queue-timeouts
+# and arrival depth 1 on every single record, i.e. not one contended run of the
+# kind this card is about. Picking `HARD_CAP_S * 6` off the back of four
+# hand-correlated anecdotes would be a constant with the same standing as the
+# one it replaced, and it would be wrong again the first time three long holds
+# queue up instead of two.
+#
+# What the bound is actually FOR is discarding a place nobody is coming back
+# for. So it asks that, and nothing else: the age is the time since the slot
+# was last put down. A caller that keeps returning — the compliant one, the one
+# that spent its turn waiting and came back — keeps its place for as long as it
+# keeps coming back, and its priority is still exactly its arrival stamp, so it
+# is FIFO and not a line-cut. A caller that walks away ages out on the same
+# clock it always did, from the moment it walked away. Nothing here is
+# unbounded: a returning caller can only ever be ahead of arrivals it genuinely
+# preceded, and the tickets ahead of IT can only disappear, so it reaches the
+# head in finite time and its ticket is consumed there.
 #
 # ⛔ None of this touches `flock`. Slots are advisory ordering only, exactly as
 # the ticket queue is; exclusion, the budget and the hard cap are untouched,
@@ -854,6 +1019,92 @@ not_measured_note() {
     log "    same name and you resume where you were, rather than behind everyone who arrived"
     log "    while you were away."
   fi
+}
+
+# ⭐ WHAT A QUEUEING CALLER IS TOLD AT SECOND ZERO, AND WHY IT IS NOT LEFT TO
+# THE EXIT-99 MESSAGE.
+#
+# The slot mechanism above works, and it is the only thing in this file that can
+# serve a wait longer than one foreground turn. Both devs who used it in the
+# shift that produced #12538 found it the same way: from `not_measured_note`,
+# after spending the full 540s budget. That is nine minutes late by
+# construction, and not by a little -- the place a timed-out call loses is
+# EXACTLY the thing a slot would have kept, so learning the name at the moment
+# of loss is learning it after the only moment it was worth anything. A slot
+# named on the next call starts a fresh place at the back.
+#
+# So the disclosure moves to arrival, where it is still actionable, and it is
+# spent only where it buys something: a caller that walks up to a free lock with
+# nobody ahead is told nothing, because it is about to acquire.
+#
+# ⛔ It does NOT refuse, shorten or reshape the wait. Predicting that a wait will
+# not fit and acting on the prediction would be this file's own doctrine
+# inverted -- the filter preflight refuses only what is CERTAINLY worthless and
+# fails open in every other direction, and a queue can drain far faster than any
+# estimate. The full budget is still spent; the caller just gets to decide,
+# before spending it, whether to spend it holding a place.
+announce_arrival() {
+  local depth="$1" ahead=-1 holder contended=0
+  case "$depth" in
+    '' | *[!0-9]*) ;;
+    *) ((depth > 0)) && ahead=$((depth - 1)) ;;
+  esac
+  holder="$(holder_line)"
+  ((ahead > 0)) && contended=1
+  ((contended == 0)) && lock_is_held && contended=1
+  if ((ahead >= 0)); then
+    log "queued: ${ahead} ahead of you · budget ${BUDGET}s · ${holder}"
+  else
+    log "queued: unordered fallback (no ticket) · budget ${BUDGET}s · ${holder}"
+  fi
+  ((contended == 1)) || return 0
+  if [[ -n "$SLOT_SLUG" ]]; then
+    log "  slot '${SLOT_SLUG}' is set — if the budget runs out, this place is KEPT, not lost."
+    return 0
+  fi
+  log "⚠ NO SLOT IS SET and this call is queueing behind someone else."
+  log "⚠   The budget above is capped at ${HARD_CAP_S}s because an acquisition wait has to fit"
+  log "⚠   inside ONE foreground agent turn. It is NOT raisable — and holds on this lock have"
+  log "⚠   been measured at 19 minutes, so a queue can outlast the whole budget honestly."
+  log "⚠   What spans several turns is a SLOT: re-run with OS_VERIFY_LOCK_SLOT=<name> and a"
+  log "⚠   call that gives up PARKS its place instead of returning to the back of the queue"
+  log "⚠   behind everyone who arrived while it was away."
+  log "⚠   ⛔ Set it NOW, not after this call exits: a slot named later starts a NEW place —"
+  log "⚠   it cannot recover the one this call is about to lose."
+  log "⚠   (\`--status\` shows who holds it and who is queued; \`--report\` shows the holds.)"
+  return 0
+}
+
+# ⭐ WHAT THE HOLDER IS TOLD IT ACTUALLY HAS, AT THE MOMENT IT BELIEVES IT HAS
+# THE MACHINE.
+#
+# The coverage block at the top of this file explains the gap; this is the same
+# sentence delivered where the misbelief is formed. A caller reaches this line
+# having just been told ACQUIRED, and the next thing it does is measure
+# something. Told nothing, it measures a shared box and publishes the number as
+# if the lock had cleared it — the silent failure this text exists for.
+#
+# It is UNCONDITIONAL, unlike the arrival notice above, and the asymmetry is the
+# point rather than an oversight. The arrival notice is spent only where it buys
+# something because it is ACTIONABLE ADVICE (set a slot) that a caller walking
+# up to a free lock has no use for. This is not advice, it is the SCOPE OF WHAT
+# WAS JUST GRANTED, and it is equally untrue for a contended acquisition and an
+# uncontended one — an idle queue says nothing at all about the unlocked gate
+# script running beside it. A holder that is told the boundary only when the
+# queue happened to be busy learns it in exactly the runs where it was most
+# likely to have guessed anyway.
+#
+# ⛔ It carries no numbers. This script does not sample load, and a disclosure
+# that quoted the one observation behind it as if it were today's would be the
+# defect it repairs, one level up.
+coverage_note() {
+  log "  ⚠ WHAT YOU NOW HOLD: exclusion against other LOCKED runs — the ones that came in"
+  log "    through this entry point — and NOTHING ELSE. Unlocked sibling work (\`check:*\` gate"
+  log "    scripts, dev servers, installs, any free-hand command) is NOT excluded by this lock"
+  log "    and runs alongside this hold, on the same cores."
+  log "    ⇒ ⛔ Holding this lock is NOT having an idle box. A wall-clock absolute measured"
+  log "      under it is a reading about a SHARED box: state that condition beside the number,"
+  log "      or quote RATIOS, which survive contention where absolutes do not."
 }
 
 # Does a count-based backstop have grounds to blame the CLOCK?
@@ -1258,17 +1509,36 @@ usage:
                                             and which commands own the lock-seconds
   os-verify-lock.sh --self-test             verify this script
 
+WHAT THE LOCK COVERS, AND WHAT IT DOES NOT. Holding it means NO OTHER LOCKED
+HEAVY JOB is running -- no other run that came in through this entry point. It
+does NOT mean an idle box. Gate scripts (`pnpm check:*`), dev servers, installs
+and any free-hand command a sibling agent types are not routed here by anything,
+are not excluded, and run on the same cores as your hold. ⇒ Seconds measured
+under this lock are SHARED-BOX seconds. Say so beside any absolute you publish,
+or quote ratios, which survive contention. Every acquiring run prints this
+boundary, and the VERDICT line repeats it beside the numbers it carries.
+
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
+⛔ The cap is not a tuning knob and raising it is not the remedy for a long
+queue: the budget is spent inside ONE foreground agent turn, which is killed at
+its own ~600s ceiling, so a larger number buys a kill with no VERDICT line
+instead of a longer wait. A wait longer than one turn is a SLOT, below.
 
-KEEPING YOUR PLACE ACROSS CALLS. An acquisition wait is capped so it fits inside
-one foreground agent turn; nothing here can stop that turn's own ceiling from
-counting the wait, so the remedy is not to spend a second turn re-queueing from
-the back. Set OS_VERIFY_LOCK_SLOT=<name> and a call that never acquires PARKS its
-place instead of losing it; the next call with the same name resumes it. A parked
-slot BLOCKS NOBODY -- it can be overtaken while you are away, which is the honest
-meaning of a place kept by someone who was not waiting -- and its priority ages
-out, so it cannot cut the line indefinitely. Being killed mid-wait parks it too.
+KEEPING YOUR PLACE ACROSS CALLS -- ⭐ SET THIS BEFORE YOU QUEUE, NOT AFTER YOU
+TIME OUT. An acquisition wait is capped so it fits inside one foreground agent
+turn; nothing here can stop that turn's own ceiling from counting the wait, so
+the remedy is not to spend a second turn re-queueing from the back. Set
+OS_VERIFY_LOCK_SLOT=<name> and a call that never acquires PARKS its place instead
+of losing it; the next call with the same name resumes it, keeping its ORIGINAL
+arrival stamp. A parked slot BLOCKS NOBODY -- it can be overtaken while you are
+away, which is the honest meaning of a place kept by someone who was not waiting.
+Its priority is bounded by an age measured from when the place was last PUT DOWN,
+so a caller that keeps coming back keeps its place however long the queue ahead
+of it is, while a place nobody returns for expires and stops cutting the line.
+Being killed mid-wait parks it too. A call that queues behind somebody with no
+slot set is told all this at second zero -- naming it in the timeout message
+alone is naming it one whole budget too late to be worth anything.
 
 EXIT 99 IS NOT A RESULT. It means this call never got a turn: nothing built,
 nothing tested, no gate decided. Record it as NOT MEASURED -- never as a red
@@ -1379,6 +1649,14 @@ run_unlocked() {
 mode_status() {
   local n=0 file pid start stamp label problem
   printf 'lock: %s\n' "$LOCK_FILE"
+  # ⚠ Everything printed below is about LOCKED work only. Said here because
+  # `--status` is what an agent reads to answer "is this box busy?", and the
+  # honest answer is that this command cannot see the half of the load that
+  # never took a ticket. An empty queue here is not an idle machine.
+  printf 'covers: LOCKED runs only — this listing sees runs that came through this entry\n'
+  printf '        point (plus a free-hand flock holder, unnamed). It does NOT see unlocked\n'
+  printf '        sibling work — `check:*` gate scripts, dev servers, installs — which is\n'
+  printf '        never excluded by this lock. An empty queue is NOT an idle box.\n'
   if ! preflight; then
     printf 'host: CANNOT OPERATE THIS LOCK — a run here refuses with VERDICT lock-unusable:\n'
     while IFS= read -r problem; do
@@ -1471,6 +1749,73 @@ mode_report() {
     '' | *[!0-9]*) printf 'records: %s\n' "$total" ;;
     *) printf 'records: %s, spanning %s\n' "$total" "$(human_s $((last - first)))" ;;
   esac
+
+  # ⚠ THE POPULATION, AND WHERE ITS FLOOR ACTUALLY IS. Everything below is
+  # computed over ONE file -- the path printed at the top -- and that file's
+  # history is not the fleet's. This script already knew that: the ageing
+  # paragraph in the slots block had to state it in order to explain why a
+  # constant could not be sized against a p95 that does not exist. But it stated
+  # it in a comment eight hundred lines from the only surface that prints these
+  # numbers, so no reader of a REPORT ever met it, while the report went on
+  # ranking commands under a fleet-scale heading. An agent asking "is a
+  # 19-minute hold normal here?" got a confident, well-formed answer over a
+  # population that structurally could not contain one -- the same shape as the
+  # two mixed-population hazards the blocks below already have to warn about,
+  # one level up: an instrument answering in the green direction about something
+  # it did not measure.
+  #
+  # The path alone does not discharge this. A path is a LOCATION; a population
+  # is an INTERVAL, and no reader can derive the second from the first -- the
+  # ledger is redirectable (`OS_VERIFY_LOCK_LEDGER`), so even the `/tmp` in the
+  # default is not a fixed premise, and `/tmp` would still not say WHEN the
+  # records begin. So the floor is printed as a number, from data this report
+  # already holds.
+  #
+  # ⛔ WHAT THIS DELIBERATELY DOES NOT SAY is "since this container started",
+  # and it does not print an uptime beside the first record. That pairing is the
+  # obvious spelling and it is MEASURED WRONG. On the box this was written on,
+  # `/proc/uptime` reported 878s -- while ALL 74 records in the live ledger, and
+  # the ledger file's own birth time, predated that boot, the oldest by 8h11m
+  # (positive control, same command: a file touched at that moment read as after
+  # the boot, so the comparison can return both answers). The uptime clock and
+  # the filesystem holding the ledger are not guaranteed to restart together.
+  # `/proc/uptime` also does not exist on the macOS hosts this file's bash-3.2
+  # floor exists for. A report that prints a confident wrong boundary is worse
+  # than one that prints none -- that is the very defect being repaired here --
+  # so the floor is stated as what it provably is, the first record, and the
+  # reason it sits there is left unasserted.
+  local nowts age fstamp floor
+  printf 'scope: every figure below is computed over ONE file — the ledger named above —\n'
+  printf '  and over nothing else.\n'
+  # Both halves of the floor, because they answer different questions and either
+  # can be unavailable: the INSTANT is what a reader compares a dated
+  # observation against ("my 19-minute hold was on the 26th — is it in here?"),
+  # the AGE is what tells them how much shift this population is. Whichever can
+  # be established is printed; if neither can, the two sentences either side
+  # still state the shape of the bound, which is the half that cannot be wrong.
+  floor=''
+  case "$first" in
+    '' | *[!0-9]*) ;;
+    *)
+      fstamp="$(utc_stamp "$first")" || fstamp=''
+      nowts="$(now_s 2> /dev/null)" || nowts=''
+      age=''
+      case "$nowts" in
+        '' | *[!0-9]*) ;;
+        *) ((nowts >= first)) && age="$(human_s $((nowts - first))) ago" ;;
+      esac
+      if [[ -n "$fstamp" && -n "$age" ]]; then
+        floor="${fstamp}, ${age}"
+      elif [[ -n "$fstamp" ]]; then
+        floor="$fstamp"
+      else
+        floor="$age"
+      fi
+      ;;
+  esac
+  [[ -n "$floor" ]] && printf '  ⇒ it reaches back to its first record and no further: %s.\n' "$floor"
+  printf '  ⇒ runs from before that, and runs recorded against any other copy of this path,\n'
+  printf '    are absent from every figure below. Absent is not the same as counted zero.\n'
   local size
   size="$(wc -c < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
   case "$size" in
@@ -1521,16 +1866,43 @@ mode_report() {
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/held" | tr -d ' ')" "$(pct_of "${tmp}/held" 50)" \
     "$(pct_of "${tmp}/held" 90)" "$(pct_of "${tmp}/held" 100)"
-  printf 'queue depth on arrival (waiters already ahead):\n'
+  # ⚠ THE LABEL, NOT THE RECORD. The field counts the arriving run itself: the
+  # depth is read AFTER `take_ticket` has minted this call's own ticket, so its
+  # floor is 1 and a completely uncontended fleet printed "1 waiter already
+  # ahead" on every row it had. The record was never wrong -- `announce_arrival`
+  # derives `ahead = depth - 1` from the same number and has always said "0
+  # ahead of you" on a free lock -- so the repair is this heading, and ⛔ NOT the
+  # recorded value: rewriting the field would put a meaning boundary through the
+  # middle of the ledger, which is the mixed-population hazard the outcomes
+  # block above already has to warn about for `command-exit`.
+  #
+  # The second ⇒ is the misreading the first one leaves behind. A run that
+  # queued behind a busy holder with nobody in front of it records exactly what
+  # a run that walked up to a free lock records, because a holder deletes its
+  # ticket at the moment it acquires; measured on both paths, both 1. So this
+  # column is evidence about the QUEUE and about nothing else -- `held` and the
+  # outcomes block are where "was the lock busy" is answered.
+  printf 'queue depth on arrival (the arriving run INCLUDED — 1 means nobody was ahead):\n'
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/depth" | tr -d ' ')" "$(pct_of "${tmp}/depth" 50)" \
     "$(pct_of "${tmp}/depth" 90)" "$(pct_of "${tmp}/depth" 100)"
+  printf '  ⇒ waiters already ahead = this minus 1. The depth is read after this call mints\n'
+  printf '    its own ticket, so 1 is the floor, not a waiter.\n'
+  printf '  ⇒ it does not count the HOLDER either — queueing behind a busy lock with nobody\n'
+  printf '    in front of you records 1, exactly as walking up to a free lock does. This\n'
+  printf '    column measures the queue, never whether the lock was held.\n'
 
   # ⭐ The table this whole mechanism exists for. Ranked by TOTAL seconds held,
   # not by the worst single run: the command that decides how much the fleet
   # queues is the one that owns the most lock-seconds, which a per-run maximum
   # can point away from entirely.
-  printf '\nlock-seconds held, by command (top 10 — this is where hold time actually goes):\n'
+  # ⛔ The heading is bound to the population, not to the fleet. The old wording
+  # -- "this is where hold time actually goes" -- is the one sentence this
+  # report PRINTS that makes a fleet-scale claim; the two similar phrasings
+  # elsewhere in this file are source comments about the mechanism's purpose and
+  # are not output. Leaving it beside the scope block above would have shipped
+  # the disclosure and the claim it contradicts in the same report.
+  printf '\nlock-seconds held, by command (top 10 — where the hold time in THIS ledger went):\n'
   awk '{
          h = ""; lbl = ""
          for (i = 2; i <= NF; i++) {
@@ -1631,6 +2003,7 @@ mode_run() {
     # into is gone.
     ARRIVAL_DEPTH="$(queue_live | wc -l | tr -d ' ')"
     case "$ARRIVAL_DEPTH" in '' | *[!0-9]*) ARRIVAL_DEPTH=-1 ;; esac
+    announce_arrival "$ARRIVAL_DEPTH"
   else
     ordered=0
     log "⚠ ticket queue at ${QUEUE_DIR} is unusable — falling back to unordered acquisition (the cap and the lock itself are unaffected)."
@@ -1848,6 +2221,7 @@ mode_run() {
   acquired_at="$(now_s)"
   waited=$((acquired_at - started))
   log "ACQUIRED after $(human_s "$waited") — running: ${label}"
+  coverage_note
 
   local rc=0
   if [[ "$kind" == shell ]]; then
@@ -1860,7 +2234,7 @@ mode_run() {
   held=$(($(now_s) - acquired_at))
   HOLDING=0
   rm -f "$HOLDER_FILE" 2> /dev/null || true
-  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited")"
+  log "$(verdict_head "$rc") · held the lock $(human_s "$held") · waited $(human_s "$waited") · ⚠ SHARED-BOX SECONDS — this lock excluded other LOCKED runs, NOT unlocked sibling work (\`check:*\` gates and the rest), so these are not idle-box figures"
   ledger_append "$VERDICT_WORD" "$waited" "$held" "$rc" "$label"
   if ((held >= LONG_HOLD_WARN_S)); then
     log "⚠ THIS RUN held the shared verify lock for $(human_s "$held"). Every sibling agent"
@@ -1891,6 +2265,20 @@ mode_self_test() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
   local L="${tmp}/lock"
+
+  # ⚠ THE SUITE MUST TEST THE SCRIPT, NOT THE SHELL IT WAS LAUNCHED FROM. Every
+  # knob below changes what a case OBSERVES while leaving it well-formed, and
+  # they are exactly the knobs an agent has in its environment when it runs this
+  # suite from inside a wrapped call. Measured while adding the arrival-notice
+  # cases (#12538): a self-test invoked from a shell carrying
+  # OS_VERIFY_LOCK_SLOT put every child on the has-a-slot branch, so a case
+  # asserting the no-slot notice failed against a script that was behaving
+  # correctly. The failure direction was the lucky one; the same inheritance can
+  # silence a case instead (OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips the very
+  # check two cases below assert). The cases that want one of these set it
+  # themselves, per command, which still works.
+  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK
+
   # Both halves matter: the export reaches the child invocations, and the three
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
   # self-test would serialise the real fleet behind its own fixtures.
@@ -2180,6 +2568,94 @@ mode_self_test() {
   st_case 'and tells a caller with no slot how to keep its place next time' \
     "$([[ "$ordout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" yes
 
+  # --- and the same name, at second zero (#12538) ---------------------------
+  #
+  # ⭐ THE ASSERTION IS THE ORDER, NOT THE PRESENCE. The exit-99 message above
+  # already names the slot, and naming it there was measured to be nine minutes
+  # too late: the place a timed-out call loses is precisely what the slot would
+  # have kept, so a caller reading the name in the verdict reads it after the
+  # only moment it was worth anything. Asserting only that the string appears
+  # SOMEWHERE would pass on the version this fix exists to replace. So the pin
+  # is that the first mention precedes the VERDICT line — the same output,
+  # early enough to act on.
+  local firsthint firstverdict
+  firsthint="$(printf '%s\n' "$ordout" | grep -n 'OS_VERIFY_LOCK_SLOT' | head -1 | cut -d: -f1)"
+  firstverdict="$(printf '%s\n' "$ordout" | grep -n 'VERDICT ' | head -1 | cut -d: -f1)"
+  st_case 'and named the slot BEFORE the wait was spent, not only in the verdict' \
+    "$(case "$firsthint" in
+         '' | *[!0-9]*) echo 'NO-ARRIVAL-HINT' ;;
+         *) case "$firstverdict" in
+              '' | *[!0-9]*) echo 'NO-VERDICT-LINE' ;;
+              *) ((firsthint < firstverdict)) && echo yes || echo no ;;
+            esac ;;
+       esac)" yes
+  st_case 'and the arrival line says how many are ahead and what the budget is' \
+    "$([[ "$ordout" == *'ahead of you · budget '* ]] && echo yes || echo no)" yes
+
+  # ⛔ AND IT IS NOT PRINTED WHEN IT WOULD BUY NOTHING. A caller walking up to a
+  # free lock is about to acquire; telling it how to keep a place it is not
+  # about to lose is the noise that gets a warning filtered out, and this one
+  # has to still be read the day it matters.
+  local freeout
+  freeout="$(bash "$SELF" -c true 2>&1)"
+  st_case 'an uncontended call is not told to set a slot' \
+    "$([[ "$freeout" == *OS_VERIFY_LOCK_SLOT* ]] && echo yes || echo no)" no
+
+  # --- the coverage boundary ------------------------------------------------
+  #
+  # ⭐ THESE ARE PRESENCE PINS, and that is the design rather than a style. The
+  # defect repaired here was SILENCE: nothing red, nothing skipped, and a
+  # wall-clock absolute that looked exactly as authoritative as a clean one
+  # because no line ever said what it was taken against. A pin written as "the
+  # output does not claim an idle box" passes just as happily against a script
+  # that prints NOTHING AT ALL — i.e. against the defect itself. So every case
+  # below asserts a sentence IS PRESENT in the output a real caller gets, and
+  # the one absence case carries its own positive control.
+  #
+  # `freeout` is reused on purpose: it is an UNCONTENDED acquisition (free lock,
+  # nobody ahead), which is where the arrival notice two cases above deliberately
+  # says nothing. The boundary is not advice, it is the scope of what was just
+  # granted, and an idle QUEUE says nothing about the unlocked gate script
+  # running beside it — so it must be there in this run too. That asymmetry
+  # between the two notices is what these cases hold in place.
+  st_case 'an acquiring run is told what this lock does NOT exclude' \
+    "$([[ "$freeout" == *'NOT excluded by this lock'* ]] && echo yes || echo no)" yes
+  st_case 'and says it in the words of the misreading — not an idle box' \
+    "$([[ "$freeout" == *'NOT having an idle box'* ]] && echo yes || echo no)" yes
+  st_case 'and names the population nothing routes through here (`check:*` gates)' \
+    "$([[ "$freeout" == *'check:*'* ]] && echo yes || echo no)" yes
+
+  # ⭐ AND THE CAVEAT TRAVELS ON THE LINE THAT CARRIES THE SECONDS. Same reason
+  # `verdict_head` exists at all: the VERDICT line is the one every dispatch
+  # brief tells a dev to quote, and a caveat sitting on the line above it is
+  # left behind by the quote. So this case reads the VERDICT LINE ALONE and
+  # requires the boundary INSIDE it — an implementation that printed the same
+  # sentence as a separate following line would satisfy a whole-output match
+  # and fail this one, which is the difference that matters.
+  st_case 'the VERDICT line itself carries the boundary, beside its own seconds' \
+    "$(printf '%s\n' "$freeout" | grep 'held the lock' | grep -c 'SHARED-BOX SECONDS')" 1
+
+  # ⛔ THE ONE ABSENCE, WITH ITS POSITIVE CONTROL. What is durable is the
+  # BOUNDARY. The magnitude behind it is a single historical observation of a
+  # single run (a neighbouring unlocked gate script at ~130% CPU, 1-minute load
+  # 4.36 on 4 cores) and this script does not sample load at all — reprinting
+  # those figures as though they described THIS run would be this card's own
+  # defect rebuilt one level up. The control term is `ACQUIRED`: present in the
+  # same capture, and not a substring of anything under test, so a zero above
+  # cannot be a zero produced by a capture that was simply empty.
+  st_case 'the disclosure quotes no load figure this script never measured' \
+    "$(printf '%s\n' "$freeout" | grep -c '130%\|4\.36')" 0
+  st_case 'and that zero is a real zero — the same capture matches a control term' \
+    "$(printf '%s\n' "$freeout" | grep -c 'ACQUIRED')" 1
+
+  # The other two surfaces a caller reads. `--status` is what an agent runs to
+  # answer "is this box busy?", and its honest answer is that it cannot see the
+  # half of the load that never took a ticket.
+  st_case '--status declares that its listing cannot see unlocked work' \
+    "$(bash "$SELF" --status 2>&1 | grep -c 'An empty queue is NOT an idle box')" 1
+  st_case 'and --help states the coverage boundary as well' \
+    "$(bash "$SELF" --help 2>&1 | grep -c 'WHAT THE LOCK COVERS')" 1
+
   # --- the ledger -----------------------------------------------------------
   #
   # The two directions that matter, and the second is the one a ledger gets
@@ -2193,6 +2669,14 @@ mode_self_test() {
     "$(grep -c 'outcome=command-exit' "$realled" 2> /dev/null || true)" 1
   st_case 'and the record carries the wait, the hold and the queue depth' \
     "$(grep -c 'waited=[0-9]* held=[0-9]* depth=' "$realled" 2> /dev/null || true)" 1
+  # ⛔ THE RECORDED FIELD IS PINNED AT ITS FLOOR, on purpose. The run above was
+  # uncontended, and it still records 1, because the depth is read after this
+  # call has minted its own ticket. That is the value `--report`'s heading now
+  # describes, and the repair for the heading being wrong was the heading --
+  # subtracting one HERE instead would read better for a day and then put a
+  # meaning boundary through the middle of a ledger nothing can re-date.
+  st_case 'and the depth it records counts the arriving run itself — floor 1, never 0' \
+    "$(grep -c ' depth=1 ' "$realled" 2> /dev/null || true)" 1
   st_case 'and exactly one record per run, not one per verdict line' \
     "$(wc -l < "$realled" | tr -d ' ')" 1
 
@@ -2226,6 +2710,93 @@ mode_self_test() {
     "$(bash "$SELF" --report 2>&1 | grep -c 'LOWER-BOUNDS that mixture')" 1
   st_case 'and names the newline flattening, which no label length can recover' \
     "$(bash "$SELF" --report 2>&1 | grep -c 'flattened to a space BEFORE the cut')" 1
+  # The arrival-depth heading, which said "waiters already ahead" over a number
+  # whose floor is 1 -- so an idle fleet read as one-deep on every row and a
+  # reader had no way to tell whether the label or the record was the wrong one.
+  # The last case is the one that would have caught it: asserting only that the
+  # true wording is PRESENT would also pass on a report that kept the old
+  # heading beside it, and the defect was a heading, not a missing sentence.
+  local rpt
+  rpt="$(bash "$SELF" --report 2>&1)"
+  st_case 'and --report says the arrival depth counts the arriving run itself' \
+    "$(printf '%s\n' "$rpt" | grep -c 'the arriving run INCLUDED')" 1
+  st_case 'and hands over the conversion rather than leaving it as arithmetic' \
+    "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead = this minus 1')" 1
+  st_case 'and blocks the next misreading: 1 is not evidence the lock was free' \
+    "$(printf '%s\n' "$rpt" | grep -c 'it does not count the HOLDER either')" 1
+  st_case 'and the off-by-one heading itself is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead):')" 0
+
+  # --- the scope of the population, and the clock that names its floor ------
+  #
+  # The report used to state its span and never its POSITION: `records: N,
+  # spanning T` says how wide the window is and nothing about where it starts,
+  # while the ranking below it was headed with a fleet-scale claim. So an agent
+  # asking "is a 19-minute hold normal here?" was answered over a population
+  # that could not contain one, and nothing printed said so. These cases are
+  # spelled against the SAME capture as the four above, which each assert a 1 --
+  # so a zero here cannot be a zero produced by a capture that came back empty.
+  st_case 'and --report states that its population is one file, not the fleet' \
+    "$(printf '%s\n' "$rpt" | grep -c 'computed over ONE file')" 1
+  st_case 'and names the floor of that population rather than only its width' \
+    "$(printf '%s\n' "$rpt" | grep -c 'it reaches back to its first record and no further')" 1
+  st_case 'and says the runs outside it are absent, which is not a measured zero' \
+    "$(printf '%s\n' "$rpt" | grep -c 'Absent is not the same as counted zero')" 1
+  # ⛔ BOTH SIDES, because the defect was a HEADING and not a missing sentence:
+  # a report that kept "this is where hold time actually goes" beside the new
+  # scope block would satisfy every presence assertion above while still
+  # printing the fleet-scale claim the scope block contradicts.
+  st_case 'and the ranking is headed by its population, not by the fleet' \
+    "$(printf '%s\n' "$rpt" | grep -c 'where the hold time in THIS ledger went')" 1
+  st_case 'and the fleet-scale heading is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'this is where hold time actually goes')" 0
+
+  # `utc_stamp`, which supplies the instant in that floor. A KNOWN epoch mapped
+  # to a KNOWN string, because the failure mode here is not an error: it is a
+  # well-formed string for the wrong instant (see the helper's own comment), and
+  # only a fixed expected value can tell those apart.
+  st_case 'utc_stamp converts a known epoch rather than formatting now' \
+    "$(utc_stamp 1787849472)" '2026-08-27T16:51:12Z'
+  st_case 'and converts the epoch its own probe is built on' \
+    "$(utc_stamp 0)" '1970-01-01T00:00:00Z'
+  st_case 'and hands back NOTHING, loudly, rather than a guess it cannot make' \
+    "$(utc_stamp not-an-epoch; printf 'rc=%s' "$?")" 'rc=1'
+
+  # ⚠ THE macOS BRANCH, ACTUALLY EXERCISED. `-r` exists in `utc_stamp` for a
+  # host CI never runs on — the same blind spot the bash-3.2 floor gate exists
+  # for — so without these two cases it is a guard nobody has ever seen fire.
+  # The fake below is macOS-SHAPED, not macOS: `-r` reads an epoch and `-d` does
+  # not, which is the actual difference. Two directions, and the second is the
+  # one that keeps the first honest: the helper must still answer the RIGHT
+  # instant through the fake (only reachable via `-r`), and the fake must be
+  # shown to really mis-answer `-d` — otherwise the first case would pass
+  # against a fake that was quietly just GNU `date`.
+  local fakebin realdate
+  realdate="$(command -v date)"
+  fakebin="${tmp}/fakebin"
+  mkdir -p "$fakebin"
+  cat > "${fakebin}/date" << FAKEDATE
+#!/usr/bin/env bash
+# macOS-shaped: -r takes an epoch, -d sets a flag and swallows its operand.
+epoch=""
+fmt=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    -u) ;;
+    -d) shift ;;
+    -r) epoch="\$2"; shift ;;
+    +*) fmt="\$1" ;;
+  esac
+  shift
+done
+[[ -n "\$epoch" ]] && exec "$realdate" -u -d "@\${epoch}" "\$fmt"
+exec "$realdate" -u "\$fmt"
+FAKEDATE
+  chmod +x "${fakebin}/date"
+  st_case 'utc_stamp answers a macOS-shaped date through -r, with the right instant' \
+    "$(PATH="${fakebin}:$PATH"; utc_stamp 1787849472)" '2026-08-27T16:51:12Z'
+  st_case 'and that fake really is macOS-shaped — its own -d formats now, not the epoch' \
+    "$(PATH="${fakebin}:$PATH"; date -u -d @0 '+%Y')" "$(date -u '+%Y')"
   # A measurement apparatus that can redden a gate has become part of the thing
   # it measures. This is the case that keeps it out of the way.
   st_case 'an unwritable ledger loses records, never runs' \
@@ -2252,6 +2823,16 @@ mode_self_test() {
   read -r _ _ parked_stamp _ < "$sq"/*-sprobe-slot 2> /dev/null || parked_stamp=''
   st_case 'and the parked ticket carries pid 0 — nobody is waiting behind it' \
     "$(awk '{print $1}' "$sq"/*-sprobe-slot 2> /dev/null)" 0
+  # The relinquish time is what the ageing bound is measured from (#12538), so
+  # a park that did not record one would silently restore the arrival clock.
+  local parked_at parked_at_ok=no
+  parked_at="$(awk '{print $2}' "$sq"/*-sprobe-slot 2> /dev/null)"
+  case "$parked_at" in
+    '' | *[!0-9]*) ;;
+    *) ((parked_at > 0 && parked_at >= $(now_s) - 120)) && parked_at_ok=yes ;;
+  esac
+  st_case 'and it records WHEN it was put down, not a start time it does not have' \
+    "$parked_at_ok" yes
 
   # THE SAFETY INVARIANT. Another caller must acquire straight past the parked
   # place while the lock is free — if a parked slot could hold the head, one
@@ -2309,13 +2890,31 @@ mode_self_test() {
   mkdir -p "$sq"
 
   # Ageing: a place older than SLOT_MAX_AGE_S is pruned like any dead ticket,
-  # so the priority it carries is bounded rather than indefinite.
+  # so the priority it carries is bounded rather than indefinite. These two
+  # fixtures carry NO relinquish time (field 2 is 0) — the shape every record
+  # written before #12538 has — and they must still age from arrival.
   mkdir -p "$sq"
   printf '0 0 %s stale-slot\n' "$(($(now_s) - SLOT_MAX_AGE_S - 60))" > "${sq}/00000000000000000009-sstale"
   printf '0 0 %s fresh-slot\n' "$(now_s)" > "${sq}/00000000000000000010-sfresh"
   st_case 'an over-age parked slot is dead' "$(ticket_state "${sq}/00000000000000000009-sstale")" dead
   st_case 'a fresh parked slot is parked, not active and not dead' \
     "$(ticket_state "${sq}/00000000000000000010-sfresh")" parked
+
+  # ⭐ WHICH CLOCK THE BOUND RUNS ON (#12538). The two fixtures below differ ONLY
+  # in the relinquish time, and both have an arrival stamp far past the bound —
+  # so under the arrival clock both are dead and this pair cannot pass. It is
+  # the pair that pins the fix rather than either case alone: a caller that
+  # keeps coming back keeps its place however long the queue ahead of it has
+  # been, and a place nobody has come back for still expires on schedule.
+  printf '0 %s %s returning-slot\n' "$(now_s)" "$(($(now_s) - SLOT_MAX_AGE_S * 4))" \
+    > "${sq}/00000000000000000012-sreturning"
+  printf '0 %s %s abandoned-slot\n' "$(($(now_s) - SLOT_MAX_AGE_S - 60))" "$(($(now_s) - SLOT_MAX_AGE_S * 4))" \
+    > "${sq}/00000000000000000013-sabandoned"
+  st_case 'a slot put down just now keeps its place however old its arrival is' \
+    "$(ticket_state "${sq}/00000000000000000012-sreturning")" parked
+  st_case 'while one nobody came back for still ages out on the same bound' \
+    "$(ticket_state "${sq}/00000000000000000013-sabandoned")" dead
+  rm -f "${sq}/00000000000000000012-sreturning" "${sq}/00000000000000000013-sabandoned"
   queue_live > /dev/null 2>&1
   st_case 'and a queue scan removes the stale one' \
     "$([[ -e "${sq}/00000000000000000009-sstale" ]] && echo yes || echo no)" no

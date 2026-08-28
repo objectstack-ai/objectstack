@@ -2,112 +2,98 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { AggregationFunction } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAnalyticsService, IDataDriver } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
 
 /**
- * Minimal IDataEngine surface required for the auto-bridge.
- * ObjectQL exposes:
- *   - `aggregate(object, { where, groupBy, aggregations: [{ function, field, alias }] })`
- *   - `execute(sql, options)` for raw SQL pass-through (enables NativeSQLStrategy
- *     and lets the analytics layer emit JOINs for relation traversal).
+ * The slice of the DECLARED engine contracts this plugin's auto-bridges
+ * consume, derived from `IDataEngine` / `IObjectQLEngine` instead of being
+ * re-declared structurally (#4251 B3, extending #11493's ruling and the
+ * datasource half of #11833 that landed as PR #12011).
+ *
+ * A consumer-local structural re-declaration meets no compiler on the PRODUCER
+ * side, so engine-surface drift lands here silently. This seam carried exactly
+ * that: the hand-written `aggregate` declared `aggregations[].function` as
+ * `string` where the contract declares a six-value enum, and nothing compiled
+ * the two against each other.
+ *
+ * Three of these members could not be named from a contract until #12248
+ * landed the #11833 ruling: `resolveEffectiveDatasource` and
+ * `getDriverForObject` (fork 1, declared OPTIONAL exactly so seams like this
+ * one keep degrading), and `getObject`'s structured `ServiceObject` return
+ * (fork 3, which used to be `unknown`). Before those, the structural type was
+ * the only way to name them at all.
+ *
+ * ## Optionality is load-bearing, and this preserves the profile exactly
+ *
+ * `aggregate` stays REQUIRED, as the hand-written type had it: it is the
+ * member a `'data'` service must expose for this bridge to exist, and the
+ * runtime `typeof svc.aggregate === 'function'` probe below is what decides
+ * whether a registered service qualifies.
+ *
+ * Everything else stays OPTIONAL. A lightweight kernel can register a `'data'`
+ * service with no raw-SQL escape hatch, no datasource registry and no schema
+ * registry; the `engine?.x` / `typeof … === 'function'` probes below are the
+ * other half of that graceful-degradation contract. `getObject` is REQUIRED on
+ * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
+ * what keeps this seam usable against an engine that is not ObjectQL.
  */
-interface DataEngineLike {
-  aggregate(object: string, options: {
-    where?: Record<string, unknown>;
-    groupBy?: string[];
-    /**
-     * `filter` (#10576, the contract half of #10413's ruling) is a
-     * per-aggregation predicate over the SOURCE rows — SQL
-     * `FILTER (WHERE …)` semantics — kept optional here in lockstep with
-     * `EngineAggregateOptions['aggregations'][number].filter` so the bridge
-     * below can forward a measure-scoped filter without widening this
-     * interface again the next time #10413's phase-2 lowering needs a place
-     * to put one.
-     */
-    aggregations?: Array<{ function: string; field: string; alias: string; filter?: Record<string, unknown> }>;
-    /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
-    timezone?: string;
-    /**
-     * `BaseEngineOptions.context` — identity/tenant of the request. The engine
-     * merges it into the operation context (`mergeReadContext`), which is what
-     * lets its middleware chain inject RLS into `opCtx.ast.where` (#3602).
-     */
-    context?: ExecutionContext;
-  }): Promise<unknown[]>;
-  /**
-   * Raw command pass-through (SQL on driver-sql). The options bag is spelled out
-   * rather than left as `Record<string, unknown>` because **`object` is load-bearing**:
-   * `ObjectQL.execute()` picks its driver in the order
-   * `options.object` → `getDriver(object)`, then `options.datasource`, then the
-   * default driver. A command that reads an object and omits `object` therefore
-   * runs against the DEFAULT datasource — which is how every dataset backed by a
-   * telemetry/audit-routed object read `0` from a populated table (#5033).
-   */
-  execute?(command: unknown, options?: {
-    /** Bound parameters for the command. */
-    args?: unknown[];
-    /** The object this command reads — routes to that object's own datasource. */
-    object?: string;
-  }): Promise<unknown>;
-  /** Return the registered object schema (relationship → target + display-label resolution). */
-  getObject?(name: string): {
-    fields?: Record<string, {
-      type?: string;
-      reference?: string;
-      options?: Array<{ value: unknown; label?: string }>;
-    }>;
-    /** Federation marker (ADR-0015): set on objects bound to an external datasource. */
-    external?: unknown;
-  } | undefined;
-  /**
-   * [#5288] The datasource an object's rows actually live on, by NAME — the
-   * engine's own five-step resolution (explicit `datasource` →
-   * `datasourceMapping` → the ADR-0057 §3.6 lifecycle split → the owning
-   * package's `defaultDatasource` → the deployment default), not the value the
-   * object declares.
-   *
-   * The declared value used to be read straight off `getObject().datasource`,
-   * and it is only step 1 of those five: `ObjectSchema.datasource` defaults to
-   * `'default'`, which in the engine means "no explicit binding, keep looking".
-   * So every object routed by steps 2-4 — `sys_audit_log` among them, routed by
-   * `lifecycle.class: 'audit'` — answered `'default'` and pointed diagnostics at
-   * a database its rows are not in.
-   *
-   * `undefined` ⇒ nothing binds the object anywhere and it rides the
-   * deployment's default datasource (or this engine cannot answer). Optional
-   * because the analytics service runs against engines other than ObjectQL;
-   * absent, the probe below simply never answers, which is the same "cannot
-   * answer, do not block" tiering it already carries.
-   */
-  resolveEffectiveDatasource?(objectName: string): string | undefined;
-  /**
-   * Resolve the storage driver backing an object (public ObjectQL accessor).
-   * Used to delegate temporal storage-form coercion to the driver, which is the
-   * single source of truth for how a `Field.date`/`Field.datetime` is stored on
-   * the active dialect. When the hooks are absent, values and column SQL pass
-   * through untouched — the contract's identity semantics.
-   */
-  getDriverForObject?(objectName: string): TemporalDriverSurface | undefined;
-}
+type DataEngineLike =
+  Pick<IDataEngine, 'aggregate'>
+  & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
+  & Partial<Pick<IObjectQLEngine, 'getObject'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
  * `temporalFilterValue` / `temporalFilterColumnSql` are first-class contract
- * members since ADR-0053 D-A2, no longer a duck-typed local invention. Picked
- * (rather than using `IDataDriver` whole) because `getDriverForObject` hands
- * back whatever the engine registered, and this seam only needs the temporal
- * surface; the runtime `typeof` guards below remain the correct way to consume
- * an optional contract member.
+ * members since ADR-0053 D-A2, no longer a duck-typed local invention.
+ *
+ * Since #12248 declared `IDataEngine.getDriverForObject?`, this is the
+ * RETURN-side narrowing that member's own docblock prescribes, applied at the
+ * two call sites below — not a re-declaration of the member. `Pick<IDataDriver,
+ * …>` admits the full contract value, so the engine keeps handing back whatever
+ * driver it registered while this seam states the only two members it reads.
+ * The runtime `typeof` guards below remain the correct way to consume an
+ * optional contract member.
  */
 type TemporalDriverSurface = Pick<
   IDataDriver,
   'temporalFilterValue' | 'temporalFilterColumnSql'
 >;
+
+/**
+ * Narrow a strategy-supplied aggregation `method` to the engine contract's
+ * `AggregationFunction`, refusing anything else.
+ *
+ * The two sides genuinely differ: `IDataEngine.aggregate`'s
+ * `aggregations[].function` is the six-value enum, while the analytics
+ * strategy contract that feeds this bridge declares `aggregations[].method` as
+ * `string`. Parsing with the spec's OWN enum keeps a single vocabulary — no
+ * local literal list to drift, and `AggregationFunction`'s error map already
+ * knows the retired `array_agg` / `string_agg` spellings.
+ */
+function parseEngineAggregateFunction(
+  method: string,
+  alias: string,
+): NonNullable<Parameters<IDataEngine['aggregate']>[1]['aggregations']>[number]['function'] {
+  const parsed = AggregationFunction.safeParse(method);
+  if (!parsed.success) {
+    throw new Error(
+      `[Analytics] The aggregate bridge cannot forward the aggregation ` +
+      `"${alias}": "${method}" is not one of the engine's aggregate functions ` +
+      `(${AggregationFunction.options.join(', ')}). A custom-SQL measure is ` +
+      `refused earlier, with a caller-facing diagnostic, by ObjectQLStrategy; ` +
+      `reaching this point means the analytics layer produced a method the ` +
+      `engine contract does not declare.`,
+    );
+  }
+  return parsed.data;
+}
 
 /**
  * Configuration for AnalyticsServicePlugin.
@@ -301,7 +287,31 @@ export class AnalyticsServicePlugin implements Plugin {
           // aggregation carries none, matching the engine's own
           // vacuous-filter convention.
           aggregations: aggregations?.map((a) => ({
-            function: a.method,
+            // [#11833] `function` is the engine contract's SIX-value
+            // `AggregationFunction`, while this bridge's own input declares
+            // `method: string` (`StrategyContext.executeAggregate`, spec
+            // `contracts/analytics-service.ts:300`). Narrowing the engine side
+            // to the contract turned that forward into a compile error — the
+            // correct signal, and the one the deleted structural type hid by
+            // declaring `function: string` on both sides.
+            //
+            // Closed by PARSING with the spec enum itself rather than by
+            // widening back to `string` (what hid it) or casting past it
+            // (which keeps the hole and adds a lie). `AggregationFunction` is
+            // the same schema `AggregationNodeSchema.function` is built from,
+            // so there is one vocabulary, and its own error map already
+            // carries the `array_agg`/`string_agg` retirement prescriptions.
+            //
+            // TIERING, deliberately: the reachable producer of a non-aggregate
+            // method — a custom-SQL measure (`AggregationMetricType`
+            // `number`/`string`/`boolean`) — is already refused upstream with a
+            // caller-blaming 400 by `ObjectQLStrategy.resolveMeasureAggregation`
+            // (#12209). Anything still arriving here is host drift, which that
+            // refusal's docblock assigns to the undeclared-500 tier — so this
+            // throws rather than re-blaming the caller, and it answers loudly
+            // instead of letting the engine answer `null` per bucket under the
+            // author's own measure name (the #4157 class).
+            function: parseEngineAggregateFunction(a.method, a.alias),
             field: a.field,
             alias: a.alias,
             ...(a.filter ? { filter: a.filter } : {}),
@@ -563,7 +573,7 @@ export class AnalyticsServicePlugin implements Plugin {
     ): unknown => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
-        const driver = svc?.getDriverForObject?.(objectName);
+        const driver: TemporalDriverSurface | undefined = svc?.getDriverForObject?.(objectName);
         if (driver && typeof driver.temporalFilterValue === 'function') {
           return driver.temporalFilterValue(objectName, fieldName, value);
         }
@@ -586,7 +596,7 @@ export class AnalyticsServicePlugin implements Plugin {
     ): string => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
-        const driver = svc?.getDriverForObject?.(objectName);
+        const driver: TemporalDriverSurface | undefined = svc?.getDriverForObject?.(objectName);
         if (driver && typeof driver.temporalFilterColumnSql === 'function') {
           return driver.temporalFilterColumnSql(objectName, fieldName, columnSql);
         }

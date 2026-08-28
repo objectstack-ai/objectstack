@@ -325,19 +325,22 @@ export type PackageRollbackRequest = z.input<typeof PackageRollbackRequestSchema
 /** Post-parse shape of {@link PackageRollbackRequest} — defaults applied, transforms run (ADR-0122). */
 export type PackageRollbackRequestParsed = z.infer<typeof PackageRollbackRequestSchema>;
 
-/**
- * Response after rolling back a package.
- */
-export const PackageRollbackResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    success: z.boolean().describe('Whether the rollback succeeded'),
-    restoredVersion: z.string().optional().describe('Restored version'),
-    message: z.string().optional().describe('Rollback status message'),
-  }),
-}).describe('Rollback package response'));
-export type PackageRollbackResponse = z.input<typeof PackageRollbackResponseSchema>;
-/** Post-parse shape of {@link PackageRollbackResponse} — defaults applied, transforms run (ADR-0122). */
-export type PackageRollbackResponseParsed = z.infer<typeof PackageRollbackResponseSchema>;
+// RETIRED (#12038, maintainer ruling 2026-08-27, sub-question 3A):
+// `PackageRollbackResponseSchema` (with its `PackageRollbackResponse` /
+// `PackageRollbackResponseParsed` types) declared a VERSION rollback —
+// `{ success, restoredVersion?, message? }` — while the live
+// `POST /packages/:id/rollback` route posts `{ commitId }` and the dispatcher
+// routes it to `rollbackToPackageCommit`, the ADR-0067 COMMIT rollback: a
+// different operation with a different result. The `PackageApiContracts`
+// `rollbackPackage` entry bound that wrong-operation schema to the exact live
+// path, so a future sweep would have read the false declaration as
+// authoritative. Both went through the ADR-0087 retirement discipline
+// (`RETIRED_DEFS_BY_MAJOR` `api/PackageRollbackResponse`, D3 semantic entry
+// `package-rollback-response-retired`). The TRUE contract for the live route
+// is `RollbackToPackageCommitResponseSchema` in `./package-lifecycle.zod`.
+// `PackageRollbackRequestSchema` above stays published as ruled — only the
+// response declaration and the contract-map binding were retired; the request
+// schema binds to no route now that the contracts entry is gone.
 
 // ==========================================
 // 9. Uninstall Package (DELETE /api/v1/packages/:packageId)
@@ -432,12 +435,11 @@ export const PackageApiContracts = {
     input: UploadArtifactRequestSchema,
     output: UploadArtifactResponseSchema,
   },
-  rollbackPackage: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/:packageId/rollback',
-    input: PackageRollbackRequestSchema,
-    output: PackageRollbackResponseSchema,
-  },
+  // `rollbackPackage` RETIRED (#12038 3A) — it bound the version-rollback
+  // schemas to the live `/api/v1/packages/:packageId/rollback` path, which
+  // actually serves the ADR-0067 COMMIT rollback (`rollbackToPackageCommit`).
+  // The live route's true contract is `RollbackToPackageCommitResponseSchema`
+  // (`./package-lifecycle.zod`), named by its route-ledger row.
   uninstallPackage: {
     method: 'DELETE' as const,
     path: '/api/v1/packages/:packageId',

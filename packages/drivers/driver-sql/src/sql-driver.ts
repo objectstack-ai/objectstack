@@ -4289,7 +4289,7 @@ export class SqlDriver implements IDataDriver {
    *
    * # Why a named method and not the inline `(this.logger.error ?? this.logger.warn)(…)`
    *
-   * Two reasons, and the second is the load-bearing one.
+   * Three reasons, and the third is the load-bearing one.
    *
    * ① It names the AGENTS.md channel at the call site, so the level is read as
    * a classification ("this is durability, not functionality") rather than as
@@ -4313,9 +4313,41 @@ export class SqlDriver implements IDataDriver {
    * sites as `loud (error@… via <helper>())`), so routing through this method
    * keeps the fallback AND is correctly classified.
    *
-   * The pre-existing inline uses in this file (the ADR-0120 D4 index sites) are
-   * left alone on purpose — they are a separate change with a separate blast
-   * radius, and the matcher blind spot itself is filed rather than patched here.
+   * ③ **The RECEIVER** (#12792 — the reason this is now the only spelling here).
+   * `a.b(…)` passes `a` as the receiver; `(a.b ?? c.d)(…)` evaluates to the bare
+   * FUNCTION and then calls it, so the call runs with `this === undefined`. A
+   * plain-closure sink — which is this class's own default and every test double
+   * in this package — does not read `this` and survives it perfectly, which is
+   * why no suite ever went red. `@objectstack/core`'s `ObjectLogger` is a class
+   * with prototype methods and no constructor binding: `error`/`fatal` reach for
+   * `this.writeErrorLike`, `debug`/`info`/`warn` for `this.write`. Detached, it
+   * throws `TypeError: Cannot read properties of undefined` — measured next door
+   * on a composed EE boot, where it turned every audience refusal into
+   * `HTTP 500 null` (#12773). On THIS channel the loss is worse than the
+   * exception: these lines report durability degradation and schema drift, so a
+   * throw converts the one signal that exists to be loud into silence plus an
+   * unrelated crash.
+   *
+   * The eight inline `error ?? warn` uses this file used to carry (the ADR-0120
+   * D4 index sites) are gone — they now call this method. They were left alone
+   * when reason ② was written because the receiver question was not in scope
+   * then, not because they were judged safe; two orthogonal problems shared one
+   * syntax and only one of them had been reasoned about.
+   *
+   * ⚠️ The ninth inline use was NOT converted here and must not be: the
+   * `info ?? warn` line in {@link reconcileAndWarnDrift} reports a reconcile that
+   * SUCCEEDED. It was given the receiver-safe property-access spelling in place,
+   * keeping its level. Routing it here would escalate a functional report to the
+   * durability channel — the over-application AGENTS.md names as what makes
+   * `error` unreadable in the first place.
+   *
+   * ⚠️ And reason ② turned out NOT to be improved by the conversion, measured
+   * rather than assumed (#12792): none of those eight sites sat inside a `catch`
+   * guarding a `DURABILITY_CRITICAL_CALLEES` operation, so the checker never
+   * discovered them and they produced no findings before the change. The two
+   * driver seams it does discover (`runWideningAlters`) already reached this
+   * method. The audit prints the same 29 seams, all loud, before and after.
+   * Reason ② is why this method exists; it is not what this conversion bought.
    */
   protected logDurabilityFailure(msg: string, meta?: any): void {
     if (this.logger.error) this.logger.error(msg, meta);
@@ -10339,7 +10371,27 @@ export class SqlDriver implements IDataDriver {
       // literal (#4560).
       defaultValue: c.defaultValue,
     }));
-    const out = diffManagedTable({ table: tableName, fields, columns: physical, dialect: this.dialectName });
+    // #12732: `diffManagedTable`'s varchar-length branch asks `createColumn`'s
+    // own read-only mirror (`varcharColumnChars`) whether it would even build
+    // a varchar for a given field — and for the text family that answer needs
+    // keyedness (#11374), the same input `initObjects` / `ensureShardTable`
+    // already resolve via `indexedKeyColumns` before any DDL. Resolved here
+    // too so the DIFFER'S expectation, not only the DDL, agrees with keyed
+    // columns.
+    const keyedColumns = indexedKeyColumns({
+      table: tableName,
+      fields,
+      tenantField: this.resolveTenantField(tableName),
+      declaredIndexes,
+    });
+    const out = diffManagedTable({
+      table: tableName,
+      fields,
+      columns: physical,
+      dialect: this.dialectName,
+      keyedColumns,
+      varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
+    });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
     return out;
   }
@@ -10552,7 +10604,19 @@ export class SqlDriver implements IDataDriver {
         try {
           const { applied } = await this.applyMigrationEntries(safe, { allowDestructive: false });
           for (const d of applied) {
-            (this.logger.info ?? this.logger.warn)(`[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column ?? ''}`);
+            // ⛔ Call through the PROPERTY, never an extracted `(a ?? b)(…)`
+            // reference: that evaluates to the bare function and invokes it with
+            // `this === undefined`, which `@objectstack/core`'s class-based
+            // `ObjectLogger` throws on — its `info`/`warn` reach for `this.write`
+            // (#12792). ⛔ And NOT routed through {@link logDurabilityFailure}:
+            // this line reports a reconcile that SUCCEEDED, so its channel is
+            // `info`, and the durability channel would escalate a functional
+            // report to `error` — the over-application AGENTS.md warns trains
+            // everyone to skim `error`. Keep the level, the fallback AND the
+            // receiver.
+            const reconciled = `[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column ?? ''}`;
+            if (this.logger.info) this.logger.info(reconciled);
+            else this.logger.warn(reconciled);
           }
           // Re-detect so the warnings below reflect the post-reconcile state.
           drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
@@ -10721,7 +10785,7 @@ export class SqlDriver implements IDataDriver {
             op.nullSafeColumns!,
           );
           if (duplicates.length > 0) {
-            (this.logger.error ?? this.logger.warn)(
+            this.logDurabilityFailure(
               `[schema-drift] REFUSING to rebuild '${op.indexName}' on '${op.table}' as a NULL-safe unique — ` +
                 `${duplicates.length} duplicate group(s) violate it (e.g. ${duplicates[0].key} × ${duplicates[0].rows} rows). ` +
                 `The existing index is left in place; deduplicate and re-run "os migrate plan" (ADR-0120 D4).`,
@@ -10768,7 +10832,7 @@ export class SqlDriver implements IDataDriver {
       /* the error below reports the state either way */
     }
     const restored = (await this.getExistingIndexNames(op.table)).has(op.indexName);
-    (this.logger.error ?? this.logger.warn)(
+    this.logDurabilityFailure(
       `[schema-drift] could not create the NULL-safe unique '${op.indexName}' on '${op.table}' after dropping ` +
         `the old index${restored ? ' — restored the previous bare composite' : ' — AND the restore failed, so the ' +
         'constraint is currently NOT enforced'}. Rows without an organization are ${restored ? 'still ' : ''}not ` +
@@ -11385,14 +11449,14 @@ export class SqlDriver implements IDataDriver {
               // outcome — but say that the shadow route was tried and why it
               // did not land, so this does not read as never having been
               // attempted.
-              (this.logger.error ?? this.logger.warn)(
+              this.logDurabilityFailure(
                 `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created ` +
                   `(#11627); falling back to the refusal below.`,
                 shadowMsg,
               );
             }
           }
-          (this.logger.error ?? this.logger.warn)(unkeyable, msg);
+          this.logDurabilityFailure(unkeyable, msg);
           throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
             code: (e as { code?: string }).code,
             cause: e,
@@ -11403,7 +11467,7 @@ export class SqlDriver implements IDataDriver {
           // visible. Do not take the boot down: the declared constraint is not
           // enforced yet, say so at `error` (from the outside everything looks
           // normal), and let the D4 drift pre-flight report the exact rows.
-          (this.logger.error ?? this.logger.warn)(
+          this.logDurabilityFailure(
             `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
               `violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint ` +
               `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
@@ -11459,7 +11523,7 @@ export class SqlDriver implements IDataDriver {
       const functionalUnsupported =
         this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
-      (this.logger.error ?? this.logger.warn)(
+      this.logDurabilityFailure(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
           `"${tableName}" over the BARE columns instead. Rows without an organization are NOT constrained ` +
           `by it (#5030): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
@@ -14139,7 +14203,7 @@ export class SqlDriver implements IDataDriver {
       return error;
     }
     if (!explanation) return error;
-    (this.logger.error ?? this.logger.warn)(explanation);
+    this.logDurabilityFailure(explanation);
     return Object.assign(new Error(`${explanation} (server said: ${String((error as { message?: string })?.message ?? error)})`), {
       code: (error as { code?: string })?.code,
       cause: error,
@@ -14492,7 +14556,7 @@ export class SqlDriver implements IDataDriver {
     const overflow = await this.explainRowSizeOverflow(tableName, fields, keyedColumns, addedColumns, e);
     if (!overflow) throw e;
     const said = String(e?.sqlMessage ?? e?.message ?? e);
-    (this.logger.error ?? this.logger.warn)(overflow, said);
+    this.logDurabilityFailure(overflow, said);
     throw Object.assign(new Error(`${overflow} (server said: ${said})`), {
       code: (e as { code?: string }).code,
       cause: e,
@@ -14636,17 +14700,25 @@ export class SqlDriver implements IDataDriver {
         // `schema-drift.ts` already treats `varchar(field.maxLength)` as the
         // expected physical shape of a bounded field (its `widen_varchar` /
         // `narrow_varchar` ops say so in as many words); this is the emitter
-        // finally agreeing with the differ. `Field.string` has always taken
-        // knex's `varchar(255)`, so a bounded text field is now LESS arbitrary
-        // than its string sibling, not more.
+        // finally agreeing with the differ. There is no `Field.string`
+        // builder: none of `Field`'s keys is named `string`, `FieldType.options`
+        // omits it too, and `FieldSchema.safeParse({ type: 'string', … })`
+        // fails at `[type]` (#12593). What IS true of knex: its bare
+        // `table.string(name)` call (no length argument) is `varchar(255)`.
+        // This branch never calls it bare — `table.string(name, keyable)`,
+        // where `keyable` is the field's own declared `maxLength`, up to
+        // `MAX_KEYABLE_VARCHAR_CHARS` (768 chars, wider than knex's
+        // 255-char default).
         //
         // Applied on every dialect rather than under `isMysql`, deliberately:
         // the alternative is one declaration with two enforcement answers, so
         // the same app would refuse an over-length write on MySQL and accept it
         // on Postgres. Dialect-divergent enforcement of one declared bound is
         // the defect class this repo's conformance matrices exist to close, and
-        // a `varchar(n)` is exactly what the SQLite and Postgres columns would
-        // have been had the field been declared `Field.string`.
+        // a `varchar(n)` is exactly what the SQLite and Postgres columns land
+        // as for a field declared `Field.text({ maxLength: n })` on a keyed
+        // column — the nearest authorable spelling to this shape; there is no
+        // `Field.string` (#12593).
         //
         // ⚠️ Scope, both halves load-bearing:
         //   - KEYED only. A non-indexed `Field.text({ maxLength: 65000 })` stays

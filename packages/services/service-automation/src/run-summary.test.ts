@@ -23,6 +23,7 @@ import { registerHttpNodes } from './builtin/http-nodes.js';
 import { registerConnectorNodes } from './builtin/connector-nodes.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import type { FlowRunSummary } from '@objectstack/spec/automation';
 
 /**
  * `resumeAuthority: 'any'` is required of a pausing fixture since #5561: these
@@ -195,13 +196,24 @@ function sweepFlow(name: string) {
     };
 }
 
-function sweepEngine(rows: Array<Record<string, unknown>>, logger = makeLogger(), store?: any) {
+function sweepEngine(
+    rows: Array<Record<string, unknown>>,
+    logger = makeLogger(),
+    store?: any,
+    // #12685: what a per-record idempotency lookup FINDS. Absent keeps the
+    // long-standing answer (the first selected row); `null` is the lookup that
+    // ran and found nothing, which is a distinct run shape from one that never
+    // ran at all. Taught to the existing double on purpose — a second fake data
+    // engine in this file would be a new double to pin for no new capability.
+    opts?: { findOne?: Record<string, unknown> | null },
+) {
     const written: Array<Record<string, unknown>> = [];
     let seq = 0;
     const data: any = {
         async find() { return rows; },
         async findOne(object: string, query?: EngineFindOneQueryInput) {
-                          assertEngineFindOnePredicate(object, query); return rows[0] ?? null; },
+                          assertEngineFindOnePredicate(object, query);
+                          return opts && 'findOne' in opts ? opts.findOne : (rows[0] ?? null); },
         async insert(obj: string, fields: any) { seq += 1; const r = { id: `${obj}_${seq}`, ...fields }; written.push(r); return r; },
         async update() { return 0; },
         async delete() { return 0; },
@@ -299,6 +311,172 @@ describe('flow run summary — a sweep that selects rows and writes none (#4354)
         expect(res.success).toBe(true); // not aborted as a runaway loop
         expect(res.summary!.skipped).toBe(40);
         expect(res.summary!.nodes.find((n) => n.nodeId === 'nudge')!.runs).toBe(0);
+    });
+});
+
+// ── The run-level filter is not the detector (#12685) ───────────────────────
+
+/**
+ * The two runs the run-level filter CANNOT tell apart, as one graph pair.
+ *
+ * `selected > 0 AND acted = 0 AND unmeasured = 0` is documented on
+ * `sys_automation_run.acted_count` as the FIRST FILTER for a broken sweep, and
+ * this pair is why the description says "filter" and not "signal": an
+ * idempotent sweep in its healthy steady state — re-select the same records,
+ * gate each one on "was this already handled" — trips it exactly as a dead gate
+ * does. Measured downstream through a real app's sweep first (hotcrm's
+ * `flow-run-summary.test.ts`); pinned here on the platform's own engine so the
+ * shipped sentence has an executable twin in the repo that ships it.
+ *
+ * ⚠️ Adding "over N consecutive runs" does not separate them, and no test can
+ * pin that by running once: the healthy steady state trips the filter on EVERY
+ * run for as long as the outstanding work stands, so consecutiveness filters
+ * flapping rather than this. What separates them is the per-node fold, which is
+ * what {@link skipsAreAccountedFor} reads.
+ *
+ * Both shapes share a node set, a closed gate and a skip count. They differ in
+ * exactly one thing — whether the run performed the read that justifies each
+ * skip:
+ *  - `healthy`   — the lookup runs FIRST and answers the gate. Every skip has a
+ *                  find behind it.
+ *  - `dead_gate` — the #4347 shape: the gate sits IN FRONT of the lookup, so
+ *                  nothing behind it ever runs and no read justifies a skip.
+ */
+function idempotentSweepFlow(name: string, shape: 'healthy' | 'dead_gate') {
+    // Never opens on this fixture's rows — the gate is closed in both shapes.
+    const condition = { dialect: 'cel', source: 'row.shouldRun == true' };
+    const lookup = {
+        id: 'find_existing', type: 'get_record', label: 'Already handled?',
+        // No `limit` ⇒ findOne ⇒ `selected: 1` when it finds one, `0` when not.
+        config: { objectName: 'nudge', filter: { deal: '{row.id}' }, outputVariable: 'existing' },
+    };
+    const gate = { id: 'gate', type: 'decision', label: 'Gate' };
+    const nudge = { id: 'nudge', type: 'create_record', label: 'Nudge', config: { objectName: 'nudge', fields: { note: 'x' } } };
+    const body = shape === 'healthy'
+        ? {
+            nodes: [lookup, gate, nudge],
+            edges: [
+                { id: 'b0', source: 'find_existing', target: 'gate' },
+                { id: 'b1', source: 'gate', target: 'nudge', type: 'conditional', condition, label: 'Go' },
+            ],
+        }
+        : {
+            nodes: [gate, lookup, nudge],
+            edges: [
+                { id: 'b1', source: 'gate', target: 'find_existing', type: 'conditional', condition, label: 'Go' },
+                { id: 'b2', source: 'find_existing', target: 'nudge' },
+            ],
+        };
+    return {
+        name, label: name, type: 'autolaunched', runAs: 'system',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            {
+                id: 'query', type: 'get_record', label: 'Query',
+                config: { objectName: 'deal', filter: { stalled: true }, limit: 10, outputVariable: 'rows' },
+            },
+            { id: 'each', type: 'loop', label: 'Each', config: { collection: '{rows}', iteratorVariable: 'row', body } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'query' },
+            { id: 'e2', source: 'query', target: 'each' },
+            { id: 'e3', source: 'each', target: 'end' },
+        ],
+    };
+}
+
+/** The queryable-column filter, exactly as `acted_count`'s description states it. */
+const tripsRunLevelFilter = (s: FlowRunSummary): boolean =>
+    s.selected > 0 && s.acted === 0 && (s.unmeasured ?? 0) === 0;
+
+/**
+ * The discriminator `acted_count`'s description sends an operator to: are the
+ * closed gate's skips accounted for by a read this run actually performed?
+ * Local to this test on purpose — the platform documents the rule and ships the
+ * data; it does not ship a detector.
+ */
+const skipsAreAccountedFor = (s: FlowRunSummary, lookupNodeId: string): boolean => {
+    const lookup = s.nodes.find((n) => n.nodeId === lookupNodeId);
+    const skips = s.gates.reduce((n, g) => n + g.skipped, 0);
+    return !!lookup && lookup.runs > 0 && (lookup.selected ?? 0) >= skips;
+};
+
+describe('the run-level filter cannot separate a healthy idempotent sweep from a dead gate (#12685)', () => {
+    const stalled = () => [1, 2, 3].map((i) => ({ id: `d${i}`, shouldRun: false }));
+
+    async function run(shape: 'healthy' | 'dead_gate', opts?: { findOne?: Record<string, unknown> | null }) {
+        const { engine, written } = sweepEngine(stalled(), makeLogger(), undefined, opts);
+        engine.registerFlow('sweep', idempotentSweepFlow('sweep', shape) as never);
+        const res = await engine.execute('sweep', { event: 'schedule' } as AutomationContext);
+        return { summary: res.summary as FlowRunSummary, written, success: res.success };
+    }
+
+    it('FIRES on a healthy idempotent sweep — the false positive the filter cannot avoid', async () => {
+        const { summary, written, success } = await run('healthy', { findOne: { id: 'nudge_prior' } });
+
+        expect(success).toBe(true);
+        expect(written).toHaveLength(0); // nothing to do: every deal already nudged
+        // 3 deals selected by the query + one find per iteration = 6 reads, no writes.
+        expect(summary).toMatchObject({ selected: 6, acted: 0, skipped: 3, unmeasured: 0 });
+        expect(tripsRunLevelFilter(summary)).toBe(true);
+
+        // …and it is healthy: the lookup ran once per iteration and found the
+        // prior work each time. That is what accounts for the skips.
+        expect(summary.nodes.find((n) => n.nodeId === 'find_existing')).toMatchObject({ runs: 3, selected: 3 });
+        expect(summary.gates).toEqual([
+            { nodeId: 'gate', targetNodeId: 'nudge', edgeId: 'b1', label: 'Go', skipped: 3 },
+        ]);
+    });
+
+    it('FIRES identically on a dead gate — same filter verdict, opposite health', async () => {
+        const { summary, written } = await run('dead_gate');
+
+        expect(written).toHaveLength(0);
+        // Only the query read anything — the body never ran at all.
+        expect(summary).toMatchObject({ selected: 3, acted: 0, skipped: 3, unmeasured: 0 });
+        expect(tripsRunLevelFilter(summary)).toBe(true);
+
+        // The gate is in front of the lookup, so nothing behind it ever ran and
+        // no read justifies a single skip.
+        expect(summary.nodes.find((n) => n.nodeId === 'find_existing')).toMatchObject({
+            runs: 0, skipped: 3, status: 'skipped',
+        });
+        expect(summary.gates[0]).toMatchObject({ nodeId: 'gate', targetNodeId: 'find_existing', skipped: 3 });
+    });
+
+    it('`summary_json` DOES separate them — the discriminator the description documents', async () => {
+        const healthy = (await run('healthy', { findOne: { id: 'nudge_prior' } })).summary;
+        const deadGate = (await run('dead_gate')).summary;
+
+        // Same run-level verdict…
+        expect([tripsRunLevelFilter(healthy), tripsRunLevelFilter(deadGate)]).toEqual([true, true]);
+        // …opposite per-node verdict. This pair is the whole point of the fold.
+        expect(skipsAreAccountedFor(healthy, 'find_existing')).toBe(true);
+        expect(skipsAreAccountedFor(deadGate, 'find_existing')).toBe(false);
+    });
+
+    it('catches the OTHER dead gate: the lookup ran and found nothing to justify the skips', async () => {
+        // The subtler #4347 shape — the gate's condition is simply wrong, so the
+        // lookup runs, finds nothing, and the gate closes anyway. `runs > 0` is
+        // therefore not enough on its own; the description says the lookup must
+        // have FOUND something, and this is the run that proves the clause earns
+        // its place.
+        const { summary } = await run('healthy', { findOne: null });
+
+        expect(summary).toMatchObject({ selected: 3, acted: 0, skipped: 3 });
+        expect(tripsRunLevelFilter(summary)).toBe(true);
+        expect(summary.nodes.find((n) => n.nodeId === 'find_existing')).toMatchObject({ runs: 3, selected: 0 });
+        expect(skipsAreAccountedFor(summary, 'find_existing')).toBe(false);
+    });
+
+    it('stays quiet on a genuinely idle sweep — nothing selected, nothing to explain', async () => {
+        const { engine } = sweepEngine([]);
+        engine.registerFlow('sweep', idempotentSweepFlow('sweep', 'healthy') as never);
+        const res = await engine.execute('sweep', { event: 'schedule' } as AutomationContext);
+
+        expect(tripsRunLevelFilter(res.summary as FlowRunSummary)).toBe(false);
+        expect(res.summary).toMatchObject({ selected: 0, acted: 0, skipped: 0, gates: [] });
     });
 });
 

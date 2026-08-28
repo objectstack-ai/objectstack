@@ -1,0 +1,251 @@
+---
+title: Package Lifecycle
+description: Package Lifecycle protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+## Package lifecycle response contracts (#12038)
+
+Response payloads for the dispatcher-served `packages.*` lifecycle routes —
+the ADR-0067 commit timeline, the ADR-0033 draft batch doors, the ADR-0070
+export / adopt / duplicate family — ruled on 2026-08-27 (#12038,
+1C · 2C · 3A · 4A · 5A).
+
+Every schema here is a DESCRIBE-ONLY TRANSCRIPTION of the return type its
+producer already declares inline (`@objectstack/metadata-protocol`
+`protocol.ts`, except where a schema's own docblock says otherwise) —
+authoring one changes no wire byte. All of these routes are served by the
+runtime dispatcher ONLY (no REST twin — #12038 survey §1b), which answers
+through the `{ success, data }` envelope (`http-dispatcher.ts`), so each
+schema declares the `data` payload, envelope-free — the same convention as
+`PublishPackageDraftsResponseSchema` and its ledger row.
+
+`packages.publish`'s contract is NOT here: its producer
+(`MetadataManager.publishPackage`) already has an exact published schema,
+`PackagePublishResultSchema` in `@objectstack/spec/system` — re-exported
+below into this `/api` namespace (ruling 5A: re-export, never a second
+copy) because the route-ledger resolver looks names up only in
+`@objectstack/spec/api`.
+
+The retired `PackageRollbackResponseSchema` and its
+`PackageApiContracts.rollbackPackage` binding (see `./package-api.zod.ts`)
+declared a VERSION rollback against the live COMMIT-rollback path;
+`RollbackToPackageCommitResponseSchema` below is the true contract,
+authored after that retirement per the ruling's sequencing (3A).
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/package-lifecycle.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+
+// Validate data
+const result = DiscardPackageDraftsResponseSchema.parse(data);
+```
+
+---
+
+## DiscardPackageDraftsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | True exactly when nothing failed. |
+| **discardedCount** | `number` | ✅ | How many drafts were discarded. |
+| **failedCount** | `number` | ✅ | How many drafts could not be discarded. |
+| **discarded** | `{ type: string; name: string }[]` | ✅ | Every draft that was discarded. |
+| **failed** | `{ type: string; name: string; error: string; code?: string }[]` | ✅ | Every draft the discard could not remove. |
+
+### Nested Shape: `DiscardPackageDraftsResponse.discarded[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the discarded draft. |
+| **name** | `string` | ✅ | Name of the discarded draft. |
+
+### Nested Shape: `DiscardPackageDraftsResponse.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the failing draft. |
+| **name** | `string` | ✅ | Name of the failing draft. |
+| **error** | `string` | ✅ | Why the discard failed. |
+| **code** | `string` | optional | Machine-readable failure code, when one was recorded. |
+
+
+---
+
+## DuplicatePackageResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | The duplicate's own verdict: true exactly when nothing failed AND at least one item was copied. |
+| **copiedCount** | `number` | ✅ | How many items were copied. |
+| **failedCount** | `number` | ✅ | How many items could not be copied. |
+| **targetPackageId** | `string` | ✅ | The new package the base was cloned into. |
+| **copied** | `{ type: string; name: string }[]` | ✅ | Every item that was copied. |
+| **failed** | `{ type: string; name: string; error: string }[]` | ✅ | Every item the clone could not copy. |
+
+### Nested Shape: `DuplicatePackageResponse.copied[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the copied item. |
+| **name** | `string` | ✅ | Name of the copied item. |
+
+### Nested Shape: `DuplicatePackageResponse.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the failing item. |
+| **name** | `string` | ✅ | Name of the failing item. |
+| **error** | `string` | ✅ | Why copying it failed. |
+
+
+---
+
+## ListPackageCommitsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **commits** | `{ id: string; operation: Enum<'apply' \| 'revert'>; message?: string; actor?: string; … }[]` | ✅ | The commit timeline, newest first. |
+
+### Nested Shape: `ListPackageCommitsResponse.commits[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Commit id. |
+| **operation** | `Enum<'apply' \| 'revert'>` | ✅ | Whether the commit applied changes or reverted an earlier commit. |
+| **message** | `string` | optional | Commit message, when one was recorded. |
+| **actor** | `string` | optional | Who made the commit, when recorded. |
+| **aiModel** | `string` | optional | AI model that authored the change, when recorded. |
+| **parentCommitId** | `string` | optional | The commit this one chains from, when recorded. |
+| **itemCount** | `number` | ✅ | How many items the commit touched. |
+| **items** | `{ type: string; name: string; existedBefore: boolean; prevVersion: number \| null }[]` | ✅ | The items the commit touched. |
+| **createdAt** | `string` | optional | When the commit was made (ISO-8601 string), when recorded. |
+
+
+---
+
+## PackageExportManifest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | The exported package's id. |
+| **name** | `string` | ✅ | The exported package's machine name. |
+| **version** | `string` | ✅ | The exported package's version. |
+| **label** | `string` | optional | Display label, when the package declares one. |
+
+
+---
+
+## PackagePublishResult
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Whether the publish succeeded |
+| **packageId** | `string` | ✅ | The package ID that was published |
+| **version** | `integer` | ✅ | New version number after publish |
+| **publishedAt** | `string` | ✅ | Publish timestamp |
+| **itemsPublished** | `integer` | ✅ | Total metadata items published |
+| **validationErrors** | `{ type: string; name: string; message: string }[]` | optional | Validation errors if publish failed |
+
+### Nested Shape: `PackagePublishResult.validationErrors[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type that failed validation |
+| **name** | `string` | ✅ | Item name that failed validation |
+| **message** | `string` | ✅ | Validation error message |
+
+
+---
+
+## ReassignOrphanedMetadataResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | Whether the reassignment ran. |
+| **reassignedCount** | `number` | ✅ | How many orphaned items were adopted. |
+| **reassigned** | `{ type: string; name: string }[]` | ✅ | Every item that was adopted. |
+| **targetPackageId** | `string` | ✅ | The package the items were adopted into. |
+
+### Nested Shape: `ReassignOrphanedMetadataResponse.reassigned[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the adopted item. |
+| **name** | `string` | ✅ | Name of the adopted item. |
+
+
+---
+
+## RevertPackageCommitResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | True exactly when nothing failed. |
+| **revertedCount** | `number` | ✅ | How many items were reverted. |
+| **failedCount** | `number` | ✅ | How many items could not be reverted. |
+| **reverted** | `{ type: string; name: string; action: Enum<'removed' \| 'restored'> }[]` | ✅ | Every item the revert touched. |
+| **failed** | `{ type: string; name: string; error: string; code?: string }[]` | ✅ | Every item the revert could not touch. |
+| **revertCommitId** | `string` | optional | Id of the commit the revert itself created, when one was written. |
+
+### Nested Shape: `RevertPackageCommitResponse.reverted[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the reverted item. |
+| **name** | `string` | ✅ | Name of the reverted item. |
+| **action** | `Enum<'removed' \| 'restored'>` | ✅ | What the revert did to the item — removed what the commit created, or restored what it overwrote. |
+
+### Nested Shape: `RevertPackageCommitResponse.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the failing item. |
+| **name** | `string` | ✅ | Name of the failing item. |
+| **error** | `string` | ✅ | Why the revert failed for this item. |
+| **code** | `string` | optional | Machine-readable failure code, when one was recorded. |
+
+
+---
+
+## RollbackToPackageCommitResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | True exactly when nothing failed. |
+| **revertedCommits** | `string[]` | ✅ | Ids of the commits that were rolled back, in the order they were reverted. |
+| **failed** | `{ commitId: string; error: string }[]` | ✅ | Every commit the rollback could not revert. |
+
+### Nested Shape: `RollbackToPackageCommitResponse.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **commitId** | `string` | ✅ | The commit that could not be reverted. |
+| **error** | `string` | ✅ | Why reverting it failed. |
+
+
+---
+

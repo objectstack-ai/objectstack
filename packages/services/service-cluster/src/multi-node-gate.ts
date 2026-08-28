@@ -67,6 +67,25 @@
  * Until it lands, a consumer should treat `refused > 0` as the trigger for the
  * **loud warning** the ruling requires, not as a licence to deny the cluster.
  *
+ * ## What a consumer may do with the verdict TODAY (visibility, not enforcement)
+ *
+ * Maintainer ruling 2026-08-27, verbatim 「其他接受」 (adopting option C): a
+ * licensed `max_nodes` oversell is made **visible to operators**, and the
+ * atomic slot claim above is deliberately not built. `os serve` is the sole
+ * runtime consumer and gives the verdict two reaches, both read-only:
+ *
+ *   1. a loud boot warning (`formatMultiNodeCapAdvisory`), and
+ *   2. operator telemetry (`describeMultiNodeCapTelemetry`) — the metric family
+ *      `cluster_declared_nodes` / `cluster_admitted_nodes` /
+ *      `cluster_node_cap_verdicts_total` in `@objectstack/observability`'s
+ *      `SEMCONV`.
+ *
+ * ⛔ Both are worded — and NAMED — around what the operator *declared* and what
+ * the licence *admits*, never around what is running. Nothing in this process
+ * knows the latter (that is the whole point of the section above), so a
+ * consumer that renames a reading into `cluster_nodes`, `active`, `live` or
+ * `members` is publishing a false statement, not clarifying a clumsy one.
+ *
  * ## Why not a per-node admission callback
  *
  * A `admitNode(nodeId): boolean` shape was considered and rejected on

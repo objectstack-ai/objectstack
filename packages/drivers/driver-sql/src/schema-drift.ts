@@ -172,6 +172,38 @@ export type DriftOp =
    */
   | { type: 'manual_column_type_change'; table: string; column: string; to: string; from: string }
   /**
+   * REPORT ONLY (#12121). The column is a `varchar(n)` under a TEXT-family
+   * field that declared NO usable bound — the shape `createColumn` emits as
+   * TEXT — so the column caps writes the declaration allows, and **the platform
+   * deliberately does not change it**.
+   *
+   * ⛔ A DISTINCT op rather than a second use of `manual_column_type_change`,
+   * for a measured reason and not a stylistic one: `os migrate
+   * multi-value-columns` selects its ENTIRE population by
+   * `op.type === 'manual_column_type_change'` (`isStaleMultiValueColumn`, "the
+   * only op this command touches") and then recovers the dialect by matching the
+   * finding's message against {@link manualJsonConversionSql}. Reusing that op
+   * would hand this finding to a command whose remedy converts the column to
+   * **json** — the wrong column type for a signature — and, since this message
+   * embeds no json statement, the command would file it under
+   * `remedy_not_recognized`: one refusal line per finding, on every run, for a
+   * divergence that command has no business with.
+   *
+   * ⛔ There is NO reconciler arm, deliberately. `applyDriftOpInPlace` matches
+   * no case, so `applyMigrationEntries` reports the entry as skipped and logs
+   * it. Whether ObjectStack should run the `ALTER` itself is a separate decision
+   * with hazards this differ must not pre-empt: on MySQL a `MODIFY` restates the
+   * WHOLE column definition (silently dropping a NOT NULL or DEFAULT that is not
+   * repeated) and a TEXT column cannot carry a plain index without a prefix
+   * length, so the conversion can turn a working table into one whose declared
+   * index no longer exists.
+   *
+   * `from` is the physical type word and `to` is always `'text'`, spelled the way
+   * `manual_column_type_change` spells them so a renderer showing `from → to`
+   * needs no new arm.
+   */
+  | { type: 'manual_widen_varchar_to_text'; table: string; column: string; to: 'text'; from: string }
+  /**
    * Retire the legacy platform-wide UNIQUE index on a now-tenant-scoped field
    * and put the composite `(tenantField, field)` in its place (#3696). The two
    * names differ, so the reconciler creates before it drops — uniqueness is
@@ -484,6 +516,46 @@ function acceptsStringifiedJson(type: string | undefined): boolean {
 }
 
 /**
+ * The field types whose column is TEXT whenever the field declares no usable
+ * `maxLength` — `createColumn`'s text-family case (#11794 / #11875).
+ *
+ * ⚠️ Read the scope precisely: these are the types for which the emitter's
+ * answer is TEXT **regardless of whether an index keys the column**. That
+ * independence is what licenses the #12121 branch below to report on this shape
+ * without being told which columns are keyed, and it is not an assumption — it
+ * falls out of the emitter's own expression, `keyable = keyed ?
+ * keyableTextLength(field) : null`, whose keyed arm returns `null` for a field
+ * with no positive-integer bound. A text-family field that DID declare a keyable
+ * bound takes `varchar(maxLength)` when keyed, which is exactly why that branch
+ * is gated on the declaration being ABSENT and never fires for it.
+ *
+ * ⛔ NOT derived from the spec's `BOUNDED_STRING_FIELD_TYPES`, for the reason
+ * `sql-driver-12017-bounded-string-spec-parity.test.ts` argues in full: that set
+ * answers "may this type declare a bound?" and carries no varchar/TEXT
+ * partition, so deriving would have to INVENT an answer for every future member
+ * at the one seam where the maintainer has actually ruled per type. It is a
+ * hand-written list and is therefore PINNED rather than trusted —
+ * `schema-drift.unbounded-text-column.test.ts` probes the driver's OWN
+ * dispatch (`varcharColumnChars`) over every `FieldType` the spec declares and
+ * asserts set equality in both directions, plus the keyed-and-unkeyed `null`
+ * above for every member. A type entering or leaving `createColumn`'s text
+ * family reds there by name.
+ *
+ * ⚠️ It lives here rather than being imported from `sql-driver.ts` because the
+ * dependency runs the other way — `sql-driver.ts` imports this module — so an
+ * import would be a cycle. The pin is what stands in for a shared constant.
+ *
+ * ⛔ Module-exported so this package's own suites can pin it, and deliberately
+ * NOT added to `index.ts` — the same call {@link MULTI_VALUE_COLUMN_REMEDY_COMMAND}
+ * makes: nothing outside this package has a question this set answers.
+ */
+export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'html', 'markdown', 'richtext', 'code',
+  // #11875 — joined the family once the write seam enforced their declared bound.
+  'signature', 'qrcode',
+]);
+
+/**
  * Does a multi-value field's JSON column carry its type on THIS dialect — i.e.
  * does a stale textual column silently corrupt the value (#11535)?
  *
@@ -596,8 +668,29 @@ export function diffManagedTable(args: {
   fields: Record<string, FieldDef>;
   columns: PhysicalColumn[];
   dialect: SqlDialectName;
+  /**
+   * Which columns an index KEYS ON (#11374), keyed by field name — the exact
+   * map {@link indexedKeyColumns} builds. Consulted ONLY by the varchar-length
+   * branch below, through {@link varcharColumnChars}, to answer the same
+   * question `createColumn` asks before it sizes a text-family column.
+   * Omitted (the default), a field reads as unkeyed — the same default the
+   * emitter itself takes when nobody supplies one.
+   */
+  keyedColumns?: ReadonlyMap<string, { unique: boolean }>;
+  /**
+   * The emitter's OWN read-only mirror — `SqlDriver.varcharColumnChars`,
+   * bound by the caller — asked "what `varchar(n)` would `createColumn`
+   * actually build for this field, or `null` if it would not build a varchar
+   * at all?" (#12732). `SqlDriver.detectTableDrift` supplies it on every real
+   * call; a caller that doesn't (this module cannot reach `sql-driver.ts` —
+   * see {@link UNBOUNDED_TEXT_FIELD_TYPES}'s note on the cycle) keeps this
+   * branch's pre-#12732 behaviour, unconditional on `declaredMaxLength`
+   * alone — an intentionally additive default so no existing direct caller of
+   * this exported function changes shape under it.
+   */
+  varcharColumnChars?: (field: FieldDef, keyed?: { unique: boolean }) => number | null;
 }): ManagedDriftEntry[] {
-  const { table, fields, columns, dialect } = args;
+  const { table, fields, columns, dialect, keyedColumns, varcharColumnChars } = args;
   const out: ManagedDriftEntry[] = [];
 
   const columnsByName = new Map(columns.map((c) => [c.name, c]));
@@ -827,10 +920,39 @@ export function diffManagedTable(args: {
       typeof field.maxLength === 'number' && Number.isInteger(field.maxLength) && field.maxLength > 0
         ? field.maxLength
         : undefined;
+    // ── #12732: would `createColumn` even make this a VARCHAR? ───────
+    //
+    // `declaredMaxLength` alone answers "did the author write a bound?" — it
+    // says nothing about whether the emitter honours that bound as a varchar
+    // width at all, and it disagreed with `createColumn` in two measured
+    // directions: an UNKEYED bounded text-family field (`text` / `richtext` /
+    // `signature` / `markdown` / …) is TEXT regardless of its declared bound
+    // (`keyableTextLength` returns `null` unkeyed), and a base string-family
+    // field (`email` / `url` / `password` / …) bounded PAST the varchar
+    // ceiling is TEXT too (`declaredVarcharLength` returns `null` above
+    // `MAX_VARCHAR_CHARS`). Both were nonetheless diffed as `varchar(N)`
+    // against the physical column — a `narrow_varchar` at `destructive` for
+    // the first (refusing the boot of an already-serving deployment over a
+    // divergence the write seam already enforces), a `widen_varchar` at
+    // `safe` for the second (planning `ALTER … varchar(100000)`, DDL MySQL
+    // refuses outright).
+    //
+    // Asking `varcharColumnChars` — the emitter's own read-only mirror,
+    // rather than a second copy of its switch — answers both at once: `null`
+    // means "the emitter would not make this a varchar", which is the honest
+    // expectation in both directions, so the branch below simply does not
+    // fire. See the parameter doc above for why an OMITTED mirror leaves this
+    // `true` rather than `false` — additive, not a silent behaviour change
+    // for a caller that hasn't been threaded the new input yet.
+    const emitterWouldVarchar =
+      varcharColumnChars === undefined || declaredMaxLength === undefined
+        ? true
+        : varcharColumnChars(field, keyedColumns?.get(fieldName)) !== null;
     if (
       enforcesVarcharLength(dialect) &&
       !declaresJsonColumn &&
       declaredMaxLength !== undefined &&
+      emitterWouldVarchar &&
       isCharacterColumn(col.type) &&
       typeof col.maxLength === 'number' &&
       declaredMaxLength !== col.maxLength
@@ -862,6 +984,93 @@ export function diffManagedTable(args: {
           message: `${table}.${fieldName}: metadata caps at ${declaredMaxLength} chars but the column allows ${col.maxLength} — narrowing may truncate. "os migrate apply --allow-destructive".`,
         });
       }
+    }
+
+    // ── an UNBOUNDED text-family field over a pre-existing varchar (#12121) ──
+    //
+    // The exact COMPLEMENT of the branch above: that one REQUIRES
+    // `declaredMaxLength !== undefined`, so on a pre-existing table the two
+    // partition the text family by whether its author wrote a number.
+    //
+    // Until this branch existed the undeclared half was reported by NOTHING, and
+    // that half is the common case. Measured on the pre-fix tree, one
+    // `diffManagedTable` call per type: a `text` / `textarea` / `html` /
+    // `markdown` / `richtext` / `code` / `signature` / `qrcode` field with no
+    // `maxLength` over a `character varying(255)` column returned **zero**
+    // entries on both enforcing dialects, while `{ type: 'signature', maxLength:
+    // 4096 }` over the same column returned `widen_varchar` in the same run — so
+    // the differ was working and this shape was simply invisible to it.
+    //
+    // What that silence costs: after #11875/#12119 a NEWLY created column for
+    // these types is TEXT and holds a data URI correctly, but the additive sync
+    // never revisits an existing column, so a deployment upgrading into that
+    // release gets no change AND no diagnostic. The server keeps refusing the
+    // same write, and the refusal is a poor substitute for a report: the live
+    // probe behind `objectql`'s `driver-fault-redaction.ts` measured Postgres's
+    // `22001` as identifier-only and naming the TYPE rather than the column
+    // (`value too long for type character varying(255)`), MySQL's `1406` as
+    // `Data too long for column 'label' at row 1`. Meanwhile every
+    // drift-reporting road in the platform — `os migrate plan`, `os migrate
+    // apply`, the artifact-pinned boot gate, the boot-time `[schema-drift]` warn
+    // — reads THIS function, so the one place that could have named the column
+    // and the cause named nothing at all.
+    //
+    // ## Why this needs no keyed-column input
+    //
+    // `createColumn` sizes a text-family column as `keyed ?
+    // keyableTextLength(field) : null`, and `keyableTextLength` returns `null`
+    // for a field with no positive-integer bound. So for the fields this branch
+    // SELECTS the emitter answers TEXT whether or not an index keys them: the
+    // differ does not have to know, and cannot be wrong about it. Pinned as such
+    // — see {@link UNBOUNDED_TEXT_FIELD_TYPES}.
+    //
+    // ## Severity `error`, category `needs_confirm` — and the category is the
+    // ## load-bearing half, exactly as it is for the base-type branch above
+    //
+    // ⛔ Do NOT "correct" `needs_confirm` to `destructive` to match how bad it
+    // sounds. `runArtifactBootMigrationGate` refuses a boot for `category ===
+    // 'destructive'` and for nothing else, and every database this finding
+    // describes is ALREADY SERVING — that is the premise of the report. A
+    // `destructive` spelling would convert a deployment that merely refuses
+    // over-long values into a crash-loop on its next restart. `safe` is wrong in
+    // the other direction: dev auto-reconcile applies `safe` entries unattended
+    // and there is no arm to apply.
+    //
+    // `severity` is read by NO gate — it is render weight — and `error` is the
+    // honest weight for the same reason the base-type branch takes it: there is
+    // no automatic repair, so the operator has to act.
+    if (
+      enforcesVarcharLength(dialect) &&
+      !declaresJsonColumn &&
+      declaredMaxLength === undefined &&
+      UNBOUNDED_TEXT_FIELD_TYPES.has(field.type || 'string') &&
+      isCharacterColumn(col.type) &&
+      typeof col.maxLength === 'number'
+    ) {
+      out.push({
+        kind: 'type_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: 'text',
+        actual: `varchar(${col.maxLength})`,
+        severity: 'error',
+        category: 'needs_confirm',
+        op: { type: 'manual_widen_varchar_to_text', table, column: fieldName, to: 'text', from: col.type },
+        message:
+          `${table}.${fieldName}: metadata declares \`${field.type || 'string'}\` with no ` +
+          `\`maxLength\`, so ObjectStack creates this column as TEXT — but the existing column is ` +
+          `\`varchar(${col.maxLength})\` and the additive sync never changes a column's type. The ` +
+          `column still caps at ${col.maxLength} characters, so the server refuses longer values the ` +
+          `declaration ALLOWS (Postgres 22001, MySQL ER_DATA_TOO_LONG) — a data URI in a ` +
+          `\`signature\`/\`qrcode\` field, or an ordinary rich-text body, is routinely past it ` +
+          `(#12121). ObjectStack does NOT migrate this column: "os migrate apply" reports this entry ` +
+          `as skipped. Two operator routes — declare a \`maxLength\` this dialect can express, which ` +
+          `turns this into the widen op "os migrate apply" performs; or convert the column to TEXT by ` +
+          `hand, with a backup taken first, restating the FULL column definition on MySQL (MODIFY ` +
+          `drops a NOT NULL or DEFAULT you do not repeat) and dropping any index that keys the column ` +
+          `first, since MySQL cannot key a TEXT column without a prefix length.`,
+      });
     }
   }
 

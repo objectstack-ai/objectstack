@@ -141,6 +141,45 @@ record's fields **directly on `ctx.input`** (a flat view over the internal
 `{ data, options }` wrapper — reads and writes of record fields route through
 `ctx.input.data`):
 
+<Callout type="warn" title="`id` / `options` / `ast` / `data` are RESERVED on the flat `ctx.input` face">
+These four names always resolve to the envelope, never to a record field —
+even if your object declares a field with one of those names. A field named
+`id` (or `options` / `ast` / `data`) still round-trips through storage
+exactly as declared; it is simply unreachable as `ctx.input.<name>`. Read it
+at `ctx.input.data.<name>` instead:
+
+```ts
+handler: async (ctx) => {
+  ctx.input.id;         // the row this write targets (or undefined on insert) — NEVER the payload's own `id` field
+  ctx.input.data.id;    // the payload's own `id` field, if the object declares one
+};
+```
+
+This applies to every read of these names through `ctx.input` — direct
+access, `Object.keys`/`for-in`, spread, and `Object.entries` all agree on the
+envelope's value for a reserved name (`packages/objectql/src/hook-wrappers.ts`,
+#12601).
+</Callout>
+
+<Callout type="warn" title="A symbol key is refused, not stored">
+A record payload is a declarable, string-keyed field set — no metadata schema
+can declare a symbol field. Writing one onto `ctx.input`, whether by
+assignment or `Object.defineProperty`, throws a `TypeError` naming the key and
+the surface instead of silently accepting it:
+
+```ts
+const cacheKey = Symbol('cache-entry');
+handler: async (ctx) => {
+  ctx.input[cacheKey] = value; // throws: symbol keys are not a valid record-payload field
+};
+```
+
+This most often happens by accident — spreading an object that carries a
+symbol-keyed cache entry onto the payload. Use a string key, or keep the value
+off the payload entirely if it is not meant to be stored (`packages/objectql/src/hook-wrappers.ts`,
+#12603).
+</Callout>
+
 ```typescript
 import { Hook } from '@objectstack/spec/data';
 

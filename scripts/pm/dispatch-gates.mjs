@@ -1180,6 +1180,148 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
 }
 
 /**
+ * The repo-relative DIRECTORY a single-segment module-relative literal names —
+ * or `null` for every other single-segment literal, which is the standing
+ * refusal this narrows by exactly one class.
+ *
+ * ## The class, and the two literals it exists for
+ *
+ * `looksPathy` reads a literal as the author wrote it minus the depth prefix,
+ * so a literal that is ONE segment after the strip carries no separator and is
+ * no hint at all. That is right for `'./invoked-as.mjs'` and `'./package.json'`
+ * and wrong for these two, which are unambiguous subtree declarations:
+ *
+ *   packages/spec/scripts/build-docs.ts:61             path.resolve(__dirname, '../src')
+ *   packages/spec/scripts/build-skill-references.ts:35 path.resolve(__dirname, '../src')
+ *
+ * Checked at the declaration site rather than assumed, which is the provenance
+ * criterion this file prices: `build-docs.ts` does `fs.readdirSync(SRC_DIR)`
+ * and walks the category directories under it; `build-skill-references.ts`
+ * resolves every spec file it reads against `SPEC_SRC`. Both really do read
+ * `packages/spec/src`.
+ *
+ * ## Why the test is "a tracked DIRECTORY" and not "the resolve succeeded"
+ *
+ * Admitting on the resolved form alone is the naive widening, and it is
+ * measured and REFUSED — `extractWatchHints`' admission comment carries the
+ * verdict. Re-measured on this tree at `96dc446c9`, it adds 53 distinct hints,
+ * and the split is the whole argument:
+ *
+ *   resolve to a tracked DIRECTORY   1    `packages/spec/src`, on the two gates above
+ *   resolve to a tracked FILE       42    `invoked-as.mjs` (x123 families),
+ *                                         `ts-parse.mjs`, `js-comment-mask.mjs`,
+ *                                         `packages/spec/package.json` — the sibling
+ *                                         module and manifest class, a second and
+ *                                         unpriced answer to the question
+ *                                         `firstPartyImportTargets` already owns
+ *   resolve to nothing tracked      10    `packages/spec/json-schema`,
+ *                                         `packages/spec/scripts/{contracts,data,other,ui}`,
+ *                                         `scripts/{package,base,tsconfig}.json` —
+ *                                         build OUTPUT directories and untracked
+ *                                         siblings, hints that would print and reach
+ *                                         nothing
+ *
+ * So the directory test is not a refinement of the naive widening, it is a
+ * different predicate that happens to share its resolve: it takes 1 of the 53
+ * and leaves the two refused classes bit for bit.
+ *
+ * TRACKED, never `existsSync` + `isDirectory`. The ten in the third row are
+ * exactly what a filesystem test would get wrong the moment anything has been
+ * built — `packages/spec/json-schema` and the four `packages/spec/scripts/*`
+ * roots are generated output, absent from a clean checkout and present after a
+ * build, so a filesystem predicate would mint five hints whose existence
+ * depends on whether the reader ran a build first. `git` is the corpus every
+ * other answer in this file is measured against, and it is the corpus here.
+ *
+ * ## Why the resolved form must carry a SEPARATOR
+ *
+ * A literal like `'../../skills'` written from `scripts/pm/` resolves to
+ * `skills` — a tracked directory, and a BARE ROOT. Admitting it would build a
+ * hint `hintCovers` refuses on its own bare-word rule, so it would reach
+ * nothing, and it would land as a fresh row in the SHRINK-ONLY escapable-literal
+ * ledger (`escapableLiteralRows` selects on exactly "no separator, and the tree
+ * has the whole literal"). That is the +139084-pair class re-entering one
+ * literal at a time, through a door labelled "directory".
+ *
+ * The separator requirement makes the refusal structural rather than lucky: no
+ * literal this function admits can be a hint `hintCovers` would refuse, so the
+ * bare-word verdict is untouched by construction and not merely untouched on
+ * today's tree. The gate whose population really is a repo root has the same
+ * escape it always had — declare the subtree spelling, `ROOT_DIR_WATCH_HINTS`.
+ *
+ * ## WITH the neighbouring refusals, or APART? — apart, and on their own criterion
+ *
+ * `hintCovers`' docblock refuses two neighbours: a bare top-level word
+ * (+139084 pairs) and a bare root FILE literal (refused on provenance, 8 of 17
+ * new pairs fabricated because `README.md` is a basename gates JOIN with a
+ * package directory). This class sits APART from both, and the distinction is
+ * not one of degree:
+ *
+ *   - both neighbours are literals with NO WRITER to resolve against, so the
+ *     tree cannot say which path — if any — they mean. `packages` is a path
+ *     COMPONENT in dozens of gates that never read the root. A module-relative
+ *     literal is the opposite shape: it is an author pointing from where they
+ *     stand, it resolves to exactly one path, and whether that path is a
+ *     tracked directory is a fact of the tree rather than a reading of intent;
+ *   - provenance, which is the criterion the docblock says it actually prices
+ *     and never volume: 2 of 2 admitted (family, hint) pairs are TRUE leads,
+ *     verified at the declaration site above. 0 fabricated;
+ *   - the neighbours are refusals of a hint the covering rule cannot judge.
+ *     This function emits a resolved, multi-segment path, so both refusals keep
+ *     running on exactly the population they always did.
+ *
+ * ## Price, measured through `hintCovers` and nothing else
+ *
+ * Over 176 families x 7131 tracked files at `96dc446c9`:
+ *
+ *   watch-hint (gate, file) pairs   83846 -> 85954   (+2108, and ZERO lost)
+ *   families gaining coverage       2; ZERO losing
+ *   (check, hint) live / inert      892/590 -> 894/590   (+2 live, 0 newly inert)
+ *   distinct hints in the fleet     829 -> 829       UNCHANGED, and that is the
+ *                                   shape of the thing: `packages/spec/src` is
+ *                                   already spelled from the root by other
+ *                                   gates, so this admits no hint text the
+ *                                   fleet did not already carry — it gives two
+ *                                   gates the hint their own source declares
+ *   check:docs                      451 -> 1505
+ *   check:skill-refs                 15 -> 1069
+ *
+ * Each of the two new (check, hint) pairs contributes 1054 files, the whole of
+ * `packages/spec/src`, which is why the pair total is exactly twice it. The
+ * hint has no `packages/spec/src.<ext>` sibling, so the dropped-extension
+ * disjunct adds nothing to either.
+ *
+ * The card that filed this measured 2062 (1031 + 1031) on 6899 tracked files
+ * and the pre-#12794 matcher. The reading moved with the tree, not with the
+ * rule: `packages/spec/src` holds 1054 tracked files now rather than 1031, and
+ * both gates take all of them.
+ *
+ * ## Why the TREE is a parameter and not a read
+ *
+ * `extractWatchHints` is a pure string function over one script's source, and
+ * `hintCovers`' docblock refuses coupling extraction to a git checkout — the
+ * refusal that sent the dropped-extension follow to comparison time. It is not
+ * relaxed here. The corpus arrives as an argument, from the caller that has
+ * already read it once; a caller with no tree gets the standing refusal, which
+ * is a MISSING lead and the direction this file errs in everywhere. And the
+ * membership questions are answered by `trackedPrefixes` and `trackedFiles` —
+ * the file's existing single owners of "what does the tree have" — never by a
+ * second walker built here.
+ */
+export function moduleRelativeDirectoryHint(literal, scriptPath, tree, { root = ROOT } = {}) {
+  if (!scriptPath || !tree) return null;
+  const resolved = resolveModuleRelativeHint(literal, scriptPath, { root });
+  // A bare root is refused BEFORE the tree is consulted: it is not a directory
+  // this rule declines to name, it is a hint `hintCovers` would refuse anyway.
+  if (!resolved || !resolved.includes('/')) return null;
+  // A tracked prefix that is not itself a tracked file IS a directory — read
+  // off the two sets the sweep already builds, so this cannot disagree with
+  // what the reachability half of the tool believes the tree holds.
+  if (!tree.prefixes.has(resolved) || tree.files.has(resolved)) return null;
+  return resolved;
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -1262,7 +1404,7 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
  * where the hint is built — not at comparison time, where every caller would
  * have to remember to do it.
  */
-export function extractWatchHints(scriptSource, scriptPath = null) {
+export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
   const moduleBody = maskSelfTests(maskComments(scriptSource));
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
@@ -1279,13 +1421,42 @@ export function extractWatchHints(scriptSource, scriptPath = null) {
     // `gate source` where the import channel says `gate source via <mod>`. It
     // also put a path population on two gates that DECLARE they have none. The
     // bare-single-segment refusal in `hintCovers`' docblock is the same
-    // standing verdict, one class over.
+    // standing verdict, one class over. Re-measured at 96dc446c9 the refusal
+    // still costs all three: the self-test's `--self-test`-inherits-nothing
+    // case, its no-path-population case (contradicted for check:release-body
+    // and check-prerelease-pin-watch.mjs), and the two pins that state the
+    // refusal itself.
+    //
+    // ONE class is admitted back, and it is a different predicate rather than a
+    // softening of that one: a single-segment literal whose resolved form is a
+    // tracked DIRECTORY carrying a separator (`moduleRelativeDirectoryHint`,
+    // whose docblock carries the split of the 53 hints and the judgement).
+    // Nothing about the sibling module, the manifest, or the bare root moves.
     const stripped = raw.replace(/^(?:\.\.?(?:\/|$))+/, '');
     // Dots and nothing else name no file, on either path — checked before the
     // resolve so it cannot turn `'..'` into the writer's own directory.
     if (!stripped) continue;
     const looksPathy = stripped.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(stripped);
-    if (!looksPathy) continue;
+    if (!looksPathy) {
+      // The one narrow re-admission, and it is MODULE-RELATIVE ONLY. `resolve`
+      // treats a bare word exactly like a `./` one, so dropping the
+      // `stripped !== raw` test here silently widens this to the bare-word class
+      // one writer's directory at a time — measured on this tree at three
+      // fabricated hints, the sharpest being `'fixtures'`, a member of
+      // check-error-status-conformance's SKIP_DIRS set, i.e. a directory the
+      // gate declares it does NOT read, admitted as `scripts/fixtures` because
+      // the tree happens to have one. The hint is the RESOLVED directory, so
+      // what reaches `hintCovers` is an ordinary multi-segment path and every
+      // refusal below is untouched; a caller with no tree keeps the standing
+      // refusal, which is a missing lead rather than a fabricated one.
+      const directory =
+        stripped !== raw
+          ? moduleRelativeDirectoryHint(raw.replace(/[./]+$/, ''), scriptPath, tree)
+          : null;
+      if (!directory) continue;
+      hints.add(directory);
+      continue;
+    }
     const trimmed = stripped.replace(/[./]+$/, '');
     if (!trimmed) continue;
     // A slash is the separator of several namespaces, and only one of them is
@@ -1705,6 +1876,106 @@ export function collapseHint(hint) {
  * to 34 and is the number this file calls unaffordable. So the two hints stay
  * as declared; narrowing them at their declaration site was considered and is
  * refused, because the narrowing would be the false statement.
+ *
+ * ## A DROPPED EXTENSION is followed, at comparison time (#12514)
+ *
+ * An ESM/TypeScript relative import spells its target without the extension, so
+ * `check-spec-changes.ts` importing `../src/migrations/registry` yields the hint
+ * `packages/spec/src/migrations/registry` — correct, resolved against the
+ * writing script by `resolveModuleRelativeHint` — while the tree holds
+ * `…/registry.ts`. The comparisons above are segment-wise, and an extension is
+ * not a segment, so the hint missed the file it names by exactly four bytes.
+ *
+ * The cost was NOT the residue row (#12780 repaired that: the printout names
+ * the real file and stops calling it a layout move). It was the MATCHED column.
+ * Nine `packages/spec` families were unreachable ENTIRELY for this reason, so
+ * no path derivation could ever name them: a dev editing
+ * `packages/spec/src/migrations/registry.ts` was never told they owed
+ * `check:spec-changes`. Silent under-derivation, exit 0 — measured four times
+ * in one day on this board as red CI after a dev had run a complete-looking
+ * union (`check:api-surface` on #12585, `check:docs` on #12591,
+ * `check:adr-anchors` on #12652, and #12393/PR #12585).
+ *
+ * ## Why COMPARISON and not EXTRACTION — the two are not equivalent
+ *
+ * The other place to follow the extension is `extractWatchHints`, emitting
+ * `…/registry.ts` as the hint. That was considered and refused on three counts,
+ * and the choice is recorded here because the printed hint is what a reader
+ * sees:
+ *
+ *   - it would make the hint text a LIE ABOUT THE SOURCE. The gate really does
+ *     import `../src/migrations/registry`, extensionless; the hint set's job is
+ *     to say what the script declares, and `resolveModuleRelativeHint`'s own
+ *     docblock calls resolving-rather-than-forgiving the contract-first repair.
+ *     "Which file does this specifier mean" is a different question, and it is
+ *     the one this comparison answers;
+ *   - `extractWatchHints` is a PURE STRING function over one script's source.
+ *     Following an extension there needs the tracked-file set, which would
+ *     couple extraction to a git checkout and hand the file a SECOND answer to
+ *     a question `extensionlessModuleTarget` already owns — the drift this file
+ *     refuses everywhere else;
+ *   - it would move the printed hint for all 38 affected hints, i.e. re-write
+ *     the residue rows #12780 landed the day before, for no gain in the column
+ *     this card is about.
+ *
+ * What extraction-side would have bought and this does not: `deepestTrackedPrefix`
+ * and the escapable-literal rows still see the extensionless spelling. That is
+ * deliberate — those readers describe what the AUTHOR WROTE, and they are
+ * correct about it.
+ *
+ * ## Measured, both directions, through `hintCovers` and nothing else
+ *
+ * Over 176 discovered families x 829 distinct hints x 7129 tracked files, on
+ * `ead731756`:
+ *
+ *   watch-hint (gate, file) pairs   83775 -> 83830   (+55, and ZERO lost)
+ *   (check, hint) live / inert      837/645 -> 892/590   (+55 live, 0 newly inert)
+ *   distinct hints reaching a file  444 -> 482   (+38, all resolving through `.ts`)
+ *   unreachable families            11 -> 2     (the nine `packages/spec` ones)
+ *   families gaining coverage       18; ZERO losing
+ *
+ * Each newly live (check, hint) pair contributes EXACTLY ONE file, which is why
+ * the two `+55` figures coincide: the rule is an equality against one derived
+ * name, so a hint that starts matching starts matching one path. The specimen
+ * the card was filed for moves with it — a card touching
+ * `packages/spec/src/migrations/registry.ts` goes from 18 matched families to
+ * 21, and `check:spec-changes` is one of the three it gains.
+ *
+ * +55 pairs is 0.07% of the corpus, against the +139084 the bare-top-level-word
+ * admission is refused at above — because the rule is an EQUALITY against one
+ * derived name, not a prefix. It cannot reach a subtree and it cannot reach a
+ * sibling: `plain + ext` is one string per extension.
+ *
+ * ## Provenance, which is the criterion this file actually prices
+ *
+ * 39 distinct (hint, file) equalities are added. 38 are the module specifiers
+ * above, each naming the file its own gate imports. The 39th is
+ * `scripts/adr-anchors` vs `scripts/adr-anchors.mjs` — the only hint in the
+ * fleet whose collapsed form is a tracked DIRECTORY that also has a
+ * module-extension sibling. It is a TRUE lead, checked at the declaration site
+ * rather than assumed: `scripts/check-adr-anchors.mjs` line 239 imports
+ * `./adr-anchors.mjs`, and that gate's own header sends a reader editing the
+ * anchor layout to that module's header first. So zero of the 39 are fabricated.
+ *
+ * That case is also the boundary with the `content/docs` sibling trade above,
+ * and the boundary holds because the extension list is a NARROWING:
+ * `content/docs.site.json` is `content/docs` + `.site.json`, which is not a
+ * module extension, so the pinned refusal is untouched. Any suffix in the same
+ * directory would have taken it back, and would additionally have named a
+ * `.test.ts` sibling for 4 of the 38 (`protocol-version`,
+ * `metadata-type-schemas`, `react-blocks`, `manifest-collection-spelling`) —
+ * re-measured here, not taken on trust. See `MODULE_SPECIFIER_EXTENSIONS`.
+ *
+ * ## The fabrication direction, and why it is pinned rather than argued
+ *
+ * This widening is root-agnostic: it follows an extension wherever the hint
+ * points, including at a root the tree does not have. 41 distinct top-level
+ * roots sit one directory away from converting 259 inert hints into MATCHED
+ * pairs (`src` gates 20 of them, `data` 9) — most of that surface predates this
+ * change, but this change adds the extensionless members of it. A repo that
+ * grows a top-level `src/` or `data/` must not mint those pairs SILENTLY, so
+ * the self-test holds the roots out by name and reds on arrival rather than
+ * leaving it to whoever reads a prompt.
  */
 export function hintCovers(hint, inputPath) {
   if (globInNonFinalSegment(hint))
@@ -1717,7 +1988,12 @@ export function hintCovers(hint, inputPath) {
   return (
     inputPath === plain ||
     inputPath.startsWith(`${plain}/`) ||
-    plain.startsWith(`${inputPath}/`)
+    plain.startsWith(`${inputPath}/`) ||
+    // EQUALITY, never a prefix: a dropped extension can only name the ONE file
+    // the specifier resolves to, and the extension list is the shared
+    // `MODULE_SPECIFIER_EXTENSIONS` rather than a second copy of it. See the
+    // section above for the price and for what this deliberately cannot do.
+    MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext)
   );
 }
 
@@ -2247,6 +2523,568 @@ export function trackedPrefixes(files) {
   }
   return prefixes;
 }
+// ── In-tree scratch directories: the CLASS, not two named roots (#12749) ────
+//
+// `changedPathsFromGit` reads untracked files on purpose, so the ignore rules
+// are the only thing between a killed test run's leftover fixture and every
+// seat's gate list. The two-directional pin in this file's self-test holds that
+// property for two paths BY NAME. The hazard is a class: any directory a
+// tracked source creates inside the tracked tree at a root the ignore rules do
+// not cover. A fifth fixture author who picks a new root reproduces it exactly,
+// and the named pin stays green — it never looks at their file.
+//
+// What follows enumerates the class from source text, so the guard grows with
+// the tree instead of with this file's literals.
+//
+// ## Why a source scan can be COMPLETE for one shape, and where it stops
+//
+// A path inside the repo can only be built from an anchor inside the repo, and
+// tracked sources spell that anchor a handful of ways (`IN_TREE_ANCHOR_*` and
+// the `new URL` form below). Everything else — `os.tmpdir()`, `RUNNER_TEMP`, an
+// absolute literal — is outside the tree by construction. So the classifier has
+// THREE answers, and the third carries the honesty: a site whose base it cannot
+// resolve is UNRESOLVED, never "probably fine". For `mkdtempSync` — the shape
+// every in-tree fixture in this tree is built from — an unresolved site is a
+// FAILURE. A detector that silently skipped what it could not read would be
+// this card's own defect one level up: green over the sites nobody measured.
+//
+// Measured on the tree at the time of writing: 359 `mkdtempSync` sites — 4 in
+// the tree (the four `packages/cli` fixtures the convention names), the rest in
+// the system temp directory, 0 unresolved.
+//
+// `mkdirSync` is swept too and deliberately NOT held to completeness: of its
+// sites, ~124 take a base this resolver cannot see (a function parameter, a
+// value read from config) and are overwhelmingly children of a system-temp root
+// already. Demanding zero unresolved there would red the tree over sites that
+// carry none of this hazard. So that half is a net of DECLARED shape: what it
+// resolves it holds, what it cannot resolve it names in the report, and this
+// module claims nothing more. ⛔ Do not read its silence as coverage.
+//
+// ## Why the verdict is `git check-ignore` and not a pattern reimplementation
+//
+// The rules are the repo's real ignore files, and an excerpt would pin the
+// excerpt. `git check-ignore` also names the SOURCE file and line of the
+// covering rule, which is the only way to tell a rule every clone has from one
+// that lives in `.git/info/exclude` — a local exclusion covers its author's
+// tree and nobody else's, so a root "covered" only that way is not covered.
+//
+// ## Why a tracked directory is not a hazard
+//
+// A source that creates a generated-output directory is not leaving scratch
+// behind; that directory is part of the tree. The escape is DERIVED, never
+// declared: a created directory git already tracks content under is tree, not
+// leftover. There is no ledger to keep in step, and a directory that stops
+// being tracked stops being exempt on the same run.
+
+/** Path expressions that anchor INSIDE the repo, at the scanned file's own directory. */
+const IN_TREE_ANCHOR_DIR =
+  /^(?:(?:path|node:path)\.)?dirname\s*\(\s*(?:fileURLToPath\s*\(\s*import\.meta\.url\s*\)|import\.meta\.filename)\s*\)$|^import\.meta\.dirname$|^__dirname$/;
+
+/** The same, anchored at the FILE — `resolve(<file>, '..')` is a spelling this tree writes. */
+const IN_TREE_ANCHOR_FILE = /^(?:fileURLToPath\s*\(\s*import\.meta\.url\s*\)|import\.meta\.filename)$/;
+
+/** `new URL('<rel>', import.meta.url)`, which resolves from the file's DIRECTORY. */
+const IN_TREE_ANCHOR_URL = /^new\s+URL\s*\(\s*(['"`])([\s\S]*?)\1\s*,\s*import\.meta\.url\s*,?\s*\)$/;
+
+/**
+ * Expressions that put a path OUTSIDE the tree wherever they sit inside it —
+ * read against the whole expression, so `realpathSync(process.env.RUNNER_TEMP)`
+ * is outside however deeply the marker is nested. Deliberately spelled as exact
+ * forms rather than a word list: a binding merely NAMED `TMP_ROOT` is an
+ * in-tree root in this very repo.
+ */
+const OUTSIDE_TREE_MARKER =
+  /\btmpdir\s*\(\s*\)|\bhomedir\s*\(\s*\)|process\.env\.(?:RUNNER_TEMP|TMPDIR|TEMP|TMP)\b/;
+
+const PATH_JOINER_CALL = /^(?:(?:path|node:path)\.)?(?:join|resolve)\s*\(/;
+const PATH_DIRNAME_CALL = /^(?:(?:path|node:path)\.)?dirname\s*\(/;
+const MKDTEMP_CALL = /^(?:fs\.)?mkdtempSync\s*\(/;
+const SCRATCH_CALL = /\b(?:fs\.)?(mkdtempSync|mkdirSync)\s*\(/g;
+const QUOTED_LITERAL = /^(['"`])([\s\S]*)\1$/;
+const PLAIN_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * The synthetic tail a probe path carries. `mkdtempSync` appends six characters
+ * the tree cannot know, so what `git check-ignore` is asked about is a
+ * REPRESENTATIVE leftover rather than a path that exists: the directory the
+ * call creates, plus a file inside it — the shape a killed run leaves behind.
+ */
+const SCRATCH_PROBE_TAIL = '0osprobe';
+const SCRATCH_PROBE_LEAF = 'leftover-probe';
+
+/** The text of a balanced argument list, starting just past its opening paren. */
+function balancedArgText(source, from) {
+  let depth = 1;
+  let out = '';
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return { text: out, end: i };
+    }
+    out += ch;
+  }
+  return { text: out, end: source.length };
+}
+
+/** Split an argument list on top-level commas, respecting quotes and nesting. */
+function splitArgList(text) {
+  const args = [];
+  let depth = 0;
+  let quote = null;
+  let cur = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && i + 1 < text.length) cur += text[++i];
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (ch === ',' && depth === 0) {
+      args.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) args.push(cur);
+  return args;
+}
+
+/** An initialiser expression: from `from` up to the first top-level `;` or newline. */
+function initialiserTail(source, from) {
+  let depth = 0;
+  let quote = null;
+  let out = '';
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      out += ch;
+      if (ch === '\\' && i + 1 < source.length) out += source[++i];
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth === 0) break;
+      depth--;
+    } else if ((ch === ';' || ch === '\n') && depth === 0) break;
+    out += ch;
+  }
+  return out.trim();
+}
+
+/**
+ * Every initialiser a name is given in this file, in source order.
+ *
+ * Scope is deliberately NOT tracked. Two scopes reusing one name is the case
+ * that would make a scoped resolver wrong in the QUIET direction, so the
+ * readings are combined instead: an in-tree reading anywhere wins, and readings
+ * that disagree stay unknown. The bias is always toward reporting a site rather
+ * than clearing it.
+ */
+function nameInitialisers(source) {
+  const byName = new Map();
+  const add = (name, init) => {
+    const list = byName.get(name);
+    if (list) list.push(init);
+    else byName.set(name, [init]);
+  };
+  for (const m of source.matchAll(/(?:^|[;{}\s(])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;\n]+)?=\s*/g)) {
+    add(m[1], initialiserTail(source, m.index + m[0].length));
+  }
+  for (const m of source.matchAll(/^[ \t]*([A-Za-z_$][\w$]*)\s*=\s*/gm)) {
+    add(m[1], initialiserTail(source, m.index + m[0].length));
+  }
+  return byName;
+}
+
+/**
+ * The expression every same-file function returns, when it returns exactly one
+ * thing. One hop is enough for the shape this tree actually writes — a local
+ * helper wrapping the system temp directory — and stopping at one hop keeps the
+ * answer readable instead of a whole-program analysis nobody can check.
+ */
+function singleReturnExpressions(source) {
+  const byName = new Map();
+  for (const m of source.matchAll(/(?:^|[;{}\s])function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const params = balancedArgText(source, m.index + m[0].length);
+    const open = source.indexOf('{', params.end);
+    if (open === -1) continue;
+    let depth = 0;
+    let end = open;
+    for (; end < source.length; end++) {
+      if (source[end] === '{') depth++;
+      else if (source[end] === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    const body = source.slice(open, end);
+    const returns = [...body.matchAll(/\breturn\s+/g)];
+    if (returns.length !== 1) continue;
+    byName.set(m[1], initialiserTail(body, returns[0].index + returns[0][0].length));
+  }
+  return byName;
+}
+
+/**
+ * Walk repo-relative segments by one path literal. Returns null when the
+ * literal climbs out of the repo or carries a dynamic part this resolver
+ * refuses to guess at — the caller turns both into the answers they deserve.
+ */
+function walkSegments(segs, literal, isLast) {
+  let text = literal;
+  const dynamic = text.indexOf('${');
+  if (dynamic !== -1) {
+    // A dynamic part is readable only as a PREFIX, and only where it cannot
+    // introduce a separator of its own after the static head — otherwise the
+    // depth the call reaches is a runtime value.
+    if (!isLast || text.includes('/')) return null;
+    text = text.slice(0, dynamic);
+  }
+  if (text.startsWith('/')) return null;
+  const out = segs.slice();
+  for (const part of text.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out;
+}
+
+/** The created directory of a `mkdtempSync(<base>)`: the base plus a random tail. */
+function withProbeTail(segs) {
+  if (segs.length === 0) return null;
+  const out = segs.slice();
+  out[out.length - 1] = `${out[out.length - 1]}${SCRATCH_PROBE_TAIL}`;
+  return out;
+}
+
+/**
+ * Where a path expression lands, relative to the repo root.
+ *
+ *   { kind: 'in-tree', segs }  — repo-relative segments
+ *   { kind: 'outside' }        — the system temp directory, a home directory, an absolute path
+ *   { kind: 'unknown', why }   — a base this resolver refuses to guess at
+ */
+export function resolvePathExpression(expr, ctx, depth = 0) {
+  let e = String(expr).trim();
+  if (!e) return { kind: 'unknown', why: 'an empty expression' };
+  if (depth > 10) return { kind: 'unknown', why: 'an expression nested deeper than this resolver reads' };
+  if (OUTSIDE_TREE_MARKER.test(e)) return { kind: 'outside' };
+
+  // `fileURLToPath(<url>)` and `<url>.pathname` are spellings OF a URL anchor,
+  // not path operations of their own.
+  if (e.endsWith('.pathname')) e = e.slice(0, -'.pathname'.length).trim();
+  const unwrapped = e.match(/^fileURLToPath\s*\(/);
+  if (unwrapped) {
+    const inner = balancedArgText(e, e.indexOf('(') + 1);
+    if (e.slice(inner.end + 1).trim() === '' && !IN_TREE_ANCHOR_FILE.test(e)) {
+      return resolvePathExpression(inner.text, ctx, depth + 1);
+    }
+  }
+
+  if (IN_TREE_ANCHOR_DIR.test(e)) return { kind: 'in-tree', segs: ctx.fileSegs.slice(0, -1) };
+  if (IN_TREE_ANCHOR_FILE.test(e)) return { kind: 'in-tree', segs: ctx.fileSegs.slice() };
+  const url = e.match(IN_TREE_ANCHOR_URL);
+  if (url) {
+    const segs = walkSegments(ctx.fileSegs.slice(0, -1), url[2], true);
+    return segs ? { kind: 'in-tree', segs } : { kind: 'unknown', why: `a URL anchor that leaves the tree: ${e}` };
+  }
+
+  const quoted = e.match(QUOTED_LITERAL);
+  if (quoted) {
+    if (quoted[2].startsWith('/')) return { kind: 'outside' };
+    return { kind: 'unknown', why: `a bare relative literal, resolved against a cwd this scan cannot see: ${e}` };
+  }
+
+  for (const [head, kind] of [[PATH_JOINER_CALL, 'join'], [PATH_DIRNAME_CALL, 'dirname'], [MKDTEMP_CALL, 'mkdtemp']]) {
+    if (!head.test(e)) continue;
+    const { text, end } = balancedArgText(e, e.indexOf('(') + 1);
+    if (e.slice(end + 1).trim() !== '') return { kind: 'unknown', why: `a path expression with a tail this scan cannot read: ${e.slice(0, 80)}` };
+    const args = splitArgList(text).map((a) => a.trim());
+    const base = resolvePathExpression(args[0] ?? '', ctx, depth + 1);
+    if (base.kind !== 'in-tree') return base;
+    if (kind === 'dirname') {
+      if (base.segs.length === 0) return { kind: 'unknown', why: 'a dirname that climbs out of the repo root' };
+      return { kind: 'in-tree', segs: base.segs.slice(0, -1) };
+    }
+    if (kind === 'mkdtemp') {
+      const segs = withProbeTail(base.segs);
+      return segs ? { kind: 'in-tree', segs } : { kind: 'unknown', why: 'a mkdtempSync rooted at the repo root itself' };
+    }
+    let segs = base.segs;
+    for (let i = 1; i < args.length; i++) {
+      const lit = args[i].match(QUOTED_LITERAL);
+      if (!lit) return { kind: 'unknown', why: `a path component this scan cannot read: ${args[i]}` };
+      const walked = walkSegments(segs, lit[2], i === args.length - 1);
+      if (!walked) return { kind: 'unknown', why: `a path component built at runtime or leaving the tree: ${args[i]}` };
+      segs = walked;
+    }
+    return { kind: 'in-tree', segs };
+  }
+
+  if (PLAIN_IDENTIFIER.test(e)) {
+    if (ctx.seen.has(e)) return { kind: 'unknown', cycle: true, why: `the binding ${e} resolves through itself` };
+    const inits = ctx.names.get(e);
+    if (!inits) return { kind: 'unknown', why: `${e} is not bound in this file` };
+    ctx.seen.add(e);
+    const readings = inits.map((init) => resolvePathExpression(init, ctx, depth + 1));
+    ctx.seen.delete(e);
+    return combineReadings(readings, e);
+  }
+
+  const call = e.match(/^([A-Za-z_$][\w$]*)\s*\(/);
+  if (call && ctx.returns.has(call[1])) {
+    if (ctx.seen.has(call[1])) return { kind: 'unknown', cycle: true, why: `${call[1]}() resolves through itself` };
+    ctx.seen.add(call[1]);
+    const r = resolvePathExpression(ctx.returns.get(call[1]), ctx, depth + 1);
+    ctx.seen.delete(call[1]);
+    return r;
+  }
+
+  return { kind: 'unknown', why: `a base this scan cannot read: ${e.slice(0, 80)}` };
+}
+
+/**
+ * In-tree wins; readings that are not unanimously outside stay unknown.
+ *
+ * A reading that came back through a CYCLE carries no information — the name is
+ * re-entered while it is already being resolved, which happens whenever a later
+ * scope rebinds a name from the value this one is resolving. It is dropped
+ * rather than counted as disagreement: counting it turned every name a helper
+ * rebinds into `unknown`, which is a refusal to answer rather than an answer.
+ */
+function combineReadings(readings, name) {
+  const informative = readings.filter((r) => !r.cycle);
+  const inTree = informative.find((r) => r.kind === 'in-tree');
+  if (inTree) return inTree;
+  if (informative.length > 0 && informative.every((r) => r.kind === 'outside')) return { kind: 'outside' };
+  const why = informative.find((r) => r.kind === 'unknown')?.why
+    ?? readings.find((r) => r.kind === 'unknown')?.why
+    ?? `nothing bound ${name}`;
+  return { kind: 'unknown', why };
+}
+
+/**
+ * Every directory-creating call in one source, classified. `rel` is the file's
+ * own repo-relative path — the anchor spellings resolve against it.
+ */
+export function scratchDirSitesInSource(rel, source) {
+  const masked = maskComments(String(source));
+  // A call spelled inside a STRING is a fixture, not a call — this module's own
+  // self-test plants fixture sources as string literals, and read as code they
+  // reported four sites in a file that creates none of them. Comments are
+  // blanked (a discussed call is not a call either) but literals are not: the
+  // path components the resolver reads ARE string literals, so they are skipped
+  // by position instead. ⛔ Not the same masking `maskSelfTests` does — a check
+  // script's self-test that really creates an in-tree directory is a real
+  // leftover hazard, and blanking self-tests wholesale would hide it.
+  const { literal } = scanSource(masked);
+  const ctx = {
+    fileSegs: rel.split('/'),
+    names: nameInitialisers(masked),
+    returns: singleReturnExpressions(masked),
+    seen: new Set(),
+  };
+  const inTree = [];
+  const unresolved = [];
+  let scanned = 0;
+  for (const m of masked.matchAll(SCRATCH_CALL)) {
+    if (literal[m.index]) continue;
+    const { text } = balancedArgText(masked, m.index + m[0].length);
+    const expr = (splitArgList(text)[0] ?? '').trim();
+    ctx.seen.clear();
+    const at = resolvePathExpression(expr, ctx);
+    const site = {
+      file: rel,
+      line: masked.slice(0, m.index).split('\n').length,
+      call: m[1],
+      expr: expr.replace(/\s+/g, ' ').slice(0, 120),
+    };
+    scanned++;
+    if (at.kind === 'unknown') {
+      unresolved.push({ ...site, why: at.why });
+      continue;
+    }
+    if (at.kind !== 'in-tree') continue;
+    const segs = m[1] === 'mkdtempSync' ? withProbeTail(at.segs) : at.segs;
+    if (!segs || segs.length === 0) continue;
+    inTree.push({ ...site, dir: segs.join('/'), probe: [...segs, SCRATCH_PROBE_LEAF].join('/') });
+  }
+  return { inTree, unresolved, scanned };
+}
+
+const SCANNED_SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+
+/**
+ * The whole tree's directory-creating sites, read from the tracked files.
+ *
+ * A zero-site sweep is a BROKEN scan, not a clean tree — the same refusal
+ * `trackedFiles` makes about an empty listing, for the same reason: every
+ * assertion built on it would be vacuously true over nothing.
+ */
+export function inTreeScratchDirs({ cwd = ROOT, files = null } = {}) {
+  const list = (files ?? trackedFiles({ cwd })).filter((f) => SCANNED_SOURCE_EXTENSIONS.test(f));
+  const inTree = [];
+  const unresolved = [];
+  let sites = 0;
+  for (const rel of list) {
+    let source;
+    try {
+      source = readFileSync(join(cwd, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!source.includes('mkdtempSync') && !source.includes('mkdirSync')) continue;
+    const found = scratchDirSitesInSource(rel, source);
+    sites += found.scanned;
+    inTree.push(...found.inTree);
+    unresolved.push(...found.unresolved);
+  }
+  if (sites === 0) {
+    throw new Error(
+      'the directory-creation sweep found ZERO sites across the tracked sources, which is a broken scan rather ' +
+        'than a tree with no fixtures (#4690). Refusing to report ignore coverage over nothing.',
+    );
+  }
+  return { inTree, unresolved, sites, scannedFiles: list.length };
+}
+
+/**
+ * `git check-ignore`'s verdict for each path, in ONE invocation.
+ *
+ * `--non-matching` is what makes this a reading rather than a silence: without
+ * it an uncovered path produces no output and exit 1, which is shaped exactly
+ * like the command failing. With it every input gets a line, and the line count
+ * is checked against the input count — so a truncated answer is a refusal, not
+ * a row of `covered: false`.
+ *
+ * `--no-index` asks about the RULES rather than about the index: a tracked path
+ * is never "ignored" to plain `check-ignore`, and the question here is whether
+ * a leftover appearing at that path WOULD be ignored.
+ */
+export function ignoreVerdicts(paths, { cwd = ROOT } = {}) {
+  const unique = [...new Set(paths)];
+  const verdicts = new Map();
+  if (unique.length === 0) return verdicts;
+  const r = spawnSync('git', ['check-ignore', '-v', '--non-matching', '--no-index', '--stdin'], {
+    cwd,
+    encoding: 'utf8',
+    input: `${unique.join('\n')}\n`,
+  });
+  if (r.error) throw new Error(`could not run git check-ignore — ${r.error.message}`);
+  if (r.status !== 0 && r.status !== 1) {
+    throw new Error(`git check-ignore exited ${r.status}${r.stderr ? `: ${r.stderr.trim()}` : ''}`);
+  }
+  const lines = (r.stdout ?? '').split('\n').filter((l) => l.length > 0);
+  if (lines.length !== unique.length) {
+    throw new Error(
+      `git check-ignore answered about ${lines.length} of ${unique.length} path(s) — a partial answer is not a verdict`,
+    );
+  }
+  for (const line of lines) {
+    const tab = line.indexOf('\t');
+    const rule = tab === -1 ? '' : line.slice(0, tab);
+    const path = tab === -1 ? line : line.slice(tab + 1);
+    const firstColon = rule.indexOf(':');
+    const secondColon = rule.indexOf(':', firstColon + 1);
+    const source = firstColon === -1 ? '' : rule.slice(0, firstColon);
+    verdicts.set(path, source === ''
+      ? { covered: false, source: null, line: null, pattern: null }
+      : {
+          covered: true,
+          source,
+          line: rule.slice(firstColon + 1, secondColon),
+          pattern: rule.slice(secondColon + 1),
+        });
+  }
+  return verdicts;
+}
+
+/**
+ * The whole verdict: every in-tree directory a tracked source creates, split
+ * into the ones a leftover would be ignored at and the ones EXPOSED.
+ *
+ * Two escapes, both derived from the tree rather than declared:
+ *
+ *   - a covering rule that lives in a TRACKED ignore file. A rule in
+ *     `.git/info/exclude`, or in the user's global excludes, covers its own
+ *     clone and nobody else's, so a root covered only that way is exposed on
+ *     every other machine — including CI, where the leftover would land in the
+ *     change set exactly as if no rule existed.
+ *   - a directory git already tracks content under. That is tree, not scratch:
+ *     a generated-output directory is part of the repo, and this escape stops
+ *     being available on the run where the tracking stops.
+ */
+export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
+  const list = files ?? trackedFiles({ cwd });
+  const sweep = inTreeScratchDirs({ cwd, files: list });
+  const tracked = trackedPrefixes(list);
+  const verdicts = ignoreVerdicts(sweep.inTree.map((s) => s.probe), { cwd });
+  const exposed = [];
+  const covered = [];
+  for (const site of sweep.inTree) {
+    const v = verdicts.get(site.probe);
+    if (v?.covered && isTrackedIgnoreSource(v.source)) {
+      covered.push({ ...site, rule: `${v.source}:${v.line}:${v.pattern}` });
+      continue;
+    }
+    if (tracked.has(site.dir)) {
+      covered.push({ ...site, rule: 'tracked directory' });
+      continue;
+    }
+    exposed.push({
+      ...site,
+      why: v?.covered
+        ? `covered only by ${v.source}, which is not a tracked ignore file — every other clone is exposed`
+        : 'no ignore rule covers a leftover here, and git tracks nothing under it',
+    });
+  }
+  return { ...sweep, exposed, covered };
+}
+
+/** An ignore file every clone has, as opposed to one local to whoever ran this. */
+function isTrackedIgnoreSource(source) {
+  if (!source) return false;
+  if (source.startsWith('/') || source.startsWith('~')) return false;
+  return !source.split('/').includes('.git');
+}
+
+/**
+ * The tracked corpus in the two shapes `moduleRelativeDirectoryHint` asks it
+ * about: every tracked FILE, and every path PREFIX the tree has. Built once and
+ * handed down, so the extractor, the reachability sweep and the ledger cannot
+ * describe different revisions of the tree — the same "one read, N answers"
+ * discipline `discoverFamilies` takes with a workflow's text.
+ *
+ * It is a bundle rather than two parameters because the pair is meaningless
+ * apart: "is this a directory" is `prefixes.has(p) && !files.has(p)`, and a
+ * caller that supplied one from one listing and one from another would get an
+ * answer about no tree at all.
+ */
+export function watchHintTree(files = trackedFiles()) {
+  return { files: new Set(files), prefixes: trackedPrefixes(files) };
+}
 
 /**
  * The longest leading run of a hint's segments that the tree still has, or ''
@@ -2286,6 +3124,94 @@ export function deepestTrackedPrefix(hint, prefixes) {
     deepest = candidate;
   }
   return deepest;
+}
+
+/**
+ * The file extensions a module specifier is allowed to have DROPPED.
+ *
+ * Not a general "source file" list and not a guess: it is the set of
+ * extensions an extensionless relative import can resolve to, and the
+ * narrowing is PRICED against the obvious alternative rather than asserted.
+ * Measured over the live fleet (829 distinct hints, 385 inert, 7125 tracked
+ * files, on 1246b4cf2): this list and a rule that accepts ANY suffix in the
+ * same directory select the SAME 38 hints — the narrowing costs no lead — and
+ * they NAME A DIFFERENT FILE for 4 of them, because a test sibling sorts
+ * first:
+ *
+ *   packages/spec/src/kernel/protocol-version.test.ts   <- the loose rule
+ *   packages/spec/src/kernel/protocol-version.ts        <- the import's target
+ *
+ * ...and likewise for `metadata-type-schemas`, `react-blocks` and
+ * `manifest-collection-spelling`. Reporting a gate's test sibling as "the file
+ * this specifier means" is a new false sentence in place of the old one, which
+ * is the entire failure this repair exists to undo. So the list stays explicit.
+ * All 38 resolve through `.ts` today; the rest is what module resolution
+ * admits, not padding. Both halves are pinned in the self-test — the hint sets
+ * agree, and no named file is invented — so a divergence reds rather than
+ * drifts.
+ */
+export const MODULE_SPECIFIER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
+
+/**
+ * The tracked file a dead hint names when the hint is a module specifier with
+ * its extension dropped — or `null` when there is no such file.
+ *
+ * ## The row this exists to stop printing (#12299, measured on 1246b4cf2)
+ *
+ * `hintCovers` compares WHOLE SEGMENTS, and an ESM/TypeScript relative import
+ * spells its target without the extension. So a gate that imports
+ * `./lib/dist-freshness` yields the hint
+ * `packages/spec/scripts/lib/dist-freshness` — correct, resolved against the
+ * writing script — while the tree holds
+ * `packages/spec/scripts/lib/dist-freshness.ts`. The hint misses the tracked
+ * prefix set by exactly its extension, and `deepestTrackedPrefix` therefore
+ * stops one segment short, at `packages/spec/scripts/lib`.
+ *
+ * That lands the hint in the branch `unreachableClass` reads as
+ * **"THE LAYOUT MOVED … a real miss, worth triaging"** — about a directory
+ * nothing moved out of, for a file sitting right there. `globInNonFinalSegment`
+ * calls that row "the worst row this output can print", and the reasoning holds
+ * verbatim here: a fabricated triage lead costs a reader a hunt for a directory
+ * in front of them, while the honest verdict is a standing fact.
+ *
+ * ## Why this reads as a REGRESSION and not as a standing gap
+ *
+ * These nine families used to print "never was a repo path" — false, but filed
+ * BY CONSTRUCTION, i.e. under the heading that tells a reader there is nothing
+ * to chase. Resolving the literal against its writing script (the producer-side
+ * repair in `resolveModuleRelativeHint`) was right and stays; what it also did
+ * was move the falsehood from an inert bucket into the actionable one:
+ *
+ *   families printing a false reason      9 of 11, before and after
+ *   ...filed "by construction" (inert)    9  ->  0
+ *   ...filed "layout moved" (triage me)   0  ->  9
+ *
+ * The pin that accompanied the resolve asserted `Boolean(deepest)` — that the
+ * hint had LEFT the "never" branch. Leaving that branch is exactly what puts a
+ * hint into this one, so the pin was green for the arrival it did not check.
+ * It is widened below to assert the reason the reader is actually shown.
+ *
+ * ## What it deliberately does NOT do
+ *
+ * It moves no verdict. The hint stays dead, the family stays unreachable, and
+ * `hintCovers` is untouched — teaching the MATCHED column to follow a dropped
+ * extension is a fleet-wide widening that owes its own pair-count measurement,
+ * and it is not this repair. This function is read by the residue printer and
+ * by nothing else, so its whole cost is one true sentence in place of a false
+ * one.
+ *
+ * A hint the tree already HAS as a path is refused up front: that hint is
+ * either live (multi-segment, so `hintCovers` reaches everything beneath it) or
+ * it is the "too generic" case, whose own message is the more useful one
+ * because it names the escape. Measured on this tree the two cases never
+ * overlap — 0 dead hints are both a tracked prefix and extensionless-resolvable
+ * — and the guard makes that structural rather than lucky.
+ */
+export function extensionlessModuleTarget(hint, files, prefixes) {
+  const plain = collapseHint(hint);
+  if (!plain || prefixes.has(plain)) return null;
+  for (const ext of MODULE_SPECIFIER_EXTENSIONS) if (files.has(plain + ext)) return plain + ext;
+  return null;
 }
 
 /**
@@ -2368,6 +3294,7 @@ export function unreachableFamilies(entries, files) {
     );
   }
   const prefixes = trackedPrefixes(files);
+  const fileSet = new Set(files);
   const reach = new Map();
   const reaches = (hint) => {
     if (!reach.has(hint)) reach.set(hint, hintReachesTree(hint, files));
@@ -2384,7 +3311,14 @@ export function unreachableFamilies(entries, files) {
     unreachable.push({
       check,
       entry,
-      dead: hints.map((hint) => ({ hint, deepest: deepestTrackedPrefix(hint, prefixes) })),
+      dead: hints.map((hint) => ({
+        hint,
+        deepest: deepestTrackedPrefix(hint, prefixes),
+        // Carried on the entry beside `deepest`, for the same reason: the
+        // renderers are pure functions over `dead` and must not have to re-read
+        // the corpus to describe what the sweep already knows.
+        target: extensionlessModuleTarget(hint, fileSet, prefixes),
+      })),
     });
   }
 
@@ -2401,9 +3335,12 @@ export function unreachableFamilies(entries, files) {
 /**
  * One family's dead population, rendered for the reader: the hint as the gate
  * spells it, and WHY it reached nothing — the three cases
- * `deepestTrackedPrefix` distinguishes, each named in words rather than left
- * for the reader to infer from a prefix. Capped like the neighbouring residue
- * listing: the reason is a triage lead, not an inventory.
+ * `deepestTrackedPrefix` distinguishes plus the one it CANNOT (a specifier
+ * whose target the tree has under a dropped extension, which reads to a prefix
+ * sweep as a short prefix and to a reader as a move that never happened; see
+ * `extensionlessModuleTarget`), each named in words rather than left for the
+ * reader to infer from a prefix. Capped like the neighbouring residue listing:
+ * the reason is a triage lead, not an inventory.
  */
 /**
  * Which KIND of unreachable is this family — one the tree could ever fix, or
@@ -2428,16 +3365,33 @@ export function unreachableFamilies(entries, files) {
  * the tree (see `unreachableFamilies`' docblock) and this does not pretend to
  * read it. "By construction" here is a statement about the DERIVATION — this
  * literal cannot be reached by it — not a claim about what the author meant.
+ *
+ * One input the prefix sweep alone gets WRONG, and it is the only exception
+ * this function makes: an extensionless module specifier whose file the tree
+ * really has stops the sweep one segment short, which is bit-for-bit the shape
+ * of a move. It is not one, so it does not vote — `extensionlessModuleTarget`
+ * carries the measurement and the incident.
  */
 export function unreachableClass(dead) {
-  const everMoved = dead.some(({ hint, deepest }) => deepest && deepest !== collapseHint(hint));
+  // A hint whose target the tree HAS (`extensionlessModuleTarget`) is NOT
+  // evidence of a move, however short its `deepest` is: the prefix stops one
+  // segment early because the specifier drops the extension, not because
+  // anything left the directory. Counting it would put nine families under
+  // "a real miss, worth triaging" with nothing to triage — see that helper.
+  const everMoved = dead.some(({ hint, deepest, target }) => !target && deepest && deepest !== collapseHint(hint));
   return everMoved ? 'layout moved' : 'by construction';
 }
 
 export function unreachableReason(dead, cap = 3) {
   const shown = dead
     .slice(0, cap)
-    .map(({ hint, deepest }) => {
+    .map(({ hint, deepest, target }) => {
+      // First, because it is the strongest statement available: the sweep knows
+      // the actual file. Every other branch reasons from a PREFIX, and for this
+      // shape every one of them lands on something false.
+      if (target) {
+        return `'${hint}' — the tree HAS ${target}; the literal is that file's extensionless module spelling, which no whole-segment comparison reaches`;
+      }
       if (!deepest) return `'${hint}' — no tracked path under its first segment; never was a repo path`;
       if (deepest === collapseHint(hint)) {
         return `'${hint}' — the tree HAS it; the covering rule refuses the literal as too generic (no path separator)`;
@@ -3938,7 +4892,7 @@ export function tierLines(result) {
  * is the drift this file's header refuses everywhere else. The self-test is
  * the only other caller, and it calls THIS.
  */
-export function discoverFamilies() {
+export function discoverFamilies({ tree = watchHintTree() } = {}) {
   const wfDir = join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -4014,7 +4968,7 @@ export function discoverFamilies() {
       // A module that declares nothing contributes everything it spells, which
       // is the behaviour every followed module had before the marker existed.
       const source = readFileSync(join(ROOT, rel), 'utf8');
-      const spelled = extractWatchHints(source, rel);
+      const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
     }
@@ -4031,7 +4985,7 @@ export function discoverFamilies() {
       // them can describe different revisions of a file, the same discipline
       // the trigger paths take above.
       const source = readFileSync(abs, 'utf8');
-      entry.hints.push(...extractWatchHints(source, f));
+      entry.hints.push(...extractWatchHints(source, f, { tree }));
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
@@ -4087,13 +5041,16 @@ export function discoverFamilies() {
 }
 
 function derive(paths, { showResidue = false } = {}) {
-  const { byCheck, workflows } = discoverFamilies();
-
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
   // looks complete. It reads the tree only; it moves no verdict above.
+  //
+  // It is read here, above the discovery, because the extractor needs the same
+  // corpus to judge a single-segment directory literal — one listing, so the
+  // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
+  const { byCheck, workflows } = discoverFamilies({ tree: watchHintTree(swept) });
   const unreachable = unreachableFamilies([...byCheck], swept);
 
   const matched = new Map();
@@ -4509,6 +5466,17 @@ export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts
  *
  * Every field degrades to null rather than throwing. No base ref, a shallow
  * clone and no git at all are real states, and none of them is an error here.
+ * They are not a NON-EVENT either: `driftLines` renders EVERY degraded field as
+ * a stated refusal to measure rather than as the silence a level tree gets, so
+ * degrading here costs the caller a reading and never costs it the news.
+ *
+ * "Every" is load-bearing and was once only "the base ref". This function
+ * degrades in TWO places — `base` when the ref does not resolve, and `behind`
+ * when the ref resolves and the COUNT cannot be read — and the second one is
+ * not a corner of the first: a shallow clone reads a distance fine (measured:
+ * `--depth=1`, before and after the upstream moves), while an unborn HEAD makes
+ * `rev-list --count` fail with a resolvable ref in hand. `unmeasuredDrift`
+ * below is the single predicate both degraded fields are read through.
  */
 export function baseDrift({ cwd = ROOT } = {}) {
   const read = (args) => {
@@ -4534,14 +5502,94 @@ export function baseDrift({ cwd = ROOT } = {}) {
 }
 
 /**
+ * WHICH step of the measurement failed — or `null` when a reading was taken,
+ * whatever its value.
+ *
+ * `baseDrift` has TWO doors to "no reading was taken", and to a reader they are
+ * one state. The base ref may not resolve (`base: null` — a fresh checkout, a
+ * clone nobody fetched, a graft), or the ref may resolve and the DISTANCE from
+ * it be unreadable (`behind: null`): `rev-list --count` fails on an unborn
+ * HEAD, which an ordinary fully-fetched clone reaches with one ordinary
+ * command, and also on a git that dies mid-run or a count that comes back
+ * non-numeric.
+ *
+ * The second door used to fall through to `!drift.behind` and render
+ * byte-identically to `behind: 0` — the same collapse the first door was fixed
+ * for, one step further along, and the WORSE of the two to be silent about: a
+ * base ref that resolves is precisely what makes a reader believe a measurement
+ * happened, so the reassurance is stronger while the ground under it is the
+ * same absent reading.
+ *
+ * They share one predicate rather than a hand-written branch each because the
+ * sentence they produce differs only in WHICH step failed. A second branch is a
+ * second place to keep the "Not zero", the least-trustworthy warning and the
+ * remedy in sync, and the whole defect being fixed here is that the first
+ * branch was written for one door while the producing side had two.
+ *
+ * The reading test is `Number.isFinite`, not `!== null`: absent, `NaN` and
+ * non-numeric are not readings either, and the only direction this can move a
+ * case is from silence toward speech — `behind: 0` IS a reading, and stays
+ * silent below.
+ */
+function unmeasuredDrift(drift) {
+  if (drift.base === null) {
+    return {
+      what: `${DEFAULT_BASE_REF} does not resolve in this checkout`,
+      how: 'A fresh checkout, a clone nobody fetched or a graft all reach here.',
+      fix: `Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for a reading.`,
+    };
+  }
+  if (!Number.isFinite(drift.behind)) {
+    return {
+      what: `${DEFAULT_BASE_REF} resolves here (${drift.base}), but counting from HEAD to it failed`,
+      how: `An unborn HEAD — 'git checkout --orphan', or a ref fetched into a repo holding no commit of its own — a git that died mid-run, or a non-numeric count all reach here.`,
+      fix: `Run 'git rev-list --count HEAD..${DEFAULT_BASE_REF}' here to see which, then derive again for a reading.`,
+    };
+  }
+  return null;
+}
+
+/**
  * Render the drift. Loud when it can have changed the answer, quiet when it
  * demonstrably cannot, and SILENT at zero — the last one for the same reason
  * the banner has no "all paths present" twin: against a base ref nobody
  * refreshed, a clean bill of health is precisely the reading the measured
  * failure would have passed.
+ *
+ * That silence at zero is what makes the UNMEASURABLE case a defect rather
+ * than a fourth flavour of quiet. `baseDrift` degrades a field to null in two
+ * places — the base ref that will not resolve, and the distance that cannot be
+ * counted from a ref that did — so `behind: null` ("no reading was taken") used
+ * to render byte-identically to `behind: 0` ("a reading was taken, and it was
+ * zero"): nothing at all, from a single `!drift.behind`. The reasoning above
+ * defends withholding an ALL-CLEAR; it never defended withholding the fact that
+ * no instrument was available. And the two states are not equally safe to be
+ * silent about: unmeasured is precisely when the family list below is LEAST
+ * trustworthy, because a gate that landed on the base branch after this tree
+ * was cut cannot be seen from inside this tree, and here nothing can even say
+ * how far back that is. So `unmeasuredDrift` speaks for BOTH doors, zero stays
+ * silent, and a reader can finally tell them apart.
+ *
+ * The unmeasured sentence therefore names the step that failed rather than the
+ * conclusion alone. "Not measured" plus a remedy for the wrong step is a lead
+ * the reader cannot act on, and the two remedies do not overlap: a fetch buys a
+ * base ref and buys nothing at all for a HEAD that has no commit.
+ *
+ * A drift of `null` — no measurement ATTACHED, because the caller never asked
+ * for one — stays silent, deliberately and separately: reporting a missing
+ * instrument to a reader who never reached for one would be the fabricated
+ * lead this file's header prices as the expensive direction.
  */
 export function driftLines(drift) {
-  if (!drift || !drift.behind) return [];
+  if (!drift) return [];
+  const unmeasured = unmeasuredDrift(drift);
+  if (unmeasured) {
+    return [
+      `  ⚠️  STALENESS NOT MEASURED — ${unmeasured.what}. This tree's distance from ${DEFAULT_BASE_REF} is UNKNOWN. Not zero: no reading was taken.`,
+      `    ${unmeasured.how} An unmeasured tree is where the families below are LEAST trustworthy, not most. ${unmeasured.fix}`,
+    ];
+  }
+  if (!drift.behind) return [];
   const { behind, base, changed, headDate, baseDate } = drift;
   const span = `HEAD${headDate ? ` ${headDate}` : ''} vs ${DEFAULT_BASE_REF} ${base}${baseDate ? ` ${baseDate}` : ''}`;
   if (changed.length === 0) {
@@ -5288,13 +6336,133 @@ function selfTest() {
   // `hintCovers`' docblock states for a bare filename. Admitting it would hand
   // every gate its own import specifiers as a watched population, a second and
   // unpriced answer to the question `firstPartyImportTargets` owns.
+  //
+  // Both are asserted WITH the live tree, never without one. The refusal is
+  // cheap to pass for the wrong reason — a call with no tree refuses every
+  // single-segment literal — so a pin that omitted it would be green whatever
+  // `moduleRelativeDirectoryHint` did.
+  const hintTree = watchHintTree();
+  const isTrackedDir = (p) => hintTree.prefixes.has(p) && !hintTree.files.has(p);
   t(
     'a single-segment sibling specifier does NOT convert into a hint',
-    extractWatchHints("import { invokedAs } from './invoked-as.mjs';", 'scripts/check-x.mjs').length === 0,
+    extractWatchHints("import { invokedAs } from './invoked-as.mjs';", 'scripts/check-x.mjs', { tree: hintTree })
+      .length === 0,
+  );
+  t(
+    '…and it is refused because the resolve lands on a tracked FILE, not for want of a tree',
+    hintTree.files.has('scripts/invoked-as.mjs') && !isTrackedDir('scripts/invoked-as.mjs'),
   );
   t(
     '…nor does a bare sibling manifest name',
-    extractWatchHints("const P = './package.json';", 'scripts/check-x.mjs').length === 0,
+    extractWatchHints("const P = './package.json';", 'scripts/check-x.mjs', { tree: hintTree }).length === 0,
+  );
+
+  // ── ONE class IS admitted back: a single-segment literal whose resolve lands
+  // ── on a tracked DIRECTORY (#12470)
+  //
+  // `moduleRelativeDirectoryHint` carries the split of the 53 hints the naive
+  // widening adds and the judgement that puts this class apart from the two
+  // `hintCovers` refuses. Pinned here as the four things a reader needs to be
+  // able to break: that it FIRES, WHERE the admitted hint lands, and the two
+  // structural refusals that keep it from becoming either of its neighbours.
+  const specDirLiteral = "const SRC_DIR = path.resolve(__dirname, '../src');";
+  t(
+    'a single-segment literal resolving to a tracked directory DOES convert',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts', { tree: hintTree }).join() ===
+      'packages/spec/src',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts', { tree: hintTree }).join(),
+  );
+  t(
+    '…and without a tree the same call keeps the standing refusal — a missing lead, never a fabricated one',
+    extractWatchHints(specDirLiteral, 'packages/spec/scripts/build-docs.ts').length === 0,
+  );
+  // ARRIVAL, not departure. That the literal left the refused set says nothing
+  // about which family it reaches or which files: both live gates are named,
+  // and each is shown to reach a real file under the directory that NO other
+  // hint of that family reaches — so the pair is this rule's, not a coincidence
+  // of some other hint already covering the tree there.
+  const dirLanding = discoverFamilies({ tree: hintTree }).byCheck;
+  const specSrcFile = trackedFiles().find((f) => f.startsWith('packages/spec/src/'));
+  for (const check of ['check:docs', 'check:skill-refs']) {
+    const entry = dirLanding.get(check);
+    t(
+      `${check} carries the admitted directory hint`,
+      (entry?.hints ?? []).includes('packages/spec/src'),
+    );
+    t(
+      `…and it is what reaches ${specSrcFile} for ${check} — no other hint of that family does`,
+      Boolean(specSrcFile) &&
+        (entry?.hints ?? []).filter((h) => hintCovers(h, specSrcFile)).join() === 'packages/spec/src',
+    );
+  }
+  // The BLAST RADIUS, both directions, over the live fleet: which families this
+  // rule changes at all. Read as the difference between the discovery WITH the
+  // tree and the same discovery WITHOUT one, so it measures the rule and not
+  // the tree — `packages/spec/src` is already a hint several other gates spell
+  // from the root, and asking "who carries it" would count those too.
+  const withoutTree = discoverFamilies({ tree: null }).byCheck;
+  const dirGained = [];
+  const dirLost = [];
+  for (const [check, entry] of dirLanding) {
+    const before = new Set(withoutTree.get(check)?.hints ?? []);
+    for (const h of entry.hints ?? []) if (!before.has(h)) dirGained.push(`${check} +${h}`);
+    for (const h of before) if (!(entry.hints ?? []).includes(h)) dirLost.push(`${check} -${h}`);
+  }
+  t(
+    'the rule changes exactly the two gates that walk packages/spec/src, and adds exactly the directory they walk',
+    dirGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
+    dirGained.join(' · '),
+  );
+  t(
+    'and it takes NOTHING away — a widening that also subtracted would read exactly like this one',
+    dirLost.length === 0,
+    dirLost.join(' · '),
+  );
+
+  // REFUSAL 1 — module-relative ONLY. `resolve` treats a bare word exactly like
+  // a `./` one, so without this the rule reads any bare word against its
+  // writer's directory and becomes the bare-word class one gate at a time. The
+  // specimen is the sharpest one on the tree: a member of
+  // check-error-status-conformance's SKIP_DIRS, a directory the gate DECLARES
+  // it does not read, which the tree happens to have under `scripts/`.
+  t(
+    'a BARE word is not resolved against its writer, even when that lands on a tracked directory',
+    extractWatchHints("const SKIP = new Set(['fixtures']);", 'scripts/check-x.mjs', { tree: hintTree }).length === 0,
+  );
+  t(
+    '…and that refusal is non-vacuous: scripts/fixtures IS a tracked directory the resolve would have found',
+    isTrackedDir('scripts/fixtures'),
+  );
+  // REFUSAL 2 — the resolved form must carry a SEPARATOR. A bare root would
+  // build a hint `hintCovers` refuses on its own bare-word rule, reaching
+  // nothing and landing as a fresh row in the SHRINK-ONLY escapable-literal
+  // ledger. Refusing it here makes that structural rather than lucky.
+  t(
+    'a single-segment literal that resolves to a bare ROOT is refused',
+    extractWatchHints("const P = '../../skills';", 'scripts/pm/x.mjs', { tree: hintTree }).length === 0,
+  );
+  t(
+    '…non-vacuously: skills IS a tracked directory, and a hint spelling it would reach nothing anyway',
+    isTrackedDir('skills') && !trackedFiles().some((f) => hintCovers('skills', f)),
+  );
+  // The #12794 boundary, asserted as the structural exclusion it is rather than
+  // as a count. `extensionlessModuleTarget` refuses any hint the tree has as a
+  // prefix, and this rule admits ONLY hints the tree has as a prefix — so no
+  // literal can be both a tracked-directory hint and an extensionless module
+  // target, on this tree or any other.
+  t(
+    'a single-segment literal whose target the tree has only under a dropped extension is NOT admitted',
+    extractWatchHints("import { invokedAs } from './invoked-as';", 'scripts/check-x.mjs', { tree: hintTree })
+      .length === 0,
+  );
+  t(
+    '…non-vacuously: had it been admitted, hintCovers would have matched the file through the extension rule',
+    hintCovers('scripts/invoked-as', 'scripts/invoked-as.mjs'),
+  );
+  t(
+    'the two rules are mutually exclusive by construction — an admitted directory is a tracked prefix, which extensionlessModuleTarget refuses',
+    extensionlessModuleTarget('packages/spec/src', hintTree.files, hintTree.prefixes) === null &&
+      isTrackedDir('packages/spec/src'),
   );
   t(
     'a literal that climbs out of the repo names nothing',
@@ -5334,12 +6502,173 @@ function selfTest() {
       !hintCovers('src/data', 'packages/spec/src/data/field.zod.ts'),
   );
   // The residue's claim stops being false: a resolved literal HAS a tracked
-  // prefix, so `unreachableClass` no longer files it as "never was a repo path"
+  // prefix, so `unreachableReason` no longer files it as "never was a repo path"
   // about a file that exists.
+  //
+  // ⚠️ This case asserted ONLY `Boolean(deepest)` — that the hint had LEFT the
+  // "never" branch — and leaving that branch is precisely what puts a hint into
+  // the "layout moved" one, so it stayed green through a false reason it never
+  // looked at (#12299). A departure pin cannot see an arrival: both ends are
+  // asserted here now, on the same live specimen.
+  const distFreshnessFiles = trackedFiles();
+  const distFreshnessDead = [
+    {
+      hint: 'packages/spec/scripts/lib/dist-freshness',
+      deepest: deepestTrackedPrefix('packages/spec/scripts/lib/dist-freshness', trackedPrefixes(distFreshnessFiles)),
+      target: extensionlessModuleTarget(
+        'packages/spec/scripts/lib/dist-freshness',
+        new Set(distFreshnessFiles),
+        trackedPrefixes(distFreshnessFiles),
+      ),
+    },
+  ];
   t(
     'a resolved dead hint has a tracked prefix, so the residue stops calling it "never a repo path"',
-    Boolean(deepestTrackedPrefix('packages/spec/scripts/lib/dist-freshness', trackedPrefixes(trackedFiles()))),
+    Boolean(distFreshnessDead[0].deepest) && !/never was a repo path/.test(unreachableReason(distFreshnessDead)),
   );
+  t(
+    '...and it does NOT arrive at "the layout moved" instead — the tree HAS the file, named',
+    !/layout moved/.test(unreachableReason(distFreshnessDead)) &&
+      unreachableReason(distFreshnessDead).includes('packages/spec/scripts/lib/dist-freshness.ts'),
+  );
+  t(
+    '...so the family carrying it is a standing fact, not a miss worth triaging',
+    unreachableClass(distFreshnessDead) === 'by construction',
+  );
+  // The extension list is a NARROWING, and the price of a narrowing is what it
+  // refuses. Pinned as an AGREEMENT rather than as a count, so it survives the
+  // tree moving: over every inert hint in the live fleet, resolving through
+  // MODULE_SPECIFIER_EXTENSIONS and resolving through "any suffix in the same
+  // directory" must pick the same file. Today both pick 38 hints and all 38
+  // land on `.ts`. The day they disagree, some gate imports a specifier whose
+  // only sibling is not a module — and whether to name that file is a decision
+  // for whoever is standing there, not a drift for nobody to notice.
+  const agreeFiles = trackedFiles();
+  const agreeFileSet = new Set(agreeFiles);
+  const agreePrefixes = trackedPrefixes(agreeFiles);
+  const agreeHints = new Set();
+  for (const [, entry] of discoverFamilies().byCheck) for (const h of entry.hints ?? []) agreeHints.add(h);
+  const looseTarget = (hint) => {
+    const plain = collapseHint(hint);
+    if (!plain || agreePrefixes.has(plain)) return null;
+    return agreeFiles.find((f) => f.startsWith(`${plain}.`) && !f.slice(plain.length + 1).includes('/')) ?? null;
+  };
+  // POPULATION: every distinct hint in the fleet, not just the inert ones.
+  // #12514 made the matcher follow a dropped extension, so the 38 hints this
+  // trade was measured over are LIVE now and an `inert`-scoped population would
+  // have emptied — taking three green cases with it while asserting nothing.
+  // Both `looseTarget` and `extensionlessModuleTarget` already refuse a hint
+  // whose collapsed form the tree HAS as a path, so widening the population
+  // adds no candidate; measured, it still selects the same 38.
+  const agreeCandidates = [...agreeHints];
+  const strictOf = (h) => extensionlessModuleTarget(h, agreeFileSet, agreePrefixes);
+  const refusedByNarrowing = agreeCandidates.filter((h) => !strictOf(h) && looseTarget(h));
+  t(
+    `the extension narrowing costs no lead — every hint the loose rule resolves, this one resolves too (refused: ${refusedByNarrowing.join(', ') || 'none'})`,
+    refusedByNarrowing.length === 0,
+  );
+  t(
+    'and it invents nothing: every file it names is a tracked file',
+    agreeCandidates.every((h) => !strictOf(h) || agreeFileSet.has(strictOf(h))),
+  );
+  // The reason the list is explicit rather than "any suffix", held to the tree
+  // so the justification cannot quietly evaporate: somewhere in the fleet the
+  // loose rule picks a `.test.ts` sibling over the module the import means. If
+  // those test files are ever removed, re-point this case at whatever pair the
+  // tree then has rather than deleting it — the trade is decided, not stale.
+  t(
+    'the loose alternative really would name the wrong file, which is why it is refused',
+    agreeCandidates.some((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h)),
+  );
+  // ⚠️ And the trade is now load-bearing in a second place. It used to decide
+  // one SENTENCE in a listing; since #12514 the same list decides which files
+  // the MATCHED column names, so the loose rule would put a gate's `.test.ts`
+  // sibling into dispatch prompts. Re-measured here: 4 of the 38 (the four
+  // named in MODULE_SPECIFIER_EXTENSIONS' docblock), and the matcher reaches
+  // the module rather than the test for every one of them.
+  const trapped = agreeCandidates.filter((h) => strictOf(h) && looseTarget(h) && strictOf(h) !== looseTarget(h));
+  t(
+    `the matcher reaches the module, never the test sibling the loose rule would have named (${trapped.length} such hints)`,
+    trapped.length > 0 &&
+      trapped.every((h) => hintCovers(h, strictOf(h)) && !hintCovers(h, looseTarget(h))),
+  );
+
+  // ── A dropped extension is followed, at COMPARISON time (#12514) ──────────
+  //
+  // Nine `packages/spec` families were unreachable ENTIRELY because a gate
+  // spells an imported module without its extension, so no path derivation
+  // could name them and a dev editing the file was never told they owed them.
+  // Silent under-derivation, exit 0. The pins below are ARRIVAL pins: where a
+  // hint lands, never merely that it left the branch it used to be in.
+  t(
+    'the matcher follows the extension an ESM specifier drops',
+    hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts'),
+  );
+  // The live specimen the card was filed for, driven end to end through the
+  // real fleet: the family, the hint and the file are all read from the tree.
+  const extlessLive = discoverFamilies().byCheck.get('check:spec-changes');
+  t(
+    'check:spec-changes really declares the extensionless specifier',
+    (extlessLive?.hints ?? []).includes('packages/spec/src/migrations/registry'),
+  );
+  t(
+    '...and a card touching that file now MATCHES it — the silent under-derivation this card names',
+    (extlessLive?.hints ?? []).some((h) => hintCovers(h, 'packages/spec/src/migrations/registry.ts')),
+  );
+  // EQUALITY, not a prefix. The rule may name the one file the specifier
+  // resolves to and nothing else — not a subtree under it, not a sibling that
+  // merely starts the same way, and not a second extension stacked on the
+  // first. Each of these would be a fabricated lead, which this file prices
+  // above a missing one.
+  t('the extension follow does not become a subtree claim', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts/inner.ts'));
+  t('nor reach a sibling that merely shares the stem', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry-v2.ts'));
+  t('nor a doubled extension', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts.ts'));
+  t('and it stays inside the segment rule — a bare word is still refused, extension or not', !hintCovers('registry', 'registry.ts'));
+  // The `content/docs.site.json` trade (#8534) is what a LOOSE suffix rule
+  // would have taken back. Pinned here as well as above, because this card is
+  // the one that would have broken it: `.site.json` is not a module extension.
+  t('the sibling-file refusal survives the extension follow', !hintCovers('content/docs', 'content/docs.site.json'));
+
+  // COHERENCE: the matcher and the residue cannot disagree about a file the
+  // tree HAS. `extensionlessModuleTarget` exists to say "the tree has this
+  // file" about a hint the sweep calls dead; after this change no hint that
+  // carries a separator can be in both states at once, so the residue can never
+  // print that sentence about a hint the derivation is silently missing.
+  const stillDead = agreeCandidates.filter((h) => h.includes('/') && !hintReachesTree(h, agreeFiles));
+  t(
+    'no separator-carrying hint is both dead to the matcher and resolvable to a tracked file',
+    stillDead.every((h) => !strictOf(h)),
+  );
+
+  // ── The fabrication direction, re-homed from #12299 ───────────────────────
+  //
+  // This widening is root-agnostic: it follows an extension wherever the hint
+  // points, INCLUDING at a top-level root the tree does not have. The tree
+  // grows a `src/` or a `data/` and inert hints become MATCHED pairs for gates
+  // that never read those files — the fabricated-lead direction this file
+  // prices above a missing one. The requirement adopted on #12299 was that this
+  // cannot happen SILENTLY, so the roots are held out by name here and their
+  // arrival reds THIS case instead of quietly minting pairs into prompts.
+  const fabTopLevel = new Set(agreeFiles.map((f) => f.split('/')[0]));
+  const fabRoots = new Set();
+  for (const h of agreeCandidates) {
+    if (hintReachesTree(h, agreeFiles)) continue;
+    const root = collapseHint(h).split('/')[0];
+    if (root && !fabTopLevel.has(root)) fabRoots.add(root);
+  }
+  // The mechanism, shown rather than argued — a synthetic pair, so the reader
+  // can see exactly what the guard below is holding out.
+  t('a hint under an absent root WOULD convert the day that root appears', hintCovers('src/kernel/protocol-version', 'src/kernel/protocol-version.ts'));
+  t(
+    `and today none of the ${fabRoots.size} roots one directory away is in the tree — ` +
+      'if this reds, a new top-level directory just converted inert hints into MATCHED pairs; ' +
+      'check each against the gate that declares it before accepting the leads',
+    [...fabRoots].every((r) => !fabTopLevel.has(r)),
+  );
+  // The two the #12299 requirement names, held explicitly so the guard cannot
+  // evaporate if the derived set above ever empties for an unrelated reason.
+  t('`src` is not a tracked top-level entry — 20 inert hints are rooted there', !fabTopLevel.has('src') && fabRoots.has('src'));
+  t('`data` is not a tracked top-level entry — 9 inert hints are rooted there', !fabTopLevel.has('data') && fabRoots.has('data'));
 
   t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
   t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
@@ -6957,17 +8286,30 @@ function selfTest() {
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
-  // goes quiet. Exactly one module in the scripts tree declares one today.
+  // goes quiet. TWO modules in the scripts tree declare one today, and this
+  // case NAMES them rather than counting them — a bare count reddens for a
+  // third module without saying which ones were already priced, and the price
+  // is the whole admission criterion:
+  //
+  //   scripts/pm/dispatch-gates.mjs         2632 pairs — join bases and tier
+  //                                         globs, nothing this tool opens
+  //   scripts/cli-build-prerequisite.mjs    216 pairs — 108 files x 2 gates,
+  //                                         each charging the card that touched
+  //                                         one a full CLI closure build to
+  //                                         measure gates it could not move
+  //                                         (#12500)
+  //
+  // A third entry is not forbidden; it is required to arrive with its own
+  // measured price, which is what re-pointing this case costs an author.
+  const declaringModules = trackedFiles()
+    .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
+    // Read from the MODULE BODY, so the fixture markers above — which live
+    // inside this very self-test — are not counted as live declarations.
+    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))))
+    .sort();
   t(
-    'exactly one module in the scripts tree carries the declaration — this one',
-    (() => {
-      const declaring = trackedFiles()
-        .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
-        // Read from the MODULE BODY, so the fixture markers above — which live
-        // inside this very self-test — are not counted as live declarations.
-        .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))));
-      return declaring.length === 1 && declaring[0] === 'scripts/pm/dispatch-gates.mjs';
-    })(),
+    `exactly the two priced modules in the scripts tree carry the declaration (${declaringModules.join(' · ') || 'none'})`,
+    declaringModules.join(' · ') === 'scripts/cli-build-prerequisite.mjs · scripts/pm/dispatch-gates.mjs',
   );
   // The residue count that carries it refuses a missing or impossible value in
   // the same shape as every other count in that line: a subset that could go
@@ -7009,7 +8351,12 @@ function selfTest() {
   // Without this the marker rots in the direction that costs — a gate grows a
   // real population, keeps its old declaration, and the residue keeps vouching
   // that its emptiness was examined.
-  const liveDiscovery = discoverFamilies();
+  // ONE tree for the discovery and for the reconstruction below. The extractor
+  // judges a single-segment directory literal against the tracked corpus, so a
+  // reconstruction that read a different corpus — or none — would report the
+  // rule as a mismatch rather than checking it.
+  const liveTree = watchHintTree();
+  const liveDiscovery = discoverFamilies({ tree: liveTree });
   const declaredEmpty = [...liveDiscovery.byCheck].filter(([, e]) => e.noPopulationReason);
   t(
     `the live tree carries at least one no-population declaration (the guard is not vacuous; found ${declaredEmpty.length})`,
@@ -7049,7 +8396,18 @@ function selfTest() {
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
   const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
-  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel), rel);
+  // A followed module's hints AS A FOLLOWER RECEIVES THEM. `discoverFamilies`
+  // reads `declaredInheritedPopulation` at this seam (`hintsOfModule`), so a
+  // reconstruction that re-scanned the raw literals instead would redden for
+  // every family importing a module that narrows — while the case it feeds
+  // asserts, in its own name, that a shared enumerator CAN carry a population
+  // declaration for its callers. It was raw until #12500 put the second live
+  // declaration in the tree, and the two i18n families are what found it.
+  const liveModuleHints = (rel) => {
+    const source = liveSource(rel);
+    const spelled = extractWatchHints(source, rel, { tree: liveTree });
+    return declaredInheritedPopulation(source, spelled)?.population ?? spelled;
+  };
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
 
   // The recogniser, on fixture source: one line per refusal, so a widening or
@@ -7093,7 +8451,7 @@ function selfTest() {
     for (const f of entry.files ?? []) {
       if (!existsSync(join(ROOT, f))) continue;
       const source = liveSource(f);
-      own.push(...extractWatchHints(source, f));
+      own.push(...extractWatchHints(source, f, { tree: liveTree }));
       for (const mod of firstPartyImportTargets(f, source)) {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
         direct.push(mod);
@@ -7185,6 +8543,61 @@ function selfTest() {
     );
   }
 
+  // ── A followed module's JOIN BASE is not a population (#12500) ─────────────
+  //
+  // `cli-build-prerequisite.mjs` spells `packages/cli` because it joins paths
+  // from it and writes it into every rerun command its two consumers print.
+  // Inherited whole it reads as a subtree claim, and it handed check:i18n and
+  // check:i18n-coverage all 322 tracked files of that package — 210 of them
+  // (the 100-file test suite, the package docs, the vitest config, the sibling
+  // app-nav gate script) unable to change a byte of the `dist/` those gates
+  // spawn. The gates' refusal text is exemplary, so the cost was never a false
+  // green: it was a full CLI closure build per card, bought to measure two
+  // gates the diff provably could not move. Measured at the narrowing:
+  // 322 -> 214 covered files per gate (108 x 2 = 216 fabricated pairs
+  // withdrawn), and all 112 files the gates really read still named.
+  //
+  // BOTH directions, against real files. A narrowing that also dropped the CLI
+  // source would be the under-naming mirror this card's pair exists to keep
+  // apart — the source compiled into the spawned command must still derive.
+  const CLI_PREREQ = 'scripts/cli-build-prerequisite.mjs';
+  const cliPrereqSource = liveSource(CLI_PREREQ);
+  const cliPrereqSpelled = extractWatchHints(cliPrereqSource, CLI_PREREQ, { tree: liveTree });
+  const cliPrereqPopulation = declaredInheritedPopulation(cliPrereqSource, cliPrereqSpelled)?.population ?? [];
+  t(
+    `the CLI build-prerequisite module declares what its callers inherit (${cliPrereqPopulation.join(' ') || 'nothing'})`,
+    cliPrereqPopulation.length === 3,
+  );
+  t(
+    'and it still SPELLS the whole-package join base — the declaration narrows a live literal, not a deleted one',
+    // The `length > 0` is not decoration: without it a DELETED marker satisfies
+    // this case by the empty set (nothing is inherited, so nothing inherits the
+    // join base) — the shape a pin that only asserts an absence always has.
+    cliPrereqPopulation.length > 0
+      && cliPrereqSpelled.includes('packages/cli')
+      && !cliPrereqPopulation.includes('packages/cli'),
+  );
+  // Specimens, not classes: the extractor module whose edit really does move
+  // the committed bundles, and a test file that compiles into nothing either
+  // gate runs. Both live, so neither direction can pass over an empty set.
+  const CLI_SRC_SPECIMEN = 'packages/cli/src/utils/i18n-extract.ts';
+  const CLI_TEST_SPECIMEN = 'packages/cli/test/authoring-rule-command-parity.test.ts';
+  t(
+    'both CLI specimens are real tracked files, so the two directions below are live',
+    existsSync(join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(join(ROOT, CLI_TEST_SPECIMEN)),
+  );
+  for (const check of ['check:i18n', 'check:i18n-coverage']) {
+    const cliEntry = liveDiscovery.byCheck.get(check);
+    t(
+      `${check} still derives the CLI source compiled into the command it spawns`,
+      Boolean(cliEntry) && coveringKey(cliEntry, CLI_SRC_SPECIMEN)?.key === 'packages/cli/src',
+    );
+    t(
+      `${check} no longer derives a CLI test file, which compiles into nothing it runs`,
+      Boolean(cliEntry) && coveringKey(cliEntry, CLI_TEST_SPECIMEN) === null,
+    );
+  }
+
   // The live guard: every REAL paths-filtered workflow either discovers a
   // family or declares why not. This is what actually fails CI the day a new
   // paths-filtered workflow adds an undiscoverable verification step and
@@ -7218,6 +8631,9 @@ function selfTest() {
     ['check:moved', fam(['packages/spec/src/legacy/**'])],
     ['check:never-was', fam(['application/json'])],
     ['check:too-generic', fam(['examples'])],
+    // `packages/spec/src/index.ts` is in the corpus; the gate spells it the way
+    // an import does. Dead to `hintCovers`, and NOT a layout move.
+    ['check:extensionless', fam(['packages/spec/src/index'])],
     ['check:declares-nothing', fam([], { files: ['scripts/check-declares-nothing.mjs'] })],
   ];
   const sweep = unreachableFamilies(sweepEntries, treeFixture);
@@ -7237,6 +8653,53 @@ function selfTest() {
   // the pin that the sweep judges with hintCovers itself rather than with a
   // faster second rule that would answer this case differently.
   t('the sweep names WHY: the tree HAS the population and the covering rule refuses the literal', /the tree HAS it/.test(reasonOf('check:too-generic')));
+  // The FOURTH cause used to be reached from HERE, and #12514 took that away on
+  // purpose: `hintCovers` now follows a dropped extension, so a specifier that
+  // names a file the tree HAS is MATCHED and never enters `dead` to be
+  // described. That is the fix, so the pin asserts the ARRIVAL rather than
+  // being deleted for going quiet — a departure pin cannot see an arrival, and
+  // this section learned that the expensive way one card ago.
+  t(
+    'an extensionless specifier whose file the tree HAS is no longer unreachable at all — it is MATCHED',
+    !sweptNames.includes('check:extensionless'),
+  );
+  t('...because the covering rule reaches the file itself', hintCovers('packages/spec/src/index', 'packages/spec/src/index.ts'));
+  // The renderer is a pure function over `dead`, so it is still pinned — just
+  // no longer from the live sweep for a hint that carries a separator. Handed
+  // the entry the sweep used to build, it must still say the true thing; that
+  // sentence is #12780's and this card does not move it.
+  const extlessDead = [
+    {
+      hint: 'packages/spec/src/index',
+      deepest: deepestTrackedPrefix('packages/spec/src/index', trackedPrefixes(treeFixture)),
+      target: extensionlessModuleTarget('packages/spec/src/index', new Set(treeFixture), trackedPrefixes(treeFixture)),
+    },
+  ];
+  t('the renderer still names WHY: the tree HAS the file under the extension the specifier drops', /extensionless module spelling/.test(unreachableReason(extlessDead)));
+  t('...and it names the FILE, so the reader has no prefix to guess from', unreachableReason(extlessDead).includes('packages/spec/src/index.ts'));
+  t('...never reporting the short prefix as a layout move', !/layout moved/.test(unreachableReason(extlessDead)));
+  t(
+    'a family whose only dead hints are extensionless specifiers is BY CONSTRUCTION, not a miss to triage',
+    unreachableClass(extlessDead) === 'by construction',
+  );
+  // ...and the exception is exactly that narrow: a hint with no such file in
+  // the tree is a layout move exactly as before.
+  t('a genuine short prefix is still a layout move', unreachableClass(sweep.find((u) => u.check === 'check:moved').dead) === 'layout moved');
+  // The predicate itself, both directions, over the same fixture corpus.
+  const extlessFiles = new Set(treeFixture);
+  const extlessPrefixes = trackedPrefixes(treeFixture);
+  t(
+    'the predicate finds the file an extensionless specifier names',
+    extensionlessModuleTarget('packages/spec/src/index', extlessFiles, extlessPrefixes) === 'packages/spec/src/index.ts',
+  );
+  t(
+    '...refuses a hint the tree already HAS as a path, leaving the too-generic message its case',
+    extensionlessModuleTarget('examples', extlessFiles, extlessPrefixes) === null,
+  );
+  t(
+    '...and invents nothing for a literal that never was a path',
+    extensionlessModuleTarget('application/json', extlessFiles, extlessPrefixes) === null,
+  );
   t('...and that case really is a population the tree has', trackedPrefixes(treeFixture).has('examples'));
   t('the reason list is capped rather than printed as an inventory', /…$/.test(unreachableReason([1, 2, 3, 4].map((n) => ({ hint: `no/such/path-${n}`, deepest: '' })))));
   // The verdict is CROSS-CUTTING, never a fourth bucket: an unreachable family
@@ -7321,6 +8784,9 @@ function selfTest() {
 
   const listed = unreachableLines(sweep, treeFixture.length);
   const listedText = listed.join('\n');
+  // Three, not four: the fixture's extensionless family stopped being
+  // unreachable when #12514 taught the matcher to follow a dropped extension.
+  // The corpus size beside it is `treeFixture.length` and did not move.
   t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
   t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
   t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
@@ -7753,6 +9219,214 @@ function selfTest() {
       missingBaseErr = err;
     }
     t('an unresolvable base ref is refused on its own terms', !!missingBaseErr && /does not resolve/.test(missingBaseErr.message));
+
+    // ── A leftover in-tree test fixture must not reach the change set (#12632)
+    //
+    // The derivation reads untracked files on purpose, so `.gitignore` is the
+    // only thing standing between a killed test run's leftover fixture and
+    // every seat's gate list. `packages/cli` creates four fixtures inside the
+    // tracked tree; the one that used to root in `packages/cli/test/` needed an
+    // ignore entry written for it alone, and now roots at `packages/cli/tmp/`
+    // with the other three, under the repo-wide `tmp/` rule.
+    //
+    // The CONTROL is the load-bearing half and it runs the SAME derivation on
+    // the SAME repo: asserting only that the covered path is absent would pass
+    // just as happily against a `.gitignore` that ignores the whole tree, or
+    // against a fixture that never planted anything. So an UNCOVERED in-tree
+    // path is planted alongside it and has to come back VISIBLE, and it has to
+    // come back carrying gate families — a leftover that reached the change set
+    // is not inert. Measured on the tree at the time of writing: a two-file
+    // leftover (the `package.json` and `objectstack.config.ts` that fixture
+    // writes) named 20 families the branch's own diff does not implicate.
+    // The count is not asserted — the family inventory grows same-day, which is
+    // this whole tool's premise — only that it is non-empty.
+    //
+    // The uncovered path is deliberately the fixture's FORMER root, so this
+    // control also fails if the bespoke ignore entry is ever restored: a rule
+    // covering a root nothing uses would make the control silently green and
+    // take the pin with it.
+    //
+    // The repo's REAL `.gitignore` is copied in rather than an excerpt written
+    // here: an excerpt would pin the excerpt.
+    const ignoreRepo = join(gitTmp, 'ignore-coverage');
+    mkdirSync(ignoreRepo, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], ignoreRepo);
+    write(ignoreRepo, '.gitignore', readFileSync(join(ROOT, '.gitignore'), 'utf8'));
+    g(['add', '-A'], ignoreRepo);
+    g(['commit', '-m', 'the real ignore rules'], ignoreRepo);
+    g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], ignoreRepo)], ignoreRepo);
+
+    const leftoverAtCoveredRoot = 'packages/cli/tmp/tmp-node-env-default-selftest/objectstack.config.ts';
+    const leftoverAtUncoveredRoot = 'packages/cli/test/tmp-node-env-default-selftest/objectstack.config.ts';
+    for (const rel of [leftoverAtCoveredRoot, leftoverAtUncoveredRoot]) {
+      write(ignoreRepo, rel, "import { AuthPlugin } from '@objectstack/plugin-auth';\n");
+      write(ignoreRepo, join(dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
+    }
+    const leftovers = changedPathsFromGit({ cwd: ignoreRepo });
+
+    t(
+      'the CONTROL reproduces the hazard: a leftover fixture at an UNCOVERED in-tree root does reach the change set',
+      leftovers.paths.includes(leftoverAtUncoveredRoot),
+    );
+    t(
+      'and reaching it is not free — the uncovered leftover names gate families of its own',
+      [...discoverFamilies().byCheck.values()].some((e) => classifyEntry(e, [leftoverAtUncoveredRoot]).verdict === 'matched'),
+    );
+    t(
+      'a leftover fixture at packages/cli/tmp/ is invisible to the derivation, under the same rules in the same repo',
+      !leftovers.paths.includes(leftoverAtCoveredRoot),
+    );
+    t(
+      'and it is the repo-wide tmp/ rule doing it, with no bespoke entry for the fixture former root',
+      !readFileSync(join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
+    );
+    // ── The CLASS the pin above does not hold (#12749) ──────────────────────
+    //
+    // Everything above names TWO paths. A fifth fixture author who creates a
+    // directory in the tracked tree at a root the ignore rules do not cover
+    // reproduces the hazard exactly, and every case above stays green — not one
+    // of them ever looks at their file. The cases below hold the class: the
+    // tree's own sources are swept for the directories they create, and each is
+    // asked about against the repo's REAL ignore rules.
+    //
+    // ⛔ No count is asserted below. The same hazard has three recorded readings
+    // (17 / 18 / 20 families) because the family inventory grows same-day, and a
+    // guard pinning a number reds on an unrelated Tuesday. What IS asserted is
+    // NON-EMPTINESS: a sweep that found nothing satisfies "every root is
+    // covered" perfectly, and would take the whole class-level guard with it.
+
+    // The reader, on sources containing nothing else — hermetic, so a failure
+    // here is the reader and not the tree.
+    const seededFixtureSource = [
+      'const HERE = path.dirname(fileURLToPath(import.meta.url));',
+      "const SCRATCH = path.resolve(HERE, '../scratch');",
+      'fs.mkdirSync(SCRATCH, { recursive: true });',
+      "const dir = fs.mkdtempSync(path.join(SCRATCH, 'case-'));",
+    ].join('\n');
+    const seededScan = scratchDirSitesInSource('packages/thing/test/a.test.ts', seededFixtureSource);
+    t(
+      'the scan reads an in-tree fixture root through the binding that seeds it',
+      seededScan.inTree.some((s) => s.call === 'mkdirSync' && s.dir === 'packages/thing/scratch'),
+    );
+    t(
+      'and reads the mkdtemp child as a directory of its own, not as its base',
+      seededScan.inTree.some((s) => s.call === 'mkdtempSync' && s.dir.startsWith('packages/thing/scratch/case-')),
+    );
+    t('nothing in that source is left unclassified', seededScan.unresolved.length === 0);
+
+    const systemTempSource = [
+      "const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'case-'));",
+      "fs.mkdirSync(path.join(scratchDir, 'nested'), { recursive: true });",
+    ].join('\n');
+    const systemScan = scratchDirSitesInSource('packages/thing/test/b.test.ts', systemTempSource);
+    t(
+      'a fixture in the system temp directory is no in-tree root, and is not unresolved either',
+      systemScan.inTree.length === 0 && systemScan.unresolved.length === 0,
+    );
+
+    // The third answer, and the reason silence from this scan can be read at
+    // all: a base it cannot resolve is REPORTED. A detector that dropped what
+    // it could not read would be this card's own defect one level up — green
+    // over the sites nobody measured.
+    const opaqueScan = scratchDirSitesInSource(
+      'packages/thing/test/c.test.ts',
+      "const dir = fs.mkdtempSync(path.join(rootFromSomewhereElse, 'case-'));",
+    );
+    t(
+      'a base the scan cannot read comes back UNRESOLVED, never silently skipped',
+      opaqueScan.inTree.length === 0 && opaqueScan.unresolved.length === 1,
+    );
+    t(
+      'and a commented-out call is not a site at all',
+      scratchDirSitesInSource('packages/thing/test/d.test.ts', "// fs.mkdtempSync(path.join(HERE, 'case-'));\n").scanned === 0,
+    );
+    t(
+      'nor is one spelled inside a string — which is what this very self-test plants',
+      scratchDirSitesInSource('packages/thing/test/e.test.ts', 'const src = "fs.mkdtempSync(join(HERE, x))";\n').scanned === 0,
+    );
+
+    // The CONTROL for the whole verdict, on a repo carrying the REAL ignore file
+    // — an excerpt would pin the excerpt. Two fixture sources are planted, one
+    // at a covered root and one at an uncovered one, and the uncovered one has
+    // to come back EXPOSED. Without this arm every live-tree case below passes
+    // just as happily against a verdict function that returns an empty list.
+    const classRepo = join(gitTmp, 'fixture-root-class');
+    mkdirSync(classRepo, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], classRepo);
+    const realIgnoreRules = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    write(classRepo, '.gitignore', realIgnoreRules);
+    const fixtureSourceRootedAt = (rel) =>
+      [
+        'const HERE = path.dirname(fileURLToPath(import.meta.url));',
+        `const SCRATCH = path.resolve(HERE, '${rel}');`,
+        'fs.mkdirSync(SCRATCH, { recursive: true });',
+        "const dir = fs.mkdtempSync(path.join(SCRATCH, 'case-'));",
+      ].join('\n');
+    write(classRepo, 'packages/cli/test/covered.test.ts', fixtureSourceRootedAt('../tmp'));
+    write(classRepo, 'packages/cli/test/uncovered.test.ts', fixtureSourceRootedAt('../scratch-fixtures'));
+    g(['add', '-A'], classRepo);
+    g(['commit', '-m', 'two fixture sources under the real ignore rules'], classRepo);
+
+    const uncoveredInControl = (r) => r.exposed.some((s) => s.dir.startsWith('packages/cli/scratch-fixtures'));
+    const classControl = exposedScratchDirs({ cwd: classRepo });
+    t(
+      'the CONTROL reproduces the hazard at CLASS level: a fixture root no ignore rule covers is EXPOSED',
+      uncoveredInControl(classControl),
+    );
+    t(
+      'and the covered root beside it is not, under the same rules in the same repo',
+      !classControl.exposed.some((s) => s.dir.startsWith('packages/cli/tmp'))
+        && classControl.covered.some((s) => s.dir.startsWith('packages/cli/tmp')),
+    );
+
+    // A rule in `.git/info/exclude` covers the clone it lives in and nothing
+    // else, so it is not coverage: the leftover still joins the change set on
+    // every other machine, CI included. `git check-ignore` answers the same
+    // either way, which is exactly why the SOURCE of the rule is read.
+    write(classRepo, '.git/info/exclude', 'scratch-fixtures/\n');
+    t(
+      'a rule living only in .git/info/exclude is not coverage — the root stays EXPOSED',
+      uncoveredInControl(exposedScratchDirs({ cwd: classRepo })),
+    );
+
+    // ... and the same instrument clears it once a TRACKED rule covers it, so
+    // what the live cases below read is a reading and not a constant.
+    write(classRepo, '.git/info/exclude', '');
+    write(classRepo, '.gitignore', `${realIgnoreRules}\nscratch-fixtures/\n`);
+    g(['add', '-A'], classRepo);
+    g(['commit', '-m', 'cover the new root in the tracked ignore file'], classRepo);
+    t(
+      'a TRACKED rule covering it clears it, so the verdict moves in both directions',
+      exposedScratchDirs({ cwd: classRepo }).exposed.length === 0,
+    );
+
+    // The live tree — the half a fifth fixture author's PR reds on.
+    const liveScratch = exposedScratchDirs({});
+    t(
+      `the sweep really read this tree (${liveScratch.sites} directory-creating site(s) across ${liveScratch.scannedFiles} tracked source(s))`,
+      liveScratch.sites > 0,
+    );
+    t(
+      `and it really found in-tree fixture roots (${liveScratch.inTree.length}), so the coverage case below judges something`,
+      liveScratch.inTree.length > 0,
+    );
+    t(
+      `every in-tree directory this tree's sources create is covered by a tracked ignore rule, or is tracked itself${
+        liveScratch.exposed.length
+          ? ` — EXPOSED: ${liveScratch.exposed.map((s) => `${s.dir} (${s.file}:${s.line})`).join(', ')}`
+          : ''
+      }`,
+      liveScratch.exposed.length === 0,
+    );
+    const unreadableTempSites = liveScratch.unresolved.filter((s) => s.call === 'mkdtempSync');
+    t(
+      `no mkdtempSync site in this tree takes a base the scan cannot read${
+        unreadableTempSites.length
+          ? ` — UNRESOLVED: ${unreadableTempSites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ')}`
+          : ''
+      }`,
+      unreadableTempSites.length === 0,
+    );
   } finally {
     rmSync(gitTmp, { recursive: true, force: true });
   }
@@ -7806,8 +9480,55 @@ function selfTest() {
   // reads as ordinary provenance. These pin the loudness, and pin that the
   // quiet cases stay quiet — a warning on every honest run is a warning nobody
   // reads.
-  t('no measurable base ref prints nothing rather than guessing', driftLines(null).length === 0 && driftLines({ base: null, behind: null, changed: [] }).length === 0);
-  t('a tree level with the base prints NO clearance — the failure would have passed one', driftLines({ base: 'aaaaaaa', behind: 0, changed: [] }).length === 0);
+  // Unmeasured is not silence (#12411). These pin the ARRIVAL — the sentence a
+  // reader actually gets — not merely that the old silence is gone: a pin
+  // asserting "the output is not empty" passes against any garbage. The
+  // previous assertion here read "no measurable base ref prints nothing rather
+  // than guessing" and was green on the defect itself, which is what a
+  // departure pin buys you.
+  const level = driftLines({ base: 'aaaaaaa', behind: 0, changed: [] });
+  const unmeasured = driftLines({ base: null, behind: null, changed: [], headDate: null, baseDate: null });
+  const unmeasuredText = unmeasured.join('\n');
+  t('an unresolvable base ref SAYS staleness was not measured, and names the ref it could not resolve',
+    unmeasuredText.includes('STALENESS NOT MEASURED') && unmeasuredText.includes(DEFAULT_BASE_REF));
+  t('and it spells the reading UNKNOWN, so the reader cannot land on zero by default',
+    unmeasuredText.includes('UNKNOWN') && unmeasuredText.includes('Not zero'));
+  t('it hands over the one action that would produce a reading',
+    unmeasuredText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  t('and it does NOT cry stale — a tree nobody measured is not a tree measured stale',
+    !unmeasuredText.includes('STALE TREE'));
+  t('a tree level with the base prints NO clearance — the failure would have passed one', level.length === 0);
+  t('so the two readings no longer share one output — the defect, stated as the comparison that used to hold',
+    unmeasuredText !== level.join('\n'));
+  t('and a drift of null — no measurement ATTACHED, the caller never asked — still prints nothing', driftLines(null).length === 0);
+  // The SECOND door to "no reading was taken" (#12815). The base ref resolves
+  // and the DISTANCE is what could not be read, so this reached `!drift.behind`
+  // carrying `behind: null` and printed nothing — byte-identical to the level
+  // tree above, the same collapse as the case above it, one step further along.
+  // These pin the arrival, and pin that ONE predicate serving both doors did
+  // not flatten them into one sentence: the remedies do not overlap, so a
+  // reader handed the other door's remedy is handed a lead they cannot act on.
+  const uncounted = driftLines({ base: 'aaaaaaa', behind: null, changed: [], headDate: null, baseDate: null });
+  const uncountedText = uncounted.join('\n');
+  t('a base ref that RESOLVES but yields no distance also SAYS staleness was not measured',
+    uncountedText.includes('STALENESS NOT MEASURED') && uncountedText.includes('UNKNOWN') && uncountedText.includes('Not zero'));
+  t('and it names the base it DID resolve, so a reader can tell WHICH step failed', uncountedText.includes('aaaaaaa'));
+  t('its remedy is the count, not the fetch — a fetch buys a base ref and buys nothing for a HEAD with no commit',
+    uncountedText.includes(`git rev-list --count HEAD..${DEFAULT_BASE_REF}`)
+      && !uncountedText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  // The two assertions below carry a length conjunct on purpose. Both are
+  // otherwise satisfied by the DEFECT — an empty list contains no 'STALE TREE'
+  // and differs from state A's sentence — which is the species #12411 deleted
+  // here: instrument intact, aimed at nothing. Measured under ablation: without
+  // the conjunct they stay green with the fix reverted.
+  t('and it does NOT cry stale either — a tree nobody counted is not a tree counted stale',
+    uncounted.length === 2 && !uncountedText.includes('STALE TREE'));
+  t('so this reading no longer shares one output with the level tree — the defect, stated as the comparison that used to hold',
+    uncountedText !== level.join('\n'));
+  t('and the two unmeasured doors are told apart rather than flattened by the shared predicate',
+    uncounted.length === 2 && unmeasured.length === 2 && uncountedText !== unmeasuredText);
+  t('a drift carrying no distance FIELD at all reads unmeasured too — absent is not a reading either',
+    driftLines({ base: 'aaaaaaa', changed: [] }).join('\n').includes('STALENESS NOT MEASURED'));
   const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
   t('behind, but with the derivation surface untouched, states the distance in ONE quiet line', benign.length === 1 && benign[0].includes('7 commit(s) behind'));
   t('and that quiet line does not cry stale, so the loud spelling stays rare', !benign.join('\n').includes('STALE TREE'));
@@ -7833,6 +9554,44 @@ function selfTest() {
     // Positive control: a clone level with its base must read zero, or a
     // non-zero reading below proves nothing.
     t('a checkout level with its base measures zero drift (positive control)', baseDrift({ cwd: clone }).behind === 0);
+    // The other end of the distinction, measured rather than hand-built: `up`
+    // was `git init`-ed and has no remote at all, so the base ref genuinely
+    // does not resolve there — the fresh-checkout state the object literals
+    // above only describe. Its reading must not be the zero the clone reads.
+    const unresolvableRepo = baseDrift({ cwd: up });
+    t('a checkout with no such remote measures NO base, and does not fall back to zero',
+      unresolvableRepo.base === null && unresolvableRepo.behind === null);
+    t('and from a real repo too it arrives as a sentence, not as the silence the level clone gets',
+      driftLines(unresolvableRepo).join('\n').includes('STALENESS NOT MEASURED')
+        && driftLines(baseDrift({ cwd: clone })).length === 0);
+    // The OTHER door, also measured rather than hand-built (#12815): a checkout
+    // whose base ref is fetched and RESOLVES, but whose own HEAD is unborn, so
+    // `rev-list --count HEAD..<ref>` cannot answer. The literals above describe
+    // that state; only a repo shows it is reachable, which is the whole reason
+    // this fixture exists beside them.
+    const unborn = join(driftTmp, 'unborn');
+    mkdirSync(unborn, { recursive: true });
+    gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], unborn);
+    gd(['remote', 'add', DEFAULT_BASE_REMOTE, up], unborn);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE, `${DEFAULT_BASE_BRANCH}:refs/remotes/${DEFAULT_BASE_REF}`], unborn);
+    const unbornRepo = baseDrift({ cwd: unborn });
+    t('a checkout whose base ref RESOLVES but whose own HEAD is unborn measures a base and NO distance',
+      typeof unbornRepo.base === 'string' && unbornRepo.behind === null);
+    t('and that door speaks from a real repo too, rather than reading as the silence the level clone gets',
+      driftLines(unbornRepo).join('\n').includes('STALENESS NOT MEASURED')
+        && driftLines(baseDrift({ cwd: clone })).length === 0);
+    t('so the three REAL readings — level, no ref, no distance — no longer share one output',
+      new Set([
+        driftLines(baseDrift({ cwd: clone })).join('\n'),
+        driftLines(unresolvableRepo).join('\n'),
+        driftLines(unbornRepo).join('\n'),
+      ]).size === 3);
+    // Arrival, not just rendering: a sentence `driftLines` returns and the
+    // banner drops is a sentence nobody reads, and the banner is the only
+    // consumer there is. Pinned from the REAL reading rather than a literal,
+    // because that is the half a literal cannot vouch for.
+    t('and the banner a reader actually sees carries it, from that real reading',
+      bannerLines({ identity: hereIdentity, paths: [], drift: unbornRepo }).join('\n').includes('STALENESS NOT MEASURED'));
     // Upstream moves in a file the answer is NOT derived from.
     writeFileSync(join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
@@ -7848,6 +9607,17 @@ function selfTest() {
     const onSurface = baseDrift({ cwd: clone });
     t('a commit INSIDE the derivation surface is caught and named', onSurface.behind === 2 && onSurface.changed.includes('scripts/check-thing.mjs'));
     t('and that is the case that goes loud', driftLines(onSurface).join('\n').includes('STALE TREE'));
+    // Reachability from an ORDINARY checkout, which is what makes the door
+    // above a state of working clones and not only of repos built to show it:
+    // `clone` is fully fetched and has just measured a real distance, and one
+    // ordinary command leaves its HEAD unborn with the base ref still
+    // resolving. It runs last because it mutates `clone`; nothing below reads it.
+    gd(['checkout', '-q', '--orphan', 'a-branch-with-no-commit'], clone);
+    const orphaned = baseDrift({ cwd: clone });
+    t('one ordinary command reaches the no-distance state in a fully fetched clone',
+      typeof orphaned.base === 'string' && orphaned.behind === null);
+    t('and the clone that measured a distance one command ago says so instead of falling silent',
+      driftLines(orphaned).join('\n').includes('STALENESS NOT MEASURED'));
   } finally {
     rmSync(driftTmp, { recursive: true, force: true });
   }

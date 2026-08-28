@@ -99,6 +99,26 @@ describe('[#12027] SchemaRegistry collision warning is order-symmetric', () => {
     expect(lines[0]).toContain('shadows the package value');
   });
 
+  it('[#12609] quotes the shadowed package id with single quotes, matching this package\'s own convention', () => {
+    // Measured over non-test `.ts` under `packages/objectql/src`: interpolated
+    // identifiers in operator prose are single-quoted 174 times against 37
+    // double-quoted — this line WAS one of the 37. `toContain` is not enough
+    // on its own (a substring check can't see which quote character surrounds
+    // it), so both directions are asserted explicitly: the correct spelling is
+    // present, and the pre-fix spelling is not — the same "would notice a
+    // disagreement" shape #12563 used for the sibling phrase in
+    // `service-automation`.
+    registry.registerItem('flow', { name: 'nightly_sync', label: 'packaged' }, 'name', PKG);
+
+    const lines = collisionsDuring(() => {
+      registry.registerItem('flow', { name: 'nightly_sync', label: 'runtime' }, 'name');
+    });
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`package '${PKG}'`);
+    expect(lines[0]).not.toContain(`package "${PKG}"`);
+  });
+
   it('LATE-REGISTRATION ORDER — sys_metadata row first, then the package: still warns', () => {
     // Unchanged behaviour, pinned so the repair cannot trade one order for the
     // other. This order is a marketplace install / HMR reload, not a boot.

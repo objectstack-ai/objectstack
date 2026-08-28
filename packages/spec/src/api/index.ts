@@ -79,3 +79,16 @@ export * from './query-adapter.zod';
 export * from './export.zod';
 export * from './automation-api.zod';
 export * from './package-api.zod';
+// #12038 — the package lifecycle response contracts (ADR-0067 commit
+// timeline, draft batch doors, ADR-0070 export/adopt/duplicate), including
+// the ruling-5A `/api` re-export of `PackagePublishResultSchema`.
+export * from './package-lifecycle.zod';
+// Ruling 5A (#12038): the book-tree response contract is declared beside its
+// resolver in `../system/book.zod` — re-exported here (never a second copy)
+// so the route-ledger resolver, which searches only `@objectstack/spec/api`,
+// can name it.
+export { ResolvedEntrySchema, ResolvedGroupSchema, ResolvedBookSchema } from '../system/book.zod';
+// …with their existing types (the interfaces `resolveBookTree` is typed by,
+// pinned type-identical to the schemas in `system/book.test.ts`) — the same
+// single-declaration re-export, so the `/api` page's import line works.
+export type { ResolvedEntry, ResolvedGroup, ResolvedBook } from '../system/book.zod';

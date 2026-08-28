@@ -80,6 +80,27 @@ import {
   // [#11924] The GLOBAL cross-object search body — NOT the per-object
   // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
   SearchAllResponse,
+  // [#12038] The meta history/diagnostics and package lifecycle response
+  // contracts, bound under the recorded ruling (1C/2C/3A/4A/5A). Each is the
+  // PAYLOAD the route answers — the value after `unwrapResponse` strips the
+  // dispatcher's `{ success, data }` envelope, and the whole bare body where
+  // the REST server answers without one — so one type is true on both
+  // surfaces (survey §8.1).
+  GetPublishedMetaItemResponse,
+  ListDraftsResponse,
+  GetMetaDiagnosticsResponse,
+  FindReferencesToMetaResponse,
+  AuditMetaItemResponse,
+  RollbackMetaItemResponse,
+  DiffMetaItemResponse,
+  PackagePublishResult,
+  DiscardPackageDraftsResponse,
+  ListPackageCommitsResponse,
+  RevertPackageCommitResponse,
+  RollbackToPackageCommitResponse,
+  PackageExportManifest,
+  ReassignOrphanedMetadataResponse,
+  DuplicatePackageResponse,
 } from '@objectstack/spec/api';
 import type {
   ApprovalRequestRow,
@@ -121,6 +142,10 @@ import type {
 } from '@objectstack/spec/automation';
 import type { ExternalCatalog } from '@objectstack/spec/data';
 import type { InstalledPackage } from '@objectstack/spec/kernel';
+// [#12038] The resolved book tree `meta.getBookTree` answers — declared beside
+// its resolver in spec `system/book.zod.ts` (its schema is re-exported into
+// `/api` for the route-ledger resolver; the type lives on the system entry).
+import type { ResolvedBook } from '@objectstack/spec/system';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 import type { ExplainDecision } from '@objectstack/spec/security';
 import type { InvitationStatus } from '@objectstack/spec/identity';
@@ -1076,24 +1101,20 @@ export class ObjectStackClient {
     /* [#3563 PR-5] The three meta routes that had no SDK expression. */
 
     /**
-     * ⛔ [#11925] The nine `meta.*` history / diagnostics methods below keep
-     * `unwrapResponse< any >` DELIBERATELY — Class C, a missing contract
-     * rather than a missing annotation (#12038).
+     * [#12038] Eight of the nine `meta.*` history / diagnostics methods below
+     * are BOUND — schema first (`@objectstack/spec/api`), ledger row second,
+     * annotation last, the #7294 order — under the recorded five-part ruling
+     * (1C · 2C · 3A · 4A · 5A). Each annotation names the PAYLOAD: the value
+     * after `unwrapResponse` strips the dispatcher envelope, and the whole
+     * bare body where the REST server answers without one, so one type is
+     * true on both surfaces.
      *
-     * `getPublished`, `listDrafts`, `migrateStored`, `getDiagnostics`,
-     * `getReferences`, `getBookTree`, `getAudit`, `rollbackItem`, `diffItem`.
-     *
-     * Nothing in `@objectstack/spec` declares any of these nine route
-     * responses: every ledger row reports `responseSchema=None`, and the
-     * producers hand back whatever the protocol service returns. The one named
-     * type that exists — `StoredMigrationReport`, which `migrateStored`'s
-     * docblock points at — lives in `@objectstack/metadata-protocol`, which is
-     * not a dependency of this package.
-     *
-     * `publishItem` below is the counter-example and the precedent: it is
-     * annotated only because #7294 declared `PublishMetaItemResponseSchema`
-     * first. Same order applies here — schema, then ledger row, then
-     * annotation. ⛔ Do not reach for a same-named neighbour instead.
+     * The exception is `migrateStored` (ruling 2C): it stays
+     * `unwrapResponse< any >` DELIBERATELY — its report's only named type,
+     * `StoredMigrationReport`, lives in `@objectstack/metadata-protocol`,
+     * which is not a dependency of this package, and a second declaration in
+     * spec would drift against the CLI that renders the same report. Its two
+     * ledger rows carry the same note. ⛔ Do not re-declare it here.
      */
 
     /**
@@ -1107,24 +1128,28 @@ export class ObjectStackClient {
      * slash-bearing name is refused at the publish door (#12194), so there is
      * one spelling and one door.
      */
-    getPublished: async (type: string, name: string) => {
+    getPublished: async (type: string, name: string): Promise<GetPublishedMetaItemResponse> => {
+        // [#12038 ruling 1C] `GetPublishedMetaItemResponse` is `unknown` BY
+        // RULING, not by omission: the route answers an arbitrary metadata
+        // item body, and freezing a union over today's type registry was
+        // explicitly refused. Callers narrow with their own type knowledge.
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/published`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<GetPublishedMetaItemResponse>(res);
     },
 
     /**
      * ADR-0033: pending drafts — metadata authored (e.g. by an AI) but not
      * yet published, which the active-only item lists hide.
      */
-    listDrafts: async (opts?: { packageId?: string; type?: string }) => {
+    listDrafts: async (opts?: { packageId?: string; type?: string }): Promise<ListDraftsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (opts?.packageId) params.set('packageId', opts.packageId);
         if (opts?.type) params.set('type', opts.type);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/_drafts${qs ? `?${qs}` : ''}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<ListDraftsResponse>(res);
     },
 
     /**
@@ -1140,6 +1165,12 @@ export class ObjectStackClient {
      *
      * Requires the `manage_metadata` capability (403 otherwise) — it rewrites
      * every eligible row in the deployment, not one item.
+     *
+     * [#12038 ruling 2C] DELIBERATELY UNBOUND — the one method in this family
+     * that keeps `unwrapResponse< any >`: `StoredMigrationReport` lives in
+     * `@objectstack/metadata-protocol`, which this package does not depend
+     * on, and a second declaration in spec would drift against the CLI that
+     * renders the same report. Both of its ledger rows carry the same note.
      */
     migrateStored: async (opts?: { apply?: boolean; types?: string[] }) => {
         const route = this.getRoute('metadata');
@@ -1173,7 +1204,7 @@ export class ObjectStackClient {
      * registered Zod schema. Powers governance dashboards and doctor-style
      * checks. 501s on kernels without `getMetaDiagnostics`.
      */
-    getDiagnostics: async (opts?: { type?: string; severity?: 'error' | 'warning'; packageId?: string }) => {
+    getDiagnostics: async (opts?: { type?: string; severity?: 'error' | 'warning'; packageId?: string }): Promise<GetMetaDiagnosticsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (opts?.type) params.set('type', opts.type);
@@ -1181,28 +1212,28 @@ export class ObjectStackClient {
         if (opts?.packageId) params.set('package', opts.packageId);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/diagnostics${qs ? `?${qs}` : ''}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<GetMetaDiagnosticsResponse>(res);
     },
 
     /**
      * Reverse references: metadata items that reference `type`/`name`.
      * `{ references: [] }` on kernels without reference tracking.
      */
-    getReferences: async (type: string, name: string) => {
+    getReferences: async (type: string, name: string): Promise<FindReferencesToMetaResponse> => {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/references`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<FindReferencesToMetaResponse>(res);
     },
 
     /**
      * ADR-0046 §6: resolve a book spine against the docs that exist now.
      * An unknown name is treated as a package id (implicit per-package book).
      */
-    getBookTree: async (name: string, opts?: { packageId?: string }) => {
+    getBookTree: async (name: string, opts?: { packageId?: string }): Promise<ResolvedBook> => {
         const route = this.getRoute('metadata');
         const qs = opts?.packageId ? `?package=${encodeURIComponent(opts.packageId)}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/book/${encodeURIComponent(name)}/tree${qs}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<ResolvedBook>(res);
     },
 
     /**
@@ -1210,11 +1241,11 @@ export class ObjectStackClient {
      * save/publish/rollback/delete/reset attempts, allowed and denied.
      * `{ events: [] }` where the audit table is not provisioned.
      */
-    getAudit: async (type: string, name: string, opts?: { limit?: number }) => {
+    getAudit: async (type: string, name: string, opts?: { limit?: number }): Promise<AuditMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const qs = opts?.limit !== undefined ? `?limit=${opts.limit}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/audit${qs}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<AuditMetaItemResponse>(res);
     },
 
     /**
@@ -1253,27 +1284,27 @@ export class ObjectStackClient {
     /**
      * Restore the body at history version `toVersion` as the new live row.
      */
-    rollbackItem: async (type: string, name: string, toVersion: number, opts?: { message?: string }) => {
+    rollbackItem: async (type: string, name: string, toVersion: number, opts?: { message?: string }): Promise<RollbackMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback`, {
             method: 'POST',
             body: JSON.stringify({ toVersion, ...(opts?.message ? { message: opts.message } : {}) }),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<RollbackMetaItemResponse>(res);
     },
 
     /**
      * Structural diff between two history versions (`from`/`to`); omit both
      * for previous-vs-current.
      */
-    diffItem: async (type: string, name: string, opts?: { from?: number; to?: number }) => {
+    diffItem: async (type: string, name: string, opts?: { from?: number; to?: number }): Promise<DiffMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (opts?.from !== undefined) params.set('from', String(opts.from));
         if (opts?.to !== undefined) params.set('to', String(opts.to));
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ''}`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<DiffMetaItemResponse>(res);
     }
   };
 
@@ -1604,32 +1635,38 @@ export class ObjectStackClient {
     },
 
     /**
-     * ⛔ [#11925] The eight methods from here down — `publish`,
-     * `discardDrafts`, `listCommits`, `revertCommit`, `rollback`, `export`,
-     * `adoptOrphans`, `duplicate` — keep `unwrapResponse< any >` on purpose:
-     * Class C, a missing contract (#12038). Their handlers reach the protocol
-     * service through an `any` cast (`(protocol as any).listCommits`,
-     * `.revertCommit`, `.rollbackToPackageCommit`, `.duplicatePackage`, …), so
-     * there is no declared type anywhere on the path to lift, and every ledger
-     * row reports `responseSchema=None`.
+     * [#12038] The eight methods from here down — `publish`, `discardDrafts`,
+     * `listCommits`, `revertCommit`, `rollback`, `export`, `adoptOrphans`,
+     * `duplicate` — are BOUND under the recorded five-part ruling. The
+     * handlers' `(protocol as any)` casts erase types their producers declare
+     * completely a few files away, so every one of these annotations is a
+     * describe-only transcription of that producer shape, published in
+     * `@objectstack/spec/api` with conformance coverage first, then named by
+     * the route-ledger row, then annotated here (the #7294 order). All eight
+     * routes are dispatcher-only; each type is the payload `unwrapResponse`
+     * yields after stripping the `{ success, data }` envelope.
      *
-     * ⭐ `rollback` in particular: `PackageRollbackResponse` sits one import
-     * away in `@objectstack/spec/api` and is the WRONG type for it. That
-     * schema declares `{ success, restoredVersion?, message? }` — a VERSION
-     * rollback — while this method posts `{ commitId }` and the dispatcher
-     * routes it to `rollbackToPackageCommit`, the ADR-0067 COMMIT rollback.
-     * Binding it would compile and be false. `return-type-precision.test.ts`
-     * holds a compile-time guard against that substitution.
+     * ⭐ `rollback`: the near-miss `PackageRollbackResponse` — a VERSION
+     * rollback declaration the spec had bound to this route's exact live path
+     * — is RETIRED (ruling 3A, ADR-0087 discipline); the binding below is the
+     * true COMMIT-rollback contract, `RollbackToPackageCommitResponse`.
+     * `return-type-precision.test.ts` guards the shape distinction.
      */
 
-    /** Publish the package's metadata snapshot. */
-    publish: async (id: string, opts?: Record<string, unknown>) => {
+    /**
+     * Publish the package's metadata snapshot. The one method in this family
+     * whose producer (`MetadataManager.publishPackage`) already had an exact
+     * published schema — `PackagePublishResultSchema`, declared in
+     * `@objectstack/spec/system` and re-exported into `/api` (#12038 ruling
+     * 5A, never a second copy).
+     */
+    publish: async (id: string, opts?: Record<string, unknown>): Promise<PackagePublishResult> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish`, {
             method: 'POST',
             body: JSON.stringify(opts ?? {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<PackagePublishResult>(res);
     },
 
     /**
@@ -1659,40 +1696,44 @@ export class ObjectStackClient {
     },
 
     /** ADR-0033: drop every pending draft bound to the package. */
-    discardDrafts: async (id: string, opts?: { actor?: string }) => {
+    discardDrafts: async (id: string, opts?: { actor?: string }): Promise<DiscardPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/discard-drafts`, {
             method: 'POST',
             body: JSON.stringify(opts ?? {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<DiscardPackageDraftsResponse>(res);
     },
 
-    /** ADR-0067: the package's commit timeline (newest-first). */
-    listCommits: async (id: string) => {
+    /**
+     * ADR-0067: the package's commit timeline (newest-first). The `commits`
+     * wrapper is the HANDLER's (the producer returns a bare array) — declared
+     * as such in `ListPackageCommitsResponseSchema`.
+     */
+    listCommits: async (id: string): Promise<ListPackageCommitsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/commits`);
-        return this.unwrapResponse<{ commits: any[] }>(res);
+        return this.unwrapResponse<ListPackageCommitsResponse>(res);
     },
 
     /** ADR-0067: revert ONE commit (the revert is itself a commit). */
-    revertCommit: async (id: string, commitId: string, opts?: { actor?: string }) => {
+    revertCommit: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RevertPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(id)}/commits/${encodeURIComponent(commitId)}/revert`,
             { method: 'POST', body: JSON.stringify(opts ?? {}) },
         );
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<RevertPackageCommitResponse>(res);
     },
 
     /** ADR-0067: roll back through all commits newer than `commitId`. */
-    rollback: async (id: string, commitId: string, opts?: { actor?: string }) => {
+    rollback: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RollbackToPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/rollback`, {
             method: 'POST',
             body: JSON.stringify({ commitId, ...(opts ?? {}) }),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<RollbackToPackageCommitResponse>(res);
     },
 
     /** Revert the package to its last published state. */
@@ -1708,20 +1749,24 @@ export class ObjectStackClient {
      * ADR-0070: assemble the package's portable manifest (offline export) —
      * the same shape `marketplace-install-local` consumes.
      */
-    export: async (id: string) => {
+    export: async (id: string): Promise<PackageExportManifest> => {
+        // [#12038 ruling 4A] Four fixed keys (`id`, `name`, `version`,
+        // `label?`) plus an open catch-all — the remaining keys are derived
+        // from the metadata type registry at runtime and deliberately not
+        // frozen into the contract.
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/export`);
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<PackageExportManifest>(res);
     },
 
     /** ADR-0070 D5: bulk-rebind package-less (orphaned) metadata into this base. */
-    adoptOrphans: async (id: string, opts?: { actor?: string }) => {
+    adoptOrphans: async (id: string, opts?: { actor?: string }): Promise<ReassignOrphanedMetadataResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/adopt-orphans`, {
             method: 'POST',
             body: JSON.stringify(opts ?? {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<ReassignOrphanedMetadataResponse>(res);
     },
 
     /**
@@ -1733,13 +1778,17 @@ export class ObjectStackClient {
         id: string,
         targetPackageId: string,
         opts?: { targetName?: string; targetNamespace?: string; actor?: string },
-    ) => {
+    ): Promise<DuplicatePackageResponse> => {
+        // ⚠ `success` on the returned payload is the OPERATION's verdict
+        // (false for a partial or empty duplicate) — the envelope-level
+        // `success` this method strips is transport-level and always true on
+        // a 200 (the objectui#6593 confusion, ended by this declaration).
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/duplicate`, {
             method: 'POST',
             body: JSON.stringify({ targetPackageId, ...(opts ?? {}) }),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<DuplicatePackageResponse>(res);
     },
   };
 

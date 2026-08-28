@@ -70,10 +70,25 @@ export interface SubscribeOptions {
 }
 
 /**
- * Fan-out messaging primitive. At-least-once delivery; handlers MUST be
- * idempotent. The memory driver delivers synchronously within a process;
- * remote drivers (redis pub/sub, postgres LISTEN/NOTIFY, nats) deliver
- * across nodes.
+ * Fan-out messaging primitive.
+ *
+ * **Delivery is whatever the configured driver declares, and no shipped
+ * driver exceeds at-most-once.** A missed message is EXPECTED: there is no
+ * persistence, no replay, and no upper bound on how long a node that was down
+ * or slow at publish time stays wrong. Handlers MUST therefore be idempotent
+ * **and** tolerate loss — designing only for duplicates is designing for the
+ * wrong hazard. Whatever bounds staleness for a consumer (a TTL, a reload,
+ * a durable outbox of its own) has to live outside this bus.
+ *
+ * The per-channel surface is `deliverySemantics` on the event's cluster
+ * metadata (`kernel/cluster.zod.ts`, `content/docs/kernel/cluster.mdx` §4.2)
+ * — it states what a channel *asks* for, not what it gets. `at-least-once`
+ * parses there and is the default for `cluster` / `tenant` scope, but no
+ * shipped driver provides it yet, so read the driver you actually run before
+ * treating a declaration as a guarantee.
+ *
+ * The memory driver delivers synchronously within a process; remote drivers
+ * (redis pub/sub, postgres LISTEN/NOTIFY, nats) deliver across nodes.
  */
 export interface IPubSub {
     publish<T = unknown>(

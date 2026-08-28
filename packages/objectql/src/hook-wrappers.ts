@@ -500,7 +500,71 @@ export function wrapDeclarativeHook(
  * read picks up mutations made by user code as `input.field = value`.
  * "Writes" means every mutation JS has, not assignment alone: `delete` and
  * `Object.defineProperty` route into `data` too (#12277).
+ *
+ * [#12601] ⚠️ `id` / `options` / `ast` / `data` are RESERVED on this flat
+ * face — EVERY instrument (`get`, `getOwnPropertyDescriptor`, `ownKeys`,
+ * `has`, spread, `Object.entries`) resolves one of these four names against
+ * the WRAPPER, never the payload, even when the payload itself declares a
+ * field sharing the name. That field does not vanish — it still round-trips
+ * through storage exactly as declared — it is simply not reachable through
+ * `ctx.input.<name>`; reach it at `ctx.input.data.<name>` instead. See the
+ * `get` and `getOwnPropertyDescriptor` traps below for the instrument-by-
+ * instrument account, and `content/docs/automation/hooks.mdx` (Hook Context)
+ * for the author-facing statement of the same rule.
+ *
+ * [#12603] ⛔ SYMBOL keys are REFUSED, not routed. `set` and `defineProperty`
+ * throw a `TypeError` for a symbol-keyed write instead of letting it reach
+ * `data` — see those two traps below for the refusal and
+ * `refuseSymbolPayloadKey` for the error text. See "Symbol keys" below the
+ * reserved-name callout in `content/docs/automation/hooks.mdx`.
  */
+
+/**
+ * [#12603] Maintainer ruling, 2026-08-27, Option C refusal arm: a record
+ * payload is a declarable, string-keyed field set — no metadata schema can
+ * declare a symbol field, so a symbol key on this flat `ctx.input` face is a
+ * JS-runtime artifact leaking toward storage, not a legal payload field.
+ *
+ * Thrown from the `set` and `defineProperty` traps, BEFORE either touches
+ * `data` — so a refused write never persists and never needs hiding from
+ * enumeration. That is the shape change from the pre-#12603 state: a
+ * symbol-keyed write used to succeed silently, reach `data`, and persist,
+ * while only `Object.getOwnPropertySymbols` / `Reflect.ownKeys` omitted it
+ * (pinned open in `hook-input-ownkeys-agreement.test.ts` under #12578). Hiding
+ * a key the engine nonetheless persisted is exactly the shape #12277, #12397
+ * and #12578 exist to abolish; refusing the write outright is the other way
+ * to close that gap, and the one this ruling chose (Option B — publish
+ * symbols via `Reflect.ownKeys` — was declined for minting an undeclarable
+ * key kind as contract).
+ *
+ * A plain `TypeError`, not a new subclass: this fires from INSIDE the hook
+ * BODY (an author wrote `input[sym] = …`), the same category as the native
+ * `TypeError` the `defineProperty` trap already lets through for a
+ * non-configurable descriptor the target does not carry (see that trap's own
+ * comment) — an author-code defect, not a declarative-layer diagnostic like
+ * `HookConditionError`. It is therefore subject to the ordinary handler error
+ * path: `onError: 'log'` can swallow it, `retryPolicy` can retry it, exactly
+ * as any other throw from the handler body (unlike `HookConditionError`,
+ * which is deliberately raised OUTSIDE that path — see the comment on that
+ * class for why the two are not the same shape).
+ *
+ * The message names the key kind (a symbol, not "a bad key"), the surface
+ * (hook input), and the fix (a string key, or keep the value off the payload)
+ * — written for the accidental case the ruling calls out: an author spreading
+ * an object that happens to carry a symbol-keyed cache entry onto `ctx.input`.
+ */
+function refuseSymbolPayloadKey(prop: symbol, trap: 'set' | 'defineProperty'): never {
+  const verb = trap === 'set' ? 'Cannot set' : 'Cannot define';
+  throw new TypeError(
+    `${verb} ${String(prop)} on hook input: a symbol key is not a valid record-payload field. ` +
+    'A record payload is a declarable, string-keyed field set — no metadata schema can declare ' +
+    'a symbol field, so a symbol key here would be a JS-runtime artifact leaking toward storage. ' +
+    'Use a string key, or keep the value off the payload entirely (e.g. a local variable) if it ' +
+    'is not meant to be stored. This often happens by accident, such as spreading an object that ' +
+    'carries a symbol-keyed cache entry onto ctx.input.'
+  );
+}
+
 function installFlatInput(ctx: HookContext): () => void {
   const raw: any = ctx.input ?? {};
   const looksWrapped =
@@ -516,6 +580,14 @@ function installFlatInput(ctx: HookContext): () => void {
   };
 
   const proxy = new Proxy(raw, {
+    // [#12601] Reserved-name precedence STARTS here: an unconditional,
+    // wrapper-only read for the four names, never falling through to `data`
+    // even when `data` owns a same-named field, and even when the WRAPPER
+    // itself does not (an insert-shaped envelope with no `id` reads
+    // `undefined`, not the payload's `id`). Every other trap that touches
+    // these four names (`getOwnPropertyDescriptor`, `has`) is written to
+    // agree with this one — this is the trap the others were made to match,
+    // not a peer that could equally have been changed instead.
     get(target, prop, receiver) {
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return Reflect.get(target, prop, receiver);
@@ -526,7 +598,14 @@ function installFlatInput(ctx: HookContext): () => void {
       }
       return Reflect.get(target, prop, receiver);
     },
+    // [#12603] Symbol keys are REFUSED here, before anything else runs — a
+    // symbol can never equal one of the four reserved (string) names, so the
+    // check can sit first without disturbing that branch below. See
+    // `refuseSymbolPayloadKey` for why this throws instead of routing.
     set(target, prop, value) {
+      if (typeof prop === 'symbol') {
+        refuseSymbolPayloadKey(prop, 'set');
+      }
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         (target as any)[prop] = value;
         return true;
@@ -581,12 +660,23 @@ function installFlatInput(ctx: HookContext): () => void {
     // A throw is a diagnosis; the silence was not. Omitting `configurable`
     // entirely (the common spelling, and every spelling `Object.assign` and
     // spread produce) is unaffected.
+    //
+    // [#12603] Symbol keys are refused here too, identically to `set` and for
+    // the same reason — see `refuseSymbolPayloadKey`.
     defineProperty(target, prop, desc) {
+      if (typeof prop === 'symbol') {
+        refuseSymbolPayloadKey(prop, 'defineProperty');
+      }
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return Reflect.defineProperty(target, prop, desc);
       }
       return Reflect.defineProperty(ensureData(), prop, desc);
     },
+    // [#12603] `deleteProperty` is deliberately NOT guarded: since `set` and
+    // `defineProperty` now refuse every symbol-keyed write before it reaches
+    // `data`, a symbol key can never be there to delete. `delete input[sym]`
+    // falls through exactly as it always has for any key `data` does not
+    // own — a harmless no-op reporting success, not a persistence lie.
     has(target, prop) {
       if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
         return prop in target;
@@ -640,15 +730,41 @@ function installFlatInput(ctx: HookContext): () => void {
     // wrapper — NOT by subtracting those four names, which would hide a
     // genuine payload field that happens to be called `id`.
     //
-    // SYMBOL KEYS are deliberately still absent, and this is NOT a finding
-    // that they do not belong on a payload: `Reflect.ownKeys(data)` here would
-    // additionally publish them, and whether the record payload may carry a
-    // symbol key at all is a question about the PAYLOAD contract (they already
-    // reach `data` through the `set` trap and already persist — measured), not
-    // about this trap. It is open, reported on #12578, and the day it is
-    // answered "yes" this line becomes `Reflect.ownKeys`. Until then the
-    // symbol half of the disagreement is pinned AS open in the sibling test,
-    // so an answer changes a recorded fact rather than an unnoticed one.
+    // [#12601] That deliberate non-subtraction is why a payload field sharing
+    // one of the four names is still LISTED here when it exists — this trap
+    // is unchanged by #12601 and stays that way. What #12601 fixed sits one
+    // trap down: the descriptor trap used to answer such a listed key's VALUE
+    // from `data` (the payload), while `get` and spread already answered it
+    // from the wrapper (the envelope) — two instruments, one listed key, two
+    // objects. The descriptor trap now checks the reserved names first too,
+    // so a key this trap lists under a reserved name always resolves to the
+    // SAME value everywhere it is read. See the descriptor trap's own comment
+    // for the full account.
+    //
+    // [#12603] SYMBOL KEYS are absent here for a settled reason now, not an
+    // open one: the maintainer ruling (2026-08-27, Option C refusal arm)
+    // answered the payload-contract question this trap's comment used to
+    // leave open ("may a record payload carry a symbol key at all?") with
+    // NO — a record payload is a declarable, string-keyed field set, and no
+    // metadata schema can declare a symbol field. `set` and `defineProperty`
+    // now REFUSE a symbol-keyed write before it ever reaches `data` (see
+    // `refuseSymbolPayloadKey`), so a symbol can no longer BE an own key of
+    // `data` for this trap to omit or report.
+    //
+    // This trap itself is deliberately UNCHANGED by that ruling —
+    // `Object.getOwnPropertyNames(target.data)` stays exactly what #12578
+    // landed. `Reflect.ownKeys(data)` (Option B) was the alternative the
+    // ruling declined: publishing symbols through enumeration would mint an
+    // undeclarable key kind as contract, which is the opposite of what was
+    // ruled. With the write refused at the boundary, the two spellings would
+    // agree anyway — `data` can never carry a symbol key for them to differ
+    // on — so there is no remaining reason to touch this line, and #12578's
+    // own ruling (this card must not re-litigate `ownKeys`) forbids it.
+    //
+    // What used to be pinned OPEN in `hook-input-ownkeys-agreement.test.ts`
+    // (the instrument disagreement, deliberately left standing) is now
+    // pinned as a REFUSAL in the same file: the write throws, so there is no
+    // persisted symbol key left for the three instruments to disagree about.
     ownKeys(target) {
       return target.data && typeof target.data === 'object'
         ? Object.getOwnPropertyNames(target.data)
@@ -692,17 +808,58 @@ function installFlatInput(ctx: HookContext): () => void {
     // (it persists a payload by evaluating it). That is a contract question
     // about the payload, and neither routing nor persistence is touched here —
     // the trap reports what is there, under every answer to it.
+    //
+    // [#12601] RESERVED-NAME PRECEDENCE mirrors `get`: checked FIRST, not last.
+    // `id`/`options`/`ast`/`data` are PLATFORM names on the flat face — a
+    // payload field sharing one of them is still a legal record field, but it
+    // is not reachable through the flat face at all, `input.data.<name>` is
+    // the only route to it. Before this fix the order was reversed (`data`
+    // checked first, the reserved-name branch only reached when `data` did
+    // not own the key), so a payload that genuinely declared a field called
+    // `id` made this trap report the PAYLOAD's descriptor while `get` — which
+    // has always checked the reserved names unconditionally, first — reported
+    // the WRAPPER's value for the identical property access. Two instruments,
+    // one key, two different objects:
+    //
+    //   const raw = { data: { id: 'PAYLOAD-ID', subject }, options: {}, id: 'WRAPPER-ID' };
+    //   input.id                                            -> 'WRAPPER-ID'  (get)
+    //   Object.getOwnPropertyDescriptor(input, 'id').value   -> 'PAYLOAD-ID'  (descriptor, PRE-FIX)
+    //
+    // Reordering costs nothing `ownKeys` does not already pay for: `ownKeys`
+    // (#12578) is untouched and keeps listing the payload's own key set
+    // unconditionally, INCLUDING a reserved name the payload happens to
+    // share — so `enumerable` here still depends on whether `data` owns the
+    // name too. That is deliberate, not an oversight: it is what keeps
+    // `Object.keys`/spread/`Object.entries` carrying the ENVELOPE's value
+    // under the reserved name exactly as before this fix (get already won
+    // there, since spread reads a value through `get`), rather than silently
+    // dropping a key `ownKeys` just offered. When `data` does NOT own the
+    // name, the reserved-name branch still hides it from enumeration exactly
+    // as it always did (`enumerable: false`) — unaffected by this fix.
+    //
+    // A reserved name absent from the WRAPPER (e.g. `id` on an insert-shaped
+    // envelope) reports NO descriptor at all here, even when `data` owns a
+    // same-named field and `ownKeys` therefore still lists it — matching
+    // `get`'s unconditional wrapper-only read, which never falls through to
+    // `data` for these four names. A proxy may legally answer `undefined` for
+    // a key its OWN `ownKeys` trap listed, as long as the target (extensible,
+    // always, here) does not itself carry that key: `Object.keys`/spread
+    // silently skip such a key rather than throwing. Pinned, all of it, in
+    // `hook-input-envelope-precedence.test.ts` (and the sandbox-snapshot
+    // consequence in `packages/runtime/src/sandbox/hook-input-envelope-precedence.integration.test.ts`).
     getOwnPropertyDescriptor(target, prop) {
+      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
+        const desc = Object.getOwnPropertyDescriptor(target, prop);
+        if (!desc) return undefined;
+        const data = target.data;
+        const payloadOwnsName =
+          !!data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, prop);
+        return { ...desc, configurable: true, enumerable: payloadOwnsName };
+      }
       const data = target.data;
       if (data && typeof data === 'object') {
         const own = Object.getOwnPropertyDescriptor(data, prop);
         if (own) return { ...own, configurable: true };
-      }
-      // Wrapper keys: still descriptors so `prop in input` works, but
-      // marked non-enumerable so they don't appear in Object.keys().
-      if (prop === 'id' || prop === 'options' || prop === 'ast' || prop === 'data') {
-        const desc = Object.getOwnPropertyDescriptor(target, prop);
-        return desc ? { ...desc, enumerable: false } : undefined;
       }
       return Object.getOwnPropertyDescriptor(target, prop);
     },

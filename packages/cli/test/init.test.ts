@@ -333,13 +333,15 @@ describe('benign peer-skew declarations (#10326)', () => {
     expect(settings).toMatch(/^ {4}'better-auth>better-sqlite3': '13'$/m);
   });
 
-  it('accepts the single better-call copy @better-auth/scim resolves to', () => {
-    // scim is held at 1.7.0-rc.1 on purpose; the rc peers an EXACT
-    // `better-call@1.3.7` while better-auth depends on 1.4.0. A better-auth
-    // plugin must share the HOST's better-call instance, so one 1.4.0 copy is
-    // the correct tree. Retires with the scim rc pin.
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
-    expect(settings).toMatch(/^ {4}'@better-auth\/scim>better-call': '1\.4\.0'$/m);
+  it('keeps the retired @better-auth/scim>better-call suppression OUT (#3653)', () => {
+    // FLIPPED from a presence ratchet when the scim pin moved off the rc.
+    // Stable @better-auth/scim 1.7.1 peers better-call@1.4.0 exactly — the
+    // copy every install already resolves — so the skew the entry declared
+    // away no longer exists, and a suppression with no skew behind it would
+    // hide the NEXT real better-call peer break from a newcomer's first
+    // screen. Re-adding it needs a new measured skew, not a revert.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBeUndefined();
+    expect(settings).not.toMatch(/'@better-auth\/scim>better-call'/);
   });
 
   it.each([
@@ -384,14 +386,16 @@ describe('benign peer-skew declarations (#10326)', () => {
     ]);
   });
 
-  it('keeps the @better-auth/utils widening separate from the retiring better-call pin', () => {
-    // @better-auth/scim appears in TWO entries for two unrelated reasons, and
-    // they retire on different days: the better-call one goes when scim leaves
-    // the rc (stable 1.7.1 peers better-call 1.4.0), while the utils one
-    // outlives it (stable 1.7.1 still peers @better-auth/utils 0.4.2). Deleting
-    // both together — the obvious move when the rc pin lifts — would silently
-    // put the utils report back on a newcomer's first screen.
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
+  it('kept the @better-auth/utils widening when the better-call pin retired (#3653)', () => {
+    // @better-auth/scim appeared in TWO entries for two unrelated reasons, and
+    // they retire on different days — which HAPPENED: the better-call one went
+    // with the rc pin (stable 1.7.1 peers better-call 1.4.0), while the utils
+    // one outlives it (stable 1.7.1 still peers @better-auth/utils 0.4.2;
+    // its own retirement key is the pnpm 10.31 floor). Deleting both together
+    // — the obvious move when the rc pin lifted — would have silently put the
+    // utils report back on a newcomer's first screen; this pin is what stops
+    // that regression from ever landing quietly.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBeUndefined();
     expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>@better-auth/utils']).toBe('0.5.0');
   });
 

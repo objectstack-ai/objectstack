@@ -290,8 +290,8 @@ defineStack({
 ```
 
 A step that calls a declared writer is counted as an effect the platform cannot
-measure (`unmeasured`), never as zero — so the broken-sweep query
-`selected > 0 AND acted = 0 AND unmeasured = 0` stops firing on that flow, and
+measure (`unmeasured`), never as zero — so the broken-sweep filter
+`selected > 0 AND acted = 0 AND unmeasured = 0` stops matching that flow, and
 keeps working on every other flow that calls a function. Declaring changes what
 is *reported*, not what is *allowed*: an undeclared writer is still counted as
 having written nothing, and no runtime check can catch it — a function is
@@ -785,17 +785,18 @@ child dispatched an uncountable effect knows its own `acted` is incomplete.
 
 The same counts land on `sys_automation_run` as **queryable columns**
 (`selected_count`, `acted_count`, `skipped_count`, `unmeasured_count`, plus a
-`summary_json` breakdown), so a broken sweep is something you can alert on
+`summary_json` breakdown), so a broken sweep is something you can query for
 rather than notice:
 
 ```typescript
-// Runs that selected work and did none of it, newest first.
-const suspect = await engine.find('sys_automation_run', {
+// CANDIDATE runs: selected work, did none of it, and measured everything they
+// did do. The first filter of the detector — not the detector; see below.
+const candidates = await engine.find('sys_automation_run', {
   where: {
     status: 'completed',
     selected_count: { $gt: 0 },
     acted_count: 0,
-    // Without this clause the alert fires on every healthy connector-driven
+    // Without this clause the filter matches every healthy connector-driven
     // flow: those runs report acted 0 because the count is INCOMPLETE, not zero.
     unmeasured_count: 0,
     started_at: { $gte: since },
@@ -804,13 +805,74 @@ const suspect = await engine.find('sys_automation_run', {
 });
 ```
 
-`selected > 0 && acted == 0 && unmeasured == 0` over several consecutive runs is
-a near-perfect broken-sweep detector — the case that is otherwise invisible,
-because nobody is watching automation until it has already been dead for a
-month. A single such run is not proof of anything: a sweep whose work is all
-already done reports the same thing legitimately, which is why the signal is
-*consecutive* runs, and why the platform reports the counts rather than raising
-the alarm itself.
+#### The filter is not the detector
+
+<Callout type="warn">
+Do not wire an alert straight to that query. It matches a **healthy idempotent
+sweep** exactly as it matches a dead gate, and it does so on every run — so the
+alert gets muted, and a muted broken-sweep detector is the same silence these
+counters exist to end, with the added cost that it now *looks* monitored.
+</Callout>
+
+Any flow that re-selects the same records each run and gates each one on "was
+this already handled" satisfies the filter in its healthy steady state, for as
+long as the prior work stands — and that is the ordinary way to write an
+idempotent sweep, not an exotic shape. Measured on one graph pair driven through
+the engine (pinned in `run-summary.test.ts`), where the two runs differ only in
+where the gate sits relative to the lookup:
+
+| run | totals | the filter | the lookup behind the gate | gate skips |
+| :--- | :--- | :--- | :--- | :--- |
+| **healthy steady state** — every stalled deal already nudged | selected 6, acted 0 | **matches** | `runs: 3`, `selected: 3` | 3 |
+| **dead gate** — gate in front of the lookup, never opens | selected 3, acted 0 | **matches** | `runs: 0` | 3 |
+| **wrong gate** — lookup runs, finds nothing, gate closes anyway | selected 3, acted 0 | **matches** | `runs: 3`, `selected: 0` | 3 |
+| genuinely idle — nothing stalled | selected 0, acted 0 | quiet | — | 0 |
+
+Requiring the match **over N consecutive runs does not rescue it**: a healthy
+idempotent sweep trips it on *every* run while the outstanding work stands, so
+the steady state is persistent rather than transient. Consecutiveness filters
+flapping, which is a different failure.
+
+#### What separates them: the per-node fold
+
+`summary_json` answers the question the totals cannot — **were the skips
+accounted for?** A gate that closes is not a defect; a gate that closes on
+nothing is.
+
+- **Healthy** — the run reached the state that justifies each skip. The lookup
+  the gate depends on ran (`runs` covering the gate's `skipped`) and *found*
+  something (`selected > 0`). Every skip has a find behind it.
+- **Broken** — the same gate closed just as often with nothing behind it: the
+  lookup never ran (`runs: 0` — the gate sits upstream of it) or ran and found
+  nothing (`selected: 0`). Nothing the run measured justifies a single skip.
+
+```typescript
+// Convict a candidate: name the node whose read your gate depends on.
+const summary = JSON.parse(run.summary_json as string) as FlowRunSummary;
+const skips = summary.gates.reduce((n, g) => n + g.skipped, 0);
+const lookup = summary.nodes.find((n) => n.nodeId === 'find_existing_task');
+const broken = skips > 0
+  && (!lookup || lookup.runs === 0 || (lookup.selected ?? 0) < skips);
+```
+
+`gates[]` names *which* edge closed and how often, so the alert can point at a
+node instead of at a flow. `detailOmitted` marks the one case this read cannot
+work with: persistence dropped `nodes` / `gates` to keep the row bounded, and
+only the totals survive.
+
+How you author the sweep decides how good its signal can be:
+
+1. **Exclude the already-handled records in the query** wherever the filter can
+   express it. The healthy steady state then reports `selected: 0` and never
+   matches at all — the quietest detector available.
+2. Where the "already handled?" answer lives in another object (an open task, a
+   sent notification), **make it a real lookup node**. The run then records the
+   find that accounts for the skip, which is the evidence the rule above reads.
+
+A gate deciding on a field of a record the run already read leaves no second
+read to account for its skips; there the summary cannot separate a correct
+decision from a stuck one, because the difference is in the data rather than in
+the counts.
 
 Rows written before summaries existed carry `null` counts, not `0` — "not
 measured" must not read as "measured zero". The log line defaults to `info`;

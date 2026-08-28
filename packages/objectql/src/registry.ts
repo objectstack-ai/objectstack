@@ -72,7 +72,12 @@ export const DEFAULT_EXTENDER_PRIORITY = 200;
  *   whichever layer is the base.
  */
 export interface ObjectContributor {
-  packageId: string;
+  // Optional (#12623): `registerObject`'s own `packageId` parameter is now
+  // optional, and this is the exact value it was called with — a bare
+  // `registerObject(schema)` call stores `undefined` here, matching the
+  // runtime behavior every call site without a tsc test-layer gate already
+  // exercised (JS does not enforce TS arity).
+  packageId: string | undefined;
   namespace: string;
   ownership: ObjectOwnership;
   priority: number;
@@ -126,11 +131,49 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
  * Deep merge two ServiceObject definitions.
- * Fields are merged additively. Other props: later value wins.
  *
- * [#8460] …except that "later value wins" is now conditional for the three
- * SCALARS. `tenantAuthored` names the scalars the fold's BASE has authored away
- * from the packaged owner's value; an extender yields on those. See
+ * The merge set is CLOSED and enumerable — this is NOT "every prop, later
+ * value wins":
+ *   - `fields`, `validations`, `indexes` are merged ADDITIVELY.
+ *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
+ *     `description`) are overridden last-writer-wins, subject to the
+ *     `tenantAuthored` yield rule below.
+ *
+ * **Every other top-level prop on `extension` is silently discarded.**
+ * `merged` starts as `{ ...base }` and nothing outside the list above is ever
+ * copied onto it — a caller that hands this function an extension body
+ * carrying an undeclared key, e.g. `tenancy: { enabled: false }`, gets a
+ * valid-but-inert no-op HERE: no error, no warning from this function, the
+ * base's existing value simply wins as if the extension had never named the
+ * key (issue #12680).
+ *
+ * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
+ * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
+ * exactly `extend` / `fields` / `label` / `pluralLabel` / `description` /
+ * `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * naming `tenancy`, `permissions`, or any other key outside that list fails
+ * LOUDLY at authoring time with a prescription (#4001; the same rule is
+ * documented at `content/docs/data-modeling/object-extensions.mdx`). This
+ * function's discard is reachable only by a caller that bypasses that
+ * schema — a direct, programmatic `registry.registerObject(def, pkg,
+ * undefined, 'extend', …)` call, which is how this package's own pin
+ * (`registry-object-extension-nonenumerated-prop-discard.test.ts`) exercises
+ * the rule. Extender-writable `tenancy`/`permissions` would in any case be a
+ * separate, much bigger decision that has NOT been made.
+ *
+ * Unlike `tenancy`/`permissions`, this one is not blocked by schema:
+ * `_provenance` is a real top-level prop an `extend` contributor carries
+ * TODAY. Copying it through (as "later value
+ * wins" would) lets a third-party extender flip a tenant-authored object's
+ * `_provenance` to the extending package's — reaching, by a different route,
+ * the exact outcome ADR-0029 D9.3's priority-reranking guard exists to
+ * prevent. `registry-object-overlay-layer.test.ts` ("an extender declaring
+ * priority 140 does not become the base layer") fails if this merge set is
+ * widened to copy it through.
+ *
+ * [#8460] …the SCALAR override above is conditional. `tenantAuthored` names
+ * the scalars the fold's BASE has authored away from the packaged owner's
+ * value; an extender yields on those. See
  * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
  * over the base rather than re-derived from the running `merged`.
  */
@@ -1529,7 +1572,12 @@ export class SchemaRegistry {
    * @param schema - The object definition
    * @param packageId - The owning package ID, or — for an `overlay` — the
    *   `sys_metadata` row's own binding (provenance ON the layer, never an
-   *   ownership claim; ADR-0029 D9.9)
+   *   ownership claim; ADR-0029 D9.9). Optional (#12623) — matches the
+   *   sibling {@link registerItem}: a bare `registerObject(schema)` call
+   *   passes `packageId: undefined` through to `applyProtection`, which
+   *   leaves the item clean (no `_packageId`, no `_provenance`) rather than
+   *   defaulting. Do not give this parameter a default value — that would
+   *   silently stamp package provenance onto every bare-call fixture.
    * @param namespace - The package namespace (for FQN computation)
    * @param ownership - 'own' (single owner) | 'overlay' (tenant layer that
    *   REPLACES the base at resolution; ADR-0029 D9) | 'extend' (additive merge)
@@ -1539,7 +1587,7 @@ export class SchemaRegistry {
    */
   registerObject(
     schema: ServiceObject,
-    packageId: string,
+    packageId?: string,
     namespace?: string,
     ownership: ObjectOwnership = 'own',
     priority: number = ownership === 'own'
@@ -1602,8 +1650,12 @@ export class SchemaRegistry {
     const shortName = schema.name;
     const fqn = computeFQN(namespace, shortName);
 
-    // Ensure namespace is registered
-    if (namespace) {
+    // Ensure namespace is registered. [#12623] `packageId` is now optional
+    // on this method, so a namespace passed without one has no owner to
+    // record — skip rather than registering `undefined` as an owner (which
+    // would also mean widening `registerNamespace`'s own required-string
+    // contract, out of scope here).
+    if (namespace && packageId) {
       this.registerNamespace(namespace, packageId);
     }
 
@@ -2996,7 +3048,7 @@ export class SchemaRegistry {
       if (shadowed) {
         console.warn(
           `[Registry] Collision: ${type}/${baseName} is shipped by package ` +
-          `"${shadowed._packageId}" and a runtime-authored row with the same name has ` +
+          `'${shadowed._packageId}' and a runtime-authored row with the same name has ` +
           `just been registered from sys_metadata. The runtime row now shadows the ` +
           `package value (ADR-0005 overlay precedence): every read of ${type}/${baseName} ` +
           `serves the stored row, not the packaged definition. That is the sanctioned ` +

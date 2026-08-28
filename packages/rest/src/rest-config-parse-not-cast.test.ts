@@ -30,11 +30,31 @@
  *
  * ⚠️ §C is also where the first round's census miss is pinned. That census was
  * scoped to this package; the risk surface is EVERY package that constructs a
- * REST server, and `packages/cli`'s `os serve` ships
+ * REST server, and `packages/cli`'s `os serve` shipped
  * `projectResolution: 'none'` — a value the declared enum does not contain and
- * `@objectstack/runtime` declares as a literal type. Five `packages/cli` e2e
+ * `@objectstack/runtime` declared as a literal type. Five `packages/cli` e2e
  * boots went red in CI. The lesson, written where the next author will hit it:
  * the search radius belongs where the CONSUMERS live, not where the change does.
+ *
+ * [#12450] That miss is what bought `projectResolution` an `.omit()` from the
+ * declared parse — and this file then carried a GREEN §C case defending the
+ * exemption: "KEEPS `projectResolution: \"none\"` — the value this platform
+ * actually ships". #11999 migrated the producer off that value (PR #12444) and
+ * the case did not notice: it called `construct()` with a hand-written literal,
+ * so its premise could die while it stayed green. ⛔ THE LESSON, and the reason
+ * the retired value is now a REFUSAL in §A rather than a reworded guard here:
+ * **a test that cannot fail when its premise dies is not protected by the
+ * suite — it is hidden by it. The passing status is what stops anyone looking.**
+ *
+ * ⚠️ The other half of that premise is NOT measurable from this package, and
+ * saying so here is part of the fix. "No boot path emits the retired value any
+ * more" is a claim about the PRODUCER, and the producer (`@objectstack/runtime`)
+ * depends on this package — so the coupling cannot be imported in this
+ * direction without a cycle, and it lives at the producer instead:
+ * `packages/runtime/src/standalone-stack.test.ts` drives the REAL emitted `api`
+ * block through a REAL `RestServer` construction. THAT is the case that goes red
+ * if the platform ever emits the retired value again; the two below only pin
+ * what this seam does with a value once it arrives.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -92,6 +112,31 @@ describe('[#11637] §A RestServer construction runs RestApiConfigSchema', () => 
 
     it('refuses a declared key written with the wrong type', () => {
         expect(() => construct({ enableCrud: 'yes' as never })).toThrow(/api\.enableCrud/);
+    });
+
+    it('[#12450] refuses the retired `projectResolution: "none"` — the parse finally reaches this key', () => {
+        // `.omit()`ed from the declared parse until #12450, so this seam
+        // ACCEPTED a value `RestApiConfigSchema` has never declared. Measured on
+        // the pre-change tree: `construct({ projectResolution: 'none' })`
+        // returned a server and `getApiBasePath()` answered `/api/v1`.
+        // Declared-but-never-executed is the defect this whole file is named
+        // after (#11637); #11999 removed the reason for the exemption by
+        // migrating `@objectstack/runtime` onto the declared `'auto'`.
+        let message = '';
+        try {
+            construct({ projectResolution: 'none' as never });
+        } catch (err: any) {
+            message = String(err?.message ?? err);
+        }
+        // POSITIVE CONTROL for the negative assertion below, and not a substring
+        // of it: an empty `message` (nothing thrown) would satisfy any
+        // `not.toContain` vacuously, so the refusal has to be proven present
+        // before its shape can be measured.
+        expect(message, 'the retired value must be refused, and the refusal must name the key').toContain('api.projectResolution');
+        expect(
+            message,
+            'a projectResolution refusal must not diagnose `version`, a key this config never wrote',
+        ).not.toContain('/api//');
     });
 
     it('appends the version rationale ONLY when `version` is what failed', () => {
@@ -205,20 +250,19 @@ describe('[#11637] §C regression guards — the narrowing is exactly the declar
         expect((rest as any).config.api.enableSearch).toBe(false);
     });
 
-    it('KEEPS `projectResolution: "none"` — the value this platform actually ships', () => {
-        // ⛔ The case CI caught and this file did not. `RestApiConfigSchema`
-        // declares `z.enum(['required', 'optional', 'auto'])`, but the value
-        // `os serve` forwards is `'none'`: `@objectstack/runtime`'s
-        // `StandaloneStackResult.api` DECLARES the literal type
-        // `{ enableProjectScoping: false; projectResolution: 'none' }`, and
-        // `serve.ts` passes it through (`?? 'auto'` does not fire — `'none'` is
-        // not nullish). Parsing this key would turn every `os serve` boot into
-        // a crash; five packages/cli e2e boots did exactly that before the key
-        // was `.omit()`ed. Which spelling is right is a contract question about
-        // project-scoping semantics, filed as #11999 — NOT this seam's to
-        // settle by refusing the value the platform ships.
-        expect(() => construct({ enableProjectScoping: false, projectResolution: 'none' })).not.toThrow();
-        expect(construct({ projectResolution: 'none' as never }).getApiBasePath()).toBe('/api/v1');
+    it('[#12450] accepts every `projectResolution` the declared enum contains — the narrowing is the retired value ONLY', () => {
+        // The BOUND on the change, and the half that makes "exactly one value
+        // starts being rejected" a measurement rather than a claim. Census over
+        // the tree at the time of #12450: four spellings appear anywhere as a
+        // value for this key — `'required'`, `'optional'`, `'auto'` and the
+        // retired `'none'` — so these three ARE the population that must keep
+        // constructing. Read back off the normalized config rather than off a
+        // mount path: a strategy that parsed and was then dropped in
+        // normalization would still answer `/api/v1`.
+        for (const projectResolution of ['required', 'optional', 'auto'] as const) {
+            const rest = construct({ enableProjectScoping: true, projectResolution });
+            expect((rest as any).config.api.projectResolution, projectResolution).toBe(projectResolution);
+        }
     });
 
     it('KEEPS the retired `api.requireAuth` warn-and-ignore posture (#3963)', () => {

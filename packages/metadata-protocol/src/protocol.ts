@@ -29,6 +29,13 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import {
+    metaOverlayCacheTtlMs,
+    readMetaOverlayCache,
+    readWriteEpoch,
+    writeMetaOverlayCache,
+    type MetaOverlayCacheKey,
+} from './meta-overlay-cache.js';
+import {
     ConflictError,
     assertProtocolCompat,
     applyAuditFieldGovernance,
@@ -6076,30 +6083,83 @@ export class ObjectStackProtocolImplementation implements
                 }
                 return rs ?? [];
             };
-            const envWideRecords = await queryByOrg(null);
-            const orgRecords = orgId ? await queryByOrg(orgId) : [];
-            // org-specific rows override env-wide rows on name collision.
-            // ADR-0048 (#1828) — key by (package, name), not bare name, so a
-            // package A row and a package B row of the same name do not
-            // collapse; org-over-env precedence still holds within each slot.
+            // ── Leg D of #11633 (#11967): the cross-request overlay cache ──
             //
-            // [#7774] …and for a bundled type the slot is `(package, name,
-            // locale)`. Within ONE org this changes nothing — the store's own
-            // unique index is `(type, name, organization_id, package_id)`, so
-            // an org cannot hold two rows that differ only by body locale.
-            // Across the two tiers it can: an env-wide row and this org's row
-            // may customize DIFFERENT members of one bundle, and keying them
-            // together made the org's zh-CN row silently displace the
-            // env-wide en-US one. Precedence is unchanged where it was ever
-            // meaningful — an org row still overrides the env-wide row of the
-            // same member — and an undiscriminated type keeps a
-            // byte-identical key.
-            const mergedMap = new Map<string, any>();
-            const rowKey = (r: any): string =>
-                metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
-            for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
-            for (const r of orgRecords) mergedMap.set(rowKey(r), r);
-            const records = Array.from(mergedMap.values());
+            // ⭐ The cache sits HERE, and its position IS the resolution of the
+            // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
+            // the ROW SET — the value the two `queryByOrg` calls produce —
+            // never the merged answer below it. Everything downstream of this
+            // point still runs on every call, hit or miss: the overlay parse,
+            // the package-aware merge, `hydrateOverlayIntoRegistry`, the
+            // MetadataService merge, the disabled-package filter, the nav
+            // contributions, the decorations. A hit changes where the rows came
+            // from and nothing about what is done with them, so the read-side
+            // registry hydration cannot be skipped by one.
+            //
+            // ⛔ Do NOT move this below the merge. That is precisely the naive
+            // shape the trap describes, and it would additionally serve three
+            // mutable sources — the SchemaRegistry, the MetadataService and the
+            // artifact table — whose changes nothing in this key can observe.
+            // See `meta-overlay-cache.ts` for the measured four-source table.
+            //
+            // ⭐ The epoch reading is taken BEFORE the read, and it is this
+            // pre-read value that is stored with the rows. A write landing
+            // WHILE this read is in flight therefore moves the epoch past what
+            // the entry records, so the entry is already dead when it is
+            // written — the safe direction. Reading it afterwards would stamp
+            // pre-write rows with a post-write epoch and make that staleness
+            // permanent: the clear-then-repopulate-from-a-stale-read failure
+            // #11633 §7 pin 2 names.
+            const overlayCacheKey: MetaOverlayCacheKey = {
+                type: request.type,
+                packageId,
+                organizationId: orgId,
+            };
+            const overlayCacheEpoch = readWriteEpoch(this.engine);
+            const overlayCacheTtlMs = metaOverlayCacheTtlMs();
+            const overlayCacheNow = Date.now();
+            const cachedRecords = readMetaOverlayCache(
+                this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
+            );
+
+            let records: any[];
+            if (cachedRecords !== undefined) {
+                records = cachedRecords as any[];
+            } else {
+                const envWideRecords = await queryByOrg(null);
+                const orgRecords = orgId ? await queryByOrg(orgId) : [];
+                // org-specific rows override env-wide rows on name collision.
+                // ADR-0048 (#1828) — key by (package, name), not bare name, so a
+                // package A row and a package B row of the same name do not
+                // collapse; org-over-env precedence still holds within each slot.
+                //
+                // [#7774] …and for a bundled type the slot is `(package, name,
+                // locale)`. Within ONE org this changes nothing — the store's own
+                // unique index is `(type, name, organization_id, package_id)`, so
+                // an org cannot hold two rows that differ only by body locale.
+                // Across the two tiers it can: an env-wide row and this org's row
+                // may customize DIFFERENT members of one bundle, and keying them
+                // together made the org's zh-CN row silently displace the
+                // env-wide en-US one. Precedence is unchanged where it was ever
+                // meaningful — an org row still overrides the env-wide row of the
+                // same member — and an undiscriminated type keeps a
+                // byte-identical key.
+                const mergedMap = new Map<string, any>();
+                const rowKey = (r: any): string =>
+                    metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+                for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
+                for (const r of orgRecords) mergedMap.set(rowKey(r), r);
+                records = Array.from(mergedMap.values());
+                // ⭐ An EMPTY row set is cached too, and that is the main point
+                // rather than an edge case: the empty result is what triggers the
+                // alt-type retry above, so "no overlay rows for this type" is the
+                // answer whose caching removes BOTH reads. #11633 §1 measured that
+                // an app whose objects are all code-authored pays the doubled read
+                // on every request; this is the line that stops it.
+                writeMetaOverlayCache(
+                    this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
+                );
+            }
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
                 // Parse each overlay body once — replaying the stored-row

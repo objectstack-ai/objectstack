@@ -2180,6 +2180,39 @@ interface TransactionScope {
   readonly reportedOutOfScope: Set<string>;
 }
 
+/**
+ * A datasource *definition* as the engine keeps it (ADR-0015) — the declarative
+ * facts a datasource states about itself, not a live connection (that is
+ * {@link ObjectQL.registerDriver}).
+ *
+ * Named rather than restated inline because three sites share it: the private
+ * index, {@link ObjectQL.registerDatasourceDef} which writes it, and
+ * {@link ObjectQL.listDatasourceDefs} which reads it back. Three copies of one
+ * shape is a second de-facto contract that drifts silently, and the drift this
+ * one produces is a credentials handle missing from a `sys_secret` sweep.
+ *
+ * The keys are a deliberate SUBSET of the spec's authored datasource surface
+ * (`ExternalDatasourceSettingsSchema` in `@objectstack/spec`) — the engine
+ * carries only what it has a use for. ⛔ Not a mirror of the spec block and not
+ * a place to grow one: `validation` and `queryTimeoutMs` are absent because
+ * nothing in this engine reads them.
+ */
+export interface DatasourceDef {
+  name: string;
+  schemaMode?: string;
+  external?: {
+    /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */
+    allowWrites?: boolean;
+    /**
+     * Reference into the secrets store, never an inline credential. Valid in
+     * EVERY `schemaMode` — it is the one `external` key a managed datasource
+     * may carry (#8153) — so a reader sweeping for handles must not filter by
+     * schema mode.
+     */
+    credentialsRef?: string;
+  };
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -2248,9 +2281,11 @@ export class ObjectQL implements IObjectQLEngine {
 
   // Datasource definitions by name (ADR-0015): carries schemaMode +
   // external.allowWrites so the write gate (Gate 3) can enforce federation
-  // ownership. Populated from manifests in registerApp and via
-  // registerDatasourceDef. Absent entry ⇒ treated as managed (default DB).
-  private datasourceDefs = new Map<string, { schemaMode?: string; external?: { allowWrites?: boolean } }>();
+  // ownership, and external.credentialsRef so a sys_secret reference sweep can
+  // see the handle a code-declared datasource holds. Populated from manifests
+  // in registerApp and via registerDatasourceDef. Absent entry ⇒ treated as
+  // managed (default DB).
+  private datasourceDefs = new Map<string, Omit<DatasourceDef, 'name'>>();
 
   // Declared-but-unusable datasources, keyed by name (framework#3828). Written
   // by the datasource connection layer via markDatasourceUnavailable; read only
@@ -5134,13 +5169,45 @@ export class ObjectQL implements IObjectQLEngine {
    * Register a Datasource *definition* (ADR-0015).
    *
    * Distinct from {@link registerDriver}, which registers a live connection.
-   * This captures the declarative `schemaMode` + `external.allowWrites` so the
-   * write gate ({@link assertWriteAllowed}) can enforce external-datasource
-   * ownership. Safe to call repeatedly; last write wins.
+   * This captures the declarative {@link DatasourceDef}: `schemaMode` +
+   * `external.allowWrites` so the write gate ({@link assertWriteAllowed}) can
+   * enforce external-datasource ownership, and `external.credentialsRef` so
+   * {@link listDatasourceDefs} can hand a credentials sweep the handle a
+   * code-declared datasource holds. Safe to call repeatedly; last write wins.
    */
-  registerDatasourceDef(def: { name: string; schemaMode?: string; external?: { allowWrites?: boolean } }): void {
+  registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
     this.datasourceDefs.set(def.name, { schemaMode: def.schemaMode, external: def.external });
+  }
+
+  /**
+   * Every datasource DEFINITION this engine holds — from BOTH entry routes,
+   * {@link registerDatasourceDef} and the package-manifest install path in
+   * {@link registerApp}.
+   *
+   * Exists because a datasource declared IN CODE never reaches the metadata
+   * store, so a `sys_secret` reference sweep reading `sys_metadata` alone
+   * cannot see the handle such a datasource holds at `external.credentialsRef`
+   * and must be handed the list by its caller instead. A completeness
+   * guarantee that depends on every caller remembering to pass a list is
+   * weaker than one the engine can answer.
+   *
+   * ⛔ Deliberately UNFILTERED: every definition, whatever its `schemaMode` and
+   * whether or not it carries a reference. `credentialsRef` is valid on a
+   * managed datasource too (#8153), so filtering by schema mode here would hide
+   * live handles from the sweep — and under-reporting is the direction that
+   * deletes live credentials.
+   *
+   * Each entry is a fresh object with a COPIED `external` block. The index
+   * stores the caller's `external` by reference, and a reader must not be able
+   * to reach through this accessor and mutate the write gate's own input.
+   */
+  listDatasourceDefs(): DatasourceDef[] {
+    return Array.from(this.datasourceDefs, ([name, def]) => ({
+      name,
+      ...(def.schemaMode !== undefined ? { schemaMode: def.schemaMode } : {}),
+      ...(def.external ? { external: { ...def.external } } : {}),
+    }));
   }
 
   /**

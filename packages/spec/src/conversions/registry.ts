@@ -8114,7 +8114,14 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
  *
  * `retiredFromLoadPath`: ObjectPermissionSchema tombstones both keys
  * (`retiredKey`, tsc `never` + the parse-time prescription), the
- * `permission-rls-priority-removed` posture one block over.
+ * `permission-rls-priority-removed` posture one block over — with one ruled
+ * exception the tombstone carries itself (#12840, maintainer 2026-08-28):
+ * the keys' retired default (`false`), which every artifact built by the
+ * published 17.x toolchain has materialized in every entry, parses as inert
+ * residue and is stripped by the `acceptRetiredDefaultResidue` stage on the
+ * schema. This conversion stays migrate-meta-only: it rewrites SOURCES (both
+ * values, `true` included); the load-path tolerance covers only the emitted
+ * default and leaves `true` on the refusal.
  */
 const permissionAllowRestorePurgeRemoved: MetadataConversion = {
   id: 'permission-allow-restore-purge-removed',

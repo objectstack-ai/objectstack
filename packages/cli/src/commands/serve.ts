@@ -52,8 +52,16 @@ import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
-// The posture prose `os serve` and `os doctor` BOTH print, declared once (#12492).
-import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
+// The posture prose `os serve` and `os doctor` BOTH print, declared once
+// (#12492) — and, since #12579, the multi-org runtime SPELLING those two
+// commands put in front of the same operator, declared once with it.
+//
+// Renamed on import so `Serve.ORGANIZATIONS_RUNTIME_PKG` below keeps its own
+// NAME: separate pins address that static by name, and only the spelling moved.
+import {
+  ORGANIZATIONS_RUNTIME_PKG as SHARED_ORGANIZATIONS_RUNTIME_PKG,
+  TENANCY_POSTURE_FIX_HINTS,
+} from '../utils/tenancy-posture-hints.js';
 // Shared with @objectstack/verify and the dogfood multi-org probes (#4700) —
 // node-only, hence the `/node` subpath rather than the edge-safe root export.
 import {
@@ -91,6 +99,17 @@ import {
   type ConsoleShaDrift,
 } from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
+// Metric NAMES and the metrics-service name, from the package that owns both.
+// `buildServeObservability()` below reaches the same package through a dynamic
+// `import()` with a "not installed — silently skip" catch; this STATIC import
+// adds no new failure mode on top of it, and the measurement is written down
+// so the next reader does not have to re-derive it: `@objectstack/runtime` is
+// imported statically a few lines above, its index re-exports
+// `./observability/index.js`, and that module statically imports
+// `@objectstack/observability` for `OBSERVABILITY_METRICS_SERVICE`. So loading
+// this command already requires the package to resolve; the dynamic form there
+// is about the exporter CLASSES, not about reachability.
+import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@objectstack/observability';
 
 // ---------------------------------------------------------------------------
 // Observability bootstrap for `objectstack serve`
@@ -982,7 +1001,7 @@ export default class Serve extends Command {
    * Exposed as a static for the same reason ALWAYS_ON_CAPABILITIES above is:
    * one declaration, two readers — the boot path and the pin.
    *
-   * ── A ⛔ stood here, and the constraint it named no longer exists ─────────
+   * ── The ⛔ that stood here, and how it ended ──────────────────────────────
    *
    * ⚠️ Until #12579 this read: MUST stay a string LITERAL in this file, because
    * `serve-cluster-host-resolution.test.ts` sweeps `serve.ts` for every dynamic
@@ -1002,41 +1021,47 @@ export default class Serve extends Command {
    * `../utils/tenancy-posture-hints.ts` read through this file's own scan
    * context, in the case named "resolves an alias to a literal in a REAL sibling
    * module of packages/cli", and again in "resolves `static readonly MEMBER =
-   * <alias>` — the shape the refactor writes".
+   * <alias>` — the shape the refactor writes", which is the shape this
+   * declaration now carries.
    *
-   * ⛔ Both halves are recorded rather than the whole note deleted, because a
-   * reader who meets neither re-derives the dead constraint from the duplication
-   * and puts the ⛔ back. ⛔ Nor is that hop dead code for having no live caller:
-   * delete it and this file is one refactor away from emptying the sweep again.
+   * ⛔ Both halves stay recorded rather than the note deleted, because a reader
+   * who meets neither re-derives the dead constraint from the shape and puts the
+   * ⛔ back.
    *
-   * ── What holds today, which is less than a prohibition ───────────────────
+   * ── What this declaration is now ─────────────────────────────────────────
    *
-   * The spelling is declared twice inside this package — here, and in the shared
-   * hints module `os doctor` also reads. That duplication is CHECKED, not
-   * silent: `serve-organizations-message-spelling.test.ts` site 8 asserts the two
-   * are EQUAL, and each is independently pinned as a key of the spec-owned
-   * roster (here via `test/serve-capability-vocabulary.test.ts`, there via
-   * `doctor-organizations-message-spelling.test.ts`). All three read this
-   * static's VALUE, never this file's source text, so none of them is a reason
-   * for the literal — and #12579 measured that the sweep was the only thing in
-   * the tree that ever read this file's source for a package spelling.
+   * ⭐ The spelling is declared ONCE, in `../utils/tenancy-posture-hints.ts` —
+   * the neutral module `os doctor` reads too — and this static is assigned from
+   * it (#12579, maintainer ruling 2026-08-27, Option A). It is the same shape
+   * `ALWAYS_ON_CAPABILITIES` above already carries: a stable handle over a
+   * declaration that lives elsewhere. Until that ruling this was a second
+   * LITERAL held EQUAL by an assertion — site 8 of
+   * `serve-organizations-message-spelling.test.ts`, retired in the same diff,
+   * because with one declaration an equality pin has no subject.
    *
-   * ⚠️ So the honest state is that nothing forbids single-sourcing this any
-   * more, and ⛔ that is still not a licence to do it in passing. PR #12532
-   * shipped the duplication deliberately with the reasoning at both ends, which
-   * makes ending it a maintainer-facing decision — open at #12579, where what
-   * would have to move together is written down. Two things outlive that
-   * decision either way: this static keeps its NAME (the roster pins address
-   * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and only a spelling may move), and the
-   * gap is ⛔ never closed in the other direction — see the ⛔ on
-   * `ORGANIZATIONS_RUNTIME_PKG` in `../utils/tenancy-posture-hints.ts`, whose
-   * reason (#12464) the hop did not touch.
+   * Two things outlive that decision, and neither moved:
+   *
+   *   · This static keeps its NAME. `test/serve-capability-vocabulary.test.ts`
+   *     pins it as a roster KEY and the sweep resolves the load THROUGH it, both
+   *     addressing `Serve.ORGANIZATIONS_RUNTIME_PKG`; only the spelling moved
+   *     out. ⛔ Rename the member and those read something that is not there.
+   *   · ⛔ The gap is NEVER closed in the other direction — see the ⛔ on
+   *     `ORGANIZATIONS_RUNTIME_PKG` in `../utils/tenancy-posture-hints.ts`.
+   *     `os doctor` must not depend on a `serve` command's export in order to
+   *     spell a package name (#12464's coupling ruling, which none of this
+   *     touches).
+   *
+   * ⚠️ This assignment is the alias hop's FIRST LIVE CONSUMER, which is a cost
+   * as well as the point: narrowing that hop is now a LIVE regression rather
+   * than a synthetic one. It is written down once, where whoever narrows it will
+   * be standing — the suite docblock over the hop's own cases in
+   * `serve-cluster-host-resolution.test.ts`.
    *
    * This single-sources the SPELLING and nothing else. Which postures load the
    * runtime, and what each of the two failure stages means, stay exactly where
    * they are; the roster is deliberately not a resolution registry.
    */
-  static readonly ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
+  static readonly ORGANIZATIONS_RUNTIME_PKG = SHARED_ORGANIZATIONS_RUNTIME_PKG;
 
   /**
    * Auto-registered plugin tiers. Plugins explicitly listed in
@@ -2525,6 +2550,13 @@ export default class Serve extends Command {
       // only the in-memory driver — remote drivers (e.g. redis) come from the EE
       // distribution; if absent we fall back to the in-memory cluster.
       let clusterConfig: { driver: string; url?: string } | undefined;
+      // The gate's verdict, held for the operator-facing telemetry emitted near
+      // the end of boot (#12667). The gate is consulted exactly once per
+      // process and its answer is otherwise consumed on the spot by the boot
+      // warning, so a second consult later would be a second question, not a
+      // second reading of the same one. `undefined` means the gate was never
+      // consulted — a single-node boot — and nothing is emitted.
+      let multiNodeVerdict: MultiNodeGateVerdict | undefined;
       const __clusterDriver = process.env.OS_CLUSTER_DRIVER?.trim();
       if (__clusterDriver && __clusterDriver !== 'memory') {
         // Multi-node authorization gate (open mechanism): a distribution (e.g.
@@ -2561,6 +2593,10 @@ export default class Serve extends Command {
         // declared" — normalization lives at the seam on purpose, so there is
         // deliberately no `?? 0` or pre-parse here.
         const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
+        // Held for BOTH branches below: an outright denial is as much an
+        // operator-facing reading as a licensed overflow, and only one of the
+        // two currently reaches a log line an operator is likely to still have.
+        multiNodeVerdict = __gate;
         if (!__gate.allowed) {
           console.warn(
             `[cluster] multi-node not authorized (${__gate.reason ?? 'denied'}) — ` +
@@ -4474,6 +4510,21 @@ export default class Serve extends Command {
         if (Array.isArray(s) && s.length > 0) seedSummary = s;
       } catch { /* no seeds ran — nothing to show */ }
 
+      // ── Multi-node licence reading → telemetry (#12667) ────────────
+      // The advisory the gate produced at boot, published where a deployment's
+      // metrics pipeline already looks. Emitted HERE, after every plugin has
+      // been registered, so a host that mounts its own
+      // `ObservabilityServicePlugin` is covered as well as serve's own
+      // auto-wired one — the auto-wire block runs long before the config
+      // plugins, and resolving there would have reached only half the hosts.
+      //
+      // ⛔ Visibility only. This publishes the SAME advisory verdict the boot
+      // warning renders as prose; it refuses nothing, counts no peers, and must
+      // never be reworded into a claim that it does. See
+      // `describeMultiNodeCapTelemetry` for why a real membership count is not
+      // available to this process at all.
+      if (multiNodeVerdict) emitMultiNodeCapTelemetry(kernel, multiNodeVerdict);
+
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
@@ -5666,6 +5717,152 @@ export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): strin
     + `${declared} replicas will still join the cluster.\n`
     + `[cluster] Reduce OS_CLUSTER_REPLICAS to ${admitted}, or raise the licensed node limit.`
   );
+}
+
+/**
+ * The gate verdict as one word, from the vocabulary the gate itself ships
+ * (`admitted` / `refused` / `capped`) — deliberately not a second vocabulary.
+ *
+ * - `refused` — `allowed: false`, the unlicensed case: the whole topology is
+ *   refused and `os serve` downgrades to single-node.
+ * - `capped`  — the licensed-overflow case: entitled to cluster, declared more
+ *   nodes than the licence admits. **Advisory**: every declared replica still
+ *   joins.
+ * - `admitted` — everything declared fits, or no cap was expressed at all.
+ */
+export type MultiNodeCapVerdictWord = 'admitted' | 'capped' | 'refused';
+
+/** One metric observation the operator surface publishes. */
+export interface MultiNodeCapMetric {
+  /** Canonical name from `SEMCONV` — never a literal written here. */
+  name: string;
+  kind: 'gauge' | 'counter';
+  value: number;
+  labels: { verdict: MultiNodeCapVerdictWord };
+}
+
+/**
+ * A positive, finite, whole node count — or `undefined` for "not declared".
+ *
+ * ⚠️ A deliberate MIRROR of `normalizeCount` in
+ * `@objectstack/service-cluster`'s `multi-node-gate.ts`, kept BYTE-IDENTICAL in
+ * its body so `serve-multi-node-cap-advisory.pin.test.ts` can compare the two
+ * bodies derived from their own files rather than against a rule re-typed in a
+ * test. The mirror exists because the resolved verdict does not carry the
+ * declared count back: `admitted` is `min(cap, wanted)`, so `{admitted: 3,
+ * refused: 0}` is produced both by "declared 3 under a cap of 5" and by
+ * "declared nothing under a cap of 3". The declaration is only knowable from
+ * the env var the operator wrote, which is what this reads.
+ */
+function normalizeDeclaredNodeCount(value: number | undefined): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+    return Math.floor(value);
+}
+
+/**
+ * The operator-facing TELEMETRY reading of a multi-node gate verdict — the
+ * second reach of the same advisory the boot warning above renders as prose
+ * (#12667, ruled C on #8501, maintainer 2026-08-27 「其他接受」).
+ *
+ * ⚠️ **Visibility, not enforcement, and the shape says so.** Nothing here
+ * refuses anything: the gate is consulted once per process at boot, every
+ * replica computes the same verdict, and none can know whether it is one of the
+ * admitted ones — so all of them join. The two facts that make a real count
+ * impossible are unchanged: there is no cluster membership view (`nodeId` is
+ * random per process, no join/leave registry) and `OS_CLUSTER_REPLICAS` is an
+ * operator-DECLARED count identical in every replica. Hence
+ * `cluster_declared_nodes` and `cluster_admitted_nodes`: "declared vs what the
+ * licence admits" is an honest sentence, "N nodes running" is not, and would
+ * be a false statement dressed as telemetry.
+ *
+ * Why prose alone was not enough reach: the boot warning is one `console.warn`
+ * in one process's startup output. An operator who scaled past their cap three
+ * weeks ago has no way to ask the question today, and no way to alert on it.
+ * These observations put the same reading where the deployment's existing
+ * metrics pipeline already looks.
+ *
+ * Deliberate omissions, each of which would be a false number rather than a
+ * missing one:
+ *
+ *   - no `cluster_declared_nodes` when nothing was declared — `0` would read
+ *     as a declaration of zero replicas;
+ *   - no `cluster_admitted_nodes` when the gate expressed no count cap
+ *     (`admitted` absent) — any number there invents a limit nobody stated;
+ *   - no series at all when the gate was never consulted (single-node boot).
+ *
+ * Pure and exported so the test suite can assert **what an operator sees** for
+ * each verdict rather than that some value was computed.
+ *
+ * @param verdict - the verdict `checkMultiNodeAllowed` returned at boot.
+ * @param declaredReplicas - `Number(process.env.OS_CLUSTER_REPLICAS)`, raw:
+ *   normalization is this function's job, exactly as it is the gate's at its
+ *   own seam. `NaN` (the variable is unset) means "not declared".
+ */
+export function describeMultiNodeCapTelemetry(
+  verdict: MultiNodeGateVerdict,
+  declaredReplicas: number,
+): MultiNodeCapMetric[] {
+  const verdictWord: MultiNodeCapVerdictWord =
+    !verdict.allowed ? 'refused' : verdict.capped ? 'capped' : 'admitted';
+  const labels = { verdict: verdictWord };
+
+  // The boot EVENT first: it is the one series that survives a push-based
+  // exporter's staleness window, so it is what an alert can be written against.
+  const metrics: MultiNodeCapMetric[] = [
+    { name: SEMCONV.clusterNodeCapVerdictsTotal, kind: 'counter', value: 1, labels },
+  ];
+
+  const declared = normalizeDeclaredNodeCount(declaredReplicas);
+  if (declared !== undefined) {
+    metrics.push({ name: SEMCONV.clusterDeclaredNodes, kind: 'gauge', value: declared, labels });
+  }
+  if (typeof verdict.admitted === 'number') {
+    metrics.push({ name: SEMCONV.clusterAdmittedNodes, kind: 'gauge', value: verdict.admitted, labels });
+  }
+  return metrics;
+}
+
+/**
+ * Publish {@link describeMultiNodeCapTelemetry}'s observations into whatever
+ * metrics backend the deployment configured.
+ *
+ * Best-effort by contract: a metric call site must never throw, and an
+ * unconfigured deployment must not be worse off than before this existed — with
+ * no backend registered the boot warning remains the only reading, which is
+ * precisely the state this card set out to improve on rather than replace.
+ *
+ * ⚠️ `kernel.getService` THROWS on a miss (see `packages/core/src/kernel.ts`),
+ * so the lookup is wrapped rather than null-checked. Resolving through the
+ * kernel — not through the block `serve` built itself — is what lets a host
+ * that mounts its OWN `ObservabilityServicePlugin` receive these too.
+ */
+function emitMultiNodeCapTelemetry(
+  kernel: { getService?: <T>(name: string) => T } | undefined,
+  verdict: MultiNodeGateVerdict,
+): void {
+  // Typed with the slot's contract, never erased to `any` (#4127/#4251,
+  // `check:slot-lookup`): the erasure would also have switched off the argument
+  // check the two calls below depend on — see their note.
+  let metrics: MetricsRegistry | undefined;
+  try {
+    metrics = kernel?.getService?.<MetricsRegistry>(OBSERVABILITY_METRICS_SERVICE);
+  } catch {
+    return; // no observability backend configured — boot warning stands alone
+  }
+  if (!metrics) return;
+  try {
+    for (const sample of describeMultiNodeCapTelemetry(verdict, Number(process.env.OS_CLUSTER_REPLICAS))) {
+      // The two signatures differ in argument ORDER (`MetricsRegistry`):
+      // counter(name, labels, value) vs gauge(name, value, labels). Written out
+      // separately so the swap is visible — and, because the lookup above is
+      // typed, a swap is now a compile error rather than a green build emitting
+      // a label map where a number belongs.
+      if (sample.kind === 'counter') metrics.counter(sample.name, sample.labels, sample.value);
+      else metrics.gauge(sample.name, sample.value, sample.labels);
+    }
+  } catch {
+    // Per the metrics contract: never throw from a call site.
+  }
 }
 
 /**

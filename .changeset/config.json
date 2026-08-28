@@ -3,7 +3,7 @@
   "changelog": [
     "@changesets/cli/changelog",
     {
-      "repo": "objectstack-ai/spec"
+      "repo": "objectstack-ai/objectstack"
     }
   ],
   "commit": false,

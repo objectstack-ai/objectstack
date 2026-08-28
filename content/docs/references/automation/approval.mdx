@@ -37,7 +37,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `false`) | Enable SLA-based escalation for this node |
+| **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
 | **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
 | **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
 | **escalateTo** | `string` | optional | User id or position machine name to escalate to |
@@ -101,7 +101,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `false`) | Enable SLA-based escalation for this node |
+| **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
 | **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
 | **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
 | **escalateTo** | `string` | optional | User id or position machine name to escalate to |

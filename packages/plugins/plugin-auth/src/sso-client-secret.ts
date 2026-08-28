@@ -22,8 +22,11 @@
  *
  * ## The seam
  * `@better-auth/sso` has NO secret-at-rest option, so there is no upstream
- * switch to flip: `SSOOptions` has no equivalent of
- * `scim({ storeSCIMToken: 'hashed' })`. Measured 2026-08-20 against the
+ * switch to flip: `SSOOptions` has no equivalent of the rc.1-era
+ * `scim({ storeSCIMToken: 'hashed' })` (an option stable scim has since
+ * dropped entirely — ObjectStack owns SCIM credentials outright now, #3653,
+ * which only sharpens the point that at-rest posture is ours to establish).
+ * Measured 2026-08-20 against the
  * installed `@better-auth/sso@1.7.1` by enumerating the top-level members of
  * `SSOOptions` in the shipped `dist/index-CZytzKv6.d.mts` — `resolveUser`,
  * `guardProviderMutation`, `provisionUser`, `provisionUserOnEveryLogin`,

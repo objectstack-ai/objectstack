@@ -29,6 +29,16 @@
  * assert on the SQL string keep the network as their concern; a value that
  * comes back as the wrong TYPE leaves the SQL perfectly valid, so a string
  * assertion cannot see it.
+ *
+ * ## ⚠️ Green here does not mean the two halves are doing the same thing
+ *
+ * They are not. A declared `Field.json` is a `json` column on the local half
+ * and a `TEXT` column on the remote one, so the same written value can land in
+ * a different SQLite storage class on each while both `find()` calls answer
+ * faithfully and every assertion below stays green. That asymmetry is recorded
+ * and pinned separately, in `turso-json-column-type-asymmetry.test.ts` (#12586)
+ * — this suite is deliberately blind to it, which is why the pin is its own
+ * file rather than another case in here.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

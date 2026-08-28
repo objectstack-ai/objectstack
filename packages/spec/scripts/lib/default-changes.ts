@@ -235,5 +235,36 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'unauthored. To start collapsed, write `defaultCollapsed: true` (with `collapsible: '
         + 'true` for the affordance to reopen).',
     },
+    {
+      key: 'automation/ApprovalEscalation:enabled',
+      from: 'false',
+      to: 'true',
+      reason:
+        'The declared default was WRONG about the shipped runtime, and the flip is what makes '
+        + 'the key enforceable at all (#12278, maintainer ruling 2026-08-27, Option C — '
+        + 'explicitly reversing the 2026-08-26 "spec stays as declared" ruling with fresh '
+        + 'analysis). The SLA escalation sweep (plugin-approvals runEscalations) historically '
+        + 'never read `enabled`: any escalation block with a positive `timeoutHours` escalated, '
+        + 'and the plugin\'s own eleven behaviour tests author exactly that shape — '
+        + '`timeoutHours` set, `enabled` omitted — and assert escalation fires. The schema said '
+        + 'the opposite (default false = off). Worse, the approval-node executor parses node '
+        + 'config through this schema before snapshotting it onto the request row, so the old '
+        + 'default MATERIALIZED `enabled: false` onto every author-omitted block in storage — '
+        + 'destroying the authored-vs-defaulted distinction and making the ruled sweep gate '
+        + '(`enabled === false` ⇒ skip) unimplementable: it would have turned the declared '
+        + 'default real by silently switching off every deployed flow that set only '
+        + '`timeoutHours`. With the default at `true` the semantics are one-directional and '
+        + 'honest: the FEATURE switch is whether an `escalation` block exists at all; within a '
+        + 'block carrying `timeoutHours`, escalation is on unless the author explicitly writes '
+        + '`enabled: false` — which the sweep now honours (the ADR-0049 declared≠enforced gap '
+        + 'this key carried is closed from both sides in the same change). A consumer who was '
+        + 'relying on the OLD declared value was relying on a fiction — the runtime escalated '
+        + 'regardless — so nothing deployed changes behaviour on the omitted path: an omitted '
+        + '`enabled` escalated before (sweep never read it) and escalates after (materializes '
+        + 'true). To keep an SLA off, write `enabled: false` — which as of this change is '
+        + 'finally the spelling the server actually reads; stored pre-flip snapshots carrying a '
+        + 'materialized `false` are covered by a read-side legacy window in the sweep, so they '
+        + 'keep escalating exactly as they do today.',
+    },
   ],
 };

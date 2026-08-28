@@ -163,7 +163,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -214,15 +214,45 @@ const UNSET_LEG_MEASURES_THE_BUILT_DIST =
   'refuses, not just that leg.';
 
 /**
- * The fixture's parent directory sits INSIDE `packages/cli/test/`, not the
- * system tmpdir: the config below does a real, static
- * `import { AuthPlugin } from '@objectstack/plugin-auth'`, and that only
- * resolves because `packages/cli/node_modules/@objectstack/plugin-auth`
- * (a real dependency of this package) is reachable by Node's ordinary
- * upward `node_modules` walk from wherever the config file lives. A fixture
- * rooted in `os.tmpdir()` has no such ancestor and the import fails.
+ * WHY THE FIXTURE IS ROOTED AT `packages/cli/tmp/` — two independent reasons,
+ * and only ONE of them is technical. They are written out separately because
+ * collapsing them is the defect this root was moved to end.
+ *
+ * 1. NOT the system tmpdir. This half IS technical and it is measured: the
+ *    config below does a real, static
+ *    `import { AuthPlugin } from '@objectstack/plugin-auth'`, which resolves
+ *    only because `packages/cli/node_modules/@objectstack/plugin-auth` (a real
+ *    dependency of this package) is reachable by Node's ordinary upward
+ *    `node_modules` walk from wherever the config file lives. A fixture rooted
+ *    in `os.tmpdir()` has no such ancestor and the import fails.
+ *
+ * 2. `tmp/` rather than `test/`. This half is a CONVENTION, and it does NOT
+ *    follow from (1). ⛔ Do not re-derive it from the import constraint: this
+ *    package's `test/` directory has exactly the SAME `node_modules` ancestor
+ *    that its `tmp/` directory has, so (1) rules out `os.tmpdir()` and says
+ *    nothing whatever about the choice between the two in-tree roots. Writing
+ *    (1) as "so it must live in `tmp/`" would just swap one false reason for
+ *    another. The choice is settled by convention instead: of the four fixtures
+ *    this package creates inside the tracked tree, three already root at
+ *    `packages/cli/tmp/` (`init-scaffold-authoring-rules.test.ts`,
+ *    `init-template-comments-self-contained.test.ts`,
+ *    `serve-no-artifact.e2e.test.ts`), and that root costs ZERO bespoke ignore
+ *    surface — the repo-wide `tmp/` rule in `.gitignore` already covers it,
+ *    where this file's former in-`test/` root needed an ignore entry written
+ *    for it alone. Maintainer ruling, 2026-08-27, adopting Option A.
+ *
+ * ⚠️ The ignore coverage is the load-bearing half of (2), not tidiness. A
+ * killed run leaves this directory behind, and a leftover in the tracked tree
+ * with NO ignore rule is not inert: `scripts/pm/dispatch-gates.mjs` derives
+ * every dispatch's gate list from the working tree, untracked files included,
+ * so an unignored leftover joins that change set and inflates it — measured on
+ * this tree, a two-file leftover adds 20 gate families that the branch's real
+ * diff does not implicate, corrupting other seats' dispatch decisions for as
+ * long as it sits there. Both directions of that property are pinned in
+ * `dispatch-gates.mjs`'s own `--self-test`; ⛔ a fifth fixture that picks a new
+ * in-tree root inherits this obligation and does not inherit the pin.
  */
-const FIXTURES_ROOT = HERE;
+const FIXTURES_ROOT = resolve(HERE, '../tmp');
 
 function configFor(port: number): string {
   return `
@@ -434,6 +464,7 @@ describe('#11113: os serve defaults NODE_ENV to production when unset', () => {
     // from `dist/`, and the two rerouted legs must not report green without it.
     requireBuiltCli(UNSET_LEG_MEASURES_THE_BUILT_DIST);
 
+    mkdirSync(FIXTURES_ROOT, { recursive: true });
     dir = mkdtempSync(join(FIXTURES_ROOT, 'tmp-node-env-default-'));
     writeFileSync(
       join(dir, 'package.json'),

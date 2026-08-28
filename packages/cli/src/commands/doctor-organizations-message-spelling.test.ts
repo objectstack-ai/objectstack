@@ -26,19 +26,21 @@
  * measure did not change: what `os doctor` RENDERS. Leg (ii) especially, which
  * is the load-bearing one (see below).
  *
- * ⚠️ The literal is still declared three times, not two: the roster key, the
- * shared module this file now reads, and `Serve.ORGANIZATIONS_RUNTIME_PKG` in
- * `serve.ts`. ⛔ That third copy is no longer REQUIRED, and this paragraph is
- * the fourth place that said it was. It used to read: it must stay a string
- * LITERAL or the host-anchoring sweep in `serve-cluster-host-resolution.test.ts`
- * can no longer resolve which package that command's `import()` names. ⭐ That
- * died at `1ca763b60` (#12533), which taught the sweep to follow an import alias
- * into a sibling module; whether to end the duplication is now an open,
- * maintainer-facing decision at #12579. ⛔ None of it changes what THIS file
- * measures. What holds either way is that no copy can drift in silence: the
- * serve↔shared pair is pinned equal by site 8 of
- * `serve-organizations-message-spelling.test.ts`, and each copy is separately
- * pinned as a roster key.
+ * ⚠️ The literal is declared twice now, not three times: the roster key, and
+ * the shared module this file reads. `Serve.ORGANIZATIONS_RUNTIME_PKG` was the
+ * third copy; since #12579 it is ASSIGNED FROM that shared module instead of
+ * spelling the package again. ⛔ It had stopped being REQUIRED before that, and
+ * this paragraph is the fourth place that said it was. It used to read: it must
+ * stay a string LITERAL or the host-anchoring sweep in
+ * `serve-cluster-host-resolution.test.ts` can no longer resolve which package
+ * that command's `import()` names. ⭐ That died at `1ca763b60` (#12533), which
+ * taught the sweep to follow an import alias into a sibling module; ending the
+ * duplication was then ruled on by the maintainer (2026-08-27, #12579, Option
+ * A). ⛔ None of it changes what THIS file measures. What holds throughout is
+ * that no copy can drift in silence: the equality pin that held serve's literal
+ * to this module's — site 8 of `serve-organizations-message-spelling.test.ts` —
+ * retired with its subject, and each surviving declaration keeps the roster-key
+ * leg that made the pair safe in the first place.
  *
  * ── Three legs, and the second is the point ──────────────────────────────
  *

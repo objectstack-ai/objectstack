@@ -1836,6 +1836,51 @@ const step17: MigrationStep = {
         + '#2377 and this entry is not where it returns.',
     },
     {
+      id: 'approval-escalation-enabled-default-flip',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'automation.ApprovalEscalation.enabled — an OMITTED value inside an approval '
+        + "node's escalation block",
+      replacement:
+        'nothing, for the common intent (escalate on timeout): an escalation block '
+        + 'carrying timeoutHours is live by default. To declare an SLA OFF while keeping '
+        + 'its configuration, write enabled: false explicitly — which is now the spelling '
+        + 'the escalation sweep actually reads',
+      reason:
+        'A DECLARED-DEFAULT CORRECTION plus the enforcement that makes the key real '
+        + "(#12278, maintainer ruling 2026-08-27) — the same category as protocol 17's "
+        + '`import-run-automations-declared-default-corrected`: the schema promised '
+        + '`enabled` defaults to `false` (SLA off) while the plugin-approvals sweep never '
+        + 'read the key at all — any escalation block with a positive `timeoutHours` '
+        + 'escalated, and with `action: \'auto_approve\'` that silently approved requests '
+        + 'their author had declared off the clock. The flip moves the default to `true` '
+        + 'and, in the same change, the sweep starts honouring an explicit '
+        + '`enabled: false`. The feature-level switch is whether an `escalation` block '
+        + 'exists at all; within a block carrying `timeoutHours`, escalation is on unless '
+        + 'explicitly turned off. Deployed metadata that OMITS `enabled` does not change '
+        + 'behaviour: it escalated before (the sweep ignored the key) and escalates after '
+        + '(the parse materializes `true`). Stored request snapshots written before the '
+        + 'flip carry a MATERIALIZED `enabled: false` (the approval-node executor parses '
+        + 'config through the old schema before snapshotting), so the sweep keeps a '
+        + 'read-side legacy window keyed on the snapshot\'s `created_at`: pre-flip '
+        + 'snapshots keep escalating exactly as they do today, and the window retires '
+        + 'itself as those pending requests drain. What DOES change is that an explicit '
+        + '`enabled: false` finally binds — a flow that authored it (e.g. the console '
+        + 'toggle switched off after a timeout was set) stops escalating on requests '
+        + 'opened after the upgrade, which is the declared intent being honoured.',
+      acceptanceCriteria:
+        'A flow whose approval node omits `enabled` inside `escalation` still escalates '
+        + 'on timeout (no metadata edit needed). A flow that writes `enabled: false` '
+        + 'stops escalating for newly opened requests — verify one such request stays '
+        + 'pending past its `timeoutHours` with no `escalate` audit row and no '
+        + 'auto-decision. Requests opened BEFORE the upgrade keep their pre-upgrade '
+        + 'behaviour (they escalate) regardless of the stored `enabled` bit. Clients '
+        + 'that parse metadata through the published JSON Schema now materialize '
+        + '`enabled: true` where they materialized `false`; a client that needs the SLA '
+        + 'off must write it explicitly.',
+    },
+    {
       id: 'audit-log-action-enum-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -6620,6 +6665,55 @@ const step18: MigrationStep = {
         + 'rather than saved with the key silently dropped.',
     },
     {
+      id: 'package-rollback-response-retired',
+      surface:
+        'api.packageRollbackResponse (`PackageRollbackResponseSchema` in '
+        + 'api/package-api.zod.ts — 1 def, 3 exported names: '
+        + '`PackageRollbackResponseSchema`, `PackageRollbackResponse`, '
+        + '`PackageRollbackResponseParsed` — plus the `PackageApiContracts.'
+        + 'rollbackPackage` contract-map entry that bound it to '
+        + '`POST /api/v1/packages/:packageId/rollback`)',
+      replacement:
+        '`RollbackToPackageCommitResponseSchema` (api/package-lifecycle.zod.ts) — '
+        + 'the transcription of what the live route actually answers: the '
+        + 'dispatcher routes `POST /packages/:id/rollback` (body `{ commitId }`) '
+        + 'to `rollbackToPackageCommit`, the ADR-0067 COMMIT rollback, whose '
+        + 'declared return is `{ success, revertedCommits: string[], '
+        + 'failed: Array<{ commitId, error }> }`. Consumers of the retired type '
+        + 'were reading a VERSION-rollback shape (`restoredVersion`) the route has '
+        + 'never answered; read `revertedCommits`/`failed` instead. '
+        + '`PackageRollbackRequestSchema` stays published (ruled out of the '
+        + 'retirement), bound to no route.',
+      reason:
+        'Maintainer ruling 2026-08-27 on #12038, sub-question 3A (五问一批, '
+        + '「其他接受」). The schema declared a version rollback — '
+        + '`{ success, restoredVersion?, message? }`, matching its file header '
+        + '"Rollback a package" — while the live path it was contract-bound to '
+        + 'serves the ADR-0067 commit rollback: a different operation with a '
+        + 'different result. Binding it in the SDK would compile and be false '
+        + '(#11925 left a compile-time guard against exactly that substitution). '
+        + 'Zero consumers measured across objectstack, objectui and cloud '
+        + '(#12038 survey §5.2, re-verified at the retiring PR\'s base): only its '
+        + 'own unit test and the #11925 negative guard. A published declaration '
+        + 'that outran the implementation is the #3877 hazard realised in the '
+        + 'opposite direction — not "no declaration" but a WRONG one — and it is '
+        + 'retired BEFORE the true schema is authored so no window exists in '
+        + 'which both claims are published.',
+      acceptanceCriteria:
+        'No code imports `PackageRollbackResponseSchema`, '
+        + '`PackageRollbackResponse` or `PackageRollbackResponseParsed` from '
+        + '`@objectstack/spec` or `@objectstack/spec/api` — every one is TS2305 '
+        + 'after upgrade (pinned by runtime namespace probes in '
+        + 'api/package-api.test.ts). `PackageApiContracts` carries no entry whose '
+        + 'path is `/api/v1/packages/:packageId/rollback` (same pin). No metadata '
+        + 'document needs editing: the schema was reachable from no metadata-type '
+        + 'binding, stack collection or /meta door. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED: nothing ever registered routes or generated '
+        + 'SDKs from the contract entry, and the route\'s handler emits the same '
+        + 'bytes before and after — the retirement removes a false claim, not '
+        + 'behaviour.',
+    },
+    {
       id: 'plugin-auto-restart-never-reinitialised',
       surface:
         '`PluginHealthCheck.autoRestart`, `PluginHealthCheck.maxRestartAttempts` '
@@ -7133,6 +7227,42 @@ const step18: MigrationStep = {
         + 'stays absence. A stored form view carrying a malformed row value is refused on its '
         + 'next authoring-path save with a prescriptive per-key issue; the author deletes the '
         + 'key or re-declares the integer they meant.',
+    },
+    {
+      id: 'ui-form-view-predicate-features-root-refused',
+      surface: 'form-view predicates naming the `features.*` scope root — section-level '
+        + '`visibleWhen`, field-level `visibleWhen` at any nesting depth, and per-option '
+        + '`visibleWhen` authored inline in the form view (`FormViewSchema`, including the '
+        + 'flattened runtime form overlay and the deprecated `visibleOn` alias spellings)',
+      replacement: 'gate by record state (`record.*` in runtime forms, `data.*` in metadata '
+        + 'forms), or move the feature-gated surface onto an app page component or action — '
+        + 'the predicate surfaces where `features.*` stays bound and stays legal. No rewrite '
+        + 'is mechanical: a feature-flag gate and a record-state gate answer different '
+        + 'questions, so the author chooses which surface the gate belongs on.',
+      reason:
+        'objectstack#12665, ruled 2026-08-27 on objectui#6262 (option B — vocabulary '
+        + 'narrowing): one authored form view is served on two kinds of route, and a '
+        + '`features.*` predicate got two verdicts from the same text. Inside an app '
+        + '(`/apps/:appName/*`) the root resolves against the real auth-config flags; on the '
+        + 'standalone form routes (`/forms/:name`, public `/f/:slug`) no app context exists, '
+        + 'the root is UNBOUND, the predicate faults — and `visibleWhen`\'s fault fallback is '
+        + 'visible, so the field or section a feature flag was meant to hide is shown to '
+        + 'everyone (fail-open, on an access-shaped key). Measured before ruling and '
+        + 're-verified at dispatch (2026-08-28): ZERO authored `features.*` form-view '
+        + 'predicates exist across objectui apps/examples/content, against an 18-hit positive '
+        + 'control on authored `visibleWhen` predicates — so the vocabulary is narrowed at '
+        + 'the authoring door instead of building an auth-config fetch plus pre-load '
+        + 'semantics on a route with zero consumers. App-context predicate surfaces '
+        + '(page components, actions, bulk-action eligibility) keep `features.*` unchanged.',
+      acceptanceCriteria:
+        'A form view carrying a predicate that names `features` in root position (dotted '
+        + 'member access, index access, or the bare root — outside string literals) is '
+        + 'refused at parse with a prescriptive issue naming the root, the surface, the '
+        + 'fail-open reason and the ruling. Predicates on permitted roots parse unchanged, '
+        + 'including member access on a record field that happens to be named `features` '
+        + '(`record.features.x`). Stored form views are unaffected until their next '
+        + 'authoring-path save (zero such documents were measured to exist); on refusal the '
+        + 'author re-gates by record state or moves the gate to an app surface.',
     },
     {
       id: 'ui-mcp-connect-agent-unknown-keys-refused',
@@ -8051,10 +8181,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -8065,10 +8198,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -8099,9 +8235,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowPurge',
     // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
     // inbox batch 5, accepting #1883's recommendation B). `allowRestore` claimed to
@@ -8126,9 +8266,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -8762,6 +8906,28 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #12038 — `api/package-api.zod.ts` `PackageRollbackResponseSchema`, retired
+    // whole together with the `PackageApiContracts.rollbackPackage` entry that
+    // bound it (maintainer ruling 2026-08-27, sub-question 3A). The schema
+    // declared a VERSION rollback — `{ success, restoredVersion?, message? }` —
+    // while the live `POST /api/v1/packages/:packageId/rollback` route posts
+    // `{ commitId }` and the dispatcher serves it with `rollbackToPackageCommit`,
+    // the ADR-0067 COMMIT rollback: a wrong-operation declaration bound to the
+    // exact live path, which a future sweep would have read as authoritative.
+    // Zero consumers measured across objectstack/objectui/cloud (#12038 survey
+    // §5.2): only its own unit test and the #11925 negative guard, both updated
+    // in the retiring PR. No carrier key, no authored document, so no tombstone
+    // and no D2 conversion — this table plus the D3 semantic entry
+    // `package-rollback-response-retired` ARE the declaration (the #8715 route-3
+    // shape). The live route's true contract is
+    // `RollbackToPackageCommitResponseSchema` (`api/package-lifecycle.zod.ts`),
+    // authored in the same PR AFTER this retirement per the ruling's sequencing.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+    'api/PackageRollbackResponse',
     // #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this

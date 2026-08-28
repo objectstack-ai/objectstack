@@ -44,12 +44,9 @@ allowBuilds:
 #   sign-in and adapter find/update/delete — 1.7.1 behaves identically on
 #   better-sqlite3 13.0.3 and on 12.11.1. The upstream range is stale.
 #
-#   @better-auth/scim (held at a release candidate deliberately, not by
-#   neglect) peers better-call at an exact 1.3.7, while better-auth itself
-#   depends on 1.4.0. A better-auth plugin has to share the host's better-call
-#   instance, so the single 1.4.0 copy is the correct resolution rather than a
-#   skew to repair. This entry retires when SCIM moves off the rc: stable
-#   @better-auth/scim 1.7.1 already peers better-call 1.4.0.
+#   (The '@better-auth/scim>better-call' entry that used to sit here retired
+#   with the scim release-candidate pin — stable @better-auth/scim 1.7.1 peers
+#   better-call 1.4.0 exactly, so the skew it declared away is gone.)
 #
 #   @better-auth/core, @better-auth/oauth-provider, @better-auth/scim and
 #   @better-auth/sso each peer an exact @better-auth/utils 0.4.2, while the
@@ -75,7 +72,6 @@ allowBuilds:
 peerDependencyRules:
   allowedVersions:
     'better-auth>better-sqlite3': '13'
-    '@better-auth/scim>better-call': '1.4.0'
     '@better-auth/core>@better-auth/utils': '0.5.0'
     '@better-auth/oauth-provider>@better-auth/utils': '0.5.0'
     '@better-auth/scim>@better-auth/utils': '0.5.0'

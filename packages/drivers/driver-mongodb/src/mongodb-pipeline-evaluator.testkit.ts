@@ -30,7 +30,8 @@
  * (proxy 403 on the download — #5517), and a suite nobody has executed against
  * the real thing is a claim, not a check. The date operators added for #7580
  * (`$convert` → date, `$dateToString`, `$concat`, `$switch`, `$lte`) carry that
- * bound exactly as the #6850/#6814 ones do.
+ * bound exactly as the #6850/#6814 ones do, and so do `$type` and the BSON-order
+ * `$min` / `$max` added for #11151.
  *
  * The single most important discipline that makes the bound survivable: this
  * file models the DOCUMENTED semantics, never the behaviour the lowering
@@ -180,23 +181,70 @@ function formatDate(d: Date, format: string): string {
 }
 
 /**
- * BSON canonical sort order, for the two types `$lte` meets here. Null sorts
- * BELOW every string — which is why the `quarter` lowering can let its `$switch`
- * run on a null instant without a guard: it answers a digit, and the surrounding
- * `$concat` has already decided the whole label is null.
+ * BSON canonical TYPE order, for the types this evaluator models. The manual's
+ * order runs MinKey, Null, Numbers, String, Object, Array, BinData, ObjectId,
+ * **Boolean**, Date, Timestamp, Regex, MaxKey — so a boolean ranks ABOVE every
+ * number and every string. That ranking is the whole reason `$min` / `$max` can
+ * answer over a boolean column where `$sum` / `$avg` cannot: order statistics
+ * compare by type-then-value and return a MEMBER of the input, while the
+ * arithmetic accumulators ignore what they cannot add.
+ *
+ * ⛔ Every type not listed here is a thrown {@link UnsupportedShape}, never a
+ * silent rank. This function is the one place the order is written down, so a
+ * type it does not model refuses in BOTH of its callers rather than being ranked
+ * one way by `$lte` and dropped by `$min`.
+ *
+ * [#11151] Boolean was added here. The three ranks that existed before keep
+ * their relative order exactly, so `$lte` — whose only operands are the null
+ * and the string a date-bucket label reaches it as — is unchanged.
+ */
+function bsonRank(v: unknown): number {
+  if (v === MISSING || v === null) return 0;
+  if (typeof v === 'number') return 1;
+  if (typeof v === 'string') return 2;
+  if (typeof v === 'boolean') return 3;
+  throw new UnsupportedShape(`BSON canonical order over an unmodelled type: ${typeof v}`);
+}
+
+/**
+ * `left <= right` under BSON canonical order — type rank first, value second.
+ * Null sorts BELOW every string, which is why the `quarter` lowering can let its
+ * `$switch` run on a null instant without a guard: it answers a digit, and the
+ * surrounding `$concat` has already decided the whole label is null.
  */
 function bsonLte(left: unknown, right: unknown): boolean {
-  const rank = (v: unknown): number => {
-    if (v === MISSING || v === null) return 0;
-    if (typeof v === 'number') return 1;
-    if (typeof v === 'string') return 2;
-    throw new UnsupportedShape(`$lte over an unmodelled BSON type: ${typeof v}`);
-  };
-  const lr = rank(left);
-  const rr = rank(right);
+  const lr = bsonRank(left);
+  const rr = bsonRank(right);
   if (lr !== rr) return lr < rr;
   if (lr === 0) return true; // null <= null
+  // `false` sorts below `true`; TypeScript refuses a relational operator on two
+  // booleans, so the comparison is spelled through their numeric images.
+  if (lr === 3) return Number(left) <= Number(right);
   return (left as string | number) <= (right as string | number);
+}
+
+/**
+ * The manual's `$type`: the BSON type NAME of a value, and the string
+ * `'missing'` for a field path that resolved to nothing — the one type name
+ * that is not a type. Modelled because the `sum` / `avg` boolean coercion
+ * (#11151) emits `$type`, and an evaluator that guessed here would be blessing
+ * a lowering nobody checked.
+ *
+ * A JS number is reported as `'double'`: every unboxed number crosses the wire
+ * as a BSON double, and this evaluator has no boxed integers to distinguish, so
+ * `'double'` is the honest answer rather than a size-dependent guess between
+ * `'int'`, `'long'` and `'double'`.
+ */
+function bsonTypeName(v: unknown): string {
+  if (v === MISSING) return 'missing';
+  if (v === null) return 'null';
+  if (typeof v === 'boolean') return 'bool';
+  if (typeof v === 'number') return 'double';
+  if (typeof v === 'string') return 'string';
+  if (v instanceof Date) return 'date';
+  if (Array.isArray(v)) return 'array';
+  if (typeof v === 'object') return 'object';
+  throw new UnsupportedShape(`$type over an unmodelled BSON type: ${typeof v}`);
 }
 
 /** MongoDB's expression truthiness: `false`, `null`, `0` and missing are false. */
@@ -246,6 +294,17 @@ export function evalExpr(doc: Doc, expr: unknown): unknown {
     case '$lte': {
       if (!Array.isArray(arg) || arg.length !== 2) throw new UnsupportedShape('$lte takes two operands');
       return bsonLte(evalExpr(doc, arg[0]), evalExpr(doc, arg[1]));
+    }
+    case '$type': {
+      // [#11151] `$type` takes exactly ONE operand, unwrapped or wrapped in a
+      // one-element array; the manual accepts both spellings and the
+      // boolean-aggregand lowering emits the unwrapped one. A longer array is
+      // an error on a real server, so it is refused here rather than reported
+      // as `'array'`.
+      if (Array.isArray(arg) && arg.length !== 1) {
+        throw new UnsupportedShape(`$type takes one operand, got ${arg.length}`);
+      }
+      return bsonTypeName(evalExpr(doc, Array.isArray(arg) ? arg[0] : arg));
     }
     case '$cond': {
       if (!Array.isArray(arg) || arg.length !== 3) throw new UnsupportedShape('$cond takes [if, then, else]');
@@ -319,7 +378,21 @@ export function accumulate(rows: Doc[], acc: unknown): unknown {
   const [op] = keys;
   const arg = (acc as Doc)[op];
   const values = rows.map((row) => evalExpr(row, arg));
-  /** MongoDB's arithmetic accumulators ignore missing and non-numeric values. */
+  /**
+   * MongoDB's ARITHMETIC accumulators ignore missing and non-numeric values.
+   *
+   * [#11151] ⛔ This filter belongs to `$sum` and `$avg` and to nothing else. It
+   * used to be computed once for the whole switch and consumed by `$min` and
+   * `$max` as well — one arm too far, and the comment above it was accurate the
+   * whole time. `$min` / `$max` are ORDER STATISTICS over BSON canonical order
+   * (see {@link bsonRank}), not arithmetic: they rank every type, so a boolean
+   * column has a real minimum and a real maximum. Filtering to numbers left
+   * them with nothing and they answered `null` — SILENTLY, which is the one
+   * thing this file's head note promises it never does. A wrong answer from a
+   * strict evaluator is worse than a refusal, because the red it produces reads
+   * as a defect in the lowering under test; that misreading really happened, and
+   * cost a card's dispatch a wrong diagnosis.
+   */
   const numbers = values.filter((v): v is number => typeof v === 'number');
 
   switch (op) {
@@ -328,9 +401,24 @@ export function accumulate(rows: Doc[], acc: unknown): unknown {
     case '$avg':
       return numbers.length === 0 ? null : numbers.reduce((a, b) => a + b, 0) / numbers.length;
     case '$min':
-      return numbers.length === 0 ? null : Math.min(...numbers);
-    case '$max':
-      return numbers.length === 0 ? null : Math.max(...numbers);
+    case '$max': {
+      // The manual's rule for both: null and missing are IGNORED, whatever is
+      // left is compared by BSON canonical order, and a group in which every
+      // value is null or missing answers `null`. The result is a MEMBER of the
+      // input — a boolean in, a boolean out (the #11249 contract) — never a
+      // number derived from one. `bsonRank` refuses any type it does not model,
+      // so an unmodelled aggregand raises rather than collapsing to `null`.
+      const present = values.filter((v) => v !== MISSING && v !== null);
+      if (present.length === 0) return null;
+      // Rank every candidate BEFORE folding, so the refusal is a property of
+      // the aggregand's TYPE and not of the group's cardinality: a fold alone
+      // never compares a one-element group, and would hand back an unmodelled
+      // value unexamined — the same silence this arm was fixed to stop.
+      for (const v of present) bsonRank(v);
+      return present.reduce((best, v) =>
+        (op === '$min' ? bsonLte(v, best) : bsonLte(best, v)) ? v : best,
+      );
+    }
     case '$addToSet': {
       // `$addToSet` skips a MISSING field and keeps an explicit `null` — the
       // whole of #6814 lives in that second half.

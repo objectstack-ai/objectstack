@@ -50,6 +50,12 @@ import type {
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken } from '@objectstack/spec/data';
+// [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
+// Operation Message Catalog is the ONE seat for these sentences — its own
+// header bars both a package-local string table and a second rendering
+// mechanism for a second producer, and #12493 landed this service's key
+// (`approval_recall_not_submitter`) into it ahead of this consumer half.
+import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { isGrantActive } from '@objectstack/core';
 import {
   filterApproversWhoCanRead,
@@ -181,6 +187,36 @@ export const ESCALATION_JOB_NAME = 'approvals-sla-escalation';
 export const ESCALATION_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 /** Reserved actor id for machine decisions made by the SLA scanner. */
 export const SLA_ACTOR_ID = 'system:sla';
+/**
+ * Read-side legacy window for the #12278 `escalation.enabled` default flip
+ * (maintainer ruling 2026-08-27, Option C).
+ *
+ * Until the flip, `ApprovalEscalationSchema` declared `enabled` with
+ * `.default(false)` while this sweep never read the key — and the
+ * approval-node executor parses node config through that schema before
+ * `openNodeRequest` snapshots it onto the request row. Every request opened
+ * from a flow that OMITTED `enabled` therefore stores a MATERIALIZED
+ * `enabled: false` in `node_config_json`, byte-identical to an authored
+ * `false`, and every such stored row is escalating today (measured basis on
+ * the ruling: the console inspector cannot author a `timeoutHours` without
+ * toggling the switch on, so no stored `false + timeoutHours` row carries an
+ * enforceable off-intent that today's runtime honours).
+ *
+ * The sweep's `enabled === false ⇒ skip` gate below therefore applies only to
+ * snapshots created at/after this cutoff (written by post-flip code, where
+ * `false` survives the parse only when an author wrote it). Older snapshots
+ * keep today's behaviour — they escalate — and the window retires itself as
+ * those pending requests drain; no tenant row is ever rewritten.
+ *
+ * Known, deliberate bound (recorded on #12278): an install that upgrades LONG
+ * after this date has pending requests created between the cutoff and its
+ * upgrade whose materialized `false` post-dates the cutoff; those honour the
+ * declared off. The alternative (a per-install marker or a stored-data
+ * normalization) buys that edge back at the price of new machinery or tenant
+ * writes — both rejected as the more expensive option under the ruling's
+ * "pick the cheaper transition" instruction.
+ */
+export const ESCALATION_ENABLED_FLIP_CUTOFF_MS = Date.parse('2026-08-28T00:00:00Z');
 /** Reserved actor id for requests abandoned because their run died (#3456). */
 export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
 /**
@@ -598,6 +634,21 @@ export interface ApprovalServiceOptions {
    * its boundaries.
    */
   recordReaderVisibleObjects?: string[];
+  /**
+   * [#11993] Deployment i18n lookup for user-facing refusal copy — an
+   * `II18nService.t`-compatible function, resolved LAZILY per refusal for the
+   * same reason {@link ApprovalServiceOptions.tenancyPosture} is: the i18n
+   * service is registered by another plugin (ADR-0029 D8) which may start
+   * after this one, and a lookup captured at construction would pin
+   * `undefined` for the life of the process.
+   *
+   * Absent (or resolving to `undefined`) is a supported stack, not a
+   * degraded one: the built-in catalog still renders the caller's locale.
+   * What it adds is the override address the catalog documents —
+   * `errors.approval_recall_not_submitter` — so a deployment's own
+   * `translation` metadata wins over the built-in sentence.
+   */
+  messageTranslator?: () => ValidationMessageTranslator | undefined;
 }
 
 export class ApprovalService implements IApprovalService {
@@ -609,6 +660,8 @@ export class ApprovalService implements IApprovalService {
   private publicBaseUrl: string;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
+  /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
+  private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /**
    * [#8652] The enabled object set for the record-reader visibility tier.
    * EMPTY means the tier is off — the default, and the shape every existing
@@ -634,6 +687,7 @@ export class ApprovalService implements IApprovalService {
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
     this.tenancyPosture = opts.tenancyPosture;
     this.fieldVisibility = opts.fieldVisibility;
+    this.messageTranslator = opts.messageTranslator;
     this.recordReaderVisibleObjects = new Set(
       (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
         .map((n) => String(n ?? '').trim())
@@ -823,6 +877,47 @@ export class ApprovalService implements IApprovalService {
     // the contract actually knows.
     const actorTenant = context.tenantId ?? (context as any).organizationId ?? null;
     return requestOrg == null || (actorTenant != null && String(requestOrg) === String(actorTenant));
+  }
+
+  /**
+   * [#11993] The END USER's half of an approval refusal.
+   *
+   * `handleApprovalError` in `@objectstack/rest` maps this service's
+   * `CODE: message` throws onto the wire by testing the prefix for the status
+   * and then STRIPPING it (a leading run of `[A-Z_]` plus a colon and any
+   * following whitespace), shipping what remains as the body's
+   * human-readable `error` — which Console splices under its own localized
+   * label ("撤回审批失败: …"). A hardcoded English reason therefore reaches an
+   * operator in a fully Chinese deployment as a Chinese prefix glued onto an
+   * English sentence they cannot act on.
+   *
+   * Rendered through the SHARED Operation Message Catalog
+   * (`@objectstack/spec/system`), not a second mechanism: same
+   * `errors.<key>` override address, same resolution ladder (deployment
+   * override -> locale catalog -> `en` -> the key), same guarantee that a
+   * misbehaving i18n service cannot turn a 403 into a 500. The catalog's
+   * header names this seat explicitly; `plugin-security`'s
+   * `userFacingDenialMessage` is the sibling consumer this mirrors.
+   *
+   * The CODE PREFIX stays on the message. It is not user copy — it is how the
+   * REST layer derives the status and the ADR-0112 wire code, and it is
+   * stripped before the sentence reaches a body. The developer's half moves
+   * to the log, where the ids it names are legible to an operator and to
+   * nobody else.
+   */
+  private userFacingRefusal(
+    messageKey: 'approval_recall_not_submitter',
+    context: ExecutionContext,
+  ): string {
+    let translate: ValidationMessageTranslator | undefined;
+    try {
+      translate = this.messageTranslator?.();
+    } catch {
+      // i18n is optional and late-bound; the built-in catalog still renders
+      // the caller's locale without it.
+      translate = undefined;
+    }
+    return renderOperationMessage({ messageKey }, { locale: context?.locale, translate });
   }
 
   /**
@@ -2701,9 +2796,28 @@ export class ApprovalService implements IApprovalService {
     }
     // The submitter withdraws their own request; a privileged admin may recall
     // any pending request to release a stuck record (#3424).
+    //
+    // [#11993] The GATE is untouched — who may recall an approval is exactly
+    // what it was. Only the refusal's user-facing half changed: it used to be
+    // one hardcoded English sentence that Console rendered verbatim in a
+    // toast. See {@link ApprovalService.userFacingRefusal}.
     if (!this.isOverrideActor(context, raw.organization_id ?? null)
       && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
-      throw new Error(`FORBIDDEN: only the submitter may recall this request`);
+      // The developer's half: the ids the catalog sentence deliberately does
+      // not name (the throw site knows the submitter only as an opaque user
+      // id), kept where a developer reads them and a user never does.
+      const developerMessage =
+        `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
+        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override`;
+      this.logger?.warn?.(developerMessage, {
+        request: requestId,
+        actor: actorId,
+        submitter: String(raw.submitter_id),
+        status: raw.status,
+      });
+      throw new Error(
+        `FORBIDDEN: ${this.userFacingRefusal('approval_recall_not_submitter', context)}`,
+      );
     }
     // A returned request is only recallable while it is still the run's live
     // frontier — a resubmitted (or later-node) request supersedes it.
@@ -3450,7 +3564,10 @@ export class ApprovalService implements IApprovalService {
    * `escalation.timeoutHours` and whose deadline has passed is escalated
    * **at most once, ever** — the `escalate` audit row is the idempotency
    * marker, written before any mutation (audit-first, like reassign). One
-   * bad row never stops the sweep.
+   * bad row never stops the sweep. A block that explicitly declares
+   * `enabled: false` is skipped (#12278 — the declared switch is enforced;
+   * pre-flip snapshots ride the legacy window on
+   * {@link ESCALATION_ENABLED_FLIP_CUTOFF_MS}).
    */
   async runEscalations(): Promise<{ scanned: number; escalated: number }> {
     let rows: any[] = [];
@@ -3471,6 +3588,15 @@ export class ApprovalService implements IApprovalService {
         const cfg = parseJson<any>(raw.node_config_json, undefined);
         const esc = cfg?.escalation;
         if (!esc || typeof esc.timeoutHours !== 'number' || esc.timeoutHours <= 0) continue;
+        // #12278: the declared switch is enforced — an explicit
+        // `enabled: false` skips the sweep (strict `=== false`: an absent key
+        // escalates, both for pre-materialization legacy rows and because the
+        // schema default is now `true`). Snapshots created before the flip
+        // cutoff carry a schema-materialized `false` that is indistinguishable
+        // from an authored one and are escalating today — the legacy window
+        // preserves them verbatim; see ESCALATION_ENABLED_FLIP_CUTOFF_MS.
+        if (esc.enabled === false
+          && Date.parse(raw.created_at ?? '') >= ESCALATION_ENABLED_FLIP_CUTOFF_MS) continue;
         const due = slaDueAt(raw.created_at, cfg);
         if (!due || Date.parse(due) > this.clock.now().getTime()) continue;
 

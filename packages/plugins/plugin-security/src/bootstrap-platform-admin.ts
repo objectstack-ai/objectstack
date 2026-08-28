@@ -62,6 +62,7 @@ import { postureEnforcesWall, type PermissionSet } from '@objectstack/spec/secur
 import { SystemUserId } from '@objectstack/spec/system';
 import {
   PLATFORM_OWNER_EMAIL_ENV,
+  isEmailVerifiedUserRow,
   resolvePlatformOwnerEmail,
   resolveTenancyPosture,
 } from '@objectstack/types';
@@ -136,19 +137,16 @@ function genId(prefix: string): string {
 }
 
 /**
- * [#11343] Verified-email predicate for the walled elevation match — a
- * fail-closed ALLOW-LIST over the representations a driver may hand back for
- * the `sys_user.email_verified` boolean column (JS `true`, SQLite `1`, and
- * their stringified forms). Everything else — `false`/`0`, `null`, an ABSENT
- * field on an imported/legacy row, or any representation not listed — reads
- * as UNVERIFIED. Absent-means-unverified is deliberate: treating a missing
- * column as verified would re-open the exact hole this predicate closes for
- * every row that predates the column.
+ * [#11343] Verified-email predicate for the walled elevation match.
+ *
+ * [#12751] The predicate itself moved to `@objectstack/types`
+ * (`isEmailVerifiedUserRow`) so the owner-verification boot diagnostic in
+ * `plugin-auth` reads the SAME allow-list this gate refuses on — the
+ * fail-closed semantics (absent-means-unverified) are documented and pinned
+ * at the definition. This alias keeps the gate's call sites reading in the
+ * gate's own vocabulary.
  */
-function isEmailVerified(u: any): boolean {
-  const v = u?.email_verified;
-  return v === true || v === 1 || v === '1' || v === 'true';
-}
+const isEmailVerified = isEmailVerifiedUserRow;
 
 /**
  * [#11343] Which `sys_user` writes can change the answer of the elevation

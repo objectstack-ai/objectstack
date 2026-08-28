@@ -20,6 +20,7 @@ import {
   AUDIENCE_CONFIG_ERROR,
   type ResolvedAudience,
 } from './audience-posture.js';
+import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import type { IDataEngine } from '@objectstack/core';
 // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
 // `auth-manager` used to re-derive that standing itself, in two spellings
@@ -962,6 +963,14 @@ export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
   /**
+   * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
+   * dev fallback is `'dev-secret-' + Date.now()` — a fresh value per call — so
+   * every consumer that needs the same key material (better-auth's own
+   * `secret` and the SCIM credential digests, which are keyed HMACs over it)
+   * must read this memo rather than re-resolving.
+   */
+  private resolvedAuthSecret?: string;
+  /**
    * [#8289] The org-role ac map handed to the `organization` plugin as `roles`
    * (`undefined` → the plugin runs on better-auth's `defaultRoles`). Stashed at
    * plugin-build time because `assertRemoveMemberPermitted` has to ask the
@@ -1061,7 +1070,7 @@ export class AuthManager {
     const passwordHasher = await this.resolvePasswordHasher();
     const betterAuthConfig: BetterAuthOptions = {
       // Base configuration
-      secret: this.config.secret || this.generateSecret(),
+      secret: this.resolveAuthSecret(),
       // Absolute origin (getCanonicalOrigin prepends https:// when baseUrl is a
       // bare host) so the reset-password / verify-email / magic-link URLs
       // better-auth derives from baseURL are always clickable links.
@@ -1371,6 +1380,62 @@ export class AuthManager {
       } : {}),
 
       // Session configuration
+      //
+      // ⚠️ `session.cookieCache` is the OTHER door into the architecture #4785
+      // rejected, and it is deliberately not opened here. What that costs, and
+      // what is actually known about it, measured 2026-08-27 against the
+      // installed better-auth `1.7.1` (read out of `node_modules`, never off
+      // the `^1.7.1` range) — each claim names the file it came from so a
+      // version bump is re-checkable one grep at a time:
+      //
+      //  - **The failure DIRECTION is the sibling's.** With `cookieCache`
+      //    enabled, `/get-session` answers from a signed payload in the
+      //    client's own `session_data` cookie and returns before any adapter
+      //    read (`dist/api/routes/session.mjs:48-130`). ObjectStack revokes by
+      //    writing the `sys_session` row — `enforceSessionControls` /
+      //    `enforceConcurrentCap` stamp `revoked_at` + a past `expires_at`
+      //    (ADR-0069 D4), and `hideRevokedSessionRow` hides a tombstoned row
+      //    from better-auth's reads (`session-tombstone.ts`). All of it is
+      //    read-path enforcement, so for as long as the cookie answers, a
+      //    revoked session keeps authenticating and nobody gets an error. Same
+      //    silent direction as `secondaryStorage` (see `secondary-storage.ts`).
+      //
+      //  - ⭐ **The REACH is materially smaller, and saying so is the point.**
+      //    Three differences, all measured, not inferred:
+      //    1. The session of RECORD does not move. `cookieCache` is read-side
+      //       only — `createSession` still writes the `sys_session` row, so
+      //       admin session lists, the concurrent-cap count and D4's audit
+      //       trail all stay correct. `secondaryStorage` skips the row.
+      //    2. The staleness window is BOUNDED and per-client:
+      //       `cookieCache.maxAge`, default 300s (`dist/cookies/index.mjs:50`,
+      //       `:99`). It cannot be extended without a database read either —
+      //       better-auth force-disables the stateless `refreshCache` whenever
+      //       a `database` is configured, which ObjectStack always does
+      //       (`dist/context/create-context.mjs:149-165`). Under
+      //       `secondaryStorage` the cache IS the record and the window has no
+      //       bound at all.
+      //    3. Sensitive operations already bypass it: better-auth's own
+      //       `getAuthoritativeSessionFromCtx` / `sensitiveSessionMiddleware`
+      //       re-read with `disableCookieCache: true` when a `database` is
+      //       configured (`dist/api/routes/session.mjs:270-280`). There is no
+      //       equivalent escape from `secondaryStorage`.
+      //
+      //  - **It is not reachable from ObjectStack config today, by
+      //    construction rather than by refusal.** The spec's
+      //    `AuthConfigSchema.session` declares `expiresIn` / `updateAge` only,
+      //    and this block reads only those two, so a `cookieCache` key on
+      //    `AuthManagerOptions.session` is DROPPED, not honoured — pinned
+      //    end-of-chain in `session-of-record.test.ts`. The one way in is
+      //    `authInstance`, where the host has replaced this whole config.
+      //
+      // ⛔ So this is a disclosed cost on a door a host must build to reach —
+      // NOT a guard, and deliberately not one. The #4785 posture is opt-in with
+      // the cost stated (maintainer ruling 2026-08-27), the same posture
+      // `cacheSecondaryStorage()` is exported under. Plumbing `cookieCache`
+      // through is therefore a decision that re-opens #4785, not a feature: it
+      // would trade D4's revocation latency for request latency, and the trade
+      // has to be made deliberately, by a maintainer, with the window written
+      // down. If you are here to add it, that ruling is what you need first.
       session: {
         ...AUTH_SESSION_CONFIG,
         expiresIn: this.config.session?.expiresIn || 60 * 60 * 24 * 7, // 7 days default
@@ -3091,24 +3156,44 @@ export class AuthManager {
     // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
     // external IdP (Okta / Entra) auto-provision / deprovision THIS env's users
     // (the paid Identity lifecycle, ADR-0071). The env is the SCIM Service
-    // Provider; endpoints mount under /api/v1/auth/scim/v2/{Users,…} (SCIM 2.0)
-    // and /api/v1/auth/scim/{generate-token,…} (management). `active:false` →
-    // ban + session revoke (needs the admin plugin, forced on above); org-scoped
-    // tokens need the organization plugin. This plugin hardcodes its
-    // `scimProvider` model and accepts no `schema` option — still true of the
-    // installed 1.7.0-rc.1 (`SCIMOptions` declares no `schema` / `modelName` /
-    // `fields` member; measured 2026-08-19). NOT "like @better-auth/sso", as
-    // this line used to say: sso accepts one as of 1.7.1 (#8224), so scim is now
-    // the only one of the pair for which the adapter bridge is forced. Bridged
-    // to `sys_scim_provider` via AUTH_MODEL_TO_PROTOCOL. Toggle with
-    // `OS_SCIM_ENABLED`.
+    // Provider; SCIM 2.0 endpoints mount under /api/v1/auth/scim/v2/{Users,…}.
+    // `active:false` → ban + session revoke (needs the admin plugin, forced on
+    // above). This plugin still accepts no `schema` option (`SCIMOptions`
+    // declares no `schema` / `modelName` / `fields` member on the installed
+    // 1.7.1), so its seven models are bridged to the `sys_scim_*` platform
+    // objects via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
     //
-    // storeSCIMToken: 'hashed' — never persist the bearer in cleartext; the
-    // plaintext is returned exactly once from generate-token (for the IdP admin).
+    // Connections are RUNTIME DATA, not boot config (#3653): the stable
+    // constructor's three-way requirement (static `connections` | bearer
+    // verifier | managed catalog) is satisfied with an application-owned
+    // `verifyBearerToken` that resolves the connection from a
+    // `sys_scim_connection_credential` row at request time. ObjectStack owns
+    // the whole credential lifecycle — mint / store / verify — in
+    // `scim-connection-service.ts`; only a keyed one-way digest is ever
+    // persisted (pinned by `credential-at-rest-posture.test.ts`). The rc.1
+    // `storeSCIMToken` / `/scim/generate-token` surface no longer exists on
+    // stable, and the upstream `managedConnections` catalog is deliberately
+    // NOT adopted (maintainer ruling 2026-08-25).
     if (enabled.scim) {
       await this.addOptionalPlugin(plugins, 'scim', async () => {
         const { scim } = await import('@better-auth/scim');
-        return scim({ storeSCIMToken: 'hashed' });
+        const { verifyScimBearerToken, scimRequestScope } = await import('./scim-connection-service.js');
+        const secret = this.resolveAuthSecret();
+        return scim({
+          connections: [],
+          authentication: {
+            verifyBearerToken: async (input) => {
+              // Mark the remainder of this request's async chain as a SCIM
+              // protocol request, so the adapter runs its provisioning writes
+              // inside a REAL engine transaction (see scimRequestScope's
+              // rationale in scim-connection-service.ts).
+              scimRequestScope.enterWith({ scim: true });
+              const engine = this.config.dataEngine;
+              if (!engine) return null; // no store to verify against — fail closed
+              return verifyScimBearerToken(engine as never, secret, input.token);
+            },
+          },
+        });
       });
     }
 
@@ -3268,6 +3353,14 @@ export class AuthManager {
   /**
    * Generate a secure secret if not provided
    */
+  /** The auth secret, resolved once — see {@link resolvedAuthSecret}. */
+  private resolveAuthSecret(): string {
+    if (!this.resolvedAuthSecret) {
+      this.resolvedAuthSecret = this.config.secret || this.generateSecret();
+    }
+    return this.resolvedAuthSecret;
+  }
+
   private generateSecret(): string {
     const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
     if (envSecret) return envSecret;
@@ -3474,6 +3567,20 @@ export class AuthManager {
   private static readonly SELF_REG_GRANT_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
+   * [#12751] Owner-verified stamps staged by the admission gate for the
+   * composed `user.create.before` hook — same shape and lifetime discipline
+   * as {@link pendingSelfRegistrationGrants} (keyed by lowercased email;
+   * better-auth lowercases the address on `createUser`, and an in-flight
+   * duplicate cannot create twice). One entry only ever exists for the
+   * declared platform owner's address on a walled deployment; TTL pruning
+   * keeps an admission whose creation never completed from leaking into an
+   * unrelated later creation of the same address.
+   */
+  private pendingOwnerVerifiedStamps = new Map<string, { stagedAtMs: number }>();
+
+  private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
+
+  /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
    * Matches the bound the dev-admin seed reads with, so the two ask the same
    * question of the same window.
@@ -3495,12 +3602,29 @@ export class AuthManager {
    */
   private static readonly PENDING_INVITATION_PROBE_MAX_PAGES = 200;
 
-  /** `error` when the host logger carries it, else the guaranteed `warn` channel (#9754). */
+  /**
+   * `error` when the host logger carries it, else the guaranteed `warn` channel (#9754).
+   *
+   * ⛔ Call through the PROPERTY — never through an extracted reference.
+   * `(logger?.error ?? logger?.warn)?.(…)` evaluates to the *function* and then
+   * invokes it, so the call runs with `this === undefined`. A plain-closure
+   * logger survives that; `@objectstack/core`'s class-based `ObjectLogger` does
+   * not — its `error` reaches for `this.writeErrorLike` (and `warn`/`info` for
+   * `this.write`) and throws `Cannot read properties of undefined`. Measured on
+   * a real composed EE boot: every audience refusal routed through here became
+   * `HTTP 500 null`, because the throw escaped the caller's `catch` when that
+   * handler called this helper a second time — so the operator lost the very
+   * verdict this method exists to report.
+   *
+   * The branch below keeps BOTH halves of the contract: the `error`→`warn`
+   * fallback (#9754) and the receiver.
+   */
   private audienceLogError(message: string, meta?: Record<string, unknown>): void {
     const logger = this.config.logger as
       | { error?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void; info?: (m: string, meta?: any) => void }
       | undefined;
-    (logger?.error ?? logger?.warn)?.(message, meta);
+    if (logger?.error) logger.error(message, meta);
+    else logger?.warn?.(message, meta);
   }
 
   /** OAuth providerIds that are OPERATOR-REGISTERED identity authorities (enterprise `oidcProviders`, incl. the cloud platform IdP). */
@@ -3577,6 +3701,23 @@ export class AuthManager {
           });
         }
         return { error: verdict.code, errorDescription: verdict.message };
+      }
+      // [#12751] Walled deployments: an ADMITTED creation of the declared
+      // platform owner through an operator provisioning path (operator class,
+      // or the bootstrap carve-out) is stamped email-verified at creation —
+      // maintainer ruling 2026-08-28, 「运营方创建即视为已验证」. The decision
+      // (and the per-path argument) lives in `walled-owner-operator-stamp.ts`;
+      // this seam only STAGES it, because the admission gate is the one place
+      // that holds the vendor's own `source.method` signal AND the bootstrap
+      // probe. Consumed once by the composed `user.create.before` hook, so the
+      // row is BORN verified; an email UPDATE can never traverse that seam,
+      // which is what keeps a later change-to-owner-address from inheriting
+      // the stamp.
+      if (
+        email &&
+        shouldStampOwnerVerifiedAtCreation({ email, creationClass, isBootstrap })
+      ) {
+        this.stageOwnerVerifiedStamp(email);
       }
       if (verdict.grantPermissionSet) {
         const setName = audience.selfRegistrationPermissionSet;
@@ -3779,6 +3920,32 @@ export class AuthManager {
       return Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
     } catch {
       return [];
+    }
+  }
+
+  /** [#12751] Stage the owner-verified stamp for the address being created. */
+  private stageOwnerVerifiedStamp(email: string): void {
+    this.prunePendingOwnerVerifiedStamps();
+    this.pendingOwnerVerifiedStamps.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+  }
+
+  /**
+   * [#12751] Consume the staged stamp for this address — one shot: the entry
+   * is deleted on read, so exactly one creation can be born verified per
+   * admission, and nothing survives for any later write to inherit.
+   */
+  private takeOwnerVerifiedStamp(email: string): boolean {
+    this.prunePendingOwnerVerifiedStamps();
+    const key = email.trim().toLowerCase();
+    if (!this.pendingOwnerVerifiedStamps.has(key)) return false;
+    this.pendingOwnerVerifiedStamps.delete(key);
+    return true;
+  }
+
+  private prunePendingOwnerVerifiedStamps(): void {
+    const cutoff = Date.now() - AuthManager.OWNER_STAMP_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingOwnerVerifiedStamps) {
+      if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
   }
 
@@ -5589,6 +5756,35 @@ export class AuthManager {
           await membershipReconciler(user);
         };
 
+    // [#12751] Walled owner-verified stamp, the CONSUMING half: the admission
+    // gate staged the decision (see `validateAudienceAdmission` and
+    // `walled-owner-operator-stamp.ts`); this before-hook lands it, so the
+    // declared owner's operator-provisioned row is BORN `emailVerified: true`
+    // — the same at-creation shape as a trusted-SSO insert, and the creation
+    // write then replays `bootstrapPlatformAdmin` (`shouldReplayBootstrapFor`,
+    // `create` arm), which elevates it with no further verification step.
+    // `user.create.before` is a seam only a CREATION traverses, so a later
+    // email UPDATE to the owner address structurally cannot inherit the
+    // stamp. Host hook chains FIRST and keeps its result shape, exactly as
+    // `sessionBefore` above does; a host `false` (refuse the creation) is
+    // honoured before the stamp is even consumed.
+    const hostUserBefore = (host as any)?.user?.create?.before;
+    const userBefore = async (user: any, ctx: any) => {
+      let draft = user;
+      if (hostUserBefore) {
+        const hostResult = await hostUserBefore(user, ctx);
+        if (hostResult === false) return false;
+        if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
+          draft = { ...draft, ...(hostResult as any).data };
+        }
+      }
+      const email = typeof draft?.email === 'string' ? draft.email : '';
+      if (email && this.takeOwnerVerifiedStamp(email)) {
+        return { data: { ...draft, emailVerified: true } };
+      }
+      return draft === user ? undefined : { data: draft };
+    };
+
     return {
       ...(host ?? {}),
       account: {
@@ -5602,6 +5798,7 @@ export class AuthManager {
         ...((host as any)?.user ?? {}),
         create: {
           ...((host as any)?.user?.create ?? {}),
+          before: userBefore,
           after: userAfter,
         },
       },

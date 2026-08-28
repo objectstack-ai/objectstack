@@ -1996,6 +1996,68 @@ export class RemoteTransport {
 
   /**
    * Map ObjectStack field types to SQLite column types for DDL.
+   *
+   * ## [#12586] These are NOT the same type names the local transport emits,
+   * and that is a recorded decision — not an oversight
+   *
+   * `TursoDriver` is dual-transport. Local/replica mode extends `SqlDriver`
+   * and lets knex spell the column (`table.json(name)`, `table.string(name)`,
+   * …); remote mode never touches knex and spells its own types here. The two
+   * disagree on **every** column:
+   *
+   * ```text
+   *  declared field       local (knex)    remote (this method)
+   *  -------------------  --------------  --------------------
+   *  { type: 'string' }   varchar(255)    TEXT
+   *  { type: 'number' }   float           REAL
+   *  { type: 'boolean' }  boolean         INTEGER
+   *  { type: 'json' }     json            TEXT
+   *  { multiple: true }   json            TEXT
+   * ```
+   *
+   * For every row but the last two the disagreement is **cosmetic**. SQLite
+   * derives a column's affinity from substrings of the declared type name, so
+   * `varchar(255)` and `TEXT` are both TEXT affinity, `float` and `REAL` are
+   * both REAL affinity, and `boolean` and `INTEGER` both store 0/1 as an
+   * integer. Measured, not derived: writing the same value through each
+   * transport lands it in the same storage class on all of them.
+   *
+   * ⚠️ **The JSON routes are the exception, and they are the reason this
+   * comment exists.** `json` contains none of SQLite's affinity markers
+   * (`INT`, `CHAR`/`CLOB`/`TEXT`, `BLOB`, `REAL`/`FLOA`/`DOUB`), so it takes
+   * **NUMERIC** affinity and converts number-like input on the way in; the
+   * `TEXT` returned below takes TEXT affinity and converts nothing. So the two
+   * transports do not merely spell this column differently — they disagree
+   * about **what a value becomes on disk**.
+   *
+   * ### Why it is safe today
+   *
+   * Both transports round-trip every `VALUE_ROUNDTRIP_CASES` value faithfully
+   * (`turso-value-roundtrip-conformance.test.ts`, both halves). They arrive
+   * there by different routes: #12380 made the local `Field.json` codec
+   * injective, so the NUMERIC-affinity column is only ever handed an encoded
+   * form it has nothing to convert; this transport's own `serializeValue` /
+   * `mapRows` reach the same answer over a column where no conversion was
+   * available to begin with.
+   *
+   * ⛔ Safe is not the same as identical. Measured on the shared fixture: a
+   * declared `Field.json` holding the native `123` is an INTEGER cell locally
+   * and a TEXT cell here, and `find()` answers `123` on both. That is the
+   * #11535 class in its quiet phase — two paths agreeing on every visible
+   * answer while standing on different ground. PR #12585's ablation is the
+   * loud phase: restoring the pre-#12380 SQLite `json` branch broke the two
+   * transports by DIFFERENT counts, diverging on `s_0123`, because only the
+   * local column had NUMERIC affinity to destroy a bare `'0123'` with.
+   *
+   * ### ⛔ Before you converge them
+   *
+   * Making both sides emit one type changes what new columns are physically
+   * declared as, and it needs the un-measured *"why did remote choose TEXT?"*
+   * answered first — so #12586 ruled it out of scope and recorded the
+   * asymmetry instead. `turso-json-column-type-asymmetry.test.ts` pins the
+   * pair and goes red if either side moves. When convergence is genuinely
+   * taken on, **delete or invert that pin** as part of the change; ⛔ never
+   * edit its expectations to match new output.
    */
   private mapFieldTypeToSQL(field: any): string {
     if (field.multiple) return 'TEXT'; // JSON array stored as text

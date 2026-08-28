@@ -305,6 +305,21 @@ describe('ApprovalEscalationSchema', () => {
     expect(result.notifySubmitter).toBe(true);
     expect(() => ApprovalEscalationSchema.parse({ enabled: true, timeoutHours: 0 })).toThrow();
   });
+
+  // #12278 (maintainer ruling 2026-08-27): the feature switch is whether an
+  // escalation block exists at all; within a block carrying timeoutHours,
+  // escalation is ON unless explicitly turned off. Declared in
+  // DEFAULT_CHANGES_BY_MAJOR (17) — this pin is what keeps the fingerprint honest.
+  it('defaults enabled to true — a block carrying timeoutHours is live unless explicitly off (#12278)', () => {
+    const omitted = ApprovalEscalationSchema.parse({ timeoutHours: 24 });
+    expect(omitted.enabled).toBe(true);
+    const explicit = ApprovalEscalationSchema.parse({ enabled: false, timeoutHours: 24 });
+    expect(explicit.enabled).toBe(false);
+    // No escalation block at all stays ABSENT on the node config — "no block"
+    // and "block declared off" remain two distinguishable states post-parse.
+    const noBlock = ApprovalNodeConfigSchema.parse({ approvers: [{ type: 'user', value: 'u1' }] });
+    expect(noBlock.escalation).toBeUndefined();
+  });
 });
 
 /**

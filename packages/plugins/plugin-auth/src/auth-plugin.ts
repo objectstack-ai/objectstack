@@ -66,7 +66,9 @@ import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
   devSeedAdminEmail,
   isDevAdminSeedArmed,
+  probeWalledOwnerAccountState,
   warnIfWalledOwnerCannotVerify,
+  type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
@@ -932,12 +934,29 @@ export class AuthPlugin implements Plugin {
       // this hook's answer independent of hook registration order.
       let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
       try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
+      const hasEmailTransport = !!emailSvc || !!this.authManager?.hasEmailTransport();
+      const hasFederatedSignIn =
+        (pub?.socialProviders?.length ?? 0) > 0 || pub?.features?.sso === true;
+      // [#12751] The third wiring fact: what the store says about the declared
+      // owner's account. Probed only when the answer can matter (walled +
+      // owner declared + neither transport nor federated sign-in wired), so
+      // every other boot pays nothing. This hook runs BEFORE the dev-seed
+      // hook below (registration order), so the probe reads the pre-seed
+      // store — the predicate's dev-seed clauses are written for exactly
+      // that reading.
+      let ownerAccountState: WalledOwnerAccountState = 'unknown';
+      if (
+        !hasEmailTransport &&
+        !hasFederatedSignIn &&
+        postureEnforcesWall(resolveTenancyPosture()) &&
+        resolvePlatformOwnerEmail()
+      ) {
+        let ql: IDataEngine | undefined;
+        try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+        ownerAccountState = await probeWalledOwnerAccountState(ql);
+      }
       warnIfWalledOwnerCannotVerify(
-        {
-          hasEmailTransport: !!emailSvc || !!this.authManager?.hasEmailTransport(),
-          hasFederatedSignIn:
-            (pub?.socialProviders?.length ?? 0) > 0 || pub?.features?.sso === true,
-        },
+        { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
         ctx.logger,
       );
     });

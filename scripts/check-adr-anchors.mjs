@@ -147,6 +147,63 @@
 // tombstone. A tombstone sharing its number with a live record is a collision, and
 // the audit above already reports that, loudly and about the right fact.
 //
+// ## The fifth thing it checks: a cited `Dk` names a real decision OF that ADR (#9592)
+//
+// Everything above stops at the NUMBER. `ADR-0057 D10` was checked to the point
+// of "0057 names one record"; the `D10` half — the part that says WHICH of that
+// record's decisions is being leaned on — was never read at all. That is the
+// #8386 / #9255 failure family: a citation whose number is right, whose letter
+// points at a decision the record does not make, and which every gate calls
+// green. Commissioned as remedy 3 of the maintainer ruling on #9255.
+//
+// The check is: for each `ADR-NNNN Dk` in an anchor's `invariant` or in an
+// ANCHORED FILE's text, `Dk` must appear in the cited record's decision index.
+// Scope is the anchored surface deliberately — that is where #3723 happened and
+// where the invariants live; the repo-wide citation corpus is an order of
+// magnitude larger and is left to a separate decision.
+//
+// ### The grammar, MEASURED before it was parsed
+//
+// A parser too strict reddens correct citations; one too loose passes anything.
+// So the shapes were counted across `docs/adr/**` first, and the check
+// recognises exactly the four that exist:
+//
+//   1. `### Dk — Title`   heading (h3 mostly, h4/h5 for sub-decisions) — 321
+//      tokens, the dominant form.
+//   2. `**Dk — Title.**`  bold-lead paragraph, ADR-0105's style — used by 22
+//      numbers, 10 of them exclusively.
+//   3. `| Dk | Title |`   first cell of a decision-table row.
+//   4. A `Dk` HEADING's own top-level list declares its sub-decisions: an
+//      ordered list gives `Dk.1`, `Dk.2`, …; a lettered list gives `Dka`,
+//      `Dkb`, …. This is not a convenience — it is load-bearing and narrow:
+//      ADR-0120 D5's five lettered gates and ADR-0020 D3's three numbered
+//      steps are DECLARED nowhere else, and 20 live citations resolve only
+//      through it. Without rule 4 those 20 read as bad letters, which is the
+//      "too strict" half of the failure this check must not become.
+//
+// ### "Cannot verify" is a THIRD verdict, and it is printed
+//
+// 67 of the 125 ADR numbers declare no machine-readable decision letters at all
+// — the older records number their decisions topically (`### Schema`) or
+// ordinally (`### 2. Commits are atomic`), never as `Dk`. 38 live citations
+// point into six of them. Those are NOT resolvable and NOT clean, and the
+// check says the difference out loud rather than letting an unrecognised shape
+// read like a pass. It is REPORTED, never failed, for the same reason the
+// ambiguous-number note is: the defect is the record's spelling, and
+// `docs/adr/**` is governed surface (#6741) that a script fix must not force.
+//
+// An ordinal->letter inference (`D2` = the 2nd `### N.` heading) was weighed and
+// REJECTED: the record never writes `D2`, so the mapping would be this gate's
+// invention, and a gate that manufactures the index it checks against cannot
+// fail honestly.
+//
+// ### The floor
+//
+// A shape-scanning check degrades SILENTLY: change the heading style and every
+// ADR becomes "no index", every citation becomes "cannot verify", and the run
+// still exits 0. So an empty corpus-wide index is a hard failure in the main
+// run, and `--self-test` pins measured floors on both the index and the scan.
+//
 // ## Where the registry lives (#6957)
 //
 // `scripts/adr-anchors/` — **one JSON file per anchor**, named after the path it
@@ -597,6 +654,244 @@ function auditCitedNumbers(citations, records, allowlist) {
 }
 
 /**
+ * A decision letter as written after an ADR id: `D3`, `D10`, `D6b`, `D9.2`,
+ * `D9.2a`, `D5-R`, `D1-R1`. Every shape in the corpus, and nothing looser — the
+ * trailing lookahead stops `D1` from being scraped out of `D1x` or `D12`.
+ */
+const DECISION_LETTER = '(\\d{1,3}(?:\\.\\d{1,2})*[a-z]?(?:-R\\d{0,2})?)(?![0-9A-Za-z])';
+
+/** `### D3 — …` / `#### D9.2 — …`. Grammar 1; also OPENS a section for grammar 4. */
+const DECISION_HEADING = new RegExp('^(#{1,6})[ \\t]+D' + DECISION_LETTER);
+
+/** Any heading — closes whatever section grammar 4 was collecting sub-items into. */
+const ANY_HEADING = /^#{1,6}[ \t]+/;
+
+/** `**D8 — Scoped invitations.**`, ADR-0105's style, list- or quote-marked or not. Grammar 2. */
+const DECISION_BOLD_LEAD = new RegExp('^[ \\t>]*(?:[-*+][ \\t]+)?\\*\\*D' + DECISION_LETTER);
+
+/** `| D5 | Authoring gates | … |` — the first cell of a decision-table row. Grammar 3. */
+const DECISION_TABLE_CELL = new RegExp('^[ \\t]*\\|[ \\t]*\\*{0,2}D' + DECISION_LETTER + '\\*{0,2}[ \\t]*\\|');
+
+/** `1. ` at column 0 inside a `Dk` heading's section → `Dk.1`. Grammar 4, numbered half. */
+const SUB_DECISION_NUMBERED = /^(\d{1,2})\.[ \t]+\S/;
+
+/** `a. ` at column 0 inside a `Dk` heading's section → `Dka`. Grammar 4, lettered half. */
+const SUB_DECISION_LETTERED = /^([a-z])\.[ \t]+\S/;
+
+/**
+ * An `ADR-NNNN Dk` citation, with the preceding word captured for the same
+ * cross-repo rule the number layer uses.
+ *
+ * The newline branch is not decoration: 11 live citations in the anchored files
+ * wrap across a JSDoc continuation (`… (ADR-0106\n * D3) — …`), and a
+ * line-oriented scan misses every one of them SILENTLY, which is the failure
+ * mode this whole file is written against.
+ */
+const DECISION_CITATION = new RegExp(
+  '(?:([A-Za-z0-9_./-]+)[ \\t]+)?ADR-(\\d{4})[ \\t]*(?:\\r?\\n[ \\t]*(?:\\*|//|#)?[ \\t]*)?D' + DECISION_LETTER,
+  'g',
+);
+
+/**
+ * The decision letters ONE ADR document declares — the four measured grammars,
+ * and nothing inferred.
+ *
+ * Pure over the markdown so `--self-test` drives every grammar with fixtures
+ * instead of depending on a record staying spelled the way it is today.
+ *
+ * @param {string} text  one record's markdown
+ * @returns {Set<string>} e.g. `{ D1, D2, D3, D3.1, D3.2, D3.3, D4 }`
+ */
+function decisionIndexFor(text) {
+  const letters = new Set();
+  /** The `Dk` whose heading section we are inside, or null. */
+  let open = null;
+  for (const line of text.split('\n')) {
+    const heading = DECISION_HEADING.exec(line);
+    if (heading) {
+      letters.add('D' + heading[2]);
+      open = 'D' + heading[2];
+      continue;
+    }
+    // A heading that is not a decision closes the section: a sub-list under
+    // `## Consequences` declares nothing.
+    if (ANY_HEADING.test(line)) {
+      open = null;
+      continue;
+    }
+    const bold = DECISION_BOLD_LEAD.exec(line);
+    if (bold) letters.add('D' + bold[1]);
+    const cell = DECISION_TABLE_CELL.exec(line);
+    if (cell) letters.add('D' + cell[1]);
+    if (!open) continue;
+    const numbered = SUB_DECISION_NUMBERED.exec(line);
+    if (numbered) {
+      letters.add(`${open}.${numbered[1]}`);
+      continue;
+    }
+    const lettered = SUB_DECISION_LETTERED.exec(line);
+    if (lettered) letters.add(`${open}${lettered[1]}`);
+  }
+  return letters;
+}
+
+/**
+ * The corpus-wide index: ADR number → the union of the decision letters its
+ * record(s) declare. Successive `.vN` versions of one decision share a number
+ * and are unioned, exactly as the number audit groups them.
+ *
+ * Pure over a filename list plus a reader, for the same reason
+ * {@link auditAdrDirectory} is pure over filenames.
+ *
+ * @param {string[]} filenames
+ * @param {(name: string) => string} read
+ * @returns {Map<string, Set<string>>}
+ */
+function buildDecisionIndex(filenames, read) {
+  const index = new Map();
+  for (const name of [...filenames].sort()) {
+    if (!name.endsWith('.md') || NON_RECORD_FILES.has(name)) continue;
+    const m = ADR_FILENAME.exec(name);
+    if (!m) continue; // already reported by auditAdrDirectory
+    const number = m[1];
+    if (!index.has(number)) index.set(number, new Set());
+    for (const letter of decisionIndexFor(read(name))) index.get(number).add(letter);
+  }
+  return index;
+}
+
+/**
+ * Parse every `ADR-NNNN Dk` citation out of one text.
+ *
+ * Pure over a string so the self-test can drive it with fixtures.
+ *
+ * @param {string} file  path, used only in the returned rows
+ * @param {string} text
+ * @returns {{ file: string, number: string, letter: string, qualifier: string }[]}
+ */
+function letterCitationsIn(file, text) {
+  const out = [];
+  for (const m of text.matchAll(DECISION_CITATION)) {
+    const raw = (m[1] ?? '').toLowerCase();
+    const qualifier = raw.replace(/^.*\//, '').replace(/[^a-z0-9-]+$/, '');
+    out.push({ file, number: m[2], letter: 'D' + m[3], qualifier });
+  }
+  return out;
+}
+
+/**
+ * Audit that every cited decision letter names a decision the cited record
+ * actually makes.
+ *
+ * Three verdicts, and they must read differently — "I could not recognise this
+ * shape" is not "clean":
+ *
+ *   - **resolved**     the letter is in the record's index.
+ *   - **unverifiable** the record declares NO decision letters; returned for
+ *     reporting, never as an error (the record's spelling is the defect, and
+ *     `docs/adr/**` is governed surface).
+ *   - **error**        the record declares letters and this is not one of them —
+ *     or the record is a tombstone, which decides nothing at all.
+ *
+ * A number with no record is skipped, not double-reported: {@link auditCitedNumbers}
+ * already owns that fact and says it better.
+ *
+ * @param {{ file: string, number: string, letter: string, qualifier: string }[]} citations
+ * @param {Map<string, Set<string>>} index  number → declared decision letters
+ * @param {Set<string>} records  numbers that name a real record
+ * @param {Set<string>} nonDecisions  the subset that are tombstones
+ * @returns {{ errors: string[], unverifiable: Map<string, Set<string>>, unverifiableCount: number, resolved: number }}
+ */
+function auditDecisionLetters(citations, index, records, nonDecisions) {
+  const errors = [];
+  let unverifiableCount = 0;
+  /** `ADR-NNNN Dk` → sorted files citing it, for letters that name no decision. */
+  const bad = new Map();
+  /** same key → files, for citations into a record with no decision letters at all. */
+  const unverifiable = new Map();
+  let resolved = 0;
+
+  const note = (map, row) => {
+    const key = `ADR-${row.number} ${row.letter}`;
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(row.file);
+  };
+
+  for (const row of citations) {
+    if (CROSS_REPO_QUALIFIERS.has(row.qualifier)) continue; // another repo's registry
+    if (!records.has(row.number)) continue; // auditCitedNumbers owns the dangling-number fact
+    if (nonDecisions.has(row.number)) {
+      note(bad, row);
+      continue;
+    }
+    const declared = index.get(row.number);
+    if (!declared || declared.size === 0) {
+      note(unverifiable, row);
+      unverifiableCount++;
+      continue;
+    }
+    if (declared.has(row.letter)) {
+      resolved++;
+      continue;
+    }
+    note(bad, row);
+  }
+
+  for (const key of [...bad.keys()].sort()) {
+    const [, number, letter] = /^ADR-(\d{4}) (D.+)$/.exec(key);
+    const files = [...bad.get(key)].sort();
+    const shown = files.slice(0, 8);
+    const declared = [...(index.get(number) ?? [])].sort();
+    const tombstone = nonDecisions.has(number);
+    errors.push(
+      `${key} is cited by ${files.length} file(s), but ` +
+        (tombstone
+          ? `ADR-${number} is a WITHDRAWN record — it makes no decisions, so no "${letter}" of it can exist (#7329).`
+          : `ADR-${number} declares no ${letter} —\n        it decides: ${declared.join(', ')}`) +
+        '\n' +
+        shown.map((f) => `        ${f}`).join('\n') +
+        (files.length > shown.length ? `\n        … and ${files.length - shown.length} more` : '') +
+        '\n      The NUMBER resolving is not the promise a citation makes — the promise is that the DECISION is ' +
+        'readable at the other end. A right number with a wrong letter sends the next author to a record that ' +
+        'does not say what the code says it says, and every gate above this one calls it green (#8386, #9255, ' +
+        'the family this layer was commissioned for).\n' +
+        `      Fix, in order of preference: (a) cite the letter that decides this — the list above is what ` +
+        `ADR-${number} actually decides; (b) if the decision moved to another record, cite that record; (c) if ` +
+        'the decision is real but unwritten, it needs an ADR, not a citation.\n' +
+        '      ⛔ Not a fix: loosening this check. A letter that resolves to nothing is the defect it exists ' +
+        'to name.',
+    );
+  }
+
+  return { errors, unverifiable, unverifiableCount, resolved };
+}
+
+/**
+ * Every `ADR-NNNN Dk` citation on the ANCHORED SURFACE — each anchor's
+ * `invariant`, and the full text of each anchored file.
+ *
+ * Deliberately narrower than {@link collectCitations}: this is the surface where
+ * an anchor's promise is made, and it is bounded by the registry rather than by
+ * the size of the repo.
+ *
+ * @param {{ file: string, invariant?: string }[]} anchorList
+ * @returns {{ file: string, number: string, letter: string, qualifier: string }[]}
+ */
+function collectAnchorLetterCitations(anchorList) {
+  const out = [];
+  for (const entry of anchorList ?? []) {
+    if (typeof entry?.invariant === 'string') {
+      out.push(...letterCitationsIn(`${MAP_PATH}/${shardNameFor(entry.file)}`, entry.invariant));
+    }
+    if (typeof entry?.file !== 'string') continue;
+    const abs = join(ROOT, entry.file);
+    if (!existsSync(abs)) continue; // the anchor loop reports the missing file
+    out.push(...letterCitationsIn(entry.file, readFileSync(abs, 'utf8')));
+  }
+  return out;
+}
+
+/**
  * Every ADR citation in the repo's TRACKED text files.
  *
  * `git grep` rather than a directory walk: it is the tool that already knows
@@ -679,6 +974,34 @@ let checked = 0;
 const citations = collectCitations();
 errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS));
 
+// #9592 — and one layer down: the `Dk` half of every `ADR-NNNN Dk` citation on
+// the ANCHORED surface must name a decision the cited record actually makes.
+const decisionIndex = buildDecisionIndex(adrFiles, (name) => readFileSync(join(ROOT, ADR_DIR, name), 'utf8'));
+const letterCitations = collectAnchorLetterCitations(anchors);
+const {
+  errors: letterErrors,
+  unverifiable: unverifiableLetters,
+  unverifiableCount: unverifiableLetterCount,
+  resolved: resolvedLetters,
+} = auditDecisionLetters(letterCitations, decisionIndex, records, nonDecisions);
+errors.push(...letterErrors);
+
+// A shape scanner degrades SILENTLY — a heading-style change turns every record
+// into "declares no letters", every citation into "cannot verify", and the run
+// still exits 0 with a cheerful summary. An empty corpus-wide index is not a
+// corpus fact, it is a broken parser, and it fails here rather than being
+// reported as 500 unverifiable citations.
+if ([...decisionIndex.values()].every((s) => s.size === 0)) {
+  errors.push(
+    `${SELF_PATH}: the decision-letter index is EMPTY — not one record under ${ADR_DIR}/ parsed as declaring a ` +
+      'decision letter.\n' +
+      '      That is a broken parser, not a clean corpus: with an empty index every `ADR-NNNN Dk` citation ' +
+      'silently becomes "cannot verify" and this whole layer becomes a no-op that still exits 0.\n' +
+      '      Check the grammars in `decisionIndexFor` against how the records actually spell their decisions ' +
+      '(the four measured shapes are documented in this file\'s header).',
+  );
+}
+
 for (const entry of anchors) {
   const { file, adrs, invariant } = entry;
   // The shard that carries this entry — its name is a pure function of the id,
@@ -741,8 +1064,27 @@ if (errors.length) {
 console.log(
   `check-adr-anchors: OK (${checked} anchored file(s), every governing ADR still referenced; ` +
     `${records.size} decision number(s), each naming one decision or an allowlisted pair; ` +
-    `${citations.length} citation(s) across ${new Set(citations.map((c) => c.file)).size} file(s) resolve).`,
+    `${citations.length} citation(s) across ${new Set(citations.map((c) => c.file)).size} file(s) resolve; ` +
+    `${resolvedLetters} decision-letter citation(s) on the anchored surface name a decision the record makes).`,
 );
+
+// Reported, never failed — and NEVER folded into the OK line above, because
+// "unrecognised" must not read as "clean" (#9592). The cited record declares no
+// machine-readable decision letters, so this layer has nothing to resolve
+// against; the fix is the record's spelling, and `docs/adr/**` is governed
+// surface (#6741) that a script gate must not force.
+if (unverifiableLetters.size) {
+  const sites = [...unverifiableLetters.values()].reduce((n, f) => n + f.size, 0);
+  console.log(
+    `check-adr-anchors: note — ${unverifiableLetterCount} decision-letter citation(s) across ${sites} ` +
+      `letter/file site(s) CANNOT BE VERIFIED — not checked, and NOT counted as resolving above: the ` +
+      `${unverifiableLetters.size} id(s) below name records that declare no decision letters at all (#9592):`,
+  );
+  for (const key of [...unverifiableLetters.keys()].sort()) {
+    const files = [...unverifiableLetters.get(key)].sort();
+    console.log(`  · ${key} — ${files.length} site(s): ${files.slice(0, 3).join(', ')}${files.length > 3 ? ', …' : ''}`);
+  }
+}
 
 // Reported, never failed. These anchors are correct — the number they name is
 // the ambiguous thing, and #5992's route B (slug-qualified references) is the
@@ -1077,6 +1419,182 @@ function selfTest() {
       }
     }
 
+    // ── Cited decision LETTERS resolve (#9592) ───────────────────────────────
+    //
+    // ⚠️ Same fixture discipline as the block above: ids are BUILT, never
+    // written literally, because this file sits in the tree the repo-wide scan
+    // reads.
+    //
+    // The grammars are pinned ONE BY ONE. A parser too strict reddens correct
+    // citations (measured: without the sub-decision rule, ADR-0120's lettered
+    // gates and ADR-0020's numbered steps — 20 live citations — read as bad
+    // letters); one too loose passes anything. Both halves are asserted.
+    {
+      const id = (n) => 'ADR-' + n;
+      const idx = decisionIndexFor;
+      const set = (s) => [...s].sort().join(',');
+
+      {
+        const got = idx('# Title\n\n### D1 — first\n\ntext\n\n### D10 — tenth\n');
+        assert('decision-index-reads-headings', set(got) === 'D1,D10', `got {${set(got)}}`);
+      }
+      {
+        const got = idx('#### D9.2 — sub\n\n##### D9.2a — amendment\n\n### D1-R1 — revised\n');
+        assert(
+          'decision-index-reads-sub-and-revision-headings',
+          set(got) === 'D1-R1,D9.2,D9.2a',
+          `the h4/h5 and \`.N\`/\`-RN\` shapes all exist in the corpus; got {${set(got)}}`,
+        );
+      }
+      {
+        // ADR-0105's style: decisions are bold-lead paragraphs, not headings.
+        const got = idx('## Decisions\n\n### Kernel\n\n**D8 — Scoped invitations.**\n\ntext\n\n**D6b — a revision.**\n');
+        assert('decision-index-reads-bold-leads', set(got) === 'D6b,D8', `got {${set(got)}}`);
+      }
+      {
+        const got = idx('| Id | What |\n| --- | --- |\n| D5 | Authoring gates |\n| **D6** | Truth sweep |\n');
+        assert('decision-index-reads-decision-tables', set(got) === 'D5,D6', `got {${set(got)}}`);
+      }
+      {
+        // The load-bearing rule: a `Dk` heading's own top-level list DECLARES
+        // its sub-decisions. Both halves, because the corpus uses both.
+        const numbered = idx('### D3 — Enforce it\n\nConcretely:\n\n1. **Plumb it in.**\n2. **Transition check.**\n3. **Introspection.**\n');
+        assert(
+          'decision-index-expands-numbered-sub-decisions',
+          set(numbered) === 'D3,D3.1,D3.2,D3.3',
+          `got {${set(numbered)}}`,
+        );
+        const lettered = idx('### D5 — Authoring gates\n\na. **New rule.**\nb. **Rewritten.**\ne. **Install gate.**\n');
+        assert(
+          'decision-index-expands-lettered-sub-decisions',
+          set(lettered) === 'D5,D5a,D5b,D5e',
+          `the list need not be contiguous — it is read, not counted; got {${set(lettered)}}`,
+        );
+      }
+      {
+        // The bound on that rule: a list under the NEXT heading declares nothing.
+        // Without this, `## Consequences` would hand every ADR a fake `Dk.1`.
+        const got = idx('### D3 — Enforce it\n\n1. one\n\n## Consequences\n\n1. not a decision\n2. also not\n');
+        assert('sub-decisions-stop-at-the-next-heading', set(got) === 'D3,D3.1', `got {${set(got)}}`);
+      }
+      {
+        // 67 of 125 numbers look like this — topical or ordinal decisions, no
+        // `Dk` anywhere. The index must come back EMPTY, which is what routes
+        // their citations to "cannot verify" instead of to a false red.
+        const got = idx('## Decision\n\n### Schema\n\ntext\n\n### 2. Commits are atomic\n\nmore\n');
+        assert('a-record-with-no-decision-letters-has-an-empty-index', got.size === 0, `got {${set(got)}}`);
+      }
+
+      const rows = (text, file = 'src/x.ts') => letterCitationsIn(file, text);
+      {
+        const parsed = rows(`see ${id('0090')} D3 and ${id('0091')} D10 for why`);
+        assert(
+          'letter-citation-parser-reads-number-and-letter',
+          parsed.length === 2 && parsed[0].number === '0090' && parsed[0].letter === 'D3' && parsed[1].letter === 'D10',
+          `got ${JSON.stringify(parsed)}`,
+        );
+      }
+      {
+        // 11 live citations wrap like this. A line-oriented scan misses every
+        // one SILENTLY, which is the failure mode, not an inconvenience.
+        const parsed = rows(`/**\n * A hash of the denied set (${id('0090')}\n * D3) — the ETag dimension.\n */`);
+        assert(
+          'letter-citation-parser-follows-a-jsdoc-line-wrap',
+          parsed.length === 1 && parsed[0].letter === 'D3',
+          `got ${JSON.stringify(parsed)}`,
+        );
+      }
+      {
+        // `D` with no number is not a letter, and a bare id is not a letter
+        // citation at all — those belong to the number layer. `D3x` IS a
+        // well-formed token (the corpus has D6b, D5e): the parser accepts the
+        // SHAPE and lets resolution refuse the value, which is what makes the
+        // failure message able to list what the record does decide.
+        const parsed = rows(`${id('0090')} Dx · ${id('0090')} Draft · bare ${id('0090')} · ${id('0090')} D3x`);
+        assert(
+          'letter-citation-parser-requires-a-numbered-token',
+          parsed.length === 1 && parsed[0].letter === 'D3x',
+          `got ${JSON.stringify(parsed)}`,
+        );
+      }
+
+      const INDEX = new Map([
+        ['0090', new Set(['D1', 'D2', 'D3', 'D3.1'])],
+        ['0091', new Set()], // a record that declares no letters
+        ['0107', new Set()], // tombstone
+      ]);
+      const RECORDS = new Set(['0090', '0091', '0107']);
+      const TOMBS = new Set(['0107']);
+      const letters = (text, file) => auditDecisionLetters(rows(text, file), INDEX, RECORDS, TOMBS);
+
+      {
+        const r = letters(`governed by ${id('0090')} D3 and ${id('0090')} D3.1`);
+        assert('resolving-letters-are-green', r.errors.length === 0, `expected no errors, got:\n${joined(r.errors)}`);
+        assert('resolved-letters-are-counted', r.resolved === 2, `got ${r.resolved}`);
+      }
+      {
+        // The whole point: the number is right and the letter is not.
+        const r = letters(`governed by ${id('0090')} D9`, 'packages/spec/src/a.ts');
+        assert('unknown-letter-is-red', r.errors.length === 1, `expected exactly 1 error, got ${r.errors.length}:\n${joined(r.errors)}`);
+        const msg = joined(r.errors);
+        assert('letter-message-names-the-citation', msg.includes('0090 D9'), `message lacks the id+letter:\n${msg}`);
+        assert(
+          'letter-message-lists-what-the-record-DOES-decide',
+          msg.includes('D1, D2, D3, D3.1'),
+          `the author must be shown the letters that exist, or the fix is a search:\n${msg}`,
+        );
+        assert(
+          'letter-message-names-the-citing-file',
+          msg.includes('packages/spec/src/a.ts'),
+          `message must point at the file to edit:\n${msg}`,
+        );
+        assert(
+          'letter-message-does-not-invite-loosening-the-check',
+          /Not a fix: loosening/.test(msg),
+          `the remedy must be "cite the decision that exists", never "relax the parser":\n${msg}`,
+        );
+      }
+      {
+        // Bounded, not open-ended: an expanded sub-decision index still refuses
+        // a sub-number the list does not reach.
+        const r = letters(`governed by ${id('0090')} D3.2`);
+        assert('sub-decision-expansion-is-bounded', r.errors.length === 1, `expected D3.2 to be refused, got:\n${joined(r.errors)}`);
+      }
+      {
+        // The third verdict. This must be neither an error nor a resolution —
+        // conflating it with either is the defect the note exists to prevent.
+        const r = letters(`governed by ${id('0091')} D4`, 'packages/spec/src/b.ts');
+        assert('letter-into-a-letterless-record-is-not-red', r.errors.length === 0, `got:\n${joined(r.errors)}`);
+        assert('letter-into-a-letterless-record-is-not-counted-as-resolved', r.resolved === 0, `got ${r.resolved}`);
+        assert(
+          'letter-into-a-letterless-record-is-REPORTED',
+          r.unverifiableCount === 1 && r.unverifiable.has(`${id('0091')} D4`),
+          `"could not recognise" must not read the same as "clean"; got ${JSON.stringify([...r.unverifiable.keys()])}`,
+        );
+      }
+      {
+        // A tombstone decides nothing, so no letter of it can exist — and that
+        // is a different fact from "the record declares no letters".
+        const r = letters(`governed by ${id('0107')} D1`);
+        assert(
+          'letter-into-a-tombstone-is-red',
+          r.errors.length === 1 && /WITHDRAWN record/.test(joined(r.errors)),
+          `a tombstone must not be excused as merely unverifiable, got:\n${joined(r.errors)}`,
+        );
+        assert('tombstone-letter-is-not-merely-unverifiable', r.unverifiableCount === 0, `got ${r.unverifiableCount}`);
+      }
+      {
+        const r = letters(`(ObjectUI ${id('0090')} D9)`);
+        assert('cross-repo-qualified-letter-is-skipped', r.errors.length === 0, `got:\n${joined(r.errors)}`);
+      }
+      {
+        // The number layer owns this fact and says it better; saying it twice
+        // would make one defect read as two.
+        const r = letters(`governed by ${id('0202')} D1`);
+        assert('letter-on-an-unknown-number-is-left-to-the-number-layer', r.errors.length === 0, `got:\n${joined(r.errors)}`);
+      }
+    }
+
     // ── Live tree: green as shipped, red under ablation ──────────────────────
     let liveFiles = null;
     try {
@@ -1215,6 +1733,72 @@ function selfTest() {
           `citation-ablation-reports-${n}`,
           citeRed.some((e) => e.includes('ADR-' + n + ' is cited')),
           `ADR-${n} is allowlisted as unresolved but resolves under ablation — the entry is stale`,
+        );
+      }
+
+      // ── Decision letters on the real tree (#9592) ─────────────────────────
+      const { records: lRecords, nonDecisions: lTombs } = audit(liveFiles, KNOWN_NUMBER_COLLISIONS);
+      const liveIndex = buildDecisionIndex(liveFiles, (name) => readFileSync(join(ROOT, ADR_DIR, name), 'utf8'));
+      const liveLettered = [...liveIndex.values()].filter((s) => s.size > 0).length;
+
+      // A FLOOR, not decoration. This layer degrades silently the moment the
+      // grammars stop matching: every record parses as "declares no letters",
+      // every citation becomes "cannot verify", and the run exits 0 with a
+      // cheerful summary. Measured 58 of 125 numbers on 1246b4cf2 — the floor
+      // sits below that so ADRs may be added or reworded, but not so low that a
+      // broken parser reads as a shrinking corpus.
+      assert(
+        'live-decision-index-is-not-empty',
+        liveLettered >= 40,
+        `expected most decision-lettered records to parse, got ${liveLettered} of ${liveIndex.size} numbers — ` +
+          'the grammars in decisionIndexFor no longer match how the records spell their decisions',
+      );
+
+      const liveLetterCitations = collectAnchorLetterCitations(anchors);
+      assert(
+        'live-letter-scan-reads-the-anchored-surface',
+        liveLetterCitations.length > 500,
+        'expected the anchored surface to carry hundreds of decision-letter citations, got ' +
+          `${liveLetterCitations.length} — the collector is not reading it`,
+      );
+
+      const liveLetters = auditDecisionLetters(liveLetterCitations, liveIndex, lRecords, lTombs);
+      assert(
+        'live-decision-letters-are-green-today',
+        liveLetters.errors.length === 0,
+        `every cited decision letter must resolve as shipped, got:\n${joined(liveLetters.errors)}`,
+      );
+      // Green must mean RESOLVED, never "nothing was checked" — the two are
+      // indistinguishable from the exit code alone, which is the whole reason
+      // the unverifiable count is reported separately rather than folded in.
+      assert(
+        'live-decision-letters-actually-resolve-something',
+        liveLetters.resolved > 500,
+        `got ${liveLetters.resolved} resolved of ${liveLetterCitations.length} scanned`,
+      );
+
+      {
+        // Ablation, predicted RED: fabricate a letter the cited record does not
+        // declare. If this ever goes green the layer cannot fail at all, which
+        // is the one outcome indistinguishable from a clean tree.
+        const [number, declared] = [...liveIndex].find(([, s]) => s.size > 0);
+        let fabricated = 'D900';
+        while (declared.has(fabricated)) fabricated += '0';
+        const red = auditDecisionLetters(
+          [{ file: 'src/probe.ts', number, letter: fabricated, qualifier: '' }],
+          liveIndex,
+          lRecords,
+          lTombs,
+        );
+        assert(
+          'ablation-a-fabricated-letter-is-red',
+          red.errors.length === 1 && red.errors[0].includes(`${number} ${fabricated}`),
+          `a letter no record declares must be refused, got:\n${joined(red.errors)}`,
+        );
+        assert(
+          'ablation-fabricated-letter-is-not-excused-as-unverifiable',
+          red.unverifiableCount === 0,
+          'a record that HAS an index must never route a bad letter to the cannot-verify branch',
         );
       }
     }

@@ -476,6 +476,55 @@ describe('#4785 — why cache is NOT the session store (the rejected architectur
     expect(sessionRows(engine)).toHaveLength(0);
   });
 
+  it('session.cookieCache is not reachable through config either — asking for it changes nothing', async () => {
+    // The OTHER door into the same read-path failure, pinned the same way as
+    // option C above and for the same reason: `AuthManager` builds better-auth's
+    // `session` block from `AUTH_SESSION_CONFIG` plus `expiresIn`/`updateAge`
+    // only, so a host that asks for `cookieCache` is silently NOT getting it.
+    //
+    // ⛔ This is an OBSERVATION pin, not a refusal — nothing here rejects the
+    // key, and nothing should: the ruled posture (maintainer, 2026-08-27) is
+    // opt-in with the cost disclosed on BOTH doors, exactly as
+    // `cacheSecondaryStorage()` stays exported. What this pin buys is the
+    // tripwire the disclosure alone could not give: the day someone plumbs
+    // `cookieCache` through, this test goes red and points them at the cost
+    // note in `auth-manager.ts` instead of letting D4 quietly acquire a
+    // revocation window nobody chose.
+    //
+    // End-of-chain, per this file's header — asserting "the emitted options
+    // carry no cookieCache" would be the middle of the chain and would pass
+    // against a build that reached the cache some other way. If the key were
+    // honoured, sign-up would mint a `session_data` cookie (which `cookieFrom`
+    // collects, so it really would be replayed below), `/get-session` would
+    // answer from that payload without an adapter read for up to
+    // `maxAge` (default 300s), and the revoked cookie would still
+    // authenticate. It must not.
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, {
+      sessionIdleTimeoutMinutes: 30,
+      session: { cookieCache: { enabled: true, maxAge: 300 } },
+    });
+
+    const cookie = cookieFrom(await signUp(manager, 'cookiecache@example.com'));
+    const id = sessionRows(engine)[0]!.id;
+
+    // The row is still the session of record: unlike `secondaryStorage`,
+    // `cookieCache` never relocates it even when it IS honoured.
+    expect(sessionRows(engine)).toHaveLength(1);
+    expect(await isAuthenticated(manager, cookie)).toBe(true);
+
+    ageSession(engine, id, { last_activity_at: new Date(Date.now() - 90 * MINUTE) });
+
+    // Same one-request lag as every other D4 control: the request that detects
+    // the timeout is still authenticated, the next one is not.
+    expect(await isAuthenticated(manager, cookie)).toBe(true);
+    expect(sessionRows(engine).find((r) => r.id === id)!.revoke_reason).toBe('idle_timeout');
+
+    // The assertion that matters, and the one a honoured `cookieCache` breaks:
+    // the cookie is dead on the very next request, not 300 seconds later.
+    expect(await isAuthenticated(manager, cookie)).toBe(false);
+  });
+
   it('the DEFAULT composition refuses to boot with a secondaryStorage rather than degrading quietly', async () => {
     // The safety net under all of the above, and the reason this hole could
     // never have opened silently in a standard `serve`: the OIDC provider

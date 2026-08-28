@@ -104,6 +104,14 @@ import {
   SysJwks,
   SysSsoProvider,
   SysScimProvider,
+  SysScimConnectionBinding,
+  SysScimConnectionCredential,
+  SysScimGroup,
+  SysScimGroupMember,
+  SysScimIdentityTombstone,
+  SysScimProjectionGrant,
+  SysScimSubject,
+  SysScimUser,
 } from '../src/identity/index.js';
 
 // ── Security ──────────────────────────────────────────────────────────────
@@ -241,6 +249,16 @@ const config: ObjectStackDefinition = defineStack({
     SysJwks,
     SysSsoProvider,
     SysScimProvider,
+    // Stable @better-auth/scim 1.7.x model set + the ObjectStack-owned
+    // credential store (#3653). SysScimProvider above retires under #11757.
+    SysScimConnectionBinding,
+    SysScimConnectionCredential,
+    SysScimGroup,
+    SysScimGroupMember,
+    SysScimIdentityTombstone,
+    SysScimProjectionGrant,
+    SysScimSubject,
+    SysScimUser,
 
     // Security: RBAC moved to @objectstack/plugin-security, sharing to
     // @objectstack/plugin-sharing (ADR-0029 K2 / D8).

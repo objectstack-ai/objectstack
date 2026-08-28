@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
