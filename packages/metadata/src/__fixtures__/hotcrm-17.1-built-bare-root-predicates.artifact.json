@@ -17,7 +17,7 @@
       "list": {
         "label": "All Leads",
         "type": "grid",
-        "data": { "object": "crm_lead" },
+        "data": { "provider": "object", "object": "crm_lead" },
         "columns": [
           { "field": "name" },
           { "field": "company" },
@@ -26,7 +26,7 @@
       },
       "form": {
         "type": "simple",
-        "data": { "object": "crm_lead" },
+        "data": { "provider": "object", "object": "crm_lead" },
         "sections": [
           {
             "name": "lead",
@@ -64,7 +64,7 @@
     {
       "form": {
         "type": "simple",
-        "data": { "object": "crm_case" },
+        "data": { "provider": "object", "object": "crm_case" },
         "sections": [
           {
             "name": "case",

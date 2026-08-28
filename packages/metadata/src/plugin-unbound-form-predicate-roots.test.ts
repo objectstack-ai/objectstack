@@ -162,7 +162,7 @@ describe('artifact door — unbound form-predicate roots are announced to the op
             {
                 form: {
                     type: 'simple',
-                    data: { object: 'crm_lead' },
+                    data: { provider: 'object', object: 'crm_lead' },
                     sections: [{
                         name: 'lead',
                         fields: [{
