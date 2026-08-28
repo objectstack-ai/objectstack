@@ -158,6 +158,27 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
 // ---------------------------------------------------------------------------
+/**
+ * The subtrees this gate walks, declared so a dispatch brief can NAME it.
+ *
+ * The population is derived at runtime from `pnpm-workspace.yaml`, which is the
+ * only honest source for "what is a workspace package". But a derived
+ * population is invisible to `scripts/pm/dispatch-gates.mjs`, and `hintCovers`
+ * refuses a separator-less literal as too generic -- so declaring the bare
+ * words `packages`, `apps`, `examples` would build no hint at all and this gate
+ * would be named by no brief: the invisible-population species
+ * `scripts/pm/bare-root-worklist.mjs` exists to count. The glob form is
+ * reachable by construction.
+ *
+ * These are a DECLARATION, never a lookup key -- the walk still comes from the
+ * manifest. `--self-test` holds the two together: every `packages:` glob in
+ * `pnpm-workspace.yaml` must sit under one of these hints, so a new workspace
+ * root reds here instead of quietly leaving part of the tree unswept and this
+ * gate unnameable.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+
+// ---------------------------------------------------------------------------
 // Refusal floors -- measured on `aef1b7e6`, held with margin. Raising the real
 // number is normal; a run that drops BELOW one of these has stopped reading.
 //   packages: 78   non-test src files: 2057   @objectstack/* specifiers: 1805
@@ -534,7 +555,8 @@ function main() {
   if (staleRows.length > 0 || unledgered.length > 0) return 1;
 
   console.log(
-    `✓ check:undeclared-dep-imports: ${result.packages.length} workspace packages, `
+    `✓ check:undeclared-dep-imports: ${result.packages.length} workspace packages under `
+    + `${ROOT_DIR_WATCH_HINTS.join(' + ')}, `
     + `${result.scannedFiles} non-test src files, ${result.specifiers} @objectstack/* specifiers `
     + `(${result.assembled} assembled, not judged); ${LEDGER.length} ledger row(s), all evidence intact.`,
   );
@@ -774,6 +796,15 @@ function selfTest() {
       && ledgerShapeProblems([{ ...row, why: 'short' }]).length === 1
       && ledgerShapeProblems([row]).length === 0);
     t('LEDGER — the shipped ledger is well formed', ledgerShapeProblems(LEDGER).length === 0);
+
+    // ── the declared watch hints stay equal to the real population ────────
+    const declaredGlobs = workspaceGlobs(readFileSync(join(REPO_ROOT, 'pnpm-workspace.yaml'), 'utf8'));
+    const hintRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+    t('WATCH HINTS — every `packages:` glob in pnpm-workspace.yaml sits under a declared hint',
+      declaredGlobs.length > 0
+      && declaredGlobs.every((g) => hintRoots.some((r) => g === r || g.startsWith(`${r}/`))));
+    t('WATCH HINTS — every hint is a glob, never a bare top-level word (hintCovers refuses those)',
+      ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')));
 
     // ── POSITIVE CONTROL on the real tree ─────────────────────────────────
     // A zero from this gate is only a reading if the instrument is seen working
