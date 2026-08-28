@@ -315,3 +315,257 @@ describe('selectRootDef — precedence', () => {
     expect(selectRootDef('Thing', doc)).toBe(doc);
   });
 });
+
+/**
+ * THE DEFECT THIS PINS (#12590). `### Nested Shape:` and `### Allowed Values:`
+ * headings qualify themselves by `Schema.key` so that one page carrying many
+ * schemas cannot emit the same heading — the same anchor — twice. Inside the
+ * `### Union Options` branch that qualifier stops qualifying anything: the
+ * branch calls `renderProperties` once per variant, and BOTH halves of
+ * `Schema.key` are shared by every sibling variant of one schema. Two
+ * `ViewItem` variants each declaring a shape-opening `config` therefore emitted
+ * `### Nested Shape: \`ViewItem.config\`` twice.
+ *
+ * Measured on `origin/main@b489d3c7`, over the emitted tree: **12 excess
+ * `### Nested Shape:` occurrences, 10 distinct headings, 4 pages** — every one
+ * under a schema rendering `### Union Options`. `check:doc-anchors` is green
+ * through all of it by design: it checks that links RESOLVE, never that anchors
+ * are unique, so a duplicate anchor silently sends every link to the first of
+ * the two.
+ *
+ * WHAT THE FIX MAY NOT DO, and what these cases hold it to:
+ *
+ *   - Not invent a notation. The qualifier reuses `variantSelector` from
+ *     `format-type.ts` — the very function that stamps `[type='sidebar']` /
+ *     `[option 2]` into a property accessor (#12316) — so a page has one
+ *     variant grammar, not two.
+ *   - Not trust a discriminant that does not discriminate. A key pinned to the
+ *     SAME literal on two variants names neither of them, and qualifying with
+ *     it would re-create the duplicate anchors through the fix itself. The
+ *     positional fallback is therefore pinned as hard as the discriminant.
+ *   - Not touch a heading outside a union variant. A schema rendered whole, and
+ *     a union with a single heading-emitting arm, keep the exact headings they
+ *     had.
+ *
+ * `### Properties` and `#### Option N` repeat within a union section and are
+ * deliberately NOT in scope here: they are the section grammar's own headings,
+ * repeated on every page in the tree, not the per-key qualifier this card is
+ * about. The uniqueness assertions below are scoped to the two qualified
+ * headings for that reason.
+ */
+
+/** A `ViewItem`-shaped variant: a discriminant literal plus a shape-opening `config`. */
+const variantWithConfig = (viewKind: string) => ({
+  type: 'object',
+  properties: {
+    viewKind: { const: viewKind },
+    config: {
+      type: 'object',
+      properties: { label: { type: 'string', description: `Label shown on the ${viewKind} view.` } },
+    },
+  },
+  required: ['viewKind', 'config'],
+});
+
+/** The same shape with no `const` anywhere — nothing for a discriminant to read. */
+const anonymousVariantWithConfig = (label: string) => ({
+  type: 'object',
+  properties: {
+    config: {
+      type: 'object',
+      properties: { label: { type: 'string', description: label } },
+    },
+  },
+});
+
+/** Wide enough to leave the cell (`TOP_LEVEL_ENUM_WIDTH_LIMIT` is 160). */
+const WIDE_VOCABULARY = Array.from({ length: 12 }, (_, i) => `vocabulary_member_${i + 1}`);
+
+const variantWithVocabulary = (viewKind: string) => ({
+  type: 'object',
+  properties: {
+    viewKind: { const: viewKind },
+    mode: { type: 'string', enum: WIDE_VOCABULARY },
+  },
+  required: ['viewKind', 'mode'],
+});
+
+/** The qualified headings only — the population this card measures. */
+const qualifiedHeadings = (md: string) =>
+  md.split('\n').filter(l => l.startsWith('### Nested Shape: ') || l.startsWith('### Allowed Values: '));
+
+describe('renderSchemaSection — union variants qualify their own headings (#12590)', () => {
+  it('gives sibling variants sharing a shape-opening key DISTINCT nested-shape headings', () => {
+    const md = renderSchemaSection('ViewItem', {
+      anyOf: [variantWithConfig('list'), variantWithConfig('record')],
+    });
+
+    expect(md).toContain("### Nested Shape: `ViewItem[viewKind='list'].config`");
+    expect(md).toContain("### Nested Shape: `ViewItem[viewKind='record'].config`");
+    // The shared spelling — one anchor for two different shapes — is gone.
+    expect(md).not.toContain('### Nested Shape: `ViewItem.config`');
+  });
+
+  it('emits no duplicate qualified heading anywhere in the section', () => {
+    const md = renderSchemaSection('ViewItem', {
+      anyOf: [variantWithConfig('list'), variantWithConfig('record'), variantWithConfig('form')],
+    });
+
+    const headings = qualifiedHeadings(md);
+    expect(headings).toHaveLength(3);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
+
+  it('spells the qualifier in the accessor voice the page already prints', () => {
+    const md = renderSchemaSection('ViewItem', {
+      anyOf: [variantWithConfig('list'), variantWithConfig('record')],
+    });
+
+    // `[key='literal']`, the #12316 discriminant spelling — the same literal
+    // formatting the Type cell two lines above uses, so a reader copying
+    // `viewKind: 'list'` off the heading copies the schema's own answer.
+    expect(md).toMatch(/### Nested Shape: `ViewItem\[viewKind='list'\]\.config`/);
+    // No second notation: no `#N`, no `(1)`, no bare `[1]`.
+    expect(md).not.toMatch(/### Nested Shape: `ViewItem[#(]/);
+  });
+
+  it('falls back to the positional spelling when the union has no discriminant', () => {
+    const md = renderSchemaSection('Thing', {
+      anyOf: [anonymousVariantWithConfig('first'), anonymousVariantWithConfig('second')],
+    });
+
+    expect(md).toContain('### Nested Shape: `Thing[option 1].config`');
+    expect(md).toContain('### Nested Shape: `Thing[option 2].config`');
+  });
+
+  /**
+   * The trap #12316 named, and the one way this fix could recreate the very
+   * defect it removes: `viewKind` is a `const` on both variants and pins the
+   * SAME literal, so it identifies neither. Answering it would emit
+   * `Thing[viewKind='list'].config` twice.
+   */
+  it('refuses a discriminant two variants pin to the same literal', () => {
+    const md = renderSchemaSection('Thing', {
+      anyOf: [variantWithConfig('list'), variantWithConfig('list')],
+    });
+
+    expect(md).not.toContain("[viewKind='list']");
+    expect(md).toContain('### Nested Shape: `Thing[option 1].config`');
+    expect(md).toContain('### Nested Shape: `Thing[option 2].config`');
+    const headings = qualifiedHeadings(md);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
+
+  /**
+   * The positional number counts DECLARED position, including arms that emit no
+   * headings — so it can be checked against the `#### Option N` heading the
+   * reader already has three lines up. Renumbering to skip them would print a
+   * number matching nothing on the page.
+   */
+  it('numbers positions by the union as declared, not by the emitting arms', () => {
+    const md = renderSchemaSection('Thing', {
+      anyOf: [
+        { type: 'string' },
+        anonymousVariantWithConfig('first'),
+        anonymousVariantWithConfig('second'),
+      ],
+    });
+
+    expect(md).toContain('#### Option 2');
+    expect(md).toContain('### Nested Shape: `Thing[option 2].config`');
+    expect(md).toContain('### Nested Shape: `Thing[option 3].config`');
+    expect(md).not.toContain('### Nested Shape: `Thing[option 1].config`');
+  });
+
+  it('keeps the variant qualifier at the union position when the accessor goes deeper', () => {
+    const md = renderSchemaSection('Thing', {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            kind: { const: 'listy' },
+            items: {
+              type: 'array',
+              items: { type: 'object', properties: { uid: { type: 'string', description: 'Element id.' } } },
+            },
+          },
+        },
+        {
+          type: 'object',
+          properties: {
+            kind: { const: 'flat' },
+            items: {
+              type: 'array',
+              items: { type: 'object', properties: { uid: { type: 'string', description: 'Element id.' } } },
+            },
+          },
+        },
+      ],
+    });
+
+    // Reads left to right: the `listy` variant, its `items`, an element of it.
+    expect(md).toContain("### Nested Shape: `Thing[kind='listy'].items[number]`");
+    expect(md).toContain("### Nested Shape: `Thing[kind='flat'].items[number]`");
+  });
+});
+
+describe('renderSchemaSection — headings outside a union variant are unchanged (#12590)', () => {
+  it('leaves a plain object schema’s nested-shape heading exactly as it was', () => {
+    const md = renderSchemaSection('Widget', {
+      type: 'object',
+      properties: {
+        config: {
+          type: 'object',
+          properties: { label: { type: 'string', description: 'The label.' } },
+        },
+      },
+    });
+
+    expect(qualifiedHeadings(md)).toEqual(['### Nested Shape: `Widget.config`']);
+  });
+
+  /**
+   * A union whose single object arm is the only heading-emitting context has
+   * nothing to tell apart, so it spends no selector — the same rule the walk
+   * applies to `string | { … }` in `nestedShapesOf` (`total < 2`), which is what
+   * keeps every heading outside the measured duplicate population byte-identical.
+   */
+  it('spends no selector on a union with a single heading-emitting arm', () => {
+    const md = renderSchemaSection('Thing', {
+      anyOf: [{ type: 'string' }, variantWithConfig('list')],
+    });
+
+    expect(qualifiedHeadings(md)).toEqual(['### Nested Shape: `Thing.config`']);
+  });
+});
+
+describe('renderSchemaSection — the same treatment for relocated vocabularies (#12590)', () => {
+  /**
+   * Zero corpus today: no page carries two `### Allowed Values:` headings that
+   * collide. It is the SAME exposure — one qualifier, shared by every sibling
+   * variant — so closing only the half with a measured population would leave
+   * the next wide vocabulary declared on two variants to reopen it.
+   */
+  it('gives sibling variants sharing a wide vocabulary DISTINCT allowed-values headings', () => {
+    const md = renderSchemaSection('ViewItem', {
+      anyOf: [variantWithVocabulary('list'), variantWithVocabulary('record')],
+    });
+
+    expect(md).toContain("### Allowed Values: `ViewItem[viewKind='list'].mode`");
+    expect(md).toContain("### Allowed Values: `ViewItem[viewKind='record'].mode`");
+    expect(md).not.toContain('### Allowed Values: `ViewItem.mode`');
+
+    const headings = qualifiedHeadings(md);
+    expect(headings).toHaveLength(2);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
+
+  it('leaves a plain object schema’s allowed-values heading exactly as it was', () => {
+    const md = renderSchemaSection('Widget', {
+      type: 'object',
+      properties: { mode: { type: 'string', enum: WIDE_VOCABULARY } },
+    });
+
+    expect(qualifiedHeadings(md)).toEqual(['### Allowed Values: `Widget.mode`']);
+  });
+});
