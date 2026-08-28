@@ -99,7 +99,7 @@ The measured hazard has **zero instances** in any shipped or example corpus (§1
 Any **one** of these turns the deferral over; none requires re-opening the direction, only scheduling it:
 
 - **The hazard stops being hypothetical**: any intersection appears between the settings-namespace set and the set of object names carrying a `Field.secret()` field — in shipped platform metadata, in an example app, or in a reported customer deployment. §1.4's "no intersection" is the whole of the deferral's evidence, and it is a fact with a shelf life.
-- **A second producer of `CryptoContext` is added**, or an existing one's vocabulary is widened to accept names it does not control. A fourth vocabulary in a flat space is the same defect with more surface, and the discriminant is far cheaper to introduce *with* the new producer than after it.
+- **A fourth producer of `CryptoContext` is added**, or an existing one's vocabulary is widened to accept names it does not control. A fourth vocabulary in a flat space is the same defect with more surface, and the discriminant is far cheaper to introduce *with* the new producer than after it.
 - **`ICryptoProvider` is opened for another breaking change.** The migration is the expensive half; the breaking-export half should be paid once. A queued breaking change to this interface should pull D1 in with it.
 - **A compliance or customer requirement asks the platform to state its at-rest ciphertext binding.** The honest present-tense answer is §1's, and an organisation that needs a stronger one funds the work.
 
