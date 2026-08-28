@@ -98,7 +98,7 @@
     "actions": {
       "status": "live",
       "evidence": "packages/runtime/src/app-plugin.ts:929",
-      "note": "served on /meta/objects/:name."
+      "note": "served on /meta/object/:name."
     },
     "managedBy": {
       "status": "live",
