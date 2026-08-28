@@ -2740,11 +2740,23 @@ export type AuditMetaItemRequest = z.input<typeof AuditMetaItemRequestSchema>;
 export type AuditMetaItemResponse = z.input<typeof AuditMetaItemResponseSchema>;
 /** Opaque by ruling (#12038 1C) — see {@link GetPublishedMetaItemResponseSchema}. */
 export type GetPublishedMetaItemResponse = z.input<typeof GetPublishedMetaItemResponseSchema>;
+/** Post-parse shape of {@link GetPublishedMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetPublishedMetaItemResponseParsed = z.infer<typeof GetPublishedMetaItemResponseSchema>;
 export type ListDraftsResponse = z.input<typeof ListDraftsResponseSchema>;
+/** Post-parse shape of {@link ListDraftsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListDraftsResponseParsed = z.infer<typeof ListDraftsResponseSchema>;
 export type GetMetaDiagnosticsResponse = z.input<typeof GetMetaDiagnosticsResponseSchema>;
+/** Post-parse shape of {@link GetMetaDiagnosticsResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaDiagnosticsResponseParsed = z.infer<typeof GetMetaDiagnosticsResponseSchema>;
 export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaResponseSchema>;
+/** Post-parse shape of {@link FindReferencesToMetaResponse} — defaults applied, transforms run (ADR-0122). */
+export type FindReferencesToMetaResponseParsed = z.infer<typeof FindReferencesToMetaResponseSchema>;
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
+/** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
+export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;
 export type DiffMetaItemResponse = z.input<typeof DiffMetaItemResponseSchema>;
+/** Post-parse shape of {@link DiffMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
+export type DiffMetaItemResponseParsed = z.infer<typeof DiffMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;
 export type GetMetaItemCachedResponse = z.input<typeof GetMetaItemCachedResponseSchema>;
 /** Post-parse shape of {@link GetMetaItemCachedResponse} — defaults applied, transforms run (ADR-0122). */

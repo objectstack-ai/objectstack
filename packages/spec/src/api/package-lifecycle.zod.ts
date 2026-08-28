@@ -216,9 +216,23 @@ export const DuplicatePackageResponseSchema = lazySchema(() => z.object({
 }));
 
 export type DiscardPackageDraftsResponse = z.input<typeof DiscardPackageDraftsResponseSchema>;
+/** Post-parse shape of {@link DiscardPackageDraftsResponse} — defaults applied, transforms run (ADR-0122). */
+export type DiscardPackageDraftsResponseParsed = z.infer<typeof DiscardPackageDraftsResponseSchema>;
 export type ListPackageCommitsResponse = z.input<typeof ListPackageCommitsResponseSchema>;
+/** Post-parse shape of {@link ListPackageCommitsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListPackageCommitsResponseParsed = z.infer<typeof ListPackageCommitsResponseSchema>;
 export type RevertPackageCommitResponse = z.input<typeof RevertPackageCommitResponseSchema>;
+/** Post-parse shape of {@link RevertPackageCommitResponse} — defaults applied, transforms run (ADR-0122). */
+export type RevertPackageCommitResponseParsed = z.infer<typeof RevertPackageCommitResponseSchema>;
 export type RollbackToPackageCommitResponse = z.input<typeof RollbackToPackageCommitResponseSchema>;
+/** Post-parse shape of {@link RollbackToPackageCommitResponse} — defaults applied, transforms run (ADR-0122). */
+export type RollbackToPackageCommitResponseParsed = z.infer<typeof RollbackToPackageCommitResponseSchema>;
 export type PackageExportManifest = z.input<typeof PackageExportManifestSchema>;
+/** Post-parse shape of {@link PackageExportManifest} — defaults applied, transforms run (ADR-0122). */
+export type PackageExportManifestParsed = z.infer<typeof PackageExportManifestSchema>;
 export type ReassignOrphanedMetadataResponse = z.input<typeof ReassignOrphanedMetadataResponseSchema>;
+/** Post-parse shape of {@link ReassignOrphanedMetadataResponse} — defaults applied, transforms run (ADR-0122). */
+export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrphanedMetadataResponseSchema>;
 export type DuplicatePackageResponse = z.input<typeof DuplicatePackageResponseSchema>;
+/** Post-parse shape of {@link DuplicatePackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type DuplicatePackageResponseParsed = z.infer<typeof DuplicatePackageResponseSchema>;
