@@ -11,20 +11,19 @@
  *
  * ## Why this exists as a TOOL and not as a written-down number
  *
- * `check-stall-guard-budget.mjs` judges `C < T` and `T - C >= W`. All three are
- * statically readable, so it can judge them on every PR forever. The term that
- * actually consumes the budget is neither of those: it is `p + s` -- the job's
- * prep plus how far into the guarded step the output froze -- and the ceiling on
- * that is the HEALTHY RUN LENGTH, which no sweep of the tree can read. That gate
- * says so in its own header and declines to encode a number derived from it.
+ * `check-stall-guard-budget.mjs` judges `C < T` and `T - C >= W`, all statically
+ * readable. The term that actually consumes the budget is `p + s` -- the job's
+ * prep plus how far into the guarded step the output froze -- whose ceiling is
+ * the HEALTHY RUN LENGTH, and no sweep of the tree can read that. So it has to be
+ * re-measured rather than checked, and the two previous attempts to carry it
+ * forward were prose -- a table in an issue and a paragraph in a header -- both of
+ * which had drifted by the time anyone re-took them. This file is the
+ * re-derivation, so the answer can rot LOUDLY instead of silently.
  *
- * So the number has to be re-measured, and the previous two attempts to carry it
- * forward were both prose: a table in an issue and a paragraph in a header. Both
- * are already stale (see "What this measured" below). A number that can only be
- * refreshed by hand is a number that silently rots -- the same defect class as a
- * cost note that drifted two orders of magnitude because nobody could re-derive
- * it. This file is the re-derivation, so the answer can rot LOUDLY: re-run it and
- * the arithmetic comes back with today's runs named in the output.
+ * The boundary this measures, and what a green from that gate does and does not
+ * promise, is stated once in the header of `check-stall-guard-budget.mjs`. It is
+ * deliberately not restated here: two copies of that argument would be two things
+ * that must agree with nobody holding them to it.
  *
  * ## What it measures
  *
@@ -69,35 +68,13 @@
  * empty population, so a run that matched no step must not be able to print the
  * same green a real sweep prints. Every refusal names the population it saw.
  *
- * ## What this measured, and the number that had already gone stale
+ * ## Re-taking it
  *
- * Run 33135187774 (head `f907fbe9e`) -- the sample #12846 was filed on -- put the
- * worst `p + s` at 15m10s on `Test Core (1/6)`. Re-taken on three consecutive
- * merge_group runs of 2026-08-28 (33160601033 `8beb3deaf`, 33162164422
- * `b9dd923b9`, 33163163494 `f4e741bd1`):
+ * Pass `--run` for runs to fetch, or `--from` for saved
+ * `GET /actions/runs/{id}/jobs` payloads. Use a `pull_request` or `merge_group`
+ * run: a push to `main` has the guarded matrix filtered out, and this tool
+ * REFUSES on an empty population rather than printing a green.
  *
- *     run          worst p + s   where
- *     33163163494  17m52s        Test Core (1/6)
- *     33162164422  18m38s        Test Core (1/6)
- *     33160601033  18m48s        Test Core (1/6)
- *
- * Worst of the three: 18m48s, i.e. 18.80m against the card's 15.2m -- 3.6 minutes
- * worse, a 24% move in the direction that consumes budget. The card hedged that
- * "the slowest shard moves with the shard partition"; across these three runs it
- * did not move at all -- shard 1/6 was worst in every one, and in the card's
- * sample too. The instability is in the DURATION, not in which shard holds it.
- *
- * On the ci.yml `test` family (W=10, C=20, T=30) that makes both paths worse than
- * the card recorded:
- *
- *     undeferred: 18.80 + 10 = 28.80 < 30  -- still covered, by 1.2m
- *     deferred:   18.80 + 20 = 38.80 > 30  -- uncovered, by 8.8m
- *
- * The undeferred margin is the line worth watching. The card measured it at 4.8m
- * and treated it as comfortable; it is now 1.2m. That is the #4250 shape -- the
- * mid-suite freeze this guard was actually built for -- and on this trend it
- * reaches zero without anything in the tree changing and without any gate going
- * red, because the term that moved is the one no gate can read.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
