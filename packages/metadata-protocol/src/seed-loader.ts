@@ -1382,6 +1382,9 @@ export class SeedLoaderService implements ISeedLoaderService {
    * org-less (→ invisible under strict org-scoping). Returns undefined when
    * there are zero or several orgs (genuinely ambiguous — keep the historical
    * global/cross-tenant NULL) or when `sys_organization` is absent.
+   *
+   * [#12852] A read that FAILED for any other reason PROPAGATES — it is not
+   * an emptiness. See the catch below.
    */
   private async resolveSoleOrganizationId(): Promise<string | undefined> {
     try {
@@ -1394,8 +1397,38 @@ export class SeedLoaderService implements ISeedLoaderService {
         const id = (rows[0] as { id?: unknown; _id?: unknown })?.id ?? (rows[0] as { _id?: unknown })?._id;
         return id ? String(id) : undefined;
       }
-    } catch {
-      // sys_organization may not exist (single-tenant runtime) — ignore.
+    } catch (error) {
+      // [#12852] Discriminate by error TYPE, the same repair PR #9817 made to
+      // `ObjectQL.probeInstallOrganizations` — the sibling probe with this
+      // exact shape, on the other side of the engine boundary. This site was
+      // missed by that pass.
+      //
+      // The bare `catch {}` this replaces answered EVERY cause with `undefined`,
+      // and `undefined` is not a neutral value here: it is the verdict this
+      // method's own JSDoc describes as "genuinely ambiguous", so the caller
+      // stamps no `organization_id` and every BUSINESS seed row of the run lands
+      // org-less — invisible afterwards under strict org-scoping. Nothing says
+      // so: `load()` reports through `SeedLoadResult.errors`, and this path
+      // never touches it, so a transient outage mid-seed reads to the operator
+      // as a clean, successful seed. ADR-0110 D3's exact shape: "the read found
+      // no sole organization" and "the read could not run" are different facts.
+      //
+      // Benign, and the only one — it is precisely the cause the swallowed
+      // comment already named: `sys_organization` is absent because its TABLE
+      // was never provisioned (schema sync not run yet, a single-tenant
+      // runtime). It can hold no row, so "no sole organization" IS the truth and
+      // the historical global/cross-tenant NULL is the right answer. Asked
+      // through the shared `isMissingTableError` predicate
+      // (`@objectstack/metadata/errors`) — the same call `loadExistingRecords`
+      // makes below — never a hand-rolled message test, so one vocabulary of
+      // "benign driver error" serves every seam that needs one.
+      //
+      // Everything else (connection loss, a timeout, a permission denial, a
+      // driver fault) means organizations may well exist and simply were not
+      // seen. It propagates, envelope intact: the seed run fails loudly instead
+      // of writing a batch of rows nobody will be able to see. No new error code
+      // and no new result field — the caller receives the read's own failure.
+      if (!isMissingTableError(error)) throw error;
     }
     return undefined;
   }

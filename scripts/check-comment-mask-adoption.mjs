@@ -80,9 +80,10 @@
  * `packages/cloud-connection/src/marketplace-proxy-plugin.ts` (38 bytes, inside
  * a declared MOUNT SOURCE). That is the naive-`//` family this gate exists for,
  * found live rather than argued from the shape. `packages/cli/src/utils/
- * console-route-ledger.conformance.test.ts` is the fourth guard in that family
- * and stays recorded: its population limb already stripped, so it was out of
- * that card's scope and nobody has re-read its scanner.
+ * console-route-ledger.conformance.test.ts` was the fourth guard in that family
+ * and was left recorded here because its population limb already stripped; the
+ * THIRD SHRINK below converts it, and its scanner was committing the same
+ * defect on 7 of that package's 110 sources.
  *
  * ## SECOND ROUND (#12475): every remaining row now carries a MEASUREMENT
  *
@@ -135,8 +136,33 @@
  * extractor and the shared scanner disagree about how many docblocks 9 of the
  * 1,053 `packages/spec/src` sources contain. That is a row whose verdict
  * changes under the shared mask, which this header has always said is a finding
- * to read rather than something to absorb, so it is filed rather than fixed
- * here.
+ * to read rather than something to absorb, so it was filed rather than fixed
+ * here. The SECOND SHRINK below is that filing coming back.
+ *
+ * ## SECOND SHRINK (#12833): the one row whose verdict moved
+ *
+ * `packages/lint/scripts/check-doc-formula-expressions.mjs` is converted and its
+ * row is deleted here, in the same PR, which is the half the `stale` branch
+ * exists to demand. `tsdocExampleBodies()` now takes its docblock runs from
+ * `scanSource().comment` instead of a lazy `/**`-to-terminator regex, so the
+ * three literal forms that regex is blind to no longer open phantom docblocks.
+ *
+ * What the conversion found, re-measured on `28a5c3e002` (the population has
+ * grown to 1,061 files / 13.7 MB since the SECOND ROUND read it): both of that
+ * row's numbers reproduce exactly, the two sets of 9 files still overlap in only
+ * 5, and the scan recovers 5 real docblocks the regex was swallowing whole.
+ *
+ * And a third number the row could not have predicted: the gate's own
+ * `@example` body set does NOT move -- 416 bodies, byte for byte identical
+ * either way -- because none of the 5 recovered docblocks carries an `@example`
+ * and none of the phantoms fabricated one. The measuring round's expectation
+ * was that the count would go UP and that the new bodies would be the
+ * interesting part of the diff; on this tree it does not, and the conversion is
+ * verdict-preserving like the other nine. That is not a reason to leave the
+ * extractor alone, and it is recorded here so nobody re-derives the row from
+ * the unchanged count: "surface 2 admits 0 sites today" was the output of an
+ * extractor provably blind to 13 KB of its own population, and it is a reading
+ * now. Both directions are pinned in that gate's own `--self-test`.
  *
  * A recorded row that the scan no longer finds FAILS as stale. That is the
  * property `check-self-test-wired.mjs` names as the difference between a rule
@@ -252,8 +278,6 @@ const VERDICTS = new Set(['unconverted', 'specimen']);
  * one private stripper for another has not been re-read by anyone.
  */
 const LEDGER = new Map([
-  ['examples/app-showcase/test/inert-wirings.test.ts',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across 91 .ts files under examples/app-showcase/src): DELETES LIVE CODE on 9 of them, 5,987 chars, because the block regex opens a phantom comment at a block-comment opener sitting inside a string literal -- the accept-glob strings in ui/actions/index.ts and the prose strings in coverage.ts -- and runs to the next terminator far below; it also KEEPS 1,813 chars of trailing line-comment prose, which its line filter deliberately never removes. Its own retired-retryDelayMs offender set is empty under both strippers today' }],
   ['packages/cli/src/commands/artifact-child-env.pin.test.ts',
     { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475: NOT a stripper feeding a scan. This file\'s guard is ts.createSourceFile; the one block-regex call is a 7-line inline SPECIMEN asserting the text scan it replaced reports that specimen clean, and it does -- 112 chars of live code deleted at the block-comment opener inside the route-wildcard string. Recorded as unconverted only because a shape scan cannot tell a negative control from a caller; converting it would delete the evidence, exactly as for the specimen row below' }],
   ['packages/cli/src/commands/migrate/multi-value-columns.no-auto-run.test.ts',
@@ -264,14 +288,8 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the two brace-matched interface BODIES interfaceFields() strips -- ResolvedMultiNodeVerdict in packages/services/service-cluster/src/multi-node-gate.ts and MultiNodeGateVerdict in commands/serve.ts, 1,462 chars): agrees with the shared mask. Narrow by construction rather than by luck -- a TSDoc-only interface slice carries no regex literal and no string holding a comment opener. The rest of the file already imports maskComments' }],
   ['packages/cli/src/commands/serve-verify-security-parity.contract.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'specimen', why: 'the private two-regex strip this file carried until its conversion, kept as a NEGATIVE CONTROL that the shared mask beats it; converting it would delete the evidence' }],
-  ['packages/cli/src/utils/console-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packageSourceFiles(), 110 non-test .ts under packages/cli/src, 1.6 MB): DELETES LIVE CODE on 9 of them, 10,263 chars. Same defect and same spelling as the two the FIRST SHRINK found -- string-aware but REGEX-BLIND, so the doubled slash inside /^https?://i reads as a line-comment opener and the rest of the line goes: dev.ts:169, serve.ts:3021, start.ts:460 and start.ts:475 are live sites today. It also KEEPS 35,382 chars of block-comment prose swallowed by phantom STRINGS opened at a quote character inside a regex class. This is the fourth guard in that family, the one #12398 left recorded; its MOUNT_SHAPED identity is still exactly [utils/console.ts] under both strippers, so the blindness has not yet cost it a finding' }],
   ['packages/create-objectstack/src/template-registry.test.ts',
     { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/create-objectstack/src/index.ts): deletes no live code -- it has no block arm at all -- and therefore KEEPS 2,744 chars of block-comment prose, the FABRICATION direction. Its line arm is anchored and reaches only whole-line comments' }],
-  ['packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across all 152 *.test.ts in packages/drivers/driver-sql/src, 2.0 MB): 54 files disagree. Mostly the safe direction -- 4,582 chars of trailing line-comment prose KEPT by the anchored line arm -- but the block arm also DELETES 228 chars of live code in logger-receiver-detach.test.ts, where a fixture STRING quotes a docblock and the naive block regex eats the string. Its own direct-OS_TEST_URL offender set is empty under both strippers' }],
-  ['packages/lint/scripts/check-doc-formula-expressions.mjs',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (collectSpecFiles(), 1,053 .ts/.tsx under packages/spec/src, 13.4 MB): tsdocExampleBodies() is an EXTRACTOR rather than a stripper, so it was measured as one -- do the spans it claims are docblocks hold characters the shared scanner calls code? On 9 files they do, up to 13,139 chars in kernel/manifest.test.ts, where a glob string opens a phantom docblock that then swallows the real ones behind it. THE ONLY ROW WHOSE OWN VERDICT MOVES: its docblock COUNT differs from the shared scanner\'s on 9 files too -- an OVERLAPPING BUT DIFFERENT set of 9, not the same one -- so this gate is under-reading @example bodies it believes it read. Filed rather than fixed here, per this header' }],
   ['packages/lint/src/validate-expressions.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-expressions.ts, 75,403 chars): agrees with the shared mask. The unanchored trailing line arm is the dangerous spelling and it holds here only because that one rule source happens to carry no doubled slash inside a regex literal or string -- a property of today\'s file, not of this stripper' }],
   ['packages/lint/src/validate-org-axis-red-lines.test.ts',
@@ -284,12 +302,8 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across all 11 *.test.ts in packages/metadata-protocol/src/migrations): deletes no live code; KEEPS 130 chars of trailing line-comment prose on 4 files, the FABRICATION direction. LIVE_TEST_FILES resolves to the same three files under both strippers, so the derived population this file guards is unaffected today' }],
   ['packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts',
     { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (collectSources(), 25 non-test .ts under packages/plugins/plugin-approvals/src, 463 KB): agrees with the shared mask. It is REGEX-BLIND like its plugin-auth twin below and survives only because this package\'s sources carry no regex literal holding a quote character and no doubled slash inside one -- a fact about the population, not about the scanner' }],
-  ['packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over 423 files / 7.3 MB -- every .ts under plugin-auth/src as a declared SUPERSET of the import-graph limb (whose exact set is resolver-dependent), plus the two cross-package roots it reads whole, packages/runtime/src and packages/services/service-sms/src. 15 files disagree: DELETES 6,375 chars of live code, the regex-blind doubled-slash defect again (auth-manager.ts loses the line holding /^https?://i), and KEEPS 22,329 chars of comment prose behind phantom strings. Its own extracted import refs are identical under both strippers on every one of the 423 files, so the reachability verdict has not moved' }],
   ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts',
     { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/qa/downstream-contract/tsconfig.json, 5,145 chars of JSONC): agrees with the shared mask. An anchored line arm over a file with no regex literals and no block comments -- the narrowest population in this ledger' }],
-  ['packages/runtime/src/error-envelope.conformance.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the 10 modules in its own MODULES list, 390 KB): DELETES 166 chars of live code on 2 of them and keeps nothing -- purely the blind direction. The unanchored trailing line arm eats route paths inside template literals: dispatcher-plugin.ts loses the rest of the line at a doubled slash in a mount path, domains/mcp.ts at the one in an https URL it builds. All four of its own per-module counts are identical under both strippers today, so the numeric-code pin has not yet been cheated' }],
   ['packages/spec/scripts/lazify-schemas.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (listZodFiles(), 208 *.zod.ts under packages/spec/src, 4.4 MB): the two COMMENT arms of the import-block matcher claim no character the shared scanner calls code, on any file. Sound by construction rather than by luck: both arms are anchored to a line start after indent only, and the matcher runs at the file top where no template literal can be open. (First measured as 208/208 disagreeing -- that was the instrument counting the newline each arm consumes; see the SECOND ROUND note.)' }],
 ]);

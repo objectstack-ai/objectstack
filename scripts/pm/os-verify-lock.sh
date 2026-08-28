@@ -802,9 +802,38 @@ open_file_pids() {
   printf 'unknown'
 }
 
+# Seconds → the same seconds, plus a scaled reading a human can hold. The
+# scaled part is a CONVENIENCE and the `%ss` prefix is the fact: every branch
+# prints the exact second count first, so no reading here is ever the only
+# copy of the number.
+#
+# ⚠ THE HOUR BRANCH IS NOT COSMETIC SUGAR ON THE MINUTE ONE. Two of this
+# script's call sites -- `--report`'s span and the floor it reaches back to --
+# are CALENDAR-scale figures, and the question a reader brings to them ("does
+# this population cover my hold from the 26th?") is answered by comparing
+# against a date. Rendered minute-only, an 8h24m window prints `504m05s` and
+# the reader has to divide before they can compare. The report elsewhere
+# refuses to leave arithmetic on the page -- the arrival-depth block spells out
+# `⇒ waiters already ahead = this minus 1` for exactly this reason -- so
+# leaving a division here was the odd one out.
+#
+# ⛔ The 3600 threshold is deliberate and the sub-hour text is deliberately
+# UNTOUCHED: the long-hold warning fires at 900s and `900s (15m00s)` reads
+# correctly at minute scale. Widening the hour branch downward would "unify"
+# the formats and make that warning worse.
+#
+# ⛔ bash 3.2 floor: plain arithmetic and `printf` only. In particular the
+# minute term is `s % 3600 / 60`, NOT `s / 60` -- the latter is the natural
+# typo and it prints 3661s as `1h61m01s`, a well-formed string that is wrong.
 human_s() {
   local s="$1"
-  if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
+  if ((s >= 3600)); then
+    printf '%ss (%dh%02dm%02ds)' "$s" $((s / 3600)) $((s % 3600 / 60)) $((s % 60))
+  elif ((s >= 60)); then
+    printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60))
+  else
+    printf '%ss' "$s"
+  fi
 }
 
 # Epoch seconds → a UTC instant a reader can compare against a dated report, or
@@ -945,14 +974,40 @@ ledger_append() {
 #
 # ⚠️ The repair is NOT a bigger constant, and the reason is that the number to
 # size it against does not exist. The ledger cannot price a p95 of legitimate
-# holds: it lives in this container's /tmp and starts empty on every reset, so
-# the population it holds is one shift's worth of whatever ran since — read on
-# 2026-08-27 it was 24 records, max hold 344s, max wait 3s, ZERO queue-timeouts
-# and arrival depth 1 on every single record, i.e. not one contended run of the
-# kind this card is about. Picking `HARD_CAP_S * 6` off the back of four
-# hand-correlated anecdotes would be a constant with the same standing as the
-# one it replaced, and it would be wrong again the first time three long holds
-# queue up instead of two.
+# holds: its population starts where the ledger FILE starts and no earlier —
+# for reasons nobody has characterised, stated below — so what it holds is
+# whatever ran since, a stretch of hours in every reading so far and never a
+# fleet history. Read on 2026-08-27 it was 24 records, max hold 344s, max wait 3s,
+# ZERO queue-timeouts and arrival depth 1 on every single record, i.e. not one
+# contended run of the kind this card is about. Picking `HARD_CAP_S * 6` off
+# the back of four hand-correlated anecdotes would be a constant with the same
+# standing as the one it replaced, and it would be wrong again the first time
+# three long holds queue up instead of two.
+#
+# ⛔ WHAT USED TO STAND WHERE THAT FLOOR STANDS, AND WHY IT IS GONE. This
+# paragraph reasoned from "it lives in this container's /tmp and starts empty
+# on every reset". That mechanism is NOT RELIABLE, and it was measured not
+# holding — twice, against two different ledger files: on 2026-08-28T01:00Z all
+# 74 records in the live ledger, and the file's own birth time, PREDATED the
+# boot `/proc/uptime` reported, the oldest by 8h11m; at 08:26Z the same day, on
+# a ledger born after that reading, all 14 records and the file's birth
+# predated the reported boot again, the oldest by 2h03m. Both readings carry
+# both controls, in one command: a file touched at that moment read as AFTER
+# the derived boot, so the comparison can return either answer; and PID 1
+# started under half a second after that boot, so `/proc/uptime` and the
+# process tree agree with EACH OTHER. It is the FILESYSTEM that did not restart
+# with them, not the clock that is wrong. The default path cannot carry the
+# claim either: `OS_VERIFY_LOCK_LEDGER` redirects the ledger, and a path is a
+# LOCATION while a population is an INTERVAL. `--report`'s scope block states
+# this same floor the same way, and for this same reason.
+#
+# ⛔ AND THE OPPOSITE PREMISE IS NOT CLAIMED: nothing above measured that /tmp
+# SURVIVES a reset. Two readings disqualify a mechanism; they do not establish
+# its negation, and WHY these files outlive a reported boot is uncharacterised
+# — establishing that is a real measurement across several restarts and several
+# hosts, not a comment edit. ⭐ The arithmetic above needs NEITHER answer: it
+# rests on the population being BOUNDED and thin, which every reading agrees
+# on, and never on why it begins where it does.
 #
 # What the bound is actually FOR is discarding a place nobody is coming back
 # for. So it asks that, and nothing else: the age is the time since the slot
@@ -1862,10 +1917,47 @@ mode_report() {
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/waited" | tr -d ' ')" "$(pct_of "${tmp}/waited" 50)" \
     "$(pct_of "${tmp}/waited" 90)" "$(pct_of "${tmp}/waited" 100)"
-  printf 'lock hold, over runs that acquired (seconds):\n'
+  # ⚠ THE FILTER, NOT THE ACQUISITION. `v > 0` above is shared by all three
+  # buckets, and it is the `waited` heading it fits: a recorded `waited` of 0 IS
+  # "did not wait at all", so that one describes its population and ⛔ must not be
+  # touched. It does NOT describe an acquisition. `held` is written by every
+  # terminal outcome, so `held=0` names two disjoint things at once -- a run that
+  # never acquired (queue-timeout, lock-unusable and filter-matches-nothing each
+  # record a literal 0) and a run that acquired and released inside one clock
+  # tick -- and the old heading, "over runs that acquired", claimed the bucket
+  # held the second kind while the filter drops it. Measured: 3 of 69 rows on the
+  # ledger this was filed from, one of which had waited 78s for the lock. The
+  # direction is the awkward one -- the dropped rows are the FASTEST holds, so
+  # p50 and p90 read high, and they read higher the better the fleet gets at
+  # holding the lock briefly.
+  #
+  # ⛔ THE REPAIR IS THE HEADING AND NOT THE FILTER, and that is not a matter of
+  # taste. Admitting `held=0` here would move `n`, `p50` and `p90` for every
+  # ledger, past and future: a figure quoted from an older report would stop
+  # matching a re-run over the very same rows, with nothing in either report
+  # saying why. That is a change of DEFINITION and it is carved out to its own
+  # card; this line only stops the report naming a population it does not have.
+  #
+  # ⛔ AND IT SAYS "RECORDED", not "held it for at least a second" -- the obvious
+  # spelling, and measurably false. `held` is a difference of two whole-second
+  # clock reads (`now_s`), so a 200ms hold that straddles a tick records 1 while
+  # a 900ms hold inside one records 0. The filter admits a recorded VALUE;
+  # promoting that to a claim about true duration would rebuild this card's own
+  # defect one line further down.
+  printf 'lock hold, over runs whose RECORDED hold is 1s or more (seconds):\n'
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/held" | tr -d ' ')" "$(pct_of "${tmp}/held" 50)" \
     "$(pct_of "${tmp}/held" 90)" "$(pct_of "${tmp}/held" 100)"
+  printf '  ⇒ this n is BELOW the record count at the top, and the gap is not rounding:\n'
+  printf '    every row recording held=0 is absent. That is the runs that never acquired\n'
+  printf '    AND the runs that acquired and let go inside one clock tick, so the fastest\n'
+  printf '    holds are the missing ones and p50/p90 read high by exactly that omission.\n'
+  printf '  ⇒ 1 is not a claim that a full second was held: the field is a difference of\n'
+  printf '    whole-second clock reads, so a sub-second hold records 0 or 1 depending only\n'
+  printf '    on where it fell against the tick.\n'
+  printf '  ⇒ an `unlocked` run is IN this bucket and held nothing -- on a host with no\n'
+  printf '    usable flock the command runs unserialized and its RUNTIME lands in this\n'
+  printf '    field. Read the outcomes block above before reading these as contention.\n'
   # ⚠ THE LABEL, NOT THE RECORD. The field counts the arriving run itself: the
   # depth is read AFTER `take_ticket` has minted this call's own ticket, so its
   # floor is 1 and a completely uncontended fleet printed "1 waiter already
@@ -2727,6 +2819,30 @@ mode_self_test() {
   st_case 'and the off-by-one heading itself is gone, not merely annotated' \
     "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead):')" 0
 
+  # The hold bucket's heading, which is the SAME defect one line up and was
+  # filed while the depth heading above was being repaired: `v > 0` drops every
+  # sub-second hold, and the heading said "over runs that acquired" -- a run
+  # that acquired, and one that waited 78s to do it, did acquire. The last two
+  # cases are the load-bearing ones and they guard opposite mistakes. Asserting
+  # only that the true wording is PRESENT would also pass on a report that kept
+  # the old heading beside it, which is how a heading defect survives a fix; and
+  # ⛔ the `waited` heading is CORRECT -- `waited > 0` literally is "waited at
+  # all" -- so it is pinned present here, because the likeliest way to get this
+  # repair wrong is to make the three headings "consistent" and break the one
+  # that was already true.
+  st_case 'and --report heads the hold bucket by what its filter admits' \
+    "$(printf '%s\n' "$rpt" | grep -c 'whose RECORDED hold is 1s or more')" 1
+  st_case 'and accounts for the gap between that n and the record count' \
+    "$(printf '%s\n' "$rpt" | grep -c 'the gap is not rounding')" 1
+  st_case 'and refuses to read a recorded 1 as a full second actually held' \
+    "$(printf '%s\n' "$rpt" | grep -c 'not a claim that a full second was held')" 1
+  st_case 'and names the unlocked rows sitting in a bucket titled about holds' \
+    "$(printf '%s\n' "$rpt" | grep -c 'run is IN this bucket and held nothing')" 1
+  st_case 'and the acquisition-shaped heading is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'over runs that acquired')" 0
+  st_case 'and the wait heading, which was already true of its filter, is untouched' \
+    "$(printf '%s\n' "$rpt" | grep -c 'over runs that waited at all')" 1
+
   # --- the scope of the population, and the clock that names its floor ------
   #
   # The report used to state its span and never its POSITION: `records: N,
@@ -2750,6 +2866,41 @@ mode_self_test() {
     "$(printf '%s\n' "$rpt" | grep -c 'where the hold time in THIS ledger went')" 1
   st_case 'and the fleet-scale heading is gone, not merely annotated' \
     "$(printf '%s\n' "$rpt" | grep -c 'this is where hold time actually goes')" 0
+
+  # `human_s`, which supplies the AGE in that floor line and the width in the
+  # `spanning` line above it. Fixed inputs to fixed strings, for the same
+  # reason `utc_stamp` is pinned that way just below: the failure here is not
+  # an error, it is a well-formed duration carrying the wrong reading, and only
+  # a fixed expected value separates those.
+  st_case 'human_s leaves a sub-minute duration as bare seconds' \
+    "$(human_s 45)" '45s'
+  st_case 'and renders a minute-scale duration in minutes, as it always did' \
+    "$(human_s 754)" '754s (12m34s)'
+  # ⛔ Pinned because it must NOT move: the long-hold warning fires at 900s and
+  # reads correctly at minute scale. A future "unification" that pulls the hour
+  # branch below an hour would make that warning worse, not better.
+  st_case 'and leaves the 900s long-hold scale reading in minutes' \
+    "$(human_s 900)" '900s (15m00s)'
+  st_case 'and keeps the last sub-hour second in minutes, not hours' \
+    "$(human_s 3599)" '3599s (59m59s)'
+  st_case 'and switches to hours at exactly one hour' \
+    "$(human_s 3600)" '3600s (1h00m00s)'
+  # ⛔ THE LOAD-BEARING CASE. Writing the minute term as `s / 60` instead of
+  # `s % 3600 / 60` renders this as `1h61m01s` -- well-formed, wrong, and
+  # invisible to any case that merely checks an `h` appeared.
+  st_case 'and carries minutes WITHIN the hour, not minutes since zero' \
+    "$(human_s 3661)" '3661s (1h01m01s)'
+  # The two figures this card was filed over, read from a live --report.
+  st_case 'and renders the reported span as hours rather than 504 minutes' \
+    "$(human_s 30245)" '30245s (8h24m05s)'
+  st_case 'and the population floor age beside it, rather than 514 minutes' \
+    "$(human_s 30841)" '30841s (8h34m01s)'
+  # The scaled reading is a convenience; the second count is the fact. This
+  # asserts the fact survived in every branch, which is what lets the scaled
+  # part be approximate-looking without any information being lost.
+  st_case 'and prints the exact second count in every branch, hours included' \
+    "$(human_s 45; printf ' '; human_s 754; printf ' '; human_s 30245)" \
+    '45s 754s (12m34s) 30245s (8h24m05s)'
 
   # `utc_stamp`, which supplies the instant in that floor. A KNOWN epoch mapped
   # to a KNOWN string, because the failure mode here is not an error: it is a

@@ -48,8 +48,9 @@
  *    rather than a union that is silently one producer short.
  *  - **A read that did not happen is a GAP, never an empty answer.** Every
  *    collector returns {@link FamilyGap} when it could not enumerate — a
- *    missing driver, an unregistered holder object, a throwing read, a host
- *    that did not declare its code-defined datasources. A gap makes the union
+ *    missing driver, an unregistered holder object, a throwing read, an engine
+ *    that cannot list the datasource definitions it holds, a host that did not
+ *    declare its code-defined datasources. A gap makes the union
  *    `complete: false`, and {@link assertSecretReferenceUnionComplete} refuses
  *    it. Returning `[]` there would be the read-invention defect AGENTS.md
  *    names, with a credential delete on the other end of it.
@@ -266,6 +267,22 @@ export interface SecretReferenceEngineLike {
   getConfigs(): Record<string, ServiceObject>;
   /** The driver serving an object, or `undefined` when none resolves. */
   getDriverForObject(objectName: string): SecretReferenceDriverLike | undefined;
+  /**
+   * Every datasource DEFINITION the engine holds — family 3's SECOND source,
+   * covering the artefacts that never reach `sys_metadata`.
+   *
+   * OPTIONAL, and that is a WIDENING of this port rather than a narrowing:
+   * every slice that satisfied this interface before still satisfies it, and
+   * the real `ObjectQL` satisfies the new member structurally (pinned in this
+   * module's test file).
+   *
+   * ⛔ Absence is NOT "the engine holds none". A slice without the accessor
+   * gaps the family — see {@link readEngineDatasourceDefs} — for the same
+   * reason `declaredDatasources: undefined` does: a read that did not happen
+   * cannot be reported as an empty answer. A slice that genuinely holds none
+   * says so exactly the way the host does, by answering `[]`.
+   */
+  listDatasourceDefs?(): readonly DatasourceArtefactLike[];
 }
 
 /** A datasource artefact, as far as this module reads it. */
@@ -423,28 +440,50 @@ export async function collectObjectFieldSecretReferences(
 /**
  * Family 3 — handles held at a datasource artefact's `external.credentialsRef`.
  *
- * Pure over the artefacts the caller supplies, because the engine cannot answer
- * this one: `registerDatasourceDef` keeps only `schemaMode` and
- * `external.allowWrites`, dropping `credentialsRef` on the way in. Artefacts
- * come from the metadata channel instead — {@link readStoredDatasourceArtefacts}
- * for the persisted ones, plus whatever the host declared in code.
+ * Pure over the artefacts its caller supplies — but the caller now assembles
+ * those from THREE sources, and none of the three dominates the others:
+ *
+ *  - {@link readStoredDatasourceArtefacts} — the persisted `sys_metadata` rows;
+ *  - {@link readEngineDatasourceDefs} — the definitions this engine holds.
+ *    `registerDatasourceDef` retains `external.credentialsRef` and
+ *    `listDatasourceDefs()` reads it back, so the engine can now answer for
+ *    every datasource REGISTERED on this runtime, by either entry route (the
+ *    direct call and the package-manifest install path);
+ *  - `SecretReferenceUnionInput.declaredDatasources` — the host's own list.
+ *
+ * A union, ⛔ not a replacement, because the two code-side sources have
+ * different blind spots: the engine indexes only what was registered on it, so
+ * a config file nothing ever installed is invisible to it, while a host's list
+ * can omit a datasource a package manifest installed behind its back. Letting
+ * either source stand for the other would under-report, and under-reporting is
+ * the direction that deletes live credentials.
+ *
+ * References are de-duplicated on the EXACT `(handleId, holder)` pair, which
+ * is information-preserving: the same handle at the same holder coordinate,
+ * seen twice because two sources both name it, is one reference. Two sources
+ * disagreeing — one holder, two different handles — keeps BOTH, because both
+ * are real and dropping either is the under-report this module refuses.
  */
 export function collectDatasourceSecretReferences(
   artefacts: readonly DatasourceArtefactLike[],
 ): FamilyResult {
   const family: SecretReferenceFamily = 'datasource';
   const references: SecretReference[] = [];
+  // Keyed on the JSON of the exact pair rather than a joined string: a
+  // separator character would have to be one no holder coordinate can contain,
+  // and that is a property this module cannot enforce over datasource names.
+  const seen = new Set<string>();
 
   for (const artefact of artefacts) {
     const ref = artefact?.external?.credentialsRef;
     if (typeof ref !== 'string' || ref === '') continue;
     const handleId = parseCredentialsRef(ref);
     if (handleId === undefined) continue; // a ref shape this producer did not mint
-    references.push({
-      handleId,
-      family,
-      holder: `datasource(${String(artefact.name)}).external.credentialsRef`,
-    });
+    const holder = `datasource(${String(artefact.name)}).external.credentialsRef`;
+    const key = JSON.stringify([handleId, holder]);
+    if (seen.has(key)) continue; // the same reference, reached through two sources
+    seen.add(key);
+    references.push({ handleId, family, holder });
   }
 
   return { family, status: 'enumerated', references };
@@ -499,6 +538,45 @@ export async function readStoredDatasourceArtefacts(
   return { artefacts };
 }
 
+/**
+ * Read the datasource definitions THIS ENGINE HOLDS — family 3's code-side
+ * source, and the half of it the union used to be unable to reach.
+ *
+ * `ObjectQL.registerDatasourceDef` retains `external.credentialsRef`, and
+ * `listDatasourceDefs()` answers every definition the engine indexed, from both
+ * entry routes and UNFILTERED by `schemaMode` (a managed datasource may carry a
+ * `credentialsRef` too, so filtering here would hide live handles).
+ *
+ * ⛔ The accessor's ABSENCE is a gap, never an empty answer. An engine slice
+ * that cannot list its definitions has not answered the question, and a
+ * code-declared datasource never reaches `sys_metadata` — so nothing else in
+ * this module would see the handle it holds. A slice that holds none states
+ * that by answering `[]`, exactly as the host does with `declaredDatasources`.
+ */
+export function readEngineDatasourceDefs(
+  engine: SecretReferenceEngineLike,
+): { artefacts: DatasourceArtefactLike[]; gap?: string } {
+  if (typeof engine.listDatasourceDefs !== 'function') {
+    return {
+      artefacts: [],
+      gap:
+        'this runtime\'s engine exposes no `listDatasourceDefs()`, so the datasource definitions '
+        + 'held in code could not be read; a code-declared datasource never reaches `sys_metadata`, '
+        + 'so its `external.credentialsRef` is invisible to the persisted read — implement the '
+        + 'accessor, or have it answer `[]` to state the engine holds none',
+    };
+  }
+
+  try {
+    return { artefacts: [...engine.listDatasourceDefs()] };
+  } catch (err) {
+    return {
+      artefacts: [],
+      gap: `listing the engine's datasource definitions threw — ${describeCause(err)}`,
+    };
+  }
+}
+
 /** Input to {@link collectSecretReferenceUnion}. */
 export interface SecretReferenceUnionInput {
   /** A booted runtime's ObjectQL engine. */
@@ -507,12 +585,16 @@ export interface SecretReferenceUnionInput {
    * The datasource artefacts the HOST declared in code (`defineStack`, an app
    * manifest, a config file) — the ones that never reach `sys_metadata`.
    *
-   * **Required, and `undefined` is not the same as `[]`.** The engine drops
-   * `credentialsRef` from the definitions it keeps, so this module cannot
-   * discover code-defined artefacts and will not pretend to: `undefined` says
-   * "nobody answered", which opens a declared gap, while `[]` is the host
-   * stating it has none. Collapsing the two would be exactly the silent
-   * incompleteness this union exists to refuse.
+   * **Required, and `undefined` is not the same as `[]`.** The union now ASKS
+   * the engine as well ({@link readEngineDatasourceDefs}), so the code-side
+   * blind spot is narrower than it was — but it has not closed. The engine
+   * indexes only what was REGISTERED on this runtime, so a datasource declared
+   * in code that nothing ever installed reaches neither `sys_metadata` nor
+   * `listDatasourceDefs()`. This module cannot discover THAT residue until it
+   * asks the host, and it will not pretend to: `undefined` still says "nobody
+   * answered", which opens a declared gap, while `[]` is the host stating it
+   * has none. Collapsing the two would be exactly the silent incompleteness
+   * this union exists to refuse.
    */
   declaredDatasources: readonly DatasourceArtefactLike[] | undefined;
 }
@@ -533,18 +615,23 @@ export async function collectSecretReferenceUnion(
   const objectField = await collectObjectFieldSecretReferences(engine);
 
   const stored = await readStoredDatasourceArtefacts(engine);
+  const held = readEngineDatasourceDefs(engine);
   const datasource = collectDatasourceSecretReferences([
     ...stored.artefacts,
+    ...held.artefacts,
     ...(declaredDatasources ?? []),
   ]);
 
   const datasourceGaps: string[] = [];
   if (stored.gap) datasourceGaps.push(stored.gap);
+  if (held.gap) datasourceGaps.push(held.gap);
   if (declaredDatasources === undefined) {
     datasourceGaps.push(
       'the host did not declare its code-defined datasource artefacts (`declaredDatasources` was '
-        + 'undefined), and the engine drops `external.credentialsRef` from the definitions it keeps, '
-        + 'so a code-defined credential could not be seen at all — pass `[]` to state there are none',
+        + 'undefined). The engine\'s own definitions WERE read, but an engine indexes only the '
+        + 'datasources REGISTERED on this runtime — a datasource declared in code that nothing ever '
+        + 'installed reaches neither `sys_metadata` nor `listDatasourceDefs()`, so this union cannot '
+        + 'discover it until the host is asked — pass `[]` to state there are none',
     );
   }
 
