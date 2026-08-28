@@ -74,7 +74,8 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, filters: { status: 'stale' } })!;
       expect(message).toContain('flow-node-crud-filter-alias');
-      expect(message).toContain('#3810');
+      expect(message).toContain('match-everything write');
+      expect(message, 'the prescription names the hazard, never a tracker id').not.toMatch(/#\d{3,5}/);
     },
   );
 
@@ -91,11 +92,12 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     ['create_record', CreateRecordConfigSchema, { objectName: 'task' }],
     ['update_record', UpdateRecordConfigSchema, { objectName: 'lead' }],
   ] as ReadonlyArray<[string, Parseable, Record<string, unknown>]>)(
-    '%s: `fieldValues` gets the #2419 prescription, not a runtime alias',
+    '%s: `fieldValues` gets the rejected-alias prescription, not a runtime alias',
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, fieldValues: { subject: 'hi' } })!;
-      expect(message).toContain('#2419');
+      expect(message).toContain('never had a runtime reader');
       expect(message).toContain('`fields`');
+      expect(message, 'the prescription names the write map, never a tracker id').not.toMatch(/#\d{3,5}/);
     },
   );
 
@@ -108,7 +110,8 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, recordId: '{record.id}' })!;
       expect(message).toContain('`filter`');
-      expect(message).toContain('#3810');
+      expect(message).toContain('match-everything delete');
+      expect(message, 'the prescription names the hazard, never a tracker id').not.toMatch(/#\d{3,5}/);
     },
   );
 
@@ -156,7 +159,8 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
       for (const key of ['bulk', 'all', 'multiple']) {
         const message = unknownKeyMessage(schema, { ...base, [key]: true })!;
         expect(message, key).toContain('`multi: true`');
-        expect(message, key).toContain('#5393');
+        expect(message, key).toContain('NO spelling of');
+        expect(message, key).not.toMatch(/#\d{3,5}/);
         // The distance claim, pinned: none of these reaches `multi`, so
         // without the curated entry the rejection would offer nothing.
         expect(message, key).not.toContain(`\`${key}\` → `);
@@ -203,10 +207,11 @@ describe('ScreenConfigSchema / ScreenFieldConfigSchema — strict as of #4001 �
       .toContain('this screen field');
   });
 
-  it('`visibleIf` on a field carries the #3528 prescription — the typo the whole ladder descends from', () => {
+  it('`visibleIf` on a field carries its prescription — the typo the whole ladder descends from', () => {
     const message = unknownKeyMessage(ScreenFieldConfigSchema, { name: 'amount', visibleIf: "type == 'x'" })!;
     expect(message).toContain('`visibleWhen`');
-    expect(message).toContain('#3528');
+    expect(message).toContain('the whole undeclared-key ladder descends from');
+    expect(message, 'the prescription names the right key, never a tracker id').not.toMatch(/#\d{3,5}/);
   });
 
   it('`object` on a screen names `objectName`, which no other layer would tell the author', () => {

@@ -363,13 +363,17 @@ describe('#4001 批 15 — the five closed chart sites', () => {
     expect(msg).toContain('`to` → `endValue`');
   });
 
-  it('carries the #3752 tombstones, one distinct sentence each (批 10)', () => {
+  it('carries the retired-interaction tombstones, one distinct sentence each (批 10)', () => {
     const zoom = reject(ChartInteractionSchema as never, { zoom: true });
-    expect(zoom).toContain('#3752');
+    expect(zoom).toContain('`zoom` was removed');
     expect(zoom).toContain('brush: true');
+    expect(zoom, 'the prescription teaches the replacement, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
     const click = reject(ChartInteractionSchema as never, { clickAction: 'x' });
-    expect(click).toContain('#3752');
+    expect(click).toContain('`clickAction` was removed');
     expect(click).toContain('onSegmentClick');
+    expect(click, 'the prescription teaches the replacement, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
     // Two keys at once ⇒ two DISTINCT bullets, not one string printed twice.
     const both = reject(ChartInteractionSchema as never, { zoom: true, clickAction: 'x' });
     expect(both.split('• ').length - 1).toBe(2);
@@ -642,8 +646,8 @@ describe('#5022 — ChartDrillDownSchema', () => {
   it.each([
     ['mode', 'TABLE / PIVOT / METRIC'],
     ['report', 'METRIC / PIVOT'],
-    ['view', 'objectui#3354'],
-    ['sort', 'objectui#3354'],
+    ['view', 'read by no renderer at all'],
+    ['sort', 'read by no renderer'],
   ])('`%s` is rejected with the reason it is absent, not a rename', (key, expected) => {
     // Each of these is REAL somewhere — on another widget, or (view/sort) in a
     // renderer type that nothing reads. Edit distance would have proposed a
@@ -670,7 +674,8 @@ describe('#5022 — ChartDrillDownSchema', () => {
     // implement that arm" is now false, and #5046's lesson is that a dead limb
     // left in place reads as live to the next author.
     const msg = reject({ target: 'sidebar' });
-    expect(msg, 'the retired navigate prescription must not survive').not.toContain('objectui#3354');
+    expect(msg, 'the retired navigate prescription must not survive — and no rejection\n'
+      + 'on this surface carries a tracker id any more').not.toMatch(/#\d{3,5}/);
     expect(msg, 'nor its claim about what a chart cannot do').not.toContain('not supported by a chart');
   });
 

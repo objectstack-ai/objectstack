@@ -60,8 +60,9 @@ describe('ObjectCapabilities', () => {
     const trash = ObjectCapabilities.safeParse({ trash: false });
     expect(trash.success).toBe(false);
     const trashMsg = trash.success ? '' : trash.error.issues.map((i) => i.message).join('\n');
-    expect(trashMsg).toContain('#3146');
-    expect(trashMsg).not.toContain('#1893');
+    expect(trashMsg).toContain('soft delete is parked');
+    expect(trashMsg, 'the prescription carries ADR ids and the migration command, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
   });
 
   it('rejects unknown capability keys instead of stripping them', () => {
@@ -102,7 +103,7 @@ describe('ObjectCapabilities', () => {
     const message = capabilityRejection({ trash: false, searchible: true });
     const preamble = 'Unrecognized key(s) on `enable`:';
     const fix = 'os migrate meta --from 16';
-    const history = 'every flag carries an enforcement contract (#2707)';
+    const history = 'every flag carries an enforcement contract';
 
     expect(message.startsWith(preamble)).toBe(true);
     expect(message.indexOf(fix)).toBeGreaterThan(message.indexOf(preamble));
@@ -113,7 +114,7 @@ describe('ObjectCapabilities', () => {
 
   it('the tombstone text survives the fold byte-for-byte', () => {
     expect(capabilityRejection({ mru: true })).toContain(
-      '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, '
+      '`enable.mru` was removed from @objectstack/spec in the 16.x line ('
       + 'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader '
       + 'existed, so the flag changed nothing.',
     );
@@ -1270,7 +1271,8 @@ describe('ObjectSchema.create()', () => {
       }
       expect(message).toContain('highlightFields');
       expect(message).toContain('11.7.0');
-      expect(message).toContain('#2536');
+      expect(message).toContain('ADR-0085 semantic roles');
+      expect(message, 'the ADR and the version are the durable references').not.toMatch(/#\d{3,5}/);
     });
 
     it('tombstone: dead metadata keys removed in 16.0 (#2377) carry upgrade guidance', () => {
@@ -1949,7 +1951,7 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
     const result = TenancyConfigSchema.safeParse({ enabled: true, strategy: 'isolated' });
     expect(result.success).toBe(false);
     const message = result.error!.issues.map((i) => i.message).join('\n');
-    expect(message).toContain('removed from @objectstack/spec after v15.0 (#2763)');
+    expect(message).toContain('removed from @objectstack/spec after v15.0');
     expect(message).toContain('environment/deployment');
     expect(message).toContain('`tenancy.enabled` + `tenancy.tenantField`');
   });

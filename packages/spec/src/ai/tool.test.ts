@@ -258,7 +258,7 @@ describe('defineTool', () => {
     const message = rejectionMessage({ requiresConfirmation: true, labl: 'x' });
     const preamble = 'Unrecognized key(s) on the tool definition:';
     const fix = 'action.ai.requiresConfirmation';
-    const history = 'the #1535 silent-strip class';
+    const history = 'the silent-strip class';
 
     expect(message.startsWith(preamble)).toBe(true);
     expect(message.indexOf(fix)).toBeGreaterThan(message.indexOf(preamble));
@@ -273,11 +273,11 @@ describe('defineTool', () => {
     // quietly reworded a retirement prescription would be the defect this
     // table exists to prevent, wearing the fold as cover.
     expect(rejectionMessage({ permissions: ['x'] })).toContain(
-      '`tool.permissions` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it '
+      '`tool.permissions` was removed in @objectstack/spec 17.0.0 (audit close-out) — it '
       + 'promised a capability gate on tool invocation that nothing ever enforced',
     );
     expect(rejectionMessage({ builtIn: true })).toContain(
-      '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no '
+      '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (audit close-out) — no '
       + 'runtime branches on it; it never affected registration, selection or execution. Delete '
       + 'the key.',
     );

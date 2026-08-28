@@ -1902,7 +1902,7 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
     expect(m.startsWith('Unrecognized key(s) on this map configuration: `titleFeld`.')).toBe(true);
     expect(m).toContain('`titleField`');
     expect(m.endsWith(
-      'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
+      'Until these shapes were closed an unknown key was dropped silently — the view still '
       + 'rendered, without whatever the key was meant to configure.',
     )).toBe(true);
   });

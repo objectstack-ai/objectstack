@@ -84,8 +84,9 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         // whoever hits it. Assert the load-bearing clauses, not the bytes.
         const message = result.success ? '' : result.error.issues[0]?.message ?? '';
         expect(message).toContain('was removed');
-        expect(message).toContain('#12032');
         expect(message).toContain('ADR-0049');
+        expect(message, 'the ADR is the durable reference; the tracker id is not')
+          .not.toMatch(/#\d{3,5}/);
         expect(message).toContain('Delete the key');
         // The measured fact, in every one of the three prescriptions: the
         // restart was only ever a destroy.

@@ -196,8 +196,10 @@ describe('unknown keys — closed at #4001 批 9, and this class had no other ga
     // suppresses the rename, so the assertion is as much about what is ABSENT.
     const message = unknownKeyMessage(DecisionConfigSchema, { condition: "amount > 100000" })!;
     expect(message).toContain('this decision node config');
-    expect(message).toContain('#4414');
+    expect(message).toContain('double-declaration');
     expect(message).toContain('OUT-EDGES');
+    expect(message, 'the prescription names the double declaration, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
     expect(message).not.toContain('`condition` → `conditions`');
   });
 

@@ -844,7 +844,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       const result = parse({ new_lead_form: { submitLabel: 'Create' } });
       expect(result.success).toBe(false);
       const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message;
-      expect(message).toContain('`submitLabel` was removed in @objectstack/spec 17 (#10926');
+      expect(message).toContain('`submitLabel` was removed in @objectstack/spec 17 (ADR-0049)');
       expect(message).toContain('`submitText`');
     });
 
