@@ -2523,6 +2523,552 @@ export function trackedPrefixes(files) {
   }
   return prefixes;
 }
+// ── In-tree scratch directories: the CLASS, not two named roots (#12749) ────
+//
+// `changedPathsFromGit` reads untracked files on purpose, so the ignore rules
+// are the only thing between a killed test run's leftover fixture and every
+// seat's gate list. The two-directional pin in this file's self-test holds that
+// property for two paths BY NAME. The hazard is a class: any directory a
+// tracked source creates inside the tracked tree at a root the ignore rules do
+// not cover. A fifth fixture author who picks a new root reproduces it exactly,
+// and the named pin stays green — it never looks at their file.
+//
+// What follows enumerates the class from source text, so the guard grows with
+// the tree instead of with this file's literals.
+//
+// ## Why a source scan can be COMPLETE for one shape, and where it stops
+//
+// A path inside the repo can only be built from an anchor inside the repo, and
+// tracked sources spell that anchor a handful of ways (`IN_TREE_ANCHOR_*` and
+// the `new URL` form below). Everything else — `os.tmpdir()`, `RUNNER_TEMP`, an
+// absolute literal — is outside the tree by construction. So the classifier has
+// THREE answers, and the third carries the honesty: a site whose base it cannot
+// resolve is UNRESOLVED, never "probably fine". For `mkdtempSync` — the shape
+// every in-tree fixture in this tree is built from — an unresolved site is a
+// FAILURE. A detector that silently skipped what it could not read would be
+// this card's own defect one level up: green over the sites nobody measured.
+//
+// Measured on the tree at the time of writing: 359 `mkdtempSync` sites — 4 in
+// the tree (the four `packages/cli` fixtures the convention names), the rest in
+// the system temp directory, 0 unresolved.
+//
+// `mkdirSync` is swept too and deliberately NOT held to completeness: of its
+// sites, ~124 take a base this resolver cannot see (a function parameter, a
+// value read from config) and are overwhelmingly children of a system-temp root
+// already. Demanding zero unresolved there would red the tree over sites that
+// carry none of this hazard. So that half is a net of DECLARED shape: what it
+// resolves it holds, what it cannot resolve it names in the report, and this
+// module claims nothing more. ⛔ Do not read its silence as coverage.
+//
+// ## Why the verdict is `git check-ignore` and not a pattern reimplementation
+//
+// The rules are the repo's real ignore files, and an excerpt would pin the
+// excerpt. `git check-ignore` also names the SOURCE file and line of the
+// covering rule, which is the only way to tell a rule every clone has from one
+// that lives in `.git/info/exclude` — a local exclusion covers its author's
+// tree and nobody else's, so a root "covered" only that way is not covered.
+//
+// ## Why a tracked directory is not a hazard
+//
+// A source that creates a generated-output directory is not leaving scratch
+// behind; that directory is part of the tree. The escape is DERIVED, never
+// declared: a created directory git already tracks content under is tree, not
+// leftover. There is no ledger to keep in step, and a directory that stops
+// being tracked stops being exempt on the same run.
+
+/** Path expressions that anchor INSIDE the repo, at the scanned file's own directory. */
+const IN_TREE_ANCHOR_DIR =
+  /^(?:(?:path|node:path)\.)?dirname\s*\(\s*(?:fileURLToPath\s*\(\s*import\.meta\.url\s*\)|import\.meta\.filename)\s*\)$|^import\.meta\.dirname$|^__dirname$/;
+
+/** The same, anchored at the FILE — `resolve(<file>, '..')` is a spelling this tree writes. */
+const IN_TREE_ANCHOR_FILE = /^(?:fileURLToPath\s*\(\s*import\.meta\.url\s*\)|import\.meta\.filename)$/;
+
+/** `new URL('<rel>', import.meta.url)`, which resolves from the file's DIRECTORY. */
+const IN_TREE_ANCHOR_URL = /^new\s+URL\s*\(\s*(['"`])([\s\S]*?)\1\s*,\s*import\.meta\.url\s*,?\s*\)$/;
+
+/**
+ * Expressions that put a path OUTSIDE the tree wherever they sit inside it —
+ * read against the whole expression, so `realpathSync(process.env.RUNNER_TEMP)`
+ * is outside however deeply the marker is nested. Deliberately spelled as exact
+ * forms rather than a word list: a binding merely NAMED `TMP_ROOT` is an
+ * in-tree root in this very repo.
+ */
+const OUTSIDE_TREE_MARKER =
+  /\btmpdir\s*\(\s*\)|\bhomedir\s*\(\s*\)|process\.env\.(?:RUNNER_TEMP|TMPDIR|TEMP|TMP)\b/;
+
+const PATH_JOINER_CALL = /^(?:(?:path|node:path)\.)?(?:join|resolve)\s*\(/;
+const PATH_DIRNAME_CALL = /^(?:(?:path|node:path)\.)?dirname\s*\(/;
+const MKDTEMP_CALL = /^(?:fs\.)?mkdtempSync\s*\(/;
+const SCRATCH_CALL = /\b(?:fs\.)?(mkdtempSync|mkdirSync)\s*\(/g;
+const QUOTED_LITERAL = /^(['"`])([\s\S]*)\1$/;
+const PLAIN_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * The synthetic tail a probe path carries. `mkdtempSync` appends six characters
+ * the tree cannot know, so what `git check-ignore` is asked about is a
+ * REPRESENTATIVE leftover rather than a path that exists: the directory the
+ * call creates, plus a file inside it — the shape a killed run leaves behind.
+ */
+const SCRATCH_PROBE_TAIL = '0osprobe';
+const SCRATCH_PROBE_LEAF = 'leftover-probe';
+
+/** The text of a balanced argument list, starting just past its opening paren. */
+function balancedArgText(source, from) {
+  let depth = 1;
+  let out = '';
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return { text: out, end: i };
+    }
+    out += ch;
+  }
+  return { text: out, end: source.length };
+}
+
+/** Split an argument list on top-level commas, respecting quotes and nesting. */
+function splitArgList(text) {
+  const args = [];
+  let depth = 0;
+  let quote = null;
+  let cur = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && i + 1 < text.length) cur += text[++i];
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (ch === ',' && depth === 0) {
+      args.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) args.push(cur);
+  return args;
+}
+
+/** An initialiser expression: from `from` up to the first top-level `;` or newline. */
+function initialiserTail(source, from) {
+  let depth = 0;
+  let quote = null;
+  let out = '';
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      out += ch;
+      if (ch === '\\' && i + 1 < source.length) out += source[++i];
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth === 0) break;
+      depth--;
+    } else if ((ch === ';' || ch === '\n') && depth === 0) break;
+    out += ch;
+  }
+  return out.trim();
+}
+
+/**
+ * Every initialiser a name is given in this file, in source order.
+ *
+ * Scope is deliberately NOT tracked. Two scopes reusing one name is the case
+ * that would make a scoped resolver wrong in the QUIET direction, so the
+ * readings are combined instead: an in-tree reading anywhere wins, and readings
+ * that disagree stay unknown. The bias is always toward reporting a site rather
+ * than clearing it.
+ */
+function nameInitialisers(source) {
+  const byName = new Map();
+  const add = (name, init) => {
+    const list = byName.get(name);
+    if (list) list.push(init);
+    else byName.set(name, [init]);
+  };
+  for (const m of source.matchAll(/(?:^|[;{}\s(])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;\n]+)?=\s*/g)) {
+    add(m[1], initialiserTail(source, m.index + m[0].length));
+  }
+  for (const m of source.matchAll(/^[ \t]*([A-Za-z_$][\w$]*)\s*=\s*/gm)) {
+    add(m[1], initialiserTail(source, m.index + m[0].length));
+  }
+  return byName;
+}
+
+/**
+ * The expression every same-file function returns, when it returns exactly one
+ * thing. One hop is enough for the shape this tree actually writes — a local
+ * helper wrapping the system temp directory — and stopping at one hop keeps the
+ * answer readable instead of a whole-program analysis nobody can check.
+ */
+function singleReturnExpressions(source) {
+  const byName = new Map();
+  for (const m of source.matchAll(/(?:^|[;{}\s])function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const params = balancedArgText(source, m.index + m[0].length);
+    const open = source.indexOf('{', params.end);
+    if (open === -1) continue;
+    let depth = 0;
+    let end = open;
+    for (; end < source.length; end++) {
+      if (source[end] === '{') depth++;
+      else if (source[end] === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    const body = source.slice(open, end);
+    const returns = [...body.matchAll(/\breturn\s+/g)];
+    if (returns.length !== 1) continue;
+    byName.set(m[1], initialiserTail(body, returns[0].index + returns[0][0].length));
+  }
+  return byName;
+}
+
+/**
+ * Walk repo-relative segments by one path literal. Returns null when the
+ * literal climbs out of the repo or carries a dynamic part this resolver
+ * refuses to guess at — the caller turns both into the answers they deserve.
+ */
+function walkSegments(segs, literal, isLast) {
+  let text = literal;
+  const dynamic = text.indexOf('${');
+  if (dynamic !== -1) {
+    // A dynamic part is readable only as a PREFIX, and only where it cannot
+    // introduce a separator of its own after the static head — otherwise the
+    // depth the call reaches is a runtime value.
+    if (!isLast || text.includes('/')) return null;
+    text = text.slice(0, dynamic);
+  }
+  if (text.startsWith('/')) return null;
+  const out = segs.slice();
+  for (const part of text.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out;
+}
+
+/** The created directory of a `mkdtempSync(<base>)`: the base plus a random tail. */
+function withProbeTail(segs) {
+  if (segs.length === 0) return null;
+  const out = segs.slice();
+  out[out.length - 1] = `${out[out.length - 1]}${SCRATCH_PROBE_TAIL}`;
+  return out;
+}
+
+/**
+ * Where a path expression lands, relative to the repo root.
+ *
+ *   { kind: 'in-tree', segs }  — repo-relative segments
+ *   { kind: 'outside' }        — the system temp directory, a home directory, an absolute path
+ *   { kind: 'unknown', why }   — a base this resolver refuses to guess at
+ */
+export function resolvePathExpression(expr, ctx, depth = 0) {
+  let e = String(expr).trim();
+  if (!e) return { kind: 'unknown', why: 'an empty expression' };
+  if (depth > 10) return { kind: 'unknown', why: 'an expression nested deeper than this resolver reads' };
+  if (OUTSIDE_TREE_MARKER.test(e)) return { kind: 'outside' };
+
+  // `fileURLToPath(<url>)` and `<url>.pathname` are spellings OF a URL anchor,
+  // not path operations of their own.
+  if (e.endsWith('.pathname')) e = e.slice(0, -'.pathname'.length).trim();
+  const unwrapped = e.match(/^fileURLToPath\s*\(/);
+  if (unwrapped) {
+    const inner = balancedArgText(e, e.indexOf('(') + 1);
+    if (e.slice(inner.end + 1).trim() === '' && !IN_TREE_ANCHOR_FILE.test(e)) {
+      return resolvePathExpression(inner.text, ctx, depth + 1);
+    }
+  }
+
+  if (IN_TREE_ANCHOR_DIR.test(e)) return { kind: 'in-tree', segs: ctx.fileSegs.slice(0, -1) };
+  if (IN_TREE_ANCHOR_FILE.test(e)) return { kind: 'in-tree', segs: ctx.fileSegs.slice() };
+  const url = e.match(IN_TREE_ANCHOR_URL);
+  if (url) {
+    const segs = walkSegments(ctx.fileSegs.slice(0, -1), url[2], true);
+    return segs ? { kind: 'in-tree', segs } : { kind: 'unknown', why: `a URL anchor that leaves the tree: ${e}` };
+  }
+
+  const quoted = e.match(QUOTED_LITERAL);
+  if (quoted) {
+    if (quoted[2].startsWith('/')) return { kind: 'outside' };
+    return { kind: 'unknown', why: `a bare relative literal, resolved against a cwd this scan cannot see: ${e}` };
+  }
+
+  for (const [head, kind] of [[PATH_JOINER_CALL, 'join'], [PATH_DIRNAME_CALL, 'dirname'], [MKDTEMP_CALL, 'mkdtemp']]) {
+    if (!head.test(e)) continue;
+    const { text, end } = balancedArgText(e, e.indexOf('(') + 1);
+    if (e.slice(end + 1).trim() !== '') return { kind: 'unknown', why: `a path expression with a tail this scan cannot read: ${e.slice(0, 80)}` };
+    const args = splitArgList(text).map((a) => a.trim());
+    const base = resolvePathExpression(args[0] ?? '', ctx, depth + 1);
+    if (base.kind !== 'in-tree') return base;
+    if (kind === 'dirname') {
+      if (base.segs.length === 0) return { kind: 'unknown', why: 'a dirname that climbs out of the repo root' };
+      return { kind: 'in-tree', segs: base.segs.slice(0, -1) };
+    }
+    if (kind === 'mkdtemp') {
+      const segs = withProbeTail(base.segs);
+      return segs ? { kind: 'in-tree', segs } : { kind: 'unknown', why: 'a mkdtempSync rooted at the repo root itself' };
+    }
+    let segs = base.segs;
+    for (let i = 1; i < args.length; i++) {
+      const lit = args[i].match(QUOTED_LITERAL);
+      if (!lit) return { kind: 'unknown', why: `a path component this scan cannot read: ${args[i]}` };
+      const walked = walkSegments(segs, lit[2], i === args.length - 1);
+      if (!walked) return { kind: 'unknown', why: `a path component built at runtime or leaving the tree: ${args[i]}` };
+      segs = walked;
+    }
+    return { kind: 'in-tree', segs };
+  }
+
+  if (PLAIN_IDENTIFIER.test(e)) {
+    if (ctx.seen.has(e)) return { kind: 'unknown', cycle: true, why: `the binding ${e} resolves through itself` };
+    const inits = ctx.names.get(e);
+    if (!inits) return { kind: 'unknown', why: `${e} is not bound in this file` };
+    ctx.seen.add(e);
+    const readings = inits.map((init) => resolvePathExpression(init, ctx, depth + 1));
+    ctx.seen.delete(e);
+    return combineReadings(readings, e);
+  }
+
+  const call = e.match(/^([A-Za-z_$][\w$]*)\s*\(/);
+  if (call && ctx.returns.has(call[1])) {
+    if (ctx.seen.has(call[1])) return { kind: 'unknown', cycle: true, why: `${call[1]}() resolves through itself` };
+    ctx.seen.add(call[1]);
+    const r = resolvePathExpression(ctx.returns.get(call[1]), ctx, depth + 1);
+    ctx.seen.delete(call[1]);
+    return r;
+  }
+
+  return { kind: 'unknown', why: `a base this scan cannot read: ${e.slice(0, 80)}` };
+}
+
+/**
+ * In-tree wins; readings that are not unanimously outside stay unknown.
+ *
+ * A reading that came back through a CYCLE carries no information — the name is
+ * re-entered while it is already being resolved, which happens whenever a later
+ * scope rebinds a name from the value this one is resolving. It is dropped
+ * rather than counted as disagreement: counting it turned every name a helper
+ * rebinds into `unknown`, which is a refusal to answer rather than an answer.
+ */
+function combineReadings(readings, name) {
+  const informative = readings.filter((r) => !r.cycle);
+  const inTree = informative.find((r) => r.kind === 'in-tree');
+  if (inTree) return inTree;
+  if (informative.length > 0 && informative.every((r) => r.kind === 'outside')) return { kind: 'outside' };
+  const why = informative.find((r) => r.kind === 'unknown')?.why
+    ?? readings.find((r) => r.kind === 'unknown')?.why
+    ?? `nothing bound ${name}`;
+  return { kind: 'unknown', why };
+}
+
+/**
+ * Every directory-creating call in one source, classified. `rel` is the file's
+ * own repo-relative path — the anchor spellings resolve against it.
+ */
+export function scratchDirSitesInSource(rel, source) {
+  const masked = maskComments(String(source));
+  // A call spelled inside a STRING is a fixture, not a call — this module's own
+  // self-test plants fixture sources as string literals, and read as code they
+  // reported four sites in a file that creates none of them. Comments are
+  // blanked (a discussed call is not a call either) but literals are not: the
+  // path components the resolver reads ARE string literals, so they are skipped
+  // by position instead. ⛔ Not the same masking `maskSelfTests` does — a check
+  // script's self-test that really creates an in-tree directory is a real
+  // leftover hazard, and blanking self-tests wholesale would hide it.
+  const { literal } = scanSource(masked);
+  const ctx = {
+    fileSegs: rel.split('/'),
+    names: nameInitialisers(masked),
+    returns: singleReturnExpressions(masked),
+    seen: new Set(),
+  };
+  const inTree = [];
+  const unresolved = [];
+  let scanned = 0;
+  for (const m of masked.matchAll(SCRATCH_CALL)) {
+    if (literal[m.index]) continue;
+    const { text } = balancedArgText(masked, m.index + m[0].length);
+    const expr = (splitArgList(text)[0] ?? '').trim();
+    ctx.seen.clear();
+    const at = resolvePathExpression(expr, ctx);
+    const site = {
+      file: rel,
+      line: masked.slice(0, m.index).split('\n').length,
+      call: m[1],
+      expr: expr.replace(/\s+/g, ' ').slice(0, 120),
+    };
+    scanned++;
+    if (at.kind === 'unknown') {
+      unresolved.push({ ...site, why: at.why });
+      continue;
+    }
+    if (at.kind !== 'in-tree') continue;
+    const segs = m[1] === 'mkdtempSync' ? withProbeTail(at.segs) : at.segs;
+    if (!segs || segs.length === 0) continue;
+    inTree.push({ ...site, dir: segs.join('/'), probe: [...segs, SCRATCH_PROBE_LEAF].join('/') });
+  }
+  return { inTree, unresolved, scanned };
+}
+
+const SCANNED_SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+
+/**
+ * The whole tree's directory-creating sites, read from the tracked files.
+ *
+ * A zero-site sweep is a BROKEN scan, not a clean tree — the same refusal
+ * `trackedFiles` makes about an empty listing, for the same reason: every
+ * assertion built on it would be vacuously true over nothing.
+ */
+export function inTreeScratchDirs({ cwd = ROOT, files = null } = {}) {
+  const list = (files ?? trackedFiles({ cwd })).filter((f) => SCANNED_SOURCE_EXTENSIONS.test(f));
+  const inTree = [];
+  const unresolved = [];
+  let sites = 0;
+  for (const rel of list) {
+    let source;
+    try {
+      source = readFileSync(join(cwd, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!source.includes('mkdtempSync') && !source.includes('mkdirSync')) continue;
+    const found = scratchDirSitesInSource(rel, source);
+    sites += found.scanned;
+    inTree.push(...found.inTree);
+    unresolved.push(...found.unresolved);
+  }
+  if (sites === 0) {
+    throw new Error(
+      'the directory-creation sweep found ZERO sites across the tracked sources, which is a broken scan rather ' +
+        'than a tree with no fixtures (#4690). Refusing to report ignore coverage over nothing.',
+    );
+  }
+  return { inTree, unresolved, sites, scannedFiles: list.length };
+}
+
+/**
+ * `git check-ignore`'s verdict for each path, in ONE invocation.
+ *
+ * `--non-matching` is what makes this a reading rather than a silence: without
+ * it an uncovered path produces no output and exit 1, which is shaped exactly
+ * like the command failing. With it every input gets a line, and the line count
+ * is checked against the input count — so a truncated answer is a refusal, not
+ * a row of `covered: false`.
+ *
+ * `--no-index` asks about the RULES rather than about the index: a tracked path
+ * is never "ignored" to plain `check-ignore`, and the question here is whether
+ * a leftover appearing at that path WOULD be ignored.
+ */
+export function ignoreVerdicts(paths, { cwd = ROOT } = {}) {
+  const unique = [...new Set(paths)];
+  const verdicts = new Map();
+  if (unique.length === 0) return verdicts;
+  const r = spawnSync('git', ['check-ignore', '-v', '--non-matching', '--no-index', '--stdin'], {
+    cwd,
+    encoding: 'utf8',
+    input: `${unique.join('\n')}\n`,
+  });
+  if (r.error) throw new Error(`could not run git check-ignore — ${r.error.message}`);
+  if (r.status !== 0 && r.status !== 1) {
+    throw new Error(`git check-ignore exited ${r.status}${r.stderr ? `: ${r.stderr.trim()}` : ''}`);
+  }
+  const lines = (r.stdout ?? '').split('\n').filter((l) => l.length > 0);
+  if (lines.length !== unique.length) {
+    throw new Error(
+      `git check-ignore answered about ${lines.length} of ${unique.length} path(s) — a partial answer is not a verdict`,
+    );
+  }
+  for (const line of lines) {
+    const tab = line.indexOf('\t');
+    const rule = tab === -1 ? '' : line.slice(0, tab);
+    const path = tab === -1 ? line : line.slice(tab + 1);
+    const firstColon = rule.indexOf(':');
+    const secondColon = rule.indexOf(':', firstColon + 1);
+    const source = firstColon === -1 ? '' : rule.slice(0, firstColon);
+    verdicts.set(path, source === ''
+      ? { covered: false, source: null, line: null, pattern: null }
+      : {
+          covered: true,
+          source,
+          line: rule.slice(firstColon + 1, secondColon),
+          pattern: rule.slice(secondColon + 1),
+        });
+  }
+  return verdicts;
+}
+
+/**
+ * The whole verdict: every in-tree directory a tracked source creates, split
+ * into the ones a leftover would be ignored at and the ones EXPOSED.
+ *
+ * Two escapes, both derived from the tree rather than declared:
+ *
+ *   - a covering rule that lives in a TRACKED ignore file. A rule in
+ *     `.git/info/exclude`, or in the user's global excludes, covers its own
+ *     clone and nobody else's, so a root covered only that way is exposed on
+ *     every other machine — including CI, where the leftover would land in the
+ *     change set exactly as if no rule existed.
+ *   - a directory git already tracks content under. That is tree, not scratch:
+ *     a generated-output directory is part of the repo, and this escape stops
+ *     being available on the run where the tracking stops.
+ */
+export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
+  const list = files ?? trackedFiles({ cwd });
+  const sweep = inTreeScratchDirs({ cwd, files: list });
+  const tracked = trackedPrefixes(list);
+  const verdicts = ignoreVerdicts(sweep.inTree.map((s) => s.probe), { cwd });
+  const exposed = [];
+  const covered = [];
+  for (const site of sweep.inTree) {
+    const v = verdicts.get(site.probe);
+    if (v?.covered && isTrackedIgnoreSource(v.source)) {
+      covered.push({ ...site, rule: `${v.source}:${v.line}:${v.pattern}` });
+      continue;
+    }
+    if (tracked.has(site.dir)) {
+      covered.push({ ...site, rule: 'tracked directory' });
+      continue;
+    }
+    exposed.push({
+      ...site,
+      why: v?.covered
+        ? `covered only by ${v.source}, which is not a tracked ignore file — every other clone is exposed`
+        : 'no ignore rule covers a leftover here, and git tracks nothing under it',
+    });
+  }
+  return { ...sweep, exposed, covered };
+}
+
+/** An ignore file every clone has, as opposed to one local to whoever ran this. */
+function isTrackedIgnoreSource(source) {
+  if (!source) return false;
+  if (source.startsWith('/') || source.startsWith('~')) return false;
+  return !source.split('/').includes('.git');
+}
 
 /**
  * The tracked corpus in the two shapes `moduleRelativeDirectoryHint` asks it
@@ -8654,6 +9200,153 @@ function selfTest() {
     t(
       'and it is the repo-wide tmp/ rule doing it, with no bespoke entry for the fixture former root',
       !readFileSync(join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
+    );
+    // ── The CLASS the pin above does not hold (#12749) ──────────────────────
+    //
+    // Everything above names TWO paths. A fifth fixture author who creates a
+    // directory in the tracked tree at a root the ignore rules do not cover
+    // reproduces the hazard exactly, and every case above stays green — not one
+    // of them ever looks at their file. The cases below hold the class: the
+    // tree's own sources are swept for the directories they create, and each is
+    // asked about against the repo's REAL ignore rules.
+    //
+    // ⛔ No count is asserted below. The same hazard has three recorded readings
+    // (17 / 18 / 20 families) because the family inventory grows same-day, and a
+    // guard pinning a number reds on an unrelated Tuesday. What IS asserted is
+    // NON-EMPTINESS: a sweep that found nothing satisfies "every root is
+    // covered" perfectly, and would take the whole class-level guard with it.
+
+    // The reader, on sources containing nothing else — hermetic, so a failure
+    // here is the reader and not the tree.
+    const seededFixtureSource = [
+      'const HERE = path.dirname(fileURLToPath(import.meta.url));',
+      "const SCRATCH = path.resolve(HERE, '../scratch');",
+      'fs.mkdirSync(SCRATCH, { recursive: true });',
+      "const dir = fs.mkdtempSync(path.join(SCRATCH, 'case-'));",
+    ].join('\n');
+    const seededScan = scratchDirSitesInSource('packages/thing/test/a.test.ts', seededFixtureSource);
+    t(
+      'the scan reads an in-tree fixture root through the binding that seeds it',
+      seededScan.inTree.some((s) => s.call === 'mkdirSync' && s.dir === 'packages/thing/scratch'),
+    );
+    t(
+      'and reads the mkdtemp child as a directory of its own, not as its base',
+      seededScan.inTree.some((s) => s.call === 'mkdtempSync' && s.dir.startsWith('packages/thing/scratch/case-')),
+    );
+    t('nothing in that source is left unclassified', seededScan.unresolved.length === 0);
+
+    const systemTempSource = [
+      "const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'case-'));",
+      "fs.mkdirSync(path.join(scratchDir, 'nested'), { recursive: true });",
+    ].join('\n');
+    const systemScan = scratchDirSitesInSource('packages/thing/test/b.test.ts', systemTempSource);
+    t(
+      'a fixture in the system temp directory is no in-tree root, and is not unresolved either',
+      systemScan.inTree.length === 0 && systemScan.unresolved.length === 0,
+    );
+
+    // The third answer, and the reason silence from this scan can be read at
+    // all: a base it cannot resolve is REPORTED. A detector that dropped what
+    // it could not read would be this card's own defect one level up — green
+    // over the sites nobody measured.
+    const opaqueScan = scratchDirSitesInSource(
+      'packages/thing/test/c.test.ts',
+      "const dir = fs.mkdtempSync(path.join(rootFromSomewhereElse, 'case-'));",
+    );
+    t(
+      'a base the scan cannot read comes back UNRESOLVED, never silently skipped',
+      opaqueScan.inTree.length === 0 && opaqueScan.unresolved.length === 1,
+    );
+    t(
+      'and a commented-out call is not a site at all',
+      scratchDirSitesInSource('packages/thing/test/d.test.ts', "// fs.mkdtempSync(path.join(HERE, 'case-'));\n").scanned === 0,
+    );
+    t(
+      'nor is one spelled inside a string — which is what this very self-test plants',
+      scratchDirSitesInSource('packages/thing/test/e.test.ts', 'const src = "fs.mkdtempSync(join(HERE, x))";\n').scanned === 0,
+    );
+
+    // The CONTROL for the whole verdict, on a repo carrying the REAL ignore file
+    // — an excerpt would pin the excerpt. Two fixture sources are planted, one
+    // at a covered root and one at an uncovered one, and the uncovered one has
+    // to come back EXPOSED. Without this arm every live-tree case below passes
+    // just as happily against a verdict function that returns an empty list.
+    const classRepo = join(gitTmp, 'fixture-root-class');
+    mkdirSync(classRepo, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], classRepo);
+    const realIgnoreRules = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    write(classRepo, '.gitignore', realIgnoreRules);
+    const fixtureSourceRootedAt = (rel) =>
+      [
+        'const HERE = path.dirname(fileURLToPath(import.meta.url));',
+        `const SCRATCH = path.resolve(HERE, '${rel}');`,
+        'fs.mkdirSync(SCRATCH, { recursive: true });',
+        "const dir = fs.mkdtempSync(path.join(SCRATCH, 'case-'));",
+      ].join('\n');
+    write(classRepo, 'packages/cli/test/covered.test.ts', fixtureSourceRootedAt('../tmp'));
+    write(classRepo, 'packages/cli/test/uncovered.test.ts', fixtureSourceRootedAt('../scratch-fixtures'));
+    g(['add', '-A'], classRepo);
+    g(['commit', '-m', 'two fixture sources under the real ignore rules'], classRepo);
+
+    const uncoveredInControl = (r) => r.exposed.some((s) => s.dir.startsWith('packages/cli/scratch-fixtures'));
+    const classControl = exposedScratchDirs({ cwd: classRepo });
+    t(
+      'the CONTROL reproduces the hazard at CLASS level: a fixture root no ignore rule covers is EXPOSED',
+      uncoveredInControl(classControl),
+    );
+    t(
+      'and the covered root beside it is not, under the same rules in the same repo',
+      !classControl.exposed.some((s) => s.dir.startsWith('packages/cli/tmp'))
+        && classControl.covered.some((s) => s.dir.startsWith('packages/cli/tmp')),
+    );
+
+    // A rule in `.git/info/exclude` covers the clone it lives in and nothing
+    // else, so it is not coverage: the leftover still joins the change set on
+    // every other machine, CI included. `git check-ignore` answers the same
+    // either way, which is exactly why the SOURCE of the rule is read.
+    write(classRepo, '.git/info/exclude', 'scratch-fixtures/\n');
+    t(
+      'a rule living only in .git/info/exclude is not coverage — the root stays EXPOSED',
+      uncoveredInControl(exposedScratchDirs({ cwd: classRepo })),
+    );
+
+    // ... and the same instrument clears it once a TRACKED rule covers it, so
+    // what the live cases below read is a reading and not a constant.
+    write(classRepo, '.git/info/exclude', '');
+    write(classRepo, '.gitignore', `${realIgnoreRules}\nscratch-fixtures/\n`);
+    g(['add', '-A'], classRepo);
+    g(['commit', '-m', 'cover the new root in the tracked ignore file'], classRepo);
+    t(
+      'a TRACKED rule covering it clears it, so the verdict moves in both directions',
+      exposedScratchDirs({ cwd: classRepo }).exposed.length === 0,
+    );
+
+    // The live tree — the half a fifth fixture author's PR reds on.
+    const liveScratch = exposedScratchDirs({});
+    t(
+      `the sweep really read this tree (${liveScratch.sites} directory-creating site(s) across ${liveScratch.scannedFiles} tracked source(s))`,
+      liveScratch.sites > 0,
+    );
+    t(
+      `and it really found in-tree fixture roots (${liveScratch.inTree.length}), so the coverage case below judges something`,
+      liveScratch.inTree.length > 0,
+    );
+    t(
+      `every in-tree directory this tree's sources create is covered by a tracked ignore rule, or is tracked itself${
+        liveScratch.exposed.length
+          ? ` — EXPOSED: ${liveScratch.exposed.map((s) => `${s.dir} (${s.file}:${s.line})`).join(', ')}`
+          : ''
+      }`,
+      liveScratch.exposed.length === 0,
+    );
+    const unreadableTempSites = liveScratch.unresolved.filter((s) => s.call === 'mkdtempSync');
+    t(
+      `no mkdtempSync site in this tree takes a base the scan cannot read${
+        unreadableTempSites.length
+          ? ` — UNRESOLVED: ${unreadableTempSites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ')}`
+          : ''
+      }`,
+      unreadableTempSites.length === 0,
     );
   } finally {
     rmSync(gitTmp, { recursive: true, force: true });
