@@ -44,10 +44,6 @@
  * PostgreSQL 16.13 and MariaDB 10.11.14), never invented here.
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
@@ -55,6 +51,7 @@ import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
+  type SeedLogger,
 } from './per-organization-catalog.js';
 
 /* ------------------------------------------------------------------------- *
@@ -583,78 +580,71 @@ describe('a pass that is not refused reports exactly what it did before', () => 
  * ------------------------------------------------------------------------- */
 
 /**
- * ## Why this is an AST assertion and not a `@ts-expect-error`
- *
- * MEASURED, not assumed: this package's `tsconfig.json` excludes
- * `**\/*.test.ts`, and `tsc --noEmit --listFiles` reports **zero**
- * plugin-security test files in the program (the sibling
- * `tsconfig.scripts.json` covers `scripts/` only). A `@ts-expect-error` written
- * here would therefore be compiled by nothing — it would evaluate never, and
- * deleting it would leave every gate exactly as green. That is the phantom
- * check AGENTS.md names; this pin reads the declaration itself instead, so it
- * has teeth in the suite that actually runs.
- *
- * ## What it pins, and why that is the load-bearing property
+ * ## The property
  *
  * `error` is optional because hosts legitimately inject reduced sinks. That
  * makes `warn` the channel a durability report DEGRADES to — and a fallback
  * that may itself be absent is not a fallback. While both were optional, `{}`
  * satisfied `SeedLogger` and every value of the type was permitted to print
- * nothing, which no call-site spelling can repair.
+ * nothing, which no call-site spelling can repair. Only the type can.
  *
- * This survives the removal of `check:optional-error-sink-contract`, which is
- * the point: the gate found the hole, but the property belongs to this module.
+ * ## Why `@ts-expect-error` really does have teeth HERE
+ *
+ * Checked rather than assumed, because a `@ts-expect-error` in a file no tsc
+ * program compiles is a phantom check that evaluates never:
+ *
+ *  - this package's OWN `typecheck` does NOT compile it — `tsconfig.json`
+ *    excludes `**\/*.test.ts`, and `tsc --noEmit --listFiles` reports zero
+ *    plugin-security test files in that program;
+ *  - but `check:type-check-coverage --re-measure` DOES. It lifts the tsconfig's
+ *    test exclusion into a temp project and re-counts, ratcheting the result in
+ *    `TEST_DEBT` — shrink-only, and green on this branch at the recorded count.
+ *
+ * So both directions are enforced, by that ratchet rather than by the sink
+ * gate: if `warn` goes back to optional the directive below stops matching an
+ * error and tsc reports an UNUSED `@ts-expect-error` (+1, ratchet red), and if
+ * `error` were made required the companion line stops compiling (+1, ratchet
+ * red). This survives removal of `check:optional-error-sink-contract`, which is
+ * the point — that gate found the hole, but the property belongs to this module.
  */
 describe('SeedLogger guarantees the channel a durability report degrades to', () => {
-  const HERE = dirname(fileURLToPath(import.meta.url));
-  const CATALOG_SOURCE = resolve(HERE, 'per-organization-catalog.ts');
-
-  /** The declared members of the `SeedLogger` type alias, and their optionality. */
-  function seedLoggerMembers(): Map<string, boolean> {
-    const text = readFileSync(CATALOG_SOURCE, 'utf8');
-    const sourceFile = ts.createSourceFile(
-      CATALOG_SOURCE, text, ts.ScriptTarget.Latest, /* setParentNodes */ true,
-    );
-    let members: Map<string, boolean> | undefined;
-    sourceFile.forEachChild((node) => {
-      if (
-        ts.isTypeAliasDeclaration(node) &&
-        node.name.text === 'SeedLogger' &&
-        ts.isTypeLiteralNode(node.type)
-      ) {
-        members = new Map(
-          node.type.members
-            .filter(ts.isPropertySignature)
-            .map((m) => [(m.name as ts.Identifier).text, m.questionToken !== undefined]),
-        );
-      }
-    });
-    // A pin that silently stops finding its subject is worse than no pin: it
-    // would go green on a renamed or restructured declaration.
-    if (!members) throw new Error('SeedLogger type alias not found — this pin lost its subject');
-    return members;
-  }
-
-  it('finds the declaration it is pinning', () => {
-    const members = seedLoggerMembers();
-    expect([...members.keys()].sort()).toEqual(['error', 'info', 'warn']);
+  it('refuses a sink that has no `warn` channel', () => {
+    // ⭐ The whole property: `{ info }` alone must NOT be a `SeedLogger`.
+    // If this stops being an error, the directive becomes unused and the
+    // TEST_DEBT ratchet goes red on the next re-measure.
+    // @ts-expect-error `warn` is non-optional — a sink that can only print at
+    // `info`, or print nothing at all, is the contract that permits silence.
+    const silentSink: SeedLogger = { info: () => {} };
+    expect(silentSink).toBeDefined();
   });
 
-  it('declares `warn` NON-optional — so no value of the type can be silent', () => {
-    // ⭐ The whole property. `{}` must not be a `SeedLogger`.
-    expect(seedLoggerMembers().get('warn')).toBe(false);
-  });
-
-  it('keeps `error` optional — reduced sinks stay representable', () => {
+  it('still admits a reduced sink that has no `error` channel', () => {
     // ⛔ Making `error` required is the measured-and-rejected repair: it would
-    // foreclose the very hosts the fallback exists for.
-    expect(seedLoggerMembers().get('error')).toBe(true);
+    // foreclose the very hosts the fallback exists for. No `@ts-expect-error`
+    // here on purpose — this line must COMPILE, and the day it stops is the
+    // day someone made `error` required.
+    const reducedSink: SeedLogger = { warn: () => {} };
+    expect(reducedSink).toBeDefined();
+
+    // …and the reduced sink is not merely representable, it is SERVED: the
+    // durability report degrades onto it rather than going silent.
+    const warns: WarnLine[] = [];
+    const refusals = createSeedWriteRefusals();
+    refusals.record('sys_position', mysqlDuplicateEntry());
+    reportSeedWriteRefusals(
+      { warn: (message, meta) => warns.push({ message, meta: meta ?? {} }) },
+      refusals,
+      'org_1',
+    );
+    expect(warns).toHaveLength(1);
+    expect(warns[0].meta.class).toBe('unique-violation');
   });
 
   it('does not let a required `info` stand in for the guarantee', () => {
     // A lost write reported at `info` is the reassuring half-truth the
     // degradation-level rule exists to remove, so `info` carries no guarantee
-    // and must stay optional.
-    expect(seedLoggerMembers().get('info')).toBe(true);
+    // and must stay optional — this line compiling is that assertion.
+    const noInfoSink: SeedLogger = { warn: () => {} };
+    expect(noInfoSink.info).toBeUndefined();
   });
 });
