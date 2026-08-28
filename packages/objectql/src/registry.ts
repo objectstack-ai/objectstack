@@ -846,7 +846,7 @@ function provisionTenantScopeIndex(
  * (`sys_member`) is walled on that column and is now indexed on it. Re-adding
  * an exclusion the wall does not have is precisely the drift this rebinding
  * closes — and `declaresTenantIndex` already covers the tables that declare
- * their own tenant index (`sys_invitation`, `sys_team`, `sys_scim_provider`).
+ * their own tenant index (`sys_invitation`, `sys_team`).
  *
  * ⚠️ The clause-1 rows are NOT a leftover of the condition #8459 lifted: an
  * object that declares itself non-tenant-scoped is one the wall composes NO
