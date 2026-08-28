@@ -136,6 +136,68 @@
  * them is printed in the residue rather than left as an absence — a schedule
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
+ * ## Why a declaration can only NARROW, and what that guarantee costs (#12842)
+ *
+ * `declaredInheritedPopulation` refuses any path its own module does not
+ * already spell, so a declaration can only ever REMOVE leads a caller would
+ * otherwise inherit — never invent one, and never hide a real population. That
+ * is a property this file asserts without reading any declaration's intent,
+ * which is what lets every dispatch built on this derivation be trusted without
+ * re-deriving it. It has a measured price, recorded here rather than left to be
+ * rediscovered card by card.
+ *
+ * A hint is a path PREFIX and `hintCovers` matches subtrees, so no declaration
+ * can express "the compiled subset of this tree". `cli-build-prerequisite.mjs`
+ * declares `packages/cli/src` — the honest spelling, since the CLI's source
+ * tree really is what compiles into the command `check:i18n` and
+ * `check:i18n-coverage` spawn — and that prefix also names the 101 interleaved
+ * test files under it plus `src/utils/console-route-ledger.ts`. All 102 are
+ * excluded by `packages/cli/tsconfig.build.json`, so none can change a byte of
+ * the `dist/` those two gates read. Measured on b1a987e4a, over the 322 tracked
+ * files of `packages/cli`:
+ *
+ *                                    BEFORE #12841   AFTER
+ *     covered by the inherited hints       322         214
+ *       really read by the gates           112         112
+ *       false leads                        210         102
+ *
+ * 102 files per gate — 204 (file, gate) pairs across the family. Priced the
+ * same day, over the 4076 first-parent commits on `origin/main` in the 30 days
+ * to 2026-08-28: 35 of them named these gates while provably unable to move
+ * them (0.86% of all landings, 10.5% of the 332 touching `packages/cli`), and
+ * each such card pays about 3m30s of compute to reach any reading at all —
+ * both gates refuse outright on an unbuilt tree, `check:i18n` after a 56-task
+ * CLI closure build and `check:i18n-coverage` only after a full `pnpm build`,
+ * which its own second prerequisite demands one round LATER. Roughly two hours
+ * of fleet compute per 30 days, before queueing.
+ *
+ * Maintainer ruling, 2026-08-28 (#12842): pay it. A mechanism that lets a
+ * declaration SUBTRACT is a mechanism that can subtract a REAL population, and
+ * that failure would be SILENT — a gate quietly no longer watching live code
+ * while every dispatch order still reads normal. Today's cost is loud and
+ * self-limiting; the trade runs the wrong way. ⛔ Do not give
+ * `declaredInheritedPopulation` a subtraction spelling — not a marker suffix,
+ * not a second marker.
+ *
+ * The recorded fallback, should the price ever escalate, is to apply a
+ * classifier on the DERIVATION side for named gate families, so that no
+ * declaration expresses anything. ⚠️ Two measured caveats it must carry:
+ * `isTestFilePath` reaches 100 of these 102, not all of them (it judges the
+ * filename infix, deliberately, so the `__tests__/` helper and the ledger file
+ * both fall outside it), and every use of it in this file today is ADDITIVE —
+ * see CHANGE_KIND_GATES — so this would be the first SUBTRACTIVE rule inside
+ * the derivation itself. ⛔ Consulting the package's own `tsconfig.build.json`
+ * instead is worse rather than better, and measurably so: an edit to that file
+ * names ZERO i18n-family gates today (measured on b1a987e4a; nine other
+ * families are named in the same run, so the zero is a reading, not a broken
+ * instrument), so the input doing the subtracting would be one nobody is ever
+ * named for.
+ *
+ * ⚠️ ORDER, carried from the card: the mirror axis is UNDER-naming (#12322,
+ * fixed in e980f6448 / PR #12476 and still open on its own terms), and that is
+ * exactly what a subtraction would put back at risk. Revisiting the rejected
+ * option requires that card closed and re-verified FIRST.
+ *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows, package.json, or the tracked-file corpus the
  * reachability sweep needs exits non-zero (#4690: unreadable input must never
