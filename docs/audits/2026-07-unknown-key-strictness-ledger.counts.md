@@ -257,11 +257,11 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 77 |
-| `api/` | 444 |
+| `api/` | 416 |
 | `cloud/` | 83 |
 | `identity/` | 32 |
 | `integration/` | 10 |
 | `kernel/` | 272 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 364 |
+| `system/` | 361 |
