@@ -16,6 +16,22 @@ import { contentDispositionValue } from './content-disposition.js';
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
 
 /**
+ * What the upload routes need to know about the caller (#2755, widened #12745).
+ *
+ * `organizationId` is the session's ACTIVE organization — the scope the upload
+ * is happening in, and the value threaded into `createFile` so the new
+ * `sys_file` row is stamped rather than landing NULL. It is optional in both
+ * directions on purpose: a resolver that only knows the user (every
+ * pre-#12745 implementation, and every single-tenant deployment) keeps
+ * type-checking and keeps working, and a session with no active organization
+ * resolves to `undefined` rather than to a guess.
+ */
+export interface StorageUploadSession {
+  userId?: string;
+  organizationId?: string;
+}
+
+/**
  * Options for the storage route registration helper.
  */
 export interface StorageRoutesOptions {
@@ -28,12 +44,13 @@ export interface StorageRoutesOptions {
    * Session resolver for the UPLOAD entry points (#2755). When wired, the
    * presigned/complete/chunked upload routes reject anonymous requests with
    * 401 `AUTH_REQUIRED`, and new sys_file rows are stamped with
-   * `owner_id = session.userId`. When absent (bare kernels, tests), the
+   * `owner_id = session.userId` and — since #12745 — with the session's active
+   * `organizationId`. When absent (bare kernels, tests), the
    * routes stay open — back-compat, logged once. Download routes are NOT
    * gated here (capability URLs embedded in <img src>/<a href>; gating them
    * is a tracked follow-up needing cookie sessions or signed links).
    */
-  resolveSession?: (req: IHttpRequest) => Promise<{ userId?: string } | null | undefined>;
+  resolveSession?: (req: IHttpRequest) => Promise<StorageUploadSession | null | undefined>;
    /**
    * Authorize a DOWNLOAD of a parent-governed file (#2970 item 2, extended by
    * ADR-0104 D3 wave 2). When wired, the download endpoints
@@ -209,7 +226,7 @@ export function registerStorageRoutes(
   const requireUploadSession = async (
     req: IHttpRequest,
     res: IHttpResponse,
-  ): Promise<{ userId?: string } | null | false> => {
+  ): Promise<StorageUploadSession | null | false> => {
     if (!opts.resolveSession) {
       if (!warnedOpenUploads) {
         warnedOpenUploads = true;
@@ -219,7 +236,7 @@ export function registerStorageRoutes(
       }
       return null;
     }
-    let session: { userId?: string } | null | undefined;
+    let session: StorageUploadSession | null | undefined;
     try {
       session = await opts.resolveSession(req);
     } catch {
@@ -316,19 +333,27 @@ export function registerStorageRoutes(
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
 
-      // Persist pending file record
-      await store.createFile({
-        id: fileId,
-        key,
-        name: filename,
-        mime_type: mimeType,
-        size,
-        scope: scope ?? 'user',
-        bucket,
-        acl: 'private',
-        status: 'pending',
-        owner_id: session?.userId,
-      });
+      // Persist pending file record.
+      //
+      // [#12745] The acting organization travels with the write. It was
+      // already in the caller's hand — `session` is read for `owner_id` on the
+      // line below — and dropping it is what left every `sys_file` row NULL on
+      // a tenancy-ENABLED object.
+      await store.createFile(
+        {
+          id: fileId,
+          key,
+          name: filename,
+          mime_type: mimeType,
+          size,
+          scope: scope ?? 'user',
+          bucket,
+          acl: 'private',
+          status: 'pending',
+          owner_id: session?.userId,
+        },
+        { organizationId: session?.organizationId },
+      );
 
       // If adapter supports presigned upload, use it; otherwise build a local stub URL
       let uploadUrl: string;
@@ -420,20 +445,24 @@ export function registerStorageRoutes(
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
 
-      // Create pending file
-      await store.createFile({
-        id: fileId,
-        key,
-        name: filename,
-        mime_type: mimeType,
-        size: totalSize,
-        scope: scope ?? 'user',
-        bucket,
-        acl: 'private',
-        status: 'pending',
-        metadata: metadata ? JSON.stringify(metadata) : undefined,
-        owner_id: session?.userId,
-      });
+      // Create pending file — same organization threading as the presigned
+      // door above (#12745).
+      await store.createFile(
+        {
+          id: fileId,
+          key,
+          name: filename,
+          mime_type: mimeType,
+          size: totalSize,
+          scope: scope ?? 'user',
+          bucket,
+          acl: 'private',
+          status: 'pending',
+          metadata: metadata ? JSON.stringify(metadata) : undefined,
+          owner_id: session?.userId,
+        },
+        { organizationId: session?.organizationId },
+      );
 
       // Initiate chunked upload in backend
       let backendUploadId: string | undefined;
