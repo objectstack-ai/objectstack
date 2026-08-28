@@ -78,11 +78,51 @@
  */
 
 import { createRequire } from 'node:module';
-import {
-  applyConversions,
-  type ConversionNotice,
-} from '@objectstack/spec';
+// ⚠ VALUE import only, and deliberately no `type` import beside it: this module
+// must keep the `@objectstack/spec` ROOT entry out of this package's PUBLIC
+// declaration surface. When an exported signature here referenced a root spec
+// type, the emitted `dist/index.d.ts` gained `import ... from '@objectstack/spec'`,
+// and every DOWNSTREAM type program reading this package's declarations began
+// loading the ~2MB spec root d.mts BESIDE the d.ts flavor it already read —
+// the whole spec surface instantiated twice. Measured cost: the TEST_DEBT
+// re-measure of `packages/qa/http-conformance` (671-file program) crossed CI's
+// ~4GB tsc heap ceiling and OOM'd, red on a PR whose diff never touched that
+// package (#12772 patch round; `--listFiles` diff: the only additions were
+// `spec/dist/index.d.mts` + its chunk). The runtime import below is invisible
+// to declaration emit once no exported type references the root — the public
+// surface speaks {@link ArtifactConversionNotice}, a structural mirror pinned
+// against the real thing in this module's test.
+import { applyConversions } from '@objectstack/spec';
 import { resolveDeclaredRange, type ProtocolHandshakeManifest } from './protocol-handshake.js';
+
+/**
+ * Structural mirror of `ConversionNotice` (`@objectstack/spec`,
+ * `src/conversions/types.ts`) — field-for-field, including the literal `code`.
+ *
+ * A mirror rather than a re-export, for the declaration-surface reason on the
+ * import above; its exactness is pinned BOTH assignability directions in
+ * `artifact-forward-conversion.test.ts`, so a drift in either declaration
+ * fails the suite rather than silently forking the contract.
+ */
+export interface ArtifactConversionNotice {
+  code: 'OS_METADATA_CONVERTED';
+  /** The conversion id that fired (`MetadataConversion.id`). */
+  conversionId: string;
+  /** Dotted surface the conversion governs, e.g. `flow.node.type`. */
+  surface: string;
+  /** The protocol major that introduced the canonical shape. */
+  toMajor: number;
+  /** The protocol major in which this conversion retires from the load path. */
+  retiresIn: number;
+  /** The off-spec token/shape actually seen in the source. */
+  from: string;
+  /** The canonical token/shape it was converted to. */
+  to: string;
+  /** Where in the stack it applied, e.g. `permissions[0].objects.crm_ticket.allowPurge`. */
+  path: string;
+  /** Derived, human-facing one-liner. */
+  message: string;
+}
 
 /** Why the retired conversion window did or did not open for an artifact. */
 export type ArtifactForwardConversionVerdict =
@@ -103,7 +143,7 @@ export interface ArtifactForwardConversionOptions {
    * `applyConversions`: converting is the point; *surfacing* is the caller's
    * choice (the ingestion door logs them operator-visibly, deduped).
    */
-  onNotice?: (notice: ConversionNotice) => void;
+  onNotice?: (notice: ArtifactConversionNotice) => void;
   /**
    * The `@objectstack/spec` version this runtime executes. Injectable for
    * tests; defaults to the installed spec package's own version. `null`
@@ -124,7 +164,7 @@ export interface ArtifactForwardConversionResult<T> {
   /** The runtime spec version the floor was compared against. */
   runtimeSpecVersion: string | null;
   /** Every notice the replay emitted (empty when nothing converted). */
-  notices: ConversionNotice[];
+  notices: ArtifactConversionNotice[];
 }
 
 /**
@@ -238,7 +278,7 @@ export function applyArtifactForwardConversions<T>(
     return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [] };
   }
 
-  const notices: ConversionNotice[] = [];
+  const notices: ArtifactConversionNotice[] = [];
   const converted = applyConversions(definition as Record<string, unknown>, {
     includeRetired: true,
     onNotice: (n) => {

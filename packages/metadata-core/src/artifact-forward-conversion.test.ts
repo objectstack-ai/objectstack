@@ -17,11 +17,26 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { ConversionNotice } from '@objectstack/spec';
 import {
   applyArtifactForwardConversions,
   parseRangeFloor,
   resolveInstalledSpecVersion,
+  type ArtifactConversionNotice,
 } from './artifact-forward-conversion.js';
+
+// ── Mirror pin ───────────────────────────────────────────────────────────────
+// `ArtifactConversionNotice` is a structural mirror of the spec root's
+// `ConversionNotice`, kept so the module's PUBLIC declarations never import
+// the ~2MB spec root (the import made every downstream type program load the
+// root twice — d.ts and d.mts flavors — and pushed the http-conformance
+// TEST_DEBT re-measure over CI's ~4GB tsc heap ceiling; #12772 patch round).
+// The TEST may reference the root freely — tests never ship declarations.
+// Both assignability directions, so EITHER side drifting reds this suite:
+type _SpecToMirror = ConversionNotice extends ArtifactConversionNotice ? true : never;
+type _MirrorToSpec = ArtifactConversionNotice extends ConversionNotice ? true : never;
+const _mirrorPin: [_SpecToMirror, _MirrorToSpec] = [true, true];
+void _mirrorPin;
 
 /** The measured 17.1-built shape: full CRUD plus the two retired lifecycle bits. */
 function legacyPermissionDefinition(protocolRange: string | undefined) {
