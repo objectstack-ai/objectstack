@@ -278,8 +278,6 @@ const VERDICTS = new Set(['unconverted', 'specimen']);
  * one private stripper for another has not been re-read by anyone.
  */
 const LEDGER = new Map([
-  ['examples/app-showcase/test/inert-wirings.test.ts',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across 91 .ts files under examples/app-showcase/src): DELETES LIVE CODE on 9 of them, 5,987 chars, because the block regex opens a phantom comment at a block-comment opener sitting inside a string literal -- the accept-glob strings in ui/actions/index.ts and the prose strings in coverage.ts -- and runs to the next terminator far below; it also KEEPS 1,813 chars of trailing line-comment prose, which its line filter deliberately never removes. Its own retired-retryDelayMs offender set is empty under both strippers today' }],
   ['packages/cli/src/commands/artifact-child-env.pin.test.ts',
     { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475: NOT a stripper feeding a scan. This file\'s guard is ts.createSourceFile; the one block-regex call is a 7-line inline SPECIMEN asserting the text scan it replaced reports that specimen clean, and it does -- 112 chars of live code deleted at the block-comment opener inside the route-wildcard string. Recorded as unconverted only because a shape scan cannot tell a negative control from a caller; converting it would delete the evidence, exactly as for the specimen row below' }],
   ['packages/cli/src/commands/migrate/multi-value-columns.no-auto-run.test.ts',

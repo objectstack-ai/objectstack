@@ -679,6 +679,22 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
     },
   },
+  '@objectstack/example-showcase': {
+    // test/inert-wirings.test.ts imports `stripComments` from
+    // `js-comment-mask.mjs` to decide which text under this app's `src/` is a
+    // comment and which is an authored wiring -- the same conversion #12398
+    // made for the route-ledger guards. The coupling is real: that guard's
+    // offender set is a function of the module's scanning behaviour, so a
+    // change to it has to re-run this package's suite. The `.d.mts` sibling is
+    // declared alongside it because it is what gives `stripComments` its type,
+    // so this package's typecheck verdict is a function of it too -- the reason
+    // the `@objectstack/cli` entry above declares the pair rather than the
+    // module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   'create-objectstack': {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
     // path to decide which templates are internal.
