@@ -1300,6 +1300,182 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
   ),
 }));
 
+// ==========================================
+// Meta history / diagnostics family (#12038)
+// ==========================================
+//
+// The response contracts for the previously-unbound `meta.*` history /
+// diagnostics routes, ruled on 2026-08-27 (#12038, 1C · 2C · 3A · 4A · 5A).
+// Every schema below is a DESCRIBE-ONLY TRANSCRIPTION of the return type its
+// producer in `@objectstack/metadata-protocol` already declares inline —
+// authoring one changes no wire byte. The route-ledger rows that name these
+// schemas state which surface's envelope they describe (the dispatcher wraps
+// `{ success, data }`; the REST server answers the payload bare — #12038
+// survey §8.1); each schema here is the PAYLOAD, envelope-free, so one
+// declaration is true on both surfaces.
+//
+// `meta.migrateStored` (`POST /meta/_migrate-stored`) is DELIBERATELY ABSENT
+// (#12038 ruling 2C): its only named type, `StoredMigrationReport`, lives in
+// `@objectstack/metadata-protocol` (`stored-migration.ts`), which
+// `packages/client` cannot reach (its deps are core + spec only). A second
+// declaration here would drift against the CLI that renders the same report,
+// and moving the type is a cross-package architecture change with zero
+// consumer pull. The route stays unbound, documented at its two ledger rows
+// and in the SDK annotation.
+
+/**
+ * `GET /meta/:type/:name/published` — the published body of a metadata item
+ * (ADR-0033).
+ *
+ * DELIBERATELY OPAQUE (#12038 ruling 1C). The route answers an arbitrary
+ * metadata item body — the union over every registered metadata type — and
+ * the layered producer feeding it declares that very field `z.unknown()` on
+ * purpose (`GetMetaItemLayeredResponseSchema.overlay`, "LAYER 2 — the stored
+ * customization row ALONE"). A discriminated union here would freeze this
+ * contract against today's type registry; the body stays opaque by ruling,
+ * not by omission. Two producers serve one route (the `state:'active'`
+ * overlay row via `getMetaItemLayered`, else the legacy code/package
+ * registry's `getPublished`) — opacity is also what keeps that fallback an
+ * implementation detail rather than a declared union.
+ */
+export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().describe(
+  'The published metadata item body, opaque by ruling (#12038 1C). Shape is '
+  + 'the item\'s own metadata-type schema, resolved at read time — never '
+  + 'frozen into this contract.',
+));
+
+/**
+ * `GET /meta/_drafts` — pending drafts (ADR-0033): metadata authored but not
+ * yet published, which the active-only item lists hide.
+ *
+ * Transcribed from `listDrafts`'s declared return
+ * (`@objectstack/metadata-protocol` `protocol.ts`).
+ */
+export const ListDraftsResponseSchema = lazySchema(() => z.object({
+  drafts: z.array(z.object({
+    type: z.string().describe('Metadata type name (canonical singular).'),
+    name: z.string().describe('Item name.'),
+    organizationId: z.string().nullable().describe(
+      'Owning organization of the draft row, `null` for an environment-wide draft.',
+    ),
+    packageId: z.string().nullable().describe(
+      'Package the draft is bound to, `null` for a package-less draft.',
+    ),
+    updatedAt: z.string().nullable().describe(
+      'Last-touch timestamp of the draft row (ISO-8601 string), `null` when '
+      + 'the row recorded none.',
+    ),
+    updatedBy: z.string().nullable().describe(
+      'Who last touched the draft, `null` when the row recorded none.',
+    ),
+  })).describe('Every pending draft visible to the caller, one row per item.'),
+}));
+
+/**
+ * `GET /meta/diagnostics` — the cross-type spec-validation sweep: every
+ * metadata entry that fails its registered Zod schema. Powers governance
+ * dashboards and doctor-style checks.
+ *
+ * Transcribed from `getMetaDiagnostics`'s declared return
+ * (`@objectstack/metadata-protocol` `protocol.ts`). `diagnostics` is the
+ * canonical `MetadataValidationResultSchema` from `@objectstack/spec/kernel`
+ * — the same type the save path's 422 and the read decorators speak, and the
+ * shape objectui's own `MetadataDiagnosticsSummary` independently re-declared
+ * field-for-field (#12038 survey §3d).
+ */
+export const GetMetaDiagnosticsResponseSchema = lazySchema(() => z.object({
+  entries: z.array(z.object({
+    type: z.string().describe('Metadata type of the failing item.'),
+    name: z.string().describe('Name of the failing item.'),
+    diagnostics: MetadataValidationResultSchema.describe(
+      'The spec-validation verdict for the item — the same '
+      + '`MetadataValidationResult` the write path answers.',
+    ),
+  })).describe('One entry per item that failed validation (after filters).'),
+  total: z.number().describe('Number of entries in this answer.'),
+  scannedTypes: z.number().describe('How many metadata types the sweep visited.'),
+  scannedItems: z.number().describe('How many items the sweep visited.'),
+  stats: z.record(z.string(), z.object({
+    count: z.number().describe('Items of this type present.'),
+    locked: z.number().describe('Items of this type currently lock-protected.'),
+    packages: z.array(z.string()).describe('Packages contributing items of this type.'),
+  })).describe(
+    'Per-type aggregate stats, keyed by metadata type — computed in the same '
+    + 'sweep so a directory page renders tile counts and a package filter in '
+    + 'one round-trip.',
+  ),
+}));
+
+/**
+ * `GET /meta/:type/:name/references` — reverse references: metadata items
+ * that reference the addressed item. `{ references: [] }` on kernels without
+ * reference tracking.
+ *
+ * Transcribed from `findReferencesToMeta`'s declared return
+ * (`@objectstack/metadata-protocol` `protocol.ts`).
+ */
+export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
+  references: z.array(z.object({
+    type: z.string().describe('Metadata type of the REFERRING item.'),
+    name: z.string().describe('Name of the referring item.'),
+    label: z.string().optional().describe('Display label of the referring item, when it has one.'),
+    path: z.string().describe('Where inside the referring item the reference sits (dot path).'),
+    kind: z.string().describe('What kind of reference this is (e.g. which key carries it).'),
+  })).describe('Every found reference to the addressed item.'),
+}));
+
+/**
+ * `POST /meta/:type/:name/rollback` — restore the body at a history version
+ * as the new live row.
+ *
+ * Transcribed from `rollbackMetaItem`'s declared return
+ * (`@objectstack/metadata-protocol` `protocol.ts`); objectui's
+ * `metadata-client.ts` docblock independently documents the same five fields
+ * (#12038 survey §3d).
+ */
+export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
+  success: z.boolean().describe('Whether the rollback landed.'),
+  version: z.string().describe(
+    'The new live row\'s ADR-0008 optimistic-concurrency token — the same '
+    + 'carrier `saveItem` returns; pass it back as `options.ifMatch`.',
+  ),
+  seq: z.number().describe('The new live row\'s history sequence number.'),
+  restoredFromVersion: z.number().describe('Which history version was restored.'),
+  message: z.string().optional().describe('Rollback note, when one was recorded.'),
+}));
+
+/**
+ * `GET /meta/:type/:name/diff` — structural diff between two history
+ * versions (`from`/`to`; omit both for previous-vs-current).
+ *
+ * Transcribed from `diffMetaItem`'s declared return
+ * (`@objectstack/metadata-protocol` `protocol.ts`).
+ */
+export const DiffMetaItemResponseSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type of the diffed item.'),
+  name: z.string().describe('Name of the diffed item.'),
+  fromVersion: z.number().nullable().describe(
+    'The older side\'s history version, `null` when that side is absent '
+    + '(e.g. the item had no earlier version).',
+  ),
+  toVersion: z.number().nullable().describe(
+    'The newer side\'s history version, `null` when that side is absent.',
+  ),
+  added: z.array(z.object({
+    path: z.string().describe('Dot path of the added member.'),
+    value: z.unknown().describe('The added value.'),
+  })).describe('Members present in `to` and absent in `from`.'),
+  removed: z.array(z.object({
+    path: z.string().describe('Dot path of the removed member.'),
+    value: z.unknown().describe('The removed value.'),
+  })).describe('Members present in `from` and absent in `to`.'),
+  changed: z.array(z.object({
+    path: z.string().describe('Dot path of the changed member.'),
+    from: z.unknown().describe('The older side\'s value.'),
+    to: z.unknown().describe('The newer side\'s value.'),
+  })).describe('Members present on both sides with different values.'),
+}));
+
 /**
  * Get Metadata Item with Cache Request
  * Get a specific metadata item with HTTP cache validation support
@@ -2562,6 +2738,13 @@ export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
 export type AuditMetaItemRequest = z.input<typeof AuditMetaItemRequestSchema>;
 export type AuditMetaItemResponse = z.input<typeof AuditMetaItemResponseSchema>;
+/** Opaque by ruling (#12038 1C) — see {@link GetPublishedMetaItemResponseSchema}. */
+export type GetPublishedMetaItemResponse = z.input<typeof GetPublishedMetaItemResponseSchema>;
+export type ListDraftsResponse = z.input<typeof ListDraftsResponseSchema>;
+export type GetMetaDiagnosticsResponse = z.input<typeof GetMetaDiagnosticsResponseSchema>;
+export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaResponseSchema>;
+export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
+export type DiffMetaItemResponse = z.input<typeof DiffMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;
 export type GetMetaItemCachedResponse = z.input<typeof GetMetaItemCachedResponseSchema>;
 /** Post-parse shape of {@link GetMetaItemCachedResponse} — defaults applied, transforms run (ADR-0122). */
