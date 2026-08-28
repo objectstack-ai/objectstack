@@ -14,6 +14,7 @@ import {
     SysMetadataCommitObject,
     SysMetadataAuditObject,
     SysViewDefinitionObject,
+    applyArtifactForwardConversions,
 } from '@objectstack/metadata-core';
 
 // `SysMetadataObject` + `SysMetadataHistoryObject` are the customer overlay
@@ -253,6 +254,16 @@ export class MetadataPlugin implements Plugin {
      * `name` and are skipped by `_parseAndRegisterArtifact`'s register loop.
      */
     private lastParsedMetadata?: Record<string, unknown[]>;
+
+    /**
+     * Once-per-process dedupe for artifact forward-conversion summaries
+     * (`conversionId|label`, #12772). The artifact watcher replays
+     * `_parseAndRegisterArtifact` on every file change, so without this a dev
+     * loop over a legacy artifact would re-announce the same conversions on
+     * every reload — the same shape `Protocol.storedConversionWarned` guards
+     * on the stored-row pass, which this surfacing is modeled on.
+     */
+    private artifactConversionWarned = new Set<string>();
 
     constructor(options: MetadataPluginOptions = {}) {
         // Documented default: `watch: false` (see {@link MetadataPluginOptions.watch}).
@@ -667,6 +678,60 @@ export class MetadataPlugin implements Plugin {
     }
 
     /**
+     * Versioned ADR-0087 forward conversion at the artifact-ingestion door
+     * (#12772) — runs BEFORE the strict schema parse below, because the parse
+     * is the refusal point.
+     *
+     * A compiled artifact is data at rest with a version stamp: built by
+     * released tooling, then unchanged while the platform moves on. When a
+     * spec release retires an authorable key inside a protocol line (spec
+     * 17.1 → 17.2 retired the `allowRestore`/`allowPurge` permission bits),
+     * every already-built artifact carrying the key becomes unbootable at the
+     * tombstone — with no operator remedy, since `os migrate meta` targets
+     * sources, not built artifacts. The stored-row read path already replays
+     * the conversion chain for exactly this reason
+     * (`applyConversionsToStoredItem`, ADR-0087 addendum); this is the same
+     * policy at the artifact door, **keyed off the artifact's own declared
+     * `engines.protocol` floor**: an artifact authored below the running spec
+     * version converts forward, an artifact authored at the current (or a
+     * newer) surface converts nothing and answers to the strict parse,
+     * tombstones included. The version key is what keeps this a conversion
+     * rather than an amnesty — the retired keys return with the M2 lifecycle
+     * batch (#1883), and artifacts authored against that surface must never
+     * have them stripped by history.
+     *
+     * Notices surface the way the stored-row pass's do — operator-visible and
+     * deduped — as one summary line per conversion per artifact rather than
+     * one per rewritten path (a real 17.1 artifact carried 150 strips of the
+     * same two keys; 150 identical warn lines would bury the boot log).
+     */
+    private _convertArtifactForward(ctx: PluginContext, definition: unknown, label: string): unknown {
+        const result = applyArtifactForwardConversions(definition);
+        if (result.notices.length === 0) return result.definition;
+
+        const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
+        for (const n of result.notices) {
+            const existing = byConversion.get(n.conversionId);
+            if (existing) existing.count += 1;
+            else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
+        }
+        for (const [conversionId, agg] of byConversion) {
+            const key = `${conversionId}|${label}`;
+            if (this.artifactConversionWarned.has(key)) continue;
+            this.artifactConversionWarned.add(key);
+            ctx.logger.warn(
+                `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
+                + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
+                + `${result.runtimeSpecVersion}) — converted ${agg.count} site(s) forward via ADR-0087 `
+                + `conversion '${conversionId}' (first at ${agg.firstPath}). ${agg.message} `
+                + `The artifact file itself is unchanged — rebuild it with current tooling `
+                + `('os build') to persist the canonical shape.`,
+            );
+        }
+        return result.definition;
+    }
+
+    /**
      * Parse raw artifact JSON (envelope or bare definition) and register all
      * metadata items into the MetadataManager.
      *
@@ -686,14 +751,20 @@ export class MetadataPlugin implements Plugin {
 
         const obj = raw as any;
         if (obj?.schemaVersion && obj?.commitId && obj?.metadata !== undefined) {
-            const artifact = EnvironmentArtifactSchema.parse(obj);
+            const artifact = EnvironmentArtifactSchema.parse({
+                ...obj,
+                metadata: this._convertArtifactForward(ctx, obj.metadata, label),
+            });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else if (obj?.success && obj?.data?.metadata) {
             // Unwrap cloud API envelope: { success: true, data: { metadata: {...} } }
-            const artifact = EnvironmentArtifactSchema.parse(obj.data);
+            const artifact = EnvironmentArtifactSchema.parse({
+                ...obj.data,
+                metadata: this._convertArtifactForward(ctx, obj.data.metadata, label),
+            });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else {
-            const def = ObjectStackDefinitionSchema.parse(obj);
+            const def = ObjectStackDefinitionSchema.parse(this._convertArtifactForward(ctx, obj, label));
             const canonical = JSON.stringify(def, Object.keys(def).sort());
             const checksum = createHash('sha256').update(canonical).digest('hex');
             const environmentId = this.options.environmentId ?? 'proj_local';

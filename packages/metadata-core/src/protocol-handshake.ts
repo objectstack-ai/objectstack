@@ -76,8 +76,15 @@ export class ProtocolIncompatibleError extends MetadataError {
   }
 }
 
-/** First declared range, protocol-first (ADR-0025 §3.10 #3). */
-function resolveDeclaredRange(
+/**
+ * First declared range, protocol-first (ADR-0025 §3.10 #3).
+ *
+ * Exported (#12772) so the artifact forward-conversion policy reads the
+ * declared range from the same source priority as the handshake — two readers
+ * of `engines.protocol` with two priority orders would be the "two opinions"
+ * defect, one layer down.
+ */
+export function resolveDeclaredRange(
   manifest: ProtocolHandshakeManifest,
 ): { range: string; source: RangeSource } | null {
   const protocol = manifest.engines?.protocol?.trim();
