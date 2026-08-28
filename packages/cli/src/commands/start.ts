@@ -14,6 +14,11 @@ import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+// The ONE port contract, shared with `dev` and with the `serve` child this
+// command spawns (#12673). ⛔ Nothing about ports is declared in this file —
+// no range, no reader, no wording; a second copy of the bound is exactly what
+// #12620 and #12662 protected against.
+import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
@@ -304,7 +309,48 @@ export default class Start extends Command {
     // Resolve the port the child `serve` will actually bind, matching its
     // flag default (`--port` > $OS_PORT/$PORT > 3000). Using `flags.port`
     // alone printed the wrong URL whenever the port came from the env.
-    const bannerPort = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true }) ?? 3000;
+    const envPort = readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
+
+    // ── start's own door on the ONE port contract (#12673) ────────────────
+    // The same module `dev` and the `serve` child call, so the range exists
+    // once in the repository and all three doors enforce one set. What this
+    // repairs, measured on `origin/main` before the door existed:
+    // `os start --port 99999` was refused a process later as `PORT="99999"`,
+    // because the spawn below hands `flags.port` to the child as `PORT` — the
+    // operator typed `--port` and was told about an environment variable they
+    // had never set.
+    //
+    // ⛔ NOT `Flags.integer({ min, max })` on the flag, though this is the one
+    // command where that would have looked sufficient. Two measured reasons.
+    // (1) It is inert on the environment: oclif runs neither a flag `parse`
+    // nor an integer `min`/`max` over a value supplied by a `default`, and
+    // `$PORT`/`$OS_PORT` reach the child through exactly such a default on
+    // `serve`'s flag — so a bound declared here would guard `--port` and leave
+    // both env spellings behaving as before. (2) The bound would be a SECOND
+    // copy of the range, which is what #12620 and #12662 both declined to
+    // create and what this card's ruling names as the thing to protect.
+    //
+    // ⚠️ The text validated is the text FORWARDED. `Flags.integer` has already
+    // normalised argv by this point (`--port 08080` parses to `8080`), and the
+    // child env below is written as `PORT: String(flags.port)` — so
+    // `String(flags.port)` is literally what the child will read, not a
+    // reconstruction of it. The env branch needs no such care: `start` does not
+    // rewrite `$PORT`/`$OS_PORT`, the child inherits them under their own
+    // names, and this door refuses them under those same names one process
+    // earlier.
+    const portText = flags.port !== undefined ? String(flags.port) : envPort;
+    if (portText !== undefined) {
+      const portSource = describePortSource(flags.port === undefined);
+      if (parseRequestedPort(portText) === null) {
+        // stderr — `redirectStdoutToStderr()` above already routes this
+        // command's stdout there; writing the refusal to stderr directly
+        // states the channel instead of depending on that redirection.
+        process.stderr.write(`${formatInvalidPortNotice(portText, portSource)}\n`);
+        process.exit(1);
+      }
+    }
+
+    const bannerPort = flags.port ?? envPort ?? 3000;
     if (flags.ui) printKV('Console', `http://localhost:${bannerPort}/_console/`, '🖥️');
 
     printStep('Starting server...');

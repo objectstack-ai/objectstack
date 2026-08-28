@@ -1950,16 +1950,41 @@ const FormFieldBaseSchema = lazySchema(() => {
    * `parent` for master-detail line items); metadata-editing forms
    * (`*.form.ts`) bind the row under edit as `data`.
    *
-   * ⚠️ **No `current_user` here** (#6146). Field-level rules are evaluated by
-   * `evalFieldPredicate` / `resolveFieldRuleState` (`@object-ui/core`), which
-   * binds `record` + `previous` + an `extra` scope and nothing else — the
-   * autocomplete pins the same set (objectui#1582). A predicate referencing
-   * `current_user` is an UNBOUND identifier: the evaluation faults and falls
-   * back, and visibility's fallback is `true`, so the field a `current_user`
-   * test was meant to hide stays **permanently visible**. `current_user` IS
-   * bound for **per-option** `visibleWhen` (a different evaluator —
-   * `resolveCascadingOptions` against the host's predicate scope, ADR-0068 /
-   * objectui#2284); that is the only `*When` surface where it resolves.
+   * ## `current_user` DOES bind here — client-side, and only under a host that
+   * publishes a scope (objectui#6010)
+   *
+   * The form renderer passes the host shell's predicate scope into
+   * `evalFieldPredicate` / `resolveFieldRuleState` (`@object-ui/core`) as their
+   * `extra` scope, so a field-level predicate resolves `current_user` and its
+   * ADR-0068 D1 aliases (`user`, `ctx.user`, `os.user`) alongside `record` +
+   * `previous` + `parent`. The root really was unbound here (#6146) and this
+   * block said so for as long as that held; objectui#6010 bound it, and the
+   * text above is a re-measurement rather than a relaxation of anything.
+   *
+   * Two limits the binding does **not** remove — both fail in the direction an
+   * author will not notice:
+   *
+   * 1. ⚠️ **This is a rendering rule, never authorization.** Nothing
+   *    server-side evaluates a form-view field `visibleWhen`: the write path
+   *    evaluates field `readonlyWhen` / `requiredWhen` and per-option
+   *    `visibleWhen`, and that is the whole list. A role test written here
+   *    hides a control and protects no data — the record still carries the
+   *    value and every other read surface still returns it. To withhold a field
+   *    by role, declare field-level security on a permission set, which the
+   *    server enforces.
+   * 2. ⚠️ **The scope belongs to the HOST, so it is empty wherever no host
+   *    publishes one.** The console's public form route (`/f/:slug`) is mounted
+   *    outside any provider deliberately — an anonymous visitor has no
+   *    principal — so `current_user` is unbound there, the predicate faults,
+   *    and visibility's fallback is `true`: the field the test was meant to
+   *    hide is shown to everyone. The authed standalone route (`/forms/:name`)
+   *    publishes the session principal and binds normally.
+   *
+   * `current_user` is bound for **per-option** `visibleWhen` as well, through a
+   * different evaluator (`resolveCascadingOptions` against the same host scope,
+   * ADR-0068 / objectui#2284) — and that surface the rule validator ALSO
+   * enforces on write, which is why it stays the destination for a user-gated
+   * *choice* rather than a user-gated field.
    *
    * **Inside a repeater, `data` is the ROW, not the whole document** (#6254).
    * A sub-field of a `type: 'record'` / repeater field is rendered with its own
@@ -1978,7 +2003,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
    * the ruling and the scanner.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here since objectui#6010 — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),

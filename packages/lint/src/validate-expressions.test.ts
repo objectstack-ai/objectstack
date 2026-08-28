@@ -707,8 +707,16 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(issue!.message).not.toContain('record.current_user');
         // 1. what actually goes wrong, in the direction it goes wrong
         expect(issue!.message).toMatch(/falls back to VISIBLE/);
-        // 2. the one `*When` surface that binds `current_user`
+        // 2. the surface whose `current_user` gate the SERVER enforces — the
+        //    rule validator evaluates a per-option `visibleWhen` on every
+        //    write. It stopped being the ONLY `*When` surface that binds the
+        //    root when objectui#6010 bound a form view's field predicate
+        //    (client-side only), so the prescription is grounded on
+        //    enforcement rather than on exclusivity.
         expect(issue!.message).toMatch(/option's own `visibleWhen`/);
+        expect(issue!.message).toMatch(/rule validator/);
+        // …and the retired exclusivity claim does not come back.
+        expect(issue!.message).not.toMatch(/the one `\*When` surface/);
         // 3. the surface that hides a whole field by role — FLS on a permission
         //    set (`PermissionSetSchema.fields`, `permission.zod.ts:455`)
         expect(issue!.message).toMatch(/readable: false/);

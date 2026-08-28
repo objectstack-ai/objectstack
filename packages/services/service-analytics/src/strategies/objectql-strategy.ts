@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import type { Cube } from '@objectstack/spec/data';
+import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark: `withReadScope` below is one of the
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -172,7 +172,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // returns `null` for a filter that constrains nothing (an empty object),
     // matching the engine's own "empty filter is vacuous" convention — so a
     // vacuous measure filter adds no `filter` key rather than an empty one.
-    const aggregations: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }> = [];
+    const aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }> = [];
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, measure);
@@ -969,7 +969,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private async executeCrossObject(
     cube: Cube,
     query: AnalyticsQuery,
-    aggregations: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>,
+    aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>,
     filter: Record<string, unknown>,
     plan: CrossObjectPlan,
     ctx: StrategyContext,
@@ -1259,7 +1259,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return member.includes('.') ? member.split('.')[1] : member;
   }
 
-  private resolveMeasureAggregation(cube: Cube, measureName: string): { field: string; method: string } {
+  private resolveMeasureAggregation(cube: Cube, measureName: string): { field: string; method: AggregationFunction } {
     const direct = this.lookupMember(cube, measureName, 'measure') as
       | { sql: string; type: string }
       | undefined;
@@ -1306,7 +1306,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
       return {
         field: direct.sql.replace(/^\$/, ''),
-        method: direct.type === 'count_distinct' ? 'count_distinct' : direct.type,
+        // The assertion, not a parse: for a CubeSchema-legal cube the type
+        // partition above leaves exactly the six `AggregationFunction` values.
+        // An enum-INVALID type (host drift, the comment above) still flows
+        // through unchecked ON PURPOSE — adding a method allowlist here would
+        // re-blame the caller with a 400 for OUR bug, so the cast keeps the
+        // compile-time contract (#12776) without changing that posture.
+        method: (direct.type === 'count_distinct' ? 'count_distinct' : direct.type) as AggregationFunction,
       };
     }
     // Accept `${field}_${type}` aliases (e.g. 'amount_sum') for measures whose
@@ -1314,16 +1320,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // This matches the convention used by clients that build measure names
     // from (field, function) pairs (e.g. the data-objectstack adapter).
     const fieldName = measureName.includes('.') ? measureName.split('.')[1] : measureName;
-    const aggTypes = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
+    const aggTypes = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'] as const;
     for (const type of aggTypes) {
       const suffix = `_${type}`;
       if (fieldName.endsWith(suffix)) {
         const baseField = fieldName.slice(0, -suffix.length);
         const candidate = cube.measures[baseField];
         if (candidate && candidate.type === type) {
+          // `type` ranges over the six `AggregationFunction` literals and the
+          // guard just proved `candidate.type` equal to it (#12776) — no cast.
           return {
             field: candidate.sql.replace(/^\$/, ''),
-            method: candidate.type === 'count_distinct' ? 'count_distinct' : candidate.type,
+            method: type,
           };
         }
       }

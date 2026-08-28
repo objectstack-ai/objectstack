@@ -33,11 +33,11 @@
 - **状态核验用最小字段**(search/list + `fields`)或等事件,整对象 `get` 留给入队决策点;门禁放行
   判据 = 承载门禁族 job 的 conclusion,聚合(`blocked`/`dirty`)只作阴性筛查再定位,放行按名定向读
   单条 job,⛔ 不拉全表(按名定位失败才拉)。
-- **转 draft 不是可靠的踢队手段 —— 两向都有实测,处置按最坏走**:本仓测得转 draft 同时掉
-  auto-merge 与队列成员资格(均不自动恢复,转正后重新挂);objectui 2026-08-25 测得相反 —— 已入
-  队 PR 转 draft 后条目保位、~40 分钟后队列照样合并,彼时 `disable_pr_auto_merge` 已拒绝(仓别/时
-  机差异未分辨)。共同支持的补救:转 draft + disable 都做(本仓测得 disable 单独不踢队、objectui
-  彼时径直拒绝),**验队列 ref 与未落地**(拼写见「零成本等价物」),⛔ 不据单读数报补救。
+- **转 draft 不是可靠的踢队手段 —— 两向相反实测,处置按最坏走**:本仓转 draft 同时掉
+  auto-merge 与队列成员资格(均不自动恢复,转正后重挂);objectui 2026-08-25 已入队 PR 转 draft 条目
+  保位、~40 分钟后队列照样合并(仓别/时机未分辨)。补救:转 draft + disable 都做(本仓
+  `disable_pr_auto_merge` 单独不踢队、objectui 彼时径直拒绝);出队按下方「队列 ref」条阳性探针
+  答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论、不据单读数报补救。
 - **`update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 对 draft PR 的任何调用必须显式带
   `draft: true`**(reviewers/title/body/labels 单字段调用同坑;objectui 2026-08-25 实测:一次只传
   reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路 = REST
@@ -51,11 +51,11 @@
   `merge`(2026-08-24 两张 PR、一张 disable→enable 复验同值)、队列路径回显空字段而入队照发,落
   地仍无一例外单亲 squash(方法归队列,本仓 `allow_merge_commit:false`)⇒ ⛔ 不拿回显当任何方向
   的证据、不为它翻转空转;「空字段=静默空转签名」旧读法已推翻,权威信号见下两条。
-- **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:一次「成功」后 2.5 小时
-  零动静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**,
-  按下条序列以队列分支/timeline 入队事件确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空
-  本接口给不了(`pull_request_read` 与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果
-  读数只有队列分支、timeline 入队事件、最终落地三种;已死假说:已绿 PR 会静默空转。
+- **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:「成功」后 2.5 小时零动
+  静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**,按下
+  条阳性探针确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空本接口给不了(`pull_request_read`
+  与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果读数 = 下条探针①②、timeline
+  入队事件、最终落地,队列分支仅在场时算;已死假说:已绿 PR 会静默空转。
 - **队列 ref 答 BUILD 不答成员资格**(旧读法「存在即在队」作废):`gh-readonly-queue/*` **只在存在
   时**有意义(= 有 build 在跑),⛔ 缺席不是任何方向的读数。**阳性探针按成本序**:①
   `update_pull_request_branch` 回「Branches that are queued for merging cannot be updated」= 在队,正常返回顺

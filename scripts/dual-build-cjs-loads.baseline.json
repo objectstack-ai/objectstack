@@ -1,0 +1,13 @@
+{
+  "$comment": "Shrink-only, hand-edited. Published `require` entry points that legitimately cannot be require()d, each with the reason. Read by scripts/check-dual-build-cjs-loads.mjs. An entry that starts loading must be DELETED in the same PR that fixes it — the gate reds on a stale exemption. ⛔ A parse failure (SyntaxError in our own emitted bytes) is NEVER ledgerable: the gate ignores an entry here for that class on purpose, because a parse failure is always a fact about what we emitted, never about a dependency. Its steady state is NOT empty — read the reasons, never the count.",
+  "entries": {
+    "@objectstack/metadata-core#./testing": {
+      "reason": "The subpath re-exports vitest, and vitest REFUSES to be loaded from CommonJS by design ('Vitest cannot be imported in a CommonJS module using require(). Please use \"import\" instead.'). The bytes parse; the load fails inside vitest's own entry. Pre-existing and independent of #12971 — the same `require` condition is present at b489d3c725e8, before the import.meta line landed. The real repair is at the manifest (a test-harness subpath has no business advertising a `require` condition), which is a published-exports change and belongs to its own card.",
+      "diagnostic": "Error: Vitest cannot be imported in a CommonJS module using require()."
+    },
+    "@objectstack/service-cluster#./testing": {
+      "reason": "Same shape as @objectstack/metadata-core#./testing — a vitest-backed test-harness subpath that declares a `require` condition vitest itself refuses to serve. Bytes parse, load fails inside vitest. Repair is the same manifest-level one and belongs to the same card.",
+      "diagnostic": "Error: Vitest cannot be imported in a CommonJS module using require()."
+    }
+  }
+}

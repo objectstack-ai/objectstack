@@ -682,6 +682,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.marked-refusal-classification.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.marked-refusal-classification.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-list-runtime-baseline-dedup.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2638,6 +2648,21 @@
     },
     {
       "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
       "verb": "update",
       "pinned": 1
     },
