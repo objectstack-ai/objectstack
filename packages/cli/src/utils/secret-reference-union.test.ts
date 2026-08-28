@@ -20,6 +20,16 @@
  * asserts a handle that ONLY that family holds. A family whose removal left
  * everything green would be a family these tests do not cover.
  *
+ * **#12804 — family 3 now has TWO sources, so it needs TWO ablations.** The
+ * union asks the engine (`listDatasourceDefs()`) as well as the host, and
+ * neither source dominates: the engine indexes only what was REGISTERED on the
+ * runtime, while the host's list is the only channel for a datasource declared
+ * in code that nothing ever installed. Each half therefore carries a named pin
+ * asserting a handle that ONLY that half can reach —
+ * `family 3 (engine half)` and `family 3 (host half)`. Ablating one half must
+ * red its own pin ALONE; if ablating one leaves everything green, the other is
+ * covering for it and the union's two branches were never reached.
+ *
  * Family 2 carries an extra pin, because it is the one family that cannot be
  * precomputed: its holders are every `secret`-typed field on every REGISTERED
  * object, tenant-authored ones included. `registers a new secret field at
@@ -47,6 +57,7 @@ import {
   collectSecretReferenceUnion,
   collectSettingsSecretReferences,
   IncompleteSecretReferenceUnionError,
+  readEngineDatasourceDefs,
   type SecretReferenceEngineLike,
 } from './secret-reference-union.js';
 
@@ -476,6 +487,10 @@ describe('family 3 — datasource artefacts (`external.credentialsRef`)', () => 
     expect(undeclared.gaps[0].reason).toContain('declaredDatasources');
     // The partial references survive — they are real, they just cannot complete.
     expect(undeclared.handleIds.has(rt.datasourceHandleId)).toBe(true);
+    // #12804: the engine half answered, so ONLY the host half is missing — one
+    // gap reason, not two. (Its wording is pinned separately, in the host-half
+    // suite below.)
+    expect(undeclared.gaps).toHaveLength(1);
 
     const declaredEmpty = await collect(rt, []);
     expect(declaredEmpty.complete).toBe(true);
@@ -490,6 +505,188 @@ describe('family 3 — datasource artefacts (`external.credentialsRef`)', () => 
     expect(union.gaps[0].reason).toContain('credentialsRef is unknown, not absent');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #12804 — family 3's SECOND source. Two halves, two ablations.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mint a credentials handle through the REAL binder, so the ref spelling under
+ * test comes from the producer rather than from this file.
+ */
+async function bindCredential(rt: Runtime, name: string) {
+  const binder = createDatasourceSecretBinder({
+    engine: rt.realEngine as never,
+    cryptoProvider: rt.crypto as never,
+  });
+  const ref = await binder.bind({ value: `${name}-password` }, { name });
+  return { ref, handleId: ref.slice('sys_secret:'.length) };
+}
+
+/** An engine slice built by hand, so a port member can be removed or broken. */
+const sliceOf = (
+  rt: Runtime,
+  listDatasourceDefs?: SecretReferenceEngineLike['listDatasourceDefs'],
+): SecretReferenceEngineLike => ({
+  getConfigs: () => rt.engine.getConfigs(),
+  getDriverForObject: (o) => rt.engine.getDriverForObject(o),
+  ...(listDatasourceDefs ? { listDatasourceDefs } : {}),
+});
+
+describe('family 3 (engine half) — definitions the engine holds', () => {
+  let rt: Runtime;
+  beforeEach(async () => { rt = await buildRuntime(); });
+
+  it('names a handle held ONLY by an engine-registered datasource definition', async () => {
+    const { ref, handleId } = await bindCredential(rt, 'analytics');
+    // Registered IN CODE only: never written to sys_metadata, never declared by
+    // the host. Before #12804 this handle was invisible to the union.
+    rt.realEngine.registerDatasourceDef({
+      name: 'analytics', schemaMode: 'external', external: { allowWrites: false, credentialsRef: ref },
+    });
+
+    // Anti-vacuity: neither other source can reach it.
+    expect(rt.store.rowsOf('sys_metadata').some((r) => String(r.metadata).includes(handleId))).toBe(false);
+
+    const union = await collect(rt, []); // host says it has NONE
+    assertSecretReferenceUnionComplete(union);
+    expect(union.handleIds.has(handleId)).toBe(true);
+    const ref3 = union.references.find((r) => r.handleId === handleId);
+    expect(ref3?.family).toBe('datasource');
+    expect(ref3?.holder).toBe('datasource(analytics).external.credentialsRef');
+    expect(union.references.filter((r) => r.handleId === handleId)).toHaveLength(1);
+  });
+
+  it('an engine that cannot list its definitions is a GAP, never an empty answer', async () => {
+    const noAccessor = sliceOf(rt);
+    const read = readEngineDatasourceDefs(noAccessor);
+    expect(read.artefacts).toEqual([]);
+    expect(read.gap).toContain('listDatasourceDefs');
+
+    const union = await collectSecretReferenceUnion({ engine: noAccessor, declaredDatasources: [] });
+    expect(union.complete).toBe(false);
+    expect(union.gaps.map((g) => g.family)).toEqual(['datasource']);
+    // The persisted half still enumerated, so its handle survives as a partial.
+    expect(union.handleIds.has(rt.datasourceHandleId)).toBe(true);
+  });
+
+  it('a throwing listDatasourceDefs is a GAP naming the cause', async () => {
+    const throwing = sliceOf(rt, () => { throw new Error('definition index unavailable'); });
+    const read = readEngineDatasourceDefs(throwing);
+    expect(read.gap).toContain('definition index unavailable');
+
+    const union = await collectSecretReferenceUnion({ engine: throwing, declaredDatasources: [] });
+    expect(union.complete).toBe(false);
+    expect(union.gaps[0].reason).toContain('definition index unavailable');
+  });
+
+  it('an engine answering [] is an ANSWER, exactly as the host\'s [] is', async () => {
+    const empty = sliceOf(rt, () => []);
+    const union = await collectSecretReferenceUnion({ engine: empty, declaredDatasources: [] });
+    expect(union.complete).toBe(true);
+  });
+});
+
+describe('family 3 (host half) — artefacts the engine never saw', () => {
+  let rt: Runtime;
+  beforeEach(async () => { rt = await buildRuntime(); });
+
+  it('names a handle held ONLY by the host-declared list', async () => {
+    const { ref, handleId } = await bindCredential(rt, 'never_installed');
+    // Declared in a config file nothing ever registered: the engine's index
+    // cannot see it, and it never reached sys_metadata either.
+    expect(rt.realEngine.listDatasourceDefs().some((d) => d.name === 'never_installed')).toBe(false);
+    expect(rt.store.rowsOf('sys_metadata').some((r) => String(r.metadata).includes(handleId))).toBe(false);
+
+    const union = await collect(rt, [{ name: 'never_installed', external: { credentialsRef: ref } }]);
+    assertSecretReferenceUnionComplete(union);
+    expect(union.handleIds.has(handleId)).toBe(true);
+    const ref3 = union.references.find((r) => r.handleId === handleId);
+    expect(ref3?.family).toBe('datasource');
+    expect(ref3?.holder).toBe('datasource(never_installed).external.credentialsRef');
+    expect(union.references.filter((r) => r.handleId === handleId)).toHaveLength(1);
+  });
+
+  it('the host half still REFUSES when nobody answered — the guarantee #12804 must not remove', async () => {
+    // The falsification criterion: an input shape that makes the union refuse
+    // rather than return a silent empty answer must still exist after wiring
+    // the engine in. `declaredDatasources: undefined` is that shape.
+    const undeclared = await collectSecretReferenceUnion({
+      engine: rt.engine,
+      declaredDatasources: undefined,
+    });
+    expect(undeclared.complete).toBe(false);
+    expect(undeclared.gaps.map((g) => g.family)).toEqual(['datasource']);
+    expect(() => assertSecretReferenceUnionComplete(undeclared))
+      .toThrow(IncompleteSecretReferenceUnionError);
+  });
+
+  it('the gap message states the LIVE mechanism, not the retired one', async () => {
+    const undeclared = await collectSecretReferenceUnion({
+      engine: rt.engine,
+      declaredDatasources: undefined,
+    });
+    const reason = undeclared.gaps[0].reason;
+    // The reason an operator reads mid-incident. The engine DID answer; what is
+    // still unreachable is a datasource declared in code and never registered.
+    expect(reason).toContain('declaredDatasources');
+    expect(reason).toContain('REGISTERED on this runtime');
+    expect(reason).toContain('until the host is asked');
+    // …and it must not carry the mechanism #12758 retired. A true sentence
+    // resting on a dead mechanism is the defect class this pin exists for.
+    expect(reason).not.toContain('engine drops');
+    expect(reason).not.toContain('could not be seen at all');
+  });
+});
+
+describe('family 3 — the two sources are a UNION, not a replacement', () => {
+  let rt: Runtime;
+  beforeEach(async () => { rt = await buildRuntime(); });
+
+  it('one datasource named by BOTH sources contributes ONE reference, not two', async () => {
+    const { ref, handleId } = await bindCredential(rt, 'shared');
+    rt.realEngine.registerDatasourceDef({ name: 'shared', external: { credentialsRef: ref } });
+
+    const union = await collect(rt, [{ name: 'shared', external: { credentialsRef: ref } }]);
+    assertSecretReferenceUnionComplete(union);
+    expect(union.references.filter((r) => r.handleId === handleId)).toHaveLength(1);
+  });
+
+  it('two sources DISAGREEING keeps both handles — dropping either would under-report', async () => {
+    const fromEngine = await bindCredential(rt, 'drifted');
+    const fromHost = await bindCredential(rt, 'drifted');
+    expect(fromEngine.handleId).not.toBe(fromHost.handleId);
+    rt.realEngine.registerDatasourceDef({ name: 'drifted', external: { credentialsRef: fromEngine.ref } });
+
+    const union = await collect(rt, [{ name: 'drifted', external: { credentialsRef: fromHost.ref } }]);
+    assertSecretReferenceUnionComplete(union);
+    expect(union.handleIds.has(fromEngine.handleId)).toBe(true);
+    expect(union.handleIds.has(fromHost.handleId)).toBe(true);
+  });
+
+  it('a handle held ONLY in sys_metadata still arrives — the persisted source is untouched', async () => {
+    const union = await collect(rt, []);
+    assertSecretReferenceUnionComplete(union);
+    expect(union.handleIds.has(rt.datasourceHandleId)).toBe(true);
+  });
+});
+
+/**
+ * Type-level pin, evaluated by `tsc --noEmit`: `packages/cli/tsconfig.json`
+ * includes `src` with NO test exclusion (unlike `tsconfig.build.json`), so a
+ * type assertion written here IS in the typecheck program — verified with
+ * `tsc --listFiles`.
+ *
+ * What it pins: the REAL engine's answer fits the port's declared return type.
+ * Taken off the METHOD so re-narrowing `ObjectQL.listDatasourceDefs` moves the
+ * pin even if the named types survive.
+ */
+type EngineDefsPort = NonNullable<SecretReferenceEngineLike['listDatasourceDefs']>;
+export function __pinRealEngineSatisfiesTheDatasourcePort(
+  engine: ObjectQL,
+): ReturnType<EngineDefsPort> {
+  return engine.listDatasourceDefs();
+}
 
 describe('completeness is the contract', () => {
   let rt: Runtime;

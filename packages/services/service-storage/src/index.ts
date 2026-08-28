@@ -8,9 +8,18 @@ export type { LocalStorageAdapterOptions } from './local-storage-adapter.js';
 export { S3StorageAdapter } from './s3-storage-adapter.js';
 export type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 export { StorageMetadataStore, StorageMetadataStoreError } from './metadata-store.js';
-export type { FileRecord, UploadSessionRecord, StorageMetadataOperation } from './metadata-store.js';
+export type {
+  FileRecord,
+  UploadSessionRecord,
+  StorageMetadataOperation,
+  StorageWriteContext,
+} from './metadata-store.js';
 export { registerStorageRoutes } from './storage-routes.js';
-export type { StorageRoutesOptions, FileReadVerdict } from './storage-routes.js';
+export type {
+  StorageRoutesOptions,
+  FileReadVerdict,
+  StorageUploadSession,
+} from './storage-routes.js';
 export { SystemFile, SystemUploadSession } from './objects/index.js';
 export {
   installAttachmentLifecycleHooks,

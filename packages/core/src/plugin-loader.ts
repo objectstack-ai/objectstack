@@ -2,8 +2,6 @@
 
 import { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
-import { z } from 'zod';
-import { PluginConfigValidator } from './security/plugin-config-validator.js';
 import { parseSignature } from './security/plugin-artifact-signature.js';
 
 /**
@@ -41,10 +39,15 @@ export interface ServiceRegistration {
 export interface PluginMetadata extends Plugin {
     /** Semantic version (e.g., "1.0.0") */
     version: string;
-    
-    /** Configuration schema for validation */
-    configSchema?: z.ZodSchema;
-    
+
+    // `configSchema` was retired on 2026-08-27 (ADR-0049 enforce-or-remove;
+    // recorded in ADR-0025 §3.7): the loader's only call passed no config and
+    // no caller could — plugin factories close over their config, so the
+    // kernel never receives it. Plugins parse their own config at their own
+    // seam instead (the `packages/rest` pattern). Re-declaring a kernel-owned
+    // config-validation surface is a fresh decision for the day the ADR-0025
+    // distribution layer lands.
+
     /** Plugin signature for security verification */
     signature?: string;
     
@@ -53,9 +56,12 @@ export interface PluginMetadata extends Plugin {
     
     /** Startup timeout in milliseconds (default: 30000) */
     startupTimeout?: number;
-    
-    /** Whether plugin supports hot reload */
-    hotReloadable?: boolean;
+
+    // `hotReloadable` was retired on 2026-08-27 (#12587, same ADR-0049 batch):
+    // declared and documented with zero reads — `HotReloadManager.reloadPlugin`
+    // gates only on its own registered reload configs, so `hotReloadable:
+    // false` was hot-reloaded identically to `true`. Reload participation is
+    // governed solely by `HotReloadManager.registerReloadConfig`.
 }
 
 /**
@@ -106,7 +112,6 @@ export interface VersionCompatibility {
 export class PluginLoader {
     private logger: Logger;
     private context?: PluginContext;
-    private configValidator: PluginConfigValidator;
     private loadedPlugins: Map<string, PluginMetadata> = new Map();
     private serviceFactories: Map<string, ServiceRegistration> = new Map();
     private serviceInstances: Map<string, any> = new Map();
@@ -115,7 +120,6 @@ export class PluginLoader {
 
     constructor(logger: Logger) {
         this.logger = logger;
-        this.configValidator = new PluginConfigValidator(logger);
     }
 
     /**
@@ -151,11 +155,6 @@ export class PluginLoader {
             const versionCheck = this.checkVersionCompatibility(metadata);
             if (!versionCheck.compatible) {
                 throw new Error(`Version incompatible: ${versionCheck.message}`);
-            }
-            
-            // Validate configuration if schema is provided
-            if (metadata.configSchema) {
-                this.validatePluginConfig(metadata);
             }
             
             // Verify signature if provided
@@ -401,22 +400,6 @@ export class PluginLoader {
     private isValidSemanticVersion(version: string): boolean {
         const semverRegex = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/;
         return semverRegex.test(version);
-    }
-
-    private validatePluginConfig(plugin: PluginMetadata, config?: any): void {
-        if (!plugin.configSchema) {
-            return;
-        }
-
-        if (config === undefined) {
-             // In loadPlugin, we often don't have the config yet.
-             // We skip validation here or valid against empty object if schema allows?
-             // For now, let's keep the logging behavior but note it's delegating
-             this.logger.debug(`Plugin ${plugin.name} has configuration schema (config validation postponed)`);
-             return;
-        }
-
-        this.configValidator.validatePluginConfig(plugin, config);
     }
 
     private async verifyPluginSignature(plugin: PluginMetadata): Promise<void> {
