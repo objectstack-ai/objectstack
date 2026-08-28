@@ -278,9 +278,11 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:898` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `190fbd01d`. Re-derived at that pin
-// 2026-08-22: `containers.tsx` changed across the move from `9a3daf8d3`, and
-// both anchors above landed on the same lines when re-counted.
+// builds against — `.objectui-sha` = `9602dc820`. Re-derived at that pin
+// 2026-08-28: `containers.tsx` is byte-identical to the one at `190fbd01d`, so
+// both anchors above are unmoved — and both were re-READ at the new pin rather
+// than inferred from that identity, because identity preserves a wrong anchor
+// as faithfully as a right one (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -363,9 +365,10 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:721` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `190fbd01d`. Re-derived
-// at that pin 2026-08-22: `containers.tsx` changed across the move from
-// `9a3daf8d3`, and both anchors above landed on the same lines when re-counted.
+// the pin this repo builds against — `.objectui-sha` = `9602dc820`. Re-derived
+// at that pin 2026-08-28: `containers.tsx` is byte-identical to the one at
+// `190fbd01d`, so both anchors above are unmoved — and both were re-READ at the
+// new pin rather than inferred from that identity (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it

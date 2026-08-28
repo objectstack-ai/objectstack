@@ -639,9 +639,10 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:662-668` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:662-668` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
@@ -1646,9 +1647,10 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:851-857` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:851-857` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
@@ -2390,11 +2392,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 — all
-   * four files in the chain below, plus `lazy-icon.tsx`, are byte-identical to
-   * the ones at `9a3daf8d3`, so every anchor is unmoved), and the chain runs
+   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — of the
+   * files in the chain below, `index.tsx` DID change across the move off
+   * `190fbd01d` and its anchor moved `161` → `204`, while `ObjectMetricWidget
+   * .tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are
+   * byte-identical to the ones at `190fbd01d`; every anchor below was re-READ
+   * at the new pin rather than inferred from that identity), and the chain runs
    * three files:
-   * `plugin-dashboard/src/index.tsx:161` publishes it as a designer input
+   * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
    * `MetricWidget`; `MetricWidget.tsx:312-321` resolves it via
