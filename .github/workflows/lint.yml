@@ -529,6 +529,25 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # Every ROOT_DIR_WATCH_HINTS declaration stays READABLE BY A TEXT SCANNER
+      # (#12762). The step above proves the extractor still works; this one
+      # proves it still has something to extract. `extractWatchHints` reads
+      # source text, so a declaration rewritten from a literal into a mapped
+      # expression over the gate's population constant contributes NO hint at
+      # all while its runtime value is unchanged — every local assertion about
+      # that value stays green, and the gate silently leaves every dispatch
+      # brief and scores a quiet green for every card in the tree it walks.
+      # Measured on this tree: the two ledger self-tests above do NOT catch it
+      # (a computed declaration with the literal kept in a neighbouring comment
+      # ran all three of them green), and only one of the fifteen declarations
+      # carried an own-source pin. The search is scoped to the declaration
+      # STATEMENT: a whole-file search finds the gate's own hint spelled again
+      # in a runtime assertion or a comment and stays green on the computed
+      # form, which is exactly how the two earlier per-file pins failed.
+      # Repo-wide sweep of authored JS/TS, no spawns; ~0.5s.
+      - name: ROOT_DIR_WATCH_HINTS declarations are literals
+        run: pnpm check:watch-hint-literal
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
