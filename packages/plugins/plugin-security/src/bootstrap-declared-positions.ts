@@ -26,7 +26,13 @@
  */
 
 import { buildExistingByName } from './seed-name-lookup.js';
-import { seedCtx, warnOrganizationLessRows } from './per-organization-catalog.js';
+import {
+  createSeedWriteRefusals,
+  seedCtx,
+  warnOrganizationLessRows,
+  warnSeedWriteRefusals,
+  type SeedWriteRefusals,
+} from './per-organization-catalog.js';
 
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -34,11 +40,25 @@ function genId(prefix: string): string {
   return `${prefix}_${ts}${rand}`;
 }
 
-async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
+// ⛔ The `catch` RECORDS before it answers. Answering `null`/`false` alone is
+// what made a refused INSERT indistinguishable from "nothing to do": `seeded`
+// never increments, the pass returns normally, and the boot logs a successful
+// seed of zero rows. The refusal log is what carries the signal past this
+// frame — see `warnSeedWriteRefusals`. Still no rethrow: the pass reports and
+// continues, it does not decide whether the deployment boots.
+async function tryInsert(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<any | null> {
+  try {
+    return await ql.insert(object, data, { context: seedCtx(organizationId) });
+  } catch (e) { refusals?.record(object, e); return null; }
 }
-async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
-  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
+async function tryUpdate(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<boolean> {
+  try {
+    await ql.update(object, data, { context: seedCtx(organizationId) }); return true;
+  } catch (e) { refusals?.record(object, e); return false; }
 }
 
 interface SeedOptions {
@@ -124,6 +144,9 @@ export async function bootstrapDeclaredPositions(
   let updated = 0;
   let unchanged = 0;
   let unreadable = 0;
+  // One log per pass, not per refused row: a legacy platform-wide unique index
+  // refuses EVERY declared position, and a line each would bury the remedy.
+  const refusals = createSeedWriteRefusals();
   for (const r of positions) {
     if (!r?.name) continue;
     const fields = positionRowFields(r);
@@ -152,14 +175,14 @@ export async function bootstrapDeclaredPositions(
       // re-seed (#2909 T2), so they can neither cause nor suppress one.
       if (!positionRecordDiffers(existing, fields)) {
         unchanged += 1;
-      } else if (await tryUpdate(ql, 'sys_position', { id: existing.id, ...fields }, organizationId)) {
+      } else if (await tryUpdate(ql, 'sys_position', { id: existing.id, ...fields }, organizationId, refusals)) {
         updated += 1;
       }
     } else {
       const row = {
         id: genId('position'), name: r.name, ...fields, active: true, is_default: false,
       };
-      const created = await tryInsert(ql, 'sys_position', row, organizationId);
+      const created = await tryInsert(ql, 'sys_position', row, organizationId, refusals);
       if (created) {
         seeded += 1;
         // The batched oracle is a snapshot taken before the loop; a name
@@ -174,6 +197,9 @@ export async function bootstrapDeclaredPositions(
     // row any more, so every leftover here really is pre-fix residue (#11532).
     warnOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
   }
+  // Before the counts are reported, so an operator reads WHY the count is zero
+  // in the same place they read the zero.
+  warnSeedWriteRefusals(options.logger, refusals, organizationId);
   if (unreadable > 0) {
     // Said once, with the count — see the sibling warn in
     // `bootstrap-declared-permissions.ts`.
