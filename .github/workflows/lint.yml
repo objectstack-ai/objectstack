@@ -411,6 +411,32 @@ jobs:
           node scripts/check-undeclared-dep-imports.mjs --self-test
           node scripts/check-undeclared-dep-imports.mjs
 
+      # A text-family column a DECLARED INDEX keys on must declare a `maxLength`
+      # (#12147, route A of #11374). Without one `driver-sql` emits it TEXT, MySQL
+      # refuses `ALTER TABLE ... ADD INDEX` with ER_BLOB_KEY_WITHOUT_LENGTH, and the
+      # object lands REGISTERED-BUT-BROKEN with its declared index silently absent
+      # (measured live on MySQL 8.0.46, #12058: 12 of 44 platform objects, sys_session
+      # among them). Enforcement used to be per-package pins, and each one was widened
+      # by a column that had escaped the previous scope -- objects keep moving across
+      # package boundaries under ADR-0029 K2, so a boundary-scoped pin re-opens the
+      # hole every time one moves. A central importing pin is NOT available: measured
+      # on PR #12143, it would invert the dependency graph. So this is a class-level
+      # source scan over every `*.object.ts`.
+      # Node builtins plus the shared comment mask only -- no node_modules, so a
+      # reviewer can run it in place. Its `--self-test` runs FIRST, and that leg is
+      # the load-bearing one: the production run over a fixed tree is green by
+      # construction, so it cannot tell a working matcher from a dead one. The other
+      # half is the FLOORS -- a sweep that finds nothing because it swept nothing
+      # reports exactly what a clean tree reports, so an empty population is `exit 2`
+      # rather than a pass. Unclassifiable shapes refuse for the same reason.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      # Scans 113 *.object.ts files, no spawns; ~0.3s.
+      - name: Keyed text-family columns declare their bound (#12147)
+        run: |
+          node scripts/check-keyed-text-bounds.mjs --self-test
+          node scripts/check-keyed-text-bounds.mjs
+
       # The bash-3.2 floor, over every shell file the repo ships (#12221).
       # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
       # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
