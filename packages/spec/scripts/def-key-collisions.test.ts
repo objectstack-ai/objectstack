@@ -323,8 +323,11 @@ describe('build-schemas.ts refuses a second write of one def key (#5832)', () =>
       expect(res.status).toBe(1);
       expect(output).toContain('JSON Schema def key(s) are claimed by two or more different schemas');
       expect(output).toContain('json-schema/shared/HttpMethod.json  <-  HttpMethod, HttpMethodSchema');
-      // Exactly one collision: the fourteen `export const X = XSchema` self-aliases
-      // this package really does carry must stay green, or the guard is unusable.
+      // Exactly one collision: the self-aliases this package really does carry —
+      // the `Object.assign(XSchema, { … })` exports under `api/` and `system/` —
+      // must all stay green, or the guard is unusable. Their number is deliberately
+      // not pinned here: it moves, and a count asserted in a comment only drifts
+      // (#12608). The generator reports the live population every run (#12588).
       expect(output).toContain('1 JSON Schema def key(s) are claimed');
       // It stops BEFORE the ratchets, which would otherwise adjudicate a build
       // whose output already depends on export iteration order. The name here

@@ -393,7 +393,7 @@ formViews: {
 | `columns` | `1-4` | Grid column count |
 | `collapsible` | `boolean` | Can section be collapsed |
 | `collapsed` | `boolean` | Initially collapsed |
-| `visibleWhen` | `string` | CEL predicate — section shown only when TRUE |
+| `visibleWhen` | `string` | CEL predicate — section shown only when TRUE. Same scope boundary as field-level predicates: no `features.*` (refused at parse — see below) |
 | `fields` | `(string \| FormField)[]` | Fields in the section |
 
 ### Form Field Configuration
@@ -428,7 +428,19 @@ fields: [
 | `colSpan` | `1-4` | Legacy absolute column span — prefer `span` |
 | `widget` | `string` | Custom widget/component name |
 | `dependsOn` | `string` | Parent field for cascading |
-| `visibleWhen` | `string` | Visibility predicate (CEL); runtime form fields bind `record` (+ `previous`, `parent`) and, since objectui#6010, `current_user` — the identity scope page components and per-option predicates already bound (ADR-0089 D1). Two surfaces still evaluate it unbound, where the predicate faults open: the console's standalone form routes `/forms/:name` and `/f/:slug` (objectui#6110), and section-level predicates (objectui#6111). (was `visibleOn`, ADR-0089) |
+| `visibleWhen` | `string` | Visibility predicate (CEL); runtime form fields bind `record` (+ `previous`, `parent`) and, since objectui#6010, `current_user` — the identity scope page components and per-option predicates already bound (ADR-0089 D1). Two surfaces still evaluate it unbound, where the predicate faults open: the console's standalone form routes `/forms/:name` and `/f/:slug` (objectui#6110), and section-level predicates (objectui#6111). No `features.*` on any form-view predicate — refused at parse, see the boundary note below. (was `visibleOn`, ADR-0089) |
+
+<Callout type="warn">
+**Form-view predicates may not name the `features.*` scope root** (ruled 2026-08-27, objectui#6262).
+A form view also renders on routes with no app context — the console's standalone `/forms/:name`
+and the public `/f/:slug` — where `features` is unbound: the predicate faults and `visibleWhen`
+fails **open**, so the field or section a feature flag was meant to hide is shown to everyone.
+The spec therefore refuses `features.*` loudly at parse on **every** form-view predicate —
+section-level, field-level at any nesting depth, and per-option `visibleWhen` authored inline in
+the form view. Gate by record state instead (`record.*`), or put the feature-gated surface on an
+app page or action, where `features.*` stays bound and stays legal. A record *field* named
+`features` is unaffected — `record.features.x` is member access, not the scope root.
+</Callout>
 
 ## Complete Example
 

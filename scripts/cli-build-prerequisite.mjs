@@ -57,8 +57,56 @@ export const atRepoRoot = (rel) => join(REPO_ROOT, rel);
 export const CLI = 'packages/cli/bin/run.js';
 /** The package whose `oclif` block declares where the built commands land. */
 export const CLI_PKG = 'packages/cli';
+/**
+ * That manifest as ONE whole path, rather than joined from `CLI_PKG` at the read.
+ *
+ * The value is identical either way; what changes is what a CALLER inherits.
+ * scripts/pm/dispatch-gates.mjs follows a gate's first-party imports and reads
+ * this module's module-body literals as population for every gate that imports
+ * it (#11190) — and a join base is indistinguishable, from out there, from a
+ * whole-package subtree claim. The manifest is the one file this module opens,
+ * so this module spells it, which is what lets the `inherited-population`
+ * marker below name it: that declaration may only NARROW to paths its module
+ * really spells, never invent one.
+ */
+const CLI_PKG_JSON = 'packages/cli/package.json';
 /** The one command that satisfies the prerequisite, for every gate that reports it. */
 export const CLI_BUILD_FIX = 'pnpm exec turbo run build --filter=@objectstack/cli';
+
+/**
+ * The CLI's COMPILED surface — the tree `tsc -p packages/cli/tsconfig.build.json`
+ * turns into the `dist/commands` oclif resolves a spawned command out of.
+ *
+ * A bare coupling constant: nothing here reads it, and it is declared for the
+ * reason check-i18n-bundles.mjs declares its two registry modules (#9144). It
+ * is the only tree under `packages/cli` whose edit can change what a consumer's
+ * spawn ANSWERS, so a declaration naming the stub and the manifest alone would
+ * leave every consumer blind to exactly the edit that moves its verdict — the
+ * shape #11190 exists to prevent, arriving by the other door. Deliberately the
+ * subtree and not a file list: the consumers spawn whole commands (`os i18n
+ * extract`, `os lint`), not one module, and a file list here would be the
+ * hand-written path map this derivation refuses.
+ */
+const CLI_SRC = 'packages/cli/src';
+
+// What a consumer of this module READS under `packages/cli`, and therefore all
+// of it a consumer inherits (#12500). `CLI_PKG` above is a join base and the
+// vocabulary of every message here, never a tree anything opens — but inherited
+// whole it named all 322 tracked files of the package for `check:i18n` and
+// `check:i18n-coverage`, 210 of them (the 100-file test suite, the package
+// docs, the vitest config, the sibling app-nav gate script) unable to change a
+// byte of the `dist/` those two gates spawn. The gates' own refusal text is
+// exemplary, so a card that skipped the build read NOT MEASURED rather than
+// green: the price was never a false verdict, it was a full CLI closure build
+// bought per card to measure two gates the diff provably could not move.
+//
+// Build CONFIGURATION is deliberately NOT declared. A tsconfig-only edit that
+// changes the shipped command surface loses one lead — one card, one CI round,
+// the direction this derivation errs in everywhere — against the ~10 minutes
+// each false lead charged. `CLI_SRC` is a prefix, so the ~101 `*.test.ts` files
+// interleaved under `src/` stay named; `hintCovers` matches subtrees, and a
+// declaration cannot express "the compiled subset of this tree".
+// dispatch-gates: inherited-population packages/cli/bin/run.js packages/cli/package.json packages/cli/src -- a consumer spawns the stub, parses the manifest for oclif.commands.target, and resolves its command out of the dist/ compiled from src/; `packages/cli` itself is this module's join base and message vocabulary, not a tree any consumer opens (#12500)
 
 /**
  * The npm scope every workspace package publishes under (`create-objectstack` is
@@ -245,9 +293,9 @@ export function resolveCliCommandFile(commandId) {
     // The message stays repo-relative (it is the path a reader would `cat` from
     // the root); only the READ is anchored. node's own ENOENT text carries the
     // absolute path it tried, which is evidence rather than vocabulary.
-    pkgJson = JSON.parse(readFileSync(atRepoRoot(join(CLI_PKG, 'package.json')), 'utf8'));
+    pkgJson = JSON.parse(readFileSync(atRepoRoot(CLI_PKG_JSON), 'utf8'));
   } catch (e) {
-    return { unknown: `could not read ${CLI_PKG}/package.json (${e.message})` };
+    return { unknown: `could not read ${CLI_PKG_JSON} (${e.message})` };
   }
   return oclifCommandFileFor(pkgJson, commandId);
 }

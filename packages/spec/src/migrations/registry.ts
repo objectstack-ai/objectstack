@@ -7105,6 +7105,42 @@ const step18: MigrationStep = {
         + 'key or re-declares the integer they meant.',
     },
     {
+      id: 'ui-form-view-predicate-features-root-refused',
+      surface: 'form-view predicates naming the `features.*` scope root — section-level '
+        + '`visibleWhen`, field-level `visibleWhen` at any nesting depth, and per-option '
+        + '`visibleWhen` authored inline in the form view (`FormViewSchema`, including the '
+        + 'flattened runtime form overlay and the deprecated `visibleOn` alias spellings)',
+      replacement: 'gate by record state (`record.*` in runtime forms, `data.*` in metadata '
+        + 'forms), or move the feature-gated surface onto an app page component or action — '
+        + 'the predicate surfaces where `features.*` stays bound and stays legal. No rewrite '
+        + 'is mechanical: a feature-flag gate and a record-state gate answer different '
+        + 'questions, so the author chooses which surface the gate belongs on.',
+      reason:
+        'objectstack#12665, ruled 2026-08-27 on objectui#6262 (option B — vocabulary '
+        + 'narrowing): one authored form view is served on two kinds of route, and a '
+        + '`features.*` predicate got two verdicts from the same text. Inside an app '
+        + '(`/apps/:appName/*`) the root resolves against the real auth-config flags; on the '
+        + 'standalone form routes (`/forms/:name`, public `/f/:slug`) no app context exists, '
+        + 'the root is UNBOUND, the predicate faults — and `visibleWhen`\'s fault fallback is '
+        + 'visible, so the field or section a feature flag was meant to hide is shown to '
+        + 'everyone (fail-open, on an access-shaped key). Measured before ruling and '
+        + 're-verified at dispatch (2026-08-28): ZERO authored `features.*` form-view '
+        + 'predicates exist across objectui apps/examples/content, against an 18-hit positive '
+        + 'control on authored `visibleWhen` predicates — so the vocabulary is narrowed at '
+        + 'the authoring door instead of building an auth-config fetch plus pre-load '
+        + 'semantics on a route with zero consumers. App-context predicate surfaces '
+        + '(page components, actions, bulk-action eligibility) keep `features.*` unchanged.',
+      acceptanceCriteria:
+        'A form view carrying a predicate that names `features` in root position (dotted '
+        + 'member access, index access, or the bare root — outside string literals) is '
+        + 'refused at parse with a prescriptive issue naming the root, the surface, the '
+        + 'fail-open reason and the ruling. Predicates on permitted roots parse unchanged, '
+        + 'including member access on a record field that happens to be named `features` '
+        + '(`record.features.x`). Stored form views are unaffected until their next '
+        + 'authoring-path save (zero such documents were measured to exist); on refusal the '
+        + 'author re-gates by record state or moves the gate to an app surface.',
+    },
+    {
       id: 'ui-mcp-connect-agent-unknown-keys-refused',
       surface: 'page `mcp:connect-agent` component — `properties` (any key at all: the widget '
         + 'declares no props)',
@@ -7988,10 +8024,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -8002,10 +8041,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
     // returns with the M2 lifecycle initiative). `EffectiveObjectPermissionSchema`
-    // is `ObjectPermissionSchema.extend({ apiOperations }).strip()` — the clone
+    // extends the same closed base shape (`.extend({ apiOperations }).strip()`,
+    // both faces behind the #12840 residue stage since 2026-08-28) — the clone
     // shares the authoring shape's per-property schema instances, so the
     // `retiredKey()` tombstone rides into the effective surface and this def's
-    // walked shape carries the same `[RETIRED]` row. Registered so the aging clock
+    // walked shape carries the same `[RETIRED]` row, while the retired default
+    // (`false`) an older published-toolchain server still emits on the wire is
+    // accepted as inert residue and stripped. Registered so the aging clock
     // (#5898) has an exact-key entry for BOTH rows the tombstone produces. The
     // effective surface is server-resolved, never authored, so no D2 conversion
     // clause targets it — the authoring-side strip in
@@ -8036,9 +8078,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowPurge',
     // #12497 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-26, decision-
     // inbox batch 5, accepting #1883's recommendation B). `allowRestore` claimed to
@@ -8063,9 +8109,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
     // `[RETIRED]`, and authoring it is a tsc error and a parse error carrying the
-    // prescription. Sources are rewritten by the D2 conversion
-    // `permission-allow-restore-purge-removed`, which strips the key from every
-    // object grant in `permissions[].objects`.
+    // prescription — with ONE ruled exception (#12840, maintainer 2026-08-28):
+    // the key's own retired default (`false`), which the published 17.x toolchain
+    // materialized into every built artifact's entries, parses as inert residue
+    // and is stripped by the `acceptRetiredDefaultResidue` stage ahead of the
+    // shape; every other value keeps this refusal. Sources are rewritten by the
+    // D2 conversion `permission-allow-restore-purge-removed`, which strips the
+    // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its

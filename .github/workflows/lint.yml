@@ -529,6 +529,25 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # Every ROOT_DIR_WATCH_HINTS declaration stays READABLE BY A TEXT SCANNER
+      # (#12762). The step above proves the extractor still works; this one
+      # proves it still has something to extract. `extractWatchHints` reads
+      # source text, so a declaration rewritten from a literal into a mapped
+      # expression over the gate's population constant contributes NO hint at
+      # all while its runtime value is unchanged — every local assertion about
+      # that value stays green, and the gate silently leaves every dispatch
+      # brief and scores a quiet green for every card in the tree it walks.
+      # Measured on this tree: the two ledger self-tests above do NOT catch it
+      # (a computed declaration with the literal kept in a neighbouring comment
+      # ran all three of them green), and only one of the fifteen declarations
+      # carried an own-source pin. The search is scoped to the declaration
+      # STATEMENT: a whole-file search finds the gate's own hint spelled again
+      # in a runtime assertion or a comment and stays green on the computed
+      # form, which is exactly how the two earlier per-file pins failed.
+      # Repo-wide sweep of authored JS/TS, no spawns; ~0.5s.
+      - name: ROOT_DIR_WATCH_HINTS declarations are literals
+        run: pnpm check:watch-hint-literal
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
@@ -3258,6 +3277,31 @@ jobs:
       # never called a stall. ~50s, no build, no network.
       - name: Stall-guard self-test
         run: pnpm check:stall-guard
+
+      # The stall guard's CI-wiring invariant (#11916). The step above proves the
+      # guard still WORKS; this one proves it can still be HEARD. The guarantee —
+      # a stalled job says so instead of sitting in_progress until the job
+      # timeout — holds only while the guard's own kill budget lands before the
+      # enclosing job's `timeout-minutes`, and nothing read that relationship:
+      # measured on f907fbe9e, the only file under `scripts/` mentioning
+      # `timeout-minutes` at all is the guard itself, in two header COMMENTS
+      # explaining it.
+      #
+      # Its regression is invisible on green runs, which is what makes it a gate
+      # rather than a review note: the guard is observable only when it fires, so
+      # a budget that can no longer fire in time scores identically to one that
+      # works. Lowering a job's timeout, raising --stall-minutes, or adding a
+      # guarded step to a short job each break it in one line, silently.
+      #
+      # Walks `.github/workflows/**`, resolves each guard-wrapped step's
+      # effective cap (explicit --stall-cap-minutes, else DEFAULT_CAP_MULTIPLE ×
+      # the window — both READ out of the guard, never copied), and reds unless
+      # the cap clears the binding timeout by at least one stall window. It
+      # REFUSES (exit 2) rather than passing when the sweep finds no guarded step
+      # at all: "every guarded step has headroom" is vacuously true of an empty
+      # population. Reads workflow text only; no build, no network, sub-second.
+      - name: Stall-guard budget invariant
+        run: pnpm check:stall-guard-budget
 
       # The dev-preflight gate's self-test — and deliberately only HALF of that
       # gate (#8170, the second and only other member of #8110's split-gate

@@ -11,9 +11,11 @@ export { parseJsx, interpretBrace } from './parse.js';
 export { validateTree } from './validate.js';
 export { generateDts, propsName, generateBlockList } from './codegen.js';
 export type { CodegenOptions } from './codegen.js';
+export { inputTypeArms, canonicalizeInputType, MANIFEST_INPUT_TYPES } from './input-type.js';
 
 import { parseJsx } from './parse.js';
 import { validateTree } from './validate.js';
+import { canonicalizeInputType } from './input-type.js';
 import type { Diagnostic, Manifest, SchemaElement, ValidationResult } from './types.js';
 
 export interface CompileResult {
@@ -60,7 +62,14 @@ export interface RegistryConfigLike {
   category?: string;
   inputs?: Array<{
     name: string;
-    type: string;
+    /**
+     * One coarse kind, or the arms of a union (objectui#3832). Typed loosely
+     * (`string`) on purpose — this interface is the STRUCTURAL boundary that
+     * keeps this package free of a dependency on the registry, so an
+     * off-vocabulary value has to be representable here and is normalized by
+     * `canonicalizeInputType` on the way in.
+     */
+    type: string | string[];
     required?: boolean;
     enum?: Array<string | { value: unknown; label?: string }>;
     binding?: 'object' | 'field';
@@ -68,19 +77,10 @@ export interface RegistryConfigLike {
   }>;
 }
 
-const INPUT_TYPES = new Set([
-  'string',
-  'number',
-  'boolean',
-  'enum',
-  'array',
-  'object',
-  'color',
-  'date',
-  'code',
-  'file',
-  'slot',
-]);
+/* The arm vocabulary and the two projections over it now live in
+ * `input-type.ts` — `manifestFromConfigs` below, `validateTree` and the codegen
+ * all read `ManifestInput.type` and must agree on how, since it holds one arm
+ * or an array of them (objectui#3832). */
 
 export function manifestFromConfigs(
   configs: RegistryConfigLike[],
@@ -96,7 +96,7 @@ export function manifestFromConfigs(
       isContainer: c.isContainer,
       inputs: (c.inputs ?? []).map((i) => ({
         name: i.name,
-        type: (INPUT_TYPES.has(i.type) ? i.type : 'string') as Manifest['components'][string]['inputs'][number]['type'],
+        type: canonicalizeInputType(i.type),
         required: i.required,
         enum: i.enum,
         binding: i.binding,

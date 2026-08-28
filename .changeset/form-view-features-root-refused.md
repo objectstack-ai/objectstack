@@ -1,0 +1,9 @@
+---
+'@objectstack/spec': minor
+---
+
+Form-view predicates loudly reject the `features.*` scope root (objectstack#12665; ruled 2026-08-27 on objectui#6262, option B — vocabulary narrowing). One authored form view is served on two kinds of route, and a `features.*` predicate got two verdicts from the same text: inside an app (`/apps/:appName/*`) the root resolves against the real auth-config flags, while on the standalone form routes (`/forms/:name`, public `/f/:slug`) no app context exists, the root is unbound, the predicate faults — and `visibleWhen`'s fault fallback is visible, so the field or section a feature flag was meant to hide was shown to everyone (fail-open, on an access-shaped key). Measured before ruling and re-verified at dispatch: zero authored `features.*` form-view predicates exist across objectui apps/examples/content (18-hit positive control on authored `visibleWhen` generally), so the vocabulary is narrowed at the authoring door instead of building auth-config parity machinery for zero consumers.
+
+What newly gets rejected: any form-view predicate naming `features` in root position — dotted member access (`features.x`), index access (`features['x']`), or the bare root — outside string literals; on section-level `visibleWhen`, field-level `visibleWhen` at any nesting depth, and per-option `visibleWhen` authored inline in the form view, including the deprecated `visibleOn` alias spellings and the flattened runtime form overlay. The refusal is a prescriptive parse issue naming the root, the surface, the fail-open reason and the ruling. Member access on a record field that happens to be named `features` (`record.features.x`) stays legal, as does every other root; app-context predicate surfaces (page components, actions, bulk-action eligibility) keep `features.*` exactly as before.
+
+<!-- adr-0087: registered ui-form-view-predicate-features-root-refused -->

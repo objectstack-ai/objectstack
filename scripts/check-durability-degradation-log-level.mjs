@@ -915,6 +915,149 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //      writes nothing at all, and the `push` / `++` accumulation shapes #8845
 //      measured, which are unchanged.
 
+// ── Measured and PARKED — the PARAMETERLESS-CATCH criterion (#12753, from #9165)
+//
+// A sixth criterion was proposed and is NOT added here: **"a read seam whose
+// `catch` binds no error parameter must discriminate or propagate."** Its appeal
+// is real and is restated first, because the numbers below are what decline it,
+// not a dislike of the idea: a parameterless `catch {` PROVABLY cannot ask
+// `isMissingTableError`, so the test is purely syntactic; it adds no name to any
+// Map, no script and no CI step; and the cheapest way to satisfy it — bind the
+// parameter and ask the declared predicate — is the correct fix rather than a
+// workaround. That is the rare gate whose cheapest satisfaction is the right
+// behaviour, which is exactly why it was worth measuring instead of assuming.
+//
+// It is PARKED BEHIND #8901, not declined outright, because what the triage
+// found is precisely what #8901 says is missing.
+//
+// ## RE-MEASURED, not carried forward
+//
+// #12753 was filed on a red set of 13 taken at `origin/main` @ c07d6e8b9
+// (2026-08-18). ONE instrument was run over BOTH trees, so the delta below is a
+// census and not a subtraction:
+//
+//   | tree                                   | read seams | parameterless RED |
+//   |----------------------------------------|-----------:|------------------:|
+//   | `origin/main` @ c07d6e8b9 (2026-08-18) |         66 |                13 |
+//   | `origin/main` @ 6f0fec3d0 (2026-08-28) |         65 |                11 |
+//
+// The 66 and the 13 reproduce the filed figures SITE FOR SITE, same files, same
+// lines. That is the calibration: the selector measured here is the criterion as
+// filed, not a near neighbour of it. 2 departures, 0 arrivals, each traced to a
+// landed commit rather than inferred from the count moving:
+//
+//   - `getMetaItems` guarding `mergePackageAwareOverlay` (metadata-protocol
+//     protocol.ts) left the READ POPULATION, not the red set. Its catch is
+//     unchanged and still parameterless, silent and undiscriminated;
+//     `contradictsDriverReadShape` (#11921) correctly stopped counting
+//     `list.find()` on a plain local array as a storage read. ⚠️ Its real risk —
+//     a failed `metadataService.list` served from the registry alone — is
+//     therefore invisible to this rule now, and this criterion would not have
+//     covered it either. A shrinking red set is not the same fact as a
+//     shrinking hazard.
+//   - `probeInstallOrganizations` (objectql engine.ts) was genuinely REPAIRED
+//     (#9261, PR #9817): it binds `error`, asks `isMissingTableError` and
+//     rethrows everything else. A seam leaving this set by being fixed is the
+//     criterion's own thesis working, one seam at a time, without the gate.
+//
+// ## The criterion's two escapes are unexercised in scope — so it is not a
+// ## conditional, it is a ban
+//
+// Measured on the 08-28 tree, every zero beside a non-zero control from the same
+// run, so none of them is a selector that quietly stopped selecting:
+//
+//   | population                         | logs | discriminates | propagates |
+//   |------------------------------------|-----:|--------------:|-----------:|
+//   | 11 parameterless catches           |    0 |             0 |          0 |
+//   | 54 catches that BIND a parameter   |   23 |            19 |          9 |
+//
+// Nothing in the parameterless half discriminates or propagates today, so the
+// criterion does not read as "must do one of two things" — in this population it
+// reads as "a read seam may not have a parameterless catch", and all 11 sites
+// must be edited or baselined on the day it lands.
+//
+// ## THE TRIAGE — the whole decision, and it is not the count
+//
+// All 11 were read at their call sites and graded on one question: does the
+// catch swallow a failure it should discriminate or propagate, or is it correct
+// but undeclared?
+//
+//   | seam                                                  | verdict |
+//   |-------------------------------------------------------|---------|
+//   | metadata history-cleanup.ts ×3 (runCleanup)            | correct-but-undeclared — `errors++` into the returned `{ deleted, errors }`; #8901's already-named cohort |
+//   | metadata-protocol protocol.ts findData                 | correct-but-undeclared — `counted = pageOffset + records.length` is a COMPUTED degradation with its reasoning in-line, already this file's #9165 falsification control |
+//   | metadata-protocol protocol.ts reportUnhydratableOrgScopedRows | correct-but-undeclared — void advisory, "diagnostics never break boot" |
+//   | metadata-protocol seed-loader.ts resolveSoleOrganizationId | ⚠️ GENUINELY WRONG — comment names one benign cause, catch swallows every cause; seeds then land org-less |
+//   | metadata-protocol seed-loader.ts resolveFromDatabase   | correct-but-undeclared — probe-chain `continue`; its expected failure is the driver's `INVALID_FILTER` refusal, NOT a missing table |
+//   | objectql engine.ts referenceExists                     | correct-but-undeclared — declared tri-state `Promise<boolean \| null>`; ALREADY in `durability-read-invention.baseline.json` as `reviewed-legitimate` |
+//   | objectql engine.ts readMigrationFlagVerified           | correct-but-undeclared — returns `{ verified: false, conclusive: false }`; `conclusive` exists so the caller can tell "asked, and no" from "could not ask" |
+//   | objectql engine.ts announceOpenMigrationGates          | correct-but-undeclared — void advisory; and it is the SAME read as the row above, one hop up |
+//   | objectql lifecycle-service.ts loadGovernance           | ⚠️ GENUINELY WRONG — a failed `sys_organization` read silently drops every TENANT retention override, so a deletion policy runs on partial evidence |
+//
+// **9 of 11 are already correct.** That is a WORSE precision than the #8845
+// proposal this file already declined — 15 red with 7 already correct (47%)
+// against 11 red with 9 already correct (82%) — and #12753's own filing named
+// the precision advantage as the thing that was unproven. It is now measured,
+// and it went the other way. Net of the one existing baseline entry
+// (`referenceExists`) the landing cost is still 10 reds against a shrink-only
+// ledger holding one row.
+//
+// ## Why that parks it on #8901 specifically, and is not a taste call
+//
+// Read the nine "correct" mechanisms as a set: an `errors` field in a returned
+// envelope; a `conclusive` flag whose only job is to separate "asked" from
+// "could not ask"; a declared tri-state `boolean | null` with the distinction
+// written into the JSDoc; a documented computed degradation. Every one of them
+// DOES tell the caller — through a channel this rule has no vocabulary to name.
+// That is #8901's sentence exactly ("the read-seam rule has no declared
+// failure-propagation vocabulary, so 'the catch reported the failure' is
+// uncheckable"), reached from a different criterion and a different census.
+// ⛔ Baselining nine correct seams to land this is the "baselined into
+// uselessness" outcome #8901 already priced, in one PR.
+//
+// ## Two counterexamples to "the cheapest satisfaction is the correct fix"
+//
+// The argument is TRUE at most of the 11 and false at three, and the exceptions
+// are the load-bearing part because they are the ones a landing author meets:
+//
+//   - `resolveFromDatabase` has NO declared predicate available. Its expected
+//     benign failure is the driver's `INVALID_FILTER` refusal on a probe column
+//     the object does not declare (see the #9071 note at the seam), and
+//     `READ_FAILURE_DISCRIMINATORS` holds exactly one name, `isMissingTableError`.
+//     Satisfying the criterion there needs a NEW declared discriminator — which
+//     this criterion promised not to add — or a hand-rolled test, which
+//     limitation 3 flags on purpose, or a baseline entry.
+//   - `reportUnhydratableOrgScopedRows` and `announceOpenMigrationGates` are
+//     void ADVISORIES whose stated contract is that they must never fail a boot.
+//     "Propagate" is refused by design, and "discriminate, then rethrow the
+//     rest" IS propagation on the non-benign branch — so the criterion's two
+//     escapes are both the wrong fix, and the right one (say something) is not
+//     what it asks for.
+//
+// ## Two smaller readings, recorded so they are not re-derived
+//
+//   - `readMigrationFlagVerified` and `announceOpenMigrationGates` are ONE read
+//     counted at two nesting levels (callee and caller). Fixing the inner seam
+//     does not clear the outer, so the ledger carries two rows for one hazard.
+//   - The three `history-cleanup` seams deliver `errors` into a returned
+//     envelope, and BOTH production call sites are `void this.runCleanup()` —
+//     so the count is correct by contract and read by nobody in-process. That
+//     is a fact about #8901's cohort, not about this criterion.
+//
+// ## Reproduce it
+//
+// There is deliberately no flag for this: the criterion is not implemented, and
+// a selector shipped for a criterion that is not shipped is a name in a Map that
+// nothing consumes. Re-derive it by adding `catchParam`, `recovers` and the
+// catch's log set to the `seam` object in `analyzeReadSeams` and counting the
+// seams whose catch clause has no `variableDeclaration`. Calibrate first: the
+// unpatched gate must answer 65 read seams on 6f0fec3d0 and 66 on c07d6e8b9
+// before any derived number from it is quoted.
+//
+// ⛔ Do not land the criterion without re-running the triage. The count is not
+// the argument here — 13 → 11 moved the number and moved nothing else, and the
+// verdict rests on what the 11 catches DO, which no count reports.
+
 // ── RECOGNIZER CORRECTION (#11921) — what "66" actually counted ─────────────
 //
 // Every census figure above is quoted against a 66-seam read population. Two of

@@ -8286,17 +8286,30 @@ function selfTest() {
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
-  // goes quiet. Exactly one module in the scripts tree declares one today.
+  // goes quiet. TWO modules in the scripts tree declare one today, and this
+  // case NAMES them rather than counting them — a bare count reddens for a
+  // third module without saying which ones were already priced, and the price
+  // is the whole admission criterion:
+  //
+  //   scripts/pm/dispatch-gates.mjs         2632 pairs — join bases and tier
+  //                                         globs, nothing this tool opens
+  //   scripts/cli-build-prerequisite.mjs    216 pairs — 108 files x 2 gates,
+  //                                         each charging the card that touched
+  //                                         one a full CLI closure build to
+  //                                         measure gates it could not move
+  //                                         (#12500)
+  //
+  // A third entry is not forbidden; it is required to arrive with its own
+  // measured price, which is what re-pointing this case costs an author.
+  const declaringModules = trackedFiles()
+    .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
+    // Read from the MODULE BODY, so the fixture markers above — which live
+    // inside this very self-test — are not counted as live declarations.
+    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))))
+    .sort();
   t(
-    'exactly one module in the scripts tree carries the declaration — this one',
-    (() => {
-      const declaring = trackedFiles()
-        .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
-        // Read from the MODULE BODY, so the fixture markers above — which live
-        // inside this very self-test — are not counted as live declarations.
-        .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))));
-      return declaring.length === 1 && declaring[0] === 'scripts/pm/dispatch-gates.mjs';
-    })(),
+    `exactly the two priced modules in the scripts tree carry the declaration (${declaringModules.join(' · ') || 'none'})`,
+    declaringModules.join(' · ') === 'scripts/cli-build-prerequisite.mjs · scripts/pm/dispatch-gates.mjs',
   );
   // The residue count that carries it refuses a missing or impossible value in
   // the same shape as every other count in that line: a subset that could go
@@ -8383,7 +8396,18 @@ function selfTest() {
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
   const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
-  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel), rel, { tree: liveTree });
+  // A followed module's hints AS A FOLLOWER RECEIVES THEM. `discoverFamilies`
+  // reads `declaredInheritedPopulation` at this seam (`hintsOfModule`), so a
+  // reconstruction that re-scanned the raw literals instead would redden for
+  // every family importing a module that narrows — while the case it feeds
+  // asserts, in its own name, that a shared enumerator CAN carry a population
+  // declaration for its callers. It was raw until #12500 put the second live
+  // declaration in the tree, and the two i18n families are what found it.
+  const liveModuleHints = (rel) => {
+    const source = liveSource(rel);
+    const spelled = extractWatchHints(source, rel, { tree: liveTree });
+    return declaredInheritedPopulation(source, spelled)?.population ?? spelled;
+  };
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
 
   // The recogniser, on fixture source: one line per refusal, so a widening or
@@ -8516,6 +8540,61 @@ function selfTest() {
     t(
       `…and the via column names the module it came from, not the gate (${coveringKey(entry, hint)?.via})`,
       coveringKey(entry, hint)?.via === `gate source via ${mod}`,
+    );
+  }
+
+  // ── A followed module's JOIN BASE is not a population (#12500) ─────────────
+  //
+  // `cli-build-prerequisite.mjs` spells `packages/cli` because it joins paths
+  // from it and writes it into every rerun command its two consumers print.
+  // Inherited whole it reads as a subtree claim, and it handed check:i18n and
+  // check:i18n-coverage all 322 tracked files of that package — 210 of them
+  // (the 100-file test suite, the package docs, the vitest config, the sibling
+  // app-nav gate script) unable to change a byte of the `dist/` those gates
+  // spawn. The gates' refusal text is exemplary, so the cost was never a false
+  // green: it was a full CLI closure build per card, bought to measure two
+  // gates the diff provably could not move. Measured at the narrowing:
+  // 322 -> 214 covered files per gate (108 x 2 = 216 fabricated pairs
+  // withdrawn), and all 112 files the gates really read still named.
+  //
+  // BOTH directions, against real files. A narrowing that also dropped the CLI
+  // source would be the under-naming mirror this card's pair exists to keep
+  // apart — the source compiled into the spawned command must still derive.
+  const CLI_PREREQ = 'scripts/cli-build-prerequisite.mjs';
+  const cliPrereqSource = liveSource(CLI_PREREQ);
+  const cliPrereqSpelled = extractWatchHints(cliPrereqSource, CLI_PREREQ, { tree: liveTree });
+  const cliPrereqPopulation = declaredInheritedPopulation(cliPrereqSource, cliPrereqSpelled)?.population ?? [];
+  t(
+    `the CLI build-prerequisite module declares what its callers inherit (${cliPrereqPopulation.join(' ') || 'nothing'})`,
+    cliPrereqPopulation.length === 3,
+  );
+  t(
+    'and it still SPELLS the whole-package join base — the declaration narrows a live literal, not a deleted one',
+    // The `length > 0` is not decoration: without it a DELETED marker satisfies
+    // this case by the empty set (nothing is inherited, so nothing inherits the
+    // join base) — the shape a pin that only asserts an absence always has.
+    cliPrereqPopulation.length > 0
+      && cliPrereqSpelled.includes('packages/cli')
+      && !cliPrereqPopulation.includes('packages/cli'),
+  );
+  // Specimens, not classes: the extractor module whose edit really does move
+  // the committed bundles, and a test file that compiles into nothing either
+  // gate runs. Both live, so neither direction can pass over an empty set.
+  const CLI_SRC_SPECIMEN = 'packages/cli/src/utils/i18n-extract.ts';
+  const CLI_TEST_SPECIMEN = 'packages/cli/test/authoring-rule-command-parity.test.ts';
+  t(
+    'both CLI specimens are real tracked files, so the two directions below are live',
+    existsSync(join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(join(ROOT, CLI_TEST_SPECIMEN)),
+  );
+  for (const check of ['check:i18n', 'check:i18n-coverage']) {
+    const cliEntry = liveDiscovery.byCheck.get(check);
+    t(
+      `${check} still derives the CLI source compiled into the command it spawns`,
+      Boolean(cliEntry) && coveringKey(cliEntry, CLI_SRC_SPECIMEN)?.key === 'packages/cli/src',
+    );
+    t(
+      `${check} no longer derives a CLI test file, which compiles into nothing it runs`,
+      Boolean(cliEntry) && coveringKey(cliEntry, CLI_TEST_SPECIMEN) === null,
     );
   }
 
