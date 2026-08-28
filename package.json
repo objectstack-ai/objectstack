@@ -137,7 +137,8 @@
     "check:resume-authority-declared": "node scripts/check-resume-authority-declared.mjs --self-test && node scripts/check-resume-authority-declared.mjs",
     "check:spec-parsed-alias": "node scripts/check-spec-parsed-alias.mjs --self-test && node scripts/check-spec-parsed-alias.mjs",
     "check:tenant-chokepoint": "node scripts/check-tenant-chokepoint.mjs --self-test && node scripts/check-tenant-chokepoint.mjs",
-    "check:stall-guard": "node scripts/run-with-stall-guard.mjs --self-test"
+    "check:stall-guard": "node scripts/run-with-stall-guard.mjs --self-test",
+    "check:stall-guard-budget": "node scripts/check-stall-guard-budget.mjs --self-test && node scripts/check-stall-guard-budget.mjs"
   },
   "keywords": [
     "objectstack",
