@@ -5,6 +5,9 @@
 
 feat(client,cli)!: `client.projects.*` becomes `client.environments.*`, and the unwrap keys follow the wire (#12866, ADR-0006 D2)
 
+<!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) The renamed surface is a member of a published runtime TypeScript class and the response-key shapes it declares inline. There is no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation behind either half — measured 2026-08-28: zero `projects` envelope contracts anywhere in `packages/spec/src`, positive control being that `environments` hits do exist there. So `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The channel that reaches every affected consumer is the COMPILER, at the call site, which is strictly more precise than a ledger line; the wire half is carried by the paired control-plane release in the same coordinated window. -->
+
+
 **BREAKING** public-API rename on `@objectstack/client`, and a breaking change to
 the `--format json` payload of the `os environments` command family. It lands
 after the v17.0.0 cut, so the lockstep launch-window convention ships it as
