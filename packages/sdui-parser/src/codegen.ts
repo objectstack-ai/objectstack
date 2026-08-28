@@ -8,7 +8,8 @@
  * fulfills it via the registry at render time.
  */
 
-import type { Manifest, ManifestComponent, ManifestInput } from './types.js';
+import type { Manifest, ManifestComponent, ManifestInput, ManifestInputType } from './types.js';
+import { inputTypeArms } from './input-type.js';
 
 export interface CodegenOptions {
   /** include a self-contained minimal JSX namespace so the d.ts type-checks
@@ -63,21 +64,39 @@ export {};
 `;
 }
 
+/**
+ * A `'slot'` arm names a child position, not a prop value — `SduiBaseProps`
+ * already types `children`, so a slot input contributes no attribute. An input
+ * is therefore emitted when it has at least one NON-slot arm, and typed from
+ * those arms only (objectui#3832): the old test was `i.type !== 'slot'`, which a
+ * union like `['slot', 'string']` would have passed while `tsType` fell through
+ * to the default and typed it `string` anyway.
+ */
 function emitInterface(comp: ManifestComponent): string {
   const lines = comp.inputs
-    .filter((i) => i.type !== 'slot')
+    .filter((i) => valueArms(i).length > 0)
     .map((i) => `  ${propLine(i)}`)
     .join('\n');
   return `export interface ${propsName(comp.type)} extends SduiBaseProps {\n${lines}\n}`;
 }
+
+/** The arms that describe a VALUE (every arm except `'slot'`). */
+const valueArms = (input: ManifestInput): ManifestInputType[] =>
+  inputTypeArms(input.type).filter((arm) => arm !== 'slot');
 
 function propLine(input: ManifestInput): string {
   const opt = input.required ? '' : '?';
   return `${quoteKeyIfNeeded(input.name)}${opt}: ${tsType(input)};`;
 }
 
-function tsType(input: ManifestInput): string {
-  switch (input.type) {
+/**
+ * The TypeScript type for one arm. Kinds that are a string with a narrower
+ * authoring control (`color`, `date`, `code`, `file`) are `string` here, as
+ * before — the JSX surface types the VALUE, and the control kind is the
+ * designer's business.
+ */
+function armTsType(arm: ManifestInputType, input: ManifestInput): string {
+  switch (arm) {
     case 'number':
       return 'number';
     case 'boolean':
@@ -90,14 +109,22 @@ function tsType(input: ManifestInput): string {
       const vals = (input.enum ?? []).map((e) => (typeof e === 'object' ? e.value : e));
       return vals.length ? vals.map((v) => JSON.stringify(v)).join(' | ') : 'string';
     }
-    case 'string':
-    case 'color':
-    case 'date':
-    case 'code':
-    case 'file':
     default:
       return 'string';
   }
+}
+
+/**
+ * A union declaration emits a TypeScript union, so the `.d.ts` an author
+ * type-checks their page against accepts exactly the arms the manifest gate
+ * accepts. Arms that collapse to the same TS type (`string` and `color`, say)
+ * are de-duplicated rather than emitted as `string | string`.
+ */
+function tsType(input: ManifestInput): string {
+  const arms = valueArms(input);
+  if (arms.length === 0) return 'string';
+  const emitted = [...new Set(arms.map((arm) => armTsType(arm, input)))];
+  return emitted.join(' | ');
 }
 
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
