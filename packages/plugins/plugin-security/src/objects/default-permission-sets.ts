@@ -69,7 +69,6 @@ export const BETTER_AUTH_MANAGED_OBJECTS = [
   'sys_verification',
   'sys_jwks',
   'sys_device_code',
-  'sys_scim_provider',
   // Stable @better-auth/scim 1.7.x model set (#3653). The ObjectStack-owned
   // `sys_scim_connection_credential` is deliberately NOT here — it declares
   // `managedBy: 'engine-owned'` (plugin-auth's SCIM connection service is its
