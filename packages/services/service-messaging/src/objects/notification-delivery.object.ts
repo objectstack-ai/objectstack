@@ -40,10 +40,40 @@ export const NotificationDelivery = ObjectSchema.create({
             label: 'Notification Event',
             required: true,
             searchable: true,
+            // [#12978] Referenced-column bound (#11374 route A): FK to
+            // `sys_notification.id`, whose physical column is the id column
+            // driver-sql creates — `table.string('id').primary()`, knex's
+            // varchar(255), spelled `DEFAULT_STRING_VARCHAR_CHARS`. 255 by
+            // transitivity from the id itself, the same sourcing the
+            // plugin-audit record-id pins assert by value.
+            maxLength: 255,
             description: 'FK → sys_notification (L2 event)',
         }),
-        recipient_id: Field.text({ label: 'Recipient User', required: true, searchable: true }),
-        channel: Field.text({ label: 'Channel', required: true }),
+        recipient_id: Field.text({
+            label: 'Recipient User',
+            required: true,
+            searchable: true,
+            // [#12978] Referenced-column bound (#11374 route A): a resolved
+            // recipient is a `sys_user.id` (physical varchar(255), as above)
+            // or an email-shaped value `RecipientResolver.resolveOne()` keeps
+            // verbatim (#9807) — RFC 5321 caps an address at 254 octets and
+            // `sys_user.email` stores one in a string-family varchar(255)
+            // column. 255 admits both producers.
+            maxLength: 255,
+        }),
+        channel: Field.text({
+            label: 'Channel',
+            required: true,
+            // [#12978] Machine channel-id vocabulary (#11374 route A): values
+            // are the `MessagingChannel.id`s the service fans out to —
+            // `registerChannel` registers `inbox` / `email` / `sms` today, and
+            // the spec's `NotificationChannelSchema` widest member is
+            // `webhook` (7 chars). 64 follows the landed machine-vocabulary
+            // precedent (sys_session.revoke_reason, maxLength: 64; adopted by
+            // sys_device_code.status), so a future channel id is never refused
+            // by the column.
+            maxLength: 64,
+        }),
         topic: Field.text({ label: 'Topic', searchable: true }),
 
         // P3b-2 digest: when the recipient's preference batches this channel
@@ -52,6 +82,12 @@ export const NotificationDelivery = ObjectSchema.create({
         // digest pass collapses all same-key rows into ONE rendered message at
         // window time. Null ⇒ an ordinary (immediate / quiet-hours) delivery.
         digest_key: Field.text({ label: 'Digest Key', searchable: true,
+            // [#12978] Derived bound (#11374 route A): the one producer is
+            // `enqueueDeliveries`' `${recipient}|${channel}|${digest.window}`
+            // — recipient ≤ 255 (recipient_id above) + '|' + channel ≤ 64
+            // (channel above) + '|' + window ≤ 10 (`digestDeferral` emits a
+            // local ISO date, YYYY-MM-DD, for both cadences). 255+1+64+1+10.
+            maxLength: 331,
             description: 'recipient|channel|window grouping key for batched (digest) deliveries; null for normal sends.' }),
 
         payload: Field.json({
