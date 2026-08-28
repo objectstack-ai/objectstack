@@ -5,7 +5,7 @@
 
 fix(spec): `StrategyContext.executeAggregate` `aggregations[].method` narrows from `string` to `AggregationFunction` (#12776)
 
-<!-- adr-0087: not-required (runtime-interface-only packages/spec/src/contracts/analytics-service.ts#StrategyContext) the narrowed member is a TS-interface parameter type on the strategy contract; no authorable metadata key, schema, or wire shape changes, so there is nothing for `objectstack migrate meta` to rewrite — the compile error itself is the upgrade channel, and the #11833 runtime refusal already rejected the same values. -->
+<!-- adr-0087: registered strategy-context-aggregation-method-narrowed -->
 
 **BREAKING** accept-set narrowing on a published contract, landing after the
 v17.0.0 cut (the lockstep launch-window convention ships it as `minor`).
