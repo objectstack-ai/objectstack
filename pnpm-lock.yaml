@@ -2329,9 +2329,6 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
-      '@objectstack/driver-turso':
-        specifier: workspace:^
-        version: link:../../drivers/driver-turso
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

@@ -28,13 +28,16 @@ interchangeable:
   and `@objectstack/driver-memory` as **dependencies**. Both are loaded through
   an *unguarded* `await import(...)` on the postgres, mysql, sqlite and memory
   arms, so a consumer reaching one of those paths needed a package it was never
-  told to install. `@objectstack/driver-sqlite-wasm`, `@objectstack/driver-mongodb`
-  and `@objectstack/driver-turso` become **optional `peerDependencies`** instead:
-  each is loaded inside a `try`/`catch` that raises a named missing-package
-  error carrying the install command, and each rides as an optional install
-  (turso drags `@libsql/client`'s native bindings). Optional peers declare the
-  relationship without installing it — the shape `@objectstack/cli` already uses
-  for the same driver.
+  told to install, and would have met `ERR_MODULE_NOT_FOUND` rather than a
+  diagnosis. The three *guarded* driver arms — `@objectstack/driver-sqlite-wasm`,
+  `@objectstack/driver-mongodb`, `@objectstack/driver-turso` — are deliberately
+  left undeclared: each load sits in a `try`/`catch` that answers an absent
+  package with the fault, the consequence and the install command, and each
+  rides as an optional install. Declaring them would install them (turso drags
+  `@libsql/client`'s native bindings) and, measured on this branch, takes a live
+  assertion out of the tree: `default-datasource-driver-factory.test.ts` reaches
+  the missing-package arm with no stub precisely because the package does not
+  resolve from here.
 * **`@objectstack/metadata-core`** now owns the ADR-0029 D9.6 provenance pair,
   `isCodeArtifactBody` and `isTenantAuthored`, sunk out of
   `@objectstack/objectql`'s registry by the same criterion as the write-verb
