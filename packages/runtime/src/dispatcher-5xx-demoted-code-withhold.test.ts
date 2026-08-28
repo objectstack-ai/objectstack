@@ -46,7 +46,7 @@
  * drift, and names what will move.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { resolveThrownHttpError, demotedDeclaredCode, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { HttpDispatcher } from './http-dispatcher.js';
