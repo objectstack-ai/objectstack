@@ -54,7 +54,7 @@ const result = AIChatWindowProps.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Button display label |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional (default: `"primary"`) | Button visual variant |
 | **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Button size |
-| **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
+| **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
 | **iconPosition** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Icon position relative to label |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the button |
 | **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
