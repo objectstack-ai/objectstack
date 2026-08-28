@@ -6541,6 +6541,55 @@ const step18: MigrationStep = {
         + 'rather than saved with the key silently dropped.',
     },
     {
+      id: 'package-rollback-response-retired',
+      surface:
+        'api.packageRollbackResponse (`PackageRollbackResponseSchema` in '
+        + 'api/package-api.zod.ts — 1 def, 3 exported names: '
+        + '`PackageRollbackResponseSchema`, `PackageRollbackResponse`, '
+        + '`PackageRollbackResponseParsed` — plus the `PackageApiContracts.'
+        + 'rollbackPackage` contract-map entry that bound it to '
+        + '`POST /api/v1/packages/:packageId/rollback`)',
+      replacement:
+        '`RollbackToPackageCommitResponseSchema` (api/package-lifecycle.zod.ts) — '
+        + 'the transcription of what the live route actually answers: the '
+        + 'dispatcher routes `POST /packages/:id/rollback` (body `{ commitId }`) '
+        + 'to `rollbackToPackageCommit`, the ADR-0067 COMMIT rollback, whose '
+        + 'declared return is `{ success, revertedCommits: string[], '
+        + 'failed: Array<{ commitId, error }> }`. Consumers of the retired type '
+        + 'were reading a VERSION-rollback shape (`restoredVersion`) the route has '
+        + 'never answered; read `revertedCommits`/`failed` instead. '
+        + '`PackageRollbackRequestSchema` stays published (ruled out of the '
+        + 'retirement), bound to no route.',
+      reason:
+        'Maintainer ruling 2026-08-27 on #12038, sub-question 3A (五问一批, '
+        + '「其他接受」). The schema declared a version rollback — '
+        + '`{ success, restoredVersion?, message? }`, matching its file header '
+        + '"Rollback a package" — while the live path it was contract-bound to '
+        + 'serves the ADR-0067 commit rollback: a different operation with a '
+        + 'different result. Binding it in the SDK would compile and be false '
+        + '(#11925 left a compile-time guard against exactly that substitution). '
+        + 'Zero consumers measured across objectstack, objectui and cloud '
+        + '(#12038 survey §5.2, re-verified at the retiring PR\'s base): only its '
+        + 'own unit test and the #11925 negative guard. A published declaration '
+        + 'that outran the implementation is the #3877 hazard realised in the '
+        + 'opposite direction — not "no declaration" but a WRONG one — and it is '
+        + 'retired BEFORE the true schema is authored so no window exists in '
+        + 'which both claims are published.',
+      acceptanceCriteria:
+        'No code imports `PackageRollbackResponseSchema`, '
+        + '`PackageRollbackResponse` or `PackageRollbackResponseParsed` from '
+        + '`@objectstack/spec` or `@objectstack/spec/api` — every one is TS2305 '
+        + 'after upgrade (pinned by runtime namespace probes in '
+        + 'api/package-api.test.ts). `PackageApiContracts` carries no entry whose '
+        + 'path is `/api/v1/packages/:packageId/rollback` (same pin). No metadata '
+        + 'document needs editing: the schema was reachable from no metadata-type '
+        + 'binding, stack collection or /meta door. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED: nothing ever registered routes or generated '
+        + 'SDKs from the contract entry, and the route\'s handler emits the same '
+        + 'bytes before and after — the retirement removes a false claim, not '
+        + 'behaviour.',
+    },
+    {
       id: 'plugin-auto-restart-never-reinitialised',
       surface:
         '`PluginHealthCheck.autoRestart`, `PluginHealthCheck.maxRestartAttempts` '
@@ -8650,6 +8699,28 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #12038 — `api/package-api.zod.ts` `PackageRollbackResponseSchema`, retired
+    // whole together with the `PackageApiContracts.rollbackPackage` entry that
+    // bound it (maintainer ruling 2026-08-27, sub-question 3A). The schema
+    // declared a VERSION rollback — `{ success, restoredVersion?, message? }` —
+    // while the live `POST /api/v1/packages/:packageId/rollback` route posts
+    // `{ commitId }` and the dispatcher serves it with `rollbackToPackageCommit`,
+    // the ADR-0067 COMMIT rollback: a wrong-operation declaration bound to the
+    // exact live path, which a future sweep would have read as authoritative.
+    // Zero consumers measured across objectstack/objectui/cloud (#12038 survey
+    // §5.2): only its own unit test and the #11925 negative guard, both updated
+    // in the retiring PR. No carrier key, no authored document, so no tombstone
+    // and no D2 conversion — this table plus the D3 semantic entry
+    // `package-rollback-response-retired` ARE the declaration (the #8715 route-3
+    // shape). The live route's true contract is
+    // `RollbackToPackageCommitResponseSchema` (`api/package-lifecycle.zod.ts`),
+    // authored in the same PR AFTER this retirement per the ruling's sequencing.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+    'api/PackageRollbackResponse',
     // #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this

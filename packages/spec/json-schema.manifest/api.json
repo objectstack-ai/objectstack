@@ -297,7 +297,6 @@
     "api/PackageInstallResponse",
     "api/PackagePathParams",
     "api/PackageRollbackRequest",
-    "api/PackageRollbackResponse",
     "api/PackageUpgradeRequest",
     "api/PackageUpgradeResponse",
     "api/PingMessage",
