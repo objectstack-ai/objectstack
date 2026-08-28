@@ -3,7 +3,7 @@
 "@objectstack/cli": minor
 ---
 
-feat(client,cli)!: `client.projects.*` becomes `client.environments.*`, and the unwrap keys follow the wire (#12866, ADR-0006 D2)
+feat(client,cli)!: `client.projects.*` becomes `client.environments.*`, the scoped sub-client becomes `ScopedEnvironmentClient`, and the unwrap keys follow the wire (#12866, #12882, ADR-0006 D2)
 
 <!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) The renamed surface is a member of a published runtime TypeScript class and the response-key shapes it declares inline. There is no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation behind either half — measured 2026-08-28: zero `projects` envelope contracts anywhere in `packages/spec/src`, positive control being that `environments` hits do exist there. So `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The channel that reaches every affected consumer is the COMPILER, at the call site, which is strictly more precise than a ledger line; the wire half is carried by the paired control-plane release in the same coordinated window. MEASURED CAVEAT, recorded here rather than worked around: this claim is REFUSED by check-adr-0087-registration at step 4, because `packages/spec/src/api/contract.zod.ts` names `ObjectStackClient` in a JSDoc PROSE comment (line 164, describing what `unwrapResponse` keys on) while neither declaring nor importing it, and the predicate does not strip comments before scanning a metadata surface for references. Steps 1-3 pass. The disposition is left stated rather than swapped for `no-migration-prescription`, which would mechanically pass only through a detector blind spot while contradicting the migration table below it — the exact anti-pattern this gate's own header records as #8299. -->
 
@@ -83,6 +83,42 @@ than carried forward under a new spelling:
 The keys `create` does send beside `environment` (`warnings`, `durationMs`,
 `hostnameAssignment`) are deliberately still undeclared — adding them is new
 published surface and a separate decision.
+
+### The environment-scoped sub-client (#12882)
+
+The fourth `project`-spelled surface on the same class, folded in by the same
+maintainer ruling. ADR-0006's D1 census named three surfaces and missed this one;
+it was an oversight, not a deliberate retention.
+
+| before | after |
+| --- | --- |
+| `client.project(id)` | `client.environment(id)` |
+| `ScopedProjectClient` (exported class) | `ScopedEnvironmentClient` |
+
+Same no-alias rule: neither old spelling survives. `client.project(id)` is not a
+deprecated method, it is gone, and the exported class is gone under its old name
+— a `import { ScopedProjectClient }` fails at the import line, which is the
+loudest and most precise channel this change has.
+
+Nothing about the behaviour moves: the scoped client still prefixes
+`/api/v1/environments/:environmentId/...`, still exposes the same `data` / `meta`
+/ `batch` / `packages` shape, and the thrown guard message becomes
+`[ObjectStack] environment(id): environmentId is required`.
+
+**Deliberately NOT renamed, because each is a different surface needing its own
+decision:** `setProjectId` / `getProjectId` on the client — `getProjectId` is a
+cross-package protocol contract that `packages/runtime` and
+`packages/metadata-protocol` both speak, so it is a coordinated rename, not a
+local one — and the REST API config keys `enableProjectScoping` /
+`projectResolution`, which are live keys read by `packages/cli/src/commands/serve.ts`.
+The docblocks that name them are worded so they stay true.
+
+Note for whoever compiles the release notes: four other pending changesets in
+this release describe methods on `ScopedProjectClient` under its old name
+(`client-unannotated-return-erasure`, `client-saveitem-ifmatch-header`,
+`client-meta-saveitem-query-options`, `client-precise-sdk-return-types`). They
+were accurate when written and are deliberately left alone; this entry is the one
+that renames the class.
 
 ### JSDoc
 

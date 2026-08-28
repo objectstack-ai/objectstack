@@ -32,7 +32,7 @@
  */
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
-import { ObjectStackClient, ScopedProjectClient } from './index';
+import { ObjectStackClient, ScopedEnvironmentClient } from './index';
 import type { CloneDataResult } from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
@@ -70,7 +70,7 @@ import type { ResolvedBook } from '@objectstack/spec/system';
 import type { Environment } from '@objectstack/spec/cloud';
 
 declare const client: ObjectStackClient;
-declare const scoped: ScopedProjectClient;
+declare const scoped: ScopedEnvironmentClient;
 
 /**
  * Compiled, never invoked. Every statement is an assertion tsc evaluates; none
@@ -133,7 +133,7 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error ExecutionLog does not satisfy `T extends FlowParsed`
     await client.automation.getFlow<ExecutionLog>('flow_a');
 
-    // ── shape class 6: the ScopedProjectClient MIRROR carries the same types ─
+    // ── shape class 6: the ScopedEnvironmentClient MIRROR carries the same types ─
     expectTypeOf(await scoped.automation.getFlow('flow_a')).toEqualTypeOf<FlowParsed>();
     expectTypeOf(await scoped.automation.getRun('flow_a', 'run_1')).toEqualTypeOf<ExecutionLog>();
     expectTypeOf(await scoped.packages.list()).toEqualTypeOf<{

@@ -176,7 +176,7 @@ export interface ClientConfig {
    */
   debug?: boolean;
   /**
-   * Active project id (UUID of `sys_environment`). When present, the
+   * Active environment id (UUID of `sys_environment`). When present, the
    * client injects an `X-Environment-Id` header on every request so the
    * server's tenant router can resolve the physical data-plane database.
    *
@@ -309,7 +309,7 @@ const QUERY_OPTIONS_V2_ONLY_KEYS: Record<QueryOptionsV2OnlyKey, true> = {
  * Does this options bag speak canonical {@link QueryOptionsV2} vocabulary?
  *
  * ONE definition read by both `data.find()` implementations
- * (`ObjectStackClient` and `ScopedProjectClient`), which are two faces of one
+ * (`ObjectStackClient` and `ScopedEnvironmentClient`), which are two faces of one
  * wire contract and were byte-identical copies of the old inline condition.
  */
 function isCanonicalQueryOptions(options: QueryOptions | QueryOptionsV2): options is QueryOptionsV2 {
@@ -563,7 +563,7 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
 
 /**
  * Write options for `meta.saveItem` on BOTH clients — the unscoped
- * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ * `ObjectStackClient.meta` and {@link ScopedEnvironmentClient.meta}.
  *
  * Named for the WRITE, not for the query string: three members ride the query
  * string and `ifMatch` rides a request HEADER (#11713). One bag per write
@@ -1504,7 +1504,7 @@ export class ObjectStackClient {
      * an extra `source: 'database' | 'registry' | 'both'` discriminator that is
      * deliberately NOT declared here — the dispatcher rows have no such key, so
      * declaring it would be false on that surface. #8140 bound the identical
-     * scoped sibling (`ScopedProjectClient.packages.list`) the same way.
+     * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
      */
     list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackage[]; total: number }> => {
         const route = this.getRoute('packages');
@@ -1530,7 +1530,7 @@ export class ObjectStackClient {
      * where a `package` service is registered. Binding the member here would
      * harden a claim that is already false on one of the two.
      *
-     * Its SCOPED twin `ScopedProjectClient.packages.get` IS bound, because
+     * Its SCOPED twin `ScopedEnvironmentClient.packages.get` IS bound, because
      * only the REST registrar serves the scoped mount — one surface, one
      * shape.
      */
@@ -2189,11 +2189,16 @@ export class ObjectStackClient {
   };
 
   /**
-   * Project-scoped client factory.
+   * Environment-scoped client factory.
    *
    * Returns a thin wrapper around the data / meta / packages namespaces that
    * prefixes every request with `/api/v1/environments/:environmentId/...`. Use this
    * when the server has `enableProjectScoping: true` in its REST API config.
+   * (That config key keeps the old spelling deliberately here: it is a REAL,
+   * live key read by `packages/cli/src/commands/serve.ts`, on the REST API's
+   * surface rather than this client's, so renaming it is a different breaking
+   * change on a different package — naming it correctly is what keeps this
+   * sentence true.)
    *
    * Backward compatibility: `client.data.*`, `client.meta.*`, and
    * `client.packages.*` continue to work unchanged; they hit unscoped routes
@@ -2206,19 +2211,19 @@ export class ObjectStackClient {
    *
    * declare const client: ObjectStackClient;
    *
-   * const scoped = client.project('00000000-0000-0000-0000-000000000001');
+   * const scoped = client.environment('00000000-0000-0000-0000-000000000001');
    * const tasks = await scoped.data.find('task', { top: 10 });
    * const objects = await scoped.meta.getItems('object');
    * ```
    */
-  project(environmentId: string): ScopedProjectClient {
+  environment(environmentId: string): ScopedEnvironmentClient {
     if (!environmentId) {
-      throw new Error('[ObjectStack] project(id): environmentId is required');
+      throw new Error('[ObjectStack] environment(id): environmentId is required');
     }
-    return new ScopedProjectClient(this, environmentId);
+    return new ScopedEnvironmentClient(this, environmentId);
   }
 
-  // ── Internal accessors exposed to ScopedProjectClient ────────────────
+  // ── Internal accessors exposed to ScopedEnvironmentClient ──────────────
   // The scoped client lives in the same module so using module-level access
   // works; TypeScript requires these to be accessible, so we expose them via
   // small protected getters that keep the public surface unchanged.
@@ -3701,7 +3706,7 @@ export class ObjectStackClient {
       },
 
       /**
-       * Flat aliases mirroring the ScopedProjectClient.automation surface so
+       * Flat aliases mirroring the ScopedEnvironmentClient.automation surface so
        * Studio (and other consumers) can use the same call shape regardless of
        * whether they hold a scoped or unscoped client.
        *
@@ -4985,7 +4990,7 @@ export class ObjectStackClient {
         // ── Normalize V2 canonical options → HTTP transport params ───
         // Detect V2 options by presence of canonical-only keys. The predicate
         // is derived from QueryOptionsV2 itself and SHARED with the copy of
-        // this method on ScopedProjectClient — see QUERY_OPTIONS_V2_ONLY_KEYS
+        // this method on ScopedEnvironmentClient — see QUERY_OPTIONS_V2_ONLY_KEYS
         // for why an inline hand-written key list is not allowed here (#6322).
         const v2 = options as QueryOptionsV2;
         const normalizedOptions: QueryOptions = {} as QueryOptions;
@@ -5023,7 +5028,7 @@ export class ObjectStackClient {
         // `skip=0` is a consistency change only: it already equals the
         // server's default, so the request means the same either way — but one
         // emitter must not hold two rules for one pair.
-        // Mirrored verbatim in `ScopedProjectClient.data.find`.
+        // Mirrored verbatim in `ScopedEnvironmentClient.data.find`.
         if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
         if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
 
@@ -5629,15 +5634,18 @@ export class ObjectStackClient {
  *
  * Wraps an {@link ObjectStackClient} and prefixes every request with
  * `/api/v1/environments/:environmentId/...` so a single client instance can talk to
- * multiple projects without mutating global state.
+ * multiple environments without mutating global state.
  *
  * The scoped client exposes the same shape as the `data`, `meta`, `batch`,
  * and `packages` namespaces on `ObjectStackClient` — only the URL prefix
  * differs. The server-side dual-mode route registration (see
  * `packages/rest/src/rest-server.ts`) accepts both shapes when
- * `projectResolution` is `'auto'` or `'optional'`.
+ * `projectResolution` is `'auto'` or `'optional'`. That config key keeps its
+ * old spelling on purpose: it is a real key on the REST API's surface, not
+ * this client's, so renaming it is a separate breaking change on a separate
+ * package — naming it as it is spelled is what keeps this sentence true.
  */
-export class ScopedProjectClient {
+export class ScopedEnvironmentClient {
   private readonly parent: ObjectStackClient;
   private readonly environmentId: string;
 

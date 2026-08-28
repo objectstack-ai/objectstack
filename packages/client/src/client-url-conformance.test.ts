@@ -277,7 +277,7 @@ const NON_HTTP: Record<string, string> = {
   'getRoute': 'pure route-table lookup',
   'unwrapResponse': 'pure envelope unwrap',
   'isFilterAST': 'pure type predicate',
-  'project': 'constructs a ScopedProjectClient; its methods are swept separately',
+  'environment': 'constructs a ScopedEnvironmentClient; its methods are swept separately',
   'setProjectId': 'local state',
   'getProjectId': 'local state',
   'setLocale': 'local state',
