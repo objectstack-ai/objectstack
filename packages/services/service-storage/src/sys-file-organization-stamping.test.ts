@@ -29,10 +29,10 @@ import {
   assertEngineUpdateDispatch,
 } from '@objectstack/objectql';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { LocalStorageAdapter } from './local-storage-adapter';
-import { StorageMetadataStore } from './metadata-store';
-import { registerStorageRoutes } from './storage-routes';
-import { StorageServicePlugin } from './storage-service-plugin';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { StorageMetadataStore } from './metadata-store.js';
+import { registerStorageRoutes } from './storage-routes.js';
+import { StorageServicePlugin } from './storage-service-plugin.js';
 
 // ---------------------------------------------------------------------------
 // A fake engine that records the OPTIONS bag of every insert — the argument
@@ -121,7 +121,7 @@ describe('StorageMetadataStore.createFile: the acting organization reaches the e
 
     // An empty context is still a context; handing one to the engine would
     // change what every other option resolver on that call sees.
-    expect(engine._inserts.map((i) => i.options)).toEqual([
+    expect(engine._inserts.map((i: { options: unknown }) => i.options)).toEqual([
       undefined,
       undefined,
       undefined,
