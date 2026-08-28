@@ -120,10 +120,10 @@ seat-post-protocol);维护者明示召唤是仲裁:有简报径直坐席,无简�
   默认不适用 `type:Bug` 的 hold**,三分支:可复现且用户可达 ⇒ 回 `pm:queue`(被 hold 的 Bug 就是
   被藏起的缺陷);declared≠enforced 观察类 ⇒ 转 enforce-or-remove 通道(不 hold 不裸关);真
   won't-fix 候选 ⇒ 逐卡进决策箱 —— 座位永不自行关闭真实缺陷。**机会主义重启条件必须
-  点名触发文件**(维护者 2026-08-11 接受):写侧即 `Restart-touch:` 行(行契约见
-  `references/state-machine.md`);派发/折叠检查时读半状态巡查锚(`half-state-patrol.yml` 的
-  `ANCHOR_ISSUE` 置顶 issue)的 H17 on-hold 触发文件索引、与本次派发文件面相交,命中 ⇒ 按该
-  hold 评论的 rider/restart 条款处置(点名该单、顺手活列为申报过的增项)。
+  点名触发文件**(维护者 2026-08-11 接受):派发/折叠检查时读半状态巡查锚(`half-state-patrol.yml`
+  的 `ANCHOR_ISSUE` 置顶 issue)的 H17 on-hold 触发文件索引、与本次派发文件面相交,命中 ⇒
+  按该 hold 评论的 rider/restart 条款处置(点名该单、顺手活列为申报过的增项)。
+- **关闭即摘 `pm:*` 状态标**(与关单同一笔;`domain:*`/类型标签留下 —— 归属不是状态)。
 - **`Blocked-by:` 行是机器可 grep 的反向索引**,一遍读喂三个职责:上游关单时放回被解锁的、
   按解锁扇出排序选择、**在合并后的 ref 上重验每张回队卡的文件面**(⛔ 只做第一件;关掉
   上游的那个合并最可能顺手把你这张卡也修掉)。**一个标签存在,当且仅当有具名读
