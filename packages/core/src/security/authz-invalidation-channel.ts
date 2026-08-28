@@ -42,13 +42,12 @@
  * write that triggered it. A grant revocation must not fail because a cache
  * hint could not be delivered — the TTL already covers exactly that case.
  *
- * ⚠️ Known contradiction in the surrounding docs, recorded so nobody resolves it
- * the wrong way: `IPubSub`'s own interface docblock
- * (`@objectstack/spec/contracts`) still says *"At-least-once delivery"*, which
- * no shipped driver provides. `cluster.mdx` §4.2 and the redis driver are the
- * measured statements and are the ones this module follows. Repairing that
- * docblock is a `packages/spec` change and is filed separately, deliberately
- * not made here.
+ * `IPubSub`'s own interface docblock (`@objectstack/spec/contracts`) states the
+ * same thing from the contract side — delivery is whatever the configured
+ * driver declares, no shipped driver exceeds at-most-once, and handlers must be
+ * idempotent **and** tolerate loss. That docblock, `cluster.mdx` §4.2 and the
+ * redis driver agree; there is no disagreement here for a later reader to go
+ * looking for.
  *
  * ## Why a new channel on the existing bus, and not a new transport
  *

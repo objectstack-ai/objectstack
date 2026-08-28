@@ -146,6 +146,93 @@ const READER: PermissionSet = {
   },
 } as unknown as PermissionSet;
 
+// ---------------------------------------------------------------------------
+// #12597 fixtures — one per guard that must SURVIVE the CRUD exemption.
+//
+// Each is `LINE_LEAD` plus exactly one guard, so a refusal can only come from
+// that guard: the object-level CRUD check is exempted for this write, and every
+// arm asserts the ADR-0112 envelope of the gate it names rather than the bare
+// fact of a refusal (a suite that only asked "was it refused?" would stay green
+// if the exemption regressed and the CRUD check answered instead).
+// ---------------------------------------------------------------------------
+
+/**
+ * Guard 1 — FIELD-LEVEL security on the FK column itself. Nothing else about
+ * `LINE_LEAD` changes: the caller still holds no object grant on B, so the CRUD
+ * check is exempted exactly as in the positive case and FLS is the only gate
+ * left that can speak.
+ */
+const FLS_LOCKED_LEAD: PermissionSet = {
+  name: 'ehr_fls_lead',
+  label: 'Line Lead (FK column locked by FLS)',
+  objects: {
+    os_ehr_product: {
+      allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
+      modifyAllRecords: true, viewAllRecords: true,
+    },
+  },
+  fields: {
+    'os_ehr_andon_record.product': { readable: true, editable: false },
+  },
+} as unknown as PermissionSet;
+
+/**
+ * Guards 2 and 3 — the RLS pair. Both add READ on B, deliberately: the row
+ * gates re-read the target row as the caller, so without a read grant the
+ * refusal would be the read denial wearing the row gate's clothes — a phantom
+ * pin that passes for the wrong reason. With read granted, the caller still
+ * holds no EDIT bit, so the exemption is still what carries the write past
+ * step 2 and the row gate is the only thing left that can refuse.
+ */
+const RLS_USING_LEAD: PermissionSet = {
+  name: 'ehr_rls_using_lead',
+  label: 'Line Lead (RLS `using` row scope on B)',
+  objects: {
+    os_ehr_product: {
+      allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
+      modifyAllRecords: true, viewAllRecords: true,
+    },
+    os_ehr_andon_record: { allowRead: true, viewAllRecords: true },
+  },
+  rowLevelSecurity: [
+    {
+      name: 'andon_own_rows_only',
+      object: 'os_ehr_andon_record',
+      operation: 'update',
+      using: 'owner_id == current_user.id',
+    },
+  ],
+} as unknown as PermissionSet;
+
+/**
+ * Guard 3 — the RLS POST-IMAGE `check`. This is the sharpest of the three and
+ * the reason the ruling narrowed: `check` is a data-SHAPE constraint, not a
+ * reach question, so an FK-clear that empties `product` is precisely the write
+ * a deployment declaring `product != null` means to forbid. Honouring that
+ * intent when it is spelled as a `validations` entry and ignoring it when it is
+ * spelled as an RLS `check` is the declared-not-enforced split this project
+ * prices highest.
+ */
+const RLS_CHECK_LEAD: PermissionSet = {
+  name: 'ehr_rls_check_lead',
+  label: 'Line Lead (RLS post-image `check` on B)',
+  objects: {
+    os_ehr_product: {
+      allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
+      modifyAllRecords: true, viewAllRecords: true,
+    },
+    os_ehr_andon_record: { allowRead: true, viewAllRecords: true },
+  },
+  rowLevelSecurity: [
+    {
+      name: 'andon_product_always_set',
+      object: 'os_ehr_andon_record',
+      operation: 'update',
+      check: 'product != null',
+    },
+  ],
+} as unknown as PermissionSet;
+
 function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
@@ -306,25 +393,34 @@ describe('#12166 — pre-delete reference check runs as SYSTEM (ruling A)', () =
     expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(true);
   });
 
-  it('the elevation is the CHECK only — a non-empty referencing table still needs the caller\'s own write authority (constraint 1)', async () => {
-    // Ruling constraint 1: "Nothing else about the delete path changes
-    // identity." The `set_null` UPDATE below still runs as the caller, so a
-    // caller with no grant on the referencing object is refused here — the
-    // reference CHECK was relaxed, the caller's authority over the dependent
-    // rows was not. Pinned so the boundary is visible rather than discovered:
-    // a later edit that elevated the cleanup WRITES too would turn this green.
+  it('[#12597 — PIN INVERTED] a non-empty referencing table no longer needs the caller\'s own write authority on it', async () => {
+    // ⚠️ THIS PIN WAS INVERTED, DELIBERATELY. It previously asserted the
+    // opposite — `PERMISSION_DENIED` with `details.operation === 'update'` —
+    // as #12166 ruling constraint 1's boundary ("nothing else about the delete
+    // path changes identity"), and that assertion is what MEASURED the residue
+    // this card was opened for: a role with full delete on A and no grant on B
+    // could delete an A only while B was empty.
+    //
+    // The maintainer ruled that residue away on 2026-08-28 (#12597, second
+    // round, option B): the FK-clear UPDATE is exempted from the object-level
+    // CRUD check, scoped by the `__referentialFieldClear` marker. So the case
+    // below now SUCCEEDS by ruling, and the old expectation is falsified rather
+    // than merely stale. ⛔ The `cascade` arm is untouched and still requires
+    // the caller's own delete authority on the child rows.
+    //
+    // The exemption's fences — FLS, the RLS `using` row scope and the RLS
+    // post-image `check` all still refusing — are pinned one describe below.
     const h = await boot();
     const p = await h.seed('os_ehr_product', { name: 'Widget' });
-    await h.seed('os_ehr_andon_record', { product: p.id });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id });
 
     const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
 
-    expect(err).not.toBe(null);
-    expect(err.code).toBe('PERMISSION_DENIED');
-    // The refusal now names the WRITE it could not perform, not the read the
-    // check used to fail on.
-    expect(err.details?.object).toBe('os_ehr_andon_record');
-    expect(err.details?.operation).toBe('update');
+    expect(err).toBe(null);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(false);
+    // set_null, not cascade: the referencing ROW survives with a cleared FK.
+    expect(h.stores.get('os_ehr_andon_record')?.has(a.id)).toBe(true);
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product ?? null).toBe(null);
   });
 });
 
@@ -423,5 +519,173 @@ describe('#12166 constraint 3 — the ledger records BOTH halves', () => {
     expect(h.engineInfo.some(
       (r) => r.msg.includes('[reference-cleanup]') && r.meta?.referencedObject === 'os_ehr_batch',
     )).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #12597 — the FK-clear write is exempt from the object-level CRUD check, and
+// from THAT CHECK ALONE (maintainer ruling 2026-08-28, second round, option B).
+//
+// The round-1 measurement is why the exemption is marker-scoped rather than
+// `isSystem`: `security-plugin.ts`'s `isSystem` short-circuit is TOTAL (the
+// repo's own page says so — `content/docs/permissions/system-context.mdx`:
+// "Elevation is total, and it is not granular"), and it would have switched off
+// three guards that answer questions referential integrity does not ask. Those
+// three are the pins below; each names the gate's own envelope, so a refusal
+// migrating between gates reddens instead of reading as "still refused".
+// ---------------------------------------------------------------------------
+
+describe('#12597 — the referential FK clear is exempt from the object-level CRUD check', () => {
+  it('THE CONTRACT: full delete on A + NOTHING on B + a non-empty referencing table ⇒ the delete succeeds and the FK is cleared', async () => {
+    const h = await boot();
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    // Owned by somebody else and referencing the target: the reporting
+    // deployment's shape, and the case that used to 403 on the UPDATE.
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+    expect(h.stores.get('os_ehr_andon_record')?.size).toBe(1);
+
+    // Attribution is asserted on the CONTEXT the cleanup write actually carries
+    // — the gate-(a) reading this card carries forward. The write must stay the
+    // OPERATOR's own identity, because every attribution channel keys on
+    // `session.userId`: `writeAudit`'s `user_id`/`actor` and the `updated_by`
+    // stamp both read it, and a bare `isSystem` context was measured producing
+    // `user_id: null, actor: null`. This exemption never touches identity, so
+    // the pin is that the context reaching the engine is the caller's own.
+    const cleanupContexts: any[] = [];
+    h.engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.object === 'os_ehr_andon_record' && opCtx.operation === 'update') {
+        cleanupContexts.push(opCtx.context);
+      }
+      return next();
+    });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
+
+    expect(err).toBe(null);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(false);
+    // `set_null`, not `cascade` — the referencing row survives, minus the FK.
+    expect(h.stores.get('os_ehr_andon_record')?.has(a.id)).toBe(true);
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product ?? null).toBe(null);
+
+    expect(cleanupContexts.length).toBe(1);
+    expect(cleanupContexts[0]?.userId).toBe('u_lead');
+    expect(cleanupContexts[0]?.isSystem).not.toBe(true);
+    // …and it is the server-derived marker, not an identity switch, that the
+    // exemption keys on (#3023; stamped in `cascadeDeleteRelations`).
+    expect(cleanupContexts[0]?.__referentialFieldClear).toBe(true);
+  });
+
+  it('GUARD 1 — field-level security on the FK column still refuses, and the FK is unchanged', async () => {
+    const h = await boot([FLS_LOCKED_LEAD]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
+
+    expect(err).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode ?? err.status).toBe(403);
+    // The FLS gate's own envelope — it names the field it refused, which is what
+    // distinguishes it from the CRUD denial the exemption removed.
+    expect(err.details?.object).toBe('os_ehr_andon_record');
+    expect(err.details?.forbiddenFields).toContain('product');
+    // Nothing moved: neither the FK nor the delete it was blocking.
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(true);
+  });
+
+  it('GUARD 2 — the RLS `using` row scope on the referencing object still refuses, and the FK is unchanged', async () => {
+    const h = await boot([RLS_USING_LEAD]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    // Out of the caller's row scope: `owner_id == current_user.id` does not hold.
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
+
+    expect(err).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode ?? err.status).toBe(403);
+    // The row gate's own envelope: it names the ROW, and its developer sentence
+    // says row-level security — the CRUD denial says neither.
+    expect(err.details?.object).toBe('os_ehr_andon_record');
+    expect(err.details?.recordId).toBe(a.id);
+    expect(err.developerMessage).toContain('row-level security');
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(true);
+  });
+
+  it('GUARD 2 CONTROL — the same policy admits the write when the row IS in scope', async () => {
+    // Without this arm, GUARD 2 is also satisfied by the exemption never firing
+    // at all: "refused" would be indistinguishable from "the CRUD check answered
+    // first". Here the ONLY thing that changes is the row's owner.
+    const h = await boot([RLS_USING_LEAD]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_lead' });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
+
+    expect(err).toBe(null);
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product ?? null).toBe(null);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(false);
+  });
+
+  it('GUARD 3 — the RLS post-image `check` still refuses, and the FK is unchanged', async () => {
+    // The `check` is `product != null`, i.e. the deployment declared that this
+    // FK may never be emptied. Under a blanket `isSystem` elevation the clear
+    // went through and the declaration was silently ignored; under the ruled
+    // narrowing the deployment gets a truthful refusal.
+    const h = await boot([RLS_CHECK_LEAD]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller());
+
+    expect(err).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode ?? err.status).toBe(403);
+    expect(err.details?.object).toBe('os_ehr_andon_record');
+    // The check gate's own sentence — distinct from both the CRUD denial and
+    // the row gate's "(row-level security)".
+    expect(err.developerMessage).toContain('row-level CHECK');
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(true);
+  });
+
+  it('THE CONVERSE, again: the exemption is not a delete gate — a caller without delete rights on the TARGET is still refused', async () => {
+    // The exemption widens which deletes SUCCEED; it must not widen who may ask.
+    // This arm would go green if the exemption had been spelled anywhere that a
+    // user-initiated write can reach.
+    const h = await boot([READER]);
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+
+    const err = await h.deleteAs('os_ehr_product', p.id, h.caller('u_reader'));
+
+    expect(err).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.details?.object).toBe('os_ehr_product');
+    expect(err.details?.operation).toBe('delete');
+    expect(h.stores.get('os_ehr_product')?.has(p.id)).toBe(true);
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
+  });
+
+  it('an ORDINARY update on the referencing object is untouched by the exemption', async () => {
+    // The exemption keys on a marker the engine stamps on its own cleanup write
+    // and nothing else. A caller who edits the same object directly, with the
+    // same grants, still meets the object-level CRUD check — the marker is the
+    // whole difference, so this is what proves the exemption is scoped to it.
+    const h = await boot();
+    const p = await h.seed('os_ehr_product', { name: 'Widget' });
+    const a = await h.seed('os_ehr_andon_record', { product: p.id, owner_id: 'u_other' });
+
+    const err = await h.engine
+      .update('os_ehr_andon_record', { id: a.id, product: null }, { context: h.caller() } as any)
+      .then(() => null, (e: any) => e);
+
+    expect(err).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.details?.object).toBe('os_ehr_andon_record');
+    expect(err.details?.operation).toBe('update');
+    expect(h.stores.get('os_ehr_andon_record')?.get(a.id)?.product).toBe(p.id);
   });
 });
