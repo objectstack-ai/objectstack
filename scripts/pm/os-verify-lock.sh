@@ -807,6 +807,36 @@ human_s() {
   if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
 }
 
+# Epoch seconds → a UTC instant a reader can compare against a dated report, or
+# NOTHING (return 1) when this host's `date` cannot produce one. Two spellings
+# exist and they are not interchangeable: GNU takes `-d @N`, BSD/macOS takes
+# `-r N`. ⚠ The failure this guards is not the rejected flag -- it is that on
+# macOS `-d` means something else entirely (it sets the DST flag), so
+# `date -u -d @N '+…'` there formats NOW and returns a perfectly well-formed
+# string for the WRONG INSTANT. A shape check cannot tell that apart from a real
+# conversion, so neither spelling is trusted on shape: each is probed against an
+# epoch whose answer is known, and only a `date` that turns 0 into 1970-01-01 is
+# asked to turn anything else into anything. Same discipline as
+# `stamp_resolution` above, for the same reason -- a caller that cannot get a
+# right answer here must be handed no answer, never a confident wrong one.
+utc_stamp() {
+  local fmt='+%Y-%m-%dT%H:%M:%SZ' out
+  if [[ "$(date -u -d @0 "$fmt" 2> /dev/null)" == '1970-01-01T00:00:00Z' ]]; then
+    out="$(date -u -d "@${1}" "$fmt" 2> /dev/null)"
+  elif [[ "$(date -u -r 0 "$fmt" 2> /dev/null)" == '1970-01-01T00:00:00Z' ]]; then
+    out="$(date -u -r "$1" "$fmt" 2> /dev/null)"
+  else
+    return 1
+  fi
+  case "$out" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+      printf '%s' "$out"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # --- the ledger -------------------------------------------------------------
 #
 # WHY A LEDGER AND NOT MORE STDERR.
@@ -1719,6 +1749,73 @@ mode_report() {
     '' | *[!0-9]*) printf 'records: %s\n' "$total" ;;
     *) printf 'records: %s, spanning %s\n' "$total" "$(human_s $((last - first)))" ;;
   esac
+
+  # ⚠ THE POPULATION, AND WHERE ITS FLOOR ACTUALLY IS. Everything below is
+  # computed over ONE file -- the path printed at the top -- and that file's
+  # history is not the fleet's. This script already knew that: the ageing
+  # paragraph in the slots block had to state it in order to explain why a
+  # constant could not be sized against a p95 that does not exist. But it stated
+  # it in a comment eight hundred lines from the only surface that prints these
+  # numbers, so no reader of a REPORT ever met it, while the report went on
+  # ranking commands under a fleet-scale heading. An agent asking "is a
+  # 19-minute hold normal here?" got a confident, well-formed answer over a
+  # population that structurally could not contain one -- the same shape as the
+  # two mixed-population hazards the blocks below already have to warn about,
+  # one level up: an instrument answering in the green direction about something
+  # it did not measure.
+  #
+  # The path alone does not discharge this. A path is a LOCATION; a population
+  # is an INTERVAL, and no reader can derive the second from the first -- the
+  # ledger is redirectable (`OS_VERIFY_LOCK_LEDGER`), so even the `/tmp` in the
+  # default is not a fixed premise, and `/tmp` would still not say WHEN the
+  # records begin. So the floor is printed as a number, from data this report
+  # already holds.
+  #
+  # ⛔ WHAT THIS DELIBERATELY DOES NOT SAY is "since this container started",
+  # and it does not print an uptime beside the first record. That pairing is the
+  # obvious spelling and it is MEASURED WRONG. On the box this was written on,
+  # `/proc/uptime` reported 878s -- while ALL 74 records in the live ledger, and
+  # the ledger file's own birth time, predated that boot, the oldest by 8h11m
+  # (positive control, same command: a file touched at that moment read as after
+  # the boot, so the comparison can return both answers). The uptime clock and
+  # the filesystem holding the ledger are not guaranteed to restart together.
+  # `/proc/uptime` also does not exist on the macOS hosts this file's bash-3.2
+  # floor exists for. A report that prints a confident wrong boundary is worse
+  # than one that prints none -- that is the very defect being repaired here --
+  # so the floor is stated as what it provably is, the first record, and the
+  # reason it sits there is left unasserted.
+  local nowts age fstamp floor
+  printf 'scope: every figure below is computed over ONE file — the ledger named above —\n'
+  printf '  and over nothing else.\n'
+  # Both halves of the floor, because they answer different questions and either
+  # can be unavailable: the INSTANT is what a reader compares a dated
+  # observation against ("my 19-minute hold was on the 26th — is it in here?"),
+  # the AGE is what tells them how much shift this population is. Whichever can
+  # be established is printed; if neither can, the two sentences either side
+  # still state the shape of the bound, which is the half that cannot be wrong.
+  floor=''
+  case "$first" in
+    '' | *[!0-9]*) ;;
+    *)
+      fstamp="$(utc_stamp "$first")" || fstamp=''
+      nowts="$(now_s 2> /dev/null)" || nowts=''
+      age=''
+      case "$nowts" in
+        '' | *[!0-9]*) ;;
+        *) ((nowts >= first)) && age="$(human_s $((nowts - first))) ago" ;;
+      esac
+      if [[ -n "$fstamp" && -n "$age" ]]; then
+        floor="${fstamp}, ${age}"
+      elif [[ -n "$fstamp" ]]; then
+        floor="$fstamp"
+      else
+        floor="$age"
+      fi
+      ;;
+  esac
+  [[ -n "$floor" ]] && printf '  ⇒ it reaches back to its first record and no further: %s.\n' "$floor"
+  printf '  ⇒ runs from before that, and runs recorded against any other copy of this path,\n'
+  printf '    are absent from every figure below. Absent is not the same as counted zero.\n'
   local size
   size="$(wc -c < "$LEDGER_FILE" 2> /dev/null | tr -d ' ')"
   case "$size" in
@@ -1799,7 +1896,13 @@ mode_report() {
   # not by the worst single run: the command that decides how much the fleet
   # queues is the one that owns the most lock-seconds, which a per-run maximum
   # can point away from entirely.
-  printf '\nlock-seconds held, by command (top 10 — this is where hold time actually goes):\n'
+  # ⛔ The heading is bound to the population, not to the fleet. The old wording
+  # -- "this is where hold time actually goes" -- is the one sentence this
+  # report PRINTS that makes a fleet-scale claim; the two similar phrasings
+  # elsewhere in this file are source comments about the mechanism's purpose and
+  # are not output. Leaving it beside the scope block above would have shipped
+  # the disclosure and the claim it contradicts in the same report.
+  printf '\nlock-seconds held, by command (top 10 — where the hold time in THIS ledger went):\n'
   awk '{
          h = ""; lbl = ""
          for (i = 2; i <= NF; i++) {
@@ -2623,6 +2726,77 @@ mode_self_test() {
     "$(printf '%s\n' "$rpt" | grep -c 'it does not count the HOLDER either')" 1
   st_case 'and the off-by-one heading itself is gone, not merely annotated' \
     "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead):')" 0
+
+  # --- the scope of the population, and the clock that names its floor ------
+  #
+  # The report used to state its span and never its POSITION: `records: N,
+  # spanning T` says how wide the window is and nothing about where it starts,
+  # while the ranking below it was headed with a fleet-scale claim. So an agent
+  # asking "is a 19-minute hold normal here?" was answered over a population
+  # that could not contain one, and nothing printed said so. These cases are
+  # spelled against the SAME capture as the four above, which each assert a 1 --
+  # so a zero here cannot be a zero produced by a capture that came back empty.
+  st_case 'and --report states that its population is one file, not the fleet' \
+    "$(printf '%s\n' "$rpt" | grep -c 'computed over ONE file')" 1
+  st_case 'and names the floor of that population rather than only its width' \
+    "$(printf '%s\n' "$rpt" | grep -c 'it reaches back to its first record and no further')" 1
+  st_case 'and says the runs outside it are absent, which is not a measured zero' \
+    "$(printf '%s\n' "$rpt" | grep -c 'Absent is not the same as counted zero')" 1
+  # ⛔ BOTH SIDES, because the defect was a HEADING and not a missing sentence:
+  # a report that kept "this is where hold time actually goes" beside the new
+  # scope block would satisfy every presence assertion above while still
+  # printing the fleet-scale claim the scope block contradicts.
+  st_case 'and the ranking is headed by its population, not by the fleet' \
+    "$(printf '%s\n' "$rpt" | grep -c 'where the hold time in THIS ledger went')" 1
+  st_case 'and the fleet-scale heading is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'this is where hold time actually goes')" 0
+
+  # `utc_stamp`, which supplies the instant in that floor. A KNOWN epoch mapped
+  # to a KNOWN string, because the failure mode here is not an error: it is a
+  # well-formed string for the wrong instant (see the helper's own comment), and
+  # only a fixed expected value can tell those apart.
+  st_case 'utc_stamp converts a known epoch rather than formatting now' \
+    "$(utc_stamp 1787849472)" '2026-08-27T16:51:12Z'
+  st_case 'and converts the epoch its own probe is built on' \
+    "$(utc_stamp 0)" '1970-01-01T00:00:00Z'
+  st_case 'and hands back NOTHING, loudly, rather than a guess it cannot make' \
+    "$(utc_stamp not-an-epoch; printf 'rc=%s' "$?")" 'rc=1'
+
+  # ⚠ THE macOS BRANCH, ACTUALLY EXERCISED. `-r` exists in `utc_stamp` for a
+  # host CI never runs on — the same blind spot the bash-3.2 floor gate exists
+  # for — so without these two cases it is a guard nobody has ever seen fire.
+  # The fake below is macOS-SHAPED, not macOS: `-r` reads an epoch and `-d` does
+  # not, which is the actual difference. Two directions, and the second is the
+  # one that keeps the first honest: the helper must still answer the RIGHT
+  # instant through the fake (only reachable via `-r`), and the fake must be
+  # shown to really mis-answer `-d` — otherwise the first case would pass
+  # against a fake that was quietly just GNU `date`.
+  local fakebin realdate
+  realdate="$(command -v date)"
+  fakebin="${tmp}/fakebin"
+  mkdir -p "$fakebin"
+  cat > "${fakebin}/date" << FAKEDATE
+#!/usr/bin/env bash
+# macOS-shaped: -r takes an epoch, -d sets a flag and swallows its operand.
+epoch=""
+fmt=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    -u) ;;
+    -d) shift ;;
+    -r) epoch="\$2"; shift ;;
+    +*) fmt="\$1" ;;
+  esac
+  shift
+done
+[[ -n "\$epoch" ]] && exec "$realdate" -u -d "@\${epoch}" "\$fmt"
+exec "$realdate" -u "\$fmt"
+FAKEDATE
+  chmod +x "${fakebin}/date"
+  st_case 'utc_stamp answers a macOS-shaped date through -r, with the right instant' \
+    "$(PATH="${fakebin}:$PATH"; utc_stamp 1787849472)" '2026-08-27T16:51:12Z'
+  st_case 'and that fake really is macOS-shaped — its own -d formats now, not the epoch' \
+    "$(PATH="${fakebin}:$PATH"; date -u -d @0 '+%Y')" "$(date -u '+%Y')"
   # A measurement apparatus that can redden a gate has become part of the thing
   # it measures. This is the case that keeps it out of the way.
   st_case 'an unwritable ledger loses records, never runs' \
