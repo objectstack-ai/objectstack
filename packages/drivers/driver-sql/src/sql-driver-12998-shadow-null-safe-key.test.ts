@@ -134,13 +134,12 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
      */
     it('leaves plain composite key parts un-coalesced', async () => {
       driver = new SqlDriver(cell.config());
-      await driver.initObjects([
-        {
-          name: 'os12998_plain',
-          fields: { a: { type: 'text', maxLength: 1024 }, b: { type: 'text', maxLength: 1024 } },
-          indexes: [{ fields: ['a', 'b'], unique: true, name: 'uniq_os12998_plain_ab' }],
-        },
-      ]);
+      const plain = {
+        name: 'os12998_plain',
+        fields: { a: { type: 'text', maxLength: 1024 }, b: { type: 'text', maxLength: 1024 } },
+        indexes: [{ fields: ['a', 'b'], unique: true, name: 'uniq_os12998_plain_ab' }],
+      };
+      await driver.initObjects([plain]);
       const { cols } = await catalog('os12998_plain');
       const shadow = cols.find((c: any) => isHashShadowColumn(c.COLUMN_NAME));
       expect(shadow, 'a shadow column must exist').toBeTruthy();
@@ -172,7 +171,8 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       // Boot once WITHOUT the unique index, and accumulate the duplicates the
       // void constraint admitted.
       const bare = orgUniqueOn('os12998_dirty');
-      await driver.initObjects([{ ...bare, indexes: [] }]);
+      const withoutIndex = { ...bare, indexes: [] };
+      await driver.initObjects([withoutIndex]);
       const knex = (driver as any).knex;
       const V = 'd'.repeat(900);
       await knex('os12998_dirty').insert([
