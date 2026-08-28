@@ -57,11 +57,11 @@ code and npm dependencies**, not just metadata. The repository already has the
   schema), and a `src/index.ts` with a lifecycle entry point.
 - The microkernel can already *load* code plugins: `packages/core/src/
   plugin-loader.ts` (dependency ordering, health checks, `signature` field,
-  `startupTimeout`, `hotReloadable`), `packages/core/src/types.ts` (`Plugin`
+  `startupTimeout`), `packages/core/src/types.ts` (`Plugin`
   with `init/start/destroy` + `PluginContext`),
   `packages/core/src/security/plugin-permission-enforcer.ts`
   (capability-based service/hook/file/network enforcement),
-  `PluginConfigValidator`, and `packages/runtime/src/sandbox/quickjs-runner.ts`
+  and `packages/runtime/src/sandbox/quickjs-runner.ts`
   (a QuickJS-WASM sandbox that wires only capability-gated `ctx.api/crypto/log`
   into untrusted code).
 
@@ -149,7 +149,7 @@ Extends the existing `ObjectStackManifest` with three new blocks
     "fs": []
   },
   "integrity": { "dist/index.mjs": "sha256-..." },  // per-file hashes
-  "configuration": { /* existing config schema (PluginConfigValidator) */ },
+  "configuration": { /* config schema — validator retired, re-decide with this layer (§3.7) */ },
   "capabilities": { /* existing implements/provides/requires/contributes */ },
   "contributes": { /* OPTIONAL declarative metadata: objects/views/flows/... */ }
 }
@@ -276,8 +276,18 @@ enforces this at publish time (an unverified publisher cannot ship `runtime:
   granted set → `PluginPermissionEnforcer` (service/hook/file/network already
   enforced). Principle of least privilege; all denials logged (existing
   behavior).
-- **Config.** `PluginConfigValidator` validates plugin config against the
-  `configuration` schema.
+- **Config.** RETIRED 2026-08-27 (#11982, ADR-0049 enforce-or-remove;
+  maintainer ruling, decision-inbox batch 5). `PluginConfigValidator` /
+  `createPluginConfigValidator` and `PluginMetadata.configSchema` were removed:
+  the mechanism could never run — the loader's one call site passed no config,
+  no manifest→`loadPlugin` path existed to carry one, `PluginMetadata` had no
+  config-value field, and zero plugins declared a schema (measured with
+  positive controls on #11982; the sibling `hotReloadable` fell to the same
+  measurement in #12587). Re-declaring a kernel-owned config-validation
+  surface is a **fresh decision** for the day this distribution layer actually
+  lands, with #11982's zero-caller measurement as its starting evidence — the
+  manifest `configuration` block below records the design intent, not a live
+  validator.
 - **Supply chain.** Lockfile + per-file `integrity`; server-side scan for
   secrets and known-vuln deps; SBOM stored on the version row; **always**
   `--ignore-scripts` (no `postinstall`).
@@ -496,7 +506,6 @@ the developers and operators who compose Apps and provision runtimes.
 - `packages/core/src/plugin-loader.ts` — plugin loading, lifecycle, health, signature
 - `packages/core/src/types.ts` — `Plugin` (`init/start/destroy`) + `PluginContext`
 - `packages/core/src/security/plugin-permission-enforcer.ts` — capability-based enforcement
-- `packages/core/src/security/plugin-config-validator.ts` — config validation
 - `packages/runtime/src/sandbox/quickjs-runner.ts` — QuickJS-WASM sandbox (T1)
 - `packages/runtime/src/cloud/marketplace-install-local-plugin.ts` — local inline install (ADR-0016 §9)
 - `packages/runtime/src/cloud/marketplace-proxy-plugin.ts` — marketplace browse proxy
