@@ -8570,7 +8570,12 @@ function selfTest() {
   );
   t(
     'and it still SPELLS the whole-package join base — the declaration narrows a live literal, not a deleted one',
-    cliPrereqSpelled.includes('packages/cli') && !cliPrereqPopulation.includes('packages/cli'),
+    // The `length > 0` is not decoration: without it a DELETED marker satisfies
+    // this case by the empty set (nothing is inherited, so nothing inherits the
+    // join base) — the shape a pin that only asserts an absence always has.
+    cliPrereqPopulation.length > 0
+      && cliPrereqSpelled.includes('packages/cli')
+      && !cliPrereqPopulation.includes('packages/cli'),
   );
   // Specimens, not classes: the extractor module whose edit really does move
   // the committed bundles, and a test file that compiles into nothing either
