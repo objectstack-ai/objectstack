@@ -27,6 +27,16 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+// The repo's ONE answer to "is this span a comment, or code?". The naive pair
+// this replaces had an UNANCHORED trailing arm, so a doubled slash anywhere on a
+// line opened a phantom comment and the rest of the line went -- measured
+// eating route paths inside template literals in `dispatcher-plugin.ts` and an
+// https URL that `domains/mcp.ts` builds. `stripComments` (not `maskComments`)
+// is the projection these guards want: they report match counts and matched
+// text, never a line or an offset. The `.mjs` specifier is deliberate;
+// `scripts/js-comment-mask.d.mts` beside it is a hand-written declaration, so
+// this import needs no `allowJs`.
+import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import {
     ApiErrorSchema,
     BaseResponseSchema,
@@ -455,9 +465,7 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
     // Comments stripped first: these modules' own prose quotes the old shape,
     // and a doc comment is not a code path.
     const read = (file: string) =>
-        readFileSync(new URL(file, import.meta.url), 'utf8')
-            .replace(/\/\*[\s\S]*?\*\//g, '')
-            .replace(/\/\/[^\n]*/g, '');
+        stripComments(readFileSync(new URL(file, import.meta.url), 'utf8'));
 
     /** Every module that can put a body on this wire surface. */
     const MODULES = [

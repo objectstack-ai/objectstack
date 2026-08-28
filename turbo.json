@@ -176,6 +176,42 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
+    "@objectstack/runtime#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/driver-sql#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/example-showcase#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/plugin-auth#test": {
       "dependsOn": ["^build"],
       "outputs": [],
@@ -190,7 +226,9 @@
         "$TURBO_ROOT$/packages/services/service-sms/src/**",
         "$TURBO_ROOT$/scripts/check-published-files.mjs",
         "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts"
+        "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
     "@objectstack/plugin-auth#typecheck": {
