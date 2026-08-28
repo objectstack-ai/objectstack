@@ -225,9 +225,12 @@ const LEDGER = [
       '#9960 chose the PRODUCER\'s exported types over a local restatement for the '
       + '`protocol.deletePackage` seam, and refused a spec shape for it (zero external consumers). '
       + 'Nothing reaches the emitted JavaScript and rollup-plugin-dts inlines the two aliases, so an '
-      + 'installing consumer is never told to install a package it does not receive: measured on '
-      + 'this branch, `packages/rest/dist/index.d.ts` names `@objectstack/metadata-protocol` zero '
-      + 'times. The row\'s evidence is that property, checked every run.',
+      + 'installing consumer is never told to install a package it does not receive. Measured on '
+      + 'this branch: `packages/rest/dist/index.d.ts` and `index.d.cts` carry ZERO module '
+      + 'references to `@objectstack/metadata-protocol` (its one textual occurrence is inside a '
+      + 'TSDoc comment), and every `from` specifier in those published types names a package rest '
+      + 'DECLARES — @objectstack/core, @objectstack/spec/* and zod. The row\'s mechanical evidence '
+      + 'is the type-only form, checked every run; a value import ends it.',
   },
 ];
 
