@@ -65,7 +65,7 @@ import {
   resolveOwnOrganizationRow,
   seedCtx,
   warnOrganizationLessRows,
-  warnSeedWriteRefusals,
+  reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
@@ -364,7 +364,7 @@ export async function bootstrapDeclaredPermissions(
     );
   }
   // Before the counts, so an operator reads WHY the count is zero beside it.
-  warnSeedWriteRefusals(options.logger, refusals, organizationId);
+  reportSeedWriteRefusals(options.logger, refusals, organizationId);
   if (out.unreadable > 0) {
     // Said once, with the count: these sets were neither seeded nor reconciled
     // because the record could not be READ. Silence here would read exactly

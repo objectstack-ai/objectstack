@@ -88,7 +88,59 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
 export type SeedLogger = {
   info?: (m: string, meta?: Record<string, any>) => void;
   warn?: (m: string, meta?: Record<string, any>) => void;
+  /**
+   * Durability-degradation channel (AGENTS.md "Degradation log levels").
+   * A catalog write that was supposed to land and did not is an `error`, not a
+   * `warn`: nothing looks broken afterwards, which is exactly why it has to be
+   * loud. {@link reportSeedWriteRefusals} routes only the unique-violation
+   * class here — see its doc for why the other class stays functional.
+   *
+   * OPTIONAL, deliberately: hosts do inject reduced sinks, and forcing this
+   * member would foreclose them (the measured-and-rejected option in the
+   * sibling `ProjectionLogger`). The fallback to `warn` is therefore
+   * mandatory at every call site, and lives in
+   * {@link logSeedDurabilityFailure} so no site can forget it.
+   *
+   * Signature matches `ProjectionLogger.error` in this package and
+   * `Logger.error` in `@objectstack/spec/contracts` — the CAUSE is its own
+   * second argument, meta is third — so the kernel logger satisfies this
+   * as-is. Getting the arity wrong here would put the meta object in the
+   * error slot, where a `Logger` neither reads nor serializes it.
+   */
+  error?: (m: string, error?: Error, meta?: Record<string, any>) => void;
 };
+
+/**
+ * Emit one durability-degradation line, falling back to `warn` when the host
+ * injected a sink with no `error`.
+ *
+ * ⛔ NOT `logger?.error?.(...)`. That spelling prints NOTHING against a
+ * reduced sink, which would silently drop the loudest line in this module in
+ * order to look tidy — the failure the whole rule exists to prevent.
+ *
+ * ⛔ NOT `(logger.error ?? logger.warn)(...)` either. That evaluates to a bare
+ * FUNCTION and calls it with `this === undefined`; `@objectstack/core`'s
+ * `ObjectLogger` is a class whose `error` reaches for `this.writeErrorLike`,
+ * so a detached call throws. Plain-closure sinks — every double in this
+ * package — survive it perfectly, which is why no suite would catch it.
+ * Both prohibitions and this exact `if`/`else` spelling are the measured
+ * conclusions recorded on `SqlDriver.logDurabilityFailure`; the property-access
+ * call form below keeps the receiver.
+ *
+ * The `?.` on `warn` is the backstop for hosts the TYPE cannot reach (a
+ * plain-JS embedder, or a cast), not doubt about the declaration.
+ */
+function logSeedDurabilityFailure(
+  logger: SeedLogger | undefined,
+  message: string,
+  meta?: Record<string, any>,
+): void {
+  // No single cause: this line summarises N refusals, so the cause slot is
+  // `undefined` and the detail travels in meta — the same shape the sibling
+  // reconcile summary in `permission-set-projection.ts` uses.
+  if (logger?.error) logger.error(message, undefined, meta);
+  else logger?.warn?.(message, meta);
+}
 
 /**
  * How many organizations one boot-time seeding sweep enumerates.
@@ -500,7 +552,7 @@ export function createSeedWriteRefusals(): SeedWriteRefusals {
  * nothing. The signal has to survive the inner helper — which is what
  * {@link SeedWriteRefusals} carries and what this function prints.
  *
- * ## Why it WARNS and does not throw
+ * ## Why it LOGS and does not throw
  *
  * A rethrow would convert a silent degradation into a boot failure on every
  * deployment carrying the legacy index — a far larger behaviour change than
@@ -508,6 +560,36 @@ export function createSeedWriteRefusals(): SeedWriteRefusals {
  * deployment boots at all. Loud is the ask; fatal is not. The pass still
  * returns its counts, still creates every row the database accepts, and is
  * still retried on the next boot and on organization creation.
+ *
+ * ## The two classes take DIFFERENT levels, and the split is the rule's own
+ *
+ * AGENTS.md "Degradation log levels" decides this with one question — *after
+ * the degradation, does the system still look normal from the outside while
+ * something it claims is persisted has not actually landed?*
+ *
+ * - **`unique-violation` -> `error`.** Yes, exactly. The boot goes on to log
+ *   "RBAC catalog seeded" at `info` over zero landed rows; nothing looks
+ *   broken; the loss surfaces later to somebody who cannot connect it back to
+ *   this boot. That is the #4420 accident on a different table — the durable
+ *   suspended-run store was attached to a table that was never created, every
+ *   write failed into a `warn` nobody read, and each restart silently dropped
+ *   every in-flight approval while the system reported itself healthy the
+ *   whole time. Per the rule, such a line owes both halves in its first
+ *   sentence: the CONSEQUENCE (the catalog did not land, and the deployment
+ *   will keep looking healthy) and the FIX (the migrate remedy).
+ * - **`other` -> `warn`.** No. A refusal that is not a unique violation is
+ *   typically a plain outage — an unreachable database, a transient fault —
+ *   which retries on the next boot and on organization creation, and which
+ *   the next person to open Setup discovers. Escalating it would be the
+ *   over-application the same section warns about: it is what trains everyone
+ *   to skim `error`, and that skimming is what made #4420's `warn` unreadable
+ *   in the first place.
+ *
+ * ⚠️ `check:durability-log-level` does NOT vouch for either choice. That gate
+ * is deliberately narrow: it judges a `catch` whose `try` calls an operation
+ * in its declared `DURABILITY_CRITICAL_CALLEES` vocabulary, and `ql.insert` is
+ * not in it. Its green over this file means the site is OUTSIDE the gate's
+ * reach — NOT MEASURED — never that the level was approved.
  *
  * ## Where the colliding index is named — and why not here
  *
@@ -524,7 +606,7 @@ export function createSeedWriteRefusals(): SeedWriteRefusals {
  * instead of re-deriving them, and prints only the value-free code channel
  * plus a column on the rare dialect that determinably names one.
  */
-export function warnSeedWriteRefusals(
+export function reportSeedWriteRefusals(
   logger: SeedLogger | undefined,
   refusals: SeedWriteRefusals,
   organizationId?: string,
@@ -544,11 +626,16 @@ export function warnSeedWriteRefusals(
     };
 
     if (entry.class === 'unique-violation') {
-      logger?.warn?.(
+      // Durability channel, with the mandatory `warn` fallback — see
+      // `logSeedDurabilityFailure`.
+      logSeedDurabilityFailure(
+        logger,
         `[security] ${entry.count} ${entry.object} row(s) were REFUSED BY A UNIQUE CONSTRAINT ` +
-          `while seeding the RBAC catalog — the catalog is INCOMPLETE and this pass's "seeded" ` +
-          `count is a count of the rows that LANDED, not of the rows that were declared. This is ` +
-          `a DEPLOYMENT SCHEMA defect rather than a data one: the catalog upserts by ` +
+          `while seeding the RBAC catalog — the catalog is INCOMPLETE, this pass's "seeded" count ` +
+          `is a count of the rows that LANDED rather than of the rows that were declared, and ` +
+          `THE DEPLOYMENT WILL GO ON LOOKING HEALTHY: the boot reports a completed seed and ` +
+          `nothing else fails, so this line is the only notice that the catalog did not land. ` +
+          `It is a DEPLOYMENT SCHEMA defect rather than a data one: the catalog upserts by ` +
           `(name, organization_id), so a refusal means the database still enforces a ` +
           `PLATFORM-WIDE unique index on the name column from before per-organization ` +
           `materialization. Under that index the first organization takes every catalog name and ` +

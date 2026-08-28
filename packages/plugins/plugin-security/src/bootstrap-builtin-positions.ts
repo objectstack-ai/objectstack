@@ -41,7 +41,8 @@ import {
   rowMatchesDeclaration,
   seedCtx,
   warnOrganizationLessRows,
-  warnSeedWriteRefusals,
+  reportSeedWriteRefusals,
+  type SeedLogger,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
@@ -95,7 +96,18 @@ async function tryUpdate(
 }
 
 interface SeedOptions {
-  logger?: { info: (m: string, meta?: Record<string, any>) => void; warn: (m: string, meta?: Record<string, any>) => void };
+  logger?: {
+    info: (m: string, meta?: Record<string, any>) => void;
+    warn: (m: string, meta?: Record<string, any>) => void;
+    /**
+     * Durability channel for a catalog write that was refused — see
+     * {@link SeedLogger.error} for the signature and why it is optional.
+     * Declared here so the level this seeder reaches for is visible in its
+     * own options rather than only inside the reporter; absent, the report
+     * falls back to `warn` and is never dropped.
+     */
+    error?: SeedLogger['error'];
+  };
   /**
    * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
    * one place an organization-less catalog row is the correct shape.
@@ -151,7 +163,7 @@ export async function bootstrapBuiltinRoles(
     warnOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
   }
   // Before the counts, so an operator reads WHY the count is zero beside it.
-  warnSeedWriteRefusals(options.logger, refusals, organizationId);
+  reportSeedWriteRefusals(options.logger, refusals, organizationId);
   if (seeded + updated > 0) {
     options.logger?.info?.('[security] built-in identity names + audience anchors seeded into sys_position', {
       seeded, updated, unchanged, total: rows.length, ...(organizationId ? { organization: organizationId } : {}),

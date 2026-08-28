@@ -30,7 +30,8 @@ import {
   createSeedWriteRefusals,
   seedCtx,
   warnOrganizationLessRows,
-  warnSeedWriteRefusals,
+  reportSeedWriteRefusals,
+  type SeedLogger,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
@@ -44,7 +45,7 @@ function genId(prefix: string): string {
 // what made a refused INSERT indistinguishable from "nothing to do": `seeded`
 // never increments, the pass returns normally, and the boot logs a successful
 // seed of zero rows. The refusal log is what carries the signal past this
-// frame — see `warnSeedWriteRefusals`. Still no rethrow: the pass reports and
+// frame — see `reportSeedWriteRefusals`. Still no rethrow: the pass reports and
 // continues, it does not decide whether the deployment boots.
 async function tryInsert(
   ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
@@ -62,7 +63,18 @@ async function tryUpdate(
 }
 
 interface SeedOptions {
-  logger?: { info: (m: string, meta?: Record<string, any>) => void; warn: (m: string, meta?: Record<string, any>) => void };
+  logger?: {
+    info: (m: string, meta?: Record<string, any>) => void;
+    warn: (m: string, meta?: Record<string, any>) => void;
+    /**
+     * Durability channel for a catalog write that was refused — see
+     * {@link SeedLogger.error} for the signature and why it is optional.
+     * Declared here so the level this seeder reaches for is visible in its
+     * own options rather than only inside the reporter; absent, the report
+     * falls back to `warn` and is never dropped.
+     */
+    error?: SeedLogger['error'];
+  };
   /**
    * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
    * one place an organization-less catalog row is the correct shape.
@@ -199,7 +211,7 @@ export async function bootstrapDeclaredPositions(
   }
   // Before the counts are reported, so an operator reads WHY the count is zero
   // in the same place they read the zero.
-  warnSeedWriteRefusals(options.logger, refusals, organizationId);
+  reportSeedWriteRefusals(options.logger, refusals, organizationId);
   if (unreadable > 0) {
     // Said once, with the count — see the sibling warn in
     // `bootstrap-declared-permissions.ts`.

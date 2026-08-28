@@ -69,7 +69,7 @@ import {
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
   createSeedWriteRefusals,
-  warnSeedWriteRefusals,
+  reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
@@ -123,7 +123,7 @@ async function tryFind(ql: any, object: string, where: any, limit = 100): Promis
 // write indistinguishable from "nothing to do": `seeded` never grows, the pass
 // returns normally, and the boot reports a successful seed of zero rows. Still
 // no rethrow — this pass reports, it does not decide whether the deployment
-// boots. See `warnSeedWriteRefusals` in `per-organization-catalog.ts`.
+// boots. See `reportSeedWriteRefusals` in `per-organization-catalog.ts`.
 async function tryInsert(
   ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
 ): Promise<any | null> {
@@ -326,7 +326,7 @@ export async function bootstrapPlatformAdmin(
   // is an early exit of the PROMOTION half, and the catalog seed above is
   // finished either way. Placing it at the end would make the diagnosis
   // conditional on how promotion happened to resolve.
-  warnSeedWriteRefusals(logger, refusals);
+  reportSeedWriteRefusals(logger, refusals);
 
   const seededCount = Object.keys(seeded).length;
   // [#11532] Under a walled posture these rows are organization-less BY RULING

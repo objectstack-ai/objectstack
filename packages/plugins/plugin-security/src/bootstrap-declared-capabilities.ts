@@ -77,7 +77,7 @@ import {
 } from './permission-set-projection.js';
 import {
   createSeedWriteRefusals,
-  warnSeedWriteRefusals,
+  reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
@@ -450,7 +450,7 @@ export async function bootstrapDeclaredCapabilities(
   // Before the counts, so an operator reads WHY the count is zero beside it.
   // This seeder is organization-less today (see the lookup note above), so the
   // report carries no organization either.
-  warnSeedWriteRefusals(options.logger, refusals);
+  reportSeedWriteRefusals(options.logger, refusals);
   if (out.unreadable > 0) {
     // [#11096] Said ONCE with the count, like the sibling seeders: a per-name
     // warn on a database that is down is a log flood that buries its own
