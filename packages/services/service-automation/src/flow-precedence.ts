@@ -45,7 +45,14 @@
 // larger change, and ADR-0048 does not ask for it — the ADR's answer for this
 // case is a precedence plus a warning, both of which are here.
 
-import { isCodeArtifactBody } from '@objectstack/objectql';
+// [#10062] From `@objectstack/metadata-core`, which this package DECLARES —
+// not from `@objectstack/objectql`, which it does not. The predicate is the
+// same one (it was sunk into metadata-core and objectql re-exports it), but the
+// import used to be an undeclared workspace dependency, and because the shared
+// tsup config externalises only `dependencies`/`peerDependencies` the bundler
+// answered it by inlining objectql's implementation into this package's dist.
+// `pnpm check:undeclared-dep-imports` is the gate over that class.
+import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import type { FlowContender, FlowShadowingRecord } from './engine.js';
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
