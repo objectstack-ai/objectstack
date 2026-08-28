@@ -80,9 +80,10 @@
  * `packages/cloud-connection/src/marketplace-proxy-plugin.ts` (38 bytes, inside
  * a declared MOUNT SOURCE). That is the naive-`//` family this gate exists for,
  * found live rather than argued from the shape. `packages/cli/src/utils/
- * console-route-ledger.conformance.test.ts` is the fourth guard in that family
- * and stays recorded: its population limb already stripped, so it was out of
- * that card's scope and nobody has re-read its scanner.
+ * console-route-ledger.conformance.test.ts` was the fourth guard in that family
+ * and was left recorded here because its population limb already stripped; the
+ * THIRD SHRINK below converts it, and its scanner was committing the same
+ * defect on 7 of that package's 110 sources.
  *
  * ## SECOND ROUND (#12475): every remaining row now carries a MEASUREMENT
  *
@@ -289,8 +290,6 @@ const LEDGER = new Map([
     { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the two brace-matched interface BODIES interfaceFields() strips -- ResolvedMultiNodeVerdict in packages/services/service-cluster/src/multi-node-gate.ts and MultiNodeGateVerdict in commands/serve.ts, 1,462 chars): agrees with the shared mask. Narrow by construction rather than by luck -- a TSDoc-only interface slice carries no regex literal and no string holding a comment opener. The rest of the file already imports maskComments' }],
   ['packages/cli/src/commands/serve-verify-security-parity.contract.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'specimen', why: 'the private two-regex strip this file carried until its conversion, kept as a NEGATIVE CONTROL that the shared mask beats it; converting it would delete the evidence' }],
-  ['packages/cli/src/utils/console-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packageSourceFiles(), 110 non-test .ts under packages/cli/src, 1.6 MB): DELETES LIVE CODE on 9 of them, 10,263 chars. Same defect and same spelling as the two the FIRST SHRINK found -- string-aware but REGEX-BLIND, so the doubled slash inside /^https?://i reads as a line-comment opener and the rest of the line goes: dev.ts:169, serve.ts:3021, start.ts:460 and start.ts:475 are live sites today. It also KEEPS 35,382 chars of block-comment prose swallowed by phantom STRINGS opened at a quote character inside a regex class. This is the fourth guard in that family, the one #12398 left recorded; its MOUNT_SHAPED identity is still exactly [utils/console.ts] under both strippers, so the blindness has not yet cost it a finding' }],
   ['packages/create-objectstack/src/template-registry.test.ts',
     { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/create-objectstack/src/index.ts): deletes no live code -- it has no block arm at all -- and therefore KEEPS 2,744 chars of block-comment prose, the FABRICATION direction. Its line arm is anchored and reaches only whole-line comments' }],
   ['packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
