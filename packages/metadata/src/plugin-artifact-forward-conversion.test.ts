@@ -30,7 +30,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveInstalledSpecVersion } from '@objectstack/metadata-core';
-import { MetadataPlugin } from './plugin';
+import { MetadataPlugin } from './plugin.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(HERE, '__fixtures__/hotcrm-17.1-built-permissions.artifact.json');

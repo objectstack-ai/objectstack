@@ -21,7 +21,7 @@ import {
   applyArtifactForwardConversions,
   parseRangeFloor,
   resolveInstalledSpecVersion,
-} from './artifact-forward-conversion';
+} from './artifact-forward-conversion.js';
 
 /** The measured 17.1-built shape: full CRUD plus the two retired lifecycle bits. */
 function legacyPermissionDefinition(protocolRange: string | undefined) {
