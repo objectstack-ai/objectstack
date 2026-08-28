@@ -230,7 +230,7 @@ export function searchResultIsNotTheGlobalSearchShape(): void {
  * all, whose published type was inferred from `unwrapResponse< …any… >`.
  *
  * Re-measured at `origin/main` the population is **39**, not the 38 the card
- * recorded — its own single-line reproducer cannot see `projects.get`, whose
+ * recorded — its own single-line reproducer cannot see `environments.get`, whose
  * type argument spans several lines. Of the 39, exactly **three** had a
  * verifiable published type to bind to; the other 36 are recorded on the
  * methods themselves and filed (#12034, #12036, #12038). The bar was not "a
@@ -376,7 +376,7 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
  *    (`restoredVersion`) whose false declaration this family just paid to
  *    remove.
  *
- * 2. `Environment` is the obvious-looking binding for `client.projects.*` and
+ * 2. `Environment` is the obvious-looking binding for `client.environments.*` and
  *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
  *    call speaks snake_case (measured from this repo's own CLI consumers:
  *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would

@@ -142,9 +142,12 @@ function matches(verb: string, path: string): Pattern | undefined {
  * `cloud`'s `packages/service-cloud/src/cloud-route-ledger.ts` gives all 90
  * routes its artifact API plugin mounts a reviewed disposition, and
  * `projects-namespace-coverage.test.ts` there drives this very SDK with a
- * recording `fetch` and matches every `projects.*` URL against it. That had to
+ * recording `fetch` and matches every control-plane URL against it. That had to
  * live in `cloud`: it depends on this repo, never the reverse, so the cloud
  * repo is the only place the mounted route set and the SDK are both in scope.
+ * (That file still carries the pre-ADR-0006-D2 name on the cloud side; renaming
+ * it is a recorded follow-up in the same coordinated window as this rename, and
+ * belongs to the cloud repo, not to this one.)
  * The exemption below stays because THIS suite still cannot see those routes —
  * it is a statement about where the coverage lives, not that there is none.
  *
@@ -159,7 +162,7 @@ function matches(verb: string, path: string): Pattern | undefined {
  * to park an unmatched URL.
  */
 const CONTROL_PLANE = '/api/v1/cloud/';
-const CONTROL_PLANE_NAMESPACE = 'projects.';
+const CONTROL_PLANE_NAMESPACE = 'environments.';
 
 /**
  * The AI plane. `/api/v1/ai/*` is served by `service-ai`, a Cloud/EE package in
@@ -425,15 +428,15 @@ describe('client URL conformance ↔ the union of all four route ledgers (#3642)
         'of the #3584 / #3611 / #3636 class:\n' + unmatched.join('\n'),
     ).toEqual([]);
 
-    // The control-plane hole, bounded from the other end: only `projects.*` may
-    // use it. Anything else reaching /api/v1/cloud/ is a method that has wandered
-    // off the data plane, and must not inherit this exemption.
+    // The control-plane hole, bounded from the other end: only `environments.*`
+    // may use it. Anything else reaching /api/v1/cloud/ is a method that has
+    // wandered off the data plane, and must not inherit this exemption.
     const trespassers = controlPlane.filter((e) => !e.startsWith(CONTROL_PLANE_NAMESPACE));
     expect(
       trespassers,
-      `non-projects methods targeting the control plane, which no in-repo ledger can vouch for:\n${trespassers.join('\n')}`,
+      `non-environments methods targeting the control plane, which no in-repo ledger can vouch for:\n${trespassers.join('\n')}`,
     ).toEqual([]);
-    expect(controlPlane.length, 'the projects namespace should still be reaching the control plane').toBeGreaterThan(0);
+    expect(controlPlane.length, 'the environments namespace should still be reaching the control plane').toBeGreaterThan(0);
 
     // The AI-plane hole, bounded the same way: only `ai.*` may use it. The
     // count assertion is the half that matters most here — if the namespace

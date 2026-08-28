@@ -180,7 +180,7 @@ export interface ClientConfig {
    * client injects an `X-Environment-Id` header on every request so the
    * server's tenant router can resolve the physical data-plane database.
    *
-   * @see docs/adr/0002-project-database-isolation.md
+   * @see docs/adr/0002-environment-database-isolation.md
    */
   environmentId?: string;
   /**
@@ -1795,19 +1795,19 @@ export class ObjectStackClient {
   /**
    * Environment Management Services
    *
-   * Environments are the v4.1+ isolation primitive — each project owns a
+   * Environments are the v4.1+ isolation primitive — each environment owns a
    * physically separate data-plane database. All Studio-level switching goes
    * through this API.
    *
    * Endpoints:
    * - GET    /api/v1/cloud/environments            → list environments
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
-   * - POST   /api/v1/cloud/environments            → provision a new project
+   * - POST   /api/v1/cloud/environments            → provision a new environment
    * - PATCH  /api/v1/cloud/environments/:id        → update (displayName, plan, status, …)
-   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active project
+   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
    *
-   * @see docs/adr/0002-project-database-isolation.md
+   * @see docs/adr/0002-environment-database-isolation.md
    */
   /**
    * ⛔ [#11925] Every unannotated method in this namespace, and in the
@@ -1830,7 +1830,7 @@ export class ObjectStackClient {
    * #8140 recorded, at family scale. The control-plane implementation is not
    * in this repo, so the casing cannot be settled from here.
    */
-  projects = {
+  environments = {
     /**
      * List environments visible to the current session. Optionally filter
      * by organization (control-plane query — not routed through a data-plane DB).
@@ -1843,16 +1843,16 @@ export class ObjectStackClient {
       const qs = params.toString();
       const url = `${this.baseUrl}/api/v1/cloud/environments${qs ? '?' + qs : ''}`;
       const res = await this.fetch(url);
-      return this.unwrapResponse<{ projects: any[]; total: number }>(res);
+      return this.unwrapResponse<{ environments: any[]; total: number }>(res);
     },
 
     /**
-     * Get a single project (joined with its database and membership row).
+     * Get a single environment (joined with its database and membership row).
      */
     get: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`);
       return this.unwrapResponse<{
-        project: any;
+        environment: any;
         database?: any;
         credential?: any;
         membership?: any;
@@ -1861,16 +1861,31 @@ export class ObjectStackClient {
     },
 
     /**
-     * Provision a new project. Delegates to
-     * `ProjectProvisioningService.provisionProject` on the server.
+     * Provision a new environment — `POST /api/v1/cloud/environments`.
+     *
+     * ⛔ This sentence names the ENDPOINT on purpose, and must keep doing so.
+     * It used to name a server class (`ProjectProvisioningService`, method
+     * `provisionProject`) that the control plane does not have: measured
+     * 2026-08-28 against the cloud repo's `main`, that spelling has ZERO hits
+     * anywhere in `packages/service-cloud/src`. The class was renamed there
+     * and this docblock rotted in silence, because the implementation lives in
+     * a repo this one never compiles against — no gate here could ever have
+     * caught it. The endpoint is the one identifier this method itself builds,
+     * so it is the only one an in-repo reader can verify. Do not reintroduce a
+     * server-class name here (ADR-0006 D1 point 3).
+     *
+     * What that endpoint does today: the control plane creates the
+     * `sys_environment` row, provisions its physically separate data-plane
+     * database, and answers `201` with the created environment. Environments
+     * are created EMPTY — starter content is installed afterwards from the App
+     * Marketplace (`sys_package` with `is_starter = true`), which
+     * `environments.packages.install` already does.
      *
      * No `template_id`: it was removed in #3731 because no control plane has
      * ever read it — the `blank`/`crm`/`todo` registry it addressed died with
      * the `apps/server` templates route, and `sys_environment` has no such
-     * column, so the field was accepted, transmitted, and dropped. Starter
-     * content is installed from the App Marketplace (`sys_package` with
-     * `is_starter = true`), which `projects.packages.install` already does.
-     * Its listing counterpart went the same way in #3702.
+     * column, so the field was accepted, transmitted, and dropped. Its
+     * listing counterpart went the same way in #3702.
      */
     create: async (req: {
       organization_id: string;
@@ -1891,24 +1906,43 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify(req),
       });
-      return this.unwrapResponse<{ project: any; database: any }>(res);
+      // Two corrections in one declaration, both measured against the cloud
+      // repo's `main` on 2026-08-28 (the handler is
+      // `packages/service-cloud/src/routes/environment-lifecycle.ts`, POST
+      // `/cloud/environments`, which builds its body key by key):
+      //
+      //  - the single-row key is `environment`. This route has NEVER emitted a
+      //    `project` key — unlike its siblings it was not carrying the old
+      //    spelling, so the old declaration here was not merely pre-rename, it
+      //    was FALSE against the running control plane.
+      //  - there is no `database` key. It was declared non-optional, so every
+      //    caller was told `res.database` is always present when the server
+      //    never sends it at all; reading it is a runtime TypeError the types
+      //    promised could not happen. `get` is the method that really does
+      //    answer a `database` block.
+      //
+      // The keys the route DOES send beside `environment` (`warnings`,
+      // `durationMs`, and a conditional `hostnameAssignment`) are deliberately
+      // not declared here — adding them is new published surface and a
+      // separate decision, not part of this rename.
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Update a project (display_name, plan, status, is_default, metadata).
+     * Update an environment (display_name, plan, status, is_default, metadata).
      */
     update: async (id: string, patch: Record<string, unknown>) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Cascade-delete a project: cleans up credential/member/package_installation
+     * Cascade-delete an environment: cleans up credential/member/package_installation
      * rows, releases the physical database via the provisioning adapter, and
-     * removes the `sys_environment` row. Default projects require `force: true`.
+     * removes the `sys_environment` row. Default environments require `force: true`.
      */
     delete: async (id: string, opts?: { force?: boolean }) => {
       const qs = opts?.force ? '?force=1' : '';
@@ -1920,19 +1954,19 @@ export class ObjectStackClient {
     },
 
     /**
-     * Activate this project for the current session. The server writes
+     * Activate this environment for the current session. The server writes
      * `active_environment_id` on the better-auth session; subsequent requests
-     * are routed to this project's database.
+     * are routed to this environment's database.
      */
     activate: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/activate`, {
         method: 'POST',
       });
-      return this.unwrapResponse<{ project: any; sessionUpdated: boolean }>(res);
+      return this.unwrapResponse<{ environment: any; sessionUpdated: boolean }>(res);
     },
 
     /**
-     * Rotate the active database credential for this project.
+     * Rotate the active database credential for this environment.
      */
     rotateCredential: async (id: string, plaintext: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/credentials/rotate`, {
@@ -1943,7 +1977,7 @@ export class ObjectStackClient {
     },
 
     /**
-     * Update the hostname bound to this project. Validates format and
+     * Update the hostname bound to this environment. Validates format and
      * uniqueness server-side; invalidates the dispatcher's routing cache.
      */
     updateHostname: async (id: string, hostname: string) => {
@@ -1951,14 +1985,14 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify({ hostname }),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Update the visibility of this project ('private' | 'public').
-     * `private` (default) hides the project from /pub/v1 enumeration but
+     * Update the visibility of this environment ('private' | 'public').
+     * `private` (default) hides the environment from /pub/v1 enumeration but
      * still allows anonymous artifact downloads when the URL includes an
-     * exact `?commit=<id>` (share-by-link). `public` lists the project and
+     * exact `?commit=<id>` (share-by-link). `public` lists the environment and
      * freely exposes all revisions.
      */
     updateVisibility: async (id: string, visibility: 'private' | 'public') => {
@@ -1966,11 +2000,11 @@ export class ObjectStackClient {
         method: 'PATCH',
         body: JSON.stringify({ visibility }),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * List published artifact revisions for a project. Each revision has
+     * List published artifact revisions for an environment. Each revision has
      * an immutable commitId (content-addressable) and storage_key.
      * Optional `branch` filter narrows to a single logical branch
      * (default branch `main` also matches rows with NULL `branch`).
@@ -2004,7 +2038,7 @@ export class ObjectStackClient {
     },
 
     /**
-     * List logical branches for a project. Each branch has a head commit
+     * List logical branches for an environment. Each branch has a head commit
      * (latest published revision on that branch) and a count of revisions.
      * Branches without a head row (e.g. all rows demoted) are omitted.
      */
@@ -2057,21 +2091,21 @@ export class ObjectStackClient {
     },
 
     /**
-     * Retry provisioning for a project stuck in `failed` (or
+     * Retry provisioning for an environment stuck in `failed` (or
      * `provisioning`) state. The server re-runs the driver handshake; on
-     * success the project flips to `active`, on failure it stays
+     * success the environment flips to `active`, on failure it stays
      * `failed` with `metadata.provisioningError` updated.
      */
     retryProvisioning: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/retry`, {
         method: 'POST',
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
      * List ObjectQL drivers registered on the server. Useful for populating a
-     * driver selector when provisioning a new project (memory / turso /
+     * driver selector when provisioning a new environment (memory / turso /
      * future sql drivers). Returned `name` is the short alias (e.g. `memory`,
      * `turso`); `driverId` is the full FQN (e.g. `com.objectstack.driver.memory`).
      */
@@ -2089,17 +2123,17 @@ export class ObjectStackClient {
     // back when a route exists to back it, with an `sdk` ledger row proving so.
 
     /**
-     * Per-project package installation management (Power Apps "solution" model).
+     * Per-environment package installation management (Power Apps "solution" model).
      * Install records are stored in the environment's own database.
      */
     packages: {
-      /** List all packages installed in a specific project. */
+      /** List all packages installed in a specific environment. */
       list: async (envId: string) => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(envId)}/packages`);
         return this.unwrapResponse<{ packages: any[]; total: number }>(res);
       },
 
-      /** Install a package into the project. */
+      /** Install a package into the environment. */
       install: async (envId: string, body: {
         packageId: string;
         version?: string;
@@ -2135,7 +2169,7 @@ export class ObjectStackClient {
         return this.unwrapResponse<{ package: any }>(res);
       },
 
-      /** Uninstall a package from the project. Forbidden for scope=platform packages. */
+      /** Uninstall a package from the environment. Forbidden for scope=platform packages. */
       uninstall: async (envId: string, pkgId: string) => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(envId)}/packages/${encodeURIComponent(pkgId)}`, {
           method: 'DELETE',
@@ -3832,7 +3866,7 @@ export class ObjectStackClient {
    *
    * The path is fixed (`/api/v1/actions`), not discovery-routed: `actions` is
    * not part of `ApiRoutesSchema`, so `getRoute()` cannot resolve it — same
-   * precedent as the `projects` surface's `/api/v1/cloud`.
+   * precedent as the `environments` surface's `/api/v1/cloud`.
    *
    * The dispatcher accepts the record id either in the URL or in the body;
    * this client always sends it in the body (`{ recordId, params }`), which
@@ -3909,7 +3943,7 @@ export class ObjectStackClient {
    * returned exactly once (only its hash is stored; it is never
    * re-displayable). Until this surface existed the SDK had no way to create
    * an API key at all. Fixed path — `keys` is not in `ApiRoutesSchema`
-   * (same precedent as `actions` / `projects`).
+   * (same precedent as `actions` / `environments`).
    */
   keys = {
       /**
