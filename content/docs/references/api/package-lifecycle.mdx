@@ -28,11 +28,11 @@ below into this `/api` namespace (ruling 5A: re-export, never a second
 copy) because the route-ledger resolver looks names up only in
 `@objectstack/spec/api`.
 
-The retired `PackageRollbackResponseSchema` / `PackageApiContracts.
-rollbackPackage` (see `./package-api.zod.ts`) declared a VERSION rollback
-against the live COMMIT-rollback path; `RollbackToPackageCommitResponseSchema`
-below is the true contract, authored after that retirement per the ruling's
-sequencing (3A).
+The retired `PackageRollbackResponseSchema` and its
+`PackageApiContracts.rollbackPackage` binding (see `./package-api.zod.ts`)
+declared a VERSION rollback against the live COMMIT-rollback path;
+`RollbackToPackageCommitResponseSchema` below is the true contract,
+authored after that retirement per the ruling's sequencing (3A).
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/package-lifecycle.zod.ts`

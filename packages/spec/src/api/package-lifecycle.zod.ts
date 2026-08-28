@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * # Package lifecycle response contracts (#12038)
+ * ## Package lifecycle response contracts (#12038)
  *
  * Response payloads for the dispatcher-served `packages.*` lifecycle routes —
  * the ADR-0067 commit timeline, the ADR-0033 draft batch doors, the ADR-0070
@@ -24,11 +24,11 @@
  * copy) because the route-ledger resolver looks names up only in
  * `@objectstack/spec/api`.
  *
- * The retired `PackageRollbackResponseSchema` / `PackageApiContracts.
- * rollbackPackage` (see `./package-api.zod.ts`) declared a VERSION rollback
- * against the live COMMIT-rollback path; `RollbackToPackageCommitResponseSchema`
- * below is the true contract, authored after that retirement per the ruling's
- * sequencing (3A).
+ * The retired `PackageRollbackResponseSchema` and its
+ * `PackageApiContracts.rollbackPackage` binding (see `./package-api.zod.ts`)
+ * declared a VERSION rollback against the live COMMIT-rollback path;
+ * `RollbackToPackageCommitResponseSchema` below is the true contract,
+ * authored after that retirement per the ruling's sequencing (3A).
  */
 
 import { z } from 'zod';
