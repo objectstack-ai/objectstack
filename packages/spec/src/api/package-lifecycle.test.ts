@@ -51,7 +51,7 @@ describe('DiscardPackageDraftsResponseSchema declares the discard-drafts body (#
       { type: 'view', name: 'account_pipeline' },
       { type: 'object', name: 'lead_source' },
     ],
-    failed: [{ type: 'flow', name: 'lead_convert', error: 'item is locked', code: 'item_locked' }],
+    failed: [{ type: 'flow', name: 'lead_convert', error: 'item is locked', code: 'ITEM_LOCKED' }],
   };
 
   it('parses the real discard report and PRESERVES every member', () => {
