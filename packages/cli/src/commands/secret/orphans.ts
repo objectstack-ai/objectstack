@@ -336,8 +336,16 @@ export default class SecretOrphans extends Command {
       });
       let verified: PreDeleteExport;
       try {
-        // Owner-only: this file holds cipher material.
-        writeFileSync(exportPath!, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+        // Owner-only, and CREATED here or not written at all. `mode` is applied
+        // only when the file is created, so a default (truncating) write onto a
+        // path some other process won that moment would inherit THAT file's owner
+        // and permissions and put cipher material in it. The `existsSync` check
+        // above still runs — it gives the better early message — but it sits
+        // before the boot, the scan and the confirmation, so it is a pre-check
+        // across an arbitrarily long window, never the guarantee. `wx` makes the
+        // guarantee atomic: a file that already exists throws EEXIST straight into
+        // the `export_failed` refusal below, with nothing deleted.
+        writeFileSync(exportPath!, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
         // Read back rather than trusting the write. A write that reported
         // success and produced a short or unreadable file would leave the
         // delete with no record at all, which is the one outcome the export
