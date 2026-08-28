@@ -92,7 +92,23 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     process.env.NODE_ENV = 'production';
     // The fixture is deliberately artifact-LESS: the config is the only host.
     process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
-  });
+
+    // Materialize the deployment's tables the way `os migrate apply` does —
+    // boot deferred, then flush — so the drift cases below start from a
+    // database that exists and each one can arrange its own state.
+    const boot = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      await boot.flushSchemaDdl();
+    } finally {
+      await boot.shutdown();
+    }
+  }, 60_000);
 
   afterAll(() => {
     if (savedEnv.NODE_ENV === undefined) delete process.env.NODE_ENV;
@@ -124,8 +140,50 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     return Number((Array.isArray(rows) ? rows[0] : rows)?.c ?? -1);
   };
 
-  it('registers the host config\'s objects — well above the five-table baseline', async () => {
+  /**
+   * Put `sys_position` back into the pre-respelling physical shape — the
+   * per-organization composite retired, the global single-column unique
+   * present. This is cloud#1695's index, verbatim.
+   *
+   * Idempotent, and called by every test that needs it, so the cases below do
+   * not depend on each other's order. An integration file whose third test only
+   * passes because the second ran is a suite that reports the wrong thing the
+   * first time one of them is skipped.
+   */
+  const degradeToLegacyUnique = async (): Promise<void> => {
     const stack = await bootLikeMigrate();
+    try {
+      const k = (stack.driver as any).knex;
+      const present = await indexNames(stack.driver, 'sys_position');
+      if (present.includes('uniq_sys_position_organization_id_name')) {
+        await k.raw('DROP INDEX uniq_sys_position_organization_id_name');
+      }
+      if (!present.includes('uniq_sys_position_name')) {
+        await k.raw('CREATE UNIQUE INDEX uniq_sys_position_name ON sys_position (name)');
+      }
+      if (await countRows(stack.driver, 'sys_position') === 0) {
+        await k('sys_position').insert({
+          id: 'pos_1',
+          name: 'org_admin',
+          label: 'Org Admin',
+          organization_id: 'org_jia',
+        });
+      }
+    } finally {
+      await stack.shutdown();
+    }
+  };
+
+  it('registers the host config\'s objects — well above the five-table baseline', async () => {
+    // A database of its own: this case is about what a FRESH target reports as
+    // pending, which is only observable before anything created the tables.
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${join(dir, 'fresh.db')}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
     try {
       expect(stack.driver).toBeTruthy();
       expect(stack.composition.hostConfigLoaded).toBe(true);
@@ -145,31 +203,17 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
       expect(pending).toContain('sys_migration');
       for (const table of ARTIFACTLESS_BASELINE_TABLES) expect(pending).toContain(table);
 
-      // Create them, the way `os migrate apply` does after confirmation.
+      // And they really are creatable — the work `os migrate apply` flushes
+      // after confirmation.
       const created = await stack.flushSchemaDdl();
       expect(created.length).toBe(stack.pendingSchemaWork.length);
     } finally {
       await stack.shutdown();
     }
-  });
+  }, 60_000);
 
   it('SEES the legacy platform-wide unique its own boot message prescribes this command for', async () => {
-    // Degrade `sys_position` to the pre-respelling physical shape: the
-    // per-organization composite retired, the global single-column unique back.
-    // This is cloud#1695's index, verbatim.
-    {
-      const stack = await bootLikeMigrate();
-      const k = (stack.driver as any).knex;
-      await k.raw('DROP INDEX uniq_sys_position_organization_id_name');
-      await k.raw('CREATE UNIQUE INDEX uniq_sys_position_name ON sys_position (name)');
-      await k('sys_position').insert({
-        id: 'pos_1',
-        name: 'org_admin',
-        label: 'Org Admin',
-        organization_id: 'org_jia',
-      });
-      await stack.shutdown();
-    }
+    await degradeToLegacyUnique();
 
     const stack = await bootLikeMigrate();
     try {
@@ -190,9 +234,11 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     } finally {
       await stack.shutdown();
     }
-  });
+  }, 60_000);
 
   it('writes NOTHING while planning — no host seeder runs', async () => {
+    await degradeToLegacyUnique();
+
     const stack = await bootLikeMigrate();
     try {
       await stack.driver!.detectManagedDrift();
@@ -207,9 +253,10 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     } finally {
       await stack.shutdown();
     }
-  });
+  }, 60_000);
 
   it('applies the replacement without --allow-destructive, keeps the row, and converges', async () => {
+    await degradeToLegacyUnique();
     {
       const stack = await bootLikeMigrate();
       try {
@@ -240,7 +287,7 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     } finally {
       await replan.shutdown();
     }
-  });
+  }, 60_000);
 });
 
 describe('an artifact-less, config-less project is unchanged (#12938 baseline pin)', () => {
@@ -291,5 +338,5 @@ describe('an artifact-less, config-less project is unchanged (#12938 baseline pi
     } finally {
       await stack.shutdown();
     }
-  });
+  }, 60_000);
 });
