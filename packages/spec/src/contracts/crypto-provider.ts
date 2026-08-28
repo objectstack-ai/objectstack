@@ -1,13 +1,34 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ICryptoProvider — pluggable encryption hook for the Settings subsystem.
+ * ICryptoProvider — pluggable encryption hook shared by every platform
+ * surface that seals a secret at rest.
  *
  * The provider's only job is to round-trip plaintext to a *handle*
  * (a string the caller persists; opaque to everyone else). The handle
- * doubles as the value stored in `sys_setting.value_enc` — it usually
- * points to a row in `sys_secret`, but the contract intentionally
- * leaves the format up to the implementation.
+ * usually points to a row in `sys_secret`, but the contract intentionally
+ * leaves the format up to the implementation. Where the caller *records*
+ * the handle differs per producer — see "Producers" below.
+ *
+ * Producers — three independent call sites construct a
+ * {@link CryptoContext}, and only the first of them means "settings":
+ *
+ *  1. **Settings** (`SettingsService`) — `ctx.namespace` is the settings
+ *     namespace, `ctx.key` the specifier key; `handle.id` is recorded in
+ *     `sys_setting.value_enc`.
+ *  2. **Object secret fields** (the ObjectQL engine's secret-field path)
+ *     — `ctx.namespace` is the **object name**, `ctx.key` the **field
+ *     name**; `handle.id` is recorded as a `secret:` ref on the business
+ *     row itself.
+ *  3. **Datasource credentials** (the datasource secret binder) —
+ *     `ctx.namespace` is caller-supplied (default `'datasource'`),
+ *     `ctx.key` the datasource name; `handle.id` is recorded as the
+ *     artefact's `sys_secret:` credentialsRef.
+ *
+ * All three persist a `sys_secret` row keyed by `handle.id`, and all three
+ * share one flat `(namespace, key)` space: `sys_secret` declares that pair
+ * **non-unique** precisely because it does not attribute a row to a
+ * producer. See {@link CryptoContext} for what that costs an AAD binding.
  *
  * Why an interface (not a concrete class):
  *
@@ -24,15 +45,16 @@
  *
  * Lifecycle:
  *
- *  1. `encrypt(plain)` — called once per `set()` for an encrypted
- *     specifier. Returns a `CryptoHandle` describing both the storage
+ *  1. `encrypt(plain, ctx)` — called once per write of an encrypted
+ *     value (a settings `set()`, an object secret field, a datasource
+ *     credential). Returns a `CryptoHandle` describing both the storage
  *     handle and the KMS metadata. The caller persists a `sys_secret`
- *     row keyed by `handle.id` and stores `handle.id` in
- *     `sys_setting.value_enc`.
- *  2. `decrypt(handle)` — called on every `get()` of an encrypted
- *     specifier to reveal the plaintext to the consumer (e.g.
- *     EmailService building a transport). Implementations may cache
- *     decrypted plaintext in-process for the duration of a request.
+ *     row keyed by `handle.id` and records `handle.id` wherever its
+ *     producer keeps it (see "Producers" above).
+ *  2. `decrypt(handle, ctx)` — called on every read of an encrypted
+ *     value to reveal the plaintext to the consumer (e.g. EmailService
+ *     building a transport). Implementations may cache decrypted
+ *     plaintext in-process for the duration of a request.
  *  3. `rotateKey(handle)` — re-wraps the same plaintext under a new
  *     KMS key. Returns a new handle (typically `version + 1`). Audit
  *     trail records the rotation as `action='rotate'`.
@@ -41,7 +63,12 @@
  * multiple async tasks. They should *not* assume sequential access.
  */
 export interface CryptoHandle {
-  /** Stable opaque id stored in `sys_setting.value_enc`. */
+  /**
+   * Stable opaque id — the key of the `sys_secret` row, recorded by the
+   * producer wherever that producer keeps its reference (`sys_setting
+   * .value_enc`, a `secret:` ref on a business row, or a `sys_secret:`
+   * credentialsRef). Not a settings-only coordinate.
+   */
   readonly id: string;
   /** Identifier of the KMS key that wrapped the cipher. */
   readonly kmsKeyId: string;
@@ -60,12 +87,42 @@ export interface CryptoHandle {
 /**
  * Optional context passed to encrypt/decrypt so providers can implement
  * Additional Authenticated Data (AAD) bindings — e.g. AWS KMS encryption
- * context. Helps reject ciphertexts that were copied across namespaces.
+ * context.
+ *
+ * ⚠️ **What an AAD over this pair does and does not guarantee.**
+ * `(namespace, key)` is one flat space shared by the three producer
+ * vocabularies listed under {@link ICryptoProvider} — settings
+ * namespace/specifier key, object name/field name, datasource binder —
+ * and nothing reserves a name in one vocabulary against another. So a
+ * provider binding its ciphertext to this pair **rejects a ciphertext
+ * swapped between two coordinates within one producer's vocabulary** (a
+ * settings value moved to another specifier; a secret field moved to
+ * another field). It does **NOT** exclude a cross-vocabulary pair: an
+ * object named `mail` carrying a secret field named `api_key` yields the
+ * same coordinate as the `mail` settings namespace's `api_key` specifier,
+ * under the same provider and key, in a `sys_secret` table that permits
+ * both rows — and a ciphertext swapped between those two rows decrypts
+ * cleanly. Implementations MUST NOT treat this pair as attributing a
+ * ciphertext to a producer.
+ *
+ * This describes the contract as it stands today, not the shape it is
+ * meant to keep: the intended end state is a producer-discriminated AAD
+ * (a scope discriminant on this type, delimiter-safe encoding), deferred
+ * because it is a breaking `ICryptoProvider` change plus an at-rest
+ * rewrap of every existing ciphertext. Until that lands, the paragraph
+ * above is the guarantee — do not read a stronger one into it.
  */
 export interface CryptoContext {
-  /** Settings namespace the value belongs to. */
+  /**
+   * Producer-scoped namespace: a settings namespace, an **object name**
+   * (secret fields), or a caller-supplied datasource namespace (default
+   * `'datasource'`). Not a settings namespace in general.
+   */
   namespace: string;
-  /** Specifier key within the namespace. */
+  /**
+   * Producer-scoped key within {@link CryptoContext.namespace}: a settings
+   * specifier key, a **field name** (secret fields), or a datasource name.
+   */
   key: string;
   /** Optional tenant id for multi-tenant key segregation. */
   tenantId?: string;
@@ -73,8 +130,9 @@ export interface CryptoContext {
 
 export interface ICryptoProvider {
   /**
-   * Encrypt plaintext and return a handle. The handle is stored in
-   * `sys_secret` and referenced by `sys_setting.value_enc`.
+   * Encrypt plaintext and return a handle. The caller persists it as a
+   * `sys_secret` row and references it from wherever its producer keeps
+   * the reference (see "Producers" on {@link ICryptoProvider}).
    */
   encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle>;
 
@@ -89,7 +147,8 @@ export interface ICryptoProvider {
    * Re-wrap the plaintext under the provider's current KMS key.
    * The returned handle replaces the input handle in `sys_secret`.
    * Implementations SHOULD bump `version` and update `kmsKeyId` while
-   * leaving `id` stable (so `sys_setting.value_enc` need not be rewritten).
+   * leaving `id` stable, so no producer's stored reference to the handle
+   * has to be rewritten.
    */
   rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle>;
 

@@ -48,7 +48,14 @@ export interface DatasourceSecretBinderDeps {
   engine: SecretStoreEngineLike;
   /** Crypto provider that wraps cleartext into a {@link CryptoHandle}. */
   cryptoProvider: ICryptoProvider;
-  /** Settings namespace recorded on the secret row (default `'datasource'`). */
+  /**
+   * Namespace recorded on the secret row and used as the `CryptoContext`
+   * namespace (default `'datasource'`). This is the datasource producer's
+   * own vocabulary, **not** a settings namespace — the three producers of
+   * `sys_secret` rows share one flat `(namespace, key)` space and the pair
+   * does not attribute a row to a producer. See `CryptoContext` in
+   * `@objectstack/spec`.
+   */
   namespace?: string;
 }
 
