@@ -762,7 +762,7 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 **请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`**(坑与端点事实住 platform-readings);④ 轮次报告单列「awaiting a human merge」(「等人来
 合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 转 draft
-与 disable 都做再验队列 ref(转 draft 单独不可靠,两向相反实测住 platform-readings)。**skills 车道自有 PR 再按 diff 内容分流**(维护者 2026-08-26 裁定,原话:「skills 中的
+与 disable 都做,出队以阳性探针答、ref 缺席只旁证不承载结论(探针与两向相反实测住 platform-readings)。**skills 车道自有 PR 再按 diff 内容分流**(维护者 2026-08-26 裁定,原话:「skills 中的
 pr，只有包含md文件时需要推给我审核，其他代码文件你直接自己审核。」):diff 含任一 `.md` 文件 ⇒
 上述终局四件套照旧;纯代码面(`scripts/pm/` 工具、`.claude/` hooks/workflows/settings、`skills/**` 非
 md 产物)⇒ skills 席按契约复审档自审(清单不减)后直接落地(ready → 入队),⛔ 不推维护者;分

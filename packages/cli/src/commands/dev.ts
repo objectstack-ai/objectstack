@@ -18,6 +18,11 @@ import {
 } from '../utils/dev-restart.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
+// The ONE port contract, shared with `start` and with the `serve` child this
+// command spawns (#12673). ⛔ Nothing about ports is declared in this file —
+// no range, no reader, no wording; a second copy of the bound is exactly what
+// #12620 and #12662 protected against.
+import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
@@ -385,6 +390,51 @@ export default class Dev extends Command {
       printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
+
+      // ── dev's own door on the ONE port contract (#12673) ──────────────
+      // Everything about the port — the range, the reader, the refusal prose —
+      // is imported from `utils/port-contract.ts`; this command declares none
+      // of it. That is the point of the card: `os dev` had no port validation
+      // at all, so an impossible value travelled to the `serve` child, which
+      // refused it under the name of the CHANNEL it arrived on. Measured on
+      // `origin/main` before this door existed: `PORT=abc os dev` and
+      // `OS_PORT=abc os dev` were both refused as `--port "abc"` — the one
+      // spelling the operator had not used, because the forwarding below
+      // renames every source to `--port`.
+      //
+      // ⭐ Placement is adjacent to `port` ON PURPOSE, not merely convenient.
+      // The refusal has to cover exactly the text this command FORWARDS, and
+      // the `port ? …` guard in the spawn argv below is what decides that. A
+      // door hoisted to the top of `run()` would be a second copy of that
+      // decision, free to drift from it; four lines apart, the two read one
+      // variable. It is still ahead of every spawn, every socket and every
+      // child process, which is all "before spawning" has ever meant here.
+      //
+      // ⛔ The `if (port)` is load-bearing, and MEASURED rather than assumed:
+      // `os dev --port ""` boots today. An empty string is falsy, so the guard
+      // below drops it and the child resolves its own default — so a door that
+      // refused every non-parsing text would refuse a value that starts a
+      // server, narrowing a published command's accept set, which this card is
+      // forbidden to do. (`PORT=""` reaches the child by inheritance instead,
+      // and `serve` refuses it there naming `PORT` — correctly, since that IS
+      // the spelling the operator set.)
+      if (port) {
+        // `flags.port === undefined` answers the same question oclif's
+        // `setFromDefault` answers for `serve`: did this come from argv? This
+        // flag carries no `default`, so there is no oclif metadata to read —
+        // and none to trust either, since oclif runs neither a flag `parse`
+        // nor an integer `min`/`max` over a default (measured; see the
+        // `describePortSource` docblock).
+        const portSource = describePortSource(flags.port === undefined);
+        if (parseRequestedPort(port) === null) {
+          // stderr, like `serve`'s refusal and for the same #7915 reason: this
+          // command's stdout is the fd the child's stdio MCP transport writes
+          // JSON-RPC frames to.
+          process.stderr.write(`${formatInvalidPortNotice(port, portSource)}\n`);
+          process.exit(1);
+        }
+      }
+
       const binPath = process.argv[1];
       const requestedPort = port ?? '3000';
 
