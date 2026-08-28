@@ -253,13 +253,14 @@ describe('[#12181] the withheld third carrier', () => {
     it('`dropStorage` is not a member of the bag, and never reaches the wire', async () => {
         const { client, fetchMock } = createMockClient(RESET_OK);
         await client.meta.deleteItem('view', 'shared_grid', {
-            // @ts-expect-error — `dropStorage` is deliberately NOT a member of
+            // `dropStorage` is deliberately NOT a member of
             // `DeleteMetaItemOptions` (2026-08-28 ruling on #12181: the one
             // carrier that ADDS destructive reach, with no measured caller).
             // This is the type-level half of the withholding; the runtime half
-            // is below. Adding the member turns this line into an "unused
-            // @ts-expect-error" error, so the withholding cannot be undone
-            // silently.
+            // is below. Adding the member turns the directive on the next line
+            // into an "unused '@ts-expect-error'" error (TS2578), so the
+            // withholding cannot be undone silently.
+            // @ts-expect-error — dropStorage is not part of this bag, on purpose.
             dropStorage: true,
         });
         // …and nothing leaks onto the URL through the excess property either.
