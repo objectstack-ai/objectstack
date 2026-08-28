@@ -1100,13 +1100,16 @@ export const LifecycleSchema = lazySchema(() => strictObject({
  * Deferred (not part of MVP):
  *   - explicit per-field in-group ordering
  *   - nested groups / sub-groups
- *   - group-level visibility predicates (a `visibleOn` key existed here
- *     briefly with no consumer anywhere; removed per ADR-0085 / ADR-0049
- *     enforce-or-remove — re-add together with its enforcement when a
- *     surface actually evaluates it)
+ *
+ * Group-level visibility (`visibleWhen`) closed the ADR-0049 enforce-or-remove
+ * loop in BOTH directions: a predicate slot existed here briefly with no
+ * consumer on any surface and was REMOVED per ADR-0085 / ADR-0049; it is
+ * re-declared now that the form renderer's section-gating contract actually
+ * evaluates a section predicate (the whole group — header included — hides
+ * when it is FALSE), so declared = enforced held on day one both times.
  *
  * Derivation semantics (declared order, empty groups dropped, ungrouped
- * trailing bucket, collapse passthrough) are single-sourced in
+ * trailing bucket, collapse + visibleWhen passthrough) are single-sourced in
  * `deriveFieldGroupLayout` (field-group-layout.ts, ADR-0085 §5) — UI
  * renderers consume that helper instead of re-implementing the rules.
  *
@@ -1148,15 +1151,10 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
       '`expanded` is not a group key — use the `collapse` enum: ' +
       "`collapse: 'expanded'` (collapsible, starts open), `'collapsed'` (starts closed), " +
       "or `'none'` (always open, no toggle).",
-    // Tombstone: this key really did exist here, briefly, reading nothing.
-    visibleWhen:
-      '`visibleWhen` was REMOVED from field groups (ADR-0085 / ADR-0049 enforce-or-remove) ' +
-      '— it existed here briefly with no consumer on any surface, so it never gated ' +
-      'anything. Gate the individual fields, or assign a Page for per-surface control.',
     visibleOn:
-      '`visibleOn` is not a field-group key — group-level visibility predicates were ' +
-      'removed under ADR-0085 / ADR-0049 (nothing evaluated them). Gate the individual ' +
-      'fields, or assign a Page.',
+      '`visibleOn` is not a field-group key — the section predicate slot is `visibleWhen` ' +
+      '(ADR-0089 canonical spelling; re-added with its enforcement under ADR-0085 §5). ' +
+      'Write `visibleWhen: <CEL>` — FALSE hides the whole group, header included.',
   },
 }, {
   /** Group key — referenced by `Field.group` to assign a field to this group. Must be snake_case. */
@@ -1172,6 +1170,23 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
 
   /** Optional description / help text shown under the group header. */
   description: z.string().optional().describe('Optional description shown under the group header'),
+
+  /**
+   * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
+   * spelling shared with field/action predicates. Evaluated by the form
+   * renderer's section-gating contract against the record in scope: FALSE (or
+   * a faulting predicate — fail-closed) hides the WHOLE group, header
+   * included; TRUE (or absent) shows it. `deriveFieldGroupLayout` passes it
+   * through to the derived section verbatim.
+   *
+   * History (ADR-0049 enforce-or-remove, both directions): the slot was
+   * removed while nothing on any surface evaluated it, and re-declared
+   * together with its enforcement once the section-gating consumer shipped —
+   * declared = enforced on day one, both times.
+   */
+  visibleWhen: ExpressionInputSchema.optional().describe(
+    "Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'`",
+  ),
 
   /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every

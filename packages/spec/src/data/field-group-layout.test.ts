@@ -114,6 +114,49 @@ describe('deriveFieldGroupLayout (ADR-0085 §5)', () => {
     })!;
     expect(sections[0].label).toBe('billing');
   });
+
+  // `visibleWhen` passthrough — the ADR-0049 re-introduction WITH enforcement:
+  // the slot only exists because the renderer's section-gating contract now
+  // evaluates it, and the derivation's whole job here is to CARRY it, verbatim,
+  // in both the shapes real metadata arrives in.
+  describe('visibleWhen passthrough (ADR-0085 §5 re-introduction)', () => {
+    const derive = (group: Record<string, unknown>) =>
+      deriveFieldGroupLayout({
+        fieldGroups: [group],
+        fields: { a: { group: 'g' } },
+      })![0];
+
+    it('carries a bare CEL string through verbatim (author / bare-DB form)', () => {
+      expect(derive({ key: 'g', label: 'G', visibleWhen: "record.type == 'invoice'" }).visibleWhen)
+        .toBe("record.type == 'invoice'");
+    });
+
+    it('carries an Expression envelope through verbatim (post-parse form)', () => {
+      const envelope = { dialect: 'cel', source: "record.type == 'invoice'" };
+      expect(derive({ key: 'g', label: 'G', visibleWhen: envelope }).visibleWhen).toBe(envelope);
+    });
+
+    it('omits the key entirely when the group declares no predicate', () => {
+      expect('visibleWhen' in derive({ key: 'g', label: 'G' })).toBe(false);
+    });
+
+    it('drops non-predicate shapes instead of forwarding them (fail-closed renderer would hide the group)', () => {
+      expect('visibleWhen' in derive({ key: 'g', label: 'G', visibleWhen: 42 })).toBe(false);
+      expect('visibleWhen' in derive({ key: 'g', label: 'G', visibleWhen: '' })).toBe(false);
+      expect('visibleWhen' in derive({ key: 'g', label: 'G', visibleWhen: ['record.x'] })).toBe(false);
+      expect('visibleWhen' in derive({ key: 'g', label: 'G', visibleWhen: null })).toBe(false);
+    });
+
+    it('never stamps a predicate on the trailing ungrouped bucket', () => {
+      const sections = deriveFieldGroupLayout({
+        fieldGroups: [{ key: 'g', label: 'G', visibleWhen: 'record.a > 0' }],
+        fields: { a: { group: 'g' }, loose: {} },
+      })!;
+      const trailing = sections[sections.length - 1];
+      expect(trailing.key).toBeUndefined();
+      expect('visibleWhen' in trailing).toBe(false);
+    });
+  });
 });
 
 /**
