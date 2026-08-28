@@ -4920,9 +4920,17 @@ export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts
  *
  * Every field degrades to null rather than throwing. No base ref, a shallow
  * clone and no git at all are real states, and none of them is an error here.
- * They are not a NON-EVENT either: `driftLines` renders `base: null` as a
- * stated refusal to measure rather than as the silence a level tree gets, so
+ * They are not a NON-EVENT either: `driftLines` renders EVERY degraded field as
+ * a stated refusal to measure rather than as the silence a level tree gets, so
  * degrading here costs the caller a reading and never costs it the news.
+ *
+ * "Every" is load-bearing and was once only "the base ref". This function
+ * degrades in TWO places — `base` when the ref does not resolve, and `behind`
+ * when the ref resolves and the COUNT cannot be read — and the second one is
+ * not a corner of the first: a shallow clone reads a distance fine (measured:
+ * `--depth=1`, before and after the upstream moves), while an unborn HEAD makes
+ * `rev-list --count` fail with a resolvable ref in hand. `unmeasuredDrift`
+ * below is the single predicate both degraded fields are read through.
  */
 export function baseDrift({ cwd = ROOT } = {}) {
   const read = (args) => {
@@ -4948,6 +4956,54 @@ export function baseDrift({ cwd = ROOT } = {}) {
 }
 
 /**
+ * WHICH step of the measurement failed — or `null` when a reading was taken,
+ * whatever its value.
+ *
+ * `baseDrift` has TWO doors to "no reading was taken", and to a reader they are
+ * one state. The base ref may not resolve (`base: null` — a fresh checkout, a
+ * clone nobody fetched, a graft), or the ref may resolve and the DISTANCE from
+ * it be unreadable (`behind: null`): `rev-list --count` fails on an unborn
+ * HEAD, which an ordinary fully-fetched clone reaches with one ordinary
+ * command, and also on a git that dies mid-run or a count that comes back
+ * non-numeric.
+ *
+ * The second door used to fall through to `!drift.behind` and render
+ * byte-identically to `behind: 0` — the same collapse the first door was fixed
+ * for, one step further along, and the WORSE of the two to be silent about: a
+ * base ref that resolves is precisely what makes a reader believe a measurement
+ * happened, so the reassurance is stronger while the ground under it is the
+ * same absent reading.
+ *
+ * They share one predicate rather than a hand-written branch each because the
+ * sentence they produce differs only in WHICH step failed. A second branch is a
+ * second place to keep the "Not zero", the least-trustworthy warning and the
+ * remedy in sync, and the whole defect being fixed here is that the first
+ * branch was written for one door while the producing side had two.
+ *
+ * The reading test is `Number.isFinite`, not `!== null`: absent, `NaN` and
+ * non-numeric are not readings either, and the only direction this can move a
+ * case is from silence toward speech — `behind: 0` IS a reading, and stays
+ * silent below.
+ */
+function unmeasuredDrift(drift) {
+  if (drift.base === null) {
+    return {
+      what: `${DEFAULT_BASE_REF} does not resolve in this checkout`,
+      how: 'A fresh checkout, a clone nobody fetched or a graft all reach here.',
+      fix: `Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for a reading.`,
+    };
+  }
+  if (!Number.isFinite(drift.behind)) {
+    return {
+      what: `${DEFAULT_BASE_REF} resolves here (${drift.base}), but counting from HEAD to it failed`,
+      how: `An unborn HEAD — 'git checkout --orphan', or a ref fetched into a repo holding no commit of its own — a git that died mid-run, or a non-numeric count all reach here.`,
+      fix: `Run 'git rev-list --count HEAD..${DEFAULT_BASE_REF}' here to see which, then derive again for a reading.`,
+    };
+  }
+  return null;
+}
+
+/**
  * Render the drift. Loud when it can have changed the answer, quiet when it
  * demonstrably cannot, and SILENT at zero — the last one for the same reason
  * the banner has no "all paths present" twin: against a base ref nobody
@@ -4955,18 +5011,23 @@ export function baseDrift({ cwd = ROOT } = {}) {
  * failure would have passed.
  *
  * That silence at zero is what makes the UNMEASURABLE case a defect rather
- * than a fourth flavour of quiet. `baseDrift` degrades every field to null
- * when the base ref does not resolve — a fresh checkout, a clone nobody
- * fetched, a graft — so `behind: null` ("no reading was taken") used to render
- * byte-identically to `behind: 0` ("a reading was taken, and it was zero"):
- * nothing at all, from a single `!drift.behind`. The reasoning above defends
- * withholding an ALL-CLEAR; it never defended withholding the fact that no
- * instrument was available. And the two states are not equally safe to be
+ * than a fourth flavour of quiet. `baseDrift` degrades a field to null in two
+ * places — the base ref that will not resolve, and the distance that cannot be
+ * counted from a ref that did — so `behind: null` ("no reading was taken") used
+ * to render byte-identically to `behind: 0` ("a reading was taken, and it was
+ * zero"): nothing at all, from a single `!drift.behind`. The reasoning above
+ * defends withholding an ALL-CLEAR; it never defended withholding the fact that
+ * no instrument was available. And the two states are not equally safe to be
  * silent about: unmeasured is precisely when the family list below is LEAST
  * trustworthy, because a gate that landed on the base branch after this tree
  * was cut cannot be seen from inside this tree, and here nothing can even say
- * how far back that is. So this branch speaks, zero stays silent, and a reader
- * can finally tell them apart.
+ * how far back that is. So `unmeasuredDrift` speaks for BOTH doors, zero stays
+ * silent, and a reader can finally tell them apart.
+ *
+ * The unmeasured sentence therefore names the step that failed rather than the
+ * conclusion alone. "Not measured" plus a remedy for the wrong step is a lead
+ * the reader cannot act on, and the two remedies do not overlap: a fetch buys a
+ * base ref and buys nothing at all for a HEAD that has no commit.
  *
  * A drift of `null` — no measurement ATTACHED, because the caller never asked
  * for one — stays silent, deliberately and separately: reporting a missing
@@ -4975,10 +5036,11 @@ export function baseDrift({ cwd = ROOT } = {}) {
  */
 export function driftLines(drift) {
   if (!drift) return [];
-  if (drift.base === null) {
+  const unmeasured = unmeasuredDrift(drift);
+  if (unmeasured) {
     return [
-      `  ⚠️  STALENESS NOT MEASURED — ${DEFAULT_BASE_REF} does not resolve in this checkout, so this tree's distance from it is UNKNOWN. Not zero: no reading was taken.`,
-      `    A fresh checkout, a clone nobody fetched or a graft all reach here — and an unmeasured tree is where the families below are LEAST trustworthy, not most. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for a reading.`,
+      `  ⚠️  STALENESS NOT MEASURED — ${unmeasured.what}. This tree's distance from ${DEFAULT_BASE_REF} is UNKNOWN. Not zero: no reading was taken.`,
+      `    ${unmeasured.how} An unmeasured tree is where the families below are LEAST trustworthy, not most. ${unmeasured.fix}`,
     ];
   }
   if (!drift.behind) return [];
@@ -8667,6 +8729,27 @@ function selfTest() {
   t('so the two readings no longer share one output — the defect, stated as the comparison that used to hold',
     unmeasuredText !== level.join('\n'));
   t('and a drift of null — no measurement ATTACHED, the caller never asked — still prints nothing', driftLines(null).length === 0);
+  // The SECOND door to "no reading was taken" (#12815). The base ref resolves
+  // and the DISTANCE is what could not be read, so this reached `!drift.behind`
+  // carrying `behind: null` and printed nothing — byte-identical to the level
+  // tree above, the same collapse as the case above it, one step further along.
+  // These pin the arrival, and pin that ONE predicate serving both doors did
+  // not flatten them into one sentence: the remedies do not overlap, so a
+  // reader handed the other door's remedy is handed a lead they cannot act on.
+  const uncounted = driftLines({ base: 'aaaaaaa', behind: null, changed: [], headDate: null, baseDate: null });
+  const uncountedText = uncounted.join('\n');
+  t('a base ref that RESOLVES but yields no distance also SAYS staleness was not measured',
+    uncountedText.includes('STALENESS NOT MEASURED') && uncountedText.includes('UNKNOWN') && uncountedText.includes('Not zero'));
+  t('and it names the base it DID resolve, so a reader can tell WHICH step failed', uncountedText.includes('aaaaaaa'));
+  t('its remedy is the count, not the fetch — a fetch buys a base ref and buys nothing for a HEAD with no commit',
+    uncountedText.includes(`git rev-list --count HEAD..${DEFAULT_BASE_REF}`)
+      && !uncountedText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  t('and it does NOT cry stale either — a tree nobody counted is not a tree counted stale', !uncountedText.includes('STALE TREE'));
+  t('so this reading no longer shares one output with the level tree — the defect, stated as the comparison that used to hold',
+    uncountedText !== level.join('\n'));
+  t('and the two unmeasured doors are told apart rather than flattened by the shared predicate', uncountedText !== unmeasuredText);
+  t('a drift carrying no distance FIELD at all reads unmeasured too — absent is not a reading either',
+    driftLines({ base: 'aaaaaaa', changed: [] }).join('\n').includes('STALENESS NOT MEASURED'));
   const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
   t('behind, but with the derivation surface untouched, states the distance in ONE quiet line', benign.length === 1 && benign[0].includes('7 commit(s) behind'));
   t('and that quiet line does not cry stale, so the loud spelling stays rare', !benign.join('\n').includes('STALE TREE'));
@@ -8702,6 +8785,28 @@ function selfTest() {
     t('and from a real repo too it arrives as a sentence, not as the silence the level clone gets',
       driftLines(unresolvableRepo).join('\n').includes('STALENESS NOT MEASURED')
         && driftLines(baseDrift({ cwd: clone })).length === 0);
+    // The OTHER door, also measured rather than hand-built (#12815): a checkout
+    // whose base ref is fetched and RESOLVES, but whose own HEAD is unborn, so
+    // `rev-list --count HEAD..<ref>` cannot answer. The literals above describe
+    // that state; only a repo shows it is reachable, which is the whole reason
+    // this fixture exists beside them.
+    const unborn = join(driftTmp, 'unborn');
+    mkdirSync(unborn, { recursive: true });
+    gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], unborn);
+    gd(['remote', 'add', DEFAULT_BASE_REMOTE, up], unborn);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE, `${DEFAULT_BASE_BRANCH}:refs/remotes/${DEFAULT_BASE_REF}`], unborn);
+    const unbornRepo = baseDrift({ cwd: unborn });
+    t('a checkout whose base ref RESOLVES but whose own HEAD is unborn measures a base and NO distance',
+      typeof unbornRepo.base === 'string' && unbornRepo.behind === null);
+    t('and that door speaks from a real repo too, rather than reading as the silence the level clone gets',
+      driftLines(unbornRepo).join('\n').includes('STALENESS NOT MEASURED')
+        && driftLines(baseDrift({ cwd: clone })).length === 0);
+    t('so the three REAL readings — level, no ref, no distance — no longer share one output',
+      new Set([
+        driftLines(baseDrift({ cwd: clone })).join('\n'),
+        driftLines(unresolvableRepo).join('\n'),
+        driftLines(unbornRepo).join('\n'),
+      ]).size === 3);
     // Upstream moves in a file the answer is NOT derived from.
     writeFileSync(join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
@@ -8717,6 +8822,17 @@ function selfTest() {
     const onSurface = baseDrift({ cwd: clone });
     t('a commit INSIDE the derivation surface is caught and named', onSurface.behind === 2 && onSurface.changed.includes('scripts/check-thing.mjs'));
     t('and that is the case that goes loud', driftLines(onSurface).join('\n').includes('STALE TREE'));
+    // Reachability from an ORDINARY checkout, which is what makes the door
+    // above a state of working clones and not only of repos built to show it:
+    // `clone` is fully fetched and has just measured a real distance, and one
+    // ordinary command leaves its HEAD unborn with the base ref still
+    // resolving. It runs last because it mutates `clone`; nothing below reads it.
+    gd(['checkout', '-q', '--orphan', 'a-branch-with-no-commit'], clone);
+    const orphaned = baseDrift({ cwd: clone });
+    t('one ordinary command reaches the no-distance state in a fully fetched clone',
+      typeof orphaned.base === 'string' && orphaned.behind === null);
+    t('and the clone that measured a distance one command ago says so instead of falling silent',
+      driftLines(orphaned).join('\n').includes('STALENESS NOT MEASURED'));
   } finally {
     rmSync(driftTmp, { recursive: true, force: true });
   }
