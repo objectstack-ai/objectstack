@@ -176,6 +176,18 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
+    "@objectstack/driver-sql#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/example-showcase#test": {
       "dependsOn": ["^build"],
       "outputs": [],

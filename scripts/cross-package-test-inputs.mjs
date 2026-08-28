@@ -689,6 +689,20 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
     },
   },
+  '@objectstack/driver-sql': {
+    // src/live-dialect-matrix.isolation.test.ts imports `stripComments` from
+    // `js-comment-mask.mjs` to decide which text in this package's 152 test
+    // sources is a comment and which is a direct `OS_TEST_*_URL` read -- the
+    // conversion #12398 began. The coupling is real: that guard's offender set
+    // is a function of the module's scanning behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is declared alongside it
+    // because it is what gives `stripComments` its type, so this package's
+    // typecheck verdict is a function of it too.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/example-showcase': {
     // test/inert-wirings.test.ts imports `stripComments` from
     // `js-comment-mask.mjs` to decide which text under this app's `src/` is a
