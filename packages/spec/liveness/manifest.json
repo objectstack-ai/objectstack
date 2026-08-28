@@ -4,80 +4,87 @@
   "props": {
     "id": {
       "status": "live",
-      "evidence": "packages/objectql/src/registry.ts:3492 (initialDisabledPackageIds lookup), :3512-3518 (the key the installed-package collection is stored under), :3505 (namespace ownership record); packages/objectql/src/engine.ts:4378",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/objectql/src/registry.ts#installPackage (three reads in one verb — the `initialDisabledPackageIds.has(manifest.id)` lookup that decides whether the record installs disabled, the `package` collection key the record is stored under, and the owner id handed to `registerNamespace`); packages/objectql/src/engine.ts#registerApp (`const id = manifest.id || manifest.name` — the package id every registration below it is stamped with); packages/rest/src/package-routes.ts#publishRoute (publish refuses a manifest without it: `if (!manifest.id || !manifest.version)` ⇒ 400 PACKAGE_MANIFEST_INVALID)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "The package identity the whole install path is keyed on. `installPackage` uses it as the collection key, as the namespace owner, and as the disabled-set lookup; the REST publish route refuses a manifest without it (packages/rest/src/package-routes.ts:532)."
+      "note": "The package identity the whole install path is keyed on. `installPackage` uses it as the collection key, as the namespace owner, and as the disabled-set lookup; the REST publish route refuses a manifest without it (packages/rest/src/package-routes.ts#publishRoute). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — all four citations had rotted IN RANGE. `registry.ts:3492` landed in `removeOverlayEntry`'s plain-key branch (`plain._packageId !== 'sys_metadata'`), an overlay-removal path that reads no manifest at all; `:3505` and `:3512-3518` both landed in `listItems` (the `'object'|'objects'` special case, and the package filter plus its docblock about hiding a disabled package's metadata); `engine.ts:4378` landed in the autonumber-counter resync (`this.autonumberCounters.set(counterKey, supplied)`), ~320 lines short of the read. WHY THE GATE COULD NOT SEE IT: registry.ts is 3921 lines and engine.ts is 13593, so every one of those lines is comfortably in range, and `id` is a word both files carry on hundreds of lines, so the #11457 key-mention check anchors on the coincidence and passes. Re-closed by hand against c459da6bc."
     },
     "namespace": {
       "status": "live",
-      "evidence": "packages/objectql/src/registry.ts:3473-3486 (shareable-namespace check + NamespaceConflictError), :3504-3505 (registerNamespace), :3542-3543 (unregister on removal); packages/objectql/src/engine.ts:4379",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/objectql/src/registry.ts#installPackage (the install-time gate — `manifest.namespace && !isShareableNamespace(...)`, then `getNamespaceOwners(...).find(owner => owner !== manifest.id)` ⇒ NamespaceConflictError, then `registerNamespace(manifest.namespace, manifest.id)` on the way through); packages/objectql/src/registry.ts#uninstallPackage (`unregisterNamespace(pkg.manifest.namespace, id)` — the release leg); packages/objectql/src/engine.ts#registerApp (`const namespace = manifest.namespace as string | undefined`, carried into the registration)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "Enforced, not merely read: a non-shareable namespace already owned by another package raises NamespaceConflictError at install. Also the ADR-0121 carve-out segment for a stack's endpoints — packages/spec/src/api/endpoint-publish-gate.ts:175 refuses a stack that declares `apis:` without an explicit namespace."
+      "note": "Enforced, not merely read: a non-shareable namespace already owned by another package raises NamespaceConflictError at install. Also the ADR-0121 carve-out segment for a stack's endpoints — packages/spec/src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations refuses a stack that declares `apis:` without an explicit namespace. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — every citation had rotted in range. `registry.ts:3473-3486` landed in `removeOverlayEntry`'s discriminated-overlay loop, `:3504-3505` in `listItems`, and `:3542-3543` in a docblock about `resolveObjectKey` reuse; `engine.ts:4379` landed in the autonumber-counter resync. The three registry reads had all been pulled into two verbs (`installPackage` / `uninstallPackage`) that the line numbers no longer reach. Re-closed by hand against c459da6bc."
     },
     "defaultDatasource": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:6337 (packageDatasource — the package-level default an object without its own `datasource` inherits)",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/objectql/src/engine.ts#resolveDatasourceBinding (limb 4 of the routing precedence — `const packageDatasource = manifest?.defaultDatasource`, taken only when the object declares none of its own and no mapping or lifecycle rule already claimed it, and only when a driver of that name is registered)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `engine.ts:6337` is in range of this 13593-line file and lands in a docblock about secret-field resolution for privileged server-side consumers, ~400 lines short of the read. The consuming symbol is the same `resolveDatasourceBinding` the `object.datasource` entry was re-anchored to in batch 1 of this card: one precedence function reads the object key at limb 1 and this manifest key at limb 4, which the two rotted lines obscured by pointing at unrelated places in different files. Re-closed by hand against c459da6bc."
     },
     "version": {
       "status": "live",
-      "evidence": "packages/rest/src/package-routes.ts:532 (publish refuses a manifest without it), :541-544 (published version echoed back); packages/services/service-package/src/index.ts:394,401; packages/cli/src/commands/plugin/publish.ts:91",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/rest/src/package-routes.ts#publishRoute (publish refuses a manifest without it — `if (!manifest.id || !manifest.version)` ⇒ 400 — and echoes the accepted version back in the 2xx body); packages/services/service-package/src/index.ts#PackageServicePlugin (the `publish` verb of the composed package service forwards `data.manifest.version` to the driver and logs the published coordinate); packages/cli/src/commands/plugin/publish.ts#PluginPublish (`const version = String(manifest.version ?? '').trim()`, refused when empty)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — a mixed entry, and the mix is the point. The CLI citation was accurate (`publish.ts:91` still names the read). Both REST citations had rotted in range: `:532` lands inside the #8016 docblock about `INTERNAL_ERROR` vs a coded refusal, and `:541-544` runs off the end of that docblock onto the `export function registerPackageRoutes(` signature — the declaration site, not a read. And the service-package citation was written `index.ts:394,401`, a comma-joined pair the evidence scanner cannot parse as a citation at all (the token stops matching PATH_RE), so that consumer has never been resolved by any check — unfalsifiable prose standing beside two checked pointers. Its two lines were in fact correct; it is now an anchor of its own. Re-closed by hand against c459da6bc."
     },
     "type": {
       "status": "live",
-      "evidence": "packages/spec/src/stack.zod.ts:855 (an app-only derivation returns [] unless the manifest type is `app`); packages/runtime/src/domains/packages.ts:275 (package listing filter)",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/spec/src/stack.zod.ts#validateSingleApp (`if (config.manifest?.type !== 'app') return []` — the single-app rule applies to consumer packages only); packages/runtime/src/domains/packages.ts#handlePackagesRequest (`packages.filter((p) => p.manifest?.type === query.type)` — the package listing filter)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) — both citations were still ACCURATE (`stack.zod.ts:855` and `domains/packages.ts:275` each name their read on the nose), so this is a pure grammar migration with no repair. Worth recording as one of the batch's control cases: both consumers sit in files under 2300 lines that have not been restructured since the 2026-08-23 seeding, which is the shape under which a line citation survives. Re-closed by hand against c459da6bc."
     },
     "scope": {
       "status": "live",
-      "evidence": "packages/services/service-settings/src/settings-service.ts:800 (the default settings scope a package's settings land in); packages/metadata-protocol/src/package-writability.ts:79 (write-path gate); packages/platform-objects/src/apps/studio.app.ts:72 (Studio hides system/cloud-scoped packages)",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/services/service-settings/src/settings-service.ts#registerManifest (`const defaultScope = manifest.scope ?? 'tenant'` — the scope every specifier without its own inherits); packages/metadata-protocol/src/package-writability.ts#isWritablePackage (write-path gate — an installed package whose manifest scope is in READ_ONLY_PACKAGE_SCOPES is refused); packages/platform-objects/src/apps/studio.app.ts#STUDIO_APP (the package picker filters `manifest.scope nin ['system','cloud']`)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "Three consumers of three different kinds — a default, a writability gate and a UI filter — so the deployment scope is read on both the runtime and the admin path."
+      "note": "Three consumers of three different kinds — a default, a writability gate and a UI filter — so the deployment scope is read on both the runtime and the admin path. 2026-08-28: RE-ANCHORED (#13003) — all three citations were still ACCURATE, so this is a grammar migration. The anchor is what the entry gains: `settings-service.ts` is 2586 lines and its read sits ~800 lines in, which is exactly the shape that rots next."
     },
     "name": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:4378 (package id fallback when `id` is absent), :4467-4471 (manifest-as-app registration uses it as the app name); packages/cli/src/commands/plugin/publish.ts:92 (marketplace display name)",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/objectql/src/engine.ts#registerApp (`const id = manifest.id || manifest.name` — the package-id fallback when `id` is absent; the same function then registers manifest-as-app under it: `if (manifest.name && manifest.navigation && !manifest.apps?.length)`); packages/cli/src/commands/plugin/publish.ts#PluginPublish (`flags['display-name'] ?? manifest.name ?? id` — the marketplace display name)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the CLI citation was accurate; both engine citations had rotted in range. `engine.ts:4378` lands in the autonumber-counter resync and `:4467-4471` in the docblock for `createWithAutonumberResync` about the `ERR_AUTONUMBER_COLLISION` contract — neither anywhere near a manifest read. The two reads this entry names are both inside `registerApp`, ~230 and ~320 lines further down, so the two separately-cited lines collapse to one anchor. Re-closed by hand against c459da6bc."
     },
     "description": {
       "status": "live",
-      "evidence": "packages/cli/src/commands/plugin/publish.ts:121 (copied onto the published package body); packages/cli/src/commands/validate.ts:354-355",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/cli/src/commands/plugin/publish.ts#PluginPublish (`if (typeof manifest.description === 'string') pkgBody.description = manifest.description` — copied onto the published package body); packages/cli/src/commands/validate.ts#Validate (echoed under the validated package's name in the human-facing summary)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `publish.ts:121` was accurate; `validate.ts:354-355` had rotted in range onto a comment about which advisories the `--json` face could structurally reach, ~130 lines short of the read (`config.manifest.description`, in the summary block). Re-closed by hand against c459da6bc."
     },
     "permissions": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-security/src/suggested-audience-bindings.ts:252 (declared permission strings from every enabled installed package feed the suggested audience bindings)",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/plugins/plugin-security/src/suggested-audience-bindings.ts#collectDeclaredSuggestions (declared permission strings from every enabled installed package feed the suggested audience bindings — `Array.isArray(manifest?.permissions) ? manifest.permissions : []`, which is also where the legacy-arm-only reading below is measured)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "cross-repo",
-      "note": "LIVE ON ONE ARM ONLY, and the split matters. `ManifestPermissionsSchema` (manifest.zod.ts:54) is a union of the legacy flat `string[]` and the structured `PluginPermissionsSchema` (services / hooks / network / fs, ADR-0025 §3.2). The single reader is guarded by `Array.isArray(manifest?.permissions)`, so it reads the LEGACY arm and skips the structured one entirely; no other reader exists in objectstack or objectui. PluginPermissionEnforcer (packages/core/src/security/plugin-permission-enforcer.ts:94-104) is not the missing consumer — it registers the set the install-time consent flow persisted to `sys_package_installation.granted_permissions`, explicitly \"independent of whatever the manifest *requested*\", and nothing in this repo feeds the manifest declaration into it. The verdict is `live` because the key is read; the structured arm's zero is filed as #11333 rather than being flattened into this one-level row. Cloud unmeasured (see `_note`) — the consent flow ADR-0025 §3.5 describes lives there."
+      "note": "LIVE ON ONE ARM ONLY, and the split matters. `ManifestPermissionsSchema` (manifest.zod.ts:54) is a union of the legacy flat `string[]` and the structured `PluginPermissionsSchema` (services / hooks / network / fs, ADR-0025 §3.2). The single reader is guarded by `Array.isArray(manifest?.permissions)`, so it reads the LEGACY arm and skips the structured one entirely; no other reader exists in objectstack or objectui. PluginPermissionEnforcer (packages/core/src/security/plugin-permission-enforcer.ts:94-104) is not the missing consumer — it registers the set the install-time consent flow persisted to `sys_package_installation.granted_permissions`, explicitly \"independent of whatever the manifest *requested*\", and nothing in this repo feeds the manifest declaration into it. The verdict is `live` because the key is read; the structured arm's zero is filed as #11333 rather than being flattened into this one-level row. Cloud unmeasured (see `_note`) — the consent flow ADR-0025 §3.5 describes lives there. 2026-08-28: RE-ANCHORED (#13003) — the citation was still ACCURATE (`suggested-audience-bindings.ts:252` names the read), so this is a grammar migration. What the anchor buys here is specific to this row's shape: the whole `live` verdict rests on ONE reader, so if `collectDeclaredSuggestions` is deleted or renamed the entry now goes red instead of pointing at whatever line 252 has become. Re-closed by hand against c459da6bc."
     },
     "objects": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:4405-4420 (both the array and the map spelling are registered)",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/objectql/src/engine.ts#registerApp (`if (manifest.objects)` — both the array spelling and the `Object.entries` map spelling are walked and registered)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `engine.ts:4405-4420` had rotted in range onto the `createWithAutonumberResync` docblock (the unique-violation retry contract and its storage-dependence warning), ~320 lines short of the read. Re-closed by hand against c459da6bc."
     },
     "datasources": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:4391-4394",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "in-repo"
+      "evidence": "packages/objectql/src/engine.ts#registerApp (`if (manifest.datasources)` — array or map, normalized to a list and registered)",
+      "verifiedAt": "2026-08-28",
+      "evidenceScope": "in-repo",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `engine.ts:4391-4394` had rotted in range into the autonumber-collision docblock (a comment about counters below the store's real max), ~320 lines short of the read. Re-closed by hand against c459da6bc."
     },
     "dependencies": {
       "status": "live",
-      "evidence": "packages/metadata-protocol/src/protocol.ts:4290-4300 (the declared map drives the transitive package-closure walk)",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/metadata-protocol/src/protocol.ts#resolveWritePackageScope (`const declared = manifest?.dependencies` inside the frontier loop — the declared map drives the transitive package-closure walk that narrows a write's reference scope)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "Read as a declaration rather than as an install instruction: an unresolvable dependency still counts toward the closure (the code says so at :4293-4296), the transitive walk just stops there."
+      "note": "Read as a declaration rather than as an install instruction: an unresolvable dependency still counts toward the closure (the loop's own comment says so — the package declared it, so an object stamped with it is reachable by declaration), the transitive walk just stops there. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `protocol.ts:4290-4300` had rotted in range of this 20255-line file onto a docblock about `evaluateRuntimeAuthoringGate` staying pure and about advisories riding the 2xx, ~210 lines short of the read. The note's own inner citation (`the code says so at :4293-4296`) had rotted with it and is now stated symbol-relative instead of by line — a line inside a note is exactly as unfalsifiable as one the scanner cannot parse, since no check reads `note` at all. Re-closed by hand against c459da6bc."
     },
     "configuration": {
       "children": {
@@ -99,10 +106,10 @@
       "children": {
         "kinds": {
           "status": "live",
-          "evidence": "packages/objectql/src/engine.ts:4504-4518 → packages/objectql/src/registry.ts:3748 (`registerKind`)",
-          "verifiedAt": "2026-08-25",
+          "evidence": "packages/objectql/src/engine.ts#registerApp (`if (manifest.contributes?.kinds)` then `for (const kind of manifest.contributes.kinds)` — the block's one and only reader monorepo-wide) → packages/objectql/src/registry.ts#registerKind (which keys the entry on `id` via `registerItem`)",
+          "verifiedAt": "2026-08-28",
           "evidenceScope": "cross-repo",
-          "note": "THE ONLY LIVE MEMBER OF THIS BLOCK, and the entire reason the block is not uniformly dead: #10627 measured that the whole monorepo contains exactly one non-test read of `manifest.contributes` and it reads `kinds`. Line drift re-verified for this seeding — #10627 cited engine.ts:4499-4501 on 299b85e9d; on b9e9227e3 the same three lines are :4504-4506. BELOW THE WALK: `globs` was RETIRED (#11169, maintainer ruling 2026-08-24, ADR-0087 D3 `plugin-manifest-kind-globs-retired`) — zero value reads anywhere (the only non-test occurrences were the schema declaration and the two type positions on `registerKind`/`getAllKinds`, which now drop it); the promised file-type discovery runs off the metadata type registry's `filePatterns`, which `contributes.kinds` does not extend. A kind entry is `{ id, description? }`; `registerKind` keys the item on `id`, and `description` is not read. CAVEAT ON THE LIVE VERDICT, filed as #10729: the typed accessor `getAllKinds()` (registry.ts:3752) has zero callers, so what the registered kind is consumed FOR downstream is unclear — the registration itself is real, the consumption of the bucket is not established."
+          "note": "THE ONLY LIVE MEMBER OF THIS BLOCK, and the entire reason the block is not uniformly dead: #10627 measured that the whole monorepo contains exactly one non-test read of `manifest.contributes` and it reads `kinds`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — and this row is the strongest argument in the batch for the anchor grammar, because its line has now been chased THREE times and rotted every time. #10627 cited engine.ts:4499-4501 on 299b85e9d; the 2026-08-23 seeding re-measured it to :4504-4506 on b9e9227e3; on c459da6bc `:4504-4518` lands in the autonumber-collision retry (`code: 'ERR_AUTONUMBER_COLLISION'`) and the read is at ~:4826, ~320 lines away. The registry half rotted too: `:3748` now lands in `getAllApps`, while `registerKind` sits at ~:3860. Chasing the line was the whole maintenance cost this migration removes. BELOW THE WALK: `globs` was RETIRED (#11169, maintainer ruling 2026-08-24, ADR-0087 D3 `plugin-manifest-kind-globs-retired`) — zero value reads anywhere (the only non-test occurrences were the schema declaration and the two type positions on `registerKind`/`getAllKinds`, which now drop it); the promised file-type discovery runs off the metadata type registry's `filePatterns`, which `contributes.kinds` does not extend. A kind entry is `{ id, description? }`; `registerKind` keys the item on `id`, and `description` is not read. CAVEAT ON THE LIVE VERDICT, filed as #10729: the typed accessor `getAllKinds()` (registry.ts#getAllKinds, re-read here — the `:3752` this note gave has drifted to ~:3864) has zero callers, so what the registered kind is consumed FOR downstream is unclear — the registration itself is real, the consumption of the bucket is not established."
         },
         "events": {
           "status": "dead",
@@ -168,10 +175,10 @@
     },
     "data": {
       "status": "live",
-      "evidence": "packages/runtime/src/app-plugin.ts:946-947 (manifest datasets are pushed onto the seed set applied at install)",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/runtime/src/app-plugin.ts#seedDatasets (`if (manifest && Array.isArray(manifest.data)) seedDatasets.push(...manifest.data)` — leg 2 of the seed collection, after the preferred top-level `bundle.data`)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "Deprecated in favour of `defineStack({ data })` but still read, so `live` rather than `dead`. Its subtree is SeedSchema, classified in full by the governed `seed` type — recorded as a RESOLVED deferral (`manifest/data` → `seed`) in scripts/liveness/undrilled-containers.baseline.json rather than duplicated here, so a key added to SeedSchema cannot get a verdict on one side and not the other."
+      "note": "Deprecated in favour of `defineStack({ data })` but still read, so `live` rather than `dead`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `app-plugin.ts:946-947` had rotted in range onto the JOB scheduling block (`ok++` after a `svc.schedule(...)` with its retry policy), ~55 lines short of the read. That is the SAME rot batch 1 recorded one file over for `object.actions`, which cited `app-plugin.ts:929` and landed in the same job block: two ledger entries, two different keys, one drifted region. ANCHOR CHOICE, stated because it is weaker than the batch's others: the read is inline in `AppPlugin.start`, which has no enclosing named helper (contrast `collectBundleActions`, which batch 1 could anchor for `object.actions`), so the anchor names `seedDatasets` — the local the spread lands in, unique in the file and specific to this collection — rather than the 1840-line class. Re-closed by hand against c459da6bc. Its subtree is SeedSchema, classified in full by the governed `seed` type — recorded as a RESOLVED deferral (`manifest/data` → `seed`) in scripts/liveness/undrilled-containers.baseline.json rather than duplicated here, so a key added to SeedSchema cannot get a verdict on one side and not the other."
     },
     "capabilities": {
       "children": {
@@ -217,29 +224,31 @@
       "children": {
         "app": {
           "status": "live",
-          "evidence": "packages/objectql/src/engine.ts:4477-4480 → packages/objectql/src/registry.ts:3659-3667 (`registerAppNavContribution` keys the contribution list on it and returns early without it)",
-          "verifiedAt": "2026-08-23",
+          "evidence": "packages/objectql/src/engine.ts#registerApp (walks `manifest.navigationContributions` and hands each entry to the registry) → packages/objectql/src/registry.ts#registerAppNavContribution (keys the contribution list on it and returns early without it) → packages/objectql/src/registry.ts#applyNavContributions (the merge reads `app?.name` against that same key)",
+          "verifiedAt": "2026-08-28",
           "evidenceScope": "in-repo",
-          "note": "The target app id — required in practice, not just in the schema: `if (!contribution || !contribution.app) return;` drops a contribution that omits it."
+          "note": "The target app id — required in practice, not just in the schema: `if (!contribution || !contribution.app) return;` drops a contribution that omits it. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — both citations had rotted in range. `engine.ts:4477-4480` landed on the `createWithAutonumberResync` parameter list (~350 lines short of the walk at ~:4799) and `registry.ts:3659-3667` landed in `uninstallPackage`'s package-record removal, ~100 lines short of `registerAppNavContribution`. Re-closed by hand against c459da6bc."
         },
         "group": {
           "status": "live",
-          "evidence": "packages/objectql/src/registry.ts:3663 (stored on the contribution), :3690-3691 (`applyNavContributions` merges by group id)",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "in-repo"
+          "evidence": "packages/objectql/src/registry.ts#registerAppNavContribution (`group: contribution.group` — stored on the contribution and echoed in the registration log); packages/objectql/src/registry.ts#applyNavContributions (`if (c.group)` ⇒ `findNavGroup(nav, c.group)`, and an unmatched group id appends at top level with a warning rather than dropping the items)",
+          "verifiedAt": "2026-08-28",
+          "evidenceScope": "in-repo",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `registry.ts:3663` had rotted onto the `// Remove package record` comment inside `uninstallPackage`, and `:3690-3691` onto the `return pkg;` of `enablePackage`. Both real consumers are ~100-140 lines further down. Re-closed by hand against c459da6bc."
         },
         "priority": {
           "status": "live",
-          "evidence": "packages/objectql/src/registry.ts:3664 (`contribution.priority ?? 200` — the merge order, defaulted rather than ignored)",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "in-repo"
+          "evidence": "packages/objectql/src/registry.ts#registerAppNavContribution (`priority: contribution.priority ?? 200` — defaulted rather than ignored); packages/objectql/src/registry.ts#applyNavContributions (`[...contributions].sort((a, b) => a.priority - b.priority)` — lower priority applied first)",
+          "verifiedAt": "2026-08-28",
+          "evidenceScope": "in-repo",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `registry.ts:3664` had rotted onto `const collection = this.metadata.get('package')` in `uninstallPackage`. The entry also gains its second consumer: the value is not merely stored with a default, it is the sort key `applyNavContributions` orders the merge by, which the single stored-at line never said. Re-closed by hand against c459da6bc."
         },
         "items": {
           "status": "live",
-          "evidence": "packages/objectql/src/registry.ts:3665 (stored), :3690 onward (merged into the target app's navigation tree, read through `getApp` / `getAllApps` and the protocol serving path)",
-          "verifiedAt": "2026-08-23",
+          "evidence": "packages/objectql/src/registry.ts#registerAppNavContribution (`items: Array.isArray(contribution.items) ? contribution.items : []` — stored, non-array coerced to empty); packages/objectql/src/registry.ts#applyNavContributions (pushed into the target group's `children` or onto the nav root, on a structuredClone so the stored app is never mutated); packages/objectql/src/registry.ts#getApp (the read path that applies the merge, `getAllApps` the same)",
+          "verifiedAt": "2026-08-28",
           "evidenceScope": "in-repo",
-          "note": "BELOW THE WALK: the per-item nav shape is NavigationContributionSchema's item type (packages/spec/src/ui/app.zod.ts), merged into the app's own navigation tree — the same surface the `app` ledger governs on the owning side. The merge is lazy on read and never mutates the stored app, so registration order does not matter (ADR-0029 D7)."
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `registry.ts:3665` had rotted onto `if (collection) {` in `uninstallPackage`, and the `:3690 onward` half onto `enablePackage`'s return. BELOW THE WALK: the per-item nav shape is NavigationContributionSchema's item type (packages/spec/src/ui/app.zod.ts), merged into the app's own navigation tree — the same surface the `app` ledger governs on the owning side. The merge is lazy on read and never mutates the stored app, so registration order does not matter (ADR-0029 D7). Re-closed by hand against c459da6bc."
         }
       }
     },
@@ -253,10 +262,10 @@
       "children": {
         "objectstack": {
           "status": "live",
-          "evidence": "packages/metadata-core/src/protocol-handshake.ts:87 (the legacy range, read when `engines` is absent); packages/cli/src/commands/lint.ts:388",
-          "verifiedAt": "2026-08-23",
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange (`const legacy = manifest.engine?.objectstack?.trim()` — limb 3, reached only when neither `engines` field is declared, and tagged `source: 'engine.objectstack'`); packages/cli/src/commands/lint.ts#lintConfig (the `hasRange` disjunction — a package declaring none of the three ranges is flagged)",
+          "verifiedAt": "2026-08-28",
           "evidenceScope": "in-repo",
-          "note": "The legacy single-field compatibility range. Read only as the fallback leg of the handshake — `engines.protocol` then `engines.platform` are consulted first (protocol-handshake.ts:83-87), which is exactly the precedence manifest.zod.ts documents."
+          "note": "The legacy single-field compatibility range. Read only as the fallback leg of the handshake — `engines.protocol` then `engines.platform` are consulted first, in `resolveDeclaredRange`, which is exactly the precedence manifest.zod.ts documents. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the lint citation was accurate; the handshake one had rotted, and rotted in the way this grammar is built for: `protocol-handshake.ts:87` now lands on the `export function resolveDeclaredRange(` SIGNATURE line, three lines above the read. A citation that drifts onto its own consumer's declaration line still passes existence, still passes the line bound, and still passes the key-mention check — and reads, to a human opening the file, almost right. Re-closed by hand against c459da6bc."
         }
       }
     },
@@ -264,16 +273,17 @@
       "children": {
         "platform": {
           "status": "live",
-          "evidence": "packages/metadata-core/src/protocol-handshake.ts:85; packages/cli/src/commands/lint.ts:387",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "in-repo"
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange (`const platform = manifest.engines?.platform?.trim()` — limb 2, tagged `source: 'engines.platform'`); packages/cli/src/commands/lint.ts#lintConfig (second term of the `hasRange` disjunction)",
+          "verifiedAt": "2026-08-28",
+          "evidenceScope": "in-repo",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the lint citation was accurate; `protocol-handshake.ts:85` had rotted into the docblock above the consumer (the #12772 sentence about not having two readers with two priority orders), seven lines short of the read. Re-closed by hand against c459da6bc."
         },
         "protocol": {
           "status": "live",
-          "evidence": "packages/metadata-core/src/protocol-handshake.ts:83; packages/cli/src/commands/lint.ts:386,396",
-          "verifiedAt": "2026-08-23",
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange (`const protocol = manifest.engines?.protocol?.trim()` — limb 1, consulted first and tagged `source: 'engines.protocol'`); packages/cli/src/commands/lint.ts#lintConfig (first term of the `hasRange` disjunction, and the `path: 'manifest.engines.protocol'` the advisory points authors at)",
+          "verifiedAt": "2026-08-28",
           "evidenceScope": "in-repo",
-          "note": "Checked BEFORE `platform` (ADR-0025 §3.10 #3), so a plugin keeps working across platform releases that preserve the protocol — the precedence is real in the code, not just in the describe()."
+          "note": "Checked BEFORE `platform` (ADR-0025 §3.10 #3), so a plugin keeps working across platform releases that preserve the protocol — the precedence is real in the code, not just in the describe(). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the lint citation was accurate but written `lint.ts:386,396`, the comma-joined form the evidence scanner cannot parse, so that consumer had never resolved against any check; `protocol-handshake.ts:83` had rotted into the docblock, seven lines short of the read. All three legs of this handshake are read in ONE function, so the three sibling entries now share one anchor apiece rather than three lines that drift together. Re-closed by hand against c459da6bc."
         }
       }
     },
@@ -285,10 +295,10 @@
     },
     "packaging": {
       "status": "live",
-      "evidence": "packages/cli/src/commands/plugin/build.ts:126 (read), :159-161 (`manifest-deps` keeps the declared dependencies external instead of bundling them)",
-      "verifiedAt": "2026-08-23",
+      "evidence": "packages/cli/src/commands/plugin/build.ts#PluginBuild (`const packaging = manifest.packaging ?? 'bundled'`, then two `if (packaging === 'manifest-deps')` forks — one that pushes the package.json dependencies onto esbuild's `external` list instead of bundling them, one further down)",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "note": "Live on a real behavioural fork, not on a read: the value selects whether esbuild bundles dependencies into the artifact or externalizes them for install-time resolution, so the two tiers produce different artifacts. Contrast its neighbour `runtime`, which is read only to be printed."
+      "note": "Live on a real behavioural fork, not on a read: the value selects whether esbuild bundles dependencies into the artifact or externalizes them for install-time resolution, so the two tiers produce different artifacts. Contrast its neighbour `runtime`, which is read only to be printed. 2026-08-28: RE-ANCHORED (#13003) — both citations were still ACCURATE (`:126` names the read, `:159-161` the externalization), so this is a grammar migration with no repair. The file is 233 lines end to end, which is the batch's clearest correlation: every accurate citation in it sits in a small or structurally quiet file, and every rotted one in a file of 1800 to 20255 lines. Re-closed by hand against c459da6bc."
     },
     "integrity": {
       "status": "dead",
