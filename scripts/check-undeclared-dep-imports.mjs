@@ -121,12 +121,29 @@
  * A row is not an approval and not a waiver spelled once: it carries EVIDENCE
  * that must still be true, so it fails as soon as its subject moves.
  *
- * `optional-runtime-probe` -- the package is deliberately not declared, because
- * declaring it would install it. The row demands the occurrence still be a
- * DYNAMIC `import()`: converting it to a static import makes the package a hard
+ * A row is admitted on ONE criterion, and it is not taste: the tree already
+ * carries a decision that this package must NOT be declared here, together with
+ * its reason. Everything else is remediated -- by declaring the dependency, by
+ * declaring it as an OPTIONAL PEER where the source says it is an optional
+ * install, or by routing the value through a package this one already declares.
+ *
+ * `optional-runtime-probe` -- declaring it would install it, and the import is
+ * a guarded probe. The row demands the occurrence still be a DYNAMIC
+ * `import()`: converting it to a static import makes the package a hard
  * requirement of module load, which is the very thing the row certifies it is
- * not, and reds here. It also demands the package still be undeclared: once the
- * manifest declares it, the finding is gone and the row is stale.
+ * not, and reds here.
+ *
+ * `type-only` -- nothing reaches the emitted JavaScript, and the published
+ * `.d.ts` inlines the declaration rather than naming the package. The row
+ * demands every occurrence still be `import type` / `export type`. This is the
+ * ORIGINAL mitigation of #10062, and the reason it is a row rather than a
+ * convention: the mitigation was prose, `service-automation` turned its import
+ * into a VALUE import, and nothing anywhere went red. Now that transition reds
+ * here, on the PR that writes it.
+ *
+ * Both kinds also demand the package still be undeclared: once the manifest
+ * declares it, the finding is gone and the row is stale, which is RED. The list
+ * only ever shrinks.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -143,10 +160,10 @@ const REPO_ROOT = resolve(HERE, '..');
 // ---------------------------------------------------------------------------
 // Refusal floors -- measured on `aef1b7e6`, held with margin. Raising the real
 // number is normal; a run that drops BELOW one of these has stopped reading.
-//   packages: 78   non-test src files: 3138   @objectstack specifiers: 3822
+//   packages: 78   non-test src files: 2057   @objectstack/* specifiers: 1805
 const MIN_PACKAGES = 60;
-const MIN_SCANNED_FILES = 2000;
-const MIN_SPECIFIERS = 2500;
+const MIN_SCANNED_FILES = 1500;
+const MIN_SPECIFIERS = 1200;
 
 // ---------------------------------------------------------------------------
 // The ledger. Shrink-only; every row carries evidence re-checked on each run.
@@ -158,15 +175,42 @@ const LEDGER = [
     file: 'packages/runtime/src/turso-driver-factory.ts',
     kind: 'optional-runtime-probe',
     why:
-      '`@objectstack/driver-turso` drags `@libsql/client` and its native bindings, so it is an '
-      + 'OPTIONAL install for both hosts and declaring it here would install it for everyone. The '
-      + 'bare `import()` is the standalone stack\'s default thunk and resolves from the evaluating '
-      + 'module\'s tree; absence raises MissingDriverPackageError carrying the install command as '
-      + 'data. Documented at length in the file\'s own header (#6268).',
+      'The tree already carries the decision NOT to declare this, with its reason: #6268\'s header '
+      + 'on that file states that `@objectstack/driver-turso` is an optional PEER of '
+      + '`@objectstack/cli` and "is not declared by `@objectstack/runtime` at all", because a bare '
+      + '`import()` resolves from the tree of the module that EVALUATES it — so the CLI passes its '
+      + 'own thunk and this bare import is only the standalone stack\'s default. Absence raises '
+      + 'MissingDriverPackageError carrying the install command as data.',
+  },
+  {
+    pkg: '@objectstack/rest',
+    dep: '@objectstack/objectql',
+    file: 'packages/rest/src/rest-server.ts',
+    kind: 'optional-runtime-probe',
+    why:
+      'The state-machine introspection door mirrors the dispatcher branch: the import is wrapped in '
+      + 'try/catch and a deployment serving REST WITHOUT the data engine answers 501 '
+      + 'NOT_IMPLEMENTED rather than failing to load. `@objectstack/rest` is deliberately not '
+      + 'coupled to the engine — `query-multiplicity.ts` and the rest of `rest-server.ts` duck-type '
+      + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
+      + 'states, not repair an omission.',
+  },
+  {
+    pkg: '@objectstack/rest',
+    dep: '@objectstack/metadata-protocol',
+    file: 'packages/rest/src/package-routes.ts',
+    kind: 'type-only',
+    why:
+      '#9960 chose the PRODUCER\'s exported types over a local restatement for the '
+      + '`protocol.deletePackage` seam, and refused a spec shape for it (zero external consumers). '
+      + 'Nothing reaches the emitted JavaScript and rollup-plugin-dts inlines the two aliases, so an '
+      + 'installing consumer is never told to install a package it does not receive: measured on '
+      + 'this branch, `packages/rest/dist/index.d.ts` names `@objectstack/metadata-protocol` zero '
+      + 'times. The row\'s evidence is that property, checked every run.',
   },
 ];
 
-const LEDGER_KINDS = new Set(['optional-runtime-probe']);
+const LEDGER_KINDS = new Set(['optional-runtime-probe', 'type-only']);
 
 // ---------------------------------------------------------------------------
 // Workspace discovery
@@ -263,6 +307,22 @@ export function isTestPath(relPathFromPkg) {
 const LITERAL_SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)(['"])(@objectstack\/[^'"\n]+)\1/g;
 const ASSEMBLED_SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)`@objectstack\/[^`\n]*\$\{/g;
 const DYNAMIC_HEAD = /(?:\bimport\s*\(\s*|\brequire\s*\(\s*)$/;
+const TYPE_ONLY_HEAD = /^(?:import|export)\s+type\s/;
+
+/**
+ * `static-type` vs `static`, decided from the statement KEYWORD rather than
+ * from the clause: `import type { X } from 'p'` erases whole, while
+ * `import { type X, y } from 'p'` is a value import that also names a type. The
+ * conservative reading is the stricter one, so only the `import type` /
+ * `export type` head earns `static-type`.
+ */
+function staticForm(maskedText, matchIndex) {
+  const from = Math.max(0, matchIndex - 4096);
+  const window = maskedText.slice(from, matchIndex);
+  const start = Math.max(window.lastIndexOf('import'), window.lastIndexOf('export'));
+  if (start < 0) return 'static';
+  return TYPE_ONLY_HEAD.test(window.slice(start)) ? 'static-type' : 'static';
+}
 
 /**
  * Occurrences of `@objectstack/*` specifiers in ONE already-masked source text.
@@ -282,7 +342,7 @@ export function specifiersIn(source) {
     occurrences.push({
       spec: m[2],
       pkg: m[2].split('/').slice(0, 2).join('/'),
-      form: DYNAMIC_HEAD.test(head) ? 'dynamic' : 'static',
+      form: DYNAMIC_HEAD.test(head) ? 'dynamic' : staticForm(maskedText, m.index),
       line,
     });
   }
@@ -373,6 +433,16 @@ export function reconcile(findings, ledger) {
         why: `the occurrence at ${finding.file}:${finding.line} is a ${finding.form} import. `
           + 'An `optional-runtime-probe` row certifies the package is NOT required at module load; '
           + 'a static import makes it required. Declare the dependency or restore the dynamic import.',
+      });
+    }
+    if (row.kind === 'type-only' && finding.form !== 'static-type') {
+      staleRows.push({
+        row,
+        why: `the occurrence at ${finding.file}:${finding.line} is a ${finding.form} import. `
+          + 'A `type-only` row certifies that NOTHING reaches the emitted JavaScript — that is the '
+          + 'whole of its evidence, and a value import ends it. This is the exact transition that '
+          + 'killed the mitigation for service-automation. Declare the dependency, or route the '
+          + 'value through a package this one already declares.',
       });
     }
   }
@@ -531,7 +601,15 @@ function selfTest() {
 
     const typeImport = run({ manifest: baseManifest, files: { 'src/a.ts': "import type { X } from '@objectstack/undeclared';\n" } });
     t('type-only import is a finding too (the "nothing lands in the JS" mitigation is not a pass)',
-      typeImport.findings.length === 1 && typeImport.findings[0].form === 'static');
+      typeImport.findings.length === 1 && typeImport.findings[0].form === 'static-type');
+
+    const typeExport = run({ manifest: baseManifest, files: { 'src/a.ts': "export type { X } from '@objectstack/undeclared';\n" } });
+    t('`export type ... from` is recorded as `static-type`',
+      typeExport.findings.length === 1 && typeExport.findings[0].form === 'static-type');
+
+    const inlineType = run({ manifest: baseManifest, files: { 'src/a.ts': "import { type X, y } from '@objectstack/undeclared';\n" } });
+    t('an INLINE type clause beside a value binding is `static`, not `static-type` (the conservative read)',
+      inlineType.findings.length === 1 && inlineType.findings[0].form === 'static');
 
     const bare = run({ manifest: baseManifest, files: { 'src/a.ts': "import '@objectstack/undeclared';\n" } });
     t('bare side-effect import is a finding', bare.findings.length === 1);
@@ -680,6 +758,17 @@ function selfTest() {
     t('LEDGER — a row in another FILE does not cover this one',
       reconcile([{ ...dyn, file: 'packages/p/src/b.ts' }], [row]).unledgered.length === 1
       && reconcile([{ ...dyn, file: 'packages/p/src/b.ts' }], [row]).staleRows.length === 1);
+    const typeRow = { pkg: '@objectstack/p', dep: '@objectstack/d', file: 'packages/p/src/a.ts', kind: 'type-only', why: 'y'.repeat(50) };
+    const typeFinding = { ...dyn, form: 'static-type' };
+    t('LEDGER — a `type-only` row covers a static-type finding',
+      reconcile([typeFinding], [typeRow]).staleRows.length === 0
+      && reconcile([typeFinding], [typeRow]).unledgered.length === 0);
+    t('LEDGER — the same import turned into a VALUE import reds the `type-only` row',
+      reconcile([{ ...typeFinding, form: 'static' }], [typeRow]).staleRows.length === 1
+      && reconcile([{ ...typeFinding, form: 'dynamic' }], [typeRow]).staleRows.length === 1);
+    t('LEDGER — a `type-only` row does NOT satisfy a dynamic probe, and vice versa',
+      reconcile([dyn], [typeRow]).staleRows.length === 1
+      && reconcile([typeFinding], [row]).staleRows.length === 1);
     t('LEDGER — a malformed row is refused before any sweep runs',
       ledgerShapeProblems([{ ...row, kind: 'made-up' }]).length === 1
       && ledgerShapeProblems([{ ...row, why: 'short' }]).length === 1

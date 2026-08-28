@@ -27,9 +27,27 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "pg-connection-string": "^2.14.0"
+  },
+  "peerDependencies": {
+    "@objectstack/driver-mongodb": "workspace:^",
+    "@objectstack/driver-sqlite-wasm": "workspace:^",
+    "@objectstack/driver-turso": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@objectstack/driver-mongodb": {
+      "optional": true
+    },
+    "@objectstack/driver-sqlite-wasm": {
+      "optional": true
+    },
+    "@objectstack/driver-turso": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@objectstack/driver-memory": "workspace:*",

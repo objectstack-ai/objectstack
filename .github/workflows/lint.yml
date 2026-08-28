@@ -390,6 +390,27 @@ jobs:
           node scripts/check-comment-mask-adoption.mjs --self-test
           node scripts/check-comment-mask-adoption.mjs
 
+      # A package's published `src/**` may only import workspace packages its own
+      # manifest DECLARES (#10062). The class was filed with one member and a
+      # mitigation — "type-only, so nothing lands in the emitted JavaScript" —
+      # and grew to four with no signal, one of them a VALUE import whose
+      # implementation the bundler then INLINED into a second package's dist.
+      # Both halves of the mitigation are now ledger EVIDENCE instead of prose:
+      # a `type-only` row reds the moment its import stops being type-only.
+      # Node builtins plus the shared comment mask only — no node_modules, so a
+      # reviewer can run it in place. Its `--self-test` runs FIRST: the
+      # production run over a fixed tree is green by construction, so it cannot
+      # tell a working matcher from a dead one, and the specifier FLOOR is the
+      # other half (a dead matcher finds nothing, and nothing is what success
+      # looks like — so it refuses with exit 2 rather than passing).
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      # Scans ~2k non-test src files across 78 workspace packages, no spawns; ~1s.
+      - name: Published src imports only declared workspace deps
+        run: |
+          node scripts/check-undeclared-dep-imports.mjs --self-test
+          node scripts/check-undeclared-dep-imports.mjs
+
       # The bash-3.2 floor, over every shell file the repo ships (#12221).
       # `/usr/bin/env bash` is bash 3.2.57 on macOS -- Apple ships no bash 4+,
       # for licensing reasons -- and THIS RUNNER IS BASH 5, where every construct
