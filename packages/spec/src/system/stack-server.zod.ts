@@ -191,7 +191,7 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
       cors:
         'Not authorable here. CORS is owned by the transport adapter and configured by '
         + 'OS_CORS_ORIGIN / OS_CORS_CREDENTIALS / OS_CORS_MAX_AGE. (`HttpServerConfig.cors` was retired in '
-        + 'v17, #4938; it is the registered first candidate for a `server.cors` key, which will arrive with '
+        + 'v17; it is the registered first candidate for a `server.cors` key, which will arrive with '
         + 'its executor.)',
       compression:
         'Not authorable — nothing reads it. `HttpServerConfig.compression` was retired in v17 '

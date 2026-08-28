@@ -350,7 +350,7 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe(
       'Fire triggers/hooks for each imported row. ON by default, and opting out must be ' +
       'explicit: automations always ran on import historically (the engine ignored this flag ' +
-      'until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
+      'until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
       'omitting the key runs them. This matches platform convention (Salesforce fires triggers ' +
       'on import by default). One boundary: a `dryRun` preview runs NO automations whatever ' +
       'this flag says.',

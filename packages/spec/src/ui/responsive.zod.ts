@@ -124,15 +124,15 @@ export const ResponsiveStylesSchema = lazySchema(() => strictObject(
       // here is usually migrating off that block, so each entry carries the
       // CSS translation that IS applied.
       columns:
-        '`columns` was a key of the retired `responsive` layout block (#11027 — no renderer ' +
+        '`columns` was a key of the retired `responsive` layout block (no renderer ' +
         'ever applied it). This block holds per-breakpoint CSS. Express a column span as CSS ' +
         "on the bucket where it should apply, e.g. `medium: { gridColumn: 'span 6' }`.",
       hiddenOn:
-        '`hiddenOn` was a key of the retired `responsive` layout block (#11027 — no renderer ' +
+        '`hiddenOn` was a key of the retired `responsive` layout block (no renderer ' +
         'ever applied it). This block holds per-breakpoint CSS. Hide a component per ' +
         "breakpoint with CSS, e.g. `xsmall: { display: 'none' }`.",
       order:
-        '`order` was a key of the retired `responsive` layout block (#11027 — no renderer ' +
+        '`order` was a key of the retired `responsive` layout block (no renderer ' +
         'ever applied it). This block holds per-breakpoint CSS. Set display order per ' +
         "breakpoint with CSS, e.g. `small: { order: '1' }`.",
     },

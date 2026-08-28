@@ -173,7 +173,7 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
     history:
       'Until this shape was closed, nothing validated `datasource.config` at all — an unrecognised connection key '
       + 'was accepted in silence and the datasource then connected on the client defaults '
-      + "(localhost:5432), which is #4001's original bug one level down.",
+      + '(localhost:5432), which is the same silent-drop bug one level down.',
   },
   {
   /**

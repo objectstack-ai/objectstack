@@ -73,7 +73,7 @@ import { strictObject } from '../shared/strict-object';
  * registration bug, not a spelling one.
  */
 const STUDIO_PLUGIN_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the plugin still '
+  'Until these shapes were closed an unknown key was dropped silently — the plugin still '
   + 'loaded and activated, contributing less than its manifest declared.';
 
 export const ViewModeSchema = lazySchema(() => z.enum(['preview', 'design', 'code', 'data', 'history']));

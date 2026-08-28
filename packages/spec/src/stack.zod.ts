@@ -200,7 +200,7 @@ function applyApiEndpointGates(
 export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   surface: 'this stack definition',
   history:
-    'Until #8687 closed this surface (the outermost door), an unknown top-level stack '
+    'Until this surface was closed (the outermost door), an unknown top-level stack '
     + 'key parsed green and its value was silently dropped — a one-character typo could ship '
     + 'an artifact missing a whole metadata family while `os validate` exited 0. The declared '
     + 'keys are enumerated by `ObjectStackDefinitionSchema` (@objectstack/spec, stack.zod.ts) '
@@ -231,8 +231,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
       + 'console, set `app.branding.primaryColor` / `accentColor` — the one live colour '
       + 'surface (it drives `--primary`, `--accent` and their derived variables).',
     onDisable:
-      'no kernel, runtime or service ever called `onDisable` (#4212 retired the uninvoked '
-      + 'lifecycle family), so a value written here goes nowhere. Do teardown inside the '
+      'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
+      + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
       + 'resources `onEnable` acquires.',
   },
 }, {

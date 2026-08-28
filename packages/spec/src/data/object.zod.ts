@@ -134,16 +134,16 @@ export function stripLegacyApiMethods(
  */
 const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   trash:
-    '`enable.trash` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
+    '`enable.trash` was removed from @objectstack/spec in the 16.x line (' +
     'ADR-0049) — it never had a runtime consumer: every delete has always been a ' +
     'hard delete, and a default-true flag promising a recycle bin was a false ' +
     'affordance (authors wrote `trash: false` believing they were opting out of a ' +
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
-    '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked at ' +
-    '#3146 and, if built, returns as a live enforced flag (ADR-0049 prune-or-build). ' +
+    '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked, ' +
+    'and if built returns as a live enforced flag (ADR-0049 prune-or-build). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   mru:
-    '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
+    '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
     'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
@@ -437,15 +437,15 @@ const DeclaredIndexUniqueScopeSchema = lazySchema(() =>
 export const IndexSchema = lazySchema(() => strictObject({
   surface: 'this index',
   history:
-    'Until this site was closed (its held 14th, closed once objectui#4772 ' +
-    "converged the console's drifted index editor), an unknown key here was dropped " +
+    'Until this site was closed (held back until the console\'s drifted index ' +
+    'editor converged), an unknown key here was dropped ' +
     'silently: the index still parsed and registered, minus whatever the author ' +
     'believed the key did.',
   guidance: {
     where:
       '`where` has never been an index key in this protocol — it was the console ' +
-      "fallback editor's drifted spelling for a partial-index predicate (objectui#4772 " +
-      'removed the control), and no driver ever emitted a predicate under either ' +
+      "fallback editor's drifted spelling for a partial-index predicate (since " +
+      'removed), and no driver ever emitted a predicate under either ' +
       'spelling. Delete the key. A partial index is built at the database layer, not ' +
       'the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from ' +
       "a runtime migration (what `metadata-protocol`'s `ensureOverlayIndex` already " +
@@ -1491,7 +1491,7 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     '. Curate the record page by assigning a custom Page schema; form ' +
     'layout derives from `fieldGroups` + `Field.group`.',
   softDelete:
-    '`softDelete` was removed from the spec in 16.0 (#2377, ADR-0049 ' +
+    '`softDelete` was removed from the spec in 16.0 (ADR-0049 ' +
     'enforce-or-remove) — there is no soft-delete/recycle-bin runtime, so it ' +
     'stored nothing and implied restore semantics that do not exist. Deletes ' +
     'are hard deletes; remove the key.',
@@ -1514,7 +1514,7 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'ids are not prefixed from it (no Salesforce-style key-prefix runtime). ' +
     'Remove the key; it had no effect.',
   tags:
-    '`tags` (object-level categorization) was removed from the spec (#2377, ' +
+    '`tags` (object-level categorization) was removed from the spec (' +
     'ADR-0049) — it had no runtime reader. Remove the key; use `managedBy` for ' +
     'lifecycle bucketing or a real field for per-record tagging.',
   active:

@@ -235,7 +235,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
  * walker's reconstruction of it.
  */
 const PROPS_HISTORY =
-  'Until #4001 batch A an undeclared prop was dropped in silence: the props schema stripped it '
+  'Until this shape was closed, an undeclared prop was dropped in silence: the props schema stripped it '
   + 'and `PageComponent.properties` is an open bag, so the key reached objectui\'s renderer, was '
   + 'not read there, and the author got a success receipt for configuration that did nothing.';
 
@@ -276,7 +276,7 @@ const COMPONENT_NODE_VISIBILITY_GUIDANCE: KeySetGuidance =
       'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '
       + 'component node\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '
       + '`id` — one canonical spelling per layer, not because the props-level form is inert. '
-      + 'Since objectui#5505 (`c86185eb5`, merged 2026-08-21) the hoisted form IS evaluated by '
+      + 'Since the console release of 2026-08-21 (`c86185eb5`) the hoisted form IS evaluated by '
       + 'the node-level gate: the two gates evaluate the same value and compose as an '
       + 'idempotent AND, so leaving it in `properties` duplicates the canonical key rather '
       + 'than silently failing to gate.',
@@ -378,8 +378,8 @@ export const PageContainerProps = strictObject(
       // schedule rather than an authorable key. Closing the shape is what makes
       // that distinction reach the author.
       body: '`body` is not an authorable spelling of the composition slot — write `children`. '
-        + 'The renderers still read `body` as a back-compat fallback for documents stored before '
-        + '#5775, but one composition key is the contract (Prime Directive #12).',
+        + 'The renderers still read `body` as a back-compat fallback for documents stored under '
+        + 'the older spelling, but one composition key is the contract (Prime Directive #12).',
     },
   },
   {
@@ -2270,7 +2270,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   fields: z.array(z.unknown()).optional()
     .describe('Field list fallback used when `columns` is absent'),
   filter: z.unknown().optional()
-    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural'),
+    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
   sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),

@@ -358,7 +358,7 @@ export const ChartInteractionSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart interaction block',
     history:
-      'Until this shape was closed, an undeclared interaction key was dropped at parse — including the two #3752 removed, so an author who kept writing `zoom` after it was retired got exactly the same silence as before the removal.',
+      'Until this shape was closed, an undeclared interaction key was dropped at parse — including the two removed with it, so an author who kept writing `zoom` after it was retired got exactly the same silence as before the removal.',
     aliases: { tooltip: 'tooltips', hover: 'tooltips', showTooltip: 'tooltips', rangeSelector: 'brush', slider: 'brush' },
     // The prescriptions #3752 wrote in this file's own doc comment, now
     // delivered at the rejection instead of only to whoever reads the source.
@@ -430,7 +430,7 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart drill-down block',
     history:
-      'Until #5022 `drillDown` was not declared anywhere in this protocol at all — objectui\'s ObjectChart read it as an untyped `(schema as any).drillDown`, so every key inside it, right or wrong, reached the renderer unchecked and a misspelling was simply ignored at click time.',
+      'Until this shape was closed, `drillDown` was not declared anywhere in this protocol at all — objectui\'s ObjectChart read it as an untyped `(schema as any).drillDown`, so every key inside it, right or wrong, reached the renderer unchecked and a misspelling was simply ignored at click time.',
     aliases: {
       enable: 'enabled', on: 'enabled', active: 'enabled',
       where: 'filter', criteria: 'filter', filters: 'filter',
@@ -540,7 +540,7 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart config',
     history:
-      'Until this shape was closed, an undeclared chart key was dropped at parse and the chart rendered with the defaults it was written to override — the failure #4001 exists for, on a shape reachable from both the dashboard and report metadata roots.',
+      'Until this shape was closed, an undeclared chart key was dropped at parse and the chart rendered with the defaults it was written to override — the failure closing this shape exists for, on a shape reachable from both the dashboard and report metadata roots.',
     aliases: {
       // `chartType` is named in `react-blocks.ts` as the INTERNAL spelling that
       // is deliberately NOT part of the author contract, so an author who saw

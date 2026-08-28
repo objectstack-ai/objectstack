@@ -28,7 +28,7 @@ const RUNTIME_MODE_PREVIEW_RETIRED =
   + 'experience becomes a product capability it re-declares fresh, with the '
   + 'production-posture hard-refusal as the first-landed half (#11846 ruling record).';
 const PREVIEW_MODE_RETIRED =
-  '`context.previewMode` was removed in @objectstack/spec 17 (#11846, ADR-0049 '
+  '`context.previewMode` was removed in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, '
   + '`simulatedRole`, `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`) '
   + 'had a consumer in any repo, so an authored block parsed cleanly and configured '

@@ -269,7 +269,7 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
 // an exact equivalent, and the rest are expressible as a kind plus the window
 // the widget's own `filter` resolves to.
 const COMPARE_TO_OFFSET_RETIRED =
-  '`dashboard.widgets[].compareTo.offset` was removed in @objectstack/spec 17.0.0 (#5011, '
+  '`dashboard.widgets[].compareTo.offset` was removed in @objectstack/spec 17.0.0 ('
   + 'ADR-0049 enforce-or-remove) — the analytics executor never had an `offset` concept, so on the '
   + 'ADR-0021 dataset path this arm did not shift a window, it threw '
   + '(`compareTo requires a timeDimension "undefined"`) and took the whole widget down with it. '
@@ -606,7 +606,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     '(`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. ' +
     'This message used to point at `page.components[].responsive` as the live home of the shared ' +
     '`ResponsiveConfig` shape; that key was measured equally unread and removed with the shape ' +
-    'in #11027. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
+    'with it. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
     'component (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
@@ -929,7 +929,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   performance: retiredKey(
-    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
+    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (audit ' +
     'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
     'implemented. Delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',

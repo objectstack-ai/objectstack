@@ -23,7 +23,7 @@ export type Locale = z.input<typeof LocaleSchema>;
  * the bug looks like missing coverage forever.
  */
 const TRANSLATION_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the bundle still '
+  'Until these shapes were closed an unknown key was dropped silently — the bundle still '
   + 'loaded, and whatever it was meant to translate rendered in the source language with no '
   + 'diagnostic, indistinguishable from a translation nobody had written yet.';
 

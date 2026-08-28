@@ -1007,7 +1007,7 @@ export const NavigationAreaSchema = lazySchema(() => strictObject(
  */
 const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   includeAll:
-    '`contextSelectors[].includeAll` was removed in @objectstack/spec 17.0.0 (#4509, '
+    '`contextSelectors[].includeAll` was removed in @objectstack/spec 17.0.0 ('
     + 'ADR-0049) — the shell deliberately ignored it. A context selector is a MANDATORY '
     + 'scope: an "All" row would clear the scope on a surface that exists to be scoped, and '
     + "on Studio's package selector that means listing the platform's own system/cloud "
@@ -1021,7 +1021,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + '@objectstack/spec 17.0.0 — selectors are mandatory-scope and never render an '
     + '"All" row. Delete the key; widen `optionsSource.filter` to widen the choices.',
   placement:
-    '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 (#4509, '
+    '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 ('
     + 'ADR-0049) — no renderer ever read it. Selectors always render in the sidebar header '
     + "block, and `'topbar'` placed nothing in the topbar. Delete the key. Run "
     + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -1446,8 +1446,8 @@ export const AppSchema = lazySchema(() => strictObject(
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'never read). Delete the key and declare the endpoint one level up, on the STACK: ' +
-    '`defineStack({ apis })`. That surface EXECUTES from protocol 17. Between ' +
-    '#4936 and the executor landing it was refused wholesale — nothing mounted a declared ' +
+    '`defineStack({ apis })`. That surface EXECUTES from protocol 17. Before ' +
+    'the executor landed it was refused wholesale — nothing mounted a declared ' +
     'path, so every key including `authRequired` parsed and gated nothing — and that ' +
     'blanket refusal is now narrowed to five per-endpoint publish gates (namespace, ' +
     'supported target, mapping, policy, uniqueness): an endpoint that passes them is ' +
@@ -1461,7 +1461,7 @@ export const AppSchema = lazySchema(() => strictObject(
     'security review, not a rename. A route that genuinely needs handler CODE is mounted ' +
     'imperatively instead: resolve the `http.server` service from your plugin context and ' +
     'register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — ' +
-    'removed in @objectstack/spec 17, #10726: nothing ever read it, and authoring it is ' +
+    'removed in @objectstack/spec 17: nothing ever read it, and authoring it is ' +
     'now rejected with its own prescription). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),

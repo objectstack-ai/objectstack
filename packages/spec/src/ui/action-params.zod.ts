@@ -370,7 +370,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
   positions: z.array(z.string()).optional().describe(
     'Position names held by the caller (ADR-0090 D3 vocabulary; the value of '
     + '`ExecutionContext.positions`, whose schema comment reads "Formerly `roles`") — the CANONICAL '
-    + 'spelling at this boundary and the key an action body should read. Within the #5613 '
+    + 'spelling at this boundary and the key an action body should read. Within the '
     + 'deprecation window `buildActionSession()` emits the same array under both this key and the '
     + 'deprecated `roles`, so migrating is a change of key and nothing else; `roles` is then removed '
     + 'on the v16 session-alias removal path (deprecate → remove: one window, then gone). '
@@ -403,7 +403,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
   roles: z.array(z.string()).optional().describe(
     'DEPRECATED alias of `positions` — the same caller position names under the one spelling '
     + 'ADR-0090 D3 forbids (the value is `ExecutionContext.positions`, "Formerly `roles`"). Read '
-    + '`positions` instead: within the #5613 deprecation window `buildActionSession()` emits both '
+    + '`positions` instead: within the deprecation window `buildActionSession()` emits both '
     + 'keys with identical values, so migrating is a change of key and nothing else. The migration '
     + 'prescription and its acceptance criteria are the ADR-0087 semantic migration '
     + '`action-session-roles-to-positions`; removal follows the v16 session-alias removal path '

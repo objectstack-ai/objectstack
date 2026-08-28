@@ -118,8 +118,8 @@ const CRUD_ALIAS_GUIDANCE = {
     + 'ADR-0087 D2 conversion `flow-node-crud-filter-alias`, which rewrites it at load; delete it once `filter` '
     + 'carries the pairs. If `filter` is also present, the two carry DIFFERENT match maps and the conversion kept '
     + 'both rather than choosing — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
-    + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare (#3810 — a '
-    + 'match-everything write).',
+    + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare — it is a '
+    + 'match-everything write.',
 } as const;
 
 /**
@@ -141,7 +141,7 @@ const CRUD_RECORD_ID_GUIDANCE =
   'CRUD nodes address rows through `filter`, never through a `recordId` key — no executor has ever read one. '
   + "Write the id as a filter VALUE: `filter: { id: '{record.id}' }`, which is the shape the node's own descriptor "
   + 'documents. This matters most on `delete_record`: a config whose only "constraint" is an unread key is a '
-  + 'match-everything delete, the #3810 hazard.';
+  + 'match-everything delete, the hazard.';
 
 /**
  * `fieldValues` — the AI-authoring dialect that never had a runtime reader.
@@ -167,8 +167,8 @@ const FIELD_VALUES_GUIDANCE =
  * reaches nothing.
  */
 const NO_OUTPUT_VARIABLE_GUIDANCE =
-  'This node binds no output — the executor reads no `outputVariable`, and #4045 recorded that absence '
-  + 'deliberately after re-verifying the executor. Its siblings (`get_record`, `create_record`, `map`) do declare '
+  'This node binds no output — the executor reads no `outputVariable`, and that absence is '
+  + 'deliberate, recorded after re-verifying the executor. Its siblings (`get_record`, `create_record`, `map`) do declare '
   + 'one, which is why the key looks universal and is not. To use what was written, follow this node with a '
   + '`get_record` that reads the row back.';
 
@@ -196,7 +196,7 @@ const NO_OUTPUT_VARIABLE_GUIDANCE =
  */
 const BULK_INTENT_PRESCRIPTION =
   'Bulk intent is declared with `multi: true` — the same word the data engine has always used for it '
-  + '(`options.multi`), so the concept keeps one name from node config to driver call. Until #5393 NO spelling of '
+  + '(`options.multi`), so the concept keeps one name from node config to driver call. Until this key arrived NO spelling of '
   + 'it existed on this node, which is why a predicate write was refused by the engine '
   + '(`… requires an ID or options.multi=true`) and no flow could reach `updateMany`/`deleteMany` at all. Leaving '
   + 'it off is still a valid, deliberate choice: without it the write must name one row by scalar `id`.';

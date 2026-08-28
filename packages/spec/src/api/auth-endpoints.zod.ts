@@ -219,7 +219,7 @@ const MAGIC_LINK_UNADVERTISED =
   + 'existed when none did. Delete the key. The server side is unchanged and still yours to '
   + 'call: `AuthPluginConfig.plugins.magicLink` wires better-auth\'s magic-link plugin, and '
   + '`/api/v1/auth/magic-link/send` + `/magic-link/verify` answer exactly as before — drive '
-  + 'them from your own UI, or wait for objectui#4179, which restores this flag along with '
+  + 'them from your own UI, or wait for the console release that restores this flag along with '
   + 'the login UI that reads it.';
 
 /**

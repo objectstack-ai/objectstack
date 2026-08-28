@@ -32,7 +32,7 @@ import { lazySchema } from '../shared/lazy-schema';
  * kept the posture those three were rescued from.
  */
 const VIEW_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
+  'Until these shapes were closed an unknown key was dropped silently — the view still '
   + 'rendered, without whatever the key was meant to configure.';
 
 export { HttpMethodSubsetSchema, HttpRequestSchema };
@@ -1308,7 +1308,7 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    * client width. Explicit buckets are a coarse, viewport-independent override.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("[#2578] Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
@@ -3278,7 +3278,7 @@ function viewItemWireFields() {
     // key arrives at THIS member's top level; declaring it validates the
     // shape where `.strip()` used to let it ride through unchecked.
     columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933'),
+      .describe('Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)'),
   };
 }
 

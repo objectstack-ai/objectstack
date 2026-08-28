@@ -62,7 +62,7 @@ import type { IScopedContext } from '../contracts/scoped-context';
  */
 const hookTargetError =
   'A hook `object` target must name at least one object. An empty target is not '
-  + '"no target": until #4001 `\'\'` and `[]` were widened to the wildcard `\'*\'`, '
+  + '"no target": until this shape was closed, `\'\'` and `[]` were widened to the wildcard `\'*\'`, '
   + 'registering the hook on EVERY object, and `[\'\']` registered it on an object '
   + 'name nothing matches, so it could never fire. Name the object(s) — '
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "

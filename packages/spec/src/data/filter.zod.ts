@@ -628,10 +628,10 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'sqlite-wasm) folds ASCII only, so a Unicode promise here would be a '
     + 'guarantee three of the five could not keep. The comparand is matched '
     + 'LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not '
-    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701 declared it; #5702 '
-    + 'lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on '
-    + 'both transports); #6520 lowered it on every JS evaluation face, so it is '
-    + 'portable across every backend the platform ships.]'
+    + 'wildcards. Case-SENSITIVE containment is $contains. Lowered on the SQL '
+    + 'family (driver-sql, driver-sqlite-wasm, driver-turso on both transports) '
+    + 'and on every JS evaluation face, so it is '
+    + 'portable across every backend the platform ships.'
   ),
 
   /**
@@ -649,12 +649,12 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + '$contains for containment. A pattern ending in a lone unpaired backslash '
     + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
     + 'as $contains (Q2 = A); $ilike is the case-insensitive twin. '
-    + '[#7536. Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
+    + 'Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
     + 'driver-turso on both transports), by driver-memory and by '
     + '@objectstack/formula. driver-mongodb, objectql `having` and '
     + 'service-analytics REFUSE it in the INVALID_FILTER envelope rather than '
     + 'approximating it — see FILTER_OPERATORS for why it is staged out of that '
-    + 'allowlist.]'
+    + 'allowlist.'
   ),
 
   /**
@@ -664,10 +664,10 @@ export const StringOperatorSchema = lazySchema(() => z.object({
   $ilike: z.string().optional().describe(
     'Whole-string pattern match like $like — "%" / "_" wildcards bound by the '
     + 'caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) '
-    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same #4706 Q1 = A '
+    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same Q1 = A '
     + 'boundary $icontains declares, because SQLite\'s fold is ASCII-only and '
-    + 'three of the five backends are SQLite underneath. [#7536; staged with '
-    + '$like — see FILTER_OPERATORS.]'
+    + 'three of the five backends are SQLite underneath. Staged with '
+    + '$like — see FILTER_OPERATORS.'
   ),
 }));
 

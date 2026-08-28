@@ -167,7 +167,7 @@ export const StateMachineValidationSchema = lazySchema(() => strictObject({
   type: z.literal('state_machine'),
   field: z.string().describe('State field (e.g. status)'),
   transitions: z.record(z.string(), z.array(z.string())).describe('Map of { OldState: [AllowedNewStates] }'),
-  initialStates: z.array(z.string()).optional().describe('States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). #3165.'),
+  initialStates: z.array(z.string()).optional().describe('States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert).'),
 }));
 
 /**

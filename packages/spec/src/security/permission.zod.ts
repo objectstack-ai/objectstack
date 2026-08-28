@@ -172,7 +172,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * (`GET /data/:object/export` → 403 `EXPORT_NOT_PERMITTED`); the frontend
    * renders that set and never reads this bit directly.
    */
-  allowExport: z.boolean().optional().describe('[#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords.'),
+  allowExport: z.boolean().optional().describe('User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords.'),
 
   /**
    * Lifecycle Operations.
@@ -189,7 +189,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * grants the ownership-write capability now; the dedicated M2 `transfer`
    * operation will reuse the same bit.
    */
-  allowTransfer: z.boolean().default(false).describe('[RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id)'),
+  allowTransfer: z.boolean().default(false).describe('[RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id)'),
 
   /**
    * REMOVED — `allowRestore` / `allowPurge` claimed to gate `restore` /

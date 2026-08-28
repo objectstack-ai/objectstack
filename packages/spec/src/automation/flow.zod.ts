@@ -362,7 +362,7 @@ function flowNodeObject() { return strictObject(
   // `outputSchema` REMOVED (#3896 audit close-out): declared, never validated —
   // no engine path checked node outputs against it (ledger: dead).
   outputSchema: retiredKey(
-    '`flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
+    '`flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (audit ' +
     'close-out) — it was never validated: the engine does not check node outputs against ' +
     'it, so it documented a contract nothing enforced. Delete the key. Downstream nodes ' +
     "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration. " +
@@ -775,18 +775,18 @@ export const FlowSchema = lazySchema(() => strictObject(
         'flow `errorHandling` counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` ' +
         '— renaming the key alone would quietly run one attempt fewer than you asked for.',
       fallback:
-        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17, ' +
-        '#3896 — the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
+        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17 — ' +
+        'the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
         'to the handler node instead.',
       fallbackNode:
-        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17, ' +
-        '#3896 — the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
+        'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17 — ' +
+        'the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
         'to the handler node instead.',
     },
     history:
       'Until this shape was closed, these were dropped silently — the block still parsed, so a retry budget ' +
       'or backoff the author configured was replaced by this block\'s defaults without a word. ' +
-      'Since #4964 the retry keys are the converged `RetryPolicySchema` contract, so a spelling ' +
+      'The retry keys are now the converged `RetryPolicySchema` contract, so a spelling ' +
       'learned on `job.retryPolicy` or a `try_catch` node\'s `retry` is correct here too.',
   }, {
     strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe("How to handle node execution errors. 'retry' governs ONE synchronous dispatch: a durable pause (approval/screen/wait) ends the retry-governed segment, so a failure after the run resumes is not retried."),
@@ -822,7 +822,7 @@ export const FlowSchema = lazySchema(() => strictObject(
     // unrecoverable errors via per-node FAULT EDGES, never this — an author
     // who configured a fallback here had none.
     fallbackNodeId: retiredKey(
-      '`flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (#3896 ' +
+      '`flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (' +
       'audit close-out) — the engine routes unrecoverable node errors via per-node fault ' +
       "edges (an edge with type: 'fault'), and never read this key: a fallback " +
       'configured here silently did not exist. Delete the key and draw a fault edge from ' +

@@ -642,7 +642,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '`projectionApplied.success` rather than rely on the 200.',
   ),
   advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    'Non-gating findings from the runtime authoring gate — the same '
     + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
     + 'applied to this body on its way to `active`. The write SUCCEEDED; these '
     + 'are what the gate has to say about it anyway (closing D3). '
@@ -654,7 +654,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '422 `invalid_metadata` envelope instead of here. A caller that ignores '
     + 'this key behaves exactly as before. Runtime-only: the CLI surfaces the '
     + 'same findings on its own stdout, and a Studio / MCP / AI author has no '
-    + 'CLI at all, which is the gap #4463 exists to close. The gate runs on '
+    + 'CLI at all, which is the gap this key exists to close. The gate runs on '
     + 'both write doors (D1), and both report: '
     + '`POST /meta/:type/:name/publish` carries the same key on '
     + '`PublishMetaItemResponseSchema`.',
@@ -713,7 +713,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
   packageId: z.string().nullable().optional().describe(
     'ADR-0048 — the software package the draft being promoted was listed '
     + 'under, when the caller has one to state (`?package=<id>` on the REST '
-    + 'door; #10063 / #10350). ⚠️ `null` is NOT the same as absent, and the '
+    + 'door). ⚠️ `null` is NOT the same as absent, and the '
     + 'difference is load-bearing: the implementation branches on the KEY '
     + 'BEING PRESENT, so an ABSENT key keeps the historical "match any '
     + 'package" resolution while `null` pins the lookup to the '
@@ -839,11 +839,11 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + 'and logged, never thrown.',
   ),
   advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    'Non-gating findings from the runtime authoring gate — the same '
     + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
-    + 'applied to the DRAFT body this promotion carried to `active` (#9176, '
+    + 'applied to the DRAFT body this promotion carried to `active` ('
     + 'the same key `SaveMetaItemResponseSchema` carries, because the gate '
-    + 'runs on both write doors by #4463 D1). The promotion SUCCEEDED; these '
+    + 'runs on both write doors, D1). The promotion SUCCEEDED; these '
     + 'are what the gate has to say about it anyway. Present ONLY when at '
     + 'least one advisory was raised — an empty array is never emitted, so a '
     + 'clean publish\'s response bytes are unchanged and absence means '
@@ -853,7 +853,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + '`invalid_metadata` envelope instead of here. A caller that ignores '
     + 'this key behaves exactly as before. This door is the one Studio\'s '
     + 'designer takes on every edit (draft save, then publish), and a Studio '
-    + '/ MCP / AI author has no CLI at all — which is the gap #4463 exists '
+    + '/ MCP / AI author has no CLI at all — which is the gap this key exists '
     + 'to close.',
   ),
   message: z.string().optional().describe(
@@ -861,7 +861,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + '[seq=3]`. The producer sets it on every publish today; it stays optional '
     + 'to match the producer\'s own signature and its `SaveMetaItemResponse` '
     + 'twin, and because an absent human-readable string strips no data — the '
-    + 'failure mode #5745 exists to prevent.',
+    + 'failure mode this key exists to prevent.',
   ),
 }));
 
@@ -955,8 +955,8 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + 'part of this contract.',
     ),
     advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-      'Non-gating findings the #4463 runtime authoring gate raised against '
-      + 'THIS draft\'s promotion (#9343 — the same element shape and the '
+      'Non-gating findings the runtime authoring gate raised against '
+      + 'THIS draft\'s promotion (the same element shape and the '
       + 'same omitted-when-empty discipline as '
       + '`PublishMetaItemResponseSchema.advisories`, riding each element '
       + 'rather than a parallel top-level map). Present ONLY when at least '
@@ -980,7 +980,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + 'A refusal that produced structured findings states a one-sentence '
       + 'HEADLINE here (what failed, where, which rules, how many); the '
       + 'per-path detail rides `issues[]` instead of being restated in this '
-      + 'string (#10524 — consumers rendering both channels were showing '
+      + 'string (consumers rendering both channels were showing '
       + 'every finding twice).',
     ),
     code: z.string().optional().describe(
@@ -990,7 +990,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
     issues: z.array(RuntimeAuthoringIssueSchema).optional().describe(
       'The structured findings behind the refusal, when the refusing error '
-      + 'carried them — today the #4463 author-time gate\'s '
+      + 'carried them — today the author-time gate\'s '
       + 'INVALID_METADATA refusal on the causal item. The producer has '
       + 'emitted this key; declaring it is what lets a '
       + 'typed consumer read it back, and what lets `error` stay a headline '
@@ -1040,7 +1040,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       message: z.string().describe('What is wrong, in the schema\'s own words.'),
       code: z.string().optional().describe(
         'Zod\'s own issue code, verbatim — deliberately NOT the ADR-0114 '
-        + '`fields[]` vocabulary (the #5364 decision: this is a '
+        + '`fields[]` vocabulary (the decision: this is a '
         + 'metadata-authoring diagnostic and its consumers read raw zod '
         + 'codes; aligning the vocabularies is a separate decision).',
       ),
@@ -1172,8 +1172,8 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   ),
   actor: z.string().optional().describe(
     'Identity recorded on the delete\'s history tombstone row. On the REST '
-    + 'door this is the request\'s authenticated identity (one producer, '
-    + '#7749) — never a caller-supplied header. Absent, the event is recorded '
+    + 'door this is the request\'s authenticated identity (one producer) '
+    + '— never a caller-supplied header. Absent, the event is recorded '
     + 'actor-less (null), deliberately not attributed to "system".',
   ),
   state: z.enum(['active', 'draft']).optional().describe(
@@ -1929,7 +1929,7 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability: caller-supplied `readonly` fields the #3043 ' +
+    'Write-observability: caller-supplied `readonly` fields the ' +
     'create-ingress strip removed before the rows were written. AGGREGATED across the batch ' +
     '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
     'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +

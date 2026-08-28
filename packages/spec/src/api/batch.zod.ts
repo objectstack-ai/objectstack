@@ -206,7 +206,7 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields LEGALLY stripped from ' +
     'THIS row before it was written — static `readonly` / TRUE `readonlyWhen` ' +
-    ' on update, or the #3043 create-ingress strip. Per-row because a batch can drop ' +
+    ' on update, or the create-ingress strip. Per-row because a batch can drop ' +
     'different fields on different rows (`readonlyWhen` is record-state-dependent). Present ' +
     'ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). ' +
     'A single response header cannot express per-row drops, so this body field is the ' +

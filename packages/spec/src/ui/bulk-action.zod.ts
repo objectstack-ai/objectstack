@@ -191,7 +191,7 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
         + 'the whole selection in `params._selectedIds` instead of a single record id.',
     },
     history:
-      'Until #4457 the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
+      'Until this shape was closed, the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
       + 'so a mis-spelled one shipped as a button that silently ran the DEFAULT behaviour (or none '
       + 'at all).',
   },

@@ -181,7 +181,7 @@ const DECISION_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'parse-validated at registration, which is why a malformed one is caught and an INERT one was not. Branching '
     + 'lives on the OUT-EDGES: give each branch its own `condition` and mark the fallback `isDefault: true`. Do not '
     + 'reach for the plural `conditions` here on the strength of the spelling — declaring branches here AND on the '
-    + 'edges is the double-declaration #4414 was filed for. If the edges already carry the predicate, delete this key.',
+    + 'edges is the double-declaration this guidance exists to stop. If the edges already carry the predicate, delete this key.',
 };
 
 // ─── script ──────────────────────────────────────────────────────────
@@ -363,7 +363,7 @@ export const DecisionConditionSchema = lazySchema(() => strictObject({
       + "projects it from the node's out-edges and applies edits back to them; it is never stored on the branch. "
       + "Route by making this branch's `label` match an out-edge's `label` exactly (a label nothing claims cannot "
       + 'route: traversal falls back to considering every out-edge, and `os validate` reports it as '
-      + '`flow-branch-label-unmatched`, #4414).',
+      + '`flow-branch-label-unmatched`).',
   },
 }, {
   /** Branch label — must match an out-edge's `label` to route anywhere. */

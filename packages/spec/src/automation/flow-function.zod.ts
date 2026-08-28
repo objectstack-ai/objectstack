@@ -152,7 +152,7 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
     'Until this shape was closed, these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
     '`handler`/`effect` by construction, so a misspelled `effect` was discarded twice over: ' +
     'the function still registered, still ran, and its writes were still counted as none, ' +
-    'which is what keeps #4354\'s broken-sweep alert quiet on the run that needed it.',
+    'which is what keeps the broken-sweep alert quiet on the run that needed it.',
 }, {
   handler: z.function().describe('The function invoked by name (a `script` node, a string-named Hook/Action handler)'),
   effect: FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)
