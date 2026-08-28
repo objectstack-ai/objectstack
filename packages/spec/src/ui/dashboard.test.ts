@@ -544,7 +544,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     // the fully-qualified key, the version, the issue, and the fix.
     expect(message).toMatch(/dashboard\.widgets\[\]\.responsive/);
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/widgets\[\]\.responsive/);
+    expect(message).toMatch(/ADR-0049 D2/);
     expect(message).toMatch(/Delete the key/);
     // The redirect correction (#11027): this message used to prescribe
     // `page.components[].responsive` as the live home of the shared shape;
@@ -620,7 +620,7 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
     // fully-qualified key, the version, the issue, and the fix.
     expect(message).toMatch(new RegExp(`dashboard\\.widgets\\[\\]\\.${key}`));
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/widgets\[\]\.aria/);
+    expect(message).toMatch(/#5010/);
     // The three went together — an author who deletes only the one key they
     // were told about would hit this same error twice more.
     expect(message).toMatch(/delete all three/i);
@@ -637,7 +637,7 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
 
     expect(message).toMatch(/dashboard\.widgets\[\]\.aria/);
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/widgets\[\]\.aria/);
+    expect(message).toMatch(/ADR-0049 D2/);
     expect(message).toMatch(/Delete the key/);
     // The shared shape survives elsewhere. Without this, the message reads as
     // "AriaProps is gone", which would send an author deleting live metadata.

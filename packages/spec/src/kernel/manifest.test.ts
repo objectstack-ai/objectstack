@@ -449,7 +449,7 @@ describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, n
     );
     expect(issue).toBeDefined();
     expect(issue!.message).toMatch(
-      new RegExp(`manifest\\.contributes\\.${member}.*removed in @objectstack/spec 17.*#10724.*Delete the key`, 's'),
+      new RegExp(`manifest\\.contributes\\.${member}.*removed in @objectstack/spec 17.*Delete the key`, 's'),
     );
   });
 

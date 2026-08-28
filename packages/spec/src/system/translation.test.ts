@@ -1219,7 +1219,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
-        .toContain('fixed envelope');
+        .toContain(`\`${key}\` was removed`);
     },
   );
 });

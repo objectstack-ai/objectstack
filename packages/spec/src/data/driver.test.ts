@@ -90,7 +90,7 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
 
   it('the streaming prescription carries the #4484 findStream story and the paged-find fix', () => {
     expect(() => DriverCapabilitiesSchema.parse({ streaming: true })).toThrow(
-      /DriverCapabilities\.streaming.*removed.*findStream.*`find` with `limit`\/`offset`.*Delete the key/s,
+      /DriverCapabilities\.streaming.*removed.*findStream.*`find\(\)` with `limit`\/`offset`.*Delete the key/s,
     );
   });
 

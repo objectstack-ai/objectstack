@@ -445,7 +445,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('tombstones both keys so a source that skipped conversion is rejected, not stripped', () => {
       for (const bad of [{ timeoutMs: 60_000 }, { onTimeout: 'continue' }]) {
         const flow = (wecFlow({ eventType: 'timer', timerDuration: 'PT1M', ...bad }).flows as any[])[0];
-        expect(() => FlowSchema.parse(flow), `${Object.keys(bad)[0]} must be rejected`).toThrow(/4158/);
+        expect(() => FlowSchema.parse(flow), `${Object.keys(bad)[0]} must be rejected`)
+          .toThrow(/was removed in @objectstack\/spec 17/);
       }
     });
   });
@@ -550,7 +551,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
         expect(
           () => ScriptConfigSchema.parse({ function: 'score_lead', ...bad }),
           `${key} must be rejected`,
-        ).toThrow(/4343/);
+        ).toThrow(/was removed in @objectstack\/spec 17/);
       }
       // The flow-level parse is deliberately blind here — pinned so the note
       // above stays true if `FlowNodeSchema.config` is ever tightened.

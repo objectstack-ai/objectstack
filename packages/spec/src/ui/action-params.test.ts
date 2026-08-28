@@ -363,7 +363,7 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
 
     expect(doc).toMatch(/DEPRECATED alias of `positions`/);
     expect(doc).toMatch(/action-session-roles-to-positions/);
-    expect(doc).toMatch(/deprecate → remove/);
+    expect(doc).toMatch(/v16 session-alias removal path/);
     expect(doc).toMatch(/security service/i);
 
     // ...and that phase 1's now-obsolete prohibition is GONE. Leaving it would
@@ -388,7 +388,7 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
     // neighbour (`hook-context-session-roles-retired`, #5050) was — the reason
     // must not read as a removal notice.
     expect(entry!.reason).toMatch(/deprecation window/);
-    expect(entry!.reason).toMatch(/tracked separately/);
+    expect(entry!.reason).toMatch(/#5613/);
     expect(entry!.acceptanceCriteria).toMatch(/ctx\.session\.positions/);
   });
 });

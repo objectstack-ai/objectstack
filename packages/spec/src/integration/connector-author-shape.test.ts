@@ -356,7 +356,7 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
     expect(result.success).toBe(false);
     const issues = result.error!.issues;
     expect(issues[0]!.code).toBe('unrecognized_keys');
-    expect(issues[0]!.message).toContain('fixed envelope');
+    expect(issues[0]!.message).toContain('`retryPolicy` was removed');
     expect(issues[0]!.message).toContain('There is no replacement');
   });
 

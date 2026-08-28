@@ -118,7 +118,7 @@ describe('#5011 — every retired spelling is rejected WITH its upgrade', () => 
   it('the bare string arms carry a prescription naming the exact replacement', () => {
     const period = reject('previousPeriod');
     expect(period).toContain('was removed in');
-    expect(period).toContain('`dashboard.widgets[].compareTo.offset` was removed');
+    expect(period).toContain('#5011');
     expect(period).toContain('DROPPED');
     expect(period).toContain("kind: ");
     expect(period).toContain('previousPeriod');
@@ -228,7 +228,7 @@ describe('#5011 — the converged slot is union-free, so its prescriptions reach
     const top = issuesFor('previousPeriod').map((i) => i.message).join('\n');
     expect(top).not.toBe('Invalid input');
     expect(top).toContain('was removed in');
-    expect(top).toContain('`dashboard.widgets[].compareTo.offset` was removed');
+    expect(top).toContain('#5011');
 
     const offsetTop = issuesFor({ offset: '7d' }).map((i) => i.message).join('\n');
     expect(offsetTop).toContain('was removed in');

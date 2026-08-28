@@ -1223,7 +1223,7 @@ describe('ObjectSchema.create()', () => {
       }
       expect(message).toContain('lifecycle hook');
       expect(message).toContain('record_change');
-      expect(message).toContain('silent-strip class');
+      expect(message).toContain('#1535');
     });
 
     // #4990 note 1 asked whether this file's own `suggestKey` shares the
@@ -1272,7 +1272,7 @@ describe('ObjectSchema.create()', () => {
       expect(message).toContain('highlightFields');
       expect(message).toContain('11.7.0');
       expect(message).toContain('ADR-0085 semantic roles');
-      expect(message, 'the ADR and the version are the durable references').not.toMatch(/#\d{3,5}/);
+      expect(message).toContain('retired in 11.9.1');
     });
 
     it('tombstone: dead metadata keys removed in 16.0 (#2377) carry upgrade guidance', () => {
@@ -1295,7 +1295,7 @@ describe('ObjectSchema.create()', () => {
           message = (e as Error).message;
         }
         expect(message, `${key} should be rejected`).toContain(key);
-        expect(message, `${key} must carry no tracker id`).not.toMatch(/#\d{3,5}/);
+        expect(message, `${key} should name the removal`).toContain('was removed');
         expect(message, `${key} should hint at the replacement`).toContain(needle);
       }
     });

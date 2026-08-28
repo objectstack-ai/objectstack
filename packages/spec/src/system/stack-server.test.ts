@@ -70,9 +70,9 @@ describe('server: carries only keys with a consumer (#4938 stays shut)', () => {
   it.each([
     ['port', /objectstack serve -p/],
     ['host', /belongs to the deployment/],
-    ['compression', /#4938/],
-    ['requestTimeout', /#4938/],
-    ['bodyLimit', /#4938/],
+    ['compression', /retired in v17/],
+    ['requestTimeout', /retired in v17/],
+    ['bodyLimit', /retired in v17/],
     ['static', /transport plugin/],
     ['cors', /OS_CORS_ORIGIN/],
   ])('rejects the unconsumed HttpServerConfig key `%s` with a prescription', (key, expected) => {

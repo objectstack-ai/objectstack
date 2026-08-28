@@ -3088,7 +3088,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
       try {
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
-      expect(message).toMatch(/view\.striped/);
+      expect(message).toMatch(new RegExp(`view\\.${key}\` was removed`));
       expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
     }
   });
