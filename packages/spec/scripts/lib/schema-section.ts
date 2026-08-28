@@ -14,9 +14,11 @@
 
 import { escapeMdxDescription } from './escape-mdx';
 import {
+  discriminantKeyOf,
   formatPropertyType,
   formatType,
   nestedShapesOf,
+  variantSelector,
   type NestedShape,
   type TypeContext,
 } from './format-type';
@@ -277,6 +279,36 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
     // the COUNT out of this position for a smaller version of the same cost;
     // taking the whole list out of it is the same decision.
     expandNested = true,
+    // What the `### Nested Shape:` and `### Allowed Values:` headings below
+    // qualify themselves BY — `schemaName` for a schema rendered whole, and
+    // `schemaName` plus a variant selector (`ViewItem[viewKind='list']`) for a
+    // table rendered from inside one arm of a top-level `### Union Options`.
+    //
+    // ## Why this is a parameter now (#12590)
+    //
+    // The union branch calls this function once per variant, and both halves of
+    // the old `${schemaName}.${key}` qualifier are shared by every sibling
+    // variant of one schema. Two `ViewItem` variants each declaring a
+    // shape-opening `config` therefore emitted `### Nested Shape:
+    // \`ViewItem.config\`` twice: two identical headings, i.e. **two identical
+    // anchors on one page**, on the very heading whose qualifier exists to
+    // prevent exactly that. Measured across the tree: 12 excess occurrences,
+    // 10 distinct headings, 4 pages — every one of them under a schema
+    // rendering `### Union Options`.
+    //
+    // The comment on `path` below (#12316) reasoned that an `owner` parameter
+    // "would be a parameter nothing ever reads", and that was true of the level
+    // it was written about: a nested-shape sub-table opens nothing of its own.
+    // It did not hold one level UP, where the union branch is a second caller
+    // of this function on the same schema name. So the owner is threaded from
+    // there and nowhere else, and defaults to `schemaName` so that every
+    // non-union call site — and the recursive sub-table call, which emits no
+    // headings at all — is byte-identical to what it rendered before.
+    //
+    // ⛔ Not a new notation: the selector spelling comes from `variantSelector`
+    // in `format-type.ts`, the same function that stamps the variant segment
+    // into a property accessor (#12316). One grammar, one implementation.
+    owner: string = schemaName,
   ) => {
       // Vocabularies too wide for their own table cell. Collected while the
       // table is built and printed as `### Allowed Values` bullets right after
@@ -320,17 +352,18 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
               if (!carriesDescription(shape)) continue;
               const own = typeof shape.node.description === 'string' ? shape.node.description : '';
               nested.push({
-                // Qualified by schema AND property, for the reason the
+                // Qualified by OWNER and property, for the reason the
                 // `### Allowed Values` headings below are: one page carries
                 // many schemas, and a heading naming only the property would
-                // give it two identical anchors. `schemaName` and not a
-                // threaded `owner` parameter — a nested table opens no
-                // relocation and no sub-table of its own, so an owner threaded
-                // into one would be a parameter nothing ever reads. The variant
+                // give it two identical anchors. The owner is `schemaName`
+                // alone everywhere except inside a top-level union variant,
+                // where it carries that variant's selector too — because the
+                // schema name is shared by all of a union's siblings and so
+                // qualifies nothing between them (#12590). The variant
                 // selector inside `accessor` is what extends that same
                 // qualification down one more level, so nine sub-tables under
                 // one property still carry nine distinct anchors.
-                path: `${schemaName}.${key}${shape.accessor}`,
+                path: `${owner}.${key}${shape.accessor}`,
                 // The element/value node's OWN describe, when it is not simply
                 // the property's — that one is already in the row above. On a
                 // union this is the VARIANT's describe, which is the line that
@@ -358,11 +391,16 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
           t += `| **${key}** | \`${typeStr}\` | ${isReq} | ${desc} |\n`;
       }
       t += '\n';
-      // Qualified by schema AND property: `api/errors.mdx` carries a wide
+      // Qualified by OWNER and property: `api/errors.mdx` carries a wide
       // `code` on both `EnhancedApiError` and `FieldError`, so a heading naming
-      // only the property would give one page two identical anchors.
+      // only the property would give one page two identical anchors. Sibling
+      // variants of ONE union are the same collision one level in — they share
+      // the schema name — so the owner carries the variant selector there
+      // (#12590). No page has two such headings today; covering this position
+      // in the same change is what stops the next wide vocabulary declared on
+      // two variants from reopening the defect.
       for (const { key, members } of relocated) {
-          t += `### Allowed Values: \`${schemaName}.${key}\`\n\n`;
+          t += `### Allowed Values: \`${owner}.${key}\`\n\n`;
           t += members.map(m => `* \`${m}\``).join('\n');
           t += `\n\n`;
       }
@@ -386,6 +424,13 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
               new Set(shape.node.required || []),
               '',
               false,
+              // Passed through rather than defaulted: this call emits no
+              // headings today (`expandNested: false` collects neither
+              // relocation nor nested shape), so it is the owner's value that
+              // is unobservable here, never the owner's correctness. Letting it
+              // fall back to `schemaName` would plant a wrong value waiting for
+              // the day this table is allowed to open something.
+              owner,
           );
       }
       return t;
@@ -402,6 +447,23 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
   } else if (mainDef.anyOf || mainDef.oneOf) {
      md += `### Union Options\n\nThis schema accepts one of the following structures:\n\n`;
      const variants = mainDef.anyOf || mainDef.oneOf;
+
+     // Which variants are heading-emitting contexts at all — only the object
+     // branch below calls `renderProperties`, and only `renderProperties`
+     // emits `### Nested Shape:` / `### Allowed Values:` headings. An `enum`,
+     // `$ref` or scalar arm prints one line and can collide with nothing.
+     const emitsHeadings: boolean[] = variants.map(
+       (variant: any) => variant?.type === 'object' && !!variant.properties,
+     );
+     const emitters = emitsHeadings.filter(Boolean).length;
+     // Fewer than two and there is nothing to tell apart: a lone object arm's
+     // headings are already unique on the page, so it keeps the exact bytes it
+     // rendered before. This mirrors the walk's own `total < 2` rule in
+     // `nestedShapesOf` — a selector is spent only where the union is what
+     // distinguishes the thing being named — measured on the same principle:
+     // every heading outside the duplicate population stays byte-identical.
+     const discriminant = emitters >= 2 ? discriminantKeyOf(variants, emitsHeadings) : null;
+
      variants.forEach((variant: any, index: number) => {
          const variantTitle = variant.title || `Option ${index + 1}`;
          md += `#### ${variantTitle}\n\n`;
@@ -411,7 +473,26 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
               if (variant.properties.type && variant.properties.type.const) {
                   md += `**Type:** \`${variant.properties.type.const}\`\n\n`;
               }
-              md += renderProperties(variant.properties, new Set(variant.required || []));
+              // The owner this variant's headings qualify themselves by. The
+              // selector segment is the one `format-type.ts` stamps into a
+              // property accessor for the same union (#12316) — discriminant
+              // where every emitting variant pins a distinct literal, positional
+              // otherwise. Getting that fallback right IS the fix: a
+              // discriminant shared by two variants would re-create the
+              // duplicate anchors through the qualifier meant to remove them,
+              // which is exactly what `discriminantKeyOf`'s distinctness test
+              // refuses to answer.
+              const variantOwner =
+                emitters >= 2
+                  ? `${schemaName}${variantSelector(variant, index, discriminant)}`
+                  : schemaName;
+              md += renderProperties(
+                variant.properties,
+                new Set(variant.required || []),
+                '### Properties',
+                true,
+                variantOwner,
+              );
          } else if (variant.enum) {
               md += `Allowed Values: ${variant.enum.map((e:string) => `\`${e}\``).join(', ')}\n\n`;
          } else if (variant.$ref) {

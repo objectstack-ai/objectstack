@@ -667,9 +667,26 @@ export function nestedShapeOf(prop: any, ctx?: TypeContext): NestedShape | null 
  * First qualifying key in declaration order. Zod emits the discriminator first
  * for `z.discriminatedUnion()`, so declaration order is the author's own answer
  * to "which key tells these apart" rather than a guess this function makes.
+ *
+ * ## Why `contributes` is a boolean per variant, and why this is exported
+ *
+ * Two callers ask this question about the same union, from two positions, and
+ * they MUST agree — a selector spelled one way in a property accessor and
+ * another way in a section heading would be two notations for one fact. The
+ * walk below asks it of a union met inside a property's type (contributing =
+ * "this variant opened at least one shape"); `schema-section.ts`'s
+ * `### Union Options` branch asks it of a schema's TOP-LEVEL union
+ * (contributing = "this variant renders a property table", i.e. is a heading-
+ * emitting context at all). Only the *membership test* differs, so only that
+ * is the parameter; the discriminant rule itself is this one function.
+ *
+ * A non-contributing variant is skipped entirely rather than counted absent:
+ * a `string` arm of `string | { type: 'a' … } | { type: 'b' … }` has no
+ * `properties` for the selector to read, and letting it veto the discriminant
+ * would push a perfectly discriminated union onto the positional fallback.
  */
-function discriminantKeyOf(variants: any[], perVariant: NestedShape[][]): string | null {
-  const contributing = variants.filter((_, index) => perVariant[index].length > 0);
+export function discriminantKeyOf(variants: any[], contributes: boolean[]): string | null {
+  const contributing = variants.filter((_, index) => contributes[index]);
   if (contributing.length < 2) return null;
 
   const first = contributing[0];
@@ -689,6 +706,39 @@ function discriminantKeyOf(variants: any[], perVariant: NestedShape[][]): string
     if (qualifies && new Set(values).size === contributing.length) return key;
   }
   return null;
+}
+
+/**
+ * The one segment that names WHICH variant of a union was selected —
+ * `[type='sidebar']` when `discriminantKeyOf` found a key, `[option 2]` when it
+ * did not.
+ *
+ * Exported for the same reason `discriminantKeyOf` is: the accessor inside a
+ * property's type and the qualifier on a section heading emitted from inside a
+ * top-level union variant are the SAME statement about the same union, and a
+ * page carrying two spellings of it would be a page with two notations. Both
+ * callers compose the string this returns; neither builds one.
+ *
+ * `index` is the variant's position in the union as DECLARED — including
+ * variants that contribute nothing — because the positional fallback is only
+ * honest if the number can be counted off the rendering the reader already has
+ * (`#### Option 2` under `### Union Options`, or the Type cell's union arms).
+ * Renumbering to skip non-contributors would produce a number matching nothing
+ * on the page.
+ *
+ * Callers decide WHETHER a selector is warranted before calling; this function
+ * always returns one. The two gates are deliberately not folded in here
+ * because they are not the same gate: the walk suppresses the segment when the
+ * union yields fewer than two SHAPES (so `string | { … }` keeps the accessor
+ * #12309 gave it), while the section renderer suppresses it when fewer than two
+ * variants emit HEADINGS (so a union with a single object arm keeps the heading
+ * it has). One function with two membership rules baked in would have to guess
+ * which caller it has.
+ */
+export function variantSelector(variant: any, index: number, discriminant: string | null): string {
+  return discriminant
+    ? `[${discriminant}=${formatLiteral(variant.properties[discriminant].const)}]`
+    : `[option ${index + 1}]`;
 }
 
 /**
@@ -775,7 +825,7 @@ export function nestedShapesOf(prop: any, ctx?: TypeContext): NestedShape[] {
       // it, so it contributes no segment. `string | { … }` keeps `Schema.key`.
       if (total < 2) return perVariant.flat();
 
-      const discriminant = discriminantKeyOf(variants, perVariant);
+      const discriminant = discriminantKeyOf(variants, perVariant.map(shapes => shapes.length > 0));
       const selected: NestedShape[] = [];
       perVariant.forEach((shapes, index) => {
         // A variant that opens no shape gets no selector — and the guard is not
@@ -784,9 +834,7 @@ export function nestedShapesOf(prop: any, ctx?: TypeContext): NestedShape[] {
         // `string | { type: 'a' … } | { type: 'b' … }` has no `properties` for
         // the selector to read and computing one here would throw.
         if (shapes.length === 0) return;
-        const selector = discriminant
-          ? `[${discriminant}=${formatLiteral(variants[index].properties[discriminant].const)}]`
-          : `[option ${index + 1}]`;
+        const selector = variantSelector(variants[index], index, discriminant);
         for (const shape of shapes) {
           // Spliced in at the UNION's position, not appended to the finished
           // path: everything the walk composed below this union came from
