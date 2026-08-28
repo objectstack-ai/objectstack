@@ -21,7 +21,7 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 436 |
+| Object sites in them | 437 |
 | Still-open (strip) sites | 124 |
 | Files carrying at least one | 22 |
 
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 168 | 156 | 5 | 0 | 7 |
+| `ui/` | 169 | 157 | 5 | 0 | 7 |
 | `data/` | 156 | 74 | 1 | 0 | 81 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **436** | **306** | **6** | **0** | **124** |
+| **total** | **437** | **307** | **6** | **0** | **124** |
 
 ## File-level triage — site counts
 
@@ -74,9 +74,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `report.zod.ts` | 3 |
 | `responsive.zod.ts` | 1 |
 | `sharing.zod.ts` | 1 |
-| `view.zod.ts` | 57 |
+| `view.zod.ts` | 58 |
 | `widget.zod.ts` | 1 |
-| **total** | **168** |
+| **total** | **169** |
 
 ### `data/` — sites
 
@@ -155,15 +155,15 @@ over it is here.
 
 ### `ui/` — open
 
-**7 strip of 168**, in 4 file(s).
+**7 strip of 169**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 18 |
-| `view.zod.ts` | 4 | 57 |
+| `view.zod.ts` | 4 | 58 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **7** | **168** |
+| **total** | **7** | **169** |
 
 | Bucket | Sites |
 |---|---|
