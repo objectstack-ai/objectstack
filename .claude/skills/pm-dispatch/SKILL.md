@@ -753,16 +753,14 @@ SendMessage
 2026-08-18:「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」;objectos 指令面
 PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局四件套:① 复核结论照常写在
 issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);
-② PR 留给维护者,**看得见地悬着** —— **人工合并即审核记录,本条座位纪律是唯一的 merge
-前防线**
-(per-PR 事前门已退役,没有机器会替你挡):⛔ 永不翻 ready、永不入队、永不挂 auto-merge;③ 在
-draft PR 上 **request review `os-zhuang`**(维护者 2026-08-19:「还是应该在 pr 的审核流程,发给
-os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日实测 draft 可点名审核且推送到达手机,
-维护者确认「推送到了」;推送通道仅此一条,同日裁定:「只有需要我审核的pr 推给我。」)—— 「等人
-合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项。**能请审则请审;PR 作者身份即 os-zhuang 的席位,请审必失败**(GitHub 拒绝向 PR 作者请审,author-identity 422)—— 改为把 PR **assign 给 os-zhuang** 替代通知,并在轮次报告点名说明走了 assignee 兜底。
-**MCP 请审必显式带 `draft: true`**:`update_pull_request` 不管传不传都发送 draft 位,一次只传
-reviewers 的请审曾把治理面 draft 静默转正入队;门开席位改走载荷无 draft 位的专用 REST 请审
-端点(事实行与踢队读数住 platform-readings);④ 轮次报告单列「awaiting a human merge」(「等人来
+② PR 留给维护者,**看得见地悬着**,终局两条:**人工直合即审核记录**(兜底);或**授权人工批
+准钉 head ⇒ 队列放行**(2026-08-27 裁:「os-zhuang hotlong 批准算数」;批准人集合与判定单源 = 队
+列守卫常量 `GOVERNED_APPROVERS`(`scripts/pm/check-governed-queue-guard.mjs`):APPROVED 且
+`commit_id` = PR 当前 head 才算,批准后再推提交即过期转红)。未钉批准 ⛔ 不翻 ready、不入队、不挂 auto-merge;③ 在 draft PR 上**向两个授权批准账户 `os-zhuang` 与 `hotlong` 都 request review**(维护者 2026-08-27:「需要
+批准的主动推送到这两个账户。」主动推,永不等被发现;通道出处 2026-08-19:「还是应该在 pr 的审核流程,发给 os-zhuang 审核。我的手机github 应该会收到推送消息吧」,当日实测推送到达
+(「推送到了」),同日裁定:「只有需要我审核的pr 推给我。」)—— 「等人
+合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项。**能请审则请审;PR 作者身份即两账户之一的席位,对该账户请审必失败**(GitHub 拒绝向 PR 作者请审,author-identity 422)—— 该账户改为把 PR **assign** 给它替代通知(另一账户照常请审),并在轮次报告点名说明走了 assignee 兜底。
+**请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`**(坑与端点事实住 platform-readings);④ 轮次报告单列「awaiting a human merge」(「等人来
 合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 转 draft
 与 disable 都做再验队列 ref(转 draft 单独不可靠,两向相反实测住 platform-readings)。**skills 车道自有 PR 再按 diff 内容分流**(维护者 2026-08-26 裁定,原话:「skills 中的
@@ -964,9 +962,11 @@ Routine 无 cron;档位硬门 = `CONTRACT_REVIEW_TIER`(保险丝机读),不达�
   陷上报。
 - **Governed 面由维护者人工合并,合并即审核记录**(三裁一脉:2026-08-08「adr 只能由维护者自己确
   认,人工合并,ai 不得擅自合并」;2026-08-11「所有 skills 的更新和adr 类似,需要人工审核」;
-  2026-08-18 对「人工合并即人工审核,事后审计代替事前门」整包:「同意。」)。面 = ACCEPT
-  路径分叉的统一定义;skills 车道纯代码 PR 的 md-content 分流、禁令三条与离队出口同见该节;
-  事后防线 = 审计清单,维护者不认识的条目 = 席位违规,立案回滚。
+  2026-08-18 对「人工合并即人工审核,事后审计代替事前门」整包:「同意。」;2026-08-27 增**授
+  权批准钉 head ⇒ 队列放行**第二路径,细则单源见 ACCEPT 路径分叉)。面 = 该节统一定义;
+  skills 车道纯代码 PR 的 md-content 分流、禁令三条与离队出口同见该节。⛔ **agent 席位永不
+  以任一账号对受管面 PR 提交批准 review**(授权集合内也有 agent 席,与「永不入队」同级);事
+  后防线 = 审计清单,归因同读合并人与批准人,agent 批准或不认识的合并 = 违规立案回滚。
 - **决定属于维护者:永不代维护者回答产品/架构问题**(唯一例外:分诊职责里已裁的代裁车
   道,边界恰
   与其置信门重合,不得更宽);**永不派发 assignee 是别人的 issue;永不派发带 `needs-user-decision`
