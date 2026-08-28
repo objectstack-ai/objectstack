@@ -740,6 +740,133 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
     return { 'If-Match': String(options.ifMatch) };
 }
 
+/**
+ * Request options for `meta.deleteItem` — the carriers the REST reset door
+ * reads, made reachable from the SDK (#12181).
+ *
+ * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
+ * reads THREE carriers. This bag declares TWO of them, and the third's
+ * absence is a ruling rather than an oversight:
+ *
+ * - {@link DeleteMetaItemOptions.ifMatch} — the ADR-0008 OCC pin. The door
+ *   already reads `If-Match` and threads it as `parentVersion`, and
+ *   `DeleteMetaItemRequest.parentVersion` names that header in the spec text
+ *   itself. Without an argument for it, every SDK reset was last-write-wins
+ *   on the one verb whose whole job is destroying an overlay row.
+ * - {@link DeleteMetaItemOptions.state} — `?state=draft`, the NARROWER
+ *   reset: discard the pending draft and leave the published overlay
+ *   serving. Its absence did not make the SDK safer, it made the SDK's only
+ *   reachable reset the full one.
+ *
+ * ⛔ `?dropStorage=true` is deliberately NOT a member, and adding it "for
+ * completeness" reverses a decision. It is the one carrier of the three that
+ * ADDS destructive reach — it drops the object's physical table after the
+ * metadata row goes — no caller was measured needing it from this client,
+ * and the door's repeated-parameter refusal exists because of that
+ * destructiveness. Maintainer-seat ruling on #12181: a destructive surface
+ * with no measured pull is not published. A caller that needs it is a
+ * separate, separately reviewable widening.
+ *
+ * Same bag on BOTH `deleteItem` declarations — the unscoped client and the
+ * environment-scoped twin — for the reason #7019 states: the scoped mount is
+ * not a second implementation, it is one `registerForBase` call replayed
+ * against `/environments/:environmentId`, so a bag on one client only would
+ * be a fresh divergence, not half a fix.
+ */
+export interface DeleteMetaItemOptions {
+    /**
+     * `If-Match: <version>` — the ADR-0008 optimistic-concurrency pin, and
+     * the one member here that is NOT a query parameter.
+     *
+     * Echo back the `version` a previous `saveItem` (or `publishItem`)
+     * resolved, and a concurrent edit is refused with `409
+     * metadata_conflict` instead of silently resetting the row the other
+     * author just wrote. Omit for the last-write-wins behaviour every reset
+     * had before this member existed — the pin is opt-in on the door too
+     * (Studio's "Reset" button is deliberately unpinned).
+     *
+     * Opaque: echo it verbatim, never parse it.
+     *
+     * Only a non-empty token reaches the wire. `undefined` and `''` both OMIT
+     * the header rather than sending an empty `If-Match`: the door reads the
+     * header's PRESENCE as "pin this reset", so an empty spelling would pin
+     * against the empty string and refuse a reset the caller never asked to
+     * pin.
+     *
+     * Same member name, same header, same truthy guard as the sibling
+     * first-party `@object-ui/data-objectstack` `MetadataClient.reset`, and
+     * as {@link SaveMetaItemOptions.ifMatch} on this same client.
+     */
+    ifMatch?: string;
+    /**
+     * `?state=draft` — discard ONLY the pending draft overlay, leaving the
+     * still-active overlay serving.
+     *
+     * `'active'` is the explicit spelling of the default and deliberately
+     * sends NOTHING: the door acts on `state=draft` alone and treats every
+     * other value as active, so emitting `?state=active` would put a value on
+     * the wire the server ignores. Same shape as
+     * {@link SaveMetaItemOptions.mode}, and the same vocabulary the spec
+     * declares (`DeleteMetaItemRequest.state`: `'active' | 'draft'`).
+     *
+     * This is the LESS destructive reset, not a new destructive one: without
+     * it the only reachable reset is the full one, which drops the published
+     * overlay too.
+     */
+    state?: 'active' | 'draft';
+}
+
+/**
+ * Compose the `meta.deleteItem` query string — the ONE builder both
+ * `deleteItem` declarations call, for the same reason
+ * {@link DeleteMetaItemOptions} is one type: the twins must not be able to
+ * drift in what they put on the wire.
+ *
+ * Returns `''` (not `'?'`) when nothing is set, so an options-less call is
+ * BYTE-IDENTICAL to what this method sent before the bag existed.
+ *
+ * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
+ * repeated `state` (#6877), so a builder that could emit the key twice would
+ * turn a caller's option into a 400.
+ */
+function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
+    if (!options) return '';
+    const params = new URLSearchParams();
+    // Only `'draft'` is actionable server-side; `'active'` is the default
+    // said out loud and sends nothing.
+    if (options.state === 'draft') params.set('state', 'draft');
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
+/**
+ * Compose the `meta.deleteItem` request headers — the ONE builder both
+ * `deleteItem` declarations call, for the same reason {@link metaDeleteQuery}
+ * is one function.
+ *
+ * Returns `undefined` (never `{}`) when nothing is set, so the call site can
+ * omit the `headers` key entirely and an options-less reset stays
+ * BYTE-IDENTICAL to what it sent before this existed.
+ *
+ * ⛔ `ifMatch` must never be added to {@link metaDeleteQuery}. It is a
+ * header; the reset door reads no `?ifMatch=` parameter, so a query spelling
+ * would look set at the call site and protect nothing.
+ *
+ * Deliberately a sibling of {@link metaSaveHeaders} rather than a call into
+ * it: the two methods carry two separately-ruled option bags (#11713 for
+ * `saveItem`, #12181 for this one), so neither type may quietly acquire the
+ * other's members. The two builders are pinned IN STEP by a test instead —
+ * one token in, identical header bytes out.
+ */
+function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, string> | undefined {
+    if (!options?.ifMatch) return undefined;
+    // Verbatim and UNQUOTED — the door tolerates ETag-style quotes by
+    // stripping them, but the token a save resolves carries none, and
+    // wrapping it here would put bytes on the wire the sibling first-party
+    // client does not send.
+    return { 'If-Match': String(options.ifMatch) };
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -997,14 +1124,39 @@ export class ObjectStackClient {
     },
 
     /**
-     * Delete a metadata item
+     * Delete a metadata item — reset it to its artifact default by removing
+     * the ADR-0005 customization overlay row.
+     *
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
+     * @param options - {@link DeleteMetaItemOptions}: the ADR-0008 OCC pin
+     *   (`ifMatch`) and the narrower draft-only discard (`state: 'draft'`).
+     *
+     * PIN THE RESET. This verb destroys a row: unpinned, a reset issued
+     * against a version somebody else has already replaced silently destroys
+     * their edit and answers 200. Echo the `version` a previous `saveItem`
+     * resolved as `options.ifMatch` and the same situation answers `409
+     * metadata_conflict` instead — the door has always read the header
+     * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
+     * had no argument for it until #12181.
      */
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
+    deleteItem: async (
+        type: string,
+        name: string,
+        options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}`, {
+        // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
+        // the three meanings `qs` holds in this file.
+        const query = metaDeleteQuery(options);
+        // The OCC token rides a HEADER, not the query string — see
+        // {@link metaDeleteHeaders}. `undefined` when unset, and the spread
+        // then omits the `headers` key altogether, so an unpinned reset hands
+        // `fetch` the same `init` it always did.
+        const headers = metaDeleteHeaders(options);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`, {
             method: 'DELETE',
+            ...(headers ? { headers } : {}),
         });
         return this.unwrapResponse(res);
     },
@@ -5729,9 +5881,31 @@ export class ScopedEnvironmentClient {
       });
       return this.parent._unwrap<SaveMetaItemResponse>(res);
     },
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}`), {
+    /**
+     * Reset a metadata item to its artifact default, scoped to this
+     * environment.
+     *
+     * `options` is the SAME {@link DeleteMetaItemOptions} bag the unscoped
+     * twin takes, and reaches the SAME handler: the scoped mount is not a
+     * second implementation, it is one `registerForBase` call replayed
+     * against `/environments/:environmentId` (see `RestServer`), so this door
+     * reads `?state=` — and the `If-Match` header — byte-identically. A bag
+     * on only one of the two clients would be a fresh divergence of the kind
+     * #7019 rules against, not half a fix.
+     */
+    deleteItem: async (
+      type: string,
+      name: string,
+      options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaDeleteQuery(options);
+      // Header half of the same bag, through the same one builder the twin
+      // calls — see {@link metaDeleteHeaders}.
+      const headers = metaDeleteHeaders(options);
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
+        ...(headers ? { headers } : {}),
       });
       return this.parent._unwrap(res);
     },
