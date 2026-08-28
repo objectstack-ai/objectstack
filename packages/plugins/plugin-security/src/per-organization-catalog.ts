@@ -87,7 +87,23 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
 
 export type SeedLogger = {
   info?: (m: string, meta?: Record<string, any>) => void;
-  warn?: (m: string, meta?: Record<string, any>) => void;
+  /**
+   * The GUARANTEED channel (#9754), and NON-OPTIONAL for that reason.
+   *
+   * `error` below is optional because hosts legitimately inject reduced
+   * sinks — so `warn` is where a durability report degrades to, and a
+   * fallback that may itself be absent is not a fallback. With both optional,
+   * `{}` satisfied this type and every value of it was permitted to print
+   * NOTHING; the call site cannot repair that, only the type can. Making
+   * `error` required instead is the measured-and-rejected option, and a
+   * required `info` would not do either: a lost write reported at `info` is
+   * the reassuring half-truth the degradation-level rule exists to remove.
+   *
+   * ⚠️ Call sites still spell it `logger?.warn?.(…)`. That `?.` is the
+   * backstop for hosts the TYPE cannot reach (a plain-JS embedder, or a
+   * cast), not doubt about this declaration.
+   */
+  warn: (m: string, meta?: Record<string, any>) => void;
   /**
    * Durability-degradation channel (AGENTS.md "Degradation log levels").
    * A catalog write that was supposed to land and did not is an `error`, not a
