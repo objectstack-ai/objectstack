@@ -8744,10 +8744,17 @@ function selfTest() {
   t('its remedy is the count, not the fetch — a fetch buys a base ref and buys nothing for a HEAD with no commit',
     uncountedText.includes(`git rev-list --count HEAD..${DEFAULT_BASE_REF}`)
       && !uncountedText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
-  t('and it does NOT cry stale either — a tree nobody counted is not a tree counted stale', !uncountedText.includes('STALE TREE'));
+  // The two assertions below carry a length conjunct on purpose. Both are
+  // otherwise satisfied by the DEFECT — an empty list contains no 'STALE TREE'
+  // and differs from state A's sentence — which is the species #12411 deleted
+  // here: instrument intact, aimed at nothing. Measured under ablation: without
+  // the conjunct they stay green with the fix reverted.
+  t('and it does NOT cry stale either — a tree nobody counted is not a tree counted stale',
+    uncounted.length === 2 && !uncountedText.includes('STALE TREE'));
   t('so this reading no longer shares one output with the level tree — the defect, stated as the comparison that used to hold',
     uncountedText !== level.join('\n'));
-  t('and the two unmeasured doors are told apart rather than flattened by the shared predicate', uncountedText !== unmeasuredText);
+  t('and the two unmeasured doors are told apart rather than flattened by the shared predicate',
+    uncounted.length === 2 && unmeasured.length === 2 && uncountedText !== unmeasuredText);
   t('a drift carrying no distance FIELD at all reads unmeasured too — absent is not a reading either',
     driftLines({ base: 'aaaaaaa', changed: [] }).join('\n').includes('STALENESS NOT MEASURED'));
   const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
