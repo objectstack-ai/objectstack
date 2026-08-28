@@ -84,6 +84,60 @@
  * and stays recorded: its population limb already stripped, so it was out of
  * that card's scope and nobody has re-read its scanner.
  *
+ * ## SECOND ROUND (#12475): every remaining row now carries a MEASUREMENT
+ *
+ * The rows above used to be recorded by SHAPE -- "the full naive two-regex
+ * pair", "hand-rolled scanner, preserves block-comment newlines". That is a
+ * statement about an implementation and not about what the implementation does
+ * to the source it actually reads, and the FIRST SHRINK proved the two come
+ * apart: three rows carried near-identical `why` text and the behaviour
+ * underneath split two ways.
+ *
+ * So on `f75a38afa` each of the 19 unconverted rows was measured, per row and
+ * not as a sweep: run that row's OWN private stripper and this tree's shared
+ * mask over THE POPULATION THAT FILE ACTUALLY SCANS, and diff the two outputs
+ * with whitespace normalised (the private copies differ in PROJECTION -- some
+ * blank, some delete, some drop whole lines -- and that difference is not a
+ * disagreement about which span is a comment). Every `why` below now states
+ * what came back. 10 of the 19 disagree with the shared mask; 9 do not.
+ *
+ * The instrument, and why its EMPTY results are readings rather than silence:
+ * before any row was measured it was shown able to fail, in the same run, on
+ * the two live specimens the FIRST SHRINK found -- the naive pair over
+ * `packages/metadata/src/plugin.ts` and over
+ * `packages/cloud-connection/src/marketplace-proxy-plugin.ts` both come back
+ * with real code deleted at the line-comment opener inside their regex
+ * literals. A negative control (the shared mask diffed against itself) returns
+ * empty, and every row asserts a non-empty population and non-empty file bytes,
+ * so a run that read nothing cannot report agreement. One first-pass result was
+ * thrown away for exactly that reason: the span instrument counted the newline
+ * an alternative consumes as a non-comment character and reported all 208
+ * `*.zod.ts` files as disagreeing; trimming the span to the comment token
+ * itself takes that row to empty. An instrument artefact reads exactly like a
+ * finding.
+ *
+ * ## What the second round found, and what it deliberately did NOT do
+ *
+ * Two directions, and they are not the same defect. A private stripper that
+ * DELETES live code makes its gate report clean over text it never looked at.
+ * One that KEEPS comment text hands its gate prose to match on, and the gate
+ * fabricates a finding. Both appear below; each `why` names which.
+ *
+ * The rows are still `unconverted`. Converting is per-row and is a MEASUREMENT
+ * rather than a sweep, and this round is the measurement half only: it changes
+ * no gate's inputs, so no gate's verdict moves on it. To size the other half,
+ * each disagreeing row's OWN predicate was re-run under both strippers. Nine of
+ * the ten answer identically today -- the deleted spans happen not to hold what
+ * those gates look for -- which makes their conversion verdict-preserving on
+ * today's tree and nothing stronger: "green over text it never read" is the
+ * failure, not the absence of one. The tenth,
+ * `packages/lint/scripts/check-doc-formula-expressions.mjs`, MOVES: its docblock
+ * extractor and the shared scanner disagree about how many docblocks 9 of the
+ * 1,053 `packages/spec/src` sources contain. That is a row whose verdict
+ * changes under the shared mask, which this header has always said is a finding
+ * to read rather than something to absorb, so it is filed rather than fixed
+ * here.
+ *
  * A recorded row that the scan no longer finds FAILS as stale. That is the
  * property `check-self-test-wired.mjs` names as the difference between a rule
  * with a witness and a rule without one: it converts "no findings" into "the
@@ -199,45 +253,45 @@ const VERDICTS = new Set(['unconverted', 'specimen']);
  */
 const LEDGER = new Map([
   ['examples/app-showcase/test/inert-wirings.test.ts',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'predates this gate; strips block comments before an inert-wiring scan that reports no offset' }],
+    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across 91 .ts files under examples/app-showcase/src): DELETES LIVE CODE on 9 of them, 5,987 chars, because the block regex opens a phantom comment at a block-comment opener sitting inside a string literal -- the accept-glob strings in ui/actions/index.ts and the prose strings in coverage.ts -- and runs to the next terminator far below; it also KEEPS 1,813 chars of trailing line-comment prose, which its line filter deliberately never removes. Its own retired-retryDelayMs offender set is empty under both strippers today' }],
   ['packages/cli/src/commands/artifact-child-env.pin.test.ts',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'predates this gate; block-comment strip ahead of a pinned-shape scan' }],
+    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475: NOT a stripper feeding a scan. This file\'s guard is ts.createSourceFile; the one block-regex call is a 7-line inline SPECIMEN asserting the text scan it replaced reports that specimen clean, and it does -- 112 chars of live code deleted at the block-comment opener inside the route-wildcard string. Recorded as unconverted only because a shape scan cannot tell a negative control from a caller; converting it would delete the evidence, exactly as for the specimen row below' }],
   ['packages/cli/src/commands/migrate/multi-value-columns.no-auto-run.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the two files code() reads, commands/migrate/apply.ts and commands/migrate/multi-value-columns.ts): deletes no live code, but KEEPS 60 chars of trailing line-comment prose the anchored line arm never reaches -- the FABRICATION direction, prose the scan can match. Its own containment answers are [true, false] under both strippers' }],
   ['packages/cli/src/commands/serve-cluster-host-resolution.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner, blanks block comments to spaces and drops strings' }],
+    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475: agrees with the shared mask byte for byte over 212 files / 3.1 MB -- commands/serve.ts exactly, plus every .ts under packages/cli/src as a declared SUPERSET of the sibling-module limb, whose exact population is resolver-dependent. It is the only private copy in this ledger that tracks regex literals as well as the three string forms, which is why it survives the doubled slash inside /^https?://i that defeats its neighbours. The old note\'s \'drops strings\' was wrong: it SKIPS string spans, leaving them intact' }],
   ['packages/cli/src/commands/serve-multi-node-cap-advisory.pin.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; imports maskComments elsewhere but interfaceFields() still strips TSDoc with the private pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the two brace-matched interface BODIES interfaceFields() strips -- ResolvedMultiNodeVerdict in packages/services/service-cluster/src/multi-node-gate.ts and MultiNodeGateVerdict in commands/serve.ts, 1,462 chars): agrees with the shared mask. Narrow by construction rather than by luck -- a TSDoc-only interface slice carries no regex literal and no string holding a comment opener. The rest of the file already imports maskComments' }],
   ['packages/cli/src/commands/serve-verify-security-parity.contract.test.ts',
     { shapes: ['regex-block', 'regex-line'], verdict: 'specimen', why: 'the private two-regex strip this file carried until its conversion, kept as a NEGATIVE CONTROL that the shared mask beats it; converting it would delete the evidence' }],
   ['packages/cli/src/utils/console-route-ledger.conformance.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner, preserves block-comment newlines' }],
+    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packageSourceFiles(), 110 non-test .ts under packages/cli/src, 1.6 MB): DELETES LIVE CODE on 9 of them, 10,263 chars. Same defect and same spelling as the two the FIRST SHRINK found -- string-aware but REGEX-BLIND, so the doubled slash inside /^https?://i reads as a line-comment opener and the rest of the line goes: dev.ts:169, serve.ts:3021, start.ts:460 and start.ts:475 are live sites today. It also KEEPS 35,382 chars of block-comment prose swallowed by phantom STRINGS opened at a quote character inside a regex class. This is the fourth guard in that family, the one #12398 left recorded; its MOUNT_SHAPED identity is still exactly [utils/console.ts] under both strippers, so the blindness has not yet cost it a finding' }],
   ['packages/create-objectstack/src/template-registry.test.ts',
-    { shapes: ['regex-line'], verdict: 'unconverted', why: 'predates this gate; line-comment strip over a template manifest, the spelling the filing card missed' }],
+    { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/create-objectstack/src/index.ts): deletes no live code -- it has no block arm at all -- and therefore KEEPS 2,744 chars of block-comment prose, the FABRICATION direction. Its line arm is anchored and reaches only whole-line comments' }],
   ['packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across all 152 *.test.ts in packages/drivers/driver-sql/src, 2.0 MB): 54 files disagree. Mostly the safe direction -- 4,582 chars of trailing line-comment prose KEPT by the anchored line arm -- but the block arm also DELETES 228 chars of live code in logger-receiver-detach.test.ts, where a fixture STRING quotes a docblock and the naive block regex eats the string. Its own direct-OS_TEST_URL offender set is empty under both strippers' }],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs',
-    { shapes: ['regex-block'], verdict: 'unconverted', why: 'predates this gate; docblock extractor, and package-local tooling that CAN import the shared module today' }],
+    { shapes: ['regex-block'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (collectSpecFiles(), 1,053 .ts/.tsx under packages/spec/src, 13.4 MB): tsdocExampleBodies() is an EXTRACTOR rather than a stripper, so it was measured as one -- do the spans it claims are docblocks hold characters the shared scanner calls code? On 9 files they do, up to 13,139 chars in kernel/manifest.test.ts, where a glob string opens a phantom docblock that then swallows the real ones behind it. THE ONLY ROW WHOSE OWN VERDICT MOVES: its docblock count differs from the shared scanner\'s on those 9 files, so this gate is under-reading @example bodies it believes it read. Filed rather than fixed here, per this header' }],
   ['packages/lint/src/validate-expressions.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-expressions.ts, 75,403 chars): agrees with the shared mask. The unanchored trailing line arm is the dangerous spelling and it holds here only because that one rule source happens to carry no doubled slash inside a regex literal or string -- a property of today\'s file, not of this stripper' }],
   ['packages/lint/src/validate-org-axis-red-lines.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-org-axis-red-lines.ts, 17,084 chars): agrees with the shared mask, on the same terms as its three sibling rows -- the unanchored trailing line arm survives because that rule source carries no doubled slash inside a literal, not because the arm is safe' }],
   ['packages/lint/src/validate-rule-compilability.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-rule-compilability.ts, 23,955 chars): agrees with the shared mask, on the same terms as its three sibling rows -- the unanchored trailing line arm survives because that rule source carries no doubled slash inside a literal, not because the arm is safe' }],
   ['packages/lint/src/validate-security-posture.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/lint/src/validate-security-posture.ts, 38,261 chars): agrees with the shared mask, on the same terms as its three sibling rows -- the unanchored trailing line arm survives because that rule source carries no doubled slash inside a literal, not because the arm is safe' }],
   ['packages/metadata-protocol/src/migrations/live-mysql-database.isolation.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (codeOf() across all 11 *.test.ts in packages/metadata-protocol/src/migrations): deletes no live code; KEEPS 130 chars of trailing line-comment prose on 4 files, the FABRICATION direction. LIVE_TEST_FILES resolves to the same three files under both strippers, so the derived population this file guards is unaffected today' }],
   ['packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner that DROPS block-comment newlines while its gate reports a line number' }],
+    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (collectSources(), 25 non-test .ts under packages/plugins/plugin-approvals/src, 463 KB): agrees with the shared mask. It is REGEX-BLIND like its plugin-auth twin below and survives only because this package\'s sources carry no regex literal holding a quote character and no doubled slash inside one -- a fact about the population, not about the scanner' }],
   ['packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts',
-    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'predates this gate; hand-rolled scanner that DROPS block-comment newlines while its gate reports a line number' }],
+    { shapes: ['scanner-decl'], verdict: 'unconverted', why: 'MEASURED #12475 over 423 files / 7.3 MB -- every .ts under plugin-auth/src as a declared SUPERSET of the import-graph limb (whose exact set is resolver-dependent), plus the two cross-package roots it reads whole, packages/runtime/src and packages/services/service-sms/src. 15 files disagree: DELETES 6,375 chars of live code, the regex-blind doubled-slash defect again (auth-manager.ts loses the line holding /^https?://i), and KEEPS 22,329 chars of comment prose behind phantom strings. Its own extracted import refs are identical under both strippers on every one of the 423 files, so the reachability verdict has not moved' }],
   ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts',
-    { shapes: ['regex-line'], verdict: 'unconverted', why: 'predates this gate; strips JSONC comments from a tsconfig, the spelling the filing card missed' }],
+    { shapes: ['regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (packages/qa/downstream-contract/tsconfig.json, 5,145 chars of JSONC): agrees with the shared mask. An anchored line arm over a file with no regex literals and no block comments -- the narrowest population in this ledger' }],
   ['packages/runtime/src/error-envelope.conformance.test.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; the full naive two-regex pair' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (the 10 modules in its own MODULES list, 390 KB): DELETES 166 chars of live code on 2 of them and keeps nothing -- purely the blind direction. The unanchored trailing line arm eats route paths inside template literals: dispatcher-plugin.ts loses the rest of the line at a doubled slash in a mount path, domains/mcp.ts at the one in an https URL it builds. All four of its own per-module counts are identical under both strippers today, so the numeric-code pin has not yet been cheated' }],
   ['packages/spec/scripts/lazify-schemas.ts',
-    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'predates this gate; import-block matcher consuming leading comments, and package-local tooling the card excluded by substring' }],
+    { shapes: ['regex-block', 'regex-line'], verdict: 'unconverted', why: 'MEASURED #12475 over its real population (listZodFiles(), 208 *.zod.ts under packages/spec/src, 4.4 MB): the two COMMENT arms of the import-block matcher claim no character the shared scanner calls code, on any file. Sound by construction rather than by luck: both arms are anchored to a line start after indent only, and the matcher runs at the file top where no template literal can be open. (First measured as 208/208 disagreeing -- that was the instrument counting the newline each arm consumes; see the SECOND ROUND note.)' }],
 ]);
 
 function walk(dir, out = []) {
