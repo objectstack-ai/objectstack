@@ -29,6 +29,76 @@ export interface FileRecord {
   ref_object?: string | null;
   ref_id?: string | null;
   ref_field?: string | null;
+  /**
+   * The registry-injected tenant column (#12745).
+   *
+   * `sys_file` declares no `tenancy` key, so `isTenancyDisabled()` reads
+   * `false` and `applySystemFields` provisions `organization_id` on every
+   * install — the column's existence is decoupled from the multi-tenant flag,
+   * so it is there whether or not the deployment is walled.
+   *
+   * ⛔ The store does NOT put this in the engine payload. Whether this object
+   * carries a tenant column, and whether an explicit value wins, is the
+   * DRIVER's decision (`injectTenantOnInsert` → `resolveTenantField`), reached
+   * by threading the acting organization as an execution context on the insert
+   * — see {@link StorageWriteContext}. It is declared here because the column
+   * is real: a caller may read it back off a row, and an admin
+   * cross-organization write may set it explicitly (the driver never
+   * overwrites an explicit value).
+   */
+  organization_id?: string | null;
+}
+
+/**
+ * The acting session's organization, threaded into a `sys_file` write (#12745).
+ *
+ * ## Why a context and not a column on the payload
+ *
+ * `sys_file` is a tenancy-ENABLED object whose `organization_id` was never
+ * written: `createFile` inserted with no context at all, so the driver's
+ * `injectTenantOnInsert` had no `tenantId` to stamp from and every row landed
+ * NULL. The repair is the channel that was missing, not a second stamping
+ * rule — the store hands the engine the organization it is acting in and the
+ * platform's existing insert-side chokepoint decides the rest:
+ *
+ *   `context.tenantId` → `ObjectQLEngine.buildDriverOptions` →
+ *   `DriverOptions.tenantId` → `SqlDriver.injectTenantOnInsert`
+ *
+ * That chokepoint already answers the two questions a metadata store must not
+ * answer for itself: whether this object has a tenant column at all
+ * (`resolveTenantField` → `null` ⇒ nothing is stamped, which is what keeps a
+ * `systemFields: false` / `tenancy.enabled: false` install from being written
+ * a column it does not have) and whether an explicit value on the row wins (it
+ * does). Stamping the payload here would re-decide both, one package away from
+ * the schema.
+ *
+ * It also silences the `[tenant-audit]` warning this insert door raises on
+ * every walled deployment — a warning naming exactly this defect ("writes will
+ * not be tenant-isolated").
+ */
+export interface StorageWriteContext {
+  /**
+   * The organization the write is acting in — the session's active
+   * organization at the call site. Absent / empty means "no organization scope
+   * resolved", and the write proceeds unstamped exactly as it did before.
+   */
+  organizationId?: string | null;
+}
+
+/**
+ * The engine options carrying a {@link StorageWriteContext}, or `undefined`
+ * when there is no organization to thread.
+ *
+ * `undefined` rather than `{ context: {} }` on purpose: an empty context is
+ * still a context, and handing one to the engine changes what every other
+ * option resolver on that call sees for a caller that has nothing to say.
+ */
+function writeOptionsFor(
+  context?: StorageWriteContext,
+): { context: { tenantId: string } } | undefined {
+  const organizationId = context?.organizationId;
+  if (typeof organizationId !== 'string' || organizationId.length === 0) return undefined;
+  return { context: { tenantId: organizationId } };
 }
 
 /**
@@ -192,15 +262,35 @@ export class StorageMetadataStore {
   // Files
   // ---------------------------------------------------------------------------
 
-  async createFile(rec: FileRecord): Promise<FileRecord> {
+  /**
+   * Insert one `sys_file` row.
+   *
+   * `context` carries the acting organization (#12745). With it the insert
+   * reaches the engine as `{ context: { tenantId } }`, which is how
+   * `sys_file.organization_id` gets written at all — see
+   * {@link StorageWriteContext} for the chain and for why the column is not
+   * stamped onto the payload here. Without it the call behaves exactly as it
+   * did before: the row lands unstamped.
+   */
+  async createFile(rec: FileRecord, context?: StorageWriteContext): Promise<FileRecord> {
     const now = new Date().toISOString();
     const full: FileRecord = { created_at: now, updated_at: now, ...rec };
+    const options = writeOptionsFor(context);
     if (!this.engine) {
-      this.files.set(full.id, full);
-      return full;
+      // The engine-absent stand-in has no schema to ask, so it records what it
+      // was told rather than deriving a column: a no-engine deployment has no
+      // wall to be on the wrong side of, and a test driving this path still
+      // observes the organization the caller threaded. An explicit value on
+      // the record wins, mirroring `injectTenantOnInsert`'s rule.
+      const stamped: FileRecord =
+        options && full.organization_id == null
+          ? { ...full, organization_id: options.context.tenantId }
+          : full;
+      this.files.set(stamped.id, stamped);
+      return stamped;
     }
     await this.engineOp('sys_file', 'insert', FILE_INSERT_CONSEQUENCE, (engine) =>
-      engine.insert('sys_file', full),
+      engine.insert('sys_file', full, options),
     );
     return full;
   }
