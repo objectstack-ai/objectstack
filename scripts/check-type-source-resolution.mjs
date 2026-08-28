@@ -198,8 +198,51 @@ const REPO_ROOT = resolve(HERE, '..');
  * here or it is indistinguishable from a ratchet quietly reset.
  *
  * ⛔ Do NOT reach for this precedent to admit an exposure your change created.
- * The test is whether the SET OF PROGRAMS changed, and that is a change to this
- * file, not to a package.
+ * The test is whether the SET OF PROGRAMS changed.
+ *
+ * ## Who may move the program set (this paragraph was falsified by #11490)
+ *
+ * ⚠️ That test used to end "…and that is a change to this file, not to a
+ * package". It was true only while the population was each package's single
+ * `tsconfig.json`: no package COULD move the set. #11490 made the population
+ * every `tsconfig*.json` a `typecheck` script names — which handed the move to
+ * the packages. A package whose `typecheck` script begins naming a
+ * `tsconfig.test.json` has moved the set BY DEFINITION, because that is what
+ * onboarding a test layer IS. The sentence outlived its invariant, and while it
+ * stood it forbade the only correct action for that case: #11491 measured 14 of
+ * the 18 remaining `TEST_DEBT` entries as arriving exactly here the moment
+ * their tests enter a program.
+ *
+ * So the re-baseline limb is open to a package too — on the terms this registry
+ * already imposes on itself, and no others:
+ *
+ *   1. Every dep admitted is reached ONLY through the program the change
+ *      ONBOARDED. A dep newly reached through a program that was ALREADY
+ *      counted is the exposure this ratchet exists to catch, and onboarding
+ *      something else in the same PR does not launder it. The provenance
+ *      annotation (`via <config>`) in `--list` and in the failure text is what
+ *      tells the two apart; if you cannot point at the program, you do not have
+ *      this case.
+ *   2. The numbers are stated in place — `--list` before and after — the way
+ *      the #11490 re-baseline above states its own. A widening that does not is
+ *      indistinguishable from a ratchet quietly reset.
+ *   3. It is a RE-BASELINE reviewed as one, not an escape from a red build. The
+ *      failure text goes on refusing the widening deliberately: an author who is
+ *      merely red cannot tell these two cases apart from inside the failure, and
+ *      this doc-block plus a reviewer is where they are told apart.
+ *
+ * Landed instances, each stating its program provenance in place:
+ * `@objectstack/client` and `@objectstack/trigger-record-change` (the #11490
+ * re-baseline), and `@objectstack/rest` (#12542 / PR #12570 at `3f41a215`, the
+ * first package to take the #5286 sibling route for this reason).
+ *
+ * ⛔ Still NOT open: `paths` remains the fix for a dep exposed through an
+ * EXISTING program, and no widening may silence one. For the onboarding case
+ * `paths` is additionally the WRONG tool, measured on PR #12570 rather than
+ * argued: redirecting those six deps to source took that package's test layer
+ * from 37 errors to 42, the +5 being `TS6133` in other packages' source billed
+ * to a ledger those packages cannot see — and a ledger holding another
+ * package's diagnostics is a ledger nobody can pay down.
  */
 const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/account': ['@objectstack/platform-objects'],
@@ -715,8 +758,28 @@ function programFiles(pkgDir, config) {
 
 // ── import extraction ───────────────────────────────────────────────────────
 
+/**
+ * The clause capture is bounded to ONE statement by `[^;'"]` (#12555). This gate
+ * carried the byte-identical first alternative to
+ * `scripts/check-test-source-alias.mjs`, whose header block states the defect and
+ * why excluding `;` alone is not enough (ASI leaves nothing for a `;`-class to
+ * stop on; excluding the quotes is what closes it, because every intervening
+ * specifier is quoted). The rest of THIS regex is deliberately not identical —
+ * the dynamic-import alternative admits `:` and `<` as leading delimiters so that
+ * `import('y').X` in a type annotation and inside a generic argument are seen —
+ * and that half is untouched here.
+ *
+ * The consequence differs from the runtime gate's even though the regex bug is
+ * the same. `extractTypeImports` reads only the SPECIFIER captures and never
+ * `match[1]`, so an over-greedy clause could not corrupt a verdict here; it could
+ * only make one disappear. A side-effect `import 'x';` followed by any
+ * `import … from …` was swallowed whole, so a specifier this package really makes
+ * tsc resolve went uncounted — a false GREEN, in the fail-closed direction this
+ * gate is otherwise careful about. Bounding the clause can therefore only add
+ * specifiers to the scan, never remove one.
+ */
 const IMPORT_PATTERNS =
-  /(?:^|[\s;})])(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]|(?:^|[\s;{(=,:<])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;{(=,])require\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;}])import\s+['"]([^'"]+)['"]/g;
+  /(?:^|[\s;})])(?:import|export)\s+([^;'"]*?)\s*from\s*['"]([^'"]+)['"]|(?:^|[\s;{(=,:<])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;{(=,])require\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;}])import\s+['"]([^'"]+)['"]/g;
 
 /**
  * Every module specifier this file makes tsc resolve — INCLUDING type-only
@@ -1108,7 +1171,19 @@ function check(root, registry) {
           // Mirrors `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`'s own words verbatim rather than
           // restating them: one rule in two voices becomes two rules by the next reading.
           '    That registry is ⛔ SHRINK-ONLY: entries are audited in both directions, so one that is no\n' +
-          '    longer needed fails the gate and names itself for deletion.',
+          '    longer needed fails the gate and names itself for deletion.\n' +
+          // #12572: that refusal is right for the case it was written for and WRONG as the last
+          // word, because since #11490 a package can move the program set itself. The exception is
+          // NAMED here and deliberately not OFFERED: the route stays a reviewed re-baseline spelled
+          // out over `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`, not a door this message opens for an author
+          // who is merely red. Keeping the refusal above intact is also what keeps this gate the
+          // `refused` precedent `check-ratchet-remedy-authority` pins it as (#8435).
+          '    ⚠️ One case is not covered by that refusal: if a `(via …)` above names a program this\n' +
+          '    change ONBOARDED — a `tsconfig*.json` the `typecheck` script here did not name before —\n' +
+          '    then the program set itself moved, which since #11490 a package can do, and `paths` is\n' +
+          '    measured to be the wrong tool for it: on PR #12570 it billed source diagnostics from\n' +
+          '    other packages into this ledger. That case is a re-baseline, and it is\n' +
+          '    settled by the doc-block over the registry, not by this message. Read it first.',
       );
     if (gone.length > 0)
       failures.push(
@@ -1631,6 +1706,36 @@ function selfTest() {
         + 'comment-only, which tells the maintainer reading the script and not the author tripping the gate',
     );
 
+    // #12572. The same failure carries TWO more load-bearing sentences, and they
+    // pull against each other on purpose — which is exactly why both need pinning
+    // from this side rather than being left to a reader's judgement.
+    //
+    //   THE REFUSAL is a cross-gate contract. `check-ratchet-remedy-authority`
+    //   hand-classifies this file as `refused` (#8435), and it earns that verdict
+    //   from this literal: its PREDICATION shape ("widening … is not the fix") is
+    //   what tells a refusal apart from mere discouragement. Soften this sentence
+    //   and this gate silently becomes an UNMARKED offer of a ratchet-expanding
+    //   remedy — a violation reported over THERE, naming a file whose author was
+    //   editing prose here and had no reason to look.
+    //
+    //   THE EXCEPTION is what keeps the refusal honest. Since #11490 a package CAN
+    //   move the program set, so an unqualified refusal forbids the only correct
+    //   action for an onboarding — the state #11491 measured 14 remaining
+    //   `TEST_DEBT` entries as walking into.
+    //
+    // Neither may be dropped to make room for the other.
+    expect(
+      has(grown.failures, 'widening the registry entry is not the fix'),
+      'the refusal PREDICATION is gone — `check-ratchet-remedy-authority` classifies this file as '
+        + '`refused` from that exact shape, so losing it turns this gate into an unmarked ratchet offer '
+        + 'and reds a DIFFERENT gate, naming this file',
+    );
+    expect(
+      has(grown.failures, 'ONBOARDED'),
+      'the failure text no longer names the one case the refusal does not cover — a package that moved '
+        + 'the program set itself, which #11490 made possible and 14 queued onboardings each arrive at',
+    );
+
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });
     expect(has(wide.failures, 'STALE'), 'a registry entry listing a dep that is no longer dist-resolved did not fail');
 
@@ -1698,6 +1803,56 @@ function selfTest() {
         `workspace parent ${glob} carries no path separator, so scripts/pm/dispatch-gates.mjs refuses it as too generic and every package under it drops out of the derived gate list`,
       );
     }
+
+    // ── the import clause is bounded to ONE statement (#12555) ────────────
+    //
+    // The same three rows the sibling gate pins, because this file carried the
+    // byte-identical first alternative. The consequence here is narrower —
+    // `extractTypeImports` reads only the specifier captures, so an over-greedy
+    // clause could not corrupt a verdict, only make one vanish — but vanishing is
+    // a false GREEN on an axis whose whole job is fail-closed, so it is pinned
+    // just as hard. A detector that silently stops matching reports a spotless
+    // repo.
+    const typeSpecs = (code) => [...new Set(extractTypeImports(code))].sort();
+    const tA = typeSpecs("import 'pkg/kernel';\nconst x = 1;\n");
+    const tB = typeSpecs("import 'pkg/kernel';\nimport { X } from 'other';\n");
+    const tC = typeSpecs("import { X } from 'other';\nimport 'pkg/kernel';\n");
+    expect(tA.join() === 'pkg/kernel', 'row A: a lone side-effect import was not seen at all');
+    expect(
+      tB.join() === 'other,pkg/kernel',
+      'row B: the side-effect import was swallowed by the NEXT statement\'s clause — the #12555 defect itself',
+    );
+    expect(
+      tB.join() === tC.join(),
+      'rows B/C disagree: the same two statements read differently when reordered, so the verdict is a function of import ORDER',
+    );
+    expect(
+      typeSpecs("import 'pkg/kernel'\nimport { X } from 'other'\n").join() === 'other,pkg/kernel',
+      'a semicolon-less (ASI) pair still spans two statements — a `;`-only clause class would pass row B and fail here',
+    );
+    // This gate's INVERSION of the runtime gate's rule must survive the bound: a
+    // type-only import always resolves at type time and is counted here on
+    // purpose (header note 4). The narrowed clause must not have dropped it.
+    expect(
+      typeSpecs("import type { A } from '@fx/types';\n").join() === '@fx/types',
+      'a type-only import stopped being counted — the statement bound went blind on the majority of this axis',
+    );
+    expect(
+      typeSpecs('import {\n  a,\n  b,\n} from \'@fx/multi\';\n').join() === '@fx/multi',
+      'a multi-line import clause stopped matching — the statement bound broke line-spanning clauses',
+    );
+    // The dynamic-import alternative is NOT the one that changed, and its extra
+    // `:` / `<` delimiters are why this regex is not byte-identical to the
+    // sibling's. Pinned so a later "sync the two gates" edit cannot quietly drop
+    // them.
+    expect(
+      typeSpecs('let v: import(\'@fx/anno\').T;\n').join() === '@fx/anno',
+      '`import(…)` in a type ANNOTATION stopped being seen — the `:` delimiter was lost from the dynamic alternative',
+    );
+    expect(
+      typeSpecs('type G = Box<import(\'@fx/generic\').T>;\n').join() === '@fx/generic',
+      '`import(…)` inside a GENERIC argument stopped being seen — the `<` delimiter was lost from the dynamic alternative',
+    );
 
     // ── the declaration must still BE the workspace (#11510) ──────────────
     //

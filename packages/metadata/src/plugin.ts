@@ -14,6 +14,10 @@ import {
     SysMetadataCommitObject,
     SysMetadataAuditObject,
     SysViewDefinitionObject,
+    applyArtifactForwardConversions,
+    detectUnboundFormViewPredicateRoots,
+    BOUND_FORM_VIEW_PREDICATE_ROOTS,
+    type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
 
 // `SysMetadataObject` + `SysMetadataHistoryObject` are the customer overlay
@@ -253,6 +257,22 @@ export class MetadataPlugin implements Plugin {
      * `name` and are skipped by `_parseAndRegisterArtifact`'s register loop.
      */
     private lastParsedMetadata?: Record<string, unknown[]>;
+
+    /**
+     * Once-per-process dedupe for the summaries the versioned artifact window
+     * emits. The artifact watcher replays `_parseAndRegisterArtifact` on every
+     * file change, so without this a dev loop over a legacy artifact would
+     * re-announce the same finding on every reload — the same shape
+     * `Protocol.storedConversionWarned` guards on the stored-row pass, which
+     * this surfacing is modeled on.
+     *
+     * Two key families share the set, because they share the replay:
+     * `<conversionId>|<label>` for a forward-conversion summary (#12772), and
+     * `unbound-form-predicate-root|<label>` for the unbound-root notice
+     * (#12915) — one line per artifact there, not one per conversion, since
+     * the notice already aggregates every finding it made.
+     */
+    private artifactConversionWarned = new Set<string>();
 
     constructor(options: MetadataPluginOptions = {}) {
         // Documented default: `watch: false` (see {@link MetadataPluginOptions.watch}).
@@ -667,6 +687,131 @@ export class MetadataPlugin implements Plugin {
     }
 
     /**
+     * Versioned ADR-0087 forward conversion at the artifact-ingestion door
+     * (#12772) — runs BEFORE the strict schema parse below, because the parse
+     * is the refusal point.
+     *
+     * A compiled artifact is data at rest with a version stamp: built by
+     * released tooling, then unchanged while the platform moves on. When a
+     * spec release retires an authorable key inside a protocol line (spec
+     * 17.1 → 17.2 retired the `allowRestore`/`allowPurge` permission bits),
+     * every already-built artifact carrying the key becomes unbootable at the
+     * tombstone — with no operator remedy, since `os migrate meta` targets
+     * sources, not built artifacts. The stored-row read path already replays
+     * the conversion chain for exactly this reason
+     * (`applyConversionsToStoredItem`, ADR-0087 addendum); this is the same
+     * policy at the artifact door, **keyed off the artifact's own declared
+     * `engines.protocol` floor**: an artifact authored below the running spec
+     * version converts forward, an artifact authored at the current (or a
+     * newer) surface converts nothing and answers to the strict parse,
+     * tombstones included. The version key is what keeps this a conversion
+     * rather than an amnesty — the retired keys return with the M2 lifecycle
+     * batch (#1883), and artifacts authored against that surface must never
+     * have them stripped by history.
+     *
+     * Notices surface the way the stored-row pass's do — operator-visible and
+     * deduped — as one summary line per conversion per artifact rather than
+     * one per rewritten path (a real 17.1 artifact carried 150 strips of the
+     * same two keys; 150 identical warn lines would bury the boot log).
+     */
+    private _convertArtifactForward(ctx: PluginContext, definition: unknown, label: string): unknown {
+        const result = applyArtifactForwardConversions(definition);
+        // Runs on every artifact, conversions or not: an artifact can be inside
+        // the versioned window and carry NO convertible key while still
+        // carrying the fault-open predicates below.
+        this._warnUnboundFormPredicateRoots(ctx, result, label);
+        if (result.notices.length === 0) return result.definition;
+
+        const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
+        for (const n of result.notices) {
+            const existing = byConversion.get(n.conversionId);
+            if (existing) existing.count += 1;
+            else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
+        }
+        for (const [conversionId, agg] of byConversion) {
+            const key = `${conversionId}|${label}`;
+            if (this.artifactConversionWarned.has(key)) continue;
+            this.artifactConversionWarned.add(key);
+            ctx.logger.warn(
+                `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
+                + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
+                + `${result.runtimeSpecVersion}) — converted ${agg.count} site(s) forward via ADR-0087 `
+                + `conversion '${conversionId}' (first at ${agg.firstPath}). ${agg.message} `
+                + `The artifact file itself is unchanged — rebuild it with current tooling `
+                + `('os build') to persist the canonical shape.`,
+            );
+        }
+        return result.definition;
+    }
+
+    /**
+     * Operator-facing boot notice for form-view predicates that fault OPEN on
+     * this runtime (#12915 scope C — maintainer ruling 2026-08-28, 「同意C」).
+     *
+     * A form-view predicate binds `record` / `previous` / `parent` (runtime
+     * record forms) or `data` (metadata-editing forms); the contract states
+     * beside that vocabulary that a bare identifier is UNBOUND and the
+     * predicate faults, and `visibleWhen`'s fault fallback is `true`. On a real
+     * 17.1-built artifact that combination dead-ends record creation in the
+     * console: the conditionally hidden field renders, and its unconditional
+     * `required: true` — authored to be gated by the visibility that no longer
+     * applies — blocks every submit, while the same payload POSTs 201 through
+     * REST. Nothing refused, nothing logged, and only the operator can fix it
+     * (by rebuilding the artifact), so this is the channel the ruling picked:
+     * service startup, server-side, never a console surface — the person at
+     * the form cannot act on "your artifact is stale".
+     *
+     * **Detection only.** No refusal, no rewrite, no behaviour change: the
+     * predicate keeps faulting open exactly as before. Rewriting a bare root to
+     * `record.` is the ADR-0087 conversion (#12915 scope A), deferred by the
+     * same ruling with an explicit start line.
+     *
+     * **Same versioned window as the conversion replay above** — and read off
+     * that pass's own verdict rather than recomputed, so the two can never
+     * disagree about which artifacts are "old". An artifact declaring the
+     * current (or a newer) floor answers to the strict parse and gets nothing
+     * from here even when it does carry bare roots; that boundary is what keeps
+     * a notice about legacy artifacts out of contract territory. An undeclared
+     * range is treated as old data at rest, matching the grandfathering posture
+     * the window already takes (`converted-undeclared`).
+     */
+    private _warnUnboundFormPredicateRoots(
+        ctx: PluginContext,
+        result: ArtifactForwardConversionResult<unknown>,
+        label: string,
+    ): void {
+        if (result.verdict !== 'converted-forward' && result.verdict !== 'converted-undeclared') return;
+
+        const findings = detectUnboundFormViewPredicateRoots(result.definition);
+        if (findings.length === 0) return;
+
+        const key = `unbound-form-predicate-root|${label}`;
+        if (this.artifactConversionWarned.has(key)) return;
+        this.artifactConversionWarned.add(key);
+
+        // ONE line per artifact, not one per predicate — a real legacy artifact
+        // carries the pattern across many fields of the same form, and the
+        // conversion summary beside this one exists because 150 identical warn
+        // lines buried a boot log.
+        const views = [...new Set(findings.map((f) => f.view))];
+        const roots = [...new Set(findings.map((f) => f.root))];
+        const quote = (list: readonly string[]) => list.map((v) => `'${v}'`).join(', ');
+        ctx.logger.warn(
+            `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
+            + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
+            + `${result.runtimeSpecVersion}) and carries ${findings.length} form-view predicate(s) whose `
+            + `root identifier is NOT bound on this surface — ${quote(roots)} `
+            + `(bound roots: ${quote(BOUND_FORM_VIEW_PREDICATE_ROOTS)}) — across `
+            + `${views.length} view(s): ${views.join(', ')} (first at ${findings[0]!.path}). `
+            + `Each one faults at evaluation and visibility fails OPEN, so a field the predicate was `
+            + `authored to HIDE renders anyway — and an unconditional 'required: true' on such a field `
+            + `dead-ends record creation in the console while the REST door still accepts it. `
+            + `Nothing was rewritten and no behaviour changed here; rebuild the artifact with current `
+            + `tooling ('os build') so its predicates carry a bound root ('record.<field>').`,
+        );
+    }
+
+    /**
      * Parse raw artifact JSON (envelope or bare definition) and register all
      * metadata items into the MetadataManager.
      *
@@ -686,14 +831,20 @@ export class MetadataPlugin implements Plugin {
 
         const obj = raw as any;
         if (obj?.schemaVersion && obj?.commitId && obj?.metadata !== undefined) {
-            const artifact = EnvironmentArtifactSchema.parse(obj);
+            const artifact = EnvironmentArtifactSchema.parse({
+                ...obj,
+                metadata: this._convertArtifactForward(ctx, obj.metadata, label),
+            });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else if (obj?.success && obj?.data?.metadata) {
             // Unwrap cloud API envelope: { success: true, data: { metadata: {...} } }
-            const artifact = EnvironmentArtifactSchema.parse(obj.data);
+            const artifact = EnvironmentArtifactSchema.parse({
+                ...obj.data,
+                metadata: this._convertArtifactForward(ctx, obj.data.metadata, label),
+            });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else {
-            const def = ObjectStackDefinitionSchema.parse(obj);
+            const def = ObjectStackDefinitionSchema.parse(this._convertArtifactForward(ctx, obj, label));
             const canonical = JSON.stringify(def, Object.keys(def).sort());
             const checksum = createHash('sha256').update(canonical).digest('hex');
             const environmentId = this.options.environmentId ?? 'proj_local';

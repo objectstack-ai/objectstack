@@ -136,9 +136,9 @@
     },
     {
       "file": "packages/services/service-datasource/package.json",
-      "field": "devDependencies",
+      "field": "dependencies",
       "axis": "product-consumer",
-      "why": "all five drivers are devDependencies here by design: the factory reaches every backend by dynamic import and the HOST supplies the one it uses, so declaring them as runtime dependencies would install five databases' worth of driver for whichever one a deployment picked."
+      "why": "serves the two UNGUARDED `await import()` sites ledgered above in this package: the `memory` arm of createDefaultDatasourceDriverFactory, and rung 3 of the sqlite step-down in sqlite-driver-fallback.ts. #10062 moved it out of devDependencies because neither load sits in a try/catch — a consumer reaching either path met ERR_MODULE_NOT_FOUND rather than a diagnosis, so the declaration is a runtime one and the manifest now says so. The sentence retired here claimed all five drivers were devDependencies by design, on the reasoning that the factory reaches every backend by dynamic import and the HOST supplies the one it uses; that argument survives only for the three GUARDED arms (driver-mongodb, driver-sqlite-wasm, driver-turso), each of which answers an absent package with a named error carrying its install command and is therefore still declared nowhere. No investment in the driver: the #5499 freeze is untouched, and this entry goes when the last consumer it serves goes."
     },
     {
       "file": "examples/embed-objectql/package.json",

@@ -160,7 +160,7 @@ Column footer summary configuration
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here since objectui#6010 — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 | **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
@@ -322,7 +322,7 @@ View filter rule
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here since objectui#6010 — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 | **fields** | `{ field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … }[]` | optional | Sub-fields for composite/repeater/record types |
@@ -1873,7 +1873,7 @@ This schema accepts one of the following structures:
 | **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
 | **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
-### Nested Shape: `ViewData.read`
+### Nested Shape: `ViewData[provider='api'].read`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1883,7 +1883,7 @@ This schema accepts one of the following structures:
 | **params** | `Record<string, any>` | optional | Query parameters |
 | **body** | `any` | optional | Request body for POST/PUT/PATCH |
 
-### Nested Shape: `ViewData.write`
+### Nested Shape: `ViewData[provider='api'].write`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -1990,7 +1990,7 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
-### Nested Shape: `ViewItem.config`
+### Nested Shape: `ViewItem[viewKind='list'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2044,7 +2044,7 @@ This schema accepts one of the following structures:
 | **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItem.protection`
+### Nested Shape: `ViewItem[viewKind='list'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2079,7 +2079,7 @@ This schema accepts one of the following structures:
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
-### Nested Shape: `ViewItem.config`
+### Nested Shape: `ViewItem[viewKind='form'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2109,7 +2109,7 @@ This schema accepts one of the following structures:
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
 | **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItem.protection`
+### Nested Shape: `ViewItem[viewKind='form'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2165,7 +2165,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
-### Nested Shape: `ViewItemWire.config`
+### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2219,7 +2219,7 @@ This schema accepts one of the following structures:
 | **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItemWire.protection`
+### Nested Shape: `ViewItemWire[viewKind='list'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2227,7 +2227,7 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
-### Nested Shape: `ViewItemWire.columnState`
+### Nested Shape: `ViewItemWire[viewKind='list'].columnState`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2264,7 +2264,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored). #9933 |
 
-### Nested Shape: `ViewItemWire.config`
+### Nested Shape: `ViewItemWire[viewKind='form'].config`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2294,7 +2294,7 @@ This schema accepts one of the following structures:
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
 | **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 
-### Nested Shape: `ViewItemWire.protection`
+### Nested Shape: `ViewItemWire[viewKind='form'].protection`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -2302,7 +2302,7 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
-### Nested Shape: `ViewItemWire.columnState`
+### Nested Shape: `ViewItemWire[viewKind='form'].columnState`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

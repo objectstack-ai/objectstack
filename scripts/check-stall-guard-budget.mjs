@@ -107,16 +107,64 @@
  * refuses is the structural class -- a guard that cannot fire in time no matter
  * what the run does.
  *
- * The same measurement bounds this gate's promise, and the bound is worth
- * stating because it is not obvious: on the ci.yml family `T - C` is 10 minutes,
- * while the worst single shard above spent 15m10s (35s prep + 14m35s of healthy
- * run) before it would have frozen. So a freeze arriving at the very END of a
- * healthy shard, on the DEFERRED path only, still loses to the job timeout
- * (15.2 + 20 > 30). The undeferred path covers it (15.2 + 10 < 30, 4.8m spare).
- * That is a property of the checked-in values, not of this gate, and this gate
- * cannot judge it -- the run length is exactly the term no static sweep can
- * read. It is recorded here, and filed as #12846, so the next reader does not
- * mistake a green line for "every stall is covered".
+ * ### The boundary of a green line here (#12846)
+ *
+ * A green from this gate does NOT mean "every stall is covered". Four things
+ * bound it, and none of them is judgeable by any static sweep:
+ *
+ * 1. WHERE THE VERDICT LANDS. The guard's clock starts at the last output, so
+ *    with `p` the job's prep before the guarded step and `s` how far into the
+ *    step the output froze, the verdict lands at `p + s + C`. The room available
+ *    for `p + s` is therefore `T - C` -- on the ci.yml family, `30 - 20 = 10`
+ *    minutes.
+ *
+ * 2. THE UNDEFERRED PATH IS COVERED. This is the #4250 shape -- the mid-suite
+ *    freeze this guard was built for -- and it clears its job timeout today. Do
+ *    not read item 3 as "the guard does not cover stalls"; it covers the common
+ *    one. But read the margin, not just the verdict: it is now barely over a
+ *    minute, and it got there by shrinking roughly a quarter in a matter of days
+ *    while nothing in the tree changed and this gate stayed green throughout.
+ *    Nothing here can see that number move, which is exactly why item 3 matters.
+ *
+ * 3. THE DEFERRED PATH IS NOT COVERED, and this gate cannot say so. On the
+ *    deferred path the kill waits for `C` rather than `W`, and `p + s + C`
+ *    exceeds the ci.yml family's `T`: the job timeout wins and the STALL-CAP
+ *    verdict is never printed. The term that consumes the budget is the HEALTHY
+ *    RUN LENGTH, and no static scan can read it -- so this is a property of the
+ *    checked-in values, not of this gate, and a green line above is silent about
+ *    it by construction.
+ *
+ * 4. TWO WEDGE CLASSES THE GUARD NEVER SEES AT ALL. `p + s + C` describes only
+ *    the wedges that go SILENT. The guard fires on silence, so a wedge that
+ *    keeps writing -- a retry loop, a poller, a log spin -- never reaches the
+ *    cap logic and is bounded only by the job timeout; and a wedge in an
+ *    UNGUARDED step is not watched at all, which on the `test` job is 16 of its
+ *    17 steps, `Install dependencies` and the cache and artifact steps included.
+ *    No value of `T` closes either one. Raising a job timeout buys headroom for
+ *    item 3; it does not extend the guard's reach.
+ *
+ * The affected population is 7 guard-wrapped STEPS across 5 jobs, not 4 jobs:
+ * `temporal-conformance` carries TWO guarded steps on ONE job clock, so the
+ * second one's `p` includes the first one's entire runtime. The census below
+ * prints each site's `slack` independently, which is correct for the criterion
+ * and reads as more independent than the clock actually is.
+ *
+ * ### Re-deriving these numbers instead of trusting them
+ *
+ * No figure from that measurement is repeated here as a constant, deliberately.
+ * The one in the card that this section replaces had already drifted about a
+ * quarter by the time it was re-taken, in the direction that consumes budget,
+ * and a hand-refreshed number is one nobody refreshes. Re-take it with
+ *
+ *     node scripts/measure-stall-guard-headroom.mjs --run <run id> [--run ...]
+ *
+ * which enumerates the guarded steps by importing THIS file's own sweep (so a
+ * renamed step surfaces loudly instead of silently dropping out), joins them
+ * against GitHub's runner timestamps, and prints both paths per site. The
+ * readings behind this section came from merge_group runs 33160601033,
+ * 33162164422 and 33163163494; the card's original sample was run 33135187774.
+ * Use a `pull_request` or `merge_group` run -- a push to `main` has the matrix
+ * filtered out, and the tool refuses rather than reporting an empty green.
  *
  * ## Non-vacuity: a sweep that finds nothing satisfies this gate perfectly
  *

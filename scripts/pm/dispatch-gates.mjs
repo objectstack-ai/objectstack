@@ -136,6 +136,68 @@
  * them is printed in the residue rather than left as an absence — a schedule
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
+ * ## Why a declaration can only NARROW, and what that guarantee costs (#12842)
+ *
+ * `declaredInheritedPopulation` refuses any path its own module does not
+ * already spell, so a declaration can only ever REMOVE leads a caller would
+ * otherwise inherit — never invent one, and never hide a real population. That
+ * is a property this file asserts without reading any declaration's intent,
+ * which is what lets every dispatch built on this derivation be trusted without
+ * re-deriving it. It has a measured price, recorded here rather than left to be
+ * rediscovered card by card.
+ *
+ * A hint is a path PREFIX and `hintCovers` matches subtrees, so no declaration
+ * can express "the compiled subset of this tree". `cli-build-prerequisite.mjs`
+ * declares `packages/cli/src` — the honest spelling, since the CLI's source
+ * tree really is what compiles into the command `check:i18n` and
+ * `check:i18n-coverage` spawn — and that prefix also names the 101 interleaved
+ * test files under it plus `src/utils/console-route-ledger.ts`. All 102 are
+ * excluded by `packages/cli/tsconfig.build.json`, so none can change a byte of
+ * the `dist/` those two gates read. Measured on b1a987e4a, over the 322 tracked
+ * files of `packages/cli`:
+ *
+ *                                    BEFORE #12841   AFTER
+ *     covered by the inherited hints       322         214
+ *       really read by the gates           112         112
+ *       false leads                        210         102
+ *
+ * 102 files per gate — 204 (file, gate) pairs across the family. Priced the
+ * same day, over the 4076 first-parent commits on `origin/main` in the 30 days
+ * to 2026-08-28: 35 of them named these gates while provably unable to move
+ * them (0.86% of all landings, 10.5% of the 332 touching `packages/cli`), and
+ * each such card pays about 3m30s of compute to reach any reading at all —
+ * both gates refuse outright on an unbuilt tree, `check:i18n` after a 56-task
+ * CLI closure build and `check:i18n-coverage` only after a full `pnpm build`,
+ * which its own second prerequisite demands one round LATER. Roughly two hours
+ * of fleet compute per 30 days, before queueing.
+ *
+ * Maintainer ruling, 2026-08-28 (#12842): pay it. A mechanism that lets a
+ * declaration SUBTRACT is a mechanism that can subtract a REAL population, and
+ * that failure would be SILENT — a gate quietly no longer watching live code
+ * while every dispatch order still reads normal. Today's cost is loud and
+ * self-limiting; the trade runs the wrong way. ⛔ Do not give
+ * `declaredInheritedPopulation` a subtraction spelling — not a marker suffix,
+ * not a second marker.
+ *
+ * The recorded fallback, should the price ever escalate, is to apply a
+ * classifier on the DERIVATION side for named gate families, so that no
+ * declaration expresses anything. ⚠️ Two measured caveats it must carry:
+ * `isTestFilePath` reaches 100 of these 102, not all of them (it judges the
+ * filename infix, deliberately, so the `__tests__/` helper and the ledger file
+ * both fall outside it), and every use of it in this file today is ADDITIVE —
+ * see CHANGE_KIND_GATES — so this would be the first SUBTRACTIVE rule inside
+ * the derivation itself. ⛔ Consulting the package's own `tsconfig.build.json`
+ * instead is worse rather than better, and measurably so: an edit to that file
+ * names ZERO i18n-family gates today (measured on b1a987e4a; nine other
+ * families are named in the same run, so the zero is a reading, not a broken
+ * instrument), so the input doing the subtracting would be one nobody is ever
+ * named for.
+ *
+ * ⚠️ ORDER, carried from the card: the mirror axis is UNDER-naming (#12322,
+ * fixed in e980f6448 / PR #12476 and still open on its own terms), and that is
+ * exactly what a subtraction would put back at risk. Revisiting the rejected
+ * option requires that card closed and re-verified FIRST.
+ *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows, package.json, or the tracked-file corpus the
  * reachability sweep needs exits non-zero (#4690: unreadable input must never
@@ -3563,6 +3625,116 @@ export function isTestFilePath(path) {
 }
 
 /**
+ * Does this file carry a value shaped like an ADR-0112 error/notice CODE — the
+ * content trigger for `check:dispatcher-error-vocabulary` (#12850)?
+ *
+ * ## Why this one is judged from CONTENT, when every other kind reads a PATH
+ *
+ * The four predicates around this one answer questions about a path: is it a
+ * test file, does its package own an extract config, is it a gate script, is it
+ * in the root program. This one cannot, and the reason is recorded elsewhere in
+ * the tree rather than argued here. The vocabulary gate computes its own
+ * population by walking a bare top-level root, and `scripts/pm/bare-root-
+ * worklist.mjs` already carries the verdict for that spelling: REFUSE-WIDE,
+ * "non-test sources plus manifests, 1898 of 4903 (39%) — same trade" as the
+ * sibling it is grouped with, whose note spells the trade out — a declaration
+ * that "would name this gate for every card in the repo that touches a
+ * package".
+ *
+ * So there is no path prefix to give this entry. Inventing one would not merely
+ * be imprecise: it would mirror, inside this file, a population the ledger next
+ * door has already refused to spell — and mirroring a fact another file states
+ * is the drift this whole script is written against. A trigger that looks right
+ * and covers a third of the tree is strictly worse than today's honest silence,
+ * because a lead that fires on every card is one a reader learns to skip.
+ *
+ * What IS derivable from a diff is the thing the gate actually bites on: a code
+ * value entering the tree. That is content, so this predicate reads content.
+ *
+ * ## What it matches, and why it is deliberately broader than the gate
+ *
+ * Two limbs, both anchored on the shapes an error code is written in here:
+ *
+ *   - STAMP POSITION — the token `code` bound to a quoted literal or to a
+ *     SCREAMING_SNAKE identifier, through `:` or `=`, optional or not, with an
+ *     optional `typeof` between. That last part is not decoration: the specimen
+ *     that cost the CI round trip is `code: typeof CONVERSION_NOTICE_CODE`, and
+ *     a matcher without it misses the very case this entry exists for.
+ *   - CONSTANT BINDING — a SCREAMING_SNAKE binding whose value is a quoted
+ *     SCREAMING_SNAKE string, which is how this repo declares a code before any
+ *     `code` token is anywhere near it (`const CONVERSION_NOTICE_CODE =
+ *     'OS_METADATA_CONVERTED'`). The specimen file matches on both limbs; a
+ *     tree sweep found no file that only the second reaches, so neither limb is
+ *     carrying the other.
+ *
+ * ⛔ This is NOT a copy of the gate's own `SHAPES` table and must never become
+ * one. A copy would be a second spelling of a fact that file owns, and it would
+ * go stale in the SILENT direction the day `SHAPES` grows an indirection — that
+ * table has grown twice for exactly that reason. Being broader than `SHAPES` is
+ * what makes staleness impossible in the expensive direction: a shape added
+ * there is already inside this predicate's wider net.
+ *
+ * ## The false-positive trade, stated so nobody assumes narrowing is free
+ *
+ * This predicate over-matches on purpose. It fires for a file that merely
+ * CONTAINS a code, not only one that adds a new one, and it does not ask
+ * whether the value is registered — both would need the gate's own resolver,
+ * which is the thing this must not import. Cost of a false positive: one extra
+ * gate run, and this gate needs no build and answers for the whole tree in one
+ * pass. Cost of a false negative, measured on #12843: a full CI round trip,
+ * because the derived union reads green locally and the gate reds in `Lint &
+ * Repo Gates`. The two costs are not close, so the wide side is the correct
+ * one. ⚠ Narrowing it later is therefore not a tidy-up — it is a trade against
+ * a measured price, and it needs the same kind of measurement to justify.
+ *
+ * Measured on this tree when written, over 7169 tracked files: 196 of the 2281
+ * non-test TypeScript files match (8.6%, 2.7% of the tree) — two orders of
+ * discrimination away from the 39% a path spelling would have named. 194 of
+ * those 196 are inside the gate's own scanned population; the other two are one
+ * file each under the app and example roots, which the gate does not scan. Two
+ * wasted runs across the whole tree is the entire cost of leaving the
+ * population half out, and leaving it out is what keeps this file from spelling
+ * a pathy literal it would then match cards through — see the note on `why`
+ * prose in the table's docblock.
+ *
+ * ## What it cannot see, said out loud rather than discovered later
+ *
+ * A file that does not exist has no content, so this returns false for one —
+ * and at DISPATCH time the card's file surface is a hypothesis, which is where
+ * a brand-new file carrying a brand-new code lives. The trigger therefore fires
+ * for the dev's re-derivation off the merge base (where the file is real and
+ * where the missed gate actually costs the round trip) and stays quiet for the
+ * PM's hypothetical surface. That asymmetry is the honest one: firing on a path
+ * whose content nobody can read would be the path-shaped trigger this entry
+ * exists to refuse, wearing a different name. ⛔ Do not close it by falling back
+ * to the path half.
+ */
+const CODE_STAMP_POSITION = /\bcode\s*\??\s*[:=]\s*(?:typeof\s+)?(?:['"`]|[A-Z][A-Z0-9_]*\b)/;
+const CODE_CONSTANT_BINDING =
+  /\b(?:const|readonly|static|let)\s+[A-Z][A-Z0-9_]*\s*(?::[^=;\n]+)?=\s*['"`][A-Z][A-Z0-9_]*['"`]/;
+
+/** The file's text, or null when there is nothing on disk to read. */
+function readTrackedSource(path) {
+  try {
+    return readFileSync(join(ROOT, path), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+export function stampsAnErrorCodeLiteral(path, readSource = readTrackedSource) {
+  if (!/\.[cm]?tsx?$/.test(path) || /\.d\.[cm]?ts$/.test(path)) return false;
+  if (isTestFilePath(path)) return false;
+  const source = readSource(path);
+  if (source === null || source === undefined) return false;
+  // Comments are masked for the reason the gate masks them: a code DISCUSSED in
+  // prose is not a code stamped in source. This narrows nothing the gate would
+  // have reported, so it costs no recall in the expensive direction.
+  const masked = maskComments(source);
+  return CODE_STAMP_POSITION.test(masked) || CODE_CONSTANT_BINDING.test(masked);
+}
+
+/**
  * Is this path inside the ROOT package's tsc program — the population behind
  * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
  *
@@ -4109,6 +4281,15 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     day the entry stops firing by itself (its `matches` reads the flags), so
  *     delete it only once the opt-out is the permanent shape rather than a
  *     transient one.
+ *   - error-code entry: when the vocabulary gate's own source declares the
+ *     population it walks in a form this derivation can read — which today
+ *     means the bare-root ledger row for it moving off REFUSE-WIDE to a
+ *     recorded subtree spelling — the ordinary path match names it and this
+ *     entry is redundant. ⛔ Growing the gate's own SHAPES table does NOT
+ *     qualify: more stamp positions make the gate see more, and change nothing
+ *     about whether a dispatch brief can NAME it. ⛔ Nor does this predicate
+ *     going quiet on a given card: it reads content, so silence about a file
+ *     nobody can read yet is not evidence in either direction.
  *   - root-program entry: when the gate's own source names its root population
  *     in a form this derivation can read — a positive literal, or a generated
  *     manifest of the resolved program — the ordinary path match names it and
@@ -4210,6 +4391,16 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:type-check-debt',
         why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a file carrying an ADR-0112 error or notice CODE (judged from CONTENT — no path derivation can name this gate)',
+    matches: stampsAnErrorCodeLiteral,
+    gates: [
+      {
+        name: 'check:dispatcher-error-vocabulary',
+        why: 'it sweeps the non-test TypeScript sources under the package root for every site that stamps an error code, and reports each value the registered vocabulary (StandardErrorCode joined with ERROR_CODE_LEDGER) does not contain — so a code arriving through a quoted literal, a SCREAMING_SNAKE constant, a typeof reference to one, or a template moves it. This is the gate no path derivation can name: it computes its own population from a bare top-level root, which the bare-root ledger records as REFUSE-WIDE at 39% of the tracked tree, so it scores the same quiet silence for every card and #12843 paid a CI round trip for that silence. It needs NO build — a source scan, one pass, whole tree, and it names the file and line. Repair by REGISTERING the code where the vocabulary is declared, never by widening a consumer to tolerate it; reconciliation runs BOTH ways, so a table row whose site is gone fails too, and a pending-registration row whose code has since been registered fails as the discharge it is. ⚠ This lead is deliberately WIDE — it fires on a file that merely carries a code-shaped value, not only one that adds a new one — because the wasted run is one cheap gate and the miss is a CI round trip',
       },
     ],
   },
@@ -7548,6 +7739,86 @@ function selfTest() {
   t('the i18n section also names check:i18n-stale-fill, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n-stale-fill   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
 
+  // ── The error-code CONTENT kind (#12850) ─────────────────────────────────
+  //
+  // The only entry in this table judged from a file's CONTENT rather than its
+  // path, so its cases are shaped differently: the limbs are driven through an
+  // INJECTED reader (offline, no tree), and the tree itself is used only for
+  // the two properties a fixture cannot pin — that the predicate still reaches
+  // the real specimen, and that it still DISCRIMINATES.
+  const codeSrc = (text) => (_path) => text;
+  const stamps = (text, path = 'packages/x/src/a.ts') => stampsAnErrorCodeLiteral(path, codeSrc(text));
+  t('a quoted code literal in a stamp position is a hit', stamps("const e = { code: 'NOT_CREATABLE' };"));
+  t('a SCREAMING_SNAKE constant in a stamp position is a hit', stamps('const e = { code: NOT_CREATABLE };'));
+  t('an assigned code is a hit', stamps("err.code = 'FLOW_FAILED';"));
+  t('an optional code FIELD TYPE is a hit', stamps("interface E { code?: 'FLOW_FAILED' }"));
+  // The specimen shape from #12843, spelled out: without the `typeof` limb this
+  // case is the one that fails, and it is the exact form that cost the round
+  // trip — a literal `code` type reached through a named constant.
+  t('a typeof reference to a code constant is a hit — the #12843 shape',
+    stamps('interface N { code: typeof CONVERSION_NOTICE_CODE; }'));
+  // The declaration half of that same shape, which carries no `code` token at
+  // all and is therefore invisible to every `code`-anchored limb.
+  t('a SCREAMING_SNAKE constant bound to a SCREAMING_SNAKE string is a hit',
+    stamps("export const CONVERSION_NOTICE_CODE = 'OS_METADATA_CONVERTED' as const;"));
+  t('a file with neither shape is not a hit', !stamps('export function add(a: number, b: number) { return a + b; }'));
+  // Masking is load-bearing in the cheap direction only: a code the gate would
+  // never report because it is not in source cannot cost a run here either.
+  t('a code discussed only in a comment is not a hit', !stamps("// code: 'NOT_CREATABLE' is stamped elsewhere\nexport const x = 1;"));
+  t('a lowercase constant binding is not a hit', !stamps("const notACode = 'lowercase';"));
+  // Population: the gate does not read tests, declaration files or non-TS, so
+  // neither does the lead. Each is driven with content that WOULD hit, so the
+  // case fails if the population half stops being consulted.
+  t('a test file carrying a stamp is not a hit', !stamps("const e = { code: 'X_Y' };", 'packages/x/src/a.test.ts'));
+  t('a d.ts carrying a stamp is not a hit', !stamps("const e = { code: 'X_Y' };", 'packages/x/src/a.d.ts'));
+  t('a non-TS file carrying a stamp is not a hit', !stamps("const e = { code: 'X_Y' };", 'packages/x/src/a.md'));
+  // The unreadable branch, pinned as its own case because it is the one this
+  // entry deliberately does NOT close: at dispatch time the card's surface is a
+  // hypothesis, and a file with no content on disk answers false rather than
+  // falling back to a path match. A regression here would be silent.
+  t('a path with nothing to read is not a hit, and does not throw', !stampsAnErrorCodeLiteral('packages/x/src/a.ts', () => null));
+  t('…and the live reader answers the same way for a path the tree does not have',
+    !stampsAnErrorCodeLiteral('packages/there-is-no-such-package/src/a.ts'));
+
+  // Anti-vacuity, against the REAL tree: the shape that cost #12843 a CI round
+  // trip must still be reached. Spelled rather than discovered because it IS
+  // the specimen — a derived probe would answer about some other file.
+  const CODE_SPECIMEN = 'packages/spec/src/conversions/types.ts';
+  t('the live tree still carries the #12843 specimen shape, and the predicate reaches it',
+    stampsAnErrorCodeLiteral(CODE_SPECIMEN));
+  // The discrimination pin, and the one case that holds this card's ruling
+  // mechanically: a content trigger is only worth having while it names the
+  // gate for SOME cards and not for most. The path spelling this entry refuses
+  // would have scored 39%; if a future widening pushes this predicate up there,
+  // the entry has become the thing it was written against and this case fails.
+  const codeCorpus = trackedFiles().filter((f) => /\.[cm]?tsx?$/.test(f) && !/\.d\.[cm]?ts$/.test(f) && !isTestFilePath(f));
+  const codeHits = codeCorpus.filter((f) => stampsAnErrorCodeLiteral(f));
+  t(`the content trigger discriminates: ${codeHits.length} of ${codeCorpus.length} non-test TS files (neither vacuous nor tree-wide)`,
+    codeCorpus.length > 500 && codeHits.length > 20 && codeHits.length < codeCorpus.length / 4);
+
+  // The rendered section, driven through THIS entry alone so the count is a
+  // statement about the entry rather than about which other kinds happen to
+  // fire for the specimen path.
+  const codeEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:dispatcher-error-vocabulary'));
+  t('exactly one entry in the table names the vocabulary gate', codeEntry.length === 1);
+  const codeKind = changeKindLines([CODE_SPECIMEN], resolved, codeEntry);
+  t('a code-carrying path emits the convention section', codeKind.length === 2 && codeKind[0].includes('judged from CONTENT'));
+  t('and it names the vocabulary gate runnably, anchored on the delimiter',
+    codeKind.some((l) => l.includes('- pnpm check:dispatcher-error-vocabulary   —')));
+  const codeLine = codeKind.find((l) => l.includes('- pnpm check:dispatcher-error-vocabulary   —')) ?? '';
+  // The `why` owes the three halves a dev cannot re-derive from the command:
+  // why no path derivation names it, what the repair direction is, and that it
+  // needs no build (unlike the two ratchets in this same table).
+  t('the vocabulary line states why no path derivation reaches it', /REFUSE-WIDE/.test(codeLine));
+  t('…and pushes the repair to registration rather than to a tolerant consumer',
+    /REGISTERING/.test(codeLine) && /never by widening a consumer/.test(codeLine));
+  t('…and says it needs no build, unlike the ratchets in this table', /needs NO build/.test(codeLine));
+  // The card's second ruling, pinned: the over-broad direction is the chosen
+  // one and the trade is written where the next reader will meet it. A silent
+  // narrowing that drops this sentence fails here.
+  t('…and writes the false-positive trade down, so nobody assumes narrowing is free',
+    /deliberately WIDE/.test(codeLine) && /CI round trip/.test(codeLine));
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -7998,6 +8269,12 @@ function selfTest() {
     'check:cross-package-test-inputs is a live family (#10542 moved it here from a path derivation that could name it at 49.6% precision at best)',
     liveFamilies.has('check:cross-package-test-inputs'),
   );
+  // #12850's entry, pinned here for the same reason and with one of its own:
+  // this is the only gate in the table reached by a CONTENT predicate, so the
+  // census guard above is the only thing standing between a rename and a lead
+  // that renders STALE on a card nobody re-reads.
+  t('check:dispatcher-error-vocabulary is a live family, so naming it is not a guess',
+    liveFamilies.has('check:dispatcher-error-vocabulary'));
 
   // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
   //

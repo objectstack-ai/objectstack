@@ -119,7 +119,6 @@ import {
   SysScimGroupMember,
   SysScimIdentityTombstone,
   SysScimProjectionGrant,
-  SysScimProvider,
   SysScimSubject,
   SysScimUser,
   SysSsoProvider,
@@ -151,10 +150,9 @@ const PLATFORM_OBJECTS: Record<string, PlatformObject> = Object.fromEntries(
     SysOrganization, SysMember, SysInvitation, SysTeam, SysTeamMember,
     SysTwoFactor, SysDeviceCode, SysJwks,
     // Bridged at the adapter layer rather than via a plugin `schema` option —
-    // see the sso/scim block at the bottom of this file (#3653).
-    // `SysScimProvider` backs no stable model any more; it retires under
-    // #11757 and stays here only until that lands.
-    SysSsoProvider, SysScimProvider,
+    // see the sso/scim block at the bottom of this file (#3653). (The rc.1-era
+    // `SysScimProvider` backed no stable model; it retired under #11757.)
+    SysSsoProvider,
     SysScimConnectionBinding, SysScimGroup, SysScimGroupMember,
     SysScimIdentityTombstone, SysScimProjectionGrant, SysScimSubject,
     SysScimUser,

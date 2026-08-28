@@ -75,6 +75,7 @@
     "EmailAddress (type)",
     "EmailAttachment (interface)",
     "EmailDeliveryStatus (type)",
+    "EngineDatasourceDef (interface)",
     "EngineSchemaRegistryView (interface)",
     "EngineTransactionInfo (interface)",
     "EngineTransactionOptions (interface)",

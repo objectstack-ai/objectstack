@@ -152,6 +152,9 @@ import { join, relative, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { requireDefaultExport, requireDependency } from '../../../scripts/import-prerequisite.mjs';
+// The tree's one comment/literal/code scanner. Surface 2's docblock extractor reads
+// its runs from here rather than from a block-comment regex — see {@link docblockSpans}.
+import { scanSource } from '../../../scripts/js-comment-mask.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 const {
   validateExpression,
@@ -553,15 +556,35 @@ function scan(files) {
  *
  * `visibleWhen` is one key spelling several unrelated contracts, and the binding
  * root genuinely differs by layer. Re-measured on objectui `origin/main`
- * @ `2aff580` (the card's table was taken at `365e334`, a sibling repo on its
- * own cadence — the PR body records what had drifted):
+ * @ `f241a4d` for #11813 (the previous reading was `2aff580`; the card's
+ * original table was `365e334` — a sibling repo on its own cadence, so each
+ * re-measure records what had drifted since the last one):
  *
  * | Layer                                   | Binds                                     |
  * |-----------------------------------------|-------------------------------------------|
- * | object field / form section `*When`     | `record` + `previous` (+ `parent`)        |
+ * | object field `*When` (ADR-0036)         | `record` + `previous` (+ `parent`)        |
+ * | view form FIELD `visibleWhen`           | `record` + the HOST predicate scope       |
  * | per-option `visibleWhen`                | `record` + the HOST predicate scope       |
  * | page component / app-nav `visible`      | `current_user`/`user`/`ctx`/`os`/`app`/…  |
  * | flow-screen field `visibleWhen`         | the screen's own field names, FLATTENED   |
+ *
+ * Row 1 states the WRITE-PATH binding, and that is deliberate rather than
+ * partial: an object field rule is enforced by the rule validator, whose
+ * evaluator binds no user root, and this is the only layer the gate judges.
+ * Since objectui#6010 the renderer ALSO hands the host scope to an object
+ * field's rules, so a user root written there resolves client-side — the form
+ * hides the control while every other reader still returns the value. That is a
+ * silent enforcement gap, which is why the verdict is unchanged and the row is
+ * qualified rather than widened (#12914 tracks the message text that describes
+ * the mechanism).
+ *
+ * Row 2 is the split #11813 asked for. It used to share row 1 with the object
+ * field layer, and since objectui#6010 that was two verdicts in one cell. The
+ * form SECTION layer shared the same cell and its verdict moved as well, with
+ * objectui#6110 / objectui#6111; it is absent from the table rather than
+ * re-stated because it lands in the SKIPPED class here either way — neither
+ * discriminator arm below reaches it — and its re-measurement is #12914, not
+ * something this gate turns on.
  *
  * The last row is not hypothetical and it is in this very corpus:
  * `content/docs/automation/flows.mdx` teaches
@@ -1016,6 +1039,72 @@ function collectSpecFiles() {
 }
 
 /**
+ * The DOCBLOCK spans in a source, as `[start, end)` offsets — decided by
+ * `scripts/js-comment-mask.mjs`, this tree's one answer to "comment, literal, or
+ * code".
+ *
+ * ## Why this is not a regex (#12833)
+ *
+ * It was one: `/\/\*\*[\s\S]*?\*\//g`, an EXTRACTOR built out of the naive
+ * block-comment strip that `js-comment-mask.mjs`'s header exists to retire. A
+ * regex cannot see a string literal, so a `/**` sitting inside one opens a
+ * PHANTOM docblock that runs to the next real terminator, and `lastIndex` then
+ * skips every genuine docblock in between. The failure is silent and it is the
+ * bad direction: the gate reads FEWER `@example` bodies than the file holds and
+ * reports clean over prose it never looked at.
+ *
+ * Measured on `packages/spec/src` (1,061 `.ts`/`.tsx`, 13.7 MB) at
+ * `28a5c3e002`, which is why this is a fix rather than a tidy-up:
+ *
+ * - **9 files** where the regex's claimed docblock spans hold characters this
+ *   scanner does not call comment at all — 13,139 of them in
+ *   `kernel/manifest.test.ts`, where a glob string literal opens the phantom.
+ * - **9 files** (an OVERLAPPING BUT DIFFERENT set — 5 in common) where the
+ *   docblock COUNT moves.
+ * - **5 real docblocks** the regex was swallowing whole and this scan recovers.
+ *
+ * What did NOT move, stated because a fix nobody can see the effect of invites
+ * being undone: the `@example` body set is byte-identical either way, 416
+ * bodies, because none of the 5 recovered docblocks carries an `@example` and
+ * none of the phantoms fabricated one. So surface 2's "admits 0 sites today" is
+ * unchanged — but it is now a reading rather than the output of an extractor
+ * that provably could not see its own population. ⛔ Do not read the unchanged
+ * count as a reason to go back: the swallowed span is 13 KB wide and the next
+ * `@example` written behind one is invisible under the regex and judged here.
+ *
+ * ## What a "docblock run" is here
+ *
+ * `scanSource().comment` flags a comment's delimiters as well as its body, so a
+ * maximal run of flagged characters is one comment — except in two shapes the
+ * split below handles: block comments that ABUT (`/**a*\/\/**b*\/` is one run,
+ * two comments), and a run that opens with `//`, which is a line comment and
+ * never a docblock. An unterminated `/**` at EOF stays a docblock, matching what
+ * the TypeScript parser does with it; dropping it would be the silent direction.
+ */
+function docblockSpans(text) {
+  const { comment } = scanSource(text);
+  const spans = [];
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    if (comment[i] !== 1) { i++; continue; }
+    let runEnd = i;
+    while (runEnd < n && comment[runEnd] === 1) runEnd++;
+    let k = i;
+    while (k + 1 < runEnd && text[k] === '/' && text[k + 1] === '*') {
+      const term = text.indexOf('*/', k + 2);
+      const end = term === -1 || term + 2 > runEnd ? runEnd : term + 2;
+      // `/**\/` is an empty block comment, not a docblock — and the regex this
+      // replaced did not match it either, so the parity is deliberate.
+      if (text.startsWith('/**', k) && end - k > 4) spans.push([k, end]);
+      k = end;
+    }
+    i = runEnd;
+  }
+  return spans;
+}
+
+/**
  * Every `@example` body in a file, as text, with the 1-based source line of its
  * first body line.
  *
@@ -1027,16 +1116,17 @@ function collectSpecFiles() {
  * live. Pass A must see all 424; pass B needs the node (to know the slot) and so
  * is AST-bound by nature.
  *
+ * Text walk, but not a text SPLIT: which spans are docblocks comes from
+ * {@link docblockSpans} above, i.e. from the shared scanner.
+ *
  * The gutter strip is line-for-line, so a body line's index maps straight back to
  * a file line.
  */
 export function tsdocExampleBodies(text) {
   const out = [];
-  const re = /\/\*\*[\s\S]*?\*\//g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const commentStartLine = text.slice(0, m.index).split('\n').length; // 1-based
-    const raw = m[0].split('\n');
+  for (const [start, end] of docblockSpans(text)) {
+    const commentStartLine = text.slice(0, start).split('\n').length; // 1-based
+    const raw = text.slice(start, end).split('\n');
     const lines = raw.map((l, i) => {
       let s = l;
       if (i === 0) s = s.replace(/^\s*\/\*\*/, '');
@@ -1432,6 +1522,83 @@ const EXEMPTION_SELF_TEST_CASES = [
  * derived from ROOTS rather than re-spelled, so renaming or widening a root
  * cannot leave the declaration describing the old population.
  */
+/**
+ * The docblock EXTRACTOR's own both-directions test (#12833).
+ *
+ * {@link tsdocExampleBodies} used to split docblocks with a lazy block-comment
+ * regex, and the fixtures below are the two failure families
+ * `scripts/js-comment-mask.mjs`'s header names, reduced from shapes measured
+ * live in `packages/spec/src`:
+ *
+ * - **SWALLOWED** — a `/**` inside a glob string opens a phantom docblock whose
+ *   terminator is the NEXT real one, so the inline `@example` behind it lands on
+ *   the phantom's LAST line, the `*\/` strip runs instead of the `/**` strip, and
+ *   the tag no longer matches. The gate then reports clean over an example it
+ *   never read. `kernel/manifest.test.ts` holds a 13,139-character span of this.
+ * - **FABRICATED** — the same opener inside a string or template manufactures a
+ *   docblock that is not there, handing the gate prose to judge. This is the
+ *   over-count measured on `data/hook-body.zod.ts` and `ui/action.zod.ts`.
+ *
+ * The POSITIVE CONTROL is not decoration: every case above asserts a body count,
+ * and four of them assert a SMALLER one than the regex produced. Without a case
+ * that must come back non-empty, an extractor that returned nothing at all would
+ * pass this block.
+ */
+const EXTRACTOR_SELF_TEST_CASES = [
+  {
+    name: 'EXTRACTOR — POSITIVE CONTROL: an ordinary inline @example is extracted, at its own line',
+    holds: () => {
+      const found = tsdocExampleBodies(
+        'const A = 1;\nconst S = strictObject({\n'
+        + '  /** @example "status in [\'draft\']" - only drafts */\n  check: z.string(),\n});\n');
+      return found.length === 1 && found[0].startLine === 4;
+    },
+  },
+  {
+    name: 'EXTRACTOR — SWALLOWED: a glob string opens no docblock, so the @example behind it '
+      + 'is READ (the regex this replaced returned nothing here)',
+    holds: () => {
+      const found = tsdocExampleBodies(
+        "const GLOB = 'src/**/*.ts';\nconst S = strictObject({\n"
+        + '  /** @example "status in [\'draft\']" - only drafts */\n  check: z.string(),\n});\n');
+      return found.length === 1 && found[0].startLine === 4;
+    },
+  },
+  {
+    name: 'EXTRACTOR — FABRICATED: an @example quoted inside a string literal is prose, not a site',
+    holds: () => tsdocExampleBodies(
+      "const DOC = 'spell it /** @example \"a > 1\" */ above the field';\nexport const X = 1;\n",
+    ).length === 0,
+  },
+  {
+    name: 'EXTRACTOR — FABRICATED: ...and inside a TEMPLATE literal, where the phantom is not '
+      + 'line-bounded, only the real docblock survives',
+    holds: () => {
+      const found = tsdocExampleBodies(
+        'const T = `a /** @example "bogus" */ b`;\n/**\n * @example "record.a > 1"\n */\nconst X = 1;\n');
+      return found.length === 1 && found[0].startLine === 4;
+    },
+  },
+  {
+    name: 'EXTRACTOR — FABRICATED: the house-style note that spells `/** */` inside a `//` '
+      + 'comment is one line comment, not a second docblock',
+    holds: () => docblockSpans(
+      "// Declared with `//` (never `/** */`) and ABOVE the enum's JSDoc.\n"
+      + '/**\n * @example "record.a > 1"\n */\nconst X = 1;\n',
+    ).length === 1,
+  },
+  {
+    name: 'EXTRACTOR — two ABUTTING docblocks are two runs, not one (the shared scanner flags '
+      + 'them as a single contiguous comment span)',
+    holds: () => docblockSpans('/** @example "a > 1" *//** @example "b > 1" */\nconst X = 1;\n').length === 2,
+  },
+  {
+    name: 'EXTRACTOR — an empty block comment is not a docblock (parity with the regex this '
+      + 'replaced, which did not match it either)',
+    holds: () => docblockSpans('/**/\nconst X = 1;\n').length === 0,
+  },
+];
+
 const DECLARATION_SELF_TEST_CASES = [
   {
     name: 'DECLARATION — every ROOT the hint extractor cannot see is declared as a subtree '
@@ -1777,13 +1944,13 @@ function selfTest() {
   }
   failed += specSelfTest();
   failed += fieldRuleSelfTest();
-  for (const c of DECLARATION_SELF_TEST_CASES) {
+  for (const c of [...DECLARATION_SELF_TEST_CASES, ...EXTRACTOR_SELF_TEST_CASES]) {
     if (c.holds()) console.log(`  ✓ ${c.name}`);
     else { failed++; console.error(`  ✗ ${c.name}`); }
   }
   const total = SELF_TEST_CASES.length + SPEC_SELF_TEST_CASES.length + EXEMPTION_SELF_TEST_CASES.length
-    + DECLARATION_SELF_TEST_CASES.length + FIELD_RULE_SELF_TEST_CASES.length
-    + FIELD_RULE_REPORT_SELF_TEST_CASES.length;
+    + DECLARATION_SELF_TEST_CASES.length + EXTRACTOR_SELF_TEST_CASES.length
+    + FIELD_RULE_SELF_TEST_CASES.length + FIELD_RULE_REPORT_SELF_TEST_CASES.length;
   if (failed > 0) {
     console.error(`\n✗ check:doc-formula-expressions self-test: ${failed} case(s) failed`);
     process.exit(1);

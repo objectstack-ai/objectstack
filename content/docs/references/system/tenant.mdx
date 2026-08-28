@@ -249,7 +249,7 @@ This schema accepts one of the following structures:
 | **database** | `{ enableRLS: boolean; contextMethod: Enum<'session_variable' \| 'search_path' \| 'application_name'>; contextVariable: string; applicationValidation: boolean }` | optional | Database configuration |
 | **performance** | `{ usePartialIndexes: boolean; usePartitioning: boolean; poolSizePerTenant?: integer }` | optional | Performance settings |
 
-### Nested Shape: `TenantIsolationConfig.database`
+### Nested Shape: `TenantIsolationConfig[strategy='shared_schema'].database`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -258,7 +258,7 @@ This schema accepts one of the following structures:
 | **contextVariable** | `string` | optional (default: `"app.current_tenant"`) | Session variable name |
 | **applicationValidation** | `boolean` | optional (default: `true`) | Application-level tenant validation |
 
-### Nested Shape: `TenantIsolationConfig.performance`
+### Nested Shape: `TenantIsolationConfig[strategy='shared_schema'].performance`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -279,7 +279,7 @@ This schema accepts one of the following structures:
 | **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
 | **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
 
-### Nested Shape: `TenantIsolationConfig.schema`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_schema'].schema`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -288,7 +288,7 @@ This schema accepts one of the following structures:
 | **sharedSchema** | `string` | optional (default: `"public"`) | Schema for shared resources |
 | **autoCreateSchema** | `boolean` | optional (default: `true`) | Auto-create schema |
 
-### Nested Shape: `TenantIsolationConfig.migrations`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_schema'].migrations`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -296,7 +296,7 @@ This schema accepts one of the following structures:
 | **maxConcurrent** | `integer` | optional (default: `10`) | Max concurrent migrations |
 | **rollbackOnError** | `boolean` | optional (default: `true`) | Rollback on error |
 
-### Nested Shape: `TenantIsolationConfig.performance`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_schema'].performance`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -317,7 +317,7 @@ This schema accepts one of the following structures:
 | **backup** | `{ strategy: Enum<'individual' \| 'consolidated' \| 'on_demand'>; frequencyHours: integer; retentionDays: integer }` | optional | Backup configuration |
 | **encryption** | `{ perTenantKeys: boolean; algorithm: string; keyManagement?: Enum<'aws_kms' \| 'azure_key_vault' \| 'gcp_kms' \| 'hashicorp_vault' \| 'custom'> }` | optional | Encryption configuration |
 
-### Nested Shape: `TenantIsolationConfig.database`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].database`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -326,7 +326,7 @@ This schema accepts one of the following structures:
 | **separateCredentials** | `boolean` | optional (default: `true`) | Separate credentials per tenant |
 | **autoCreateDatabase** | `boolean` | optional (default: `true`) | Auto-create database |
 
-### Nested Shape: `TenantIsolationConfig.connectionPool`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].connectionPool`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -335,7 +335,7 @@ This schema accepts one of the following structures:
 | **idleTimeout** | `integer` | optional (default: `300`) | Idle pool timeout |
 | **usePooler** | `boolean` | optional (default: `true`) | Use connection pooler |
 
-### Nested Shape: `TenantIsolationConfig.backup`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].backup`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -343,7 +343,7 @@ This schema accepts one of the following structures:
 | **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency |
 | **retentionDays** | `integer` | optional (default: `30`) | Backup retention days |
 
-### Nested Shape: `TenantIsolationConfig.encryption`
+### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].encryption`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

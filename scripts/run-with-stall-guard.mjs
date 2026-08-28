@@ -100,6 +100,30 @@
 // is 2x the window; a cap <= the window is REFUSED, because it would disable the
 // probe silently.
 //
+// ## What this guard does NOT see (#12846)
+//
+// Two limits, both worth knowing before trusting a green run:
+//
+//   1. THE DEFERRED PATH CAN STILL LOSE TO THE JOB TIMEOUT. The verdict lands at
+//      `p + s + C` -- job prep, plus how far into the step the output froze, plus
+//      the cap -- and on the ci.yml family that can exceed `timeout-minutes`, in
+//      which case the job dies unlabelled and the STALL-CAP banner above is never
+//      printed. The undeferred path (kill at the window) still clears it, so this
+//      is the deferred path only. The term that decides it is the healthy run
+//      length, which no static check can read; the full statement of the boundary,
+//      and how to re-take the measurement rather than trust a number, is in the
+//      header of `scripts/check-stall-guard-budget.mjs`.
+//
+//   2. THIS GUARD ONLY EVER FIRES ON SILENCE. `silentMs` is reset by every chunk
+//      of output, and there is no absolute deadline anywhere in this file. So a
+//      wedge that KEEPS WRITING -- a retry loop, a poller, a log spin -- never
+//      reaches the cap logic at all and is bounded only by the job timeout. The
+//      note above about such a hang concerns one that has ALREADY gone quiet at
+//      this guard while writing at the source; one that never goes quiet here is
+//      invisible to the instrument. Likewise a wedge in a step this guard does not
+//      wrap is not watched at all -- on the `test` job that is 16 of its 17 steps.
+//      Raising a job timeout does not extend this guard's reach over either shape.
+//
 // If /proc/<pid>/io cannot be read (not Linux, hardened permissions), the probe
 // reports itself UNAVAILABLE and the guard behaves exactly as it did before this
 // signal existed. An unreadable probe must never read as liveness.

@@ -16,10 +16,13 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
 //
-// ORDER IS LOAD-BEARING until #12555 lands: check-test-source-alias's import regex
-// swallows a bare side-effect import whenever an `import … from …` follows it later in
-// the file, so this statement must stay BELOW every `from` import or the clocked-window
-// rule reports this file as unpaid while the line it asks for is already here.
+// Order is NO LONGER load-bearing (#12555 landed). The import regex in
+// check-test-source-alias used to swallow a bare side-effect import whenever an
+// `import … from …` followed it later in the file, so this statement had to stay BELOW
+// every `from` import or the clocked-window rule reported this file as unpaid while the
+// line it asks for was already here. That clause capture is now bounded to one
+// statement, and both orderings read correctly — pinned by that gate's `--self-test`,
+// which is what guards this file now rather than the position of the line below.
 import '@objectstack/spec/kernel';
 
 /**

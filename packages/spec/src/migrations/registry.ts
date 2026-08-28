@@ -6423,6 +6423,85 @@ const step18: MigrationStep = {
         + 'work byte-identically before and after.',
     },
     {
+      id: 'kernel-context-preview-mode-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        "context.mode — the value 'preview' left the RuntimeMode enum — and "
+        + 'context.previewMode, the whole PreviewModeConfig block it keyed '
+        + '(autoLogin / simulatedRole / simulatedUserName / readOnly / '
+        + 'expiresInSeconds / bannerMessage, declared on KernelContext and on the '
+        + 'TenantRuntimeContext extension). The exported '
+        + 'PreviewModeConfigSchema / PreviewModeConfig / PreviewModeConfigParsed '
+        + 'names left with the def',
+      replacement:
+        'nothing declarative — the capability the block described was never '
+        + 'implemented by any layer, so there is no working configuration to '
+        + 'migrate to. Preview/demo DEPLOYMENTS belong to the deployment layer, '
+        + 'which owns auth per-project (ArtifactKernelFactory in the cloud '
+        + 'distribution); the OS_PREVIEW_MODE environment variable stays exactly '
+        + 'as it is — deployment ROUTING (widening the trusted-origin list for '
+        + 'preview subdomains), unrelated to identity. If a preview experience '
+        + 'becomes a product capability it re-declares fresh, with the '
+        + 'production-posture hard-refusal as the first-landed half (#11846 '
+        + 'ruling record)',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 on #11846 '
+        + '(decision-inbox batch 2, Option A: remove — all four decision facets '
+        + 'pointed the same way). The declaration was the sharpest '
+        + 'declared-≠-enforced shape on a SECURITY surface: the schema promised '
+        + '"bypass auth, simulate admin identity" and named a production guard '
+        + '"the runtime must enforce", and NO code path implemented either half. '
+        + 'Measured zero consumers in all three repos, each leg with positive '
+        + 'controls: objectstack — no runtime branches on the mode; the only '
+        + "non-declaration hits for RuntimeMode or mode === 'preview' are the "
+        + 'schema unit test, a type-alias pin and a measurement-test comment '
+        + '(re-verified at dispatch, 2026-08-27, origin/main 15bf9e8). objectui — '
+        + 'the #11846 card records the measurement. cloud — cloud#1651 (closed '
+        + '2026-08-26): previewMode appears only as a local variable for '
+        + 'OS_PREVIEW_MODE whose effect is adding preview-domain wildcards to '
+        + "better-auth's CSRF trusted origins; RuntimeMode has zero hits "
+        + 'repo-wide; the positive control ArtifactKernelFactory (where serve.ts '
+        + 'predicted preview auto-login would live if it existed) has 20+ hits '
+        + 'and never touches previewMode. An author — very often an AI (ADR-0033) '
+        + '— could write the six-key block per the reference docs, parse cleanly, '
+        + 'and get no behaviour and no diagnostic, while a reader of the docs had '
+        + 'no way to tell the block from the keys that work. Bookkeeping: the '
+        + "enum-VALUE half ('preview') puts nothing in RETIRED_KEYS_BY_MAJOR and "
+        + 'leaves the four surface ratchets untouched by itself — its '
+        + "prescription hangs on the enum's own error map (the HookBodyCapability "
+        + 'precedent); the KEY half is tombstoned with retiredKey() on the '
+        + 'non-strict KernelContextSchema (both walked-shape copies registered in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]); the DEF half (kernel/PreviewModeConfig, '
+        + 'with no carrier left) is registered in RETIRED_DEFS_BY_MAJOR[18]. It '
+        + 'is a SEMANTIC entry rather than a D2 conversion because there is no '
+        + 'source to rewrite: a kernel context is constructed by host code at '
+        + 'boot — not a stack collection member, never stored as a sys_metadata '
+        + 'row — so the conversion chain has no seam that would ever see one '
+        + '(the kernel/Manifest:loading disposition). ADR-0049 / ADR-0087, '
+        + '#11846.',
+      acceptanceCriteria:
+        "No host constructs a kernel context with mode: 'preview' or a "
+        + 'previewMode block: both now fail tsc at the authoring site and fail '
+        + 'the parse with the prescription (pinned in '
+        + 'kernel/preview-mode-retirement.test.ts). Concretely, check three '
+        + "places. (1) Host boot code composing a KernelContext: delete `mode: "
+        + "'preview'` (mode defaults to production; use development for local "
+        + 'demo work) and delete any previewMode block — neither ever changed '
+        + 'runtime behaviour, so removing them changes nothing observable. '
+        + '(2) Code importing PreviewModeConfigSchema, PreviewModeConfig or '
+        + 'PreviewModeConfigParsed from @objectstack/spec or @objectstack/spec/'
+        + 'kernel: every one is TS2305 after upgrade; no working replacement '
+        + 'exists to point at, because the vocabulary described nothing real. '
+        + "(3) TypeScript branching on the RuntimeMode type (a mode === "
+        + "'preview' arm, a switch over modes): the arm is now unreachable and "
+        + 'an exhaustiveness check will fail to compile if it stays — that '
+        + 'compile error is the enforced channel for TypeScript consumers. '
+        + 'Preview deployment ROUTING is untouched: OS_PREVIEW_MODE and '
+        + 'OS_PREVIEW_BASE_DOMAINS keep working exactly as documented '
+        + '(deployment routing, never identity).',
+    },
+    {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
         'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
@@ -6909,6 +6988,53 @@ const step18: MigrationStep = {
         + 'not collapse.',
     },
     {
+      id: 'scim-provider-object-retired',
+      surface:
+        'the `sys_scim_provider` platform object (`SysScimProvider` in '
+        + '`@objectstack/platform-objects/identity`, re-exported from the package '
+        + 'root) and its name in `PLATFORM_PROVIDED_OBJECT_NAMES` '
+        + '(`@objectstack/spec/system` constants). The rc.1-era `@better-auth/scim` '
+        + 'connection row: one row per SCIM bearer connection, written only by the '
+        + 'retired `/scim/generate-token` endpoint.',
+      replacement:
+        '(removed — no direct replacement row. The stable `@better-auth/scim` '
+        + '1.7.x line (#3653, PR #12726) derives no `scimProvider` model: SCIM '
+        + 'state lives in the seven stable platform objects '
+        + '(`sys_scim_connection_binding`, `sys_scim_group`, '
+        + '`sys_scim_group_member`, `sys_scim_identity_tombstone`, '
+        + '`sys_scim_projection_grant`, `sys_scim_subject`, `sys_scim_user`) and '
+        + 'connection credentials in the ObjectStack-owned '
+        + '`sys_scim_connection_credential`, minted/verified by '
+        + '`scim-connection-service.ts` behind the application-owned '
+        + '`verifyBearerToken`. A SCIM-enabled deployment re-registers its '
+        + 'connections on the stable surface; rc.1 token digests are not portable '
+        + 'on any path, so the IdP reissues its token — a migration-day operator '
+        + 'action, not a code rewrite.)',
+      reason:
+        'Maintainer ruling 2026-08-24 on #11693 (verbatim: 「11700 11693 不需要考虑'
+        + '历史数据，其他按照你的建议继续」) — disposition A: retire, with no '
+        + 'data-migration path owed for existing rows (reaffirmed 2026-08-25: SCIM '
+        + 'has no real customers; the binding constraint is a smooth upgrade). '
+        + 'Executed as #11757 after the stable-1.7.1 migration landed (#3653 / '
+        + 'PR #12726): the installed library derives no `scimProvider` model, so '
+        + 'the object backed nothing — nothing could write a row to it any more. '
+        + 'Retiring it also removes its `provider_id` unique index, whose '
+        + 'stricter-than-upstream uniqueness was flagged on #3653 and parked '
+        + 'pending exactly this retirement.',
+      acceptanceCriteria:
+        'No code imports `SysScimProvider` from `@objectstack/platform-objects` '
+        + '(TS2305 after upgrade); `isPlatformProvidedObjectName(\'sys_scim_provider\')` '
+        + 'returns false, so a stack referencing the name is flagged as a probable '
+        + 'typo rather than resolved; plugin-auth provisions no `sys_scim_provider` '
+        + 'object and `AUTH_MODEL_TO_PROTOCOL` carries no `scimProvider` entry; the '
+        + 'spec registry conformance test (`platform-object-names.test.ts`) pins '
+        + 'the absence bidirectionally — re-adding either the object file or the '
+        + 'registry name alone reds `registry group "platform-objects" is out of '
+        + 'date` (measured both ways on #11757). Existing `sys_scim_provider` '
+        + 'tables in deployed databases are left in place untouched, by ruling — '
+        + 'no backfill, no reaper, no migrate command.',
+    },
+    {
       id: 'send-template-input-org-retired',
       surface: 'contracts.emailService.sendTemplate input.org',
       replacement:
@@ -7048,6 +7174,53 @@ const step18: MigrationStep = {
         + 'the per-row `results[].errors[].code` (`ROLLED_BACK` / `NOT_ATTEMPTED`) instead '
         + 'of an envelope-level code; constructing an ApiError with a retired spelling '
         + 'fails `StandardErrorCode`/`ApiErrorSchema` parse rather than passing silently.',
+    },
+    {
+      id: 'strategy-context-aggregation-method-narrowed',
+      surface: 'StrategyContext.executeAggregate aggregations[].method '
+        + '(contracts/analytics-service.ts, exported from @objectstack/spec/contracts) '
+        + '- the parameter type, declared as bare string',
+      replacement: 'AggregationFunction (count | sum | avg | min | max | count_distinct, '
+        + 'data/query.zod.ts) - the same closed vocabulary IDataEngine.aggregate already '
+        + 'declares for the identical slot (AggregationNodeSchema.function; the analytics '
+        + 'bridge renames method to function and forwards). A caller filling method from a '
+        + 'string-typed value narrows the value to the enum - typing it '
+        + 'AggregationFunction, or parsing with the spec\'s own AggregationFunction zod '
+        + 'enum where the value enters from data. Values outside the six were never '
+        + 'served: the bridge has parsed-and-refused them at runtime since #11833, and '
+        + 'that refusal stays as defence in depth',
+      reason:
+        '#12776, maintainer ruling 2026-08-28 (option A, census-first). Two spec-declared '
+        + 'surfaces described the same value and disagreed about its type: '
+        + 'IDataEngine.aggregate\'s aggregations[].function is the closed six-value '
+        + 'AggregationFunction enum while StrategyContext.executeAggregate declared the '
+        + 'same slot aggregations[].method: string, so nothing on the analytics side of '
+        + 'that seam was compile-checked against the engine\'s vocabulary - an author, '
+        + 'very often an AI (ADR-0033), writing an analytics strategy got no compile-time '
+        + 'help and could carry any method name all the way to the bridge\'s runtime '
+        + 'refusal. One slot now has one declaration. Bookkeeping: this is a TYPE '
+        + 'narrowing on a runtime TS interface member - no authorable metadata key, no '
+        + 'wire shape and no walked-shape def changed, so nothing lands in '
+        + 'RETIRED_KEYS_BY_MAJOR / RETIRED_DEFS_BY_MAJOR and the surface ratchets are '
+        + 'expected byte-identical. It is a SEMANTIC entry rather than a D2 conversion '
+        + 'because there is no authored document or sys_metadata row for the chain to '
+        + 'rewrite: the only consumers are TypeScript call sites, and the compile error '
+        + 'is the channel that reaches them. In-repo census at the ruling (hard '
+        + 'precondition, measured before the narrowing landed): every implementor and '
+        + 'every call site filling method is legal under the enum - '
+        + 'ObjectQLStrategy.resolveMeasureAggregation emits only the six post-#12209 '
+        + 'refusal, the two literal producers write count, and every test fixture is '
+        + 'implementor-side and stays assignable by contravariance.',
+      acceptanceCriteria:
+        'External implementors of StrategyContext stay source-compatible: a handler '
+        + 'accepting method: string accepts a superset and remains assignable to the '
+        + 'narrowed member. External callers filling method with a string-typed or '
+        + 'out-of-vocabulary value fail tsc at the executeAggregate call site on upgrade; '
+        + 'the fix is narrowing the value\'s type to AggregationFunction (parsing with '
+        + 'the spec enum where it enters from data), never widening a local mirror of '
+        + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
+        + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
+        + 'and no stored metadata or document needs editing.',
     },
     {
       id: 'ui-cloud-connection-widgets-unknown-keys-refused',
@@ -7714,6 +7887,31 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // declaration, and the registration-time refusal in
     // `HotReloadManager.registerPlugin` is the door for the audience that exists.
     'kernel/HotReloadConfig:watchPatterns',
+    // #11846 — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
+    // ruling 2026-08-27, Option A: remove). The key was declared as an auth bypass
+    // — its docstring promised auto-login as a simulated admin and named a
+    // production guard "the runtime must enforce" — and NOTHING implemented any of
+    // it: zero consumers measured in objectstack, objectui and cloud (cloud#1651,
+    // 2026-08-26, with positive controls; `ArtifactKernelFactory` — where serve.ts
+    // predicted preview auto-login would live if anywhere — never touches it). An
+    // author could write the six-key block today, parse cleanly, and get no
+    // behaviour and no diagnostic, while the reference docs said the capability
+    // existed. Tombstoned with `retiredKey()` — `KernelContextSchema` is not
+    // `.strict()`, so a bare deletion would be a silent strip (#3733, ADR-0104).
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, the
+    // `kernel/Manifest:loading` reasoning: a kernel context is constructed by HOST
+    // CODE at boot — it is not a stack collection member (`PLURAL_TO_SINGULAR` has
+    // no entry for it) and nothing stores one as a `sys_metadata` row, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone plus the D3 semantic
+    // entry `kernel-context-preview-mode-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    'kernel/KernelContext:previewMode',
     // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
@@ -8065,6 +8263,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #11846 — the `TenantRuntimeContextSchema` copy of
+    // `kernel/KernelContext:previewMode`: the def is `KernelContextSchema.extend(…)`,
+    // so the tombstone lands in this walked shape too and `authorable-surface/`
+    // marks it `[RETIRED]` separately. Registered per key, as gate (b) reads them —
+    // nothing radiates from the base (the `shared/FieldMapping:transform`
+    // precedent). See the base entry for the full record and the
+    // no-D2-conversion reasoning.
+    'kernel/TenantRuntimeContext:previewMode',
     // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key
@@ -8959,6 +9165,24 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // implementation first. See `18.kernel__AdvancedPluginLifecycleConfig.ts`
     // for the family record.
     'kernel/PluginUpdateStrategy',
+    // #11846 — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
+    // `autoLogin` default true, `simulatedRole` default 'admin',
+    // `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`). Its
+    // only carrier key, `KernelContext.previewMode`, is tombstoned in this same
+    // major (both walked-shape copies — see the two `…:previewMode` entries in
+    // RETIRED_KEYS_BY_MAJOR[18]), and an exported value schema with no consumer
+    // reads as a capability (#3950, the `PerformanceConfigSchema` rule) — so the
+    // def leaves the emitted set whole, with its `PreviewModeConfig` /
+    // `PreviewModeConfigParsed` types. Measured before removal: zero consumers of
+    // the schema or any of its six keys in objectstack, objectui or cloud
+    // (cloud#1651, 2026-08-26, positive controls on record). The declared
+    // behaviour (auto-login as a simulated admin, a read-only demo session) was
+    // never implemented by any layer; preview DEPLOYMENTS belong to the
+    // deployment layer, whose `OS_PREVIEW_MODE` is routing-only and stays. If a
+    // preview experience becomes a product capability it re-declares fresh, with
+    // the production-posture hard-refusal as the first-landed half (#11846 ruling
+    // record).
+    'kernel/PreviewModeConfig',
     // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

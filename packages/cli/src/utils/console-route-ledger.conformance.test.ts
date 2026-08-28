@@ -24,6 +24,19 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+// The repo's ONE answer to "is this span a comment, or code?" — its header
+// carries the two private-stripper families that drifted apart and the
+// parser-differential sweep that measured which way each fails. The private
+// scanner this replaces was string-aware but REGEX-BLIND: the doubled slash
+// closing `/^https?:\/\//i` read as a line-comment opener and took the rest of
+// the line with it, which is the same defect #12398 found live in two sibling
+// guards. `stripComments` (not `maskComments`) is the projection this file
+// wants: it deletes comment characters but keeps every newline, so the
+// `file:line` every finding here reports still points at the real line, and
+// nothing in this file reports an offset. The `.mjs` specifier is deliberate;
+// `scripts/js-comment-mask.d.mts` beside it is a hand-written declaration, so
+// this import needs no `allowJs`.
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 import { CONSOLE_ROUTE_LEDGER } from './console-route-ledger.js';
 
 /**
@@ -58,49 +71,6 @@ const NON_ROUTE_MEMBERS = new Set(['use', 'notFound', 'onError', 'fire', 'fetch'
 // ---------------------------------------------------------------------------
 // Scanning machinery
 // ---------------------------------------------------------------------------
-
-/**
- * Strip comments before scanning, PRESERVING newlines inside block comments so
- * every finding's `file:line` points at the real line — `console.ts` opens with
- * a 35-line header, and reporting a mount 35 lines short makes an accurate
- * finding read as a wrong one.
- */
-export function stripComments(source: string): string {
-    let out = '';
-    let i = 0;
-    while (i < source.length) {
-        const c = source[i];
-        const next = source[i + 1];
-        if (c === '/' && next === '/') {
-            while (i < source.length && source[i] !== '\n') i++;
-            continue;
-        }
-        if (c === '/' && next === '*') {
-            i += 2;
-            while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
-                if (source[i] === '\n') out += '\n';
-                i++;
-            }
-            i += 2;
-            continue;
-        }
-        if (c === '\'' || c === '"' || c === '`') {
-            const quote = c;
-            out += c;
-            i++;
-            while (i < source.length) {
-                if (source[i] === '\\') { out += source.slice(i, i + 2); i += 2; continue; }
-                out += source[i];
-                if (source[i] === quote) { i++; break; }
-                i++;
-            }
-            continue;
-        }
-        out += c;
-        i++;
-    }
-    return out;
-}
 
 /** Module-scope `const NAME = '<literal>';` bindings, exported or not. */
 export function constantBindings(code: string): Map<string, string> {
@@ -380,11 +350,27 @@ describe('cli console route ledger hygiene', () => {
 });
 
 describe('scan machinery, pinned in both directions', () => {
-    it('the comment stripper drops prose paths, keeps code paths, and preserves line numbers', () => {
+    it('the shared stripper drops prose paths, keeps code paths, and preserves line numbers', () => {
+        // Not a re-pin of `js-comment-mask.mjs` -- that module pins its own
+        // behaviour. This pins the PROPERTY this census rests on: comment
+        // characters go, every newline stays, so `lineOf()` below still counts
+        // the real line.
         const stripped = stripComments("// app.get('/ghost', h)\n/* a\nb */\napp.get(`/real`, h);\n");
         expect(stripped).not.toContain('ghost');
         expect(stripped).toContain('/real');
         expect(censusOf(['f.ts'], () => "/* a\nb\nc */\napp.get('/x', h);\n").routes[0].line).toBe(4);
+    });
+
+    it('a doubled slash inside a REGEX LITERAL does not swallow the rest of its line', () => {
+        // The defect the private scanner this file used to carry was measured
+        // committing on 7 of this package's 110 sources: string-aware but
+        // regex-blind, it read the `//` that CLOSES `/^https?:\/\//i` as a
+        // line-comment opener and deleted to end of line. A mount sharing that
+        // line went with it, and the census reported clean over text it never
+        // read. Live in `commands/dev.ts`, `commands/serve.ts` and
+        // `commands/start.ts` at conversion time.
+        const stripped = stripComments("const ok = /^https?:\\/\\//i.test(u); app.get('/real', h);\n");
+        expect(stripped).toContain('/real');
     });
 
     it('resolves the spellings this package uses, and refuses the rest', () => {
