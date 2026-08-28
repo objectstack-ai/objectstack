@@ -1769,10 +1769,31 @@ mode_report() {
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/held" | tr -d ' ')" "$(pct_of "${tmp}/held" 50)" \
     "$(pct_of "${tmp}/held" 90)" "$(pct_of "${tmp}/held" 100)"
-  printf 'queue depth on arrival (waiters already ahead):\n'
+  # ⚠ THE LABEL, NOT THE RECORD. The field counts the arriving run itself: the
+  # depth is read AFTER `take_ticket` has minted this call's own ticket, so its
+  # floor is 1 and a completely uncontended fleet printed "1 waiter already
+  # ahead" on every row it had. The record was never wrong -- `announce_arrival`
+  # derives `ahead = depth - 1` from the same number and has always said "0
+  # ahead of you" on a free lock -- so the repair is this heading, and ⛔ NOT the
+  # recorded value: rewriting the field would put a meaning boundary through the
+  # middle of the ledger, which is the mixed-population hazard the outcomes
+  # block above already has to warn about for `command-exit`.
+  #
+  # The second ⇒ is the misreading the first one leaves behind. A run that
+  # queued behind a busy holder with nobody in front of it records exactly what
+  # a run that walked up to a free lock records, because a holder deletes its
+  # ticket at the moment it acquires; measured on both paths, both 1. So this
+  # column is evidence about the QUEUE and about nothing else -- `held` and the
+  # outcomes block are where "was the lock busy" is answered.
+  printf 'queue depth on arrival (the arriving run INCLUDED — 1 means nobody was ahead):\n'
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/depth" | tr -d ' ')" "$(pct_of "${tmp}/depth" 50)" \
     "$(pct_of "${tmp}/depth" 90)" "$(pct_of "${tmp}/depth" 100)"
+  printf '  ⇒ waiters already ahead = this minus 1. The depth is read after this call mints\n'
+  printf '    its own ticket, so 1 is the floor, not a waiter.\n'
+  printf '  ⇒ it does not count the HOLDER either — queueing behind a busy lock with nobody\n'
+  printf '    in front of you records 1, exactly as walking up to a free lock does. This\n'
+  printf '    column measures the queue, never whether the lock was held.\n'
 
   # ⭐ The table this whole mechanism exists for. Ranked by TOTAL seconds held,
   # not by the worst single run: the command that decides how much the fleet
@@ -2545,6 +2566,14 @@ mode_self_test() {
     "$(grep -c 'outcome=command-exit' "$realled" 2> /dev/null || true)" 1
   st_case 'and the record carries the wait, the hold and the queue depth' \
     "$(grep -c 'waited=[0-9]* held=[0-9]* depth=' "$realled" 2> /dev/null || true)" 1
+  # ⛔ THE RECORDED FIELD IS PINNED AT ITS FLOOR, on purpose. The run above was
+  # uncontended, and it still records 1, because the depth is read after this
+  # call has minted its own ticket. That is the value `--report`'s heading now
+  # describes, and the repair for the heading being wrong was the heading --
+  # subtracting one HERE instead would read better for a day and then put a
+  # meaning boundary through the middle of a ledger nothing can re-date.
+  st_case 'and the depth it records counts the arriving run itself — floor 1, never 0' \
+    "$(grep -c ' depth=1 ' "$realled" 2> /dev/null || true)" 1
   st_case 'and exactly one record per run, not one per verdict line' \
     "$(wc -l < "$realled" | tr -d ' ')" 1
 
@@ -2578,6 +2607,22 @@ mode_self_test() {
     "$(bash "$SELF" --report 2>&1 | grep -c 'LOWER-BOUNDS that mixture')" 1
   st_case 'and names the newline flattening, which no label length can recover' \
     "$(bash "$SELF" --report 2>&1 | grep -c 'flattened to a space BEFORE the cut')" 1
+  # The arrival-depth heading, which said "waiters already ahead" over a number
+  # whose floor is 1 -- so an idle fleet read as one-deep on every row and a
+  # reader had no way to tell whether the label or the record was the wrong one.
+  # The last case is the one that would have caught it: asserting only that the
+  # true wording is PRESENT would also pass on a report that kept the old
+  # heading beside it, and the defect was a heading, not a missing sentence.
+  local rpt
+  rpt="$(bash "$SELF" --report 2>&1)"
+  st_case 'and --report says the arrival depth counts the arriving run itself' \
+    "$(printf '%s\n' "$rpt" | grep -c 'the arriving run INCLUDED')" 1
+  st_case 'and hands over the conversion rather than leaving it as arithmetic' \
+    "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead = this minus 1')" 1
+  st_case 'and blocks the next misreading: 1 is not evidence the lock was free' \
+    "$(printf '%s\n' "$rpt" | grep -c 'it does not count the HOLDER either')" 1
+  st_case 'and the off-by-one heading itself is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead):')" 0
   # A measurement apparatus that can redden a gate has become part of the thing
   # it measures. This is the case that keeps it out of the way.
   st_case 'an unwritable ledger loses records, never runs' \
