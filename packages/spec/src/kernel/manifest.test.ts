@@ -493,7 +493,7 @@ describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled O
     );
     expect(issue).toBeDefined();
     expect(issue!.message).toMatch(
-      /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*#10726.*Delete the key.*http\.server/s,
+      /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*Delete the key.*http\.server/s,
     );
   });
 
@@ -529,7 +529,7 @@ describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-
     );
     expect(issue).toBeDefined();
     expect(issue!.message).toMatch(
-      /manifest\.contributes\.kinds\[\]\.globs.*removed in @objectstack\/spec 17.*#11169.*filePatterns.*Delete the key/s,
+      /manifest\.contributes\.kinds\[\]\.globs.*removed in @objectstack\/spec 17.*filePatterns.*Delete the key/s,
     );
   });
 

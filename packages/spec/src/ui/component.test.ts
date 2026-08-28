@@ -956,7 +956,7 @@ describe('RecordHighlightsProps', () => {
       // "drawn by nothing" story, and the no-replacement guidance. The `s`
       // flag is house style: the message spans lines.
       expect(armIssue!.message).toMatch(/this `record:highlights` field/);
-      expect(armIssue!.message).toMatch(/`record:highlights` field `icon` was removed .*#10054.*ADR-0049/s);
+      expect(armIssue!.message).toMatch(/`record:highlights` field `icon` was removed .*ADR-0049/s);
       expect(armIssue!.message).toMatch(/Delete the key — no replacement: the renderer never drew it/s);
       expect(armIssue!.message).toMatch(/os migrate meta --from 17/);
     });

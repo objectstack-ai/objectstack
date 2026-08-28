@@ -50,7 +50,7 @@ describe('ObjectCapabilities', () => {
       expect(result.success).toBe(false);
       const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
       expect(message).toContain(`\`${key}\``);
-      expect(message).toContain('#2377');
+      expect(message, 'the migration command is the durable reference').not.toMatch(/#\d{3,5}/);
       // The prescription names the source rewrite (the #3207 conversion).
       expect(message).toContain('os migrate meta --from 16');
     }
@@ -1223,7 +1223,7 @@ describe('ObjectSchema.create()', () => {
       }
       expect(message).toContain('lifecycle hook');
       expect(message).toContain('record_change');
-      expect(message).toContain('#1535');
+      expect(message).toContain('silent-strip class');
     });
 
     // #4990 note 1 asked whether this file's own `suggestKey` shares the
@@ -1295,7 +1295,7 @@ describe('ObjectSchema.create()', () => {
           message = (e as Error).message;
         }
         expect(message, `${key} should be rejected`).toContain(key);
-        expect(message, `${key} should cite #2377`).toContain('#2377');
+        expect(message, `${key} must carry no tracker id`).not.toMatch(/#\d{3,5}/);
         expect(message, `${key} should hint at the replacement`).toContain(needle);
       }
     });

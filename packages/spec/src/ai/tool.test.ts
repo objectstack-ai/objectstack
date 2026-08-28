@@ -150,7 +150,7 @@ describe('defineTool', () => {
     }
     // FROM → TO: the action-level flag is the only path that stops execution.
     expect(message).toMatch(/ai\.requiresConfirmation/);
-    expect(message).toMatch(/#3715/);
+    expect(message).toMatch(/ADR-0033/);
   });
 
   it('rejects an unrelated unknown key too (strictness is not special-cased)', () => {
@@ -180,7 +180,7 @@ describe('defineTool', () => {
       message = String((e as Error).message);
     }
     expect(message).toContain(key);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
 
   it('the `permissions` rejection points at the gate the middleware actually runs', () => {

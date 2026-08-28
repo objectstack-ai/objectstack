@@ -122,7 +122,7 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     '%s: `outputVariable` is a DOCUMENTED absence, so the rejection says so rather than staying silent',
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, outputVariable: 'updated' })!;
-      expect(message).toContain('#4045');
+      expect(message).toContain('binds no output');
       expect(message).toContain('get_record');
     },
   );

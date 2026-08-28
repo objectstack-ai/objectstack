@@ -1126,7 +1126,7 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
       expect(messages).not.toContain('not executable in v17');
       expect(messages).not.toContain('until the endpoint executor ships');
       // The historical fact stays: #4936 happened, and the prescription says so.
-      expect(messages).toContain('#4936');
+      expect(messages).toContain('refused wholesale');
     });
   });
 });

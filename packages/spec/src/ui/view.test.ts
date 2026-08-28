@@ -2363,7 +2363,7 @@ describe('FormViewSchema — retired defaultSort (#3896 close-out)', () => {
       });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/list view/);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
   it('a form without it still parses', () => {
     expect(() => FormViewSchema.parse({ type: 'simple', sections: [{ fields: ['name'] }] })).not.toThrow();
@@ -3056,7 +3056,7 @@ describe('ListViewSchema — retired responsive/performance (#3896 close-out)', 
     try {
       ListViewSchema.parse({ type: 'grid', columns: ['name'], performance: { lazyLoad: true } });
     } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
 });
 
@@ -3088,7 +3088,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
       try {
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
-      expect(message).toMatch(/#7176/);
+      expect(message).toMatch(/view\.striped/);
       expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
     }
   });

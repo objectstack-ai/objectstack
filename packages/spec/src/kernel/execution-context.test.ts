@@ -177,7 +177,7 @@ describe('ExecutionContextSchema.preserveAudit — the published description (#6
   });
 
   it('states that the exemption does NOT reach INSERT, anchored to #6640', () => {
-    expect(description).toMatch(/#6640/);
+    expect(description).toMatch(/server-enforced on BOTH write paths/);
     expect(description).toMatch(/\bnot\b/i);
   });
 

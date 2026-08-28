@@ -103,7 +103,7 @@ describe('unique scope rejection message — the two surfaces disagree about bar
     // warning channel and the protocol-18 rejection, named where they are read.
     expect(message).toContain('unique/unscoped-declared-index');
     expect(message).toContain('protocol 18');
-    expect(message).toContain('#5082');
+    expect(message, 'the version and the lint id are the durable references').not.toMatch(/#\d{3,5}/);
 
     // And the organization scope described by what it DOES here, not by an
     // equivalence to `true` that does not hold on this surface.

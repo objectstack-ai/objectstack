@@ -365,7 +365,7 @@ describe('FlowSchema', () => {
         message = String((e as Error).message);
       }
       expect(message).toMatch(/status/);
-      expect(message).toMatch(/#3896/);
+      expect(message).toMatch(/audit close-out/);
     });
 
     it('should default runAs to user', () => {

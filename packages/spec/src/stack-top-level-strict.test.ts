@@ -141,7 +141,7 @@ describe('#10485 — the `themes` carrier is retired (ADR-0049; ruled 退役授�
     expect(issue.path).toEqual([]);
     expect((issue as unknown as { keys: string[] }).keys).toContain('themes');
     // The prescription itself — removal citation, and where colour lives now.
-    expect(issue.message).toContain('#10485');
+    expect(issue.message).toContain('authored themes');
     expect(issue.message).toContain('app.branding');
     expect(issue.message).toContain('primaryColor');
     // A retirement is a prescription, never a rename suggestion (finding 7).

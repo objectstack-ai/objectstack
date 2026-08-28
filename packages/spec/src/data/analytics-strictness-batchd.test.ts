@@ -245,8 +245,8 @@ describe('#4001 batch D — the strict base does not break the request wrapper',
   });
 
   it('the #3878 tombstones still fire — `query` and `format` carry their migration text', () => {
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('#3878');
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('#3878');
+    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('was removed from AnalyticsQueryRequest');
+    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('was removed from AnalyticsQueryRequest');
   });
 });
 

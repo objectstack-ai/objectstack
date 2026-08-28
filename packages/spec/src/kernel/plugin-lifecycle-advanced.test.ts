@@ -264,7 +264,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       // whoever hits it. Assert the load-bearing clauses, not the byte string.
       const message = result.success ? '' : result.error.issues[0]?.message ?? '';
       expect(message).toContain('was removed');
-      expect(message).toContain('#12428');
+      expect(message).toContain('nothing ever read it');
       expect(message).toContain('ADR-0049');
       expect(message).toContain('scheduleReload');
 

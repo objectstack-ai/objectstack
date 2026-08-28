@@ -71,7 +71,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       // pin is on the tense, which is the whole defect: the claim may appear as
       // history ("was enforced by the shell only"), never as current fact.
       expect(rationale17()).not.toMatch(/is enforced by the shell only/i);
-      expect(rationale17()).toMatch(/was CLOSED by #4722/);
+      expect(rationale17()).toMatch(/was CLOSED by/);
     });
 
     it('names #4722 and the two trees an item gate is now enforced in', () => {
@@ -107,7 +107,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       // erase it — an upgrading author needs to know the keys were fail-open,
       // not merely unread.
       const r = rationale17();
-      expect(r).toMatch(/#4651/);
+      expect(r).toMatch(/areas\[\]\.visible/);
       expect(r).toMatch(/FAIL-OPEN access gates/);
       expect(r).toMatch(/At the time of the retirement/);
       expect(r).toMatch(/must not invent an authorization mechanism/);
@@ -194,7 +194,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       // guard, which is what distinguishes this from a bare "it is enforced now".
       const a = entry()!.acceptanceCriteria;
       expect(a).toMatch(/refuseUndeclaredSuspension/);
-      expect(a).toMatch(/#6667/);
+      expect(a).toMatch(/refuses that suspension/);
       expect(a).toMatch(/guard-class/);
       expect(a).toMatch(/`fault` edge/);
     });

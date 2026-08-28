@@ -63,7 +63,7 @@ describe('[#4914] manifest.loading retirement', () => {
     expect(issue!.path).toEqual(['loading']);
     // The prescription itself — this string IS the migration doc for whoever
     // hits it, so it is contract, not commentary.
-    expect(issue!.message).toMatch(/`manifest\.loading`.*removed.*17\.0\.0.*#4914/s);
+    expect(issue!.message).toMatch(/`manifest\.loading`.*removed.*17\.0\.0/s);
     expect(issue!.message).toMatch(/Delete the key/s);
   });
 

@@ -83,7 +83,7 @@ describe('ScriptConfigSchema (#4343 — converged to a function call)', () => {
     // The tombstone's payload is the prescription, not "unrecognized key" —
     // this string IS the upgrade doc for whoever hits it (retired-key.ts).
     expect(message).toContain(`\`script.config.${key}\``);
-    expect(message).toMatch(/#4343/);
+    expect(message).toMatch(/none of its values/);
     expect(message).toMatch(/os migrate meta --from 16/);
     expect(result.error!.issues[0]!.path).toEqual([key]);
   });

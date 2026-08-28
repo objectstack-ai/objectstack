@@ -206,7 +206,7 @@ describe('AgentSchema', () => {
         message = String((e as Error).message);
       }
       expect(message).toMatch(/knowledge-service|source level/);
-      expect(message).toMatch(/#3896/);
+      expect(message).toMatch(/audit close-out/);
     });
 
     it('should accept agent with skills (Agent→Skill→Tool architecture)', () => {
