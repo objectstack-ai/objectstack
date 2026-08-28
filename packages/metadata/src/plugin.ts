@@ -15,6 +15,10 @@ import {
     SysMetadataAuditObject,
     SysViewDefinitionObject,
     applyArtifactForwardConversions,
+    detectUnboundFormViewPredicateRoots,
+    BOUND_FORM_VIEW_PREDICATE_ROOTS,
+    BOUND_FORM_FIELD_PREDICATE_ROOTS,
+    type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
 
 // `SysMetadataObject` + `SysMetadataHistoryObject` are the customer overlay
@@ -256,12 +260,18 @@ export class MetadataPlugin implements Plugin {
     private lastParsedMetadata?: Record<string, unknown[]>;
 
     /**
-     * Once-per-process dedupe for artifact forward-conversion summaries
-     * (`conversionId|label`, #12772). The artifact watcher replays
-     * `_parseAndRegisterArtifact` on every file change, so without this a dev
-     * loop over a legacy artifact would re-announce the same conversions on
-     * every reload — the same shape `Protocol.storedConversionWarned` guards
-     * on the stored-row pass, which this surfacing is modeled on.
+     * Once-per-process dedupe for the summaries the versioned artifact window
+     * emits. The artifact watcher replays `_parseAndRegisterArtifact` on every
+     * file change, so without this a dev loop over a legacy artifact would
+     * re-announce the same finding on every reload — the same shape
+     * `Protocol.storedConversionWarned` guards on the stored-row pass, which
+     * this surfacing is modeled on.
+     *
+     * Two key families share the set, because they share the replay:
+     * `<conversionId>|<label>` for a forward-conversion summary (#12772), and
+     * `unbound-form-predicate-root|<label>` for the unbound-root notice
+     * (#12915) — one line per artifact there, not one per conversion, since
+     * the notice already aggregates every finding it made.
      */
     private artifactConversionWarned = new Set<string>();
 
@@ -707,6 +717,10 @@ export class MetadataPlugin implements Plugin {
      */
     private _convertArtifactForward(ctx: PluginContext, definition: unknown, label: string): unknown {
         const result = applyArtifactForwardConversions(definition);
+        // Runs on every artifact, conversions or not: an artifact can be inside
+        // the versioned window and carry NO convertible key while still
+        // carrying the fault-open predicates below.
+        this._warnUnboundFormPredicateRoots(ctx, result, label);
         if (result.notices.length === 0) return result.definition;
 
         const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
@@ -729,6 +743,92 @@ export class MetadataPlugin implements Plugin {
             );
         }
         return result.definition;
+    }
+
+    /**
+     * Operator-facing boot notice for form-view predicates that fault OPEN on
+     * this runtime (#12915 scope C — maintainer ruling 2026-08-28, 「同意C」).
+     *
+     * A form-view predicate binds `record` / `previous` / `parent` (runtime
+     * record forms) or `data` (metadata-editing forms) — and a FIELD-level one
+     * also binds `current_user` and its ADR-0068 aliases (objectui#6010),
+     * which a SECTION-level one does not. The contract states beside that
+     * vocabulary that a bare identifier is UNBOUND and the predicate faults,
+     * and `visibleWhen`'s fault fallback is `true`. On a real
+     * 17.1-built artifact that combination dead-ends record creation in the
+     * console: the conditionally hidden field renders, and its unconditional
+     * `required: true` — authored to be gated by the visibility that no longer
+     * applies — blocks every submit, while the same payload POSTs 201 through
+     * REST. Nothing refused, nothing logged, and only the operator can fix it
+     * (by rebuilding the artifact), so this is the channel the ruling picked:
+     * service startup, server-side, never a console surface — the person at
+     * the form cannot act on "your artifact is stale".
+     *
+     * **Detection only.** No refusal, no rewrite, no behaviour change: the
+     * predicate keeps faulting open exactly as before. Rewriting a bare root to
+     * `record.` is the ADR-0087 conversion (#12915 scope A), deferred by the
+     * same ruling with an explicit start line.
+     *
+     * **Same versioned window as the conversion replay above** — and read off
+     * that pass's own verdict rather than recomputed, so the two can never
+     * disagree about which artifacts are "old". An artifact declaring the
+     * current (or a newer) floor answers to the strict parse and gets nothing
+     * from here even when it does carry bare roots; that boundary is what keeps
+     * a notice about legacy artifacts out of contract territory. An undeclared
+     * range is treated as old data at rest, matching the grandfathering posture
+     * the window already takes (`converted-undeclared`).
+     */
+    private _warnUnboundFormPredicateRoots(
+        ctx: PluginContext,
+        result: ArtifactForwardConversionResult<unknown>,
+        label: string,
+    ): void {
+        if (result.verdict !== 'converted-forward' && result.verdict !== 'converted-undeclared') return;
+
+        const findings = detectUnboundFormViewPredicateRoots(result.definition);
+        if (findings.length === 0) return;
+
+        const key = `unbound-form-predicate-root|${label}`;
+        if (this.artifactConversionWarned.has(key)) return;
+        this.artifactConversionWarned.add(key);
+
+        // ONE line per artifact, not one per predicate — a real legacy artifact
+        // carries the pattern across many fields of the same form, and the
+        // conversion summary beside this one exists because 150 identical warn
+        // lines buried a boot log.
+        const views = [...new Set(findings.map((f) => f.view))];
+        const roots = [...new Set(findings.map((f) => f.root))];
+        const quote = (list: readonly string[]) => list.map((v) => `'${v}'`).join(', ');
+
+        // The bound vocabulary differs between a field slot and a section slot
+        // (a field also binds the `current_user` family, objectui#6010), so
+        // print only the rule(s) the findings actually implicate. Printing one
+        // flat list would either understate the field vocabulary — reading as
+        // "your legitimate current_user predicate is broken" — or quote a
+        // section rule at an operator whose artifact has no section findings.
+        const surfaces = new Set(findings.map((f) => f.surface));
+        const vocabulary = [
+            surfaces.has('field')
+                ? `on a form FIELD: ${quote(BOUND_FORM_FIELD_PREDICATE_ROOTS)}`
+                : null,
+            surfaces.has('section')
+                ? `on a form SECTION: ${quote(BOUND_FORM_VIEW_PREDICATE_ROOTS)}`
+                : null,
+        ].filter(Boolean).join('; ');
+
+        ctx.logger.warn(
+            `[MetadataPlugin] artifact '${label}' predates this runtime's spec `
+            + `(authored engines.protocol floor ${result.authoredFloor ?? '<undeclared>'}, runtime spec `
+            + `${result.runtimeSpecVersion}) and carries ${findings.length} form-view predicate(s) whose `
+            + `root identifier is NOT bound where it evaluates — ${quote(roots)} `
+            + `(bound roots ${vocabulary}) — across `
+            + `${views.length} view(s): ${views.join(', ')} (first at ${findings[0]!.path}). `
+            + `Each one faults at evaluation and visibility fails OPEN, so a field the predicate was `
+            + `authored to HIDE renders anyway — and an unconditional 'required: true' on such a field `
+            + `dead-ends record creation in the console while the REST door still accepts it. `
+            + `Nothing was rewritten and no behaviour changed here; rebuild the artifact with current `
+            + `tooling ('os build') so its predicates carry a bound root ('record.<field>').`,
+        );
     }
 
     /**

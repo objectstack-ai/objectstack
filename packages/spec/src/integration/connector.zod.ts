@@ -616,12 +616,15 @@ export type ConnectorStatus = z.input<typeof ConnectorStatusSchema>;
  *
  * `connector_action` dispatches to a handler that reaches an external system;
  * nothing on this side can see what happened there. #4354's per-run summary
- * reports `selected` / `acted` and the broken-sweep alert is
- * `selected > 0 AND acted = 0 AND unmeasured = 0`, so the two guesses are both
- * wrong in a costly direction: a blanket `acted: 0` trips the alert on every
- * healthy connector sweep until operators learn to ignore it, and a blanket
- * `acted: 1` makes a read-only sweep look busy forever so the alert never
- * fires. `http` gets to skip this question because the HTTP method answers it
+ * reports `selected` / `acted`, and a broken sweep is FIRST FILTERED by
+ * `selected > 0 AND acted = 0 AND unmeasured = 0` — a filter, not a verdict
+ * (#12685: a healthy idempotent sweep matches it on every run too, and what
+ * discriminates is the per-node fold in `FlowRunSummary.nodes[]` / `gates[]`).
+ * The two guesses are wrong in a costly direction even so: a blanket `acted: 0`
+ * puts every healthy connector sweep into that candidate set until operators
+ * learn to ignore it, and a blanket `acted: 1` makes a read-only sweep look
+ * busy forever so it never becomes a candidate at all. `http` gets to skip this
+ * question because the HTTP method answers it
  * (`GET` reads, anything else mutates); a connector action's key does not.
  *
  * ## Why the vocabulary differs from `FlowFunctionEffectSchema`

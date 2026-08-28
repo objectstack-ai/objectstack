@@ -85,3 +85,60 @@ describe('getObject return contract (#12248, #11833 fork 3)', () => {
     expect(ok).toBe('substitutable');
   });
 });
+
+/**
+ * `getSchema` — typed on the contract, one member over from `getObject`
+ * (#12481; the #11833 ruling's fork 3 as executed by #12248, applied by
+ * inheritance: `ObjectQL.getObject` is literally `return this.getSchema(name)`,
+ * so the mother ruling's reason transfers whole).
+ *
+ * Same pin discipline as the block above: every pin reads the MEMBER type off
+ * the contract, no engine double is stood up, and on a revert to `unknown` the
+ * consumer reads below stop compiling with no `@ts-expect-error` needed.
+ */
+describe('getSchema return contract (#12481 — #12248 one member over, #11833 fork 3 by inheritance)', () => {
+  type SchemaAnswer = ReturnType<IObjectQLEngine['getSchema']>;
+
+  it('answers exactly the spec registered-object type', () => {
+    // Mutual extends: a revert to `unknown` (the shape that forced the
+    // consumer-side casts) resolves `Exact` to `never`, as does a drift to
+    // the parsed state (`ServiceObjectParsed`) — authored state (`z.input`,
+    // ADR-0122), exactly as the `getObject` pins above.
+    type Exact = SchemaAnswer extends ServiceObject | undefined
+      ? (ServiceObject | undefined extends SchemaAnswer ? 'exact' : never)
+      : never;
+    const exact: Exact = 'exact';
+    expect(exact).toBe('exact');
+  });
+
+  it('getSchema and getObject cannot drift apart — the alias holds on the contract', () => {
+    type ObjectAnswer = ReturnType<IObjectQLEngine['getObject']>;
+    type Same = SchemaAnswer extends ObjectAnswer
+      ? (ObjectAnswer extends SchemaAnswer ? 'same' : never)
+      : never;
+    const same: Same = 'same';
+    expect(same).toBe('same');
+  });
+
+  it('the engine-owned write guard reads its slice off the contract value directly', () => {
+    // The measured re-narrowing this typing ends: `plugin-security`'s
+    // engine-owned write guard cast `ql.getSchema(...)` to its local
+    // `EngineOwnedSchemaLike` slice (`name` / `managedBy` / `userActions`)
+    // to perform these reads. On the pre-#12481 `unknown` return each read
+    // below is a compile error; after it, the contract answer must stay
+    // assignable to that slice, or dropping the cast (the repair) would need
+    // a cast back — the outcome the ruling forbids.
+    const readManagedBy = (engine: IObjectQLEngine, objectName: string) =>
+      engine.getSchema(objectName)?.managedBy;
+    const readUserActions = (engine: IObjectQLEngine, objectName: string) =>
+      engine.getSchema(objectName)?.userActions;
+    type WriteGuardSlice =
+      | { name?: string; managedBy?: string; userActions?: unknown }
+      | undefined;
+    type Substitutable = SchemaAnswer extends WriteGuardSlice ? 'substitutable' : never;
+    const ok: Substitutable = 'substitutable';
+    expect(typeof readManagedBy).toBe('function');
+    expect(typeof readUserActions).toBe('function');
+    expect(ok).toBe('substitutable');
+  });
+});

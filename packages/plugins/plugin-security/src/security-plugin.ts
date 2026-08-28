@@ -106,7 +106,7 @@ import {
   MasterReferenceMissingError,
   MaskedValueWriteError,
 } from './errors.js';
-import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
+import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import {
   backfillOrgAdminGrants,
@@ -1679,10 +1679,13 @@ export class SecurityPlugin implements Plugin {
       // construction. Runs BEFORE the empty-principal fall-open so engine-owned
       // tables fail CLOSED for principal-less-but-user-context callers.
       assertEngineOwnedWriteAllowed(
-        // The contract's getSchema returns `unknown` (schema shape is
-        // engine-local); narrow to the slice the guard reads.
+        // [#12481] The contract's getSchema answers `ServiceObject |
+        // undefined`, which satisfies the guard's `EngineOwnedSchemaLike`
+        // slice directly — the pre-#12481 `as` narrowing of an `unknown`
+        // return is gone. The runtime probe stays: doubles and foreign
+        // engines may omit the member (the contract header's own caveat).
         typeof ql?.getSchema === 'function'
-          ? ql.getSchema(opCtx.object) as EngineOwnedSchemaLike | undefined
+          ? ql.getSchema(opCtx.object)
           : undefined,
         opCtx.operation,
         opCtx.context,

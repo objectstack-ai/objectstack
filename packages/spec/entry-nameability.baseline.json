@@ -16,32 +16,11 @@
     "instruction to delete the line: a ledger that keeps entries after they are repaired",
     "stops describing the tree and starts covering for it.",
     "",
-    "THE SHRINK PATH IS ONE LINE PER ROW. Each of these is repaired exactly the way",
-    "#11350 and #11709 were: re-export the named type, on the leaking entry, from the",
-    "module that declares it. They are NOT repaired here because doing so edits four",
-    "entry barrels and regenerates `api-surface/` — a different file surface and a",
-    "different gate family from this card's, and two of those barrels were claimed by",
-    "other in-flight work when this landed. They are filed for triage instead; see the",
-    "PR body for the measurement and the issue link.",
-    "",
-    "MEASURED ON: cdbd9204b65ae4ebec63f90f61669fb498efaa55 (2026-08-26)."
+    "#12414 repaired the seven (entry, type) pairs this ledger was carrying — one",
+    "re-export line per name, on the leaking entry, from the module that declares",
+    "it — and deleted them here per the shrink-only rule above. `entries` is empty",
+    "on purpose: the class #11986 measured is closed, and a name that leaks again",
+    "fails the gate rather than landing pre-accommodated."
   ],
-  "entries": {
-    "@objectstack/spec": {
-      "leaks": ["Book", "FormField", "NavigationItem"],
-      "why": "Root-entry factories whose return type expands to mention a `/system`, `/ui` type the root entry does not re-export. Same class and same repair as #11350's three names and #11709's two — A′ closed the `defineStack` instance only. Repair: re-export each from its declaring module in `src/index.ts`."
-    },
-    "@objectstack/spec/kernel": {
-      "leaks": ["UnknownAuthoringKeyFinding"],
-      "why": "A `/kernel` export's call result mentions a finding type declared in an internal module and not re-exported from the `/kernel` entry. Repair: re-export it from `src/kernel/index.ts`."
-    },
-    "@objectstack/spec/ai": {
-      "leaks": ["FilterCondition", "StateNodeConfig"],
-      "why": "`/ai` factory return types expand to mention a `/data` filter type and an `/automation` state-machine type; both are public on their own subpaths but not nameable from `/ai`. Repair: re-export both from `src/ai/index.ts`."
-    },
-    "@objectstack/spec/ui": {
-      "leaks": ["FilterCondition"],
-      "why": "`/ui` factory return types expand to mention `/data`'s `FilterCondition`, which `/ui` does not re-export. Repair: re-export it from `src/ui/index.ts`."
-    }
-  }
+  "entries": {}
 }

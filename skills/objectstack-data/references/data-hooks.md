@@ -495,7 +495,7 @@ whoever is elevated. If the acting user cannot edit the target (e.g. it is
 `public_read`), the write throws:
 
 ```
-FORBIDDEN: insufficient privileges to update <object> <id>
+FORBIDDEN: <a localized sentence; match on code, not prose>
 ```
 
 **An admin is not automatically exempt** — the gate is `canEdit`, driven by the

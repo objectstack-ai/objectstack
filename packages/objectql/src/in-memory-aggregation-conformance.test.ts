@@ -113,6 +113,26 @@ describe('[#6401] in-memory aggregation — aggregate vocabulary conformance', (
     expect(AGGREGATION_ROWS.filter((r) => r.stage === null)).toHaveLength(2);
   });
 
+  /**
+   * [#11152] The SPELLING pin the value cases above cannot carry: this
+   * harness's `actualFor` coerces through `Number(...)` (a wire-type reading
+   * the SQL twins need), and `Number(false)` is `0` — so a face answering the
+   * superseded `false`/`true` (#11249) would pass every boolean value case
+   * while diverging from the ruled JSON domain. The 2026-08-28 ruling pins
+   * booleans as NUMBERS in aggregation on every face, so the raw answer is
+   * asserted here, uncoerced.
+   */
+  it('min/max over the boolean column answer the NUMBERS 0/1, not JSON booleans', () => {
+    const rows = applyInMemoryAggregation([...AGGREGATION_ROWS], {
+      aggregations: [
+        { function: 'min', field: 'flag', alias: 'lo' },
+        { function: 'max', field: 'flag', alias: 'hi' },
+      ],
+    } as any);
+    expect((rows as any[])[0].lo).toBe(0);
+    expect((rows as any[])[0].hi).toBe(1);
+  });
+
   for (const c of AGGREGATION_CASES) {
     it(c.name, () => {
       const rows = applyInMemoryAggregation([...AGGREGATION_ROWS], astFor(c));

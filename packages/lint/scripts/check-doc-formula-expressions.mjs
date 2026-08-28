@@ -556,15 +556,35 @@ function scan(files) {
  *
  * `visibleWhen` is one key spelling several unrelated contracts, and the binding
  * root genuinely differs by layer. Re-measured on objectui `origin/main`
- * @ `2aff580` (the card's table was taken at `365e334`, a sibling repo on its
- * own cadence — the PR body records what had drifted):
+ * @ `f241a4d` for #11813 (the previous reading was `2aff580`; the card's
+ * original table was `365e334` — a sibling repo on its own cadence, so each
+ * re-measure records what had drifted since the last one):
  *
  * | Layer                                   | Binds                                     |
  * |-----------------------------------------|-------------------------------------------|
- * | object field / form section `*When`     | `record` + `previous` (+ `parent`)        |
+ * | object field `*When` (ADR-0036)         | `record` + `previous` (+ `parent`)        |
+ * | view form FIELD `visibleWhen`           | `record` + the HOST predicate scope       |
  * | per-option `visibleWhen`                | `record` + the HOST predicate scope       |
  * | page component / app-nav `visible`      | `current_user`/`user`/`ctx`/`os`/`app`/…  |
  * | flow-screen field `visibleWhen`         | the screen's own field names, FLATTENED   |
+ *
+ * Row 1 states the WRITE-PATH binding, and that is deliberate rather than
+ * partial: an object field rule is enforced by the rule validator, whose
+ * evaluator binds no user root, and this is the only layer the gate judges.
+ * Since objectui#6010 the renderer ALSO hands the host scope to an object
+ * field's rules, so a user root written there resolves client-side — the form
+ * hides the control while every other reader still returns the value. That is a
+ * silent enforcement gap, which is why the verdict is unchanged and the row is
+ * qualified rather than widened (#12914 tracks the message text that describes
+ * the mechanism).
+ *
+ * Row 2 is the split #11813 asked for. It used to share row 1 with the object
+ * field layer, and since objectui#6010 that was two verdicts in one cell. The
+ * form SECTION layer shared the same cell and its verdict moved as well, with
+ * objectui#6110 / objectui#6111; it is absent from the table rather than
+ * re-stated because it lands in the SKIPPED class here either way — neither
+ * discriminator arm below reaches it — and its re-measurement is #12914, not
+ * something this gate turns on.
  *
  * The last row is not hypothetical and it is in this very corpus:
  * `content/docs/automation/flows.mdx` teaches

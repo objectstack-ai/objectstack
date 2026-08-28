@@ -14,7 +14,6 @@ import {
   SysOauthApplication,
   SysOauthRefreshToken,
   SysOrganization,
-  SysScimProvider,
   SysSession,
   SysSsoProvider,
   SysTeam,
@@ -114,10 +113,13 @@ describe('@objectstack/platform-objects', () => {
       expect((object as any).access?.default).toBe('private');
     });
 
-    it('SysScimProvider is capability-gated like its sibling sys_sso_provider', () => {
-      // Admin config with an embedded live credential (scim_token) — the D3
-      // capability gate (not the private posture) is the sso/scim pattern.
-      expect((SysScimProvider as any).requiredPermissions).toEqual(['manage_platform_settings']);
+    it('SysSsoProvider is capability-gated (ADR-0066 D3)', () => {
+      // Admin config with an embedded live credential (oidc_client_secret) —
+      // the D3 capability gate (not the private posture) is the sso pattern.
+      // This pin lived on SysScimProvider until that object retired (#11757);
+      // it moves to the surviving sibling so the gate cannot be dropped
+      // silently.
+      expect((SysSsoProvider as any).requiredPermissions).toEqual(['manage_platform_settings']);
     });
 
     it('member self-service objects deliberately stay on the public posture', () => {

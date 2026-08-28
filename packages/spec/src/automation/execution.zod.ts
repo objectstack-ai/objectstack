@@ -168,7 +168,15 @@ export type FlowRunGateSummary = z.input<typeof FlowRunGateSummarySchema>;
  *
  * The counters exist to answer one question no other surface could: is a green
  * run doing its job, or has it silently stopped? `selected > 0 && acted == 0`
- * over consecutive runs is the broken-sweep signal — the platform ships the
+ * (with `unmeasured = 0`) is the FIRST FILTER for a broken sweep, not a verdict
+ * (#12685): a healthy idempotent sweep that re-selects the same records and
+ * gates each one on "already handled" satisfies it on every run while that work
+ * stands, so "over N consecutive runs" does not separate the two —
+ * consecutiveness filters flapping, which is a different failure. What
+ * separates them is the per-node fold below: a healthy skip is accounted for by
+ * a read this run performed — the lookup the gate depends on shows `runs > 0`
+ * and `selected > 0` in `nodes[]` — while a dead gate skips just as often with
+ * nothing behind it (`runs: 0`, or `selected: 0`). The platform ships the
  * measurement so every flow gets it, rather than each app rebuilding a detector
  * out of the same primitives that fail silently.
  *
@@ -185,9 +193,12 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
   /**
    * The qualifier `acted` needs to be trusted. A run that dispatched an
    * uncountable effect (a `connector_action`) can report `acted: 0` while
-   * having done plenty, so the broken-sweep query is
+   * having done plenty, so the broken-sweep FILTER is
    * `selected > 0 AND acted = 0 AND unmeasured = 0` — the third clause is what
-   * keeps the alert off healthy connector-driven flows.
+   * keeps it off healthy connector-driven flows, because such a run has an
+   * INCOMPLETE `acted` count, not a zero one. A filter, not a verdict: what
+   * actually separates a broken sweep from a healthy idempotent one is the
+   * per-node fold, spelled out on `FlowRunSummarySchema` above (#12685).
    *
    * Optional, and `undefined` is NOT `0`: a run recorded before this field
    * existed did not track uncountable effects at all, and defaulting it to zero

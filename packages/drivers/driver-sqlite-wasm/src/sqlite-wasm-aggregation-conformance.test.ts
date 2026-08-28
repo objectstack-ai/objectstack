@@ -66,6 +66,10 @@ describe('[#6409] driver-sqlite-wasm — aggregate vocabulary conformance', () =
           // column nullable, which is what the null-bearing rows need.
           stage: { type: 'string' },
           score: { type: 'number' },
+          // [#11152] Declared `type: 'boolean'` on purpose — see
+          // `AggregationRow.flag`: the ruled boolean cases answer NUMBERS
+          // (min=0/max=1) over the 0/1 INTEGER storage.
+          flag: { type: 'boolean' },
         },
       },
     ]);
@@ -82,6 +86,8 @@ describe('[#6409] driver-sqlite-wasm — aggregate vocabulary conformance', () =
     const rows = await driver.find(OBJECT, { orderBy: [{ field: 'id', order: 'asc' }] });
     expect(rows).toHaveLength(6);
     expect((rows as any[]).filter((r) => r.stage === null)).toHaveLength(2);
+    // [#11152] 3 true / 3 false — the property every boolean case hangs off.
+    expect((rows as any[]).filter((r) => Boolean(r.flag)).length, 'true flags').toBe(3);
   });
 
   for (const c of AGGREGATION_CASES) {

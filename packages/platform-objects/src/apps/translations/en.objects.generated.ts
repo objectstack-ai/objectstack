@@ -1894,47 +1894,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_scim_provider: {
-    label: "SCIM Provider",
-    pluralLabel: "SCIM Providers",
-    description: "SCIM 2.0 connections (bearer tokens) external IdPs use to provision/deprovision this environment's users",
-    fields: {
-      id: {
-        label: "ID"
-      },
-      provider_id: {
-        label: "Provider ID",
-        help: "Stable SCIM provider identifier (e.g. \"okta-scim\")"
-      },
-      provider_key: {
-        label: "Provider Key",
-        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
-      },
-      scim_token: {
-        label: "SCIM Token (hash)",
-        help: "Hashed bearer credential for this SCIM connection — the plaintext is shown once at generate-token. Sensitive; do not expose."
-      },
-      organization_id: {
-        label: "Organization",
-        help: "Organization scope of this token (org-scoped tokens restrict provisioning to that org)"
-      },
-      user_id: {
-        label: "Owned By",
-        help: "User who generated this token (when provider-ownership is enabled)"
-      },
-      created_at: {
-        label: "Created At"
-      },
-      updated_at: {
-        label: "Updated At"
-      }
-    },
-    _views: {
-      all: {
-        label: "All"
-      }
-    }
-  },
   sys_scim_connection_binding: {
     label: "SCIM Connection Binding",
     pluralLabel: "SCIM Connection Bindings",
