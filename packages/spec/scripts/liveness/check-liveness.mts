@@ -62,8 +62,31 @@
 // file that no longer mentions the property, and `mapping.fieldMapping` cited a
 // range ending 3 lines past the end of `import-mapping.ts`. A range is bounded
 // by its END. The complementary case — a consumer that moved WITHIN its file —
-// is out of reach here by construction and is tracked separately; the ✗ text
-// below says why its obvious detector is not obviously right.
+// is out of reach here by construction; the ✗ text below says why its obvious
+// detector is not obviously right, and SYMBOL ANCHORS (next paragraph) are the
+// durable citation form that class cannot rot.
+//
+// SYMBOL ANCHORS (#12516): a citation may anchor the consuming SYMBOL instead
+// of (or beside) a line — `path/to/file.ts#dispatchFlowAction`, the proof-ref
+// `#` convention applied to the citation grammar. The in-range residual above
+// is not theoretical: the two `action.json` entries PR #12214 repointed with
+// fresh line numbers on 2026-08-25 had both drifted by 2026-08-26 — the cited
+// lines were in range, the file named the key, and the consumers had simply
+// moved to other lines of the same 1670-line file, so every check stayed
+// green while both pointers were wrong. A symbol moves WITH the consumer, so
+// the anchor survives exactly that movement; when the consumer is renamed or
+// deleted the symbol is gone from the file and the gate goes red — a
+// direction a stale line can never produce, since a drifted line is still "a
+// line the file has". The check is text-level on purpose (the same file reads
+// the key-mention check already does; no TS program in the gate's CI path).
+// Its measured limit: a symbol that survives while its body stops reading the
+// key is out of reach at text level, and the line-window detector that would
+// chase it was censused BEFORE being switched on (the #11457 discipline) at
+// 117-173 misses out of 298 live line citations — a population that cannot be
+// told apart from matcher noise without re-measuring every entry, i.e. the
+// 48-of-227 era again. The file-level key-mention check stays that residual's
+// backstop, and anchors are opt-in per citation: adoption is the repair path,
+// entry by entry, as call graphs get re-closed.
 //
 // PRODUCER-SIDE EVIDENCE (`producer`, #4837): `live` means AUTHORING the
 // property changes runtime behaviour. A consumer that reads the property is
@@ -135,7 +158,7 @@ import {
   type VerificationEntry,
   type VerificationReport,
 } from './verification.mts';
-import { checkCitationLines, checkEvidence, countLines, type EvidenceScan } from './evidence.mts';
+import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, type EvidenceScan } from './evidence.mts';
 import {
   KEY_MENTION_GUIDANCE,
   findUnanchoredCitations,
@@ -459,6 +482,13 @@ const report: any = {
   keyMentionExempt: 0, // ...of which this many are recorded in the shrink-only baseline
   keyMentionUnanchored: [] as string[], // ...and this many are NOT — FAILS the gate
   keyMentionStale: [] as string[], // a baseline row whose pair now anchors — also FAILS
+  // The SYMBOL half of a citation (#12516). A line citation rots IN RANGE when
+  // the consumer moves within its file — every check above stays green. An
+  // anchored citation (`path#symbol`) survives that movement and goes red when
+  // the symbol leaves the file.
+  anchorsChecked: 0, // resolvable local `path#symbol` anchors asked
+  anchorsUnresolved: [] as string[], // ...of which this many name a symbol the file does not contain — FAILS
+  anchorsMalformed: [] as string[], // an anchor that is not one identifier — also FAILS (silent-degrade guard)
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -510,6 +540,27 @@ function collectOutOfRange(scan: EvidenceScan, label: string): void {
   }
 }
 
+/**
+ * Resolve a scanned pointer's `path#symbol` anchors against the cited files.
+ * `producer` and `evidence` both come through here, for the reason
+ * `collectOutOfRange` states: an anchor names a SYMBOL, not the key, so —
+ * unlike the key-mention check — it applies to a call-site pointer exactly as
+ * it applies to a consumer pointer, and a standard that held for one and not
+ * the other would leave the weaker one as where a renamed symbol hides.
+ */
+function collectAnchorFindings(scan: EvidenceScan, label: string): void {
+  const anchors = checkEvidenceAnchors(scan, contentOf);
+  report.anchorsChecked += anchors.checked.length;
+  for (const a of anchors.unresolved) {
+    report.anchorsUnresolved.push(`${label} → ${a.path}#${a.symbol}`);
+  }
+  for (const a of anchors.malformed) {
+    report.anchorsMalformed.push(
+      `${label} → ${a.path}#${a.symbol} — an anchor must be one identifier ([A-Za-z_$][A-Za-z0-9_$]*)`,
+    );
+  }
+}
+
 function classify(type: string, path: string, status: string, led: any, cat: any) {
   cat.classified++;
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
@@ -532,6 +583,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     const pv = checkEvidence(led.producer, (p) => existsSync(join(repoRoot, p)));
     for (const miss of pv.missing) report.producerMissing.push(`${type}/${path} → ${miss}`);
     collectOutOfRange(pv, `${type}/${path} [producer]`);
+    collectAnchorFindings(pv, `${type}/${path} [producer]`);
   }
   if (status === 'live' && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
@@ -544,6 +596,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     report.evidenceMissing += ev.missing.length;
     for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
     collectOutOfRange(ev, `${type}/${path}`);
+    collectAnchorFindings(ev, `${type}/${path}`);
     // The within-file question (#11457), asked of `evidence` ONLY — never of
     // `producer`. That asymmetry is deliberate and is not the one
     // `collectOutOfRange` deliberately refuses just above: a line bound applies
@@ -822,6 +875,15 @@ const failed =
   // false-positive era to calibrate against — a line past EOF is arithmetic, and
   // the two shipped instances it found were both real (#11210).
   report.citationsOutOfRange.length > 0 ||
+  // ...and the SYMBOL half (#12516). Red rather than ⚠ from day one, on the
+  // zero-census argument the orphan-proof flip states: the anchor grammar was
+  // introduced by the same change that measured ZERO pre-existing `path#symbol`
+  // tokens across every ledger evidence/producer string, so the gate starts
+  // green and only a NEW anchor can red it. A malformed anchor fails for the
+  // `verifiedAt` reason — parsed to nothing, it silently disables the check
+  // for exactly that citation.
+  report.anchorsUnresolved.length > 0 ||
+  report.anchorsMalformed.length > 0 ||
   // ...and the within-file half (#11457). Red rather than ⚠ on the strength of
   // the census that designed it: the signal was measured over the whole ledger
   // BEFORE it was switched on, the seven real rots it found were repaired, the
@@ -887,9 +949,12 @@ if (asJson) {
       '   it survives review because it LOOKS precise, and the next agent re-verifying the\n' +
       '   entry follows it, finds nothing, and has to rebuild the call graph from scratch.\n\n' +
       '   Repairs, same three as a missing file and picked the same way:\n' +
-      '     • the consumer MOVED (inside this file or out of it) → repoint at the real line,\n' +
-      '       MEASURED — open the file and read it, do not shift the number by the diff — and\n' +
-      '       stamp `verifiedAt` while you have the call graph open;\n' +
+      '     • the consumer MOVED (inside this file or out of it) → repoint, MEASURED — open\n' +
+      '       the file and read it, do not shift the number by the diff — and stamp\n' +
+      '       `verifiedAt` while you have the call graph open. Prefer anchoring the\n' +
+      '       consuming SYMBOL (`path#symbol`, #12516) over a fresh line: the line you\n' +
+      '       write today rots the same way this one did, the symbol moves with the\n' +
+      '       consumer;\n' +
       '     • the consumer moved to ANOTHER repo → attribute it with a realm marker; those\n' +
       '       are counted, never resolved, and never bounded here;\n' +
       '     • the consumer is GONE → the verdict is not `live` any more. Re-classify under\n' +
@@ -897,9 +962,51 @@ if (asJson) {
       '   A RANGE (`:12-34`) is bounded by its END: a range whose tail is past EOF overruns\n' +
       '   the file even when its head is inside.\n\n' +
       '   A consumer that moved WITHIN the file it is cited to leaves every line in range,\n' +
-      '   so nothing here fires — that complementary case is now the key-mention check\n' +
-      '   below, which the #11457 census designed rather than bolted on (a naive match on\n' +
-      '   the authoring key reports the whole camelCase→snake_case class as rot).',
+      '   so nothing here fires — the key-mention check below catches the file-level form\n' +
+      '   (the #11457 census designed it rather than bolted it on: a naive match on the\n' +
+      '   authoring key reports the whole camelCase→snake_case class as rot), and a\n' +
+      '   `path#symbol` anchor (#12516) is the citation form the line-level form cannot\n' +
+      '   rot at all.',
+    );
+  }
+  // The SYMBOL half (#12516). Two numbers, same discipline, same reason as the
+  // three above: "all resolved" over zero anchors is what a degraded parser
+  // prints too.
+  console.log(
+    `symbol anchors: ${report.anchorsChecked} pointer(s) written \`path#symbol\`, ` +
+    `${report.anchorsChecked - report.anchorsUnresolved.length} naming a symbol the cited file contains` +
+    (report.anchorsUnresolved.length ? `, ${report.anchorsUnresolved.length} UNRESOLVED` : '') +
+    (report.anchorsMalformed.length ? `; ${report.anchorsMalformed.length} MALFORMED` : '') + '.',
+  );
+  if (report.anchorsUnresolved.length) {
+    console.log(`\n✗ ${report.anchorsUnresolved.length} anchored citation(s) name a symbol the cited file does not contain:`);
+    report.anchorsUnresolved.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   An anchored citation survives the drift that rots a line — the symbol moves\n' +
+      '   WITH the consumer — so this firing means the consumer itself left: renamed,\n' +
+      '   deleted, or promoted out of the file. That is the strongest rot signal this\n' +
+      '   gate has, and the one a line citation can never produce (a drifted line is\n' +
+      '   still "a line the file has").\n\n' +
+      '   Repairs, same three as ever, picked by re-reading the code:\n' +
+      '     • the consumer was RENAMED or moved within this repo → re-anchor at the real\n' +
+      '       symbol, MEASURED — read the declaration, confirm it still reads the key —\n' +
+      '       and stamp `verifiedAt` while the call graph is open;\n' +
+      '     • the consumer moved to ANOTHER repo → attribute it with a realm marker;\n' +
+      '       foreign anchors are counted, never resolved;\n' +
+      '     • the consumer is GONE → the verdict is not `live` any more. Re-classify\n' +
+      '       under ADR-0049 enforce-or-remove rather than re-anchoring at a plausible\n' +
+      '       survivor.',
+    );
+  }
+  if (report.anchorsMalformed.length) {
+    console.log(`\n✗ ${report.anchorsMalformed.length} malformed anchor(s) — not one identifier:`);
+    report.anchorsMalformed.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   An anchor the checker cannot judge is a citation the gate silently stops\n' +
+      '   holding to the symbol standard — the `verifiedAt` malformed-date asymmetry,\n' +
+      '   one field over. Write `path/to/file.ts#oneIdentifier`; for a dotted member\n' +
+      '   read (`IDENT.MEMBER`), anchor the declaring symbol and put the member in the\n' +
+      '   prose.',
     );
   }
   // The within-file half. Two numbers again, and for the third time the same
@@ -1201,7 +1308,8 @@ if (asJson) {
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
-      'resolves, every `path:NNN` citation names a line that file actually has and every cited ' +
+      'resolves, every `path:NNN` citation names a line that file actually has, every ' +
+      '`path#symbol` anchor names a symbol its file contains, and every cited ' +
       'file names the property it is evidence for (or is a recorded exemption), all bound ' +
       'high-risk proofs resolve, every dogfood `@proof:` tag on disk is registered in ' +
       'proof-registry.mts, and the README state table carries a row ' +

@@ -58,7 +58,7 @@ registry to fold it back onto — the override *is* its governance.
 
 | Status | Meaning |
 |---|---|
-| `live` | Has a runtime consumer. Cite it in `evidence` as `file:line`; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
+| `live` | Has a runtime consumer. Cite it in `evidence`, preferably anchored to the consuming symbol — `file#symbol` — with `file:line` as an optional convenience; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
 | `experimental` / `planned` | Declared, intentionally not enforced yet. Also read from a spec `.describe()` marker like `[EXPERIMENTAL — not enforced]`. |
 | `dead` | Parsed, no consumer. Tracked for **enforce-or-remove** (ADR-0049). |
 
@@ -73,6 +73,23 @@ starting with `packages/`, `apps/`, `content/`, …) and resolves it against thi
 checkout. Prose around the paths is fine and encouraged — `packages/spec/src/stack.zod.ts
 (mergeActionsIntoObjects stable-sorts each group)` resolves the path and ignores
 the parenthetical.
+
+**Anchor the consuming symbol, not (only) a line** (#12516). A citation may be
+written `packages/…/file.ts#dispatchFlowAction` — the proof-ref `#` convention
+applied to the citation grammar — and the gate then verifies the symbol is
+still in the cited file (`✗`, exit 1 when it is not; a malformed anchor — not
+one identifier — also fails, the `verifiedAt` bad-date asymmetry one field
+over). Prefer this form. A **line number rots in range**: the file exists, the
+line is inside it, the file names the key, and the consumer has simply moved to
+a different line of the same file — every check passes and the pointer is
+wrong. Measured: the two `action.json` entries repointed with fresh line
+numbers on 2026-08-25 had both drifted that way by 2026-08-26, because their
+1670-line file is actively edited — the more precisely a line is cited, the
+faster it rots. A symbol moves *with* the consumer, so the anchor survives
+exactly that movement, and when the consumer is renamed or deleted the gate
+goes red — a direction a stale line can never produce. A line may still ride
+along (`file.ts#symbol:150`, either order): it stays a human convenience,
+bounded by the past-EOF check, and the symbol is the load-bearing half.
 
 **A repo-local path that does not resolve FAILS CI** (`✗`, exit 1 — since #5623;
 it was a non-failing `⚠` before, calibrated for the parser bug described in the

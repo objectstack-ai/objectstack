@@ -43,9 +43,9 @@
     },
     "target": {
       "status": "live",
-      "verifiedAt": "2026-08-25",
-      "evidence": "packages/runtime/src/action-execution.ts:725 (type:'flow' server dispatch — automation.execute(action.target, …), with :718 rejecting an unknown flow name by that same value); packages/runtime/src/action-execution.ts:472 (headlessActionTypeError names the target the client-dispatched types go to instead)",
-      "note": "URL/script/flow/endpoint + ${param}/${ctx} interpolation. 2026-08-25: REPOINTED — the evidence cited packages/runtime/src/http-dispatcher.ts, which has 0 occurrences of `target`; the action consumer was extracted into domains/actions.ts + action-execution.ts and http-dispatcher.ts now only delegates (handleActions → handleActionsRequest at :1969-1970). The file still existed and the citation carried no line, so nothing in the gate could see it."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/runtime/src/action-execution.ts#dispatchFlowAction (type:'flow' server dispatch — automation.execute(action.target, …) runs inside it, after flowIsUnknown rejects an unrecognized flow name by that same value); packages/runtime/src/action-execution.ts#headlessActionTypeError (names the target the client-dispatched types go to instead)",
+      "note": "URL/script/flow/endpoint + ${param}/${ctx} interpolation. 2026-08-25: REPOINTED — the evidence cited packages/runtime/src/http-dispatcher.ts, which has 0 occurrences of `target`; the action consumer was extracted into domains/actions.ts + action-execution.ts and http-dispatcher.ts now only delegates. The file still existed and the citation carried no line, so nothing in the gate could see it. 2026-08-28: RE-ANCHORED (#12516) — the 08-25 repoint wrote line numbers (:725/:718/:472) and all three drifted IN RANGE within a day (the lines now hold the FlowActionRefusal brand block and disabledActionRefusal's docblock); the citation now anchors the consuming symbols, which move with the consumer."
     },
     "body": {
       "status": "live",
@@ -109,9 +109,9 @@
     },
     "requiredPermissions": {
       "status": "live",
-      "verifiedAt": "2026-08-25",
-      "evidence": "packages/runtime/src/domains/actions.ts:172-180 (ADR-0066 D4 dual-surface gate — resolves the action's declared requiredPermissions and rejects 403 when the caller's systemPermissions don't cover them); packages/runtime/src/action-execution.ts (resolveRouteActionDeclaration supplies the declaration the gate reads)",
-      "note": "ADR-0066 D4 dual-surface action gate. Server is source of truth: handleActionsRequest rejects (403) when the caller's systemPermissions don't cover action.requiredPermissions; objectui ActionRunner derives the same UI hide/disable. Unit-proven in packages/runtime/src/http-dispatcher.test.ts + packages/spec/src/ui/action.test.ts (both re-measured 2026-08-25 and still naming the key). 2026-08-25: REPOINTED — the evidence cited packages/runtime/src/http-dispatcher.ts, which has 0 occurrences of `requiredPermissions` since the actions domain was extracted into domains/actions.ts. Note the split the repoint exposes: the TEST kept the name while the source lost it, so the note's pointer stayed true while the evidence pointer rotted."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/runtime/src/action-execution.ts#actionPermissionError (ADR-0066 D4 dual-surface gate — reads actionDef.requiredPermissions and returns the 403 message when the caller's systemPermissions don't cover them); packages/runtime/src/domains/actions.ts#handleActionsRequest (the /actions route's D4 call site — rejects 403 via that gate); packages/runtime/src/action-execution.ts#resolveRouteActionDeclaration (supplies the declaration the gate reads)",
+      "note": "ADR-0066 D4 dual-surface action gate. Server is source of truth: handleActionsRequest rejects (403) when the caller's systemPermissions don't cover action.requiredPermissions; objectui ActionRunner derives the same UI hide/disable. Unit-proven in packages/runtime/src/http-dispatcher.test.ts + packages/spec/src/ui/action.test.ts (both re-measured 2026-08-25 and still naming the key). 2026-08-25: REPOINTED — the evidence cited packages/runtime/src/http-dispatcher.ts, which has 0 occurrences of `requiredPermissions` since the actions domain was extracted into domains/actions.ts. Note the split the repoint exposes: the TEST kept the name while the source lost it, so the note's pointer stayed true while the evidence pointer rotted. 2026-08-28: RE-ANCHORED (#12516) — the 08-25 repoint wrote :172-180 and it drifted IN RANGE within a day (those lines now hold path-part parsing and the invalidBody constructor; the actual key read lives in actionPermissionError, single-sourced in action-execution.ts and called from handleActionsRequest). Symbol anchors move with the consumer."
     },
     "disabled": {
       "status": "live",
