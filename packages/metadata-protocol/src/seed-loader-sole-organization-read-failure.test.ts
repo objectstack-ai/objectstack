@@ -50,6 +50,22 @@ interface StoreRow extends Record<string, unknown> {
     id: string;
 }
 
+/**
+ * The fixture's WHERE matcher, flat equality only.
+ *
+ * A combinator is REFUSED rather than read as a field name: a matcher that
+ * treats `$or` as a column answers a combinator query with an empty result set
+ * and nothing erroring, which is the silently-wrong shape
+ * `pnpm check:where-matcher` exists to keep out. This fixture only ever
+ * receives flat equality (`organization_id`, `sku`).
+ */
+function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+    return Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        return row[k] === v;
+    });
+}
+
 function createLogger() {
     return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
@@ -77,17 +93,7 @@ function createEngine() {
             findCalls.push(objectName);
             if (objectName in failFor) throw failFor[objectName];
             let records = store[objectName] ?? [];
-            if (query?.where) {
-                const where = query.where;
-                records = records.filter((r) => Object.entries(where).every(([k, v]) => {
-                    // REFUSE rather than guess: a combinator read as a field
-                    // name is a silently-wrong matcher, and this fixture only
-                    // ever receives flat equality. Same convention as
-                    // `seed-loader-existing-records-read-failure.test.ts`.
-                    if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-                    return r[k] === v;
-                }));
-            }
+            if (query?.where) records = records.filter((r) => matchesWhere(r, query.where!));
             if (typeof query?.limit === 'number') records = records.slice(0, query.limit);
             return records;
         }),
