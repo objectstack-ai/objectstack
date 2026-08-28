@@ -1,0 +1,85 @@
+{
+  "manifest": {
+    "id": "app.objectstack.hotcrm",
+    "namespace": "crm",
+    "defaultDatasource": "default",
+    "version": "2.2.2",
+    "type": "app",
+    "scope": "project",
+    "name": "HotCRM",
+    "description": "Era fixture for #12915 — the lead form view as an artifact built by released @objectstack/cli 17.1.0 spelled it: visibility predicates rooted at a BARE field identifier, gating fields that are unconditionally required.",
+    "engines": {
+      "protocol": "^17.0.0-rc.1"
+    }
+  },
+  "views": [
+    {
+      "list": {
+        "label": "All Leads",
+        "type": "grid",
+        "data": { "object": "crm_lead" },
+        "columns": [
+          { "field": "name" },
+          { "field": "company" },
+          { "field": "status" }
+        ]
+      },
+      "form": {
+        "type": "simple",
+        "data": { "object": "crm_lead" },
+        "sections": [
+          {
+            "name": "lead",
+            "label": "Lead",
+            "columns": 2,
+            "fields": [
+              { "field": "name", "required": true },
+              { "field": "company", "required": true },
+              { "field": "email", "required": true },
+              { "field": "status" },
+              {
+                "field": "disqualification_reason",
+                "required": true,
+                "visibleWhen": { "dialect": "cel", "source": "status == \"unqualified\"" }
+              },
+              {
+                "field": "duplicate_of_type",
+                "required": true,
+                "visibleWhen": { "dialect": "cel", "source": "status == \"duplicate\"" }
+              },
+              {
+                "field": "duplicate_of_lead",
+                "required": true,
+                "visibleWhen": { "dialect": "cel", "source": "duplicate_of_type == \"lead\"" }
+              },
+              {
+                "field": "note",
+                "visibleWhen": { "dialect": "cel", "source": "record.note != \"status unqualified\"" }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "form": {
+        "type": "simple",
+        "data": { "object": "crm_case" },
+        "sections": [
+          {
+            "name": "case",
+            "label": "Case",
+            "fields": [
+              { "field": "subject", "required": true },
+              {
+                "field": "resolution",
+                "required": true,
+                "visibleWhen": { "dialect": "cel", "source": "record.status == \"closed\"" }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
