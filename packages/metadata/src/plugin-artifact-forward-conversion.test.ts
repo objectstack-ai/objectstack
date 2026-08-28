@@ -20,9 +20,13 @@
  *
  * Direction one pins the fix: the 17.1-authored artifact converts forward and
  * registers. Direction two pins the boundary that keeps the conversion
- * *versioned*: the same permission shape claiming the CURRENT spec version
- * still refuses with the tombstone — the retired window opens on version
- * evidence, never as a blanket amnesty (the keys return with M2, #1883).
+ * *versioned* — the retired window opens on version evidence, never as a
+ * blanket amnesty (the keys return with M2, #1883) — as re-shaped by the
+ * #12845 ruling (maintainer 2026-08-28): at the CURRENT spec version a
+ * NON-default retired-key value still refuses with the tombstone, while the
+ * emitted default parses as inert residue stripped silently at the SCHEMA
+ * layer (`acceptRetiredDefaultResidue`), with this door's versioned window
+ * staying closed (no conversion notice) — both halves pinned below.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -119,17 +123,37 @@ describe('artifact door — 17.1-built artifact converts forward and registers (
 });
 
 describe('artifact door — the conversion is versioned, not a blanket amnesty (#12772)', () => {
-    it('an artifact claiming the CURRENT spec version with the same keys still refuses with the tombstone', async () => {
+    // Direction two split in half by the #12845 ruling (maintainer 2026-08-28,
+    // recorded on the cloud#1685 thread; `acceptRetiredDefaultResidue` in
+    // `packages/spec/src/shared/retired-key.ts`): a retired DEFAULTED key is
+    // refused only when it carries a NON-default value — the emitted default
+    // (`false` for both bits, materialized by the released 17.x builder into
+    // every entry) parses as inert residue and is silently stripped at the
+    // SCHEMA layer. So the refusal surface this door must keep pinned is the
+    // non-default value; the pure-residue artifact at the current version now
+    // parses clean WITHOUT this door's conversion opening (and that
+    // distinction — schema-layer silent strip vs the door's noticed,
+    // version-gated strip — is itself pinned below).
+
+    it('an artifact claiming the CURRENT spec version with a NON-default retired-key value still refuses with the tombstone', async () => {
         const installed = resolveInstalledSpecVersion();
         expect(installed).toMatch(/^\d+\.\d+\.\d+/); // spec is always resolvable here
 
         const plugin = newPlugin();
         const fixture = loadFixture();
-        // Same permission bodies, but the manifest now claims the running
-        // spec's own surface — the retired window must stay closed. `^X.Y.Z`
-        // floors at exactly the installed version, so this pin survives every
-        // future spec release without edits.
+        // The manifest claims the running spec's own surface — the retired
+        // window must stay closed. `^X.Y.Z` floors at exactly the installed
+        // version, so this pin survives every future spec release without
+        // edits.
         fixture.manifest.engines.protocol = `^${installed}`;
+        // The real 17.1-built artifact carries only the emitted default
+        // (150 × `false` — the premise guard above pins that), which is the
+        // residue class #12845 now tolerates. The surviving refusal is the
+        // NON-default value — legal to author on the 17.1 surface, never
+        // emitted by a default — so construct that probe from the fixture:
+        const firstGrant = Object.values<any>(fixture.permissions[0].objects)[0];
+        expect(firstGrant.allowRestore).toBe(false); // was the residue value
+        firstGrant.allowRestore = true;
 
         // The refusal must reach the operator carrying the prescription — the
         // tombstone's FROM → TO payload and the standardized migrate sentence
@@ -141,10 +165,41 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
             expect.unreachable('the strict parse must refuse');
         } catch (e: any) {
             const message = String(e?.message ?? e);
-            expect(message).toMatch(/allowRestore|allowPurge/);
+            expect(message).toContain('allowRestore');
             expect(message).toContain('was removed in @objectstack/spec 17 (#12497, ADR-0049)');
             expect(message).toContain('Run `os migrate meta --from 17`');
         }
+    });
+
+    it('an artifact claiming the CURRENT spec version whose retired keys carry only the emitted default parses clean — the #12845 residue tolerance, at the schema layer, not this door', async () => {
+        const installed = resolveInstalledSpecVersion();
+        const plugin = newPlugin();
+        const ctx = fakeCtx();
+        const fixture = loadFixture(); // untouched: 150 × the emitted default
+        const before = loadFixture();
+        fixture.manifest.engines.protocol = `^${installed}`;
+
+        const total = await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-current-residue');
+        expect(total).toBe(before.permissions.length);
+
+        // The keys are gone from what registered — stripped by the schema's
+        // residue tolerance…
+        for (const pristine of before.permissions) {
+            const registered = await plugin.manager.get('permission', pristine.name);
+            for (const objName of Object.keys(pristine.objects ?? {})) {
+                const grant = (registered as any).objects[objName];
+                expect(grant).not.toHaveProperty('allowRestore');
+                expect(grant).not.toHaveProperty('allowPurge');
+            }
+        }
+        // …and NOT by this door's conversion: the authored floor is current,
+        // so the versioned window stayed closed and no conversion summary was
+        // emitted. This is the boundary that keeps the door's amnesty
+        // versioned even now that the schema tolerates pure residue.
+        const conversionWarns = (ctx.logger.warn.mock.calls as any[])
+            .map((c) => String(c[0]))
+            .filter((m) => m.includes('permission-allow-restore-purge-removed'));
+        expect(conversionWarns).toHaveLength(0);
     });
 });
 
