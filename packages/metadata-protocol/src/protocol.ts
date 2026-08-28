@@ -4,7 +4,7 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
+import { declaredUserMessage, readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
@@ -2260,6 +2260,124 @@ function metadataStoreUnavailableError(cause: unknown): Error {
 }
 
 /**
+ * [#12536] The producer-side CLASSIFICATION every `sys_metadata` read failure
+ * now passes through — the one door, so that "is this a store fault or an
+ * application refusal?" is answered once instead of per call site.
+ *
+ * ## The defect it closes
+ *
+ * A metadata app's sandboxed hook on `sys_metadata` may REFUSE a read and mark
+ * its refusal with `userMessage` — the #9934 producer-side opt-in, where the
+ * field's PRESENCE is the marking (maintainer ruling, 2026-08-19, objectui#5210
+ * option 1). Every such refusal used to be handed straight to {@link
+ * metadataStoreUnavailableError}, which builds a FRESH error carrying only
+ * `code` / `status` / `cause`. `declaredUserMessage` reads the TOP level and
+ * never `cause`, so the mark died at the producer: measured on `origin/main`,
+ * a marked `beforeFind` refusal and a `connect ECONNREFUSED` came out of
+ * `getMetaItems` as the same `503 SERVICE_UNAVAILABLE` with the same sentence
+ * and `declaredUserMessage === undefined` on both. A hook author's localized
+ * refusal could not reach an end user through this limb at all, and the
+ * console substituted its #3821 generic string.
+ *
+ * ## The ruling this implements
+ *
+ * Maintainer, 2026-08-27 (verbatim: 「同意」), option B: a producer-marked
+ * application refusal must NOT be wrapped as a store-unavailable error in the
+ * first place. It travels its OWN refusal category with the author's text
+ * intact; a genuine store fault keeps #8136's deliberately non-quoting 503,
+ * untouched. Both prior rulings stand — they stop colliding here.
+ *
+ * ⛔ The declined shortcut, recorded so nobody re-implements it: forwarding the
+ * mark ACROSS the 503 (a `cause` fall-through in `declaredUserMessage`, or a
+ * `userMessage` copied onto the store-unavailable error). That would open a
+ * quoting exception in the one door #8136 built to quote nothing, and the
+ * typical failure of that shape is passing the whole cause chain through —
+ * a silent leak. Nothing from `cause` crosses the 503 door: this function
+ * either builds the refusal INSTEAD of the 503, or leaves the 503 exactly as
+ * it was.
+ */
+function metadataReadFailureError(cause: unknown): Error {
+    // {@link declaredUserMessage} is THE read — "never with an inline `typeof`
+    // probe" is that function's own instruction, and it is why a blank or
+    // non-string `userMessage` is not a declaration here either.
+    const marked = declaredUserMessage(cause);
+    if (marked !== undefined) return markedApplicationRefusalError(cause, marked);
+    return metadataStoreUnavailableError(cause);
+}
+
+/**
+ * [#12536] The refusal category a producer-MARKED failure travels in, built so
+ * the author's text survives verbatim and nothing else from the cause does.
+ *
+ * ## What is quoted, and what is not
+ *
+ * `message` is the marked text itself. That is the one string the producer
+ * declared is addressed to the end user (#9934), so quoting it discloses
+ * nothing that was not authored for a caller — and it is the ONLY thing taken
+ * from the cause. The cause's own `message` is a diagnostic and is NOT read:
+ * it rides on `cause`, which `handleRouteError` / `logWithheldServerFault`
+ * print whole for the operator, the same posture {@link
+ * metadataStoreUnavailableError} takes.
+ *
+ * ## Status and code are RESOLVED, never re-spelled
+ *
+ * `resolveThrownHttpError` is imported for both, for the reason {@link
+ * clientFacingRowFailureText} gives: a fourth local spelling of "what did this
+ * throw declare?" is how two seams start disagreeing about one error. It folds
+ * `status`, `statusCode` and the validation shape into one status, and gives
+ * the code rule this file already applies elsewhere — a catalogued `.code`
+ * passes through, anything else demotes to the status-derived standard code,
+ * so `ApiErrorSchema`'s closed union (ADR-0112 D4) can never receive a
+ * driver's dialect.
+ *
+ * The fallback status is 400, and it is NOT invented here: it is what the REST
+ * sandbox door already answers for a hook refusal that named no status of its
+ * own (`error-response.ts`, #9967 — `declared ?? 400`, pinned by
+ * `hook-error-format.dogfood.test.ts`). A hook that DID name one keeps it
+ * (#7867: "an error that NAMES its own HTTP status is asking to be served with
+ * it"), which is also why this is status-agnostic in the way the `userMessage`
+ * contract requires — a 400, 403, 409 or 503 refusal may all carry the mark.
+ */
+function markedApplicationRefusalError(cause: unknown, userMessage: string): Error {
+    const { status, code } = resolveThrownHttpError(cause, MARKED_REFUSAL_UNDECLARED_STATUS);
+    const err = new Error(userMessage) as Error & {
+        code?: string;
+        status?: number;
+        userMessage?: string;
+        cause?: unknown;
+    };
+    err.code = code;
+    err.status = status;
+    err.userMessage = userMessage;
+    err.cause = cause;
+    return err;
+}
+
+/**
+ * [#12536] The status a marked refusal takes when its producer named none —
+ * the REST sandbox door's own `declared ?? 400` (#9967), reused rather than
+ * chosen again, so the metadata read door and the hook door classify one
+ * undeclared hook refusal identically.
+ */
+const MARKED_REFUSAL_UNDECLARED_STATUS = 400;
+
+/**
+ * [#12536] Carry a producer's `userMessage` mark onto an error this file is
+ * re-wrapping — the exact sibling of {@link carryCatalogedErrorCode}, one
+ * field over.
+ *
+ * A re-wrap that drops the mark destroys the #9934 channel just as completely
+ * as building a fresh error does, and for the same reason: `declaredUserMessage`
+ * reads the TOP level, never `cause`. Copying only the marked field quotes
+ * nothing else — the cause's diagnostic `message` stays governed by whichever
+ * withhold rule that exit already applies (#8136), unchanged.
+ */
+function carryDeclaredUserMessage(target: Error, source: unknown): void {
+    const marked = declaredUserMessage(source);
+    if (marked !== undefined) (target as Error & { userMessage?: string }).userMessage = marked;
+}
+
+/**
  * [#5532] The terminal "this metadata item does not exist" — structured, so it
  * stops falling out of `mapDataError`'s catch-all.
  *
@@ -3489,6 +3607,15 @@ export interface UninstallCleanupOutcome {
     success: boolean;
     removed: number;
     error?: string;
+    /**
+     * [#12536] The user-facing refusal text the failing cleanup MARKED with
+     * `userMessage` (#9934) — absent unless it declared one. This outcome is
+     * response DATA riding inside a `PACKAGE_DELETE_PARTIAL` 400's `details`,
+     * so no HTTP boundary reads a `userMessage` on its behalf; the channel has
+     * to exist here or the mark has nowhere to go. Read it with
+     * `declaredUserMessage`, never by probing the field.
+     */
+    userMessage?: string;
 }
 
 /**
@@ -3548,7 +3675,13 @@ export interface DeletePackageResponse {
     deletedCount: number;
     failedCount: number;
     deleted: Array<{ type: string; name: string; state: string }>;
-    failed: Array<{ type: string; name: string; error: string; code?: string }>;
+    /**
+     * Per-item failures. [#12536] `userMessage` is the #9934 mark the item's
+     * own failure declared — present exactly when a producer marked its
+     * refusal, so a caller can tell an application refusal apart from a store
+     * failure on a path where no HTTP boundary can do it for them.
+     */
+    failed: Array<{ type: string; name: string; error: string; code?: string; userMessage?: string }>;
     cleanups: UninstallCleanupOutcome[];
 }
 
@@ -5636,8 +5769,23 @@ export class ObjectStackProtocolImplementation implements
      * silently mis-answers "does this exist?" while a false "real" costs one
      * 503 the caller can retry.
      *
+     * ## [#12536] Not benign is not the same as "the store is down"
+     *
+     * A non-benign failure is classified once more before it is wrapped, by
+     * {@link metadataReadFailureError}: a metadata app's hook may have REFUSED
+     * this read and marked its refusal with `userMessage` (#9934), and that is
+     * an application refusal, not a dependency outage. Handing it to the 503
+     * below destroyed the mark at the producer — the two failures left this
+     * guard as the same envelope with the same sentence. The classification
+     * splits them; neither category's wording changes.
+     *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): the
+     *         author's text verbatim, in its own refusal category, with the
+     *         cause still carried for the operator and nothing else quoted.
      * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
-     *         error as `cause`. Not the driver error itself: unwrapped, it has
+     *         error as `cause`, for every UNMARKED non-benign failure. Not the
+     *         driver error itself: unwrapped, it has
      *         no status, so the REST boundary would have to guess from the
      *         message text — and `mapDataError` guesses `no such table` into
      *         `404 OBJECT_NOT_FOUND`, i.e. straight back into a miss.
@@ -5646,7 +5794,10 @@ export class ObjectStackProtocolImplementation implements
      */
     private rethrowUnlessMetadataStoreUnprovisioned(error: unknown): void {
         if (isMissingTableError(error)) return;
-        throw metadataStoreUnavailableError(error);
+        // [#12536] CLASSIFY, do not assume. A read can fail because the store
+        // is unreachable OR because a metadata app's hook refused it in its
+        // own words — see {@link metadataReadFailureError}.
+        throw metadataReadFailureError(error);
     }
 
     /**
@@ -6831,6 +6982,11 @@ export class ObjectStackProtocolImplementation implements
      * `code: null` — the same unfounded assertion, one column to the left, and
      * the one the lock/affordance flags are derived from.
      *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): an
+     *         application refusal in the author's own words, classified at the
+     *         producer and NOT the 503 below. See {@link
+     *         metadataReadFailureError}.
      * @throws {@link metadataStoreUnavailableError} — 503 /
      *         `SERVICE_UNAVAILABLE` when a read that would decide a layer did
      *         not happen: the `sys_metadata` overlay read failing for any
@@ -7135,6 +7291,11 @@ export class ObjectStackProtocolImplementation implements
      * on those terms (ADR-0110 D3). The unqualified `catch` that used to report
      * all of them as an empty trail is what this closes.
      *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): an
+     *         application refusal in the author's own words, classified at the
+     *         producer and NOT the 503 below. See {@link
+     *         metadataReadFailureError}.
      * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
      *         error as `cause`, for every read failure that is not an
      *         unprovisioned table. The `/audit` route's existing
@@ -11725,6 +11886,11 @@ export class ObjectStackProtocolImplementation implements
      * method THROWS (#5706) rather than answering "unlocked" — see the
      * `catch` below and {@link rethrowUnlessMetadataStoreUnprovisioned}.
      *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): an
+     *         application refusal in the author's own words, classified at the
+     *         producer and NOT the 503 below. See {@link
+     *         metadataReadFailureError}.
      * @throws {@link metadataStoreUnavailableError} — 503 /
      *         `SERVICE_UNAVAILABLE`, when the lock state could not be
      *         determined. The one non-throwing failure is an
@@ -16885,7 +17051,9 @@ export class ObjectStackProtocolImplementation implements
         try {
             rows = (await this.engine.find('sys_metadata', { where })) as any[];
         } catch (e) {
-            throw metadataStoreUnavailableError(e);
+            // [#12536] …through the classifier: a marked application refusal
+            // is not a store fault. See {@link metadataReadFailureError}.
+            throw metadataReadFailureError(e);
         }
 
         const dropStorage = request.keepData !== true;
@@ -16930,11 +17098,22 @@ export class ObjectStackProtocolImplementation implements
                 // producer that no longer needs it (Prime Directive #12), and
                 // it would blank the per-item refusals that make a partial
                 // uninstall actionable.
+                // [#12536] …and the per-item path follows the SAME
+                // classification the read seam now applies (maintainer ruling,
+                // 2026-08-27): a marked application refusal is reported as one,
+                // in the author's own words, rather than dissolving into a row
+                // that reads like a store failure. `failed[]` had no channel
+                // for the mark at all — `error` is the diagnostic sentence and
+                // `code` is the closed vocabulary — so `userMessage` is the
+                // member that carries it, absent (never `''`) when the item's
+                // failure declared none, so nothing invents a marked refusal.
+                const itemUserMessage = declaredUserMessage(e);
                 failed.push({
                     type: row.type,
                     name: row.name,
                     error: e?.message ?? 'delete failed',
                     ...(e?.code ? { code: e.code } : {}),
+                    ...(itemUserMessage !== undefined ? { userMessage: itemUserMessage } : {}),
                 });
             }
         }
@@ -16996,11 +17175,18 @@ export class ObjectStackProtocolImplementation implements
                 // verbatim — and this outcome rides on the RESPONSE by design,
                 // inside `details`, where no boundary's message withhold can
                 // reach it. Quoted only when the cleanup declared a refusal.
+                // [#12536] The mark travels beside the withheld sentence, not
+                // instead of it: `error` stays whatever #8136's rule licenses,
+                // and a cleanup that refused in the author's own words is still
+                // reported as a refusal rather than as one that merely
+                // "failed".
+                const cleanupUserMessage = declaredUserMessage(e);
                 cleanups.push({
                     name,
                     success: false,
                     removed: 0,
                     error: clientFacingFailureText(e, 'cleanup failed'),
+                    ...(cleanupUserMessage !== undefined ? { userMessage: cleanupUserMessage } : {}),
                 });
                 console.warn(
                     `[protocol.deletePackage] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
@@ -17646,6 +17832,11 @@ export class ObjectStackProtocolImplementation implements
      * `SysMetadataRepository` (#4867) ask, so a driver quirk is taught to the
      * platform once rather than re-spelled per seam.
      *
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): an
+     *         application refusal in the author's own words, classified at the
+     *         producer and NOT the 503 below. See {@link
+     *         metadataReadFailureError}.
      * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
      *         error as `cause`, for every failure that is not an unprovisioned
      *         table.
@@ -18570,6 +18761,11 @@ export class ObjectStackProtocolImplementation implements
      *         of a type the platform DECLARES (`viewes`). Narrow by
      *         construction: a name that reaches for no declared type is a
      *         possible plugin kind and is served, not refused (#7894).
+     * @throws {@link markedApplicationRefusalError} — [#12536] FIRST, when the
+     *         failure carried a producer's `userMessage` mark (#9934): an
+     *         application refusal in the author's own words, classified at the
+     *         producer and NOT the 503 below. See {@link
+     *         metadataReadFailureError}.
      * @throws {@link metadataStoreUnavailableError} — 503 /
      *         `SERVICE_UNAVAILABLE` (#8833), when the `sys_metadata_history`
      *         read failed for any reason other than the table not being
@@ -19133,6 +19329,13 @@ export class ObjectStackProtocolImplementation implements
                 // its `status` made it out. See {@link carryCatalogedErrorCode}
                 // for why an unconditional copy is the wrong shape here.
                 carryCatalogedErrorCode(e, err);
+                // [#12536] …and the same for the #9934 mark. A hook that
+                // refused this delete in its own words wrote that text for the
+                // END USER; dropping it here destroys the channel exactly the
+                // way the store-unavailable wrapper used to, one exit over.
+                // Only the marked field is copied — the sentence selection
+                // above stays #8136's, unchanged.
+                carryDeclaredUserMessage(e, err);
                 throw e;
             }
         }
@@ -19234,6 +19437,10 @@ export class ObjectStackProtocolImplementation implements
             // stays as it is, for the reason {@link carryCatalogedErrorCode}
             // gives.
             carryCatalogedErrorCode(e, err);
+            // [#12536] The second exit gets the mark carry too, for the reason
+            // the `code` carry gives: the envelope must not vary by which path
+            // served the delete.
+            carryDeclaredUserMessage(e, err);
             throw e;
         }
     }

@@ -310,7 +310,13 @@ export const CEILINGS = new Map([
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
-  ['.claude/agents/os-dev.md', 470],
+  // Lowered 470 → 466 by the #12081 residual soft-break paydown (lowering is
+  // always legitimate, and the same closure lowered decision-analysis.md above):
+  // this file's last 8 Han+ASCII-punct breaks merged back into their paragraphs,
+  // and 4 of the 8 paid for themselves. Zero content change — the diff is
+  // byte-identical after whitespace normalization (39,313 B both sides), so the
+  // 4 lines are re-flow slack, never a cut. Headroom 0 again, same convention.
+  ['.claude/agents/os-dev.md', 466],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on

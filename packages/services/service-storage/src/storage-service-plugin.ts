@@ -20,7 +20,7 @@ import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
-import type { FileReadVerdict } from './storage-routes.js';
+import type { FileReadVerdict, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
@@ -624,10 +624,27 @@ function buildGetSession(ctx: PluginContext): ((headers: any) => Promise<any>) |
  * Bridge the kernel's `auth` service (better-auth) into the storage routes'
  * upload gate (#2755). Returns `undefined` when no auth service is present —
  * the routes then stay open (bare kernels/tests, logged once there).
+ *
+ * [#12745] It now also reports the session's ACTIVE ORGANIZATION, which the
+ * upload routes thread into `createFile` so the new `sys_file` row is stamped.
+ * The read is the platform's existing spelling for that fact —
+ * `session.session.activeOrganizationId`, the same one `HttpDispatcher`,
+ * `dispatcher-plugin` and `ExecutionContext.tenantId` resolve from — with the
+ * flattened shape as a fallback for hosts that hand back the session record
+ * directly.
+ *
+ * ⛔ No membership fallback. `marketplace-install-local-plugin`'s
+ * `resolveActiveOrgId` falls back to the user's first `sys_organization_member`
+ * row; that is a SCOPING read for a seed, and its own doc warns it answers for
+ * "which org do these rows land in" only. Here the answer becomes a WALL: a
+ * file stamped from a guessed membership is a file its uploader can no longer
+ * see from the organization they were actually acting in. No active
+ * organization therefore means no stamp — the pre-#12745 behaviour, reported
+ * by the backfill rather than invented here.
  */
 function buildAuthSessionResolver(
   ctx: PluginContext,
-): ((req: { headers?: unknown }) => Promise<{ userId?: string } | null>) | undefined {
+): ((req: { headers?: unknown }) => Promise<StorageUploadSession | null>) | undefined {
   const getSession = buildGetSession(ctx);
   if (!getSession) return undefined;
   return async (req) => {
@@ -636,7 +653,14 @@ function buildAuthSessionResolver(
       if (!headers) return null;
       const session: any = await getSession(headers);
       const userId = session?.user?.id;
-      return userId ? { userId: String(userId) } : null;
+      if (!userId) return null;
+      const activeOrganizationId =
+        session?.session?.activeOrganizationId ?? session?.activeOrganizationId;
+      const organizationId =
+        typeof activeOrganizationId === 'string' && activeOrganizationId.length > 0
+          ? activeOrganizationId
+          : undefined;
+      return { userId: String(userId), organizationId };
     } catch {
       return null;
     }

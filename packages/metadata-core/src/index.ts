@@ -49,6 +49,17 @@ export * from './engine-findone-predicate.js';
 // reporting two.
 export * from './audit-field-governance.js';
 
+// [#10062] The ADR-0029 D9.6 provenance pair, sunk here from
+// `@objectstack/objectql`'s registry by the same criterion as everything above:
+// `@objectstack/service-automation` needs the same "does a code package ship
+// this name?" answer for ADR-0048 flow precedence, and was reaching it by
+// importing objectql — a package it does not declare, so the bundler inlined a
+// copy of objectql's implementation into service-automation's dist. Both sides
+// already declare THIS package, and it depends on neither. `objectql`
+// re-exports `isCodeArtifactBody` from `registry.ts`, so its public API is
+// unchanged.
+export * from './code-artifact-provenance.js';
+
 // [#6562] The served-document injection/strip pair over the injected-system-
 // column definition tables, sunk here by the same criterion and for the same
 // cycle as the governance table above. The DEFINITION tables themselves and the

@@ -29,11 +29,27 @@ This document summarizes the critical architectural improvements made to the `pa
 - Refined `Kernel.getService` to distinguish between "service registration missing" and "factory execution failed".
 - Factory errors are now re-thrown with their original stack trace and message.
 
-## 5. Configuration Validation
+## 5. Configuration Validation — retracted; the surface has since been retired
+
 **Problem:** Configuration validation was a scaffold without implementation.
-**Fix:**
-- Integrated `PluginConfigValidator` (Zod-based) into `PluginLoader`.
-- `validatePluginConfig` now performs actual schema validation against `plugin.configSchema`.
+
+**Claimed fix — never took effect.** This section originally recorded that
+`PluginConfigValidator` (Zod-based) had been integrated into `PluginLoader`, and that
+`validatePluginConfig` performed real schema validation against `plugin.configSchema`.
+It did not. The loader's only call site passed no config, so `validatePluginConfig`
+always returned from its `config === undefined` branch — logging "config validation
+postponed" — without ever reaching the validator. The kernel validated no plugin config
+on any commit in this repository's recorded history, and no caller could have supplied
+one: plugin factories close over their own config, so the kernel never receives it. The
+scaffold stayed a scaffold.
+
+**Actual resolution (2026-08-27).** The surface was retired rather than implemented, under
+ADR-0049 (enforce-or-remove) and recorded in ADR-0025 §3.7: `PluginMetadata.configSchema`,
+`PluginConfigValidator` and `createPluginConfigValidator` are gone, and plugins parse their
+own config at their own seam. Tombstones marking the decision live in `src/plugin-loader.ts`,
+`src/security/index.ts` and `src/plugin-loader.retired-fields.pin.test.ts`. Re-declaring a
+kernel-owned config-validation surface is a fresh decision for the day the ADR-0025
+distribution layer lands.
 
 ## Verification
 - **Build:** Clean build of `dist` artifacts.

@@ -324,6 +324,22 @@ const TRIAGE = new Map([
       + 'can drift from the scan is worse than none. The row stays in the sweep: the bare root is '
       + 'still not covered',
   }],
+  ['check:dual-build-cjs-loads SCAN_ROOT packages', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'the gate walks every publishable manifest under the root to find published `require` '
+      + 'conditions, then reads only the dist/ those manifests point at — so the two literals it '
+      + 'declares beside SCAN_ROOT under the ROOT_DIR_WATCH_HINTS idiom are the files whose '
+      + 'CONTENT its verdict is a function of: packages/**/package.json at 74 tracked files '
+      + '(1.0%) and packages/**/tsup.config.ts at 20 (0.3%), against 4903 under the bare root. '
+      + 'A THIRD spelling was measured and REFUSED: #12971 arrived through a single source line, '
+      + 'so packages/**/src/** has the best recall of the three, but it reaches 4482 files — '
+      + '62.2% of the tracked tree, wider than the 39% rows refused below on exactly this trade — '
+      + 'and the gate does not READ those files at all, which makes declaring them the costlier '
+      + 'error this map names. The recall is not lost: the gate is a step in Build Core, a '
+      + 'required context on every PR, so the omission costs one CI round trip rather than a '
+      + 'missed defect. The row STAYS in the sweep because the bare root is still not covered — '
+      + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['check:authz-resolver SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
