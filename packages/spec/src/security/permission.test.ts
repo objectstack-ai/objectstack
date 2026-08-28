@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   PermissionSetSchema,
   ObjectPermissionSchema,
@@ -9,6 +9,7 @@ import {
   type ObjectPermission,
   type FieldPermission,
 } from './permission.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
 
 describe('AdminScopeSchema (ADR-0090 D12)', () => {
   it('parses a delegated-admin scope with defaults', () => {
@@ -123,19 +124,38 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
     expect('allowPurge' in parsed, 'retired key contributes nothing to the parsed output').toBe(false);
   });
 
-  it('authored values reject with the prescription (not a bare strict error)', () => {
+  it('non-default values reject with the prescription (not a bare strict error)', () => {
+    // [#12840] Only `true` is a dead AUTHORED claim now — `false` is the
+    // default the published 17.x toolchain materialized into every built
+    // artifact, ruled inert residue (accepted and stripped; matrix below).
     for (const key of ['allowRestore', 'allowPurge'] as const) {
-      // Both directions are dead: the authored `false` claimed a lock that
-      // never existed just as loudly as the authored `true` claimed a grant.
-      for (const value of [true, false]) {
-        const r = ObjectPermissionSchema.safeParse({ [key]: value } as never);
-        expect(r.success).toBe(false);
-        const messages = r.error!.issues.map((i) => i.message).join('\n');
-        expect(messages).toContain('#12497');
-        expect(messages).toContain('removed in @objectstack/spec 17');
-        expect(messages).toContain('Delete the key');
-        expect(messages).toContain('M2');
-      }
+      const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
+      expect(r.success).toBe(false);
+      const messages = r.error!.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('#12497');
+      expect(messages).toContain('removed in @objectstack/spec 17');
+      expect(messages).toContain('Delete the key');
+      expect(messages).toContain('M2');
+    }
+  });
+
+  it('[#12840] the refusal is the tombstone byte-for-byte — guidance text, expected: never, located path', () => {
+    // The #12497 refusal shape was measured as
+    // `{ expected: 'never', code: 'invalid_type', path: […, key], message: <guidance> }`.
+    // The residue stage must not touch it: a non-default value never enters
+    // the strip, so the issue is the tombstone's own. The guidance is read
+    // back from the tombstone's `[REMOVED] ` describe — the single source —
+    // so this pin proves refusal text === declared prescription, byte for byte.
+    for (const key of ['allowRestore', 'allowPurge'] as const) {
+      const declared = (ObjectPermissionSchema.shape[key].description ?? '').replace(/^\[REMOVED\] /, '');
+      expect(declared).toContain('#12497');
+      const r = ObjectPermissionSchema.safeParse({ allowRead: true, [key]: true } as never);
+      expect(r.success).toBe(false);
+      const issue = r.error!.issues.find((i) => i.path[i.path.length - 1] === key)!;
+      expect(issue).toBeDefined();
+      expect((issue as { expected?: string }).expected).toBe('never');
+      expect(issue.code).toBe('invalid_type');
+      expect(issue.message).toBe(declared);
     }
   });
 
@@ -156,11 +176,173 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
     // `.extend()` shares the authoring shape's per-property instances, so the
     // response-side def carries the same `[RETIRED]` row in the authorable
     // surface — and a DECLARED-never key is refused there even though the
-    // schema `.strip()`s unknown keys (declared ≠ unknown). No server can emit
-    // the bit any more (the parsed authoring output omits it), so this refusal
-    // has no wire-compat cost inside the launch window.
-    const r = EffectiveObjectPermissionSchema.safeParse({ allowRead: true, allowRestore: false } as never);
+    // schema `.strip()`s unknown keys (declared ≠ unknown). [#12840] narrowed
+    // the refusal to NON-default values: a server still on the published 17.x
+    // toolchain DOES emit the bit at its materialized default (`false`), so
+    // that residue is accepted-and-stripped (matrix below) while `true` keeps
+    // this refusal.
+    const r = EffectiveObjectPermissionSchema.safeParse({ allowRead: true, allowRestore: true } as never);
     expect(r.success).toBe(false);
+  });
+});
+
+describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class rule)', () => {
+  // Maintainer ruling 2026-08-28, recorded on objectstack-ai/cloud#1685: a
+  // retired key that had a schema default is refused only when it carries a
+  // NON-default value. The published `@objectstack/spec` 17.x still emitted
+  // `z.boolean().default(false)` for `allowRestore`/`allowPurge`, so every
+  // artifact the released toolchain built carries both keys as `false` in
+  // every permission entry — 75 occurrences in the measured HotCRM artifact,
+  // whose sources declare neither. Refusing the emitted default sentences
+  // every existing built artifact to death on the next runtime upgrade.
+
+  /** The published-toolchain shape, verbatim from the cloud#1685 measurement. */
+  const publishedToolchainEntry = {
+    allowCreate: true,
+    allowRead: true,
+    allowEdit: true,
+    allowDelete: true,
+    allowRestore: false,
+    allowPurge: false,
+  };
+
+  it('accepts the emitted default and STRIPS it — the parsed output carries neither key', () => {
+    const r = ObjectPermissionSchema.safeParse(publishedToolchainEntry as never);
+    expect(r.success).toBe(true);
+    expect('allowRestore' in r.data!, 'residue must not survive into the normalized output').toBe(false);
+    expect('allowPurge' in r.data!, 'residue must not survive into the normalized output').toBe(false);
+    expect(r.data!.allowCreate).toBe(true);
+    expect(r.data!.allowDelete).toBe(true);
+  });
+
+  it('each key strips independently', () => {
+    for (const key of ['allowRestore', 'allowPurge'] as const) {
+      const r = ObjectPermissionSchema.safeParse({ allowRead: true, [key]: false } as never);
+      expect(r.success).toBe(true);
+      expect(key in r.data!).toBe(false);
+    }
+  });
+
+  it('parse → serialize → parse is a fixpoint without the keys (no re-emission)', () => {
+    const first = ObjectPermissionSchema.parse(publishedToolchainEntry as never);
+    const serialized = JSON.parse(JSON.stringify(first)) as Record<string, unknown>;
+    expect('allowRestore' in serialized).toBe(false);
+    expect('allowPurge' in serialized).toBe(false);
+    const second = ObjectPermissionSchema.parse(serialized as never);
+    expect(JSON.parse(JSON.stringify(second))).toEqual(serialized);
+  });
+
+  it('tolerates ONLY the captured retired default — every other value keeps the loud refusal', () => {
+    // The helper contract: the residue value is the literal captured at
+    // retirement time (`false`), compared by identity. Falsy near-misses are
+    // NOT the emitted default and land on the tombstone like any authored value.
+    for (const wrong of [true, 0, '', null, 'false'] as const) {
+      const r = ObjectPermissionSchema.safeParse({ allowRestore: wrong } as never);
+      expect(r.success, `value ${JSON.stringify(wrong)} must NOT be tolerated`).toBe(false);
+      expect(r.error!.issues.map((i) => i.message).join('\n')).toContain('#12497');
+    }
+  });
+
+  it('the residue strips inside a full permission-set / stack-shaped parse (the artifact path)', () => {
+    // The measured refusal was located at
+    // `permissions[5].objects.crm_campaign_member.allowRestore` — a composed
+    // artifact's permission collection. The tolerance rides the SAME nested
+    // schema, so the stack-shaped parse accepts and normalizes it.
+    const set = PermissionSetSchema.parse({
+      name: 'system_admin',
+      objects: {
+        crm_campaign_member: publishedToolchainEntry,
+        crm_note: { allowRead: true },
+      },
+    } as never);
+    expect('allowRestore' in set.objects.crm_campaign_member!).toBe(false);
+    expect('allowPurge' in set.objects.crm_campaign_member!).toBe(false);
+    expect(set.objects.crm_campaign_member!.allowEdit).toBe(true);
+  });
+
+  it('the composed-artifact door accepts the measured refusal shape at its exact path', () => {
+    // cloud#1672's red step died on the composed HotCRM artifact at
+    // `permissions[5].objects.crm_campaign_member.allowRestore`
+    // (`expected: 'never'`). Reproduce that exact coordinate through the
+    // artifact's own door (`ObjectStackDefinitionSchema`): five sets ahead,
+    // the sixth carrying the published-toolchain entry — and assert the parse
+    // now accepts it and the normalized artifact carries neither key.
+    const filler = Array.from({ length: 5 }, (_, i) => ({
+      name: `filler_set_${i}`,
+      objects: { crm_note: { allowRead: true } },
+    }));
+    const artifact = ObjectStackDefinitionSchema.parse({
+      permissions: [
+        ...filler,
+        { name: 'system_admin', objects: { crm_campaign_member: publishedToolchainEntry } },
+      ],
+    } as never);
+    const entry = artifact.permissions![5]!.objects.crm_campaign_member!;
+    expect('allowRestore' in entry).toBe(false);
+    expect('allowPurge' in entry).toBe(false);
+    expect(entry.allowDelete).toBe(true);
+  });
+
+  it('a 75-occurrence artifact parses with NO warning storm (the strip is silent)', () => {
+    // Real artifacts carry the residue once per permission entry (75 in the
+    // HotCRM measurement). The ruled bound is "at most low-noise, never
+    // per-occurrence storms"; the implementation chooses silence — a schema
+    // parse has no notice channel, and the loud channels for authored sources
+    // (tsc `never`, the D2 conversion, `os migrate meta`) are untouched.
+    const spies = (['warn', 'error', 'info', 'log'] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
+    try {
+      const objects: Record<string, unknown> = {};
+      for (let i = 0; i < 38; i++) objects[`obj_${i}`] = { ...publishedToolchainEntry };
+      const parsed = PermissionSetSchema.parse({ name: 'wide_set', objects } as never);
+      expect(Object.keys(parsed.objects)).toHaveLength(38);
+      for (const entry of Object.values(parsed.objects)) {
+        expect('allowRestore' in entry!).toBe(false);
+        expect('allowPurge' in entry!).toBe(false);
+      }
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it('an entry WITHOUT residue passes through by reference (copy-on-write)', () => {
+    // The strip clones only when it removes something — an artifact already on
+    // the clean shape is not rewritten on its way through.
+    const clean = { allowRead: true };
+    const r = ObjectPermissionSchema.safeParse(clean as never);
+    expect(r.success).toBe(true);
+  });
+
+  it('the wire clone tolerates the same residue (an older server emits the defaults)', () => {
+    const r = EffectiveObjectPermissionSchema.safeParse({
+      allowRead: true,
+      allowRestore: false,
+      allowPurge: false,
+      apiOperations: ['get', 'list'],
+    } as never);
+    expect(r.success).toBe(true);
+    expect('allowRestore' in r.data!).toBe(false);
+    expect('allowPurge' in r.data!).toBe(false);
+    expect(r.data!.apiOperations).toEqual(['get', 'list']);
+  });
+
+  it('the authoring surface stays retired: the shape still declares the tombstones', () => {
+    // Nothing is un-retired — the walked shape keeps the `[REMOVED]` rows
+    // (authorable-surface + JSON-schema artifacts publish the tombstone), and
+    // `z.input` keeps the keys `never` so writing one in TypeScript source
+    // fails `tsc` exactly as #12497 ruled. (The `as never` casts across this
+    // file are that channel, exercised.)
+    for (const key of ['allowRestore', 'allowPurge'] as const) {
+      expect(ObjectPermissionSchema.shape[key].description).toMatch(/^\[REMOVED\] /);
+    }
+    // The compile channel, pinned: the residue tolerance is RUNTIME-only, so
+    // the input type still refuses the key — hand-authoring even the retired
+    // default in TypeScript source stays a tsc error.
+    // @ts-expect-error — `allowRestore` stays unwritable on ObjectPermission (#12497, unchanged by #12840)
+    const typeChannel: ObjectPermission = { allowRead: true, allowRestore: false };
+    void typeChannel;
   });
 });
 

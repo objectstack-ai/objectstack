@@ -3259,6 +3259,31 @@ jobs:
       - name: Stall-guard self-test
         run: pnpm check:stall-guard
 
+      # The stall guard's CI-wiring invariant (#11916). The step above proves the
+      # guard still WORKS; this one proves it can still be HEARD. The guarantee —
+      # a stalled job says so instead of sitting in_progress until the job
+      # timeout — holds only while the guard's own kill budget lands before the
+      # enclosing job's `timeout-minutes`, and nothing read that relationship:
+      # measured on f907fbe9e, the only file under `scripts/` mentioning
+      # `timeout-minutes` at all is the guard itself, in two header COMMENTS
+      # explaining it.
+      #
+      # Its regression is invisible on green runs, which is what makes it a gate
+      # rather than a review note: the guard is observable only when it fires, so
+      # a budget that can no longer fire in time scores identically to one that
+      # works. Lowering a job's timeout, raising --stall-minutes, or adding a
+      # guarded step to a short job each break it in one line, silently.
+      #
+      # Walks `.github/workflows/**`, resolves each guard-wrapped step's
+      # effective cap (explicit --stall-cap-minutes, else DEFAULT_CAP_MULTIPLE ×
+      # the window — both READ out of the guard, never copied), and reds unless
+      # the cap clears the binding timeout by at least one stall window. It
+      # REFUSES (exit 2) rather than passing when the sweep finds no guarded step
+      # at all: "every guarded step has headroom" is vacuously true of an empty
+      # population. Reads workflow text only; no build, no network, sub-second.
+      - name: Stall-guard budget invariant
+        run: pnpm check:stall-guard-budget
+
       # The dev-preflight gate's self-test — and deliberately only HALF of that
       # gate (#8170, the second and only other member of #8110's split-gate
       # family). Same neighbour as the step above for the same reason: both are

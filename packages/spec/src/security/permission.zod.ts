@@ -17,7 +17,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * - Purge (Hard delete / Compliance)
  */
 import { lazySchema } from '../shared/lazy-schema';
-import { retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 /**
  * [ADR-0057 D1] Object access DEPTH — the Dataverse "access level" axis,
@@ -73,7 +73,28 @@ const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
   modifyalldata: 'modifyAllRecords',
 };
 
-export const ObjectPermissionSchema = lazySchema(() => strictObject(
+/**
+ * [#12840] The inert residue the #12497 retirement left in BUILT artifacts:
+ * every `@objectstack/spec` 17.x the released toolchain shipped still carried
+ * `z.boolean().default(false)` for both keys, so every artifact it built has
+ * them MATERIALIZED as `false` in every permission entry (75 occurrences in
+ * the measured HotCRM artifact; its sources declare neither). Captured here as
+ * literals at retirement time — never re-read from anywhere live (the schema
+ * no longer has the defaults; the tombstones replaced them). See
+ * {@link acceptRetiredDefaultResidue} for the class rule.
+ */
+const OBJECT_PERMISSION_RETIRED_KEY_RESIDUE = {
+  allowRestore: false,
+  allowPurge: false,
+} as const;
+
+/**
+ * The closed authoring shape, module-private: {@link ObjectPermissionSchema}
+ * is this shape behind the #12840 residue-tolerance stage, and
+ * {@link EffectiveObjectPermissionSchema} extends this (an `.extend()` needs
+ * the real `ZodObject`, and the wrapper is a preprocess pipe).
+ */
+const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
   {
     surface: 'this object permission',
     aliases: OBJECT_PERMISSION_KEY_ALIASES,
@@ -188,6 +209,13 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
    * there is still no ungated window. THE KEYS RETURN with the M2 lifecycle
    * initiative (feature + RBAC in one batch, maintainer 2026-08-03); #1883
    * stays open as the anchor.
+   *
+   * [#12840] Both keys carried `.default(false)` before the retirement, so
+   * every artifact the published 17.x toolchain built has them materialized
+   * as `false` in every entry. That emitted default parses as inert residue
+   * and is STRIPPED by the residue stage on {@link ObjectPermissionSchema}
+   * (`OBJECT_PERMISSION_RETIRED_KEY_RESIDUE`); the tombstones below never see
+   * it. Every other value still lands here, prescription intact.
    */
   allowRestore: retiredKey(
     '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (#12497, ADR-0049) — ' +
@@ -252,6 +280,24 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
 }));
 
 /**
+ * Object-level permission entry — {@link ObjectPermissionBaseSchema} behind
+ * the [#12840] retired-default residue stage.
+ *
+ * The published 17.x toolchain materialized `allowRestore: false` /
+ * `allowPurge: false` into every permission entry of every artifact it built
+ * (the keys carried Zod defaults before #12497 retired them), so the parse
+ * accepts exactly that emitted default as inert residue and STRIPS it — the
+ * parsed output carries neither key, and a round-trip converges to the clean
+ * shape. Any NON-default value (`true`) still lands on the untouched #12497
+ * tombstone with its prescription. Maintainer ruling 2026-08-28 (recorded on
+ * objectstack-ai/cloud#1685): a retired key that had a schema default is
+ * refused only when it carries a non-default value.
+ */
+export const ObjectPermissionSchema = lazySchema(() =>
+  acceptRetiredDefaultResidue(ObjectPermissionBaseSchema, OBJECT_PERMISSION_RETIRED_KEY_RESIDUE),
+);
+
+/**
  * RESPONSE-side extension of {@link ObjectPermissionSchema} carrying the
  * server-resolved effective API operation set for one object (#3391).
  *
@@ -268,16 +314,26 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
  * falls back to its default-allow behavior (old backend / unrestricted object).
  */
 export const EffectiveObjectPermissionSchema = lazySchema(() =>
-  (ObjectPermissionSchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    apiOperations: z.array(ApiOperationSchema).optional().describe(
-      'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum.',
-    ),
-    // WIRE shape: `.extend()` inherits the authoring schema's `.strict()`, and a
-    // strict response parser is forward-incompatible — a newer server adding a
-    // response key would crash an older client. `.strip()` restores zod-default
-    // tolerance here; strictness is an AUTHORING-side contract only (#4001's
-    // authorable/wire split).
-  }).strip(),
+  // [#12840] The same retired-default residue stage as the authoring schema:
+  // a server still running the published 17.x toolchain emits
+  // `allowRestore: false` / `allowPurge: false` in its effective-permission
+  // responses (the defaults were materialized server-side), so the wire parse
+  // accepts-and-strips exactly that residue too; `true` keeps the tombstone
+  // refusal. Extends the BASE object — the tolerance wrapper is a pipe, not a
+  // `ZodObject`.
+  acceptRetiredDefaultResidue(
+    (ObjectPermissionBaseSchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+      apiOperations: z.array(ApiOperationSchema).optional().describe(
+        'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum.',
+      ),
+      // WIRE shape: `.extend()` inherits the authoring schema's `.strict()`, and a
+      // strict response parser is forward-incompatible — a newer server adding a
+      // response key would crash an older client. `.strip()` restores zod-default
+      // tolerance here; strictness is an AUTHORING-side contract only (#4001's
+      // authorable/wire split).
+    }).strip(),
+    OBJECT_PERMISSION_RETIRED_KEY_RESIDUE,
+  ),
 );
 export type EffectiveObjectPermission = z.input<typeof EffectiveObjectPermissionSchema>;
 

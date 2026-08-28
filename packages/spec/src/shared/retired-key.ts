@@ -106,3 +106,106 @@ import { z } from 'zod';
 export function retiredKey(guidance: string) {
   return z.never({ error: () => guidance }).optional().describe(`[REMOVED] ${guidance}`);
 }
+
+/**
+ * The inert residue a RETIRED **DEFAULTED** key leaves behind in built
+ * artifacts: retired key name → the default the retired schema used to emit,
+ * **captured as a literal at retirement time** (#12840).
+ *
+ * ⛔ Never derive an entry from anything live. The whole point of the capture
+ * is that the default no longer exists anywhere in the schema — the tombstone
+ * replaced it — so the only trustworthy record of "what the released toolchain
+ * materialized" is the literal written down when the key was retired.
+ */
+export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | string | null>>;
+
+/**
+ * Accept a retired defaulted key's EMITTED DEFAULT as inert residue — and
+ * strip it — while every other value keeps the tombstone's loud refusal
+ * (#12840; maintainer ruling 2026-08-28, recorded on objectstack-ai/cloud#1685).
+ *
+ * ## The class of retirement this exists for
+ *
+ * {@link retiredKey} makes a removal audible in both authoring channels (`tsc`
+ * `never` + the parse-time prescription). That is the right posture for a key
+ * an author WROTE — but a key that carried a Zod `.default(…)` has a third
+ * population nobody authored: **every artifact built by a released toolchain
+ * has the key MATERIALIZED at its default in every entry**, because the parse
+ * that built the artifact emitted the default. Refusing that emitted default
+ * sentences every previously built artifact — marketplace packages, installed
+ * environments — to death on the next runtime upgrade, over a value that is
+ * behaviourally identical to absence for the key's entire history. (The
+ * founding case: `allowRestore`/`allowPurge` after #12497 — the published
+ * spec 17.x still emitted `false` for both, 75 occurrences in one real
+ * artifact whose sources declare neither.)
+ *
+ * So a retired **defaulted** key discriminates on the VALUE:
+ *
+ *   - value `===` the retired default → inert residue: accepted, and STRIPPED
+ *     before the shape parses, so the normalized output does not carry the key
+ *     and a parse → serialize round-trip converges to the clean shape (no
+ *     re-emission). The strip is deliberately SILENT — real artifacts carry
+ *     the residue once per permission entry, and a per-occurrence notice would
+ *     be a 75-line storm that teaches operators to skim; the loud channels for
+ *     authored sources (tsc `never`, `os migrate meta`, the D2 conversion)
+ *     are unchanged.
+ *   - any other value → the untouched {@link retiredKey} refusal, guidance
+ *     byte-for-byte: the key stays a tombstone in the shape, and this wrapper
+ *     never runs on a non-default value, so the prescription and the
+ *     `expected: 'never'` issue shape are exactly what the retirement ruled.
+ *
+ * ## Nothing is un-retired
+ *
+ * The authoring surface keeps every refusal the retirement established: the
+ * shape still declares the key as a {@link retiredKey} tombstone (`z.input`
+ * stays `never`, so writing the key in TypeScript source fails `tsc` exactly
+ * as before), the JSON-schema/authorable-surface artifacts still publish the
+ * `[REMOVED]` tombstone row, and a non-default value is refused with the
+ * original prescription everywhere. What changes is only the disposition of
+ * the **emitted default in already-parsed data** — provenance that JSON cannot
+ * carry, which is why the discrimination is by value, as ruled.
+ *
+ * ## Mechanism and placement
+ *
+ * A `z.preprocess` stage ahead of the closed shape (the `ViewMetadataSchema` /
+ * `translation` retired-dialect precedent — every schema walker resolves a
+ * preprocess pipe to its OUT side via `pipeAuthorableSide`, #4488/#5074/#5317).
+ * The strip is copy-on-write: an input without residue passes through by
+ * reference. The wrapper preserves a read-through `shape` (the inner shape is
+ * the authorable truth), but it is NOT a `ZodObject` — `.extend()` a
+ * tolerance-wrapped schema by extending the inner object and re-wrapping, the
+ * way `EffectiveObjectPermissionSchema` does.
+ *
+ * The next retirement of a defaulted key reuses this helper with its own
+ * captured literal instead of re-inventing the judgement.
+ */
+export function acceptRetiredDefaultResidue<S extends z.ZodObject<z.ZodRawShape>>(
+  schema: S,
+  residue: RetiredDefaultResidue,
+): z.ZodType<z.output<S>, z.input<S>> & { readonly shape: S['shape'] } {
+  const keys = Object.keys(residue);
+  const strip = (body: unknown): unknown => {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return body;
+    let out: Record<string, unknown> | undefined;
+    for (const key of keys) {
+      if (
+        Object.prototype.hasOwnProperty.call(body, key) &&
+        (body as Record<string, unknown>)[key] === residue[key]
+      ) {
+        out ??= { ...(body as Record<string, unknown>) };
+        delete out[key];
+      }
+    }
+    return out ?? body;
+  };
+  const pipe = z.preprocess(strip, schema);
+  // Read-through `shape` so shape-reading consumers (and the walkers' duck
+  // tests) see the inner authorable shape. Lazy: never forces a lazySchema
+  // proxy at construction. Note `.describe()`/`.optional()` clones do not
+  // carry this instance property — it exists on the exported instance only.
+  Object.defineProperty(pipe, 'shape', {
+    configurable: true,
+    get: () => schema.shape,
+  });
+  return pipe as unknown as z.ZodType<z.output<S>, z.input<S>> & { readonly shape: S['shape'] };
+}
