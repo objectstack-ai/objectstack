@@ -33,8 +33,12 @@ module's own file and resolve the same `@objectstack/spec/package.json`. Both
 conditions now load and `resolveInstalledSpecVersion()` returns the identical
 value in each.
 
-No API, type or behaviour change: the ESM output is byte-identical apart from
-the source comment, and nothing an author writes moves.
+No API, type or behaviour change, and the ESM half is untouched — measured
+rather than assumed: rebuilding with and without the shim, the emitted ESM code
+bytes are identical in every file, and the whole difference is the shared
+chunk's content-hashed **filename** (`chunk-DDDKWTSW.js` → `chunk-46MG4YHS.js`)
+and the `sourceMappingURL` line naming it. Chunk names are internal to the
+package; no `exports` target moves. Nothing an author writes moves either.
 
 **The class is now gated.** `pnpm check:dual-build-cjs-loads` (a step in the
 required **Build Core** job) parses every emitted CommonJS file and `require()`s
