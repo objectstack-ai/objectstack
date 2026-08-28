@@ -33,6 +33,8 @@
     "storage",
     "---More---",
     "error-code-ledger",
+    "misc",
+    "package-lifecycle",
     "sortability"
   ]
 }

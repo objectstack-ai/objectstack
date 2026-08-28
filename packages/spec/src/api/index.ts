@@ -88,3 +88,7 @@ export * from './package-lifecycle.zod';
 // so the route-ledger resolver, which searches only `@objectstack/spec/api`,
 // can name it.
 export { ResolvedEntrySchema, ResolvedGroupSchema, ResolvedBookSchema } from '../system/book.zod';
+// …with their existing types (the interfaces `resolveBookTree` is typed by,
+// pinned type-identical to the schemas in `system/book.test.ts`) — the same
+// single-declaration re-export, so the `/api` page's import line works.
+export type { ResolvedEntry, ResolvedGroup, ResolvedBook } from '../system/book.zod';
