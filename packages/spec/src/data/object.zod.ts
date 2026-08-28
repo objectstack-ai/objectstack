@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { FieldSchema } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
-import { ActionSchema } from '../ui/action.zod';
+import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
 
 /**
@@ -2358,7 +2358,41 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
  * silent strip into a `tsc` error at the authoring site as well as at build.
  */
 type NoExcessObjectKeys<T> = T &
-  Record<Exclude<keyof T, keyof z.input<typeof ObjectSchemaBase>>, never>;
+  Record<Exclude<keyof T, keyof z.input<typeof ObjectSchemaBase>>, never> &
+  NoExcessNestedActionParams<T>;
+
+/**
+ * [#12615] Extends the compile-time excess-key rejection one level DOWN, to the
+ * action-param literals nested inside `actions[].params[]`.
+ *
+ * Why the top-level trick alone does not reach them: `create()` infers `T`
+ * from the argument itself, so the argument always matches `T` exactly and
+ * TypeScript's excess-property (freshness) checking never fires — at any
+ * depth. {@link NoExcessObjectKeys} compensates at the top level by mapping
+ * every non-schema key to `never`; nested literals had no such map, so a
+ * typo'd param key (measured 2026-08-26: `carryOverX` on
+ * `sys-permission-set.object.ts`) sailed through `tsc` and was caught only by
+ * `ActionParamSchema`'s strict parse at module load. This mirrors the same
+ * map over each element of each action's `params` array, turning the typo
+ * into a located compile error at the authoring site.
+ *
+ * Compile-layer signal only — the strict parse at module load remains the
+ * enforcement of record; nothing here changes what parses or when.
+ */
+type NoExcessNestedActionParams<T> =
+  T extends { actions: infer As extends readonly unknown[] }
+    ? { actions: { [I in keyof As]: NoExcessActionParams<As[I]> } }
+    : unknown;
+
+/** Maps one action literal: constrain each of its `params` entries, if any. */
+type NoExcessActionParams<A> =
+  A extends { params: infer Ps extends readonly unknown[] }
+    ? A & { params: { [I in keyof Ps]: NoExcessActionParamKeys<Ps[I]> } }
+    : A;
+
+/** One action-param literal: every key outside `ActionParam` becomes `never`. */
+type NoExcessActionParamKeys<P> = P &
+  Record<Exclude<keyof P, keyof ActionParam>, never>;
 
 /** Object names already warned about a generic `password` field (dedup per name). */
 const warnedPasswordObjects = new Set<string>();

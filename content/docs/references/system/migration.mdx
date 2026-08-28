@@ -465,7 +465,7 @@ Add a new field to an existing object
 | **fieldName** | `string` | ✅ | Name of the field to add |
 | **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }` | ✅ | Full field definition to add |
 
-### Nested Shape: `MigrationOperation.field`
+### Nested Shape: `MigrationOperation[type='add_field'].field`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -590,7 +590,7 @@ Create a new object
 | **type** | `'create_object'` | ✅ |  |
 | **object** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full object definition to create |
 
-### Nested Shape: `MigrationOperation.object`
+### Nested Shape: `MigrationOperation[type='create_object'].object`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
