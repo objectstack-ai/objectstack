@@ -945,14 +945,40 @@ ledger_append() {
 #
 # ⚠️ The repair is NOT a bigger constant, and the reason is that the number to
 # size it against does not exist. The ledger cannot price a p95 of legitimate
-# holds: it lives in this container's /tmp and starts empty on every reset, so
-# the population it holds is one shift's worth of whatever ran since — read on
-# 2026-08-27 it was 24 records, max hold 344s, max wait 3s, ZERO queue-timeouts
-# and arrival depth 1 on every single record, i.e. not one contended run of the
-# kind this card is about. Picking `HARD_CAP_S * 6` off the back of four
-# hand-correlated anecdotes would be a constant with the same standing as the
-# one it replaced, and it would be wrong again the first time three long holds
-# queue up instead of two.
+# holds: its population starts where the ledger FILE starts and no earlier —
+# for reasons nobody has characterised, stated below — so what it holds is
+# whatever ran since, a stretch of hours in every reading so far and never a
+# fleet history. Read on 2026-08-27 it was 24 records, max hold 344s, max wait 3s,
+# ZERO queue-timeouts and arrival depth 1 on every single record, i.e. not one
+# contended run of the kind this card is about. Picking `HARD_CAP_S * 6` off
+# the back of four hand-correlated anecdotes would be a constant with the same
+# standing as the one it replaced, and it would be wrong again the first time
+# three long holds queue up instead of two.
+#
+# ⛔ WHAT USED TO STAND WHERE THAT FLOOR STANDS, AND WHY IT IS GONE. This
+# paragraph reasoned from "it lives in this container's /tmp and starts empty
+# on every reset". That mechanism is NOT RELIABLE, and it was measured not
+# holding — twice, against two different ledger files: on 2026-08-28T01:00Z all
+# 74 records in the live ledger, and the file's own birth time, PREDATED the
+# boot `/proc/uptime` reported, the oldest by 8h11m; at 08:26Z the same day, on
+# a ledger born after that reading, all 14 records and the file's birth
+# predated the reported boot again, the oldest by 2h03m. Both readings carry
+# both controls, in one command: a file touched at that moment read as AFTER
+# the derived boot, so the comparison can return either answer; and PID 1
+# started under half a second after that boot, so `/proc/uptime` and the
+# process tree agree with EACH OTHER. It is the FILESYSTEM that did not restart
+# with them, not the clock that is wrong. The default path cannot carry the
+# claim either: `OS_VERIFY_LOCK_LEDGER` redirects the ledger, and a path is a
+# LOCATION while a population is an INTERVAL. `--report`'s scope block states
+# this same floor the same way, and for this same reason.
+#
+# ⛔ AND THE OPPOSITE PREMISE IS NOT CLAIMED: nothing above measured that /tmp
+# SURVIVES a reset. Two readings disqualify a mechanism; they do not establish
+# its negation, and WHY these files outlive a reported boot is uncharacterised
+# — establishing that is a real measurement across several restarts and several
+# hosts, not a comment edit. ⭐ The arithmetic above needs NEITHER answer: it
+# rests on the population being BOUNDED and thin, which every reading agrees
+# on, and never on why it begins where it does.
 #
 # What the bound is actually FOR is discarding a place nobody is coming back
 # for. So it asks that, and nothing else: the age is the time since the slot

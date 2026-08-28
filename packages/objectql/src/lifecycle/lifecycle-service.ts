@@ -48,7 +48,12 @@ import type {
  *     it produces no audit rows either way, and `sys_file`, the one that is
  *     audited, already reaped per id because it carries reap guards.
  *   - A sweep failure is logged and isolated; it never throws into the
- *     scheduler and never blocks other objects' policies.
+ *     scheduler and never blocks other objects' policies. [#12853] One
+ *     deliberate exception to the second half: a governance snapshot that
+ *     could not be READ aborts the whole sweep before any policy is applied,
+ *     because every object's window would otherwise be decided from evidence
+ *     nobody gathered. It is still not THROWN — `sweep()` reports it through
+ *     `report.errors` and logs it, like every other failure here.
  */
 
 /** Cross-tenant operator context — lifecycle is a system policy, not a user
@@ -600,7 +605,41 @@ export class LifecycleService {
         .filter((o) => o?.lifecycle && o.lifecycle.class !== 'record');
 
       // Governance snapshot (P4): settings-driven overrides / quotas.
-      this.governance = await this.loadGovernance(engine, declared);
+      //
+      // [#12853] A snapshot that could not be READ aborts the sweep here,
+      // before a single policy is applied. `loadGovernance` throws only when
+      // the `sys_organization` scan failed for a non-benign reason, and every
+      // window this sweep would use is downstream of that scan — so carrying on
+      // means reaping every tenant against the global window while believing it
+      // was the configured one. Deferring costs a sweep; the rows are still
+      // there for the next one.
+      //
+      // Reported and logged rather than rethrown, deliberately. `sweep()`'s
+      // declared contract is that it never throws (`LifecycleSweepReport.errors`
+      // is its failure channel) and the scheduler enters it as
+      // `void this.sweep()`, where a rejection is unhandled — the same
+      // objection #8906 recorded when it declined to rethrow from
+      // `checkGovernance` one method below. One `errors` entry per declared
+      // object, because that field means "a lifecycle policy did not get
+      // applied" and here none of them did.
+      try {
+        this.governance = await this.loadGovernance(engine, declared);
+      } catch (error) {
+        const msg = (error as Error)?.message ?? String(error);
+        for (const obj of declared) {
+          report.errors.push({
+            object: obj.name,
+            error:
+              `governance snapshot could not be loaded (${msg}) — sweep aborted before any policy ` +
+              `was applied, so no rows were reaped for this object`,
+          });
+        }
+        this.opts.logger.warn(
+          `[lifecycle] governance snapshot could not be loaded (${msg}); sweep aborted before any ` +
+            'policy was applied — no rows were reaped, and the next scheduled sweep retries',
+        );
+        return report;
+      }
       if (!this.governance.enabled) {
         this.opts.logger.debug?.('[lifecycle] disabled via settings; sweep skipped');
         return report;
@@ -731,8 +770,13 @@ export class LifecycleService {
   }
 
   /** Resolve the `lifecycle` settings namespace into a per-sweep snapshot.
-   * Every read is best-effort: no settings service / unregistered namespace
-   * ⇒ declared policies apply unmodified. */
+   * Every SETTINGS read is best-effort: no settings service / unregistered
+   * namespace ⇒ declared policies apply unmodified.
+   *
+   * [#12853] The tenant scan is not. A `sys_organization` read that FAILED
+   * throws out of here, because an empty `tenantOverrides` is the same value
+   * as "this deployment has no tenant overrides" and the caller acts on the
+   * difference by DELETING rows. See the catch below. */
   private async loadGovernance(
     engine: LifecycleEngineLike,
     declared: LifecycleObjectLike[],
@@ -783,8 +827,37 @@ export class LifecycleService {
             snapshot.tenantOverrides.set(objectName, list);
           }
         }
-      } catch {
-        // No sys_organization (single-tenant kernel) — tenant overrides n/a.
+      } catch (error) {
+        // [#12853] Discriminate by error TYPE. `snapshot.tenantOverrides` is
+        // the ADR-0057 §3.2 per-tenant retention/expiry window set, and an
+        // EMPTY map is not a neutral value: `reap()` and `archiveObject()` read
+        // it as "this deployment has tuned no tenant", fall every tenant back
+        // to the global window, and DELETE on it. That window is wrong in both
+        // directions — a tenant configured to retain LONGER has its rows
+        // expired early, and one configured to retain shorter keeps them.
+        //
+        // The bare `catch {}` this replaces answered every cause that way, and
+        // nothing reported it: `GovernanceSnapshot` carries no field saying the
+        // tenant pass did not complete, and the catch logged nothing. So a
+        // connection drop, a timeout, a permission refusal or a driver fault
+        // produced a deletion executed on knowingly incomplete evidence, by an
+        // executor that did not know it was incomplete. ADR-0110 D3's shape,
+        // with a delete on the wrong side of it.
+        //
+        // Benign, and the only one — precisely the cause the swallowed comment
+        // already named: no `sys_organization` at all (a single-tenant kernel),
+        // i.e. its TABLE was never provisioned. It can hold no organization, so
+        // "no tenant overrides" IS the truth and the global window is the right
+        // window for everyone. Asked through the shared `isMissingTableError`
+        // predicate (`@objectstack/metadata/errors`) — the same call
+        // `checkGovernance` makes below — never a hand-rolled message test.
+        //
+        // Everything else propagates to `sweep()`, which aborts the sweep
+        // before applying any policy. For a DELETION action, "do not act on
+        // incomplete evidence" is the correct failure direction: a log cannot
+        // bring back a reaped row, and the rows this defers are still there for
+        // the next sweep to reap once the read succeeds.
+        if (!isMissingTableError(error)) throw error;
       }
     }
 
