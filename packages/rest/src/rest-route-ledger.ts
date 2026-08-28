@@ -143,13 +143,21 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // `/meta/zzz_not_a_type`.
   { route: 'GET /api/v1/meta/types', family: 'metadata', source: 'route-manager', disposition: 'server-only',
     note: 'richer types listing consumed by Studio tooling directly; the SDK reads the same body from GET /meta (meta.getTypes). Mirrors the `GET /meta/types` row in runtime/src/route-ledger.ts' },
-  { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getDiagnostics' },
-  { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts' },
+  { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getDiagnostics',
+    responseSchema: 'GetMetaDiagnosticsResponseSchema',
+    note: '[#12038] REST-only route; this server answers the payload BARE (`res.json(result)`, no envelope), so the named schema is the whole body on this surface. Describe-only transcription of `getMetaDiagnostics`\'s declared return; conformance: spec `api/protocol.test.ts`' },
+  { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts',
+    responseSchema: 'ListDraftsResponseSchema',
+    note: '[#12038] on THIS surface the payload is answered BARE (`res.json(result)`); the dispatcher twin (runtime ledger row) answers the same payload through the `{ success, data }` envelope — the named schema is the PAYLOAD, true on both surfaces. Describe-only transcription of `listDrafts`\'s declared return; conformance: spec `api/protocol.test.ts`' },
   { route: 'POST /api/v1/meta/_migrate-stored', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateStored',
-    note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }' },
+    note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }. DELIBERATELY UNBOUND (#12038 ruling 2C) — this row would name the schema, but the report\'s only named type, `StoredMigrationReport`, lives in `@objectstack/metadata-protocol` (unreachable from the spec/api namespace this field resolves against); a second declaration in spec would drift against the CLI rendering the same report. Answered BARE on this surface, enveloped on the dispatcher twin' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
-  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences' },
-  { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getBookTree' },
+  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences',
+    responseSchema: 'FindReferencesToMetaResponseSchema',
+    note: '[#12038] REST-only route; payload answered BARE, so the named schema is the whole body. Describe-only transcription of `findReferencesToMeta`\'s declared return; conformance: spec `api/protocol.test.ts`' },
+  { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getBookTree',
+    responseSchema: 'ResolvedBookSchema',
+    note: '[#12038] REST-only route; payload answered BARE — `resolveBookTree()`\'s `ResolvedBook`, verbatim. The schema is declared beside its interfaces in spec `system/book.zod.ts` and re-exported into `/api` (ruling 5A); conformance: spec `system/book.test.ts`' },
   // [#5882] The three-layer diagnostic projection, promoted from the
   // `?layers=true` flag on the row below to a path of its own so that one path
   // answers one response shape. `responseSchema` is filled because this mount
@@ -177,12 +185,17 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'REST-only: the dispatcher /meta branch has no DELETE handling — it falls into the read path. [#7019] gated on `manage_metadata` (ADR-0066 D1), same mechanism as the PUT twins — but NOT for the ADR-0106 reason: nothing is masked or round-tripped here, this discards a customization overlay outright, and `?dropStorage=true` takes the object table with it. [#12702] same shared verdict as the PUT door: an admitted `manage_org_presentation` reset threads the caller\'s own organization, so the only row it can discard is their own org\'s overlay' },
   { route: 'GET /api/v1/meta/:type/:name/history', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getHistory',
     note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s' },
-  { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAudit' },
+  { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAudit',
+    responseSchema: 'AuditMetaItemResponseSchema',
+    note: '[#12038] REST-only route; payload answered BARE, so the named schema is the whole body. The schema predates this row (#11678, exact field-for-field match of `auditMetaItem`\'s declared return); conformance: the #11678 capture suite in spec `api/protocol.test.ts`' },
   { route: 'POST /api/v1/meta/:type/:name/publish', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.publishItem',
     note: 'per-item ADR-0033 publish; packages.publishDrafts remains the package-scoped flow. [#12702] gated by the shared `metaWriteCapabilityVerdict`: `manage_org_presentation` is also admitted for an org-scoped tier-A promotion — the second half of the save→publish loop, promoting only the caller\'s own org partition' },
   { route: 'POST /api/v1/meta/:type/:name/rollback', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.rollbackItem',
-    note: '[#12702] gated by the shared `metaWriteCapabilityVerdict`: `manage_org_presentation` is also admitted for an org-scoped tier-A rollback, restoring only a version of the caller\'s own org overlay' },
-  { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.diffItem' },
+    responseSchema: 'RollbackMetaItemResponseSchema',
+    note: '[#12702] gated by the shared `metaWriteCapabilityVerdict`: `manage_org_presentation` is also admitted for an org-scoped tier-A rollback, restoring only a version of the caller\'s own org overlay. [#12038] REST-only route; payload answered BARE, so the named schema is the whole body — describe-only transcription of `rollbackMetaItem`\'s declared return; conformance: spec `api/protocol.test.ts`' },
+  { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.diffItem',
+    responseSchema: 'DiffMetaItemResponseSchema',
+    note: '[#12038] REST-only route; payload answered BARE, so the named schema is the whole body. Describe-only transcription of `diffMetaItem`\'s declared return; conformance: spec `api/protocol.test.ts`' },
   // [#7526] The two routes that were ledgered in `runtime/src/route-ledger.ts`
   // and implemented in the dispatcher, but which no registrar ever mounted —
   // so the SDK guard (#3642) certified them off a DECLARATION while they died
@@ -199,7 +212,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
     note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end. #9180 step 2 retired the plural `/api/v1/meta/objects/:name/state/:field` twin that used to carry this `sdk` disposition, and the SDK now spells the segment `object` — the `/meta` type segment is singular, always. The retired twin was a DECLARED registration, not a `META_URL_TO_SINGULAR` fold tolerance (this route matches a literal segment and never consulted the fold), so the boundary accept set is unchanged. ⚠ What the retirement did NOT make universal, because an author reading only this row would assume it did: the legacy dispatcher `/meta` if-chain in `packages/runtime/src/domains/meta.ts` still matches BOTH literals, so the plural is refused HERE and still answered wherever `dispatch()` fronts the request instead of this server. That is deliberate, by the maintainer re-weigh of 2026-08-17 (item 3: no new refusals beyond step 1; the external break deferred with no scheduled window), and it is recorded with its provenance on the dispatcher ledger row plus `runtime/src/domains/meta-state-plural-tolerance.test.ts` (#10179)' },
   { route: 'GET /api/v1/meta/:type/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
-    note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name)' },
+    responseSchema: 'GetPublishedMetaItemResponseSchema',
+    note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name). [#12038 ruling 1C] the named schema is DELIBERATELY OPAQUE (`z.unknown()`): the route answers an arbitrary metadata item body, BARE on this surface (enveloped on the dispatcher twin) — never a union frozen against the type registry' },
 
   // [#12195] THREE ROWS RETIRED HERE — `GET /api/v1/meta/:type/:section/:name`,
   // `PUT` on the same path, and `GET …/:section/:name/published`. They were the

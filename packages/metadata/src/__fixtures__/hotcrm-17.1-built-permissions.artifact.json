@@ -1,0 +1,1044 @@
+{
+  "manifest": {
+    "id": "app.objectstack.hotcrm",
+    "namespace": "crm",
+    "defaultDatasource": "default",
+    "version": "3.0.0",
+    "type": "app",
+    "scope": "project",
+    "name": "HotCRM",
+    "description": "AI-Native CRM for the ObjectStack marketplace — Accounts, Contacts, Leads, Opportunities, Cases, Knowledge, Forecasts, Campaigns, Contracts.",
+    "engines": {
+      "protocol": "^17.1.0"
+    }
+  },
+  "permissions": [
+    {
+      "name": "guest_portal",
+      "label": "Guest (Public Forms)",
+      "description": "Anonymous visitors submitting public Web-to-Lead / Web-to-Case forms. INSERT-only on lead and case; no read/edit/delete on any object.",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": true,
+          "allowRead": false,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_case": {
+          "allowCreate": true,
+          "allowRead": false,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      }
+    },
+    {
+      "name": "marketing_user",
+      "label": "Marketing User",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_account": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_contact": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_campaign": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_opportunity": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_campaign_member": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_article_feedback": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_knowledge_article": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "crm_opportunity.amount": {
+          "readable": true,
+          "editable": false
+        },
+        "crm_account.health_score": {
+          "readable": true,
+          "editable": false
+        }
+      },
+      "rowLevelSecurity": [
+        {
+          "name": "opportunity_private_owner_only_marketing",
+          "label": "Private opportunities stay with their owner",
+          "description": "A deal flagged Private is visible only to its owner, even to holders of org-wide opportunity read.",
+          "object": "crm_opportunity",
+          "operation": "select",
+          "using": "is_private == false || owner_id == current_user.id",
+          "enabled": true
+        },
+        {
+          "name": "marketing_campaign_updates",
+          "label": "Marketing works any campaign",
+          "description": "Marketing users edit any campaign (and thereby enrol members into it), not only campaigns they created.",
+          "object": "crm_campaign",
+          "operation": "update",
+          "using": "id != null",
+          "enabled": true
+        },
+        {
+          "name": "marketing_campaign_member_updates",
+          "label": "Marketing updates any campaign member",
+          "description": "Marketing users update member response state on rows they did not personally create.",
+          "object": "crm_campaign_member",
+          "operation": "update",
+          "using": "id != null",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "sales_manager",
+      "label": "Sales Manager",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_account": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_contact": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_opportunity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_quote": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_contract": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false,
+          "writeScope": "own_and_reports"
+        },
+        "crm_product": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_campaign": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_case": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_task": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_event": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_event_attendee": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_forecast": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_article_feedback": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_knowledge_article": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_campaign_member": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_opportunity_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_quote_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "crm_opportunity.amount": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_account.health_score": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_quote.internal_notes": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_case.internal_notes": {
+          "readable": true,
+          "editable": false
+        }
+      },
+      "rowLevelSecurity": [
+        {
+          "name": "opportunity_private_owner_only",
+          "label": "Private opportunities stay with their owner",
+          "description": "A deal flagged Private is visible only to its owner, even to holders of org-wide opportunity read.",
+          "object": "crm_opportunity",
+          "operation": "select",
+          "using": "is_private == false || owner_id == current_user.id",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "sales_rep",
+      "label": "Sales Representative",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_account": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_contact": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_opportunity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_quote": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_contract": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_product": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_campaign": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_case": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_task": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_event": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_event_attendee": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_article_feedback": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_knowledge_article": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_forecast": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_opportunity_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_quote_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_campaign_member": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "crm_account.annual_revenue": {
+          "readable": true,
+          "editable": false
+        },
+        "crm_account.description": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_opportunity.amount": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_opportunity.probability": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_account.health_score": {
+          "readable": true,
+          "editable": false
+        },
+        "crm_quote.internal_notes": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_case.internal_notes": {
+          "readable": false,
+          "editable": false
+        }
+      }
+    },
+    {
+      "name": "service_agent",
+      "label": "Service Agent",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_account": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_contact": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_opportunity": {
+          "allowCreate": false,
+          "allowRead": false,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_case": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowExport": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_task": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_event": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false,
+          "readScope": "own"
+        },
+        "crm_event_attendee": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": false,
+          "modifyAllRecords": false
+        },
+        "crm_product": {
+          "allowCreate": false,
+          "allowRead": true,
+          "allowEdit": false,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_article_feedback": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        },
+        "crm_knowledge_article": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": false,
+          "allowTransfer": false,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": false
+        }
+      },
+      "fields": {
+        "crm_case.is_sla_violated": {
+          "readable": true,
+          "editable": false
+        },
+        "crm_case.resolution_time_hours": {
+          "readable": true,
+          "editable": false
+        },
+        "crm_case.internal_notes": {
+          "readable": true,
+          "editable": true
+        },
+        "crm_account.health_score": {
+          "readable": true,
+          "editable": false
+        }
+      }
+    },
+    {
+      "name": "tenant_admin",
+      "label": "Tenant Administrator",
+      "isDefault": false,
+      "objects": {
+        "crm_lead": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_account": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_contact": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_opportunity": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_quote": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_contract": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_product": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_campaign": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_case": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowExport": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_task": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_event": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_event_attendee": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_forecast": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_article_feedback": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_knowledge_article": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_opportunity_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_quote_line_item": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        },
+        "crm_campaign_member": {
+          "allowCreate": true,
+          "allowRead": true,
+          "allowEdit": true,
+          "allowDelete": true,
+          "allowTransfer": true,
+          "allowRestore": false,
+          "allowPurge": false,
+          "viewAllRecords": true,
+          "modifyAllRecords": true
+        }
+      },
+      "systemPermissions": [
+        "view_setup",
+        "manage_org_users",
+        "view_all_data",
+        "modify_all_data",
+        "manage_sharing"
+      ]
+    }
+  ]
+}

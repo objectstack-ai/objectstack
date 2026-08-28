@@ -419,6 +419,23 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'row — a result envelope that merely spells itself `code`.',
     },
     {
+        code: 'OS_METADATA_CONVERTED',
+        file: 'packages/metadata-core/src/artifact-forward-conversion.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The same ADR-0087 conversion-notice vocabulary as the apply.ts row above, met at a TYPE ' +
+            'position: `ArtifactConversionNotice.code` is the literal in a structural mirror of ' +
+            "ConversionNotice, declared so the artifact-ingestion forward-conversion policy (#12772) " +
+            'keeps the spec ROOT import out of its public declaration surface (the root reference made ' +
+            "every downstream type program load the 2MB root twice and pushed a TEST_DEBT re-measure " +
+            "over CI's tsc heap ceiling). A literal type stamps nothing at runtime — notices flow to an " +
+            '`onNotice` callback exactly as in the row above, nothing is thrown and no envelope is ' +
+            'built; the mirror is pinned against the real declaration in both assignability directions ' +
+            'by `artifact-forward-conversion.test.ts`.',
+    },
+    {
         code: 'OS_METADATA_CONVERSION_CONFLICT',
         file: 'packages/spec/src/conversions/apply.ts',
         shape: 'objlitconst',

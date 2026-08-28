@@ -14,6 +14,11 @@ export * from './in-memory-repository.js';
 export * from './cache.js';
 export * from './layered-repository.js';
 export * from './protocol-handshake.js';
+// #12772 — versioned forward conversion for compiled artifacts at an
+// ingestion door: replays the ADR-0087 chain (retired entries included) over
+// an artifact whose declared `engines.protocol` floor predates the running
+// spec, so within-line key retirements do not brick already-built artifacts.
+export * from './artifact-forward-conversion.js';
 export * from './objects/index.js';
 
 // [#5619] The ObjectQL WRITE-VERB dispatch predicates (#4550 delete / #5480

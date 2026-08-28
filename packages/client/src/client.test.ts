@@ -260,7 +260,13 @@ describe('ObjectStackClient', () => {
     });
 
     it('meta.getDiagnostics pins GET /meta/diagnostics with its query params', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { items: [] } });
+        // [#12038] Producer-true mock: `getMetaDiagnostics` answers
+        // `{ entries, total, scannedTypes, scannedItems, stats }` — the old
+        // `{ items: [] }` mock was an invented shape the route never answered.
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { entries: [], total: 0, scannedTypes: 0, scannedItems: 0, stats: {} },
+        });
         await client.meta.getDiagnostics();
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/meta/diagnostics',
@@ -280,7 +286,13 @@ describe('ObjectStackClient', () => {
     });
 
     it('meta.getBookTree pins GET /meta/book/:name/tree', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { tree: [] } });
+        // [#12038] Producer-true mock: the route answers `resolveBookTree()`'s
+        // `ResolvedBook` (`{ name, label?, groups }`) — the old `{ tree: [] }`
+        // mock was an invented shape the route never answered.
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { name: 'handbook', groups: [] },
+        });
         await client.meta.getBookTree('handbook', { packageId: 'com.example.docs' });
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/meta/book/handbook/tree?package=com.example.docs',
@@ -305,7 +317,14 @@ describe('ObjectStackClient', () => {
     });
 
     it('meta.rollbackItem pins POST /meta/:type/:name/rollback with toVersion', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { restored: true } });
+        // [#12038] Producer-true mock: `rollbackMetaItem` answers
+        // `{ success, version, seq, restoredFromVersion, message? }` — the old
+        // `{ restored: true }` mock was an invented shape the route never
+        // answered.
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { success: true, version: 'W/"4"', seq: 4, restoredFromVersion: 3 },
+        });
         await client.meta.rollbackItem('object', 'customer', 3);
         const [url, init] = fetchMock.mock.calls[0];
         expect(String(url)).toBe('http://localhost:3000/api/v1/meta/object/customer/rollback');
@@ -314,7 +333,14 @@ describe('ObjectStackClient', () => {
     });
 
     it('meta.diffItem pins GET /meta/:type/:name/diff with from/to', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { changes: [] } });
+        // [#12038] Producer-true mock: `diffMetaItem` answers
+        // `{ type, name, fromVersion, toVersion, added, removed, changed }` —
+        // the old `{ changes: [] }` mock was an invented shape the route never
+        // answered.
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { type: 'object', name: 'customer', fromVersion: 2, toVersion: 5, added: [], removed: [], changed: [] },
+        });
         await client.meta.diffItem('object', 'customer', { from: 2, to: 5 });
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/meta/object/customer/diff?from=2&to=5',

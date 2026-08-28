@@ -1862,10 +1862,47 @@ mode_report() {
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/waited" | tr -d ' ')" "$(pct_of "${tmp}/waited" 50)" \
     "$(pct_of "${tmp}/waited" 90)" "$(pct_of "${tmp}/waited" 100)"
-  printf 'lock hold, over runs that acquired (seconds):\n'
+  # ⚠ THE FILTER, NOT THE ACQUISITION. `v > 0` above is shared by all three
+  # buckets, and it is the `waited` heading it fits: a recorded `waited` of 0 IS
+  # "did not wait at all", so that one describes its population and ⛔ must not be
+  # touched. It does NOT describe an acquisition. `held` is written by every
+  # terminal outcome, so `held=0` names two disjoint things at once -- a run that
+  # never acquired (queue-timeout, lock-unusable and filter-matches-nothing each
+  # record a literal 0) and a run that acquired and released inside one clock
+  # tick -- and the old heading, "over runs that acquired", claimed the bucket
+  # held the second kind while the filter drops it. Measured: 3 of 69 rows on the
+  # ledger this was filed from, one of which had waited 78s for the lock. The
+  # direction is the awkward one -- the dropped rows are the FASTEST holds, so
+  # p50 and p90 read high, and they read higher the better the fleet gets at
+  # holding the lock briefly.
+  #
+  # ⛔ THE REPAIR IS THE HEADING AND NOT THE FILTER, and that is not a matter of
+  # taste. Admitting `held=0` here would move `n`, `p50` and `p90` for every
+  # ledger, past and future: a figure quoted from an older report would stop
+  # matching a re-run over the very same rows, with nothing in either report
+  # saying why. That is a change of DEFINITION and it is carved out to its own
+  # card; this line only stops the report naming a population it does not have.
+  #
+  # ⛔ AND IT SAYS "RECORDED", not "held it for at least a second" -- the obvious
+  # spelling, and measurably false. `held` is a difference of two whole-second
+  # clock reads (`now_s`), so a 200ms hold that straddles a tick records 1 while
+  # a 900ms hold inside one records 0. The filter admits a recorded VALUE;
+  # promoting that to a claim about true duration would rebuild this card's own
+  # defect one line further down.
+  printf 'lock hold, over runs whose RECORDED hold is 1s or more (seconds):\n'
   printf '  n=%s  p50=%s  p90=%s  max=%s\n' \
     "$(wc -l < "${tmp}/held" | tr -d ' ')" "$(pct_of "${tmp}/held" 50)" \
     "$(pct_of "${tmp}/held" 90)" "$(pct_of "${tmp}/held" 100)"
+  printf '  ⇒ this n is BELOW the record count at the top, and the gap is not rounding:\n'
+  printf '    every row recording held=0 is absent. That is the runs that never acquired\n'
+  printf '    AND the runs that acquired and let go inside one clock tick, so the fastest\n'
+  printf '    holds are the missing ones and p50/p90 read high by exactly that omission.\n'
+  printf '  ⇒ 1 is not a claim that a full second was held: the field is a difference of\n'
+  printf '    whole-second clock reads, so a sub-second hold records 0 or 1 depending only\n'
+  printf '    on where it fell against the tick.\n'
+  printf '  ⇒ an `unlocked` run is IN this bucket and held nothing -- on a host with no\n'
+  printf '    usable flock the command runs unserialized and its RUNTIME lands in this\n'
+  printf '    field. Read the outcomes block above before reading these as contention.\n'
   # ⚠ THE LABEL, NOT THE RECORD. The field counts the arriving run itself: the
   # depth is read AFTER `take_ticket` has minted this call's own ticket, so its
   # floor is 1 and a completely uncontended fleet printed "1 waiter already
@@ -2726,6 +2763,30 @@ mode_self_test() {
     "$(printf '%s\n' "$rpt" | grep -c 'it does not count the HOLDER either')" 1
   st_case 'and the off-by-one heading itself is gone, not merely annotated' \
     "$(printf '%s\n' "$rpt" | grep -c 'waiters already ahead):')" 0
+
+  # The hold bucket's heading, which is the SAME defect one line up and was
+  # filed while the depth heading above was being repaired: `v > 0` drops every
+  # sub-second hold, and the heading said "over runs that acquired" -- a run
+  # that acquired, and one that waited 78s to do it, did acquire. The last two
+  # cases are the load-bearing ones and they guard opposite mistakes. Asserting
+  # only that the true wording is PRESENT would also pass on a report that kept
+  # the old heading beside it, which is how a heading defect survives a fix; and
+  # ⛔ the `waited` heading is CORRECT -- `waited > 0` literally is "waited at
+  # all" -- so it is pinned present here, because the likeliest way to get this
+  # repair wrong is to make the three headings "consistent" and break the one
+  # that was already true.
+  st_case 'and --report heads the hold bucket by what its filter admits' \
+    "$(printf '%s\n' "$rpt" | grep -c 'whose RECORDED hold is 1s or more')" 1
+  st_case 'and accounts for the gap between that n and the record count' \
+    "$(printf '%s\n' "$rpt" | grep -c 'the gap is not rounding')" 1
+  st_case 'and refuses to read a recorded 1 as a full second actually held' \
+    "$(printf '%s\n' "$rpt" | grep -c 'not a claim that a full second was held')" 1
+  st_case 'and names the unlocked rows sitting in a bucket titled about holds' \
+    "$(printf '%s\n' "$rpt" | grep -c 'run is IN this bucket and held nothing')" 1
+  st_case 'and the acquisition-shaped heading is gone, not merely annotated' \
+    "$(printf '%s\n' "$rpt" | grep -c 'over runs that acquired')" 0
+  st_case 'and the wait heading, which was already true of its filter, is untouched' \
+    "$(printf '%s\n' "$rpt" | grep -c 'over runs that waited at all')" 1
 
   # --- the scope of the population, and the clock that names its floor ------
   #

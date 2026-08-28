@@ -1,0 +1,82 @@
+---
+title: Misc
+description: Misc protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+## TypeScript Usage
+
+```typescript
+import { ResolvedBookSchema, ResolvedEntrySchema, ResolvedGroupSchema } from '@objectstack/spec/api';
+import type { ResolvedBook, ResolvedEntry, ResolvedGroup } from '@objectstack/spec/api';
+
+// Validate data
+const result = ResolvedBookSchema.parse(data);
+```
+
+---
+
+## ResolvedBook
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | The book's machine name. |
+| **label** | `string` | optional | The book's display label, when it declares one. |
+| **groups** | `{ key: string; label: string; entries: object[] }[]` | ✅ | The resolved groups, in render order. |
+
+### Nested Shape: `ResolvedBook.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | The group's key (from the spine, or `uncategorized`). |
+| **label** | `string` | ✅ | The group's display label. |
+| **entries** | `{ doc?: string; href?: string; label?: string; description?: string; … }[]` | ✅ | The group's resolved entries, in render order. |
+
+
+---
+
+## ResolvedEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **doc** | `string` | optional | Doc name, or undefined for an external link / separator. |
+| **href** | `string` | optional | External link target, when the entry is a link. |
+| **label** | `string` | optional | Display label, when one resolved. |
+| **description** | `string` | optional | Doc description, when one resolved. |
+| **badge** | `string` | optional | Badge text (e.g. "beta"), when declared. |
+| **icon** | `string` | optional | Icon name, when declared. |
+| **separator** | `boolean` | optional | True for a `---` separator node. |
+
+
+---
+
+## ResolvedGroup
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **key** | `string` | ✅ | The group's key (from the spine, or `uncategorized`). |
+| **label** | `string` | ✅ | The group's display label. |
+| **entries** | `{ doc?: string; href?: string; label?: string; description?: string; … }[]` | ✅ | The group's resolved entries, in render order. |
+
+### Nested Shape: `ResolvedGroup.entries[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **doc** | `string` | optional | Doc name, or undefined for an external link / separator. |
+| **href** | `string` | optional | External link target, when the entry is a link. |
+| **label** | `string` | optional | Display label, when one resolved. |
+| **description** | `string` | optional | Doc description, when one resolved. |
+| **badge** | `string` | optional | Badge text (e.g. "beta"), when declared. |
+| **icon** | `string` | optional | Icon name, when declared. |
+| **separator** | `boolean` | optional | True for a `---` separator node. |
+
+
+---
+

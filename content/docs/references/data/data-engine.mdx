@@ -543,7 +543,7 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
-### Nested Shape: `DataEngineRequest.query`
+### Nested Shape: `DataEngineRequest[method='find'].query`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -577,7 +577,7 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
-### Nested Shape: `DataEngineRequest.query`
+### Nested Shape: `DataEngineRequest[method='findOne'].query`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -626,7 +626,7 @@ This schema accepts one of the following structures:
 | **id** | `string \| number` | optional | ID for single update, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; returning?: boolean; … }` | optional |  |
 
-### Nested Shape: `DataEngineRequest.options`
+### Nested Shape: `DataEngineRequest[method='update'].options`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -650,7 +650,7 @@ This schema accepts one of the following structures:
 | **id** | `string \| number` | optional | ID for single delete, or use where in options |
 | **options** | `{ context?: object; where?: Record<string, any> \| any; multi?: boolean; filter?: Record<string, any> \| any }` | optional |  |
 
-### Nested Shape: `DataEngineRequest.options`
+### Nested Shape: `DataEngineRequest[method='delete'].options`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -671,7 +671,7 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
 
-### Nested Shape: `DataEngineRequest.query`
+### Nested Shape: `DataEngineRequest[method='count'].query`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -691,7 +691,7 @@ This schema accepts one of the following structures:
 | **object** | `string` | ✅ |  |
 | **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
 
-### Nested Shape: `DataEngineRequest.query`
+### Nested Shape: `DataEngineRequest[method='aggregate'].query`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

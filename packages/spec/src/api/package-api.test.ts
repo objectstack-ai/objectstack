@@ -14,7 +14,6 @@ import {
   UploadArtifactRequestSchema,
   UploadArtifactResponseSchema,
   PackageRollbackRequestSchema,
-  PackageRollbackResponseSchema,
   UninstallPackageApiRequestSchema,
   UninstallPackageApiResponseSchema,
   PackageApiErrorCode,
@@ -356,20 +355,11 @@ describe('PackageRollbackRequestSchema', () => {
   });
 });
 
-describe('PackageRollbackResponseSchema', () => {
-  it('should accept a successful rollback response', () => {
-    const result = PackageRollbackResponseSchema.parse({
-      success: true,
-      data: {
-        success: true,
-        restoredVersion: '1.0.0',
-        message: 'Rolled back to version 1.0.0',
-      },
-    });
-    expect(result.data.success).toBe(true);
-    expect(result.data.restoredVersion).toBe('1.0.0');
-  });
-});
+// `PackageRollbackResponseSchema` is RETIRED (#12038 3A) — it declared a
+// VERSION rollback against the live COMMIT-rollback route. Its retirement pin
+// (runtime namespace probes, the registry-retirement.test.ts pattern) lives in
+// the `package-rollback-response retirement` block at the end of this file;
+// the live route's true contract is covered in package-lifecycle.test.ts.
 
 // ==========================================
 // Uninstall Package
@@ -425,7 +415,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.upgradePackage).toBeDefined();
     expect(PackageApiContracts.resolveDependencies).toBeDefined();
     expect(PackageApiContracts.uploadArtifact).toBeDefined();
-    expect(PackageApiContracts.rollbackPackage).toBeDefined();
     expect(PackageApiContracts.uninstallPackage).toBeDefined();
   });
 
@@ -436,7 +425,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.upgradePackage.method).toBe('POST');
     expect(PackageApiContracts.resolveDependencies.method).toBe('POST');
     expect(PackageApiContracts.uploadArtifact.method).toBe('POST');
-    expect(PackageApiContracts.rollbackPackage.method).toBe('POST');
     expect(PackageApiContracts.uninstallPackage.method).toBe('DELETE');
   });
 
@@ -447,7 +435,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.upgradePackage.path).toBe('/api/v1/packages/upgrade');
     expect(PackageApiContracts.resolveDependencies.path).toBe('/api/v1/packages/resolve-dependencies');
     expect(PackageApiContracts.uploadArtifact.path).toBe('/api/v1/packages/upload');
-    expect(PackageApiContracts.rollbackPackage.path).toBe('/api/v1/packages/:packageId/rollback');
     expect(PackageApiContracts.uninstallPackage.path).toBe('/api/v1/packages/:packageId');
   });
 
@@ -458,5 +445,34 @@ describe('PackageApiContracts', () => {
       expect(contract.method).toBeDefined();
       expect(contract.path).toBeDefined();
     });
+  });
+});
+
+// ==========================================
+// package-rollback-response retirement (#12038 3A)
+// ==========================================
+
+describe('package-rollback-response retirement (#12038 3A)', () => {
+  // Runtime namespace probes, the registry-retirement.test.ts pattern: a
+  // removed export cannot be imported by name (would not compile), so the pin
+  // asks the namespace object. Anti-vacuity guard: a neighbour that stayed.
+  it('`PackageRollbackResponseSchema` is no longer exported from `@objectstack/spec/api`', async () => {
+    const api = await import('./index');
+    const ns = api as unknown as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(ns, 'PackageRollbackResponseSchema')).toBe(false);
+    // Anti-vacuity: the sibling that deliberately stayed still resolves.
+    expect(Object.prototype.hasOwnProperty.call(ns, 'PackageRollbackRequestSchema')).toBe(true);
+  });
+
+  it('`PackageApiContracts` no longer binds any schema to the live commit-rollback path', () => {
+    const entries = Object.entries(PackageApiContracts) as Array<[string, { path: string }]>;
+    expect('rollbackPackage' in PackageApiContracts).toBe(false);
+    // The load-bearing half: no contract-map entry claims the LIVE path the
+    // dispatcher serves with `rollbackToPackageCommit` (#12038 §5.2 — the
+    // retired entry bound the version-rollback schema to exactly this path).
+    const claimants = entries.filter(([, c]) => c.path === '/api/v1/packages/:packageId/rollback');
+    expect(claimants).toEqual([]);
+    // Anti-vacuity: the map still carries its surviving entries.
+    expect(entries.length).toBeGreaterThan(0);
   });
 });
