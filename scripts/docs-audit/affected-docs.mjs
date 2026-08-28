@@ -660,15 +660,42 @@ diffBaseRef = baseRef;
 
 /**
  * A test file — it observes behaviour rather than defining it, so changing one cannot
- * make an implementation-accuracy doc stale. Covers the repo's conventions: `*.test.*`
- * / `*.spec.*` at any depth (including `.integration.test.ts` and `.conformance.test.ts`)
- * plus anything under a `__tests__` / `__mocks__` / `__fixtures__` directory.
+ * make an implementation-accuracy doc stale. Covers the repo's conventions:
+ *
+ *   1. `*.test.*` / `*.spec.*` / `*.bench.*` at any depth (including compound infixes
+ *      like `.integration.test.ts` and `.conformance.test.ts`);
+ *   2. anything under a `__tests__` / `__mocks__` / `__fixtures__` directory;
+ *   3. anything under a NON-underscore `test/` or `tests/` directory — the same
+ *      convention as (2), spelled without the underscores. Six packages use it
+ *      (`cli`, `client`, `metadata-core`, `metadata-fs`, `qa/dogfood`,
+ *      `qa/downstream-contract`), and `test/fixtures/` falls out of it by shape rather
+ *      than by being named.
+ *
+ * ⛔ ARMS 1(bench) AND 3 ARE HERE BECAUSE THE PREDICATE WAS THE DEFECT, NOT THE TWO
+ * FILES THAT EXPOSED IT. `packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts`
+ * and `packages/spec/src/benchmark.bench.ts` were the instances observed; a pair of
+ * path literals would have been the hand-written map this whole file refuses, and would
+ * have rotted at the third fixture. The arms are written over the CONVENTION so the
+ * next fixture and the next benchmark are covered on arrival.
+ *
+ * DELIBERATELY NOT EXCLUDED, so a later reader knows these were decided rather than
+ * missed — each is a file the repo ships or could ship as implementation:
+ *   · `*.testkit.ts` (8 files) — exported harness code, the same class as
+ *     `packages/qa/src/testing.ts`, which the self-test below already pins as
+ *     implementation;
+ *   · `*.fixture.ts` / `*.fixtures.ts` (5) and `*.pin.ts` (6) — infixes with no
+ *     established exclusion convention here, and widening an exclusion on a guess is
+ *     the failure mode `selfTest`'s own docblock names first;
+ *   · a BARE `fixtures/` or `mocks/` directory outside `test/` — zero population
+ *     today, so admitting it would be speculative reach, and `test/fixtures/` is
+ *     already covered by arm 3.
  *
  * Verify with `--self-test`.
  */
 function isTestFile(path) {
   return /(^|\/)__(tests|mocks|fixtures)__\//.test(path)
-    || /(^|\/)[^/]+\.(test|spec)\.[^/]+$/.test(path);
+    || /(^|\/)tests?\//.test(path)
+    || /(^|\/)[^/]+\.(test|spec|bench)\.[^/]+$/.test(path);
 }
 
 /**
@@ -2157,6 +2184,29 @@ function selfTest() {
     ['packages/qa/src/testing.ts', false, 'testing.ts is implementation'],
     ['packages/spec/src/latest.ts', false, 'no false positive on a bare name'],
     ['packages/foo/src/tests-helper.ts', false, 'tests-helper is not __tests__'],
+
+    // -- the two classes #11857 measured as false-positive registrars ----------
+    // Both are REAL repo paths, and both are here as the INSTANCES that exposed a
+    // predicate hole. The arms they pin are written over the CONVENTION, so the
+    // synthetic cases beneath them carry just as much of the pin.
+    ['packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts', true, 'a fixture under a non-underscore test/fixtures/'],
+    ['packages/spec/src/benchmark.bench.ts', true, 'a .bench.ts benchmark'],
+    ['packages/objectql/src/engine-data-events.bench.ts', true, 'the OTHER .bench.ts - the arm is the infix, not the basename'],
+    ['packages/cli/test/helpers/serve-process.ts', true, 'a helper nested under test/ carrying no test infix of its own'],
+    ['packages/client/tests/helpers/harness.ts', true, 'the tests/ plural spelling of the directory arm'],
+    ['packages/qa/dogfood/test/armed.ts', true, 'a bare .ts sitting directly in test/'],
+
+    // The over-widening side. An exclusion that grows silently drops real
+    // implementation changes - the failure this self-test's docblock names FIRST -
+    // so the classes deliberately left ADMITTED are pinned admitted, not left to
+    // drift into the exclusion later. See `isTestFile`'s docblock for why each stays.
+    ['packages/spec/src/ui/door-reachability.testkit.ts', false, 'a .testkit.ts is shipped harness code, not a test file'],
+    ['packages/lint/src/showcase-shape.fixtures.ts', false, 'a .fixtures.ts infix is NOT the __fixtures__ directory arm'],
+    ['packages/objectql/src/datasource-def-credentials-ref.pin.ts', false, 'a .pin.ts is implementation to this predicate'],
+    ['packages/foo/src/testkit/harness.ts', false, 'testkit/ is not test/ - the directory arm needs the WHOLE segment'],
+    ['packages/foo/src/testing/helper.ts', false, 'testing/ is not test/ either'],
+    ['packages/foo/src/bench-utils.ts', false, 'bench without the dotted infix is implementation'],
+    ['packages/foo/src/latest.benchmark.ts', false, 'a .benchmark. infix is not .bench.'],
   ];
   for (const [path, want, label] of testFileCases) check('isTestFile', label, path, want, isTestFile(path));
 
@@ -2187,6 +2237,8 @@ function selfTest() {
     'packages/foo/src/__tests__/helper.ts',              // ceiling population only
     'packages/foo/src/__mocks__/fake-server.ts',         // the `-server` alternative
     'packages/foo/src/__fixtures__/stub-route-ledger.ts',// LEDGER_FILE_RE
+    'packages/foo/test/fixtures/stub-route.ts',          // #11857 registrar-NAMED, non-underscore test/
+    'packages/foo/src/engine.bench.ts',                  // #11857 benchmark
     'packages/foo/node_modules/dep/route.ts',            // pruned directory
     'packages/foo/dist/route.ts',                        // pruned directory
     'packages/foo/README.md',                            // not a .ts file
@@ -2221,6 +2273,14 @@ function selfTest() {
     ['packages/foo/src/__mocks__/fake-server.ts', 'a __mocks__/ file matching the `-server` alternative'],
     ['packages/foo/src/__fixtures__/stub-route-ledger.ts', 'a __fixtures__/ file matching LEDGER_FILE_RE'],
     ['packages/foo/src/__tests__/helper.ts', 'a __tests__/ helper with no registrar name'],
+    // #11857. NON-VACUOUS BY CONSTRUCTION, exactly as the four above are: neither
+    // carries a .test. / .spec. infix, so under the PREVIOUS predicate both were
+    // walked - `stub-route.ts` then matched `REGISTRAR_FILE_RE` and a test fixture
+    // contributed production route tails, and `engine.bench.ts` entered the ceiling
+    // population. Re-admitting either arm breaks the two equality checks above, and
+    // these two rows name WHICH arm came back.
+    ['packages/foo/test/fixtures/stub-route.ts', 'a non-underscore test/fixtures/ file matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/engine.bench.ts', 'a .bench.ts benchmark'],
   ];
   for (const [rel, label] of excludedFixtures) {
     check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
