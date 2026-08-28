@@ -172,7 +172,7 @@ export const HookSchema = lazySchema(() => strictObject(
         '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
         + 'or remove the hook.',
     },
-    history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
+    history: 'Until this shape was closed, these were dropped silently — the hook still registered and ran.',
   },
   {
   /**
@@ -291,7 +291,7 @@ export const HookSchema = lazySchema(() => strictObject(
       delayms: 'backoffMs',
     },
     history:
-      'Until #4001 these were dropped silently — the hook retried on the defaults rather '
+      'Until this shape was closed, these were dropped silently — the hook retried on the defaults rather '
       + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
       + '`baseDelayMs`; a hook spells it `backoffMs`.',
   },
@@ -619,7 +619,7 @@ export const HookContextSchema = lazySchema(() => z.object({
     mode: z.enum(['record', 'per-row']).describe("'record' = this call is the caller's whole write; 'per-row' = one of N dispatches for one write"),
     index: z.number().int().nonnegative().describe('0-based position in the per-row fan-out; always 0 when mode is "record"'),
     scope: z.record(z.string(), z.unknown()).describe('Scratch shared by every dispatch of one caller write, across both phases (same object identity)'),
-  }).optional().describe('How this hook call relates to the caller\'s write (engine-produced; #6966)'),
+  }).optional().describe('How this hook call relates to the caller\'s write (engine-produced)'),
 
   /**
    * Execution Session
@@ -732,7 +732,7 @@ export const HookContextSchema = lazySchema(() => z.object({
     preserveAudit: z.boolean().optional().describe(
       'True when this write is a historical import that must KEEP its caller-supplied '
       + 'updated_at/updated_by (and the readonly audit family) instead of being stamped with '
-      + 'the import instant (#3493). Server-set, opt-in, absent on normal writes; read by the '
+      + 'the import instant. Server-set, opt-in, absent on normal writes; read by the '
       + 'built-in audit hook. A stamping policy, not an authorization input.',
     ),
     // `roles` REMOVED (#5050, ADR-0049 D2). It was DECLARED here, READ by two
@@ -782,8 +782,8 @@ export const HookContextSchema = lazySchema(() => z.object({
     // field named `roles` or a comparison against the string 'admin'
     // (ADR-0090 D3 bans the `role` spelling outright).
     roles: retiredKey(
-      '`HookContext.session.roles` was removed in @objectstack/spec 17.0.0 (#5050, ADR-0049 D2) — '
-      + 'it was declared, read by two dead exemption branches (removed in #5049), and never '
+      '`HookContext.session.roles` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — '
+      + 'it was declared, read by two dead exemption branches, and never '
       + 'produced: ObjectQL\'s `buildSession()` builds the session field by field and has never '
       + 'written `roles`, so every read resolved `undefined` and a guard keyed on it was dead '
       + 'code that merely LOOKED like an authorization decision. Delete the key. To gate a hook '
@@ -794,7 +794,7 @@ export const HookContextSchema = lazySchema(() => z.object({
       + 'outright). Nothing to migrate: a HookContext is built per operation by the engine and '
       + 'never stored, so no metadata source carries this key. NOTE an ACTION body\'s '
       + '`ctx.session` is a different object and still carries its own `roles` array today; '
-      + 'that surface is tracked separately (#5613) and is not what this key was.',
+      + 'that surface is tracked separately and is not what this key was.',
     ),
   }).optional().describe('Current session context'),
 
@@ -823,8 +823,8 @@ export const HookContextSchema = lazySchema(() => z.object({
    * truth — there was no caller (#4586).
    */
   provenance: z.object({
-    flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request (#3456).'),
-    attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem` (#4586). ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
+    flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request.'),
+    attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
 

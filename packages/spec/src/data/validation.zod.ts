@@ -145,7 +145,7 @@ const BASE_VALIDATION_SHAPE = {
 export const ScriptValidationSchema = lazySchema(() => strictObject({
   surface: 'this script validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { formula: 'condition', expression: 'condition', predicate: 'condition', rule: 'condition' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -160,7 +160,7 @@ export const ScriptValidationSchema = lazySchema(() => strictObject({
 export const StateMachineValidationSchema = lazySchema(() => strictObject({
   surface: 'this state-machine validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { states: 'transitions', statefield: 'field', from: 'transitions', initial: 'initialStates', initialstate: 'initialStates' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -177,7 +177,7 @@ export const StateMachineValidationSchema = lazySchema(() => strictObject({
 export const FormatValidationSchema = lazySchema(() => strictObject({
   surface: 'this format validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { pattern: 'regex', fieldname: 'field' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -259,7 +259,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
 export const CrossFieldValidationSchema = lazySchema(() => strictObject({
   surface: 'this cross-field validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { formula: 'condition', expression: 'condition' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -280,7 +280,7 @@ export const CrossFieldValidationSchema = lazySchema(() => strictObject({
 export const JSONValidationSchema = lazySchema(() => strictObject({
   surface: 'this JSON-schema validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { jsonschema: 'schema', fieldname: 'field' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -511,7 +511,7 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
 export const ConditionalValidationSchema = lazySchema(() => strictObject({
   surface: 'this conditional validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { if: 'when', condition: 'when', match: 'when', else: 'otherwise' },
 }, {
   ...BASE_VALIDATION_SHAPE,

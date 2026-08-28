@@ -260,7 +260,7 @@ export type I18nLabel = z.input<typeof I18nLabelSchema>;
 // (it reaches `arialabel`, `ariaLabell`, `ariadescribedby`, `aria-label`,
 // `roles`; it does NOT reach any of the four aliases here).
 const ARIA_HISTORY =
-  'Until #4001 closed this shape an unknown key was dropped silently — the component still '
+  'Until this shape was closed an unknown key was dropped silently — the component still '
   + 'rendered, with no accessible name and nothing to say the one you wrote had been discarded.';
 
 /**

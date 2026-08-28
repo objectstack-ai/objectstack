@@ -13,7 +13,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const ApiMappingSchema = lazySchema(() => z.object({
   source: z.string().describe('Source field/path'),
   target: z.string().describe('Target field/path'),
-  transform: z.string().optional().describe('Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
+  transform: z.string().optional().describe('Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
 }));
 export type ApiMapping = z.input<typeof ApiMappingSchema>;
 
@@ -35,7 +35,7 @@ export type ApiMapping = z.input<typeof ApiMappingSchema>;
 const STORED_BOOKKEEPING_GUIDANCE =
   'This is the metadata layer\'s own storage bookkeeping, not endpoint vocabulary. It is written onto '
   + 'the stored ROW by `register` / `publishPackage` and peeled off before this schema sees a body '
-  + '(#5309), so writing it on a declaration configures nothing. Remove it — publication state is '
+  + ', so writing it on a declaration configures nothing. Remove it — publication state is '
   + 'managed by `os package publish`, not authored.';
 
 /**
@@ -100,7 +100,7 @@ const STORED_BOOKKEEPING_GUIDANCE =
 export const ApiEndpointSchema = strictObject({
   surface: 'this API endpoint',
   history:
-    'Until #5384 closed this shape these were dropped silently — the endpoint still published and '
+    'Until this shape was closed these were dropped silently — the endpoint still published and '
     + 'served, minus whatever the key was meant to configure (a `cacheTTL` / `objectParam` typo cost '
     + 'the whole policy or projection, with `os validate` green).',
   aliases: {
@@ -167,8 +167,8 @@ export const ApiEndpointSchema = strictObject({
   description: z.string().optional(),
 
   /** Execution Logic */
-  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe("Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary (#5040) and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector"),
-  target: z.string().optional().describe("Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (#10338 made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'`"),
+  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe("Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector"),
+  target: z.string().optional().describe("Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'`"),
 
   /** Logic Config */
   objectParams: z.object({

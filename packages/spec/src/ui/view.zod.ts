@@ -1561,7 +1561,7 @@ export const ListViewSchema = lazySchema(() => strictObject({
   bulkActionDefs: z.array(BulkActionDefSchema).optional().describe(
     'Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a '
     + "mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for "
-    + "an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the "
+    + "an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the "
     + 'action it NAMES once for the whole selection — the renderer injects `params._selectedIds: '
     + 'string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate '
     + 'artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a '
@@ -1570,7 +1570,7 @@ export const ListViewSchema = lazySchema(() => strictObject({
     + "on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` "
     + 'instead — the bare-string form, promoted with the action\'s own label, params and `visible`; a '
     + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time "
-    + '(#4457). Toolbar url/api actions can also interpolate the current selection via '
+    + '. Toolbar url/api actions can also interpolate the current selection via '
     + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),
 
@@ -1657,12 +1657,12 @@ export const ListViewSchema = lazySchema(() => strictObject({
   // and inert — no renderer in either repo read them (re-grepped 2026-07-16,
   // objectui@fb35e48; ledger: dead).
   responsive: retiredKey(
-    '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   performance: retiredKey(
-    '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
     'Delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -1676,19 +1676,19 @@ export const ListViewSchema = lazySchema(() => strictObject({
   // of these as real behavior, that is an implementation card filed first, and
   // the key stays retired pending it.
   striped: retiredKey(
-    '`view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    '`view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
     'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   bordered: retiredKey(
-    '`view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    '`view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
     "is the renderer's own constant, not authorable). Delete the key. " +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   virtualScroll: retiredKey(
-    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
     'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -1978,7 +1978,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
    * the ruling and the scanner.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
@@ -2140,7 +2140,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * refused at parse (ruled 2026-08-27, objectui#6262; see
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27, objectui#6262): unbound on the standalone form routes, where the predicate would fault open.'),
+  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
@@ -2648,7 +2648,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
   // `defaultSort` REMOVED (#3896 audit close-out): no reader in either repo —
   // related lists sort by their OWN list view's sort, never by this.
   defaultSort: retiredKey(
-    '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
     'Delete the key and set the sort on the related list view instead. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -2713,7 +2713,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
           if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
         })
         .describe(
-          'Where the browser goes after a successful submit. Ruled 2026-08-11 (#7496): '
+          'Where the browser goes after a successful submit. Ruled 2026-08-11: '
           + '(1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative '
           + 'URLs are refused, which is what closes the open-redirect face; '
           + '(2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, '
@@ -2747,7 +2747,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
   // therefore rides HERE, where the reference table does have a row (#7496).
   ]).optional().describe(
     "Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates "
-    + 'only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11, #7496).',
+    + 'only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11).',
   ),
 
   /**
@@ -2764,7 +2764,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
     cancel: FormButtonConfigSchema.optional().describe('Cancel button'),
     reset: FormButtonConfigSchema.optional().describe('Reset button'),
   }).strict().optional()
-    .describe('Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998).'),
+    .describe('Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm.'),
 
   /**
    * Initial field values for create-mode forms, keyed by field machine name —
@@ -2774,14 +2774,14 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * still wins.
    */
   defaults: z.record(z.string(), z.unknown()).optional()
-    .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998).'),
+    .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;).'),
 
   // `aria` REMOVED from the FORM view (#3896 audit close-out): no form
   // renderer applied it (plugin-form/SchemaForm never read schema.aria) — an
   // ACCESSIBILITY claim that is merely accepted is false compliance, the
   // requiresConfirmation shape.
   aria: retiredKey(
-    '`form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form ' +
+    '`form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form ' +
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
     'renderer issues rather than per-view attribute overrides. ' +
@@ -3200,7 +3200,7 @@ const ViewColumnStateSchema = z.object({
   widths: z.record(z.string(), z.number()).optional()
     .describe('Column widths in pixels, keyed by field name (runtime-only per-user state — written by the console grid, never authored).'),
 }).describe(
-  'Runtime-only personalization overlay key (#9933): the per-user column layout (order/widths) the console grid '
+  'Runtime-only personalization overlay key: the per-user column layout (order/widths) the console grid '
   + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
 );
 
@@ -3475,20 +3475,20 @@ function flattenedViewOverlayFields() {
     object: z
       .string({ error: (issue) => (issue.input === undefined ? INLINE_VIEW_OBJECT_REQUIRED : undefined) })
       .describe(
-        'Bound object name — REQUIRED on an inline view config (#7741): the object-bound read paths '
+        'Bound object name — REQUIRED on an inline view config: the object-bound read paths '
         + '(`GET /meta/view?object=`, the view switcher) match on `object` + `viewKind`, so an unbound '
-        + 'row can never be served. Inherited from the shadowed entry on personalization PUTs (#2555).',
+        + 'row can never be served. Inherited from the shadowed entry on personalization PUTs.',
       ),
     viewKind: z
       .enum(ViewKindSchema.options, {
         error: (issue) => (issue.input === undefined ? INLINE_VIEW_KIND_REQUIRED : undefined),
       })
       .describe(
-        'View family — REQUIRED on an inline view config (#7741): half of the `object` + `viewKind` '
+        'View family — REQUIRED on an inline view config: half of the `object` + `viewKind` '
         + 'pair the object-bound read paths match on. Inherited from the shadowed entry on '
-        + 'personalization PUTs (#2555).',
+        + 'personalization PUTs.',
       ),
-    label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry — #2555).'),
+    label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry —).'),
     // [#9933] Runtime-only overlay key — declared HERE (the overlay-validation
     // face) and on `viewItemWireFields()`, never on an authoring shape. This is
     // what lets a `columnState`-only personalization patch through the

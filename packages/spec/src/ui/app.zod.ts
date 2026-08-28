@@ -309,7 +309,7 @@ const BaseNavItemSchema = z.object({
   badge: z.union([z.string(), z.number()]).optional().describe('Badge text or count displayed on the item'),
 
   /** Visual variant for the badge (consumed by objectui NavigationRenderer) */
-  badgeVariant: z.enum(['default', 'secondary', 'destructive', 'outline']).optional().describe('Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
+  badgeVariant: z.enum(['default', 'secondary', 'destructive', 'outline']).optional().describe('Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /).'),
 
   /** 
    * Visibility condition. 
@@ -449,7 +449,7 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
    * dead combination is unrepresentable rather than silently ignored).
    */
   runAction: z.string().optional().describe(
-    'Auto-run this declared action once on arrival at the object\'s list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId.',
+    'Auto-run this declared action once on arrival at the object\'s list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId.',
   ),
 }));
 
@@ -548,7 +548,7 @@ export const ActionNavItemSchema = lazySchema(() => strictObject(navItemSurface(
       surface: "this nav item's action definition",
       aliases: { action: 'actionName', name: 'actionName', args: 'params', input: 'params' },
       history:
-        'Until #4001 these were dropped silently — the definition still parsed, so clicking ' +
+        'Until this shape was closed, these were dropped silently — the definition still parsed, so clicking ' +
         'the entry dispatched a different action than the author declared.',
     },
     {
@@ -756,7 +756,7 @@ export const NavigationContributionSchema = lazySchema(() => strictObject(
     surface: 'this navigation contribution',
     aliases: { targetapp: 'app', appname: 'app', targetgroup: 'group', groupid: 'group', order: 'priority', navigation: 'items' },
     history:
-      'Until #4001 these were dropped silently — the contribution still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the contribution still parsed, so a ' +
       'package injected its menu into the wrong place, or nowhere.',
   },
   {
@@ -784,12 +784,12 @@ export const AppBrandingSchema = lazySchema(() => strictObject(
     surface: "this app's branding block",
     aliases: { primary: 'primaryColor', accent: 'accentColor', color: 'primaryColor', logourl: 'logo', icon: 'favicon', theme: 'primaryColor' },
     history:
-      'Until #4001 these were dropped silently — branding still parsed, so a theme the ' +
+      'Until this shape was closed, these were dropped silently — branding still parsed, so a theme the ' +
       'author set never reached the shell.',
   },
   {
   primaryColor: z.string().optional().describe('Primary theme color hex code'),
-  accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
+  accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit /).'),
   logo: z.string().optional().describe('Custom logo URL for this app'),
   favicon: z.string().optional().describe('Custom favicon URL for this app'),
 }));
@@ -804,7 +804,7 @@ export const AppBrandingSchema = lazySchema(() => strictObject(
  * `order` to rearrange areas saw nothing move.
  */
 const AREA_ORDER_RETIRED =
-  '`areas[].order` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no renderer '
+  '`areas[].order` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no renderer '
   + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
   + 'authored, so declaration order already IS display order. Delete the key and reorder the '
   + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
@@ -850,27 +850,27 @@ const AREA_ORDER_RETIRED =
  * (`areas.navigation`) and pinned in `packages/rest/src/rest.test.ts`.
  */
 const AREA_VISIBLE_RETIRED =
-  '`areas[].visible` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — nothing ever '
+  '`areas[].visible` was removed in @objectstack/spec 17.0.0 (ADR-0049) — nothing ever '
   + 'evaluated an area-level predicate, so an area "hidden" by one rendered for EVERYONE: a '
   + 'gate that fails open, which is worse than no gate at all. Delete the key and gate the '
   + 'items INSIDE the area — a navigation ITEM\'s `visible` takes the same CEL expression and '
   + 'IS evaluated per item by the shell. For a gate the SERVER enforces, use '
   + '`requiredPermissions` instead: on the app itself, or on the ITEMS of either navigation '
   + 'tree — the app\'s top-level `navigation` AND every `areas[].navigation`, both stripped '
-  + 'server-side since #4722. The distinction survives at every level: `visible` is CEL '
+  + 'server-side. The distinction survives at every level: `visible` is CEL '
   + 'evaluated in the browser, so it hides an entry that has already been sent, while '
   + '`requiredPermissions` stops that entry from being served at all. Run '
   + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
-  '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — '
+  '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
   + 'no layer ever checked it, so a "permission-gated" area was served to, and rendered for, '
   + 'every user: a fail-open access gate, not merely an unread key. Delete it and move the '
   + 'gate to a layer that is actually enforced. `requiredPermissions` on the APP is checked '
   + 'server-side (the app is dropped from /meta entirely for a caller who lacks them), and '
   + '`requiredPermissions` / `requiresService` on a navigation ITEM are stripped server-side '
   + 'in BOTH trees — the app\'s top-level `navigation` AND every `areas[].navigation`, through '
-  + 'the same filter since #4722 — then re-checked in the shell, so an item gated inside an '
+  + 'the same filter — then re-checked in the shell, so an item gated inside an '
   + 'area never reaches the browser either. That enforces the items INSIDE an area; the '
   + 'area-level key is not revived. Still evaluated client-side ONLY, at every level: '
   + '`visible` (CEL) and `requiresObject` — so anything that must never reach the browser '
@@ -928,7 +928,7 @@ export const NavigationAreaSchema = lazySchema(() => strictObject(
       permissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
     },
     history:
-      'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
+      'Until this shape was closed, these were dropped silently — the area still parsed, so its gating or ' +
       'ordering was quietly ignored.',
   },
   {
@@ -1018,7 +1018,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   showall:
     '`contextSelectors[].includeAll` (which `showall` aliased) was removed in '
-    + '@objectstack/spec 17.0.0 (#4509) — selectors are mandatory-scope and never render an '
+    + '@objectstack/spec 17.0.0 — selectors are mandatory-scope and never render an '
     + '"All" row. Delete the key; widen `optionsSource.filter` to widen the choices.',
   placement:
     '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 (#4509, '
@@ -1027,7 +1027,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   location:
     '`contextSelectors[].placement` (which `location` aliased) was removed in '
-    + '@objectstack/spec 17.0.0 (#4509) — selectors always render in the sidebar header. '
+    + '@objectstack/spec 17.0.0 — selectors always render in the sidebar header. '
     + 'Delete the key.',
 };
 
@@ -1037,7 +1037,7 @@ export const AppContextSelectorSchema = lazySchema(() => strictObject(
     aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource' },
     guidance: CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE,
     history:
-      'Until #4001 these were dropped silently — the selector still parsed, so its scope ' +
+      'Until this shape was closed, these were dropped silently — the selector still parsed, so its scope ' +
       'variable behaved differently than declared.',
   },
   {
@@ -1065,7 +1065,7 @@ export const AppContextSelectorSchema = lazySchema(() => strictObject(
       surface: "this context selector's options source",
       aliases: { url: 'endpoint', path: 'endpoint', value: 'valueKey', label: 'labelKey', filters: 'filter', where: 'filter' },
       history:
-        'Until #4001 these were dropped silently — the source still parsed, so the ' +
+        'Until this shape was closed, these were dropped silently — the source still parsed, so the ' +
         'dropdown resolved its options from a different shape than declared.',
     },
     {
@@ -1093,7 +1093,7 @@ export const AppContextSelectorSchema = lazySchema(() => strictObject(
         surface: 'this context-selector option filter',
         aliases: { field: 'key', path: 'key', operator: 'op', values: 'value' },
         history:
-          'Until #4001 these were dropped silently — the predicate still parsed, so the ' +
+          'Until this shape was closed, these were dropped silently — the predicate still parsed, so the ' +
           'option list was not narrowed the way the author declared.',
       },
       {
@@ -1199,7 +1199,7 @@ export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
  * objectui, tracked for removal in objectstack-ai/objectui#3264.
  */
 const HOME_PAGE_ID_RETIRED =
-  '`app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). '
+  '`app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). '
   + 'objectui\'s console did read it before v17 (`resolveLandingRoute`), so this key had a '
   + 'consumer — it was retired because the capability is better expressed on the navigation '
   + 'item itself than as an ID cross-reference that silently falls back when it dangles. An '
@@ -1230,7 +1230,7 @@ const UNPUBLISHED_IS_MACHINE_MANAGED =
   + '`_unpublished` key: the AI materialization path sets it, and `POST /packages/:id/publish-drafts` '
   + '(the "Publish" button) clears it. Delete this key. If you wanted to keep the app out of the App '
   + 'Switcher — the personal-settings case, e.g. Account — that is `hidden: true`, which is navigation '
-  + 'presentation ONLY and never affects access (#4829).';
+  + 'presentation ONLY and never affects access.';
 
 export const AppSchema = lazySchema(() => strictObject(
   {
@@ -1280,7 +1280,7 @@ export const AppSchema = lazySchema(() => strictObject(
       draft: UNPUBLISHED_IS_MACHINE_MANAGED,
     },
     history:
-      'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
+      'Until this shape was closed, these were dropped silently — the app still parsed, so navigation or ' +
       'gating the author declared never reached the shell.',
   },
   {
@@ -1446,7 +1446,7 @@ export const AppSchema = lazySchema(() => strictObject(
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'never read). Delete the key and declare the endpoint one level up, on the STACK: ' +
-    '`defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between ' +
+    '`defineStack({ apis })`. That surface EXECUTES from protocol 17. Between ' +
     '#4936 and the executor landing it was refused wholesale — nothing mounted a declared ' +
     'path, so every key including `authRequired` parsed and gated nothing — and that ' +
     'blanket refusal is now narrowed to five per-endpoint publish gates (namespace, ' +

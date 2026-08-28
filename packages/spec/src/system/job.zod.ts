@@ -117,7 +117,7 @@ import { RetryPolicySchema } from '../shared/retry-policy.zod';
  * jobs, they were one job declared twice, with the second silently winning.
  */
 const JOB_ID_RETIRED =
-  '`job.id` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — nothing ever read '
+  '`job.id` was removed in @objectstack/spec 17.0.0 (ADR-0049) — nothing ever read '
   + 'it, and its own description ("defaults to `name` when omitted") advertised an identity '
   + 'override that did not exist. `name` IS the job\'s identity everywhere: the scheduling '
   + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
@@ -128,7 +128,7 @@ const JOB_ID_RETIRED =
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
-    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled', timeoutMs: 'timeout' },
   guidance: { id: JOB_ID_RETIRED },
 }, {
@@ -138,8 +138,8 @@ export const JobSchema = lazySchema(() => strictObject({
   description: z.string().optional().describe('Job description / purpose'),
   schedule: ScheduleSchema.describe('Job schedule configuration'),
   handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
-  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt (#3494). Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 (#4661) — state a count to opt in.'),
-  timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
+  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
+  timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout". The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).

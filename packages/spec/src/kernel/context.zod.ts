@@ -38,7 +38,7 @@ const PREVIEW_MODE_RETIRED =
   + 'which owns auth per-project (`ArtifactKernelFactory` in the cloud distribution); '
   + '`OS_PREVIEW_MODE` stays there as a routing-only switch. If a preview experience '
   + 'becomes a product capability it re-declares fresh, with the production-posture '
-  + 'hard-refusal as the first-landed half (#11846 ruling record).';
+  + 'hard-refusal as the first-landed half (ruling record).';
 
 /**
  * Runtime Mode Enum

@@ -149,7 +149,7 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
       'take one — but that is the array entry\'s own shape, not this record.',
   },
   history:
-    'Until #4001 these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
+    'Until this shape was closed, these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
     '`handler`/`effect` by construction, so a misspelled `effect` was discarded twice over: ' +
     'the function still registered, still ran, and its writes were still counted as none, ' +
     'which is what keeps #4354\'s broken-sweep alert quiet on the run that needed it.',
@@ -157,7 +157,7 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
   handler: z.function().describe('The function invoked by name (a `script` node, a string-named Hook/Action handler)'),
   effect: FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)
     .describe("What the function does to data — omit for the pure default"),
-}).describe('A named handler function plus its declared effect (#4396)'));
+}).describe('A named handler function plus its declared effect'));
 
 export type FlowFunctionDeclaration = z.input<typeof FlowFunctionDeclarationSchema>;
 /** Post-parse shape of {@link FlowFunctionDeclaration} — defaults applied, transforms run (ADR-0122). */
@@ -185,7 +185,7 @@ export type FlowFunctionDeclarationParsed = z.infer<typeof FlowFunctionDeclarati
 const FlowFunctionLoweredDeclarationSchema = lazySchema(() => FlowFunctionDeclarationSchema.extend({
   handler: z.string().min(1)
     .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
-}).describe('A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref (#4976)'));
+}).describe('A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref'));
 
 /**
  * One entry of the `functions` map, in the four shapes it legitimately takes:

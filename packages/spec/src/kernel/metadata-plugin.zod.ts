@@ -526,7 +526,7 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
    */
   additionalTypes: retiredKey(
     '`config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
-    '(#8586, ADR-0049 enforce-or-remove) — it never had an effect: the only production writer ' +
+    '(ADR-0049 enforce-or-remove) — it never had an effect: the only production writer ' +
     'of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which ' +
     'replaces the array outright, so nothing ever merged these entries and the live type set ' +
     'was exactly the built-in registry whatever you declared here. Delete the key. There is no ' +

@@ -186,7 +186,7 @@ export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['
  * available fix each time was a comment. This is the fix those comments wanted.
  */
 const FIELD_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the field was still created, '
+  'Until this shape was closed these were dropped silently — the field was still created, '
   + 'minus whatever the key was meant to constrain, protect or compute.';
 
 /**
@@ -684,7 +684,7 @@ function fieldKeyGuidanceAsStrictOptions() {
  * hide; these shapes close it at publish time.
  */
 const INLINE_GRID_COLUMN_HISTORY =
-  'Until #9227 closed this shape these parsed as `z.any()` — a mis-keyed column published '
+  'Until this shape was closed these parsed as `z.any()` — a mis-keyed column published '
   + 'clean and rendered as blank cells, with nothing naming the wrong key.';
 
 /**
@@ -722,7 +722,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
     hidden: 'defaultHidden',
   },
 }, {
-  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name, #3951). The retired `field` spelling is refused.'),
+  name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.'),
   label: z.string().optional().describe("Column header; defaults to the child field's label via hydration."),
   type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself."),
   width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).'),
@@ -795,7 +795,7 @@ export const FieldSchema = lazySchema(() => {
     // these are the removals recorded only as comments on this object, and a
     // comment is visible to everyone except the author who got it wrong.
     columnName:
-      '`columnName` was removed in the 16.x line (#2377) — the SQL driver hardcodes the physical '
+      '`columnName` was removed in the 16.x line — the SQL driver hardcodes the physical '
       + 'column to the field key, so a custom name was ignored. External/federated objects map '
       + 'physical columns with `external.columnMap` (ADR-0062 D7).',
     // `currency` is not, and has never been, a declared FieldSchema key — it is
@@ -811,7 +811,7 @@ export const FieldSchema = lazySchema(() => {
       + '{ currencyMode: \'fixed\', defaultCurrency: \'JPY\' }`. A field without one uses '
       + 'the tenant default at runtime.',
     referenceFilters:
-      '`referenceFilters` (string[]) was removed in the 16.x line (#2377) — the lookup picker only '
+      '`referenceFilters` (string[]) was removed in the 16.x line — the lookup picker only '
       + 'ever read the structured form. Use `lookupFilters: [{ field, operator, value }]`.',
     // `notNull` is aliased to `required` above for the common case, but ADR-0113
     // makes the two deliberately distinct and the distinction IS the point, so
@@ -854,7 +854,7 @@ export const FieldSchema = lazySchema(() => {
    * always representable (it reads back as `[]`, never `null` — see
    * `multiple`), so the required check judges emptiness, not absence.
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (#9447, maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -882,12 +882,12 @@ export const FieldSchema = lazySchema(() => {
    * branch. Same ruling: `required` on a multi-value lookup means non-empty
    * array (see `required` above).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (#9447, maintainer ruling 2026-08-18).'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (maintainer ruling 2026-08-18).'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
   unique: UniqueScopeSchema.default(false).describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'"),
-  defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
+  defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes, discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
   // #11566 — a character length is a positive integer, so `0`, `-5` and `12.5`
@@ -960,7 +960,7 @@ export const FieldSchema = lazySchema(() => {
    * `number` field should present until the renderer half of this contract
    * (objectui#4033) lands and retires the interim heuristic.
    */
-  useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
+  useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -1097,7 +1097,7 @@ export const FieldSchema = lazySchema(() => {
    * renderer's measured reads — an unknown or retired key (`field`) is a
    * named rejection at publish time, never a blank cell at render time.
    */
-  inlineColumns: z.array(InlineGridColumnSchema).optional().describe("Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column ({ name, label?, type?, … } — objectui GridColumn, #3951); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
+  inlineColumns: z.array(InlineGridColumnSchema).optional().describe("Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
   /** Optional numeric child field summed for the inline grid running total. */
   inlineAmountField: z.string().optional().describe('Numeric child field summed for the inline grid total'),
 
@@ -1366,7 +1366,7 @@ export const FieldSchema = lazySchema(() => {
    */
   visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17 (#3855)."),
+  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
@@ -1378,7 +1378,7 @@ export const FieldSchema = lazySchema(() => {
    * fails `tsc` at the authoring site before any parse runs.
    */
   conditionalRequired: retiredKey(
-    '`conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. ' +
+    '`conditionalRequired` was removed in @objectstack/spec 17 — use `requiredWhen`. ' +
     'Rename the key; the value (a CEL predicate) is unchanged. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
@@ -1433,7 +1433,7 @@ export const FieldSchema = lazySchema(() => {
    */
   internal: z.boolean().optional().describe("[#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column."),
 
-  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
+  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE and on INSERT (a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply: a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
@@ -1492,7 +1492,7 @@ export const FieldSchema = lazySchema(() => {
    * starts clean (#3420). No runtime effect beyond the diagnostic; ignored on
    * non-`password` fields.
    */
-  ackPlaintextMasking: z.boolean().optional().describe("[ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields."),
+  ackPlaintextMasking: z.boolean().optional().describe("[ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning. No effect on non-password fields."),
   system: z.boolean().optional().describe('Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag.'),
   sortable: z.boolean().optional().default(true).describe('Whether field is sortable in list views'),
   inlineHelpText: z.string().optional().describe('Help text displayed below the field in forms'),

@@ -326,7 +326,7 @@ const setMembershipSchema = (op: '$in' | '$nin') =>
 const SET_MEMBER_DESCRIPTION =
   'Membership list. Members are literal values of any type the column stores. A '
   + '{ $field } reference is NOT a member shape: no backend resolves one inside a list '
-  + '(#7596) — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead.';
+  + ' — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead.';
 
 /**
  * Set operators for membership checks.
@@ -359,7 +359,7 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 const RANGE_ENDPOINT_DESCRIPTION =
   'Closed interval [min, max]. Each endpoint is a number, a Date, or a string. '
   + 'A { $field } reference is NOT an endpoint shape: no backend resolves one '
-  + 'inside a list (#7596) — put it in a scalar comparison '
+  + 'inside a list — put it in a scalar comparison '
   + '($gt/$gte/$lt/$lte), which does compile to a column-to-column bound. '
   + 'STRING is the form the '
   + 'platform itself produces: the date-macro resolver walks INTO arrays, so '
@@ -648,7 +648,7 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'with no wildcards is an exact comparison, NOT a substring search; write '
     + '$contains for containment. A pattern ending in a lone unpaired backslash '
     + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
-    + 'as $contains (#4706 Q2 = A); $ilike is the case-insensitive twin. '
+    + 'as $contains (Q2 = A); $ilike is the case-insensitive twin. '
     + '[#7536. Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
     + 'driver-turso on both transports), by driver-memory and by '
     + '@objectstack/formula. driver-mongodb, objectql `having` and '
@@ -2117,7 +2117,7 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
     + 'FilterCondition at the single sink parseFilterAST (@objectstack/spec/data) '
     + 'the moment it arrives; it is never stored and never travels the wire as '
     + 'an array. A query "where" is a FilterCondition and does not accept this '
-    + 'shape (#5158).'
+    + 'shape.'
   )
 ) as z.ZodType<FilterArray, FilterArray>;
 

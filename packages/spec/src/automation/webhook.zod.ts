@@ -153,15 +153,15 @@ export const WebhookSchema = lazySchema(() => strictObject({
   guidance: {
     // #3494 removed these five and `retryPolicy` — the tombstone has to carry
     // the reason, or an author just writes them again one release later.
-    body: '`body` was removed in 17 (#3494) — the delivery path always sends its own fixed envelope, so a custom body was never sent. There is no replacement.',
-    payloadFields: '`payloadFields` was removed in 17 (#3494) — the delivery envelope is fixed and was never trimmed to a field list. There is no replacement.',
-    includeSession: '`includeSession` was removed in 17 (#3494) — session context was never included in a delivery. There is no replacement.',
-    authentication: '`authentication` was removed in 17 (#3494) — only HMAC signing via `secret` is applied to a delivery. Use `secret`.',
-    retryPolicy: '`retryPolicy` was removed in 17 (#3494) — delivery retries are owned by the messaging outbox on a fixed schedule, and the authored policy was never read. There is no replacement.',
-    tags: '`tags` was removed in 17 (#3494) — nothing read them. There is no replacement.',
+    body: '`body` was removed in 17 — the delivery path always sends its own fixed envelope, so a custom body was never sent. There is no replacement.',
+    payloadFields: '`payloadFields` was removed in 17 — the delivery envelope is fixed and was never trimmed to a field list. There is no replacement.',
+    includeSession: '`includeSession` was removed in 17 — session context was never included in a delivery. There is no replacement.',
+    authentication: '`authentication` was removed in 17 — only HMAC signing via `secret` is applied to a delivery. Use `secret`.',
+    retryPolicy: '`retryPolicy` was removed in 17 — delivery retries are owned by the messaging outbox on a fixed schedule, and the authored policy was never read. There is no replacement.',
+    tags: '`tags` was removed in 17 — nothing read them. There is no replacement.',
   },
   history:
-    'Until #4001 these were dropped silently — the webhook still parsed and still ' +
+    'Until this shape was closed, these were dropped silently — the webhook still parsed and still ' +
     'materialized, so a subscription scoped or secured with a key we do not declare ' +
     'shipped listening to the wrong thing, or to everything.',
   // `WebhookConfigSchema` (integration/connector.zod.ts) is this shape

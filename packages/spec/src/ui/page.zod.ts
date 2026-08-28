@@ -36,7 +36,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * layout rather than in their spelling.
  */
 const PAGE_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the page still rendered, '
+  'Until this shape was closed these were dropped silently — the page still rendered, '
   + 'without whatever the key was meant to configure.';
 
 export const PageRegionSchema = lazySchema(() => strictObject({
@@ -253,7 +253,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
   // carrier and are removed with the key (`responsive.zod.ts`, the
   // PerformanceConfigSchema precedent).
   responsive: retiredKey(
-    '`page.components[].responsive` was removed in @objectstack/spec 17 (#11027, ADR-0049 D2) — ' +
+    '`page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — ' +
     'no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) ' +
     'parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS ' +
     'applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled ' +
@@ -495,11 +495,11 @@ export const PageSchema = lazySchema(() => strictObject({
     // block with no renderer; deleting them left an author writing something
     // that had never worked and, until now, was not told so.
     recordReview:
-      '`recordReview` was removed with the `record_review` page type (framework#2265) — it had '
+      '`recordReview` was removed with the `record_review` page type — it had '
       + 'no renderer, so the page validated and then failed at runtime. Use `type: \'record\'` with '
       + '`regions`, or `kind: \'slotted\'` to override individual slots.',
     blankLayout:
-      '`blankLayout` was removed with the `blank` page type (framework#2265) — it had no renderer. '
+      '`blankLayout` was removed with the `blank` page type — it had no renderer. '
       + 'A free-form page is `kind: \'html\'` with `source` (ADR-0080).',
     // `route` is the key an author reaches for first, and it has never existed.
     // The page's `name` IS its routing identity — this file's own naming

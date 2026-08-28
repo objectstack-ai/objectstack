@@ -47,7 +47,7 @@ export type EmailTemplateDefinitionVariableParsed = z.infer<typeof EmailTemplate
 export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   surface: 'this email template',
   history:
-    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   // #5013 — five of these pointed at `body` and `fromAddress`, neither of which
   // this schema declares: every one of them prescribed a second rejection. The
   // real slots are the two bodies and the per-template From override.

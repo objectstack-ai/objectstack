@@ -219,11 +219,11 @@ export const DataEngineInsertOptionsSchema = lazySchema(() => BaseEngineOptionsS
  * `BatchOptions.validateOnly` / `ListNotificationsRequest.cursor` disposition).
  */
 export const ENGINE_UPDATE_UPSERT_REMOVED =
-  '`update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was '
+  '`update.options.upsert` was removed in @objectstack/spec 17 (ADR-0049) — it was '
   + 'declared and allowlisted but never implemented: no engine or driver path ever read it, so '
   + '`{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. '
   + 'Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row '
-  + "throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row "
+  + "throws RECORD_NOT_FOUND ('s not-found gate) rather than inserting, so read the row "
   + 'first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if '
   + 'ever built, must reconcile with that gate by design rather than through this silent flag.';
 
@@ -298,8 +298,8 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    * the same register as the two read-only arms — each answers "what about this
    * FIELD caused the strip?".
    */
-  reason: z.enum(['readonly', 'readonly_when', 'primary_key']).describe('Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437)'),
-}).describe('A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)'));
+  reason: z.enum(['readonly', 'readonly_when', 'primary_key']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier'),
+}).describe('A write-path strip event: caller-supplied fields legally dropped from the payload'));
 
 // --------------------------------------------------------------------------
 // Legacy: DataEngineUpdateOptionsSchema (DEPRECATED)

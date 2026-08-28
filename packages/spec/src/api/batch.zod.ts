@@ -82,7 +82,7 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
     'If true (and atomic=false), continue processing remaining records after errors. '
     + 'Default false: the first failure ENDS the run — records before it stay written (nothing is rolled '
     + 'back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than '
-    + 'omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539).'),
+    + 'omitted, so `results` always covers all `total` records and `succeeded + failed === total`.'),
   // `validateOnly` promised a dry-run — "validate records without persisting" —
   // but no batch surface ever read it (`updateManyData` / `deleteManyData` /
   // `batchData` all persist regardless). A caller sending `validateOnly: true`
@@ -93,7 +93,7 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
   // and should be reintroduced deliberately, not back-filled to match a promise
   // nothing kept. Tombstoned so writing it is audible, not silently stripped.
   validateOnly: retiredKey(
-    '`options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). '
+    '`options.validateOnly` was removed from BatchOptions in @objectstack/spec. '
     + 'It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have '
     + 'silently executed. There is no dry-run today — drop the key. If you need to preview a batch '
     + 'without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) '
@@ -197,16 +197,16 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
   errors: z.array(ApiErrorSchema).optional().describe(
     'Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back '
     + 'marks rows that were written then undone with code ROLLED_BACK and rows never reached with '
-    + 'NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped '
+    + 'NOT_ATTEMPTED, while the causal row keeps its own error. A NON-atomic batch that stopped '
     + '(the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code '
     + '— rows before the failure stay written and keep reporting success, since nothing was rolled back '
-    + '(#7539).'),
+    + '.'),
   data: RecordDataSchema.optional().describe('Full record data (if returnRecords=true)'),
   index: z.number().optional().describe('Index of the record in the request array'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from ' +
-    'THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` ' +
-    '(#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop ' +
+    'Write-observability: caller-supplied fields LEGALLY stripped from ' +
+    'THIS row before it was written — static `readonly` / TRUE `readonlyWhen` ' +
+    ' on update, or the #3043 create-ingress strip. Per-row because a batch can drop ' +
     'different fields on different rows (`readonlyWhen` is record-state-dependent). Present ' +
     'ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). ' +
     'A single response header cannot express per-row drops, so this body field is the ' +
@@ -412,9 +412,9 @@ export type CrossObjectBatchDroppedFields = z.input<typeof CrossObjectBatchDropp
 export const CrossObjectBatchResponseSchema = lazySchema(() => z.object({
   results: z.array(z.unknown()).describe('Per-operation result, index-aligned with the request operations'),
   droppedFields: z.array(CrossObjectBatchDroppedFieldsSchema).optional().describe(
-    'Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY ' +
-    'stripped from an operation before it was written — static `readonly` (#2948) or a TRUE ' +
-    '`readonlyWhen` predicate (#3042). This endpoint is the console record form\'s save path ' +
+    'Write-observability: caller-supplied fields the engine LEGALLY ' +
+    'stripped from an operation before it was written — static `readonly` or a TRUE ' +
+    '`readonlyWhen` predicate. This endpoint is the console record form\'s save path ' +
     '(master-detail writes parent + children in one transaction), so without it the ONE surface ' +
     'where a user edits a `readonlyWhen` field reported plain success while the value never ' +
     'landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was ' +

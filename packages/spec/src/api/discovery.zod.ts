@@ -570,7 +570,7 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
    * (declared === enforced).
    */
   transactionalBatch: z.boolean().describe(
-    'Whether the backend exposes the atomic cross-object batch endpoint (POST {basePath}/batch, #1604/ADR-0034): '
+    'Whether the backend exposes the atomic cross-object batch endpoint (POST {basePath}/batch, /ADR-0034): '
     + 'all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation '
     + 'instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction.'
   ),
@@ -594,7 +594,7 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
    */
   websockets: z.boolean().describe(
     'Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. '
-    + 'False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12, #2462).'
+    + 'False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12).'
   ),
   /**
    * Whether a file-storage surface is served at all (upload / download /

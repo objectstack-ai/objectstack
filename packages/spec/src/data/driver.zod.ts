@@ -305,7 +305,7 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
   streaming: retiredKey(
     '`DriverCapabilities.streaming` was removed in @objectstack/spec 17.0.0 (#4634, ADR-0049 '
     + 'enforce-or-remove) — no code in any repository ever read it, and `findStream`, the only '
-    + 'read this bit could describe, was itself removed in 17.0.0 (#4484): nothing ever called '
+    + 'read this bit could describe, was itself removed in 17.0.0: nothing ever called '
     + 'it, and two of its three implementations materialised the entire result set before '
     + 'yielding. The bit carried the same defect one level up (`SqlDriver` implemented '
     + '`findStream` yet declared `streaming: false`; `InMemoryDriver` declared `true` over a '

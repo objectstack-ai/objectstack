@@ -100,7 +100,7 @@ export const ResponsiveStylesSchema = lazySchema(() => strictObject(
   {
     surface: 'this per-breakpoint style map',
     history:
-      'Until #4001 批 13 a bucket this shape does not declare was dropped silently — ' +
+      'Until this shape was closed, a bucket this shape does not declare was dropped silently — ' +
       'and since the whole block is optional, a node whose every style was written ' +
       'under the wrong vocabulary rendered completely unstyled and parsed clean.',
     aliases: {

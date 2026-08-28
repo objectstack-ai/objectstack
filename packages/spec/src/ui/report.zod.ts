@@ -52,9 +52,9 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
 export const ReportSortSchema = lazySchema(() => strictObject({
   surface: 'this report order key',
   history:
-    'Until #4001 批 14 closed this shape these were dropped silently — the key still parsed, '
+    'Until this shape was closed these were dropped silently — the key still parsed, '
     + '`direction` fell back to `asc`, and the report rendered in an order nobody asked for '
-    + '(the `SortNodeSchema` failure of #4721, one layer up).',
+    + '(the same `SortNodeSchema` failure, one layer up).',
   // Anchored on the two named sibling ordering contracts, not on edit distance.
   // A report's `order` is the THIRD spelling of "sort" an author meets, and the
   // other two are both correct where they live:
@@ -166,7 +166,7 @@ export function reportSelectionOrder(
 export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObject({
   surface: 'this joined report block',
   history:
-    'Until #4001 批 14 closed this shape these were dropped silently — the block still rendered, '
+    'Until this shape was closed these were dropped silently — the block still rendered, '
     + 'minus whatever the key was meant to select, scope or order.',
   // A block is a sub-report, so the vocabulary an author brings is the CONTAINER's
   // (`ReportSchema`, thirty lines below) — and the two shapes deliberately differ:
@@ -248,7 +248,7 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
 export const ReportSchema = lazySchema(() => strictObject({
   surface: 'this report',
   history:
-    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   // Kept deliberately parallel to `JoinedReportBlockSchema` above: a block is a
   // sub-report, so an author who learns one vocabulary must not be corrected
   // differently on the other. The scope-filter entries are that table's,

@@ -204,17 +204,17 @@ export const EmailPasswordConfigPublicSchema = lazySchema(() => z.object({
  */
 const PASSKEYS_UNADVERTISED =
   '`features.passkeys` was removed from GET /api/v1/auth/config in @objectstack/spec 17 '
-  + '(#7481, ADR-0049) — it was served from introduction and consumed by nothing: no login '
+  + '(ADR-0049) — it was served from introduction and consumed by nothing: no login '
   + 'UI in any client reads it, and no better-auth passkey plugin is wired behind it, so a '
   + 'deployer who set `plugins.passkeys: true` flipped a switch that changed no behaviour '
   + 'anywhere. Delete the key. There is no replacement flag to read: passkey sign-in is not '
   + 'a capability this platform offers yet. It returns to this payload in the change that '
-  + 'ships the login UI (objectui#4179), classified in PUBLIC_AUTH_FEATURES again at that '
+  + 'ships the login UI, classified in PUBLIC_AUTH_FEATURES again at that '
   + 'point — do not re-add it ahead of a consumer.';
 
 const MAGIC_LINK_UNADVERTISED =
   '`features.magicLink` was removed from GET /api/v1/auth/config in @objectstack/spec 17 '
-  + '(#7481, ADR-0049) — the ADVERTISEMENT was inert, not the capability: no client renders '
+  + '(ADR-0049) — the ADVERTISEMENT was inert, not the capability: no client renders '
   + 'a magic-link sign-in affordance off this flag, so it only told a deployer that a UI '
   + 'existed when none did. Delete the key. The server side is unchanged and still yours to '
   + 'call: `AuthPluginConfig.plugins.magicLink` wires better-auth\'s magic-link plugin, and '
@@ -234,10 +234,10 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
   ),
   phoneNumber: z.boolean().optional().describe(
-    'Phone-number sign-in enabled (phone + password, #2766 V1.5)',
+    'Phone-number sign-in enabled (phone + password, V1.5)',
   ),
   phoneNumberOtp: z.boolean().optional().describe(
-    'Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service (#2780)',
+    'Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service',
   ),
 }));
 

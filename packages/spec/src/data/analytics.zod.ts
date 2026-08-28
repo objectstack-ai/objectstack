@@ -84,7 +84,7 @@ export const MetricSchema = lazySchema(() => strictObject(
       // `strictObject` the key carried (closed by #4001 batch D) is gone with
       // it — strictness on a shape nothing reads was fake compliance either way.
       filters:
-        '`measures.<metric>.filters` was removed in @objectstack/spec 17 (#10414, ADR-0049) — '
+        '`measures.<metric>.filters` was removed in @objectstack/spec 17 (ADR-0049) — '
         + 'it never had an effect: no strategy read it (NativeSQLStrategy and ObjectQLStrategy '
         + 'both aggregate the metric\'s `sql` and ignore `filters`), so an authored '
         + '`filters: [{ sql: … }]` parsed clean and the query returned the UNFILTERED aggregate. '
@@ -272,7 +272,7 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
       // the `triggerPhrase` lesson in strict-object.ts).
       filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
         + 'FilterCondition, the same shape find() takes). There is no per-metric filter key '
-        + 'either (#10414): fold the condition into the metric\'s own `sql` expression, or use '
+        + 'either: fold the condition into the metric\'s own `sql` expression, or use '
         + 'an ADR-0021 dataset measure\'s structured `filter`.',
     },
     // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds

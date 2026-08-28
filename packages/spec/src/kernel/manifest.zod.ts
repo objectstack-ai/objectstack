@@ -394,7 +394,7 @@ export const ManifestSchema = z.object({
     /** REMOVED (#10724) — use the `translation` metadata type / stack `translations`. */
     translations: retiredKey(
       '`manifest.contributes.translations` was removed in @objectstack/spec 17 ' +
-      '(#10724, ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
+      '(ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
       'path }` entries; authoring them registered no translations. Delete the key. ' +
       'Declare translations as `translation` metadata: `defineTranslationBundle({ … })` ' +
       "in the stack's `translations` collection (`defineStack({ translations: […] })`), " +

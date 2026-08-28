@@ -165,7 +165,7 @@ export const ChartAxisSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart axis',
     history:
-      'Until #4001 an undeclared axis key was dropped at parse and the axis rendered with the default scale and ticks — a chart that looked configured and was not.',
+      'Until this shape was closed, an undeclared axis key was dropped at parse and the axis rendered with the default scale and ticks — a chart that looked configured and was not.',
     // MEASURED same-file inconsistency, both directions: this schema names its
     // bound column `field` and its caption `title`, while `ChartSeriesSchema`
     // twenty lines below names them `name` and `label`. An author who has just
@@ -216,7 +216,7 @@ export const ChartSeriesSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart series',
     history:
-      'Until #4001 an undeclared series key was dropped at parse — the series still drew, in the palette colour, on the left axis, unstacked, which is precisely the configuration the author was overriding.',
+      'Until this shape was closed, an undeclared series key was dropped at parse — the series still drew, in the palette colour, on the left axis, unstacked, which is precisely the configuration the author was overriding.',
     // The mirror of `ChartAxisSchema`'s entries: `field`/`title` are the axis
     // spellings of this schema's `name`/`label`. `stackId` / `yAxisId` /
     // `strokeDasharray` are Recharts' prop names — and `dashArray`'s own
@@ -285,7 +285,7 @@ export const ChartAnnotationSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart annotation',
     history:
-      'Until #4001 an undeclared annotation key was dropped at parse and the reference line drew at the wrong place, in the default style, or not at all — while the annotation itself reported valid.',
+      'Until this shape was closed, an undeclared annotation key was dropped at parse and the reference line drew at the wrong place, in the default style, or not at all — while the annotation itself reported valid.',
     // A region is authored as a RANGE, and every neighbouring range vocabulary
     // in the protocol spells its ends `from`/`to` or `start`/`end`
     // (`data/filter.zod.ts` operators, the dashboard date-range filter). This
@@ -358,7 +358,7 @@ export const ChartInteractionSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart interaction block',
     history:
-      'Until #4001 an undeclared interaction key was dropped at parse — including the two #3752 removed, so an author who kept writing `zoom` after it was retired got exactly the same silence as before the removal.',
+      'Until this shape was closed, an undeclared interaction key was dropped at parse — including the two #3752 removed, so an author who kept writing `zoom` after it was retired got exactly the same silence as before the removal.',
     aliases: { tooltip: 'tooltips', hover: 'tooltips', showTooltip: 'tooltips', rangeSelector: 'brush', slider: 'brush' },
     // The prescriptions #3752 wrote in this file's own doc comment, now
     // delivered at the rejection instead of only to whoever reads the source.
@@ -367,9 +367,9 @@ export const ChartInteractionSchema = lazySchema(() => strictObject(
     // `join`/`joinGateway` lesson).
     guidance: {
       zoom:
-        '`zoom` was removed in #3752 — no renderer ever had a zoom primitive behind it, and `brush` already narrows the visible range. Write `brush: true`.',
+        '`zoom` was removed — no renderer ever had a zoom primitive behind it, and `brush` already narrows the visible range. Write `brush: true`.',
       clickAction:
-        '`clickAction` was removed in #3752 — a segment click already has owners that work: the host\'s own `onSegmentClick` in the react tier, `drilldown` on a report (`ReportSchema.drilldown`, ADR-0021 D2, already on by default), and the renderer\'s segment drill under a dashboard widget\'s `options` bag. Use one of those.',
+        '`clickAction` was removed — a segment click already has owners that work: the host\'s own `onSegmentClick` in the react tier, `drilldown` on a report (`ReportSchema.drilldown`, ADR-0021 D2, already on by default), and the renderer\'s segment drill under a dashboard widget\'s `options` bag. Use one of those.',
     },
   },
   {
@@ -451,9 +451,9 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
       report:
         '`report` (drill into an analytical report instead of the record list) is a METRIC / PIVOT widget capability in the objectui renderer; `<ObjectChart>` does not read it and renders the record list regardless. Delete the key, or drill from a metric widget instead.',
       view:
-        '`view` (render a named list view inside the drill drawer) is declared in objectui\'s renderer-side type as reserved and is read by no renderer at all (objectui#3354). It has never done anything — delete it and use `columns` to choose what the drill list shows.',
+        '`view` (render a named list view inside the drill drawer) is declared in objectui\'s renderer-side type as reserved and is read by no renderer at all. It has never done anything — delete it and use `columns` to choose what the drill list shows.',
       sort:
-        '`sort` (default ordering for the drill list) is declared in objectui\'s renderer-side type and read by no renderer (objectui#3354). Delete it; the drill list uses the object\'s own default ordering.',
+        '`sort` (default ordering for the drill list) is declared in objectui\'s renderer-side type and read by no renderer. Delete it; the drill list uses the object\'s own default ordering.',
     },
   },
   {
@@ -540,7 +540,7 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart config',
     history:
-      'Until #4001 an undeclared chart key was dropped at parse and the chart rendered with the defaults it was written to override — the failure #4001 exists for, on a shape reachable from both the dashboard and report metadata roots.',
+      'Until this shape was closed, an undeclared chart key was dropped at parse and the chart rendered with the defaults it was written to override — the failure #4001 exists for, on a shape reachable from both the dashboard and report metadata roots.',
     aliases: {
       // `chartType` is named in `react-blocks.ts` as the INTERNAL spelling that
       // is deliberately NOT part of the author contract, so an author who saw
@@ -770,7 +770,7 @@ export const ChartGroupBySchema = lazySchema(() =>
       {
         surface: 'this chart groupBy',
         history:
-          'Until #5583 an undeclared key inside the structured groupBy was dropped at parse — `dateGranularty` for `dateGranularity` cost the date bucketing silently, and the chart drew one point per raw timestamp.',
+          'Until this shape was closed, an undeclared key inside the structured groupBy was dropped at parse — `dateGranularty` for `dateGranularity` cost the date bucketing silently, and the chart drew one point per raw timestamp.',
         // The near-misses edit distance cannot reach, each anchored to a
         // neighbouring vocabulary this protocol really uses:
         //   `granularity` — `dateGranularity` is the only spelling in the
@@ -835,7 +835,7 @@ export const ChartAggregateSchema = lazySchema(() =>
     {
       surface: 'this chart aggregate',
       history:
-        'Until #5583 an undeclared aggregate key was dropped at parse — `groupby` for `groupBy` degraded the chart to a single ungrouped point, and `fn` for `function` fell back to the default, both with `build`/`validate` fully green.',
+        'Until this shape was closed, an undeclared aggregate key was dropped at parse — `groupby` for `groupBy` degraded the chart to a single ungrouped point, and `fn` for `function` fell back to the default, both with `build`/`validate` fully green.',
       // The near-misses edit distance cannot reach (the folded fallback already
       // covers `groupby`, `Group_By` and `functoin`, so none of those appears
       // here — a second spelling of a covered probe is a dead entry, #5481):

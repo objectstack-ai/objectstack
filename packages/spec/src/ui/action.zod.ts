@@ -143,7 +143,7 @@ const actionParamOptionColorGuidance =
   + '`data/field.zod.ts`), read where a STORED value is displayed — the grid cell and the '
   + 'detail badge. An action param\'s options are never rendered that way: the dialog builds '
   + 'an INPUT from them, submits the picked value and discards the list, so no renderer would '
-  + 'read `color` here even if this shape declared it (#5016 measured this). Drop the key — to '
+  + 'read `color` here even if this shape declared it (measured this). Drop the key — to '
   + 'colour the value once it is stored, declare the option list on the FIELD.';
 
 /**
@@ -172,7 +172,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
     surface: 'this action param',
     aliases: ACTION_PARAM_KEY_ALIASES,
     history:
-      'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
+      'Until this shape was closed, these were dropped silently — the param still parsed, so a mis-spelled ' +
       'config shipped as a control that quietly ignored it.',
   },
   {
@@ -270,7 +270,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   options: z.array(strictObject({
     surface: 'this action param option',
     history:
-      'Until #4001 批 14 closed this shape these were dropped silently — the param still '
+      'Until this shape was closed these were dropped silently — the param still '
       + 'rendered its picker, minus whatever the key was meant to colour, gate or disable.',
     aliases: {
       // Carried over from `SelectOptionSchema`'s table — same idea, and these
@@ -692,7 +692,7 @@ const ActionAiCategorySchema = z.enum([
  * action AROUND the param stayed open for three more releases.
  */
 const ACTION_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the action still registered '
+  'Until this shape was closed these were dropped silently — the action still registered '
   + 'and still ran, without whatever the key was meant to configure or gate.';
 
 export const ActionAiSchema = strictObject({
@@ -714,7 +714,7 @@ export const ActionAiSchema = strictObject({
     permissions:
       'AI invocation is not gated by a key here — an agent reaches this action only if a '
       + "surface-compatible SKILL declares it (ADR-0064), and who may talk to that agent is "
-      + "gated by the agent's `access` / `permissions` (enforced at the chat route since #1884). "
+      + "gated by the agent's `access` / `permissions`. "
       + 'For a human-approval step on the call itself, use `requiresConfirmation: true`.',
     approval:
       'there is no approval workflow key here — `requiresConfirmation: true` forces a '
@@ -922,7 +922,7 @@ const actionObject = () => strictObject({
    * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
    * copy and is never sent to a model.
    */
-  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`.'),
+  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two —). Not the LLM-facing `ai.description`.'),
 
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
@@ -1038,7 +1038,7 @@ const actionObject = () => strictObject({
    * `never`, so the mistake fails `tsc` before any parse runs.
    */
   execute: retiredKey(
-    '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
+    '`execute` was removed in @objectstack/spec 17 — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
@@ -1134,7 +1134,7 @@ const actionObject = () => strictObject({
   // tables derive from this one field factory), and the #7428 refusal lives on
   // `ActionSchema`'s refine chain alone — hence "a registered action" rather
   // than an unqualified claim that would be false on the inline surface.
-  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.'),
+  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.'),
   successMessage: I18nLabelSchema.optional().describe('Success message to show after execution'),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
@@ -1255,7 +1255,7 @@ const actionObject = () => strictObject({
   // VIEW's bulkActions, never this flag. Tombstoned with the prescription;
   // `action-inert-keys-removed` strips them from authored sources.
   shortcut: retiredKey(
-    '`action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`action.shortcut` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
@@ -1263,7 +1263,7 @@ const actionObject = () => strictObject({
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   bulkEnabled: retiredKey(
-    '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
     "in the view's `bulkActions` instead. " +
@@ -1450,7 +1450,7 @@ const actionObject = () => strictObject({
           + "to the top-level `openIn` key for `type:'url'` actions. Write `openIn: 'newTab'`."
         : undefined),
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
-  }).optional().describe("Post-success navigation for type:'api' and type:'script' actions (#9566/#9474). `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
+  }).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

@@ -314,7 +314,7 @@ export type StudioPluginContributionsParsed = z.infer<typeof StudioPluginContrib
 
 const STUDIO_ACTIVATION_EVENTS_RETIRED =
   '`studioPluginManifest.activationEvents` was removed in @objectstack/spec 17.0.0 '
-  + '(#4657, ADR-0049) — no Studio host ever read it: every plugin loads and activates '
+  + '(ADR-0049) — no Studio host ever read it: every plugin loads and activates '
   + 'immediately on registration, so the declared lazy-activation window never existed. '
   + 'Delete the key; `activate()` still runs at registration time. Lazy activation, if '
   + 'built, returns via the enforce route of ADR-0049 with a vocabulary its executor '

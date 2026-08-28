@@ -35,7 +35,7 @@ export const RealtimeEventType = z.enum([
   'record.updated',
   'record.deleted',
   'field.changed',
-]).describe('Realtime event type (not yet enforced — the runtime emits data.record.* event names instead, and field.changed is never emitted; see #3197)');
+]).describe('Realtime event type ');
 
 export type RealtimeEventType = z.input<typeof RealtimeEventType>;
 

@@ -187,8 +187,8 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
  */
 const CAPABILITIES_HISTORY =
   'Until this shape was closed an unknown flag was dropped without a word — the object '
-  + 'shipped as if the author had never written it (#1535); `enable` is a closed vocabulary '
-  + 'in which every flag carries an enforcement contract (#2707).';
+  + 'shipped as if the author had never written it; `enable` is a closed vocabulary '
+  + 'in which every flag carries an enforcement contract.';
 
 /**
  * Capability Flags
@@ -437,7 +437,7 @@ const DeclaredIndexUniqueScopeSchema = lazySchema(() =>
 export const IndexSchema = lazySchema(() => strictObject({
   surface: 'this index',
   history:
-    'Until #4001 批 20 closed this site (its held 14th, closed once objectui#4772 ' +
+    'Until this site was closed (its held 14th, closed once objectui#4772 ' +
     "converged the console's drifted index editor), an unknown key here was dropped " +
     'silently: the index still parsed and registered, minus whatever the author ' +
     'believed the key did.',
@@ -480,7 +480,7 @@ export const IndexSchema = lazySchema(() => strictObject({
   // `fields: ['organization_id', 'code']`" survives as valid legacy input,
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
-  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
+  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
 
   // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
   // Kept LAST in the shape on purpose — see the #5606 note in the block
@@ -492,7 +492,7 @@ export const IndexSchema = lazySchema(() => strictObject({
   // `object-index-type-partial-removed` strips both from stored/authored
   // sources on the protocol-17 migration.
   type: retiredKey(
-    '`indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever ' +
+    '`indexes[].type` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no driver ever ' +
     'read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex\'s ' +
     '`table.index()` / `table.unique()`, which cannot express an access method, so the value ' +
     'changed no DDL; its `.default(\'btree\')` merely made an inert knob show up in every parse ' +
@@ -502,7 +502,7 @@ export const IndexSchema = lazySchema(() => strictObject({
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   partial: retiredKey(
-    '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no ' +
+    '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no ' +
     'driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a ' +
     'FULL index and the predicate silently did nothing. Delete the key. Partial indexes are ' +
     'built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … ' +
@@ -523,13 +523,13 @@ export const IndexSchema = lazySchema(() => strictObject({
  */
 const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   strategy:
-    '`tenancy.strategy` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
+    '`tenancy.strategy` was removed from @objectstack/spec after v15.0 — it ' +
     'never had a consumer. The platform has exactly two tenancy modes and neither is ' +
     'object-level config: database-per-tenant isolation is an environment/deployment ' +
     'choice (each environment carries its own database URL), and row-level isolation ' +
     'is `tenancy.enabled` + `tenancy.tenantField`. Delete the key.',
   crossTenantAccess:
-    '`tenancy.crossTenantAccess` was removed from @objectstack/spec after v15.0 (#2763) — it ' +
+    '`tenancy.crossTenantAccess` was removed from @objectstack/spec after v15.0 — it ' +
     'never had a consumer; setting it granted nothing. Cross-tenant visibility is ' +
     'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
     'D11), and the object access posture. Delete the key.',
@@ -665,10 +665,10 @@ export const TenancyConfigSchema = lazySchema(() => strictObject({
     '`organization_id`, the kernel-injected column the RLS predicates and ' +
     '`tenantPolicy()` also assume. A declared name is honoured only when the ' +
     'object really has that field — otherwise the same `organization_id` ' +
-    'fallback applies. No default is materialized here on purpose (#5315).',
+    'fallback applies. No default is materialized here on purpose.',
   ),
   organizationField: z.string().optional().describe(
-    'STAMP-ONLY (#8778, widened by cloud#1395): column carrying the ' +
+    'STAMP-ONLY: column carrying the ' +
     'organization a row is ABOUT, consulted by the three sanctioned ' +
     'platform-row writers — audit stamping, the approval-row writer ' +
     '(`plugin-approvals`), and the automation-run recorder ' +
@@ -725,7 +725,7 @@ export function isTenancyDisabled(schema: unknown): boolean {
 export const ObjectAccessConfigSchema = lazySchema(() => strictObject({
   surface: "this object's `access` block",
   history:
-    'Until #4001 these were dropped silently — the block still parsed, so an object the ' +
+    'Until this shape was closed, these were dropped silently — the block still parsed, so an object the ' +
     'author declared `private` shipped `public`: covered by every `\'*\'` wildcard grant, ' +
     'with no signal that the posture had been discarded.',
   aliases: {
@@ -863,7 +863,7 @@ const lifecycleOnlyWhenSchema = z.record(
 export const LifecycleSchema = lazySchema(() => strictObject({
   surface: "this object's `lifecycle` block",
   history:
-    'Until #4001 these were dropped silently — the block still parsed, so a bounding ' +
+    'Until this shape was closed, these were dropped silently — the block still parsed, so a bounding ' +
     'policy written one level too high left the object with NO policy at all. ADR-0057 ' +
     "§3.5's own refine then passed, because the key it looks for was never there.",
   aliases: { rotation: 'storage' },
@@ -911,7 +911,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   retention: strictObject({
     surface: "this object's `lifecycle.retention` block",
     history:
-      'Until #4001 these were dropped silently — the retention window still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the retention window still parsed, so a ' +
       'row filter written under the wrong key reaped rows the author had meant to exempt.',
     aliases: { filter: 'onlyWhen', where: 'onlyWhen', when: 'onlyWhen', age: 'maxAge' },
     guidance: {
@@ -932,7 +932,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   ttl: strictObject({
     surface: "this object's `lifecycle.ttl` block",
     history:
-      'Until #4001 these were dropped silently — the TTL block still parsed, so rows the ' +
+      'Until this shape was closed, these were dropped silently — the TTL block still parsed, so rows the ' +
       'author expected to auto-expire lived forever.',
     aliases: { expiresAfter: 'expireAfter', after: 'expireAfter', timestampField: 'field', on: 'field', filter: 'onlyWhen', where: 'onlyWhen', when: 'onlyWhen' },
     guidance: {
@@ -951,7 +951,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   storage: strictObject({
     surface: "this object's `lifecycle.storage` block",
     history:
-      'Until #4001 these were dropped silently — the rotation block still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the rotation block still parsed, so a ' +
       'telemetry table declared as rotating kept every shard it ever cut.',
     aliases: { count: 'shards', interval: 'unit', period: 'unit', granularity: 'unit' },
     guidance: {
@@ -973,7 +973,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   archive: strictObject({
     surface: "this object's `lifecycle.archive` block",
     history:
-      'Until #4001 these were dropped silently — the archive block still parsed, so audit ' +
+      'Until this shape was closed, these were dropped silently — the archive block still parsed, so audit ' +
       'rows were reaped hot with no cold copy ever written.',
     aliases: { datasource: 'to', target: 'to', destination: 'to', retain: 'keep' },
     guidance: {
@@ -1122,7 +1122,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
 export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   surface: 'this field group',
   history:
-    'Until #4001 these were dropped silently — the group still parsed AND still rendered, ' +
+    'Until this shape was closed, these were dropped silently — the group still parsed AND still rendered, ' +
     'which is the worst version of the failure: the section appeared, so the author had ' +
     'every reason to believe the setting they wrote had been applied.',
   aliases: {
@@ -1240,7 +1240,7 @@ export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
 export const ObjectExternalBindingSchema = strictObject({
   surface: "this object's `external` binding (ADR-0015)",
   history:
-    'Until #4001 these were dropped silently — the binding still parsed, so a federated ' +
+    'Until this shape was closed, these were dropped silently — the binding still parsed, so a federated ' +
     'object bound to the wrong remote table, or shipped read-only after the author had ' +
     'explicitly asked for writes.',
   aliases: {
@@ -1331,8 +1331,8 @@ export const RowCrudActionOverrideSchema = strictObject({
   // here — but the rejection was zod's own bare `Unrecognized key: "visible"`,
   // which names neither the surface nor a key to write instead. #7832.
   history:
-    'This shape has been closed since objectui#2614, so the key was never silently dropped — '
-    + 'until #7832 the rejection just could not tell you which key to write instead.',
+    'This shape has been closed, so the key was never silently dropped — '
+    + 'until this shape was closed, the rejection just could not tell you which key to write instead.',
   aliases: {
     // `showWhen` carries no boolean reading: whatever surface an author borrowed
     // it from, they meant a predicate, and the predicate slot here is
@@ -1467,12 +1467,12 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     '`namespace` was retired — the object `name` IS the canonical id ' +
     'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
     'to declare. Embed the module prefix in the name instead: `namespace: "sys", ' +
-    'name: "user"` becomes `name: "sys_user"`. Until #4001 closed this shape on the ' +
+    'name: "user"` becomes `name: "sys_user"`. Until this shape was closed on the ' +
     'parse path it was stripped in silence, so an object declaring one shipped under ' +
     'the unprefixed name its author did not intend.',
   compactLayout:
     '`compactLayout` was renamed to `highlightFields` in @objectstack/spec 11.7.0 ' +
-    '(ADR-0085 semantic roles) and the alias was retired in 11.9.1 (#2536). ' +
+    '(ADR-0085 semantic roles) and the alias was retired in 11.9.1. ' +
     'Rename the key — the value shape (ordered field-name list) is unchanged.',
   detail:
     'The `detail` UI-hints block was removed by ADR-0085 (spec 11.7.0). Its ' +
@@ -1488,7 +1488,7 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'for named list views.',
   defaultDetailForm:
     '`defaultDetailForm` was never implemented and was removed from the spec ' +
-    '(#2402). Curate the record page by assigning a custom Page schema; form ' +
+    '. Curate the record page by assigning a custom Page schema; form ' +
     'layout derives from `fieldGroups` + `Field.group`.',
   softDelete:
     '`softDelete` was removed from the spec in 16.0 (#2377, ADR-0049 ' +
@@ -1496,21 +1496,21 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'stored nothing and implied restore semantics that do not exist. Deletes ' +
     'are hard deletes; remove the key.',
   versioning:
-    '`versioning` was removed from the spec in 16.0 (#2377, ADR-0049) — no ' +
+    '`versioning` was removed from the spec in 16.0 (ADR-0049) — no ' +
     'record-versioning engine ever read it (it snapshotted no history). Use ' +
     'per-field `Field.trackHistory` for field-level history, or a data ' +
     'lifecycle policy (`lifecycle`) for retention.',
   search:
     '`search` (the SearchConfig block) was removed from the spec in 16.0 ' +
-    '(#2377, ADR-0049) — no search-engine config was consumed. Declare the ' +
+    '(ADR-0049) — no search-engine config was consumed. Declare the ' +
     'indexed fields with `searchableFields` (ADR-0061); records stay queryable ' +
     'via the normal data API regardless.',
   recordName:
-    '`recordName` was removed from the spec in 16.0 (#2377, ADR-0049) — it was ' +
+    '`recordName` was removed from the spec in 16.0 (ADR-0049) — it was ' +
     'never read. Auto-naming is modelled as a `Field` of type \'autonumber\' ' +
     '(with `autonumberFormat`) designated as the object\'s `nameField`.',
   keyPrefix:
-    '`keyPrefix` was removed from the spec in 16.0 (#2377, ADR-0049) — record ' +
+    '`keyPrefix` was removed from the spec in 16.0 (ADR-0049) — record ' +
     'ids are not prefixed from it (no Salesforce-style key-prefix runtime). ' +
     'Remove the key; it had no effect.',
   tags:
@@ -1518,11 +1518,11 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'ADR-0049) — it had no runtime reader. Remove the key; use `managedBy` for ' +
     'lifecycle bucketing or a real field for per-record tagging.',
   active:
-    '`active` was removed from the spec (#2377, ADR-0049) — no runtime reader ' +
+    '`active` was removed from the spec (ADR-0049) — no runtime reader ' +
     'gated on it, so an "inactive" object was still fully queryable and usable. ' +
     'Remove the key; gate availability with permissions/sharing instead.',
   abstract:
-    '`abstract` was removed from the spec (#2377, ADR-0049) — object ' +
+    '`abstract` was removed from the spec (ADR-0049) — object ' +
     'inheritance/abstraction is not implemented, so an abstract object still ' +
     'got a table and was instantiable. Remove the key.',
 };
@@ -1548,8 +1548,8 @@ const ObjectSchemaBase = strictObject(
     aliases: { capabilities: 'enable', features: 'enable' },
     guidance: UNKNOWN_KEY_GUIDANCE,
     history:
-      'Until #4001 closed this shape these were dropped silently on the PARSE path — '
-      + '`ObjectSchema.create()` has rejected them since #1535, but `defineStack({ objects })`, '
+      'Until this shape was closed these were dropped silently on the PARSE path — '
+      + '`ObjectSchema.create()` has rejected them, but `defineStack({ objects })`, '
       + '`/api/v1/meta/types/object` and the Studio form all go through `parse()`, which did not.',
   },
   {
@@ -1716,7 +1716,7 @@ const ObjectSchemaBase = strictObject(
   userActions: strictObject({
     surface: "this object's `userActions` block",
     history:
-      'Until #4001 these were dropped silently — the block still parsed, so an affordance ' +
+      'Until this shape was closed, these were dropped silently — the block still parsed, so an affordance ' +
       'the author meant to hide stayed on the toolbar, and the `managedBy`-derived ' +
       'default silently won.',
     aliases: {
@@ -1845,7 +1845,7 @@ const ObjectSchemaBase = strictObject(
       strictObject({
         surface: "this object's `systemFields` block",
         history:
-          'Until #4001 these were dropped silently — the block still parsed, so an ' +
+          'Until this shape was closed, these were dropped silently — the block still parsed, so an ' +
           'opt-out the author wrote had no effect and the registry injected the column ' +
           'anyway.',
         aliases: {
@@ -2001,7 +2001,7 @@ const ObjectSchemaBase = strictObject(
   activityMilestones: z.array(strictObject({
     surface: 'this activity milestone',
     history:
-      'Until #4001 these were dropped silently — the milestone still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the milestone still parsed, so a ' +
       'mis-keyed template shipped a timeline row with the wrong text, or the milestone ' +
       'never fired at all.',
     aliases: {
@@ -2100,7 +2100,7 @@ const ObjectSchemaBase = strictObject(
    * it. objectui's `ObjectSchemaClientExtensions.editMode` mirror retires in a
    * release-gated follow-up and the spec derivation carries it from then on.
    */
-  editMode: z.enum(['modal', 'page']).optional().describe("Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (#11408, #10144 family)."),
+  editMode: z.enum(['modal', 'page']).optional().describe("Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (family)."),
 
   /**
    * Built-in List Views
@@ -2134,7 +2134,7 @@ const ObjectSchemaBase = strictObject(
   /**
    * Search Engine Config 
    */
-  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused (#6674) — mirror the value onto a stored text field and declare that.'),
+  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused — mirror the value onto a stored text field and declare that.'),
 
   /**
    * System Capabilities
@@ -2187,7 +2187,7 @@ const ObjectSchemaBase = strictObject(
   publicSharing: strictObject({
     surface: "this object's `publicSharing` policy",
     history:
-      'Until #4001 these were dropped silently — the policy still parsed, so a redaction ' +
+      'Until this shape was closed, these were dropped silently — the policy still parsed, so a redaction ' +
       'list or an expiry cap the author wrote was never applied to the links the platform ' +
       'went on to issue. On a policy whose whole job is to be restrictive, a silently ' +
       'dropped key fails OPEN.',
@@ -2983,7 +2983,7 @@ export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 export const ObjectExtensionSchema = lazySchema(() => strictObject({
   surface: 'this object extension',
   history:
-    'Until #4001 these were dropped silently — the extension still parsed and still ' +
+    'Until this shape was closed, these were dropped silently — the extension still parsed and still ' +
     'registered, so fields or rules an author meant to merge into someone else\'s object ' +
     'simply never arrived, on a surface where the target is owned by another package and ' +
     'the absence is easy to blame on precedence.',

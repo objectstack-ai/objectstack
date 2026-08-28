@@ -122,10 +122,10 @@ export const TimeRelativeTriggerSchema = lazySchema(() =>
         runAs:
           '`runAs` is a FLOW-level key, not part of the descriptor. A sweep has no trigger ' +
           'user, so under the default `runAs: \'user\'` its data operations are REFUSED ' +
-          '(#3760) — declare `runAs: \'system\'` beside `nodes`/`edges`.',
+          ' — declare `runAs: \'system\'` beside `nodes`/`edges`.',
       },
       history:
-        'Until #4001 these were dropped silently — the descriptor still parsed and the sweep ' +
+        'Until this shape was closed, these were dropped silently — the descriptor still parsed and the sweep ' +
         'still bound, so a mis-spelled window or filter produced a trigger that matched ' +
         'nothing (or everything) while reporting itself as configured.',
     },

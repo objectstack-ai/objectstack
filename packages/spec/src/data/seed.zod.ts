@@ -33,7 +33,7 @@ export const SeedMode = z.enum([
 export const SeedSchema = lazySchema(() => strictObject({
   surface: 'this seed',
   history:
-    'Until #4001 these were dropped silently — the seed still applied, on the defaults '
+    'Until this shape was closed, these were dropped silently — the seed still applied, on the defaults '
     + '(`mode: upsert`, `externalId: name`) rather than what was written.',
   aliases: {
     objectname: 'object',

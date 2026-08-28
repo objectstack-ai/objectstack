@@ -149,7 +149,7 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
     surface: 'this flow variable',
     aliases: { input: 'isInput', output: 'isOutput', default: 'defaultValue', initialValue: 'defaultValue' },
     history:
-      'Until #4001 these were dropped silently — the variable still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the variable still parsed, so a ' +
       'mis-declared input/output contract shipped without a diagnostic.',
   },
   {
@@ -256,7 +256,7 @@ function flowNodeObject() { return strictObject(
         '(e.g. `config.inputs` for script/function nodes); `inputSchema` declares their types.',
     },
     history:
-      'Until #4001 these were dropped silently — the node still parsed, so a mis-placed ' +
+      'Until this shape was closed, these were dropped silently — the node still parsed, so a mis-placed ' +
       'config shipped as a step that quietly ignored it.',
   },
   {
@@ -297,7 +297,7 @@ function flowNodeObject() { return strictObject(
         payload: 'input',
       },
       history:
-        'Until #4001 these were dropped silently — the block still parsed, so a whole ' +
+        'Until this shape was closed, these were dropped silently — the block still parsed, so a whole ' +
         'mapped input map written under another word vanished and the executor ' +
         'dispatched the action with `input ?? {}`: a successful call carrying nothing.',
     },
@@ -320,7 +320,7 @@ function flowNodeObject() { return strictObject(
     {
       surface: "this node's canvas `position`",
       history:
-        'Until #4001 these were dropped silently — the block still parsed, so a canvas ' +
+        'Until this shape was closed, these were dropped silently — the block still parsed, so a canvas ' +
         'hint written beside x/y (a size, a third coordinate, a designer marker) was ' +
         'discarded, and the round-trip back through the designer could not tell it had ' +
         'ever been written.',
@@ -347,7 +347,7 @@ function flowNodeObject() { return strictObject(
           '`required: true`.',
       },
       history:
-        'Until #4001 these were dropped silently — the declaration still parsed, so a ' +
+        'Until this shape was closed, these were dropped silently — the declaration still parsed, so a ' +
         'parameter constrained under a word we do not declare (`optional: false`) came ' +
         'back UNconstrained: `required` fell to its `false` default, and the engine\'s ' +
         'pre-execution check (`validateNodeInputSchemas`) then had nothing to require.',
@@ -391,12 +391,12 @@ function flowNodeObject() { return strictObject(
       // helper once told an author to write something that gets rejected next.
       timeout:
         '`wait` has no timeout — nothing has ever failed or resumed a wait on a deadline ' +
-        '(#4158 retired the two keys that claimed one). Use `timerDuration`, and QUOTE the ' +
+        '(retired the two keys that claimed one). Use `timerDuration`, and QUOTE the ' +
         'number: the key is a string, and a bare numeric string is read as milliseconds, so ' +
         "`timerDuration: '60000'` is a 60s wait (`timerDuration: 'PT1M'` says the same in ISO 8601).",
     },
     history:
-      'Until #4001 these were dropped silently — the block still parsed, so a wait node ' +
+      'Until this shape was closed, these were dropped silently — the block still parsed, so a wait node ' +
       'whose resume condition the author spelled slightly wrong waited on nothing.',
   }, {
     /** Type of event to wait for */
@@ -432,7 +432,7 @@ function flowNodeObject() { return strictObject(
      * happened to be declared.
      */
     timeoutMs: retiredKey(
-      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17 (#4158). It documented a '
+      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17. It documented a '
       + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
       + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
       + '`timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is '
@@ -443,7 +443,7 @@ function flowNodeObject() { return strictObject(
       + 'sources; apply them by hand.',
     ),
     onTimeout: retiredKey(
-      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at '
+      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17. It had no readers at '
       + 'all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete '
       + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
       + 'its timer elapses or its signal arrives. '
@@ -474,7 +474,7 @@ function flowNodeObject() { return strictObject(
       duration: 'timerDuration',
     },
     history:
-      'Until #4001 these were dropped silently — the block still parsed, so BPMN\'s ' +
+      'Until this shape was closed, these were dropped silently — the block still parsed, so BPMN\'s ' +
       '`cancelActivity: false` was discarded and `interrupting` fell to its `true` ' +
       'default: an event the author declared NON-interrupting cancelled the host ' +
       'activity anyway.',
@@ -514,7 +514,7 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
       guard: 'condition',
     },
     history:
-      'Until #4001 these were dropped silently — the edge still parsed, so a branch ' +
+      'Until this shape was closed, these were dropped silently — the edge still parsed, so a branch ' +
       'predicate or endpoint the author wrote was quietly ignored.',
   },
   {
@@ -608,7 +608,7 @@ export const FlowSchema = lazySchema(() => strictObject(
         '`config.schedule` on the START node, not at the flow top level.',
     },
     history:
-      'Until #4001 these were dropped silently — the flow still parsed, so a trigger ' +
+      'Until this shape was closed, these were dropped silently — the flow still parsed, so a trigger ' +
       'binding or config the author wrote was quietly ignored.',
   },
   {
@@ -641,7 +641,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   status: z.enum(['draft', 'active', 'obsolete', 'invalid']).default('draft').describe('Deployment status'),
   // `template` REMOVED (#3896 audit close-out): no reader in designer or engine.
   template: retiredKey(
-    '`flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`flow.template` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'no designer or engine path ever read it, so flagging a flow as a template/subflow did ' +
     'nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the ' +
     'flow by name. ' +
@@ -664,7 +664,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   // (`status` is the enforced lifecycle). An author who "disabled" a flow here
   // left it firing.
   active: retiredKey(
-    '`flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it ' +
+    '`flow.active` was removed in @objectstack/spec 17.0.0 (audit close-out) — it ' +
     'never had an effect: the engine arms flows from `status`, and `active: false` did NOT ' +
     'stop a flow (worse, the default read as disabled while the engine treated unset as ' +
     "enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and " +
@@ -784,7 +784,7 @@ export const FlowSchema = lazySchema(() => strictObject(
         'to the handler node instead.',
     },
     history:
-      'Until #4001 these were dropped silently — the block still parsed, so a retry budget ' +
+      'Until this shape was closed, these were dropped silently — the block still parsed, so a retry budget ' +
       'or backoff the author configured was replaced by this block\'s defaults without a word. ' +
       'Since #4964 the retry keys are the converged `RetryPolicySchema` contract, so a spelling ' +
       'learned on `job.retryPolicy` or a `try_catch` node\'s `retry` is correct here too.',
