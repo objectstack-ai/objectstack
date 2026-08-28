@@ -545,8 +545,30 @@ jobs:
       # `check:pm-dispatch-gates` straight at the tool is measured and argued in
       # `scripts/pm/check-dispatch-gates.mjs`'s header (the tool's self-test
       # fixtures are path strings, and they become watch hints that fabricate
-      # MATCHED leads across most of the tree). Reads two files and walks
-      # packages/; ~0.3s.
+      # MATCHED leads across most of the tree).
+      #
+      # ⛔ This paragraph deliberately carries NO cost figure (#12831). The line
+      # that used to close it — "Reads two files and walks packages/; ~0.3s" —
+      # described the 61-case self-test named at the top, and the part that grew
+      # since is exactly the part it denied: the live-tree cases run the same
+      # discovery the tool does (every workflow file, and then the source of
+      # every gate that discovery finds), build temporary git repositories and
+      # drive `changedPathsFromGit` against them, and sweep the tracked corpus.
+      # That is not "two files", and it is not a walk of packages/. The estimate
+      # went with the description rather than being refreshed: a replacement has
+      # to be read off a real CI run of THIS step, because a reading taken in an
+      # agent container is a reading of a contended box and not of a runner
+      # (#12528). A cost nobody re-measures ends up endorsing a decision it has
+      # no standing to endorse, which is what this one had become. No live
+      # counts stand here either, for the same reason — they rot the same way,
+      # and it is the SHAPE of the work, not its size, that the argument needs.
+      #
+      # ⛔ Cost was never what makes this step unconditional. The FIRST
+      # paragraph above is, and it stands without this half: an exemption is
+      # what a self-test must not have, or the gap moves. Losing the estimate is
+      # therefore NOT an argument for an `if:`, a label read or a paths filter —
+      # weakening this gate is a maintainer call, and no reading of this note
+      # authorises one.
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
