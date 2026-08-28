@@ -1350,6 +1350,80 @@ describe('ObjectSchema.create()', () => {
       expect(obj.validations).toEqual([]);
     });
   });
+
+  // [#12615] The #1535 compile-layer rejection, one level DOWN. `create()`
+  // infers `T` from its argument, so tsc's excess-property (freshness) check
+  // never fires at ANY depth; the top-level `Record<…, never>` map compensated
+  // only for top-level keys, and a typo'd key on a nested action-param literal
+  // (measured 2026-08-26: `carryOverX` on `sys-permission-set.object.ts`)
+  // passed the package typecheck CLEAN — caught only by `ActionParamSchema`'s
+  // strict parse at module load. `NoExcessNestedActionParams` mirrors the map
+  // over `actions[].params[]`; these pins hold both layers:
+  //  - the `@ts-expect-error` line is the COMPILE pin — if the nested map is
+  //    removed, the directive goes unused and `check:test-typecheck` fails;
+  //  - the `.toThrow` is the RUNTIME pin — the strict parse stays the
+  //    enforcement of record, unchanged, for non-literal (dynamic) configs.
+  describe('excess-key rejection on nested action-param literals (#12615)', () => {
+    it('a typo\'d param key is refused at compile time AND still refused by the load-time strict parse', () => {
+      expect(() => ObjectSchema.create({
+        name: 'demo',
+        fields: { status: { type: 'text' } },
+        actions: [
+          {
+            name: 'clone_demo',
+            label: 'Clone',
+            mode: 'custom',
+            locations: ['list_item'],
+            type: 'api',
+            method: 'POST',
+            target: '/api/v1/data/demo',
+            params: [
+              {
+                field: 'status',
+                defaultFromRow: true,
+                carryOver: true,
+                // @ts-expect-error — `carryOverX` is not an ActionParam key (the #12615 compile pin)
+                carryOverX: true,
+              },
+            ],
+          },
+        ],
+      })).toThrow(/carryOverX/);
+    });
+
+    it('positive control: every canonical param spelling still compiles and parses untouched', () => {
+      const obj = ObjectSchema.create({
+        name: 'demo',
+        fields: { status: { type: 'text' } },
+        actions: [
+          {
+            // An action with NO params — the nested map must leave it alone.
+            name: 'activate_demo',
+            label: 'Activate',
+            mode: 'custom',
+            locations: ['list_item'],
+            type: 'api',
+            method: 'PATCH',
+            target: '/api/v1/data/demo/{id}',
+          },
+          {
+            name: 'clone_demo',
+            label: 'Clone',
+            mode: 'custom',
+            locations: ['list_item'],
+            type: 'api',
+            method: 'POST',
+            target: '/api/v1/data/demo',
+            params: [
+              { name: 'label', label: 'New Name', type: 'text', required: true, helpText: 'display name' },
+              { field: 'status', defaultFromRow: true, carryOver: true },
+            ],
+          },
+        ],
+      });
+      expect(obj.actions).toHaveLength(2);
+    });
+  });
 });
 
 // ============================================================================
