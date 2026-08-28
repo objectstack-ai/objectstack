@@ -4,7 +4,34 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node"],
+    // [#12181] `@objectstack/metadata-core` and `@objectstack/metadata-protocol`
+    // are imported by `src/meta-delete-item-carriers.test.ts` (the real-door
+    // reproduction), i.e. by the TEST program `tsconfig.test.json`, which
+    // extends this file. Without these rules tsc resolves those specifiers
+    // through each dependency's `exports` map — `dist/index.d.ts`, A BUILD
+    // ARTIFACT — so the verdict would be about the last `pnpm build` rather
+    // than about the producer's source in the checkout.
+    // `check:type-source-resolution` refuses exactly that, and its header
+    // states why the dangerous case is a typecheck that PASSES.
+    //
+    // ONE rule per package, not two: both publish a single entry point (their
+    // `exports` maps carry only `"."` besides, for metadata-core, a `./testing`
+    // subpath nothing here imports), and a rule pointing at files that are not
+    // on disk is worse than absent — tsc falls back to node resolution, i.e. to
+    // `dist`, silently. ⛔ Never spell a key with a star not preceded by a
+    // slash (`@objectstack/metadata-core*`): it matches the bare name AND every
+    // subpath, folds them onto one target, and type-checks green against the
+    // wrong module.
+    //
+    // `rootDir` stays `./src`: this BUILD program excludes `**/*.test.ts`, so
+    // no file in it imports either specifier and neither producer's source is
+    // pulled in here. The test program that does pull them in already sets
+    // `rootDir` to the workspace root.
+    "paths": {
+      "@objectstack/metadata-core": ["../metadata-core/src/index.ts"],
+      "@objectstack/metadata-protocol": ["../metadata-protocol/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
