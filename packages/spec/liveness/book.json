@@ -1,18 +1,18 @@
 {
   "type": "book",
-  "_note": "BookSchema (ADR-0046 §6 documentation spine). Consumers: the REST `/meta/book/:name/tree` endpoint (packages/rest/src/rest-server.ts:3078-3169) driving the spec's pure resolveBookTree/audienceAllows (packages/spec/src/system/book.zod.ts), and objectui's console docs portal (apps/console/src/pages/book-nav.ts @940ba24 — a faithful resolver port rendering the reader UI, plus portal-only consumers for slug/icon/order). 15 of 17 live; the two dead entries are both inline `translations` maps that LOOK like the doc-level mechanism that works (`doc.translations`, resolveDocLocale) but have no resolver anywhere. Seeded 2026-08-01 (#4488).",
+  "_note": "BookSchema (ADR-0046 §6 documentation spine). Consumers: the REST `/meta/book/:name/tree` endpoint (`packages/rest/src/rest-server.ts`, the `book/:name/tree` branch of `registerMetadataEndpointsInner`) driving the spec's pure `resolveBookTree` / `audienceAllows` (packages/spec/src/system/book.zod.ts), and objectui's console docs portal (apps/console/src/pages/book-nav.ts @940ba24 — a faithful resolver port rendering the reader UI, plus portal-only consumers for slug/icon/order). 15 of 17 live; the two dead entries are both inline `translations` maps that LOOK like the doc-level mechanism that works (`doc.translations`, resolveDocLocale) but have no resolver anywhere. Seeded 2026-08-01 (#4488). 2026-08-28 (#13003): every LOCAL citation in this file was re-anchored to its consuming symbol. The four objectui-only entries (`description`, `slug`, `icon`, `order`) are left BYTE-FOR-BYTE UNTOUCHED and undated-forward on purpose: their evidence is pinned at `objectui @940ba24`, a commit this container cannot reproduce, and the anchor grammar deliberately never collects foreign anchors — re-stamping `verifiedAt` on a call graph nobody re-closed is exactly the false confidence this ledger exists to prevent (the `tool.json` precedent).",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/rest-server.ts:3098",
-      "note": "tree-route identity; an unknown name is treated as a package id and resolved as the implicit per-package book (§6.4)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/rest-server.ts#deriveImplicitPackageBook (the tree route matches `b.name === req.params.name` and, failing that, synthesizes the implicit per-package book from the same segment — §6.4); packages/spec/src/system/book.zod.ts#resolveBookTree (`return { name: book.name, … }` — the resolved tree carries it back out)",
+      "note": "tree-route identity; an unknown name is treated as a package id and resolved as the implicit per-package book (§6.4). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `rest-server.ts:3098` had rotted onto `patterns: crud.patterns` in the CRUD-endpoint config, ~1,800 lines from the book route. The `_note`'s file-level range (`:3078-3169`) had rotted with it and is replaced by a symbol too. Re-closed by hand against 93ea19bca."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:303",
-      "note": "carried into the resolved tree; portal cards fall back to `name`."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`return { name: book.name, label: book.label, … }`)",
+      "note": "carried into the resolved tree; portal cards fall back to `name`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:303` lands on `.map((g, i) => ({ g, i }))`, the GROUP sort decoration at the top of `resolveBookTree`: the right function, the wrong read, and about a sibling key (`groups.order`) rather than this one. Right-function-wrong-read is the residual class an anchor cannot remove — the anchor is honest about which function, and the parenthetical now carries the expression, which is the part a reader can check. Re-closed by hand against 93ea19bca."
     },
     "description": {
       "status": "live",
@@ -40,23 +40,23 @@
     },
     "audience": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/rest-server.ts:3113, packages/rest/src/rest-server.ts:2969, packages/spec/src/system/book.zod.ts:351",
-      "note": "ENFORCED access gate (§6.7), fail-closed: gates the whole tree (401 anonymous / 403 non-holder), and every doc's effective audience is the union over the books that claim it (resolveDocAudiences) — applied to both doc lists and tree entries. The one security-shaped property on this type, and it is real."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#audienceAllows (the gate itself: `public` always, `org`/unset any authenticated principal, `{ permissionSet }` only a holder, unknown shape → false); packages/spec/src/system/book.zod.ts#resolveDocAudiences (`const audience = book.audience ?? 'org'` — every doc's effective audience is the UNION over the books that claim it, unclaimed docs falling back to `org`); packages/rest/src/rest-server.ts#audienceAllows (the tree gate: `if (!audienceAllows(book.audience, caller))` → 401 anonymous / 403 non-holder, before any tree is built)",
+      "note": "ENFORCED access gate (§6.7), fail-closed: gates the whole tree (401 anonymous / 403 non-holder), and every doc's effective audience is the union over the books that claim it (resolveDocAudiences) — applied to both doc lists and tree entries. The one security-shaped property on this type, and it is real. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — ALL THREE legs were wrong. `rest-server.ts:3113` lands on the comment `// config to read).` and `:2969` on a docblock sentence about `'v1/beta'` splicing a path segment; `book.zod.ts:351` lands on `entries.push(entryFromDoc(d))` inside `resolveBookTree`'s `...` rest-expansion — tree ASSEMBLY, not the gate, ~83 lines from `audienceAllows`. A security-shaped property whose every pointer had drifted, one of them onto a comment, is the case this whole worklist is justified by: the verdict was right, and nothing cited could have shown it. Re-closed by hand against 93ea19bca."
     },
     "groups": {
       "children": {
         "key": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/book.zod.ts:238, packages/spec/src/system/book.zod.ts:290",
-          "note": "group identity: explicit `doc.group` placement matches on it, and it keys the resolved tree."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`d.group === group.key` places an explicit member, `derivedMembers.set(group.key, members)` buckets them, and `{ key: group.key, label: group.label, entries }` keys the resolved group)",
+          "note": "group identity: explicit `doc.group` placement matches on it, and it keys the resolved tree. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:238` is the docblock of `ResolvedEntrySchema` and `:290` a bare `*` continuation line inside `resolveBookTree`'s own docblock. Both sit close enough to be believable and neither is a read. Re-closed by hand against 93ea19bca."
         },
         "label": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/book.zod.ts:290",
-          "note": "section title in the resolved tree."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`resolvedGroups.push({ key: group.key, label: group.label, entries })` — the section title of the resolved group)",
+          "note": "section title in the resolved tree. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:290` is a bare `*` line in `resolveBookTree`'s docblock, shared with `groups.key`'s rotted second leg: one docblock line doing duty as evidence for two different keys. Re-closed by hand against 93ea19bca."
         },
         "translations": {
           "status": "dead",
@@ -66,27 +66,27 @@
         },
         "order": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/book.zod.ts:221",
-          "note": "orders groups within the book (0 default, then declaration order)."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`.sort((a, b) => (a.g.order ?? 0) - (b.g.order ?? 0) || a.i - b.i)` — 0 when absent, declaration index as the stable tiebreak)",
+          "note": "orders groups within the book (0 default, then declaration order). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:221` is `key: string;` in the `ResolvedGroup` INTERFACE: a citation for `order` landing on the type declaration of a sibling key, in a block that describes the RESOLVED shape rather than the authored one. Re-closed by hand against 93ea19bca."
         },
         "include": {
           "status": "live",
-          "verifiedAt": "2026-08-17",
-          "evidence": "packages/spec/src/system/book.zod.ts:236, packages/spec/src/system/book.zod.ts:193",
-          "note": "the derived-membership rule — the heart of the §6.2.1 design. Both forms are live: the GLOB variant matches on name/group, and the `{ tag }` variant (matchesInclude reads doc.tags) started matching the moment DocSchema DECLARED `tags` in 17.0.0 (#4509, ADR-0049) — see doc.json's `tags` entry for the fix's full history."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#matchesInclude (both forms — a string is a name glob via `globToRegExp`, `{ tag }` tests `doc.tags`, and `scopePackage` short-circuits a foreign doc first); packages/spec/src/system/book.zod.ts#resolveBookTree (`group.include != null && matchesInclude(d, group.include, scope)` — called on the derived-membership pass AND again inside a `pages` group's `...` rest-expansion)",
+          "note": "the derived-membership rule — the heart of the §6.2.1 design. Both forms are live: the GLOB variant matches on name/group, and the `{ tag }` variant (matchesInclude reads doc.tags) started matching the moment DocSchema DECLARED `tags` in 17.0.0 (#4509, ADR-0049) — see doc.json's `tags` entry for the fix's full history. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:236` is a docblock line about #12038's describe-only transcription and `:193` a BLANK LINE in the resolver's section banner. The entry's prose already named `matchesInclude` correctly; it is only the positions that had rotted, which is the whole shape of this migration. Re-closed by hand against 93ea19bca."
         },
         "package": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/book.zod.ts:232",
-          "note": "scopes the rule to a package id (cross-package books, ADR-0048)."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`const scope = group.package ?? bookPackage`, on both the derived pass and the `pages` rest-expansion); packages/spec/src/system/book.zod.ts#matchesInclude (`if (scopePackage && doc.packageId && doc.packageId !== scopePackage) return false` — where the scope is actually enforced)",
+          "note": "scopes the rule to a package id (cross-package books, ADR-0048). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:232` is the `/**` that OPENS `ResolvedEntrySchema`'s docblock. The entry now cites both halves separately: the read that computes the scope and the comparison that enforces it, which were one line apart when this was written and are ~40 lines apart today. Re-closed by hand against 93ea19bca."
         },
         "pages": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/book.zod.ts:248-286",
-          "note": "explicit curated-order override; `---` separators and `...` rest-expansion both implemented, node label/badge/icon overrides carried into entries."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (`if (group.pages) continue` excludes the group from the derived pass, then the override walk: `'---'` → a separator entry, `'...'` → rest-expansion filtered by the same `include`/`group` rules, a string → `byName` lookup with a not-found placeholder, and a node object → `entryFromDoc` overlaid with `label`/`badge`/`icon`)",
+          "note": "explicit curated-order override; `---` separators and `...` rest-expansion both implemented, node label/badge/icon overrides carried into entries. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:248-286` was a RANGE, and the line bound checks only its END (a start inside the file with an end past EOF is the case that rule exists for), so the whole span was unbounded on one side by design; today it spans `ResolvedEntrySchema`'s field list into `ResolvedBookSchema`, i.e. the response contract rather than the resolver. A range citation is the weakest form the grammar allows for exactly this reason — it names more lines and therefore fewer things. Re-closed by hand against 93ea19bca."
         }
       },
       "note": "Drilled because `translations` diverges (dead) from its six live siblings."
