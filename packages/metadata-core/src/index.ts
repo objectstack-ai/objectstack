@@ -19,6 +19,11 @@ export * from './protocol-handshake.js';
 // an artifact whose declared `engines.protocol` floor predates the running
 // spec, so within-line key retirements do not brick already-built artifacts.
 export * from './artifact-forward-conversion.js';
+// #12915 scope C — the read-only sibling of the conversion above: report
+// form-view predicates whose ROOT identifier is unbound (and therefore fault
+// OPEN) on artifacts inside the same versioned window. Detection only; the
+// rewriting conversion is scope A, deferred by the 2026-08-28 ruling.
+export * from './form-predicate-root-policy.js';
 export * from './objects/index.js';
 
 // [#5619] The ObjectQL WRITE-VERB dispatch predicates (#4550 delete / #5480

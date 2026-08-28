@@ -50,7 +50,6 @@ import { SysTeam } from './sys-team.object.js';
 import { SysTeamMember } from './sys-team-member.object.js';
 import { SysApiKey } from './sys-api-key.object.js';
 import { SysSsoProvider } from './sys-sso-provider.object.js';
-import { SysScimProvider } from './sys-scim-provider.object.js';
 import { SysTwoFactor } from './sys-two-factor.object.js';
 import { SysAccount } from './sys-account.object.js';
 import { SysSession } from './sys-session.object.js';
@@ -142,7 +141,6 @@ const OBJECTS: Array<[string, { actions?: unknown }]> = [
   ['sys_team_member', SysTeamMember],
   ['sys_api_key', SysApiKey],
   ['sys_sso_provider', SysSsoProvider],
-  ['sys_scim_provider', SysScimProvider],
   ['sys_two_factor', SysTwoFactor],
   ['sys_account', SysAccount],
   ['sys_session', SysSession],

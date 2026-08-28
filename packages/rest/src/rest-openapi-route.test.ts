@@ -322,6 +322,12 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
   it('passes the half of the document `packages/spec` owns through serve untouched', async () => {
     // The artifact's surviving half — `components.schemas`, `securitySchemes`,
     // `info` — is the contract, and serve-time enrichment must not touch it.
+    //
+    // Until #11646 the `info` third of that claim was narrowed to `title`
+    // alone, precisely because the serve path overwrote `info.version` with
+    // the deployment's `api.version`: the invariant was stated and then
+    // excepted, in this same file. The override is deleted, so the exception
+    // is gone and the pin below covers the WHOLE block.
     const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
     const artifact = await (rest as any).loadOpenApiSpec();
     expect(artifact, 'the bundled artifact must be loadable for this pin to mean anything').toBeTruthy();
@@ -336,7 +342,16 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
     const { body } = await serveOpenApiFrom(rest);
     expect(Object.keys(body.components.schemas)).toEqual(Object.keys(artifact.components.schemas));
     expect(body.components.securitySchemes).toEqual(artifact.components.securitySchemes);
-    expect(body.info.title).toBe(artifact.info.title);
+    // Anti-vacuity: a whole-block `toEqual` over an `info` with no `version`
+    // would pass without ever reaching the field #11646 closed.
+    expect(
+      artifact.info.version,
+      'the artifact must carry a version, or the whole-block pin below never reaches the field #11646 closed',
+    ).toBeTruthy();
+    expect(
+      body.info,
+      'serve-time enrichment must not touch `info` — the WHOLE block is the artifact\'s, `version` included (#11646). A serve-time override of any `info` field lands here.',
+    ).toEqual(artifact.info);
   });
 
   it('discards a `paths`-carrying artifact instead of merging it', async () => {
@@ -370,55 +385,87 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
   });
 });
 
-describe('GET /openapi.json — what `info.version` carries (#11546)', () => {
+describe('GET /openapi.json — what `info.version` carries (#11546, #11646)', () => {
+  // History, because this field has now been three different things.
+  //
   // The line under test used to read
   //   `version: this.config.api.version || enriched.info.version`
   // under a comment promising "the runtime version so consumers don't pin to
   // the spec package's compile-time version". Both halves were false, and
   // nothing pinned either one, so the document could have drifted to any of
-  // three different facts without a test noticing. These four fix what the
-  // field means.
+  // three different facts without a test noticing. #11546 pinned it to the
+  // declared API version identifier and deleted the fallback.
+  //
+  // #11646 then deleted the serve-time override itself (maintainer ruling,
+  // 2026-08-25, option B): the served `info.version` is the ARTIFACT's, so
+  // the served document and `@objectstack/spec`'s published `./openapi.json`
+  // export state one fact instead of two. The declared identifier still
+  // exists and is still observable — it builds the mount — it just no longer
+  // rewrites a producer-owned contract field. The cases below are the
+  // inversion of the #11546 ones: each now asserts the value the override
+  // used to suppress.
   //
   // OpenAPI 3.1, Info Object: `version` is "the version of the OpenAPI
   // document (which is distinct from the OpenAPI Specification version or the
   // API implementation version)". The runtime version is the implementation
   // version, so it is the one value the field's own definition excludes —
   // which is why this is NOT the shape #11292 settled for `/discovery`, where
-  // `DiscoverySchema.version` means the serving artifact by #10993.
+  // `DiscoverySchema.version` means the serving artifact by #10993. That
+  // exclusion is unchanged by #11646: the artifact version is the document's
+  // version, not the runtime's.
 
-  it('serves the declared API version identifier, not the artifact version', async () => {
+  it('serves the artifact version, not the declared API version identifier', async () => {
     const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
     const artifact = await (rest as any).loadOpenApiSpec();
     const { body } = await serveOpenApiFrom(rest);
 
-    expect(body.info.version).toBe('v1');
-    // The serve path deliberately overrides the producer here, so the pin is
-    // only meaningful while the two values actually differ — if they ever
-    // converge this assertion says so instead of passing vacuously.
+    expect(body.info.version).toBe(artifact.info.version);
+    // Only meaningful while the two candidate facts are actually different
+    // values — if they ever converge this says so instead of passing
+    // vacuously, exactly as the #11546 version of this case did in the other
+    // direction.
     expect(
       artifact.info.version,
-      'the artifact must carry a DIFFERENT version for the override pin above to mean anything',
+      'the artifact must carry a version DIFFERENT from the declared `api.version` for the pin above to mean anything',
     ).not.toBe('v1');
-    expect(body.info.version).not.toBe(artifact.info.version);
+    expect(body.info.version).not.toBe('v1');
   });
 
-  it('tracks a custom `api.version`, which is also the mount segment', async () => {
+  it('does not track a custom `api.version` — that identifier moves the MOUNT, not `info.version`', async () => {
     const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: 'v9' });
+    const artifact = await (rest as any).loadOpenApiSpec();
     const { body } = await serveOpenApiFrom(rest, '/api/v9');
-    expect(body.info.version).toBe('v9');
+
+    // The identifier is still live and still observable — establish that
+    // FIRST, so a v9 that quietly stopped taking effect cannot make the
+    // `info.version` half below pass for the wrong reason.
+    expect(
+      Object.keys(body.paths).length,
+      'the v9 mount published no paths — this case would then assert nothing about the identifier',
+    ).toBeGreaterThan(0);
+    for (const path of Object.keys(body.paths)) {
+      expect(path.startsWith('/api/v9'), `'${path}' did not follow the v9 mount`).toBe(true);
+    }
+
+    // ...and it does not reach `info`, which is the artifact's.
+    expect(body.info.version).toBe(artifact.info.version);
+    expect(body.info.version).not.toBe('v9');
   });
 
   it('is not the runtime version — an `OS_RUNTIME_VERSION` stamp does not reach it', async () => {
-    // The anti-regression pin for the direction this card did NOT take. Were
-    // the field re-pointed at `resolveDiscoveryVersion()`, the sentinel below
-    // would land in the served document and this goes red.
+    // The anti-regression pin for the direction NEITHER card took. Were the
+    // field re-pointed at `resolveDiscoveryVersion()`, the sentinel below
+    // would land in the served document and this goes red. #11646 moved the
+    // expected value from the declared identifier to the artifact's version;
+    // the excluded value is unchanged.
     const SENTINEL = '9.9.9-openapi-info-version-sentinel';
     const old = process.env.OS_RUNTIME_VERSION;
     process.env.OS_RUNTIME_VERSION = SENTINEL;
     try {
       const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
+      const artifact = await (rest as any).loadOpenApiSpec();
       const { body } = await serveOpenApiFrom(rest);
-      expect(body.info.version).toBe('v1');
+      expect(body.info.version).toBe(artifact.info.version);
       expect(JSON.stringify(body.info)).not.toContain(SENTINEL);
     } finally {
       if (old === undefined) delete process.env.OS_RUNTIME_VERSION;
@@ -435,10 +482,15 @@ describe('GET /openapi.json — what `info.version` carries (#11546)', () => {
     // instead of cast, so `RestServer` refuses the construction and the
     // doubled-slash mount is unreachable.
     //
-    // The fact the old pin protected is unchanged and still covered above:
-    // there is still NO `|| enriched.info.version` fallback, so a configured
-    // version is served as itself. What changed is that `''` is no longer a
-    // configurable version.
+    // What this pin protects is the CONSTRUCTION refusal, and that is
+    // unchanged: `''` is not a configurable version.
+    //
+    // The other half of this comment used to read "there is still NO
+    // `|| enriched.info.version` fallback, so a configured version is served
+    // as itself" — #11646 retired that sentence with the override it
+    // described. `api.version` no longer reaches `info.version` at all, by
+    // any path, fallback or otherwise; it builds the mount, which is what the
+    // refusal above keeps well-formed.
     expect(() => makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: '' }))
       .toThrow(/api\.version/);
   });

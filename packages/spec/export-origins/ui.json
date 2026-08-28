@@ -148,6 +148,7 @@
     "FieldWidgetProps": "src/ui/widget.zod.ts#FieldWidgetProps (type)",
     "FieldWidgetPropsParsed": "src/ui/widget.zod.ts#FieldWidgetPropsParsed (type)",
     "FieldWidgetPropsSchema": "src/ui/widget.zod.ts#FieldWidgetPropsSchema (const)",
+    "FilterCondition": "src/data/filter.zod.ts#FilterCondition (type)",
     "FormButtonConfig": "src/ui/view.zod.ts#FormButtonConfig (type)",
     "FormButtonConfigSchema": "src/ui/view.zod.ts#FormButtonConfigSchema (const)",
     "FormField": "src/ui/view.zod.ts#FormField (type)",

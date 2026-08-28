@@ -528,8 +528,8 @@ The complete, prioritized gap map lives in issue **#2561** (the production
   `sys_verification`, `sys_oauth_access_token`, `sys_oauth_refresh_token`,
   `sys_device_code`) declare `access: { default: 'private' }` — no wildcard
   grant reaches them; platform admins retain access via the posture-gated
-  superuser bypass. `sys_scim_provider` is capability-gated like
-  `sys_sso_provider`. Member self-service objects (`sys_session`,
+  superuser bypass. `sys_sso_provider` is capability-gated
+  (`manage_platform_settings`). Member self-service objects (`sys_session`,
   `sys_api_key`, `sys_oauth_application`, `sys_two_factor`) deliberately stay
   public-posture (the Account app reads them as the member; row scoping is
   their guard). Still open: Studio posture surfacing (objectui).

@@ -165,6 +165,49 @@ export interface WriteObservabilityOptions {
 }
 
 /**
+ * A datasource *definition* as the engine retains it (ADR-0015) — the
+ * declarative facts a datasource states about itself, never a live driver
+ * connection (that is `registerDriver`).
+ *
+ * Named because two members share it: {@link IDataEngine.registerDatasourceDef}
+ * writes it and {@link IDataEngine.listDatasourceDefs} reads it back. Two
+ * inline copies of one shape on one contract is the de-facto-contract drift
+ * the #11833 sweep exists to retire — and a name here is what lets a consumer
+ * type its sweep without re-declaring a consumer-local structural element
+ * type, the same pattern one member over. Naming follows the contract's
+ * existing `Engine*` family (`EngineQueryOptions`, `EngineUpdateOptions`, …);
+ * `@objectstack/objectql` exports its own structurally-identical
+ * `DatasourceDef`, which this contract cannot import (dependency direction),
+ * so the distinct name keeps the two declarations tellable apart until the
+ * engine converges on this one.
+ *
+ * The keys are a deliberate SUBSET of the spec's authored datasource surface
+ * (`ExternalDatasourceSettingsSchema` in `data/datasource.zod.ts`) — the
+ * engine retains only what it has a use for. ⛔ Not a mirror of the authored
+ * block and not a place to grow one: `validation` and `queryTimeoutMs` are
+ * absent because nothing in the engine reads them ([#12805] mirrors engine
+ * reality, it does not invent surface).
+ */
+export interface EngineDatasourceDef {
+  name: string;
+  schemaMode?: string;
+  external?: {
+    /** Datasource-wide write gate — ADR-0015 §5.3 Gate 3. */
+    allowWrites?: boolean;
+    /**
+     * Reference into the secrets store, never an inline credential
+     * (`credentialsRef` on `ExternalDatasourceSettingsSchema`). Valid in
+     * EVERY `schemaMode` — it is the one `external` key a managed datasource
+     * may carry (#8153) — so a reader sweeping for handles must not filter
+     * by schema mode. [#12805] The engine has accepted and retained this key
+     * since #12758; this contract is the catch-up, not a widening beyond
+     * engine reality.
+     */
+    credentialsRef?: string;
+  };
+}
+
+/**
  * IDataEngine - Standard Data Engine Interface
  *
  * Abstract interface for data persistence capabilities.
@@ -351,16 +394,41 @@ export interface IDataEngine {
    * the third such type the #11833 sweep measured (#12010), adjudicated onto
    * the contract by the 2026-08-25 ruling's item 4.
    *
-   * Register a datasource *definition* (ADR-0015) — declarative
-   * `schemaMode` + `external.allowWrites`, so the engine's write gate can
-   * enforce external-datasource ownership. Distinct from registering a live
+   * Register a datasource *definition* (ADR-0015) — the declarative
+   * {@link EngineDatasourceDef}: `schemaMode` + `external.allowWrites` so the
+   * engine's write gate can enforce external-datasource ownership, and
+   * `external.credentialsRef` so {@link listDatasourceDefs} can hand a
+   * credentials sweep the handle a code-declared datasource holds ([#12805]
+   * — the engine accepts and retains the reference since #12758; before
+   * this catch-up a caller typed against THIS contract was refused with
+   * TS2353 for a value the runtime keeps). Distinct from registering a live
    * driver connection. Safe to call repeatedly; last write wins.
    */
-  registerDatasourceDef?(def: {
-    name: string;
-    schemaMode?: string;
-    external?: { allowWrites?: boolean };
-  }): void;
+  registerDatasourceDef?(def: EngineDatasourceDef): void;
+
+  /**
+   * Every datasource DEFINITION this engine holds — from BOTH entry routes,
+   * {@link registerDatasourceDef} and the engine's package-manifest install
+   * path. The read-back of the same registry the member above writes, so it
+   * shares that member's population ("only engines that own a datasource
+   * registry answer") and its optionality — the fourth member of the
+   * lifecycle family the 2026-08-25 ruling's item 4 adjudicated onto this
+   * contract, declared under the same [#4251]/[#11493] evidence bar
+   * ([#12805]: implemented on `ObjectQL` since #12758, and the #12804
+   * `sys_secret` reference sweep is the consumer that otherwise must name
+   * the engine class concretely or re-declare the member structurally).
+   *
+   * Exists because a datasource declared IN CODE never reaches the metadata
+   * store, so a `sys_secret` reference sweep reading `sys_metadata` alone
+   * cannot see the handle such a datasource holds at
+   * `external.credentialsRef` and must be handed the list by the engine.
+   * Implementations answer UNFILTERED (every definition, whatever its
+   * `schemaMode`, with or without a reference — `credentialsRef` is valid on
+   * a managed datasource too, #8153) and answer FRESH copies: a reader must
+   * not be able to reach through this accessor and mutate the write gate's
+   * own input.
+   */
+  listDatasourceDefs?(): EngineDatasourceDef[];
 
   /**
    * Record that a **declared** datasource has no live driver, and why

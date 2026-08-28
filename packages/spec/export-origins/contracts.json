@@ -75,6 +75,7 @@
     "EmailAddress": "src/contracts/email-service.ts#EmailAddress (type)",
     "EmailAttachment": "src/contracts/email-service.ts#EmailAttachment (interface)",
     "EmailDeliveryStatus": "src/contracts/email-service.ts#EmailDeliveryStatus (type)",
+    "EngineDatasourceDef": "src/contracts/data-engine.ts#EngineDatasourceDef (interface)",
     "EngineSchemaRegistryView": "src/contracts/objectql-engine.ts#EngineSchemaRegistryView (interface)",
     "EngineTransactionInfo": "src/contracts/objectql-engine.ts#EngineTransactionInfo (interface)",
     "EngineTransactionOptions": "src/contracts/objectql-engine.ts#EngineTransactionOptions (interface)",

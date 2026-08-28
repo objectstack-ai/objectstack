@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { IDataEngine, WriteObservabilityOptions } from './data-engine';
+import type { EngineDatasourceDef, IDataEngine, WriteObservabilityOptions } from './data-engine';
 import type { IDataDriver } from './data-driver';
+import type { ServiceSlotContract } from './core-service-contracts';
 import type { IntrospectedSchema } from './schema-diff-service';
 import {
   EngineUpdateOptionsSchema,
@@ -494,28 +495,85 @@ describe('Data Engine Contract', () => {
     });
   });
 
-  describe('datasource lifecycle members (#12248, #12010 via the #11833 ruling item 4)', () => {
+  describe('datasource lifecycle members (#12248, #12010, #12805 via the #11833 ruling item 4)', () => {
     type RegisterMember = IDataEngine['registerDatasourceDef'];
+    type ListMember = IDataEngine['listDatasourceDefs'];
     type MarkMember = IDataEngine['markDatasourceUnavailable'];
     type ClearMember = IDataEngine['clearDatasourceUnavailable'];
 
-    it('all three are optional — only engines owning a datasource registry answer', () => {
+    it('all four are optional — only engines owning a datasource registry answer', () => {
       type A = undefined extends RegisterMember ? 'optional' : never;
+      type L = undefined extends ListMember ? 'optional' : never;
       type B = undefined extends MarkMember ? 'optional' : never;
       type C = undefined extends ClearMember ? 'optional' : never;
       const a: A = 'optional';
+      const l: L = 'optional';
       const b: B = 'optional';
       const c: C = 'optional';
-      expect([a, b, c]).toEqual(['optional', 'optional', 'optional']);
+      expect([a, l, b, c]).toEqual(['optional', 'optional', 'optional', 'optional']);
     });
 
     it('registerDatasourceDef takes the declarative def — name required, write gate keys optional', () => {
       const register: NonNullable<RegisterMember> = (_def) => {};
       register({ name: 'warehouse' });
       register({ name: 'warehouse', schemaMode: 'read-only', external: { allowWrites: false } });
+      // #12805 — the accept set catches up to what the engine has retained
+      // since #12758: a fresh literal carrying the secrets-store handle
+      // compiles at THIS seam (before the catch-up it was refused with
+      // TS2353 here while the runtime accepted and kept the value).
+      register({
+        name: 'warehouse',
+        schemaMode: 'read-only',
+        external: { allowWrites: false, credentialsRef: 'secrets/warehouse' },
+      });
       // @ts-expect-error - a datasource definition without a name registers nothing
       register({ schemaMode: 'read-only' });
+      // The widening is exactly the ruled key, not an open door: an inline
+      // credential has no declared home on the def (secrets travel by
+      // REFERENCE — `credentialsRef`), so an undeclared `external` key stays
+      // refused. Pinned in BOTH directions, like the `kind` union below.
+      // @ts-expect-error - `credentials` (inline) is not a declared external key
+      register({ name: 'warehouse', external: { credentials: 'user:pass' } });
       expect(typeof register).toBe('function');
+    });
+
+    it('listDatasourceDefs answers the SAME declared def the register member takes — one shape, no drift', () => {
+      // Mutual extends pins that the write side and the read-back share ONE
+      // declaration (`EngineDatasourceDef`): a widening that reaches only one
+      // of the pair resolves either half to `never`.
+      type Registered = Parameters<NonNullable<RegisterMember>>[0];
+      type Listed = ReturnType<NonNullable<ListMember>>[number];
+      type Same = Registered extends Listed
+        ? (Listed extends Registered ? 'same' : never)
+        : never;
+      type Declared = Listed extends EngineDatasourceDef
+        ? (EngineDatasourceDef extends Listed ? 'declared' : never)
+        : never;
+      const same: Same = 'same';
+      const declared: Declared = 'declared';
+      expect(same).toBe('same');
+      expect(declared).toBe('declared');
+    });
+
+    it('a sys_secret sweep can read the handle through the data slot contract alone', () => {
+      // The #12804 consumer seam (#12805): "which code-declared datasources
+      // hold a `sys_secret` handle", typed against `ServiceSlotContract`
+      // for the data slot — naming neither the engine class nor a
+      // consumer-local structural re-declaration (the #11833 pattern).
+      const sweep = (engine: ServiceSlotContract<'data'>): string[] =>
+        (engine.listDatasourceDefs?.() ?? [])
+          .filter((def) => def.external?.credentialsRef !== undefined)
+          .map((def) => def.name);
+      expect(typeof sweep).toBe('function');
+    });
+
+    it('refuses an implementation answering nameless or inline-credential defs', () => {
+      // @ts-expect-error - every listed definition carries its name
+      const nameless: NonNullable<ListMember> = () => [{ schemaMode: 'read-only' }];
+      // @ts-expect-error - the def carries a secrets-store REFERENCE, never an inline credential
+      const inline: NonNullable<ListMember> = () => [{ name: 'w', external: { credentials: 'user:pass' } }];
+      expect(nameless).toBeTruthy();
+      expect(inline).toBeTruthy();
     });
 
     it('markDatasourceUnavailable admits exactly the two declared kinds', () => {
