@@ -1706,6 +1706,36 @@ function selfTest() {
         + 'comment-only, which tells the maintainer reading the script and not the author tripping the gate',
     );
 
+    // #12572. The same failure carries TWO more load-bearing sentences, and they
+    // pull against each other on purpose — which is exactly why both need pinning
+    // from this side rather than being left to a reader's judgement.
+    //
+    //   THE REFUSAL is a cross-gate contract. `check-ratchet-remedy-authority`
+    //   hand-classifies this file as `refused` (#8435), and it earns that verdict
+    //   from this literal: its PREDICATION shape ("widening … is not the fix") is
+    //   what tells a refusal apart from mere discouragement. Soften this sentence
+    //   and this gate silently becomes an UNMARKED offer of a ratchet-expanding
+    //   remedy — a violation reported over THERE, naming a file whose author was
+    //   editing prose here and had no reason to look.
+    //
+    //   THE EXCEPTION is what keeps the refusal honest. Since #11490 a package CAN
+    //   move the program set, so an unqualified refusal forbids the only correct
+    //   action for an onboarding — the state #11491 measured 14 remaining
+    //   `TEST_DEBT` entries as walking into.
+    //
+    // Neither may be dropped to make room for the other.
+    expect(
+      has(grown.failures, 'widening the registry entry is not the fix'),
+      'the refusal PREDICATION is gone — `check-ratchet-remedy-authority` classifies this file as '
+        + '`refused` from that exact shape, so losing it turns this gate into an unmarked ratchet offer '
+        + 'and reds a DIFFERENT gate, naming this file',
+    );
+    expect(
+      has(grown.failures, 'ONBOARDED'),
+      'the failure text no longer names the one case the refusal does not cover — a package that moved '
+        + 'the program set itself, which #11490 made possible and 14 queued onboardings each arrive at',
+    );
+
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });
     expect(has(wide.failures, 'STALE'), 'a registry entry listing a dep that is no longer dist-resolved did not fail');
 
