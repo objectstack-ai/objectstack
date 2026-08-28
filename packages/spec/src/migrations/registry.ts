@@ -5267,7 +5267,20 @@ const step18: MigrationStep = {
     'grant in `permissions[].objects` (pure lossless delete — they never had an ' +
     'effect to lose). `allowTransfer` is ENFORCED (#3004) and stays. The keys return ' +
     'with the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays ' +
-    'open as the anchor.',
+    'open as the anchor. ' +
+    'Finally, it narrows the per-option `default` key OUT of the form-view options ' +
+    'vocabulary (#12868, ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 ' +
+    'on the objectui#6263 analysis, disposition 甲): `SelectOptionSchema` serves two ' +
+    'surfaces and only the OBJECT-field face reads `default` (#7246 / PR #7388 — ' +
+    '`applyFieldDefaults` falls back to the option marked `default: true`; that face, its ' +
+    'alias rows and its precedence pin are untouched). On a form-view field\'s option list ' +
+    'the key parsed clean and nothing read it — the insert-path fallback consults the ' +
+    'object definition\'s options, never a form view\'s, and no form renderer seeds a value ' +
+    'from it (measured on objectui#6263; the ruled census found ZERO authored occurrences ' +
+    'across the tree, the example apps and the published *.form.ts corpus). The FormView ' +
+    'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses ' +
+    'the key with the prescription; the mechanical conversion strips it from stored ' +
+    'sources (pure lossless delete — it never had an effect on this surface to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5282,6 +5295,7 @@ const step18: MigrationStep = {
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
     'permission-allow-restore-purge-removed',
+    'form-view-option-default-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
