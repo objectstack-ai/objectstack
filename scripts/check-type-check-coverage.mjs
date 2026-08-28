@@ -447,6 +447,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
+import { getHeapStatistics } from 'node:v8';
 import {
   selfTest as workspaceEnumeratorSelfTest,
   workspacePackageDirs,
@@ -2716,6 +2717,163 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
   return n;
 }
 
+// ---------------------------------------------------------------------------
+// The heap ceiling `--re-measure` runs tsc under (#12856).
+//
+// ## The defect this closes
+//
+// tsc's ceiling is V8's default old-space size, and V8 derives that from the
+// PHYSICAL MEMORY of the box the process starts on. Nothing here said so, so
+// this gate measured a different world on every machine -- while the only
+// verdict that counts is CI's. Three devs ran `--re-measure` on the agent
+// container against the tree below, all three read green, and CI OOM'd on that
+// same tree. ⚠️ The asymmetry IS the defect: a local pass was never a claim
+// about CI, and nothing said so out loud.
+//
+// ## Where the number comes from -- CI, never this box
+//
+// Read off the CI runner itself: run 33136681083, job `Type Check · debt
+// ledger`, at 6d097a604, Node v22.23.2. The `packages/qa/http-conformance`
+// TEST_DEBT program died there, and the last GC before it says how much heap it
+// was allowed:
+//
+//     [5950] 65768 ms: Mark-Compact 4040.3 (4143.8) -> 4029.5 (4147.5) MB,
+//       ... allocation failure; GC in old space requested
+//     FATAL ERROR: Ineffective mark-compacts near heap limit
+//       Allocation failed - JavaScript heap out of memory
+//
+// V8 gave up with 4040.3 MB live and 4147.5 MB of heap committed, which
+// brackets that runner's old-space limit into [4040, 4148] MB. 4096 is the only
+// V8 default that lands in the window, and the two sides agree on the offset:
+// `getHeapStatistics().heap_size_limit` reports the old space plus a fixed
+// ~48 MB of other spaces (8240 reported for 8192 and 560 for 512, both measured
+// with `NODE_OPTIONS` on a box under this file's own eyes), so a 4096 old space
+// reports 4144 and commits the 4147.5 above it.
+//
+// ⚠️ If 4096 is wrong, it is wrong DOWNWARD -- the only safe direction. This
+// number's entire job is to be no HIGHER than CI's ceiling. A pin ABOVE CI's is
+// worse than no pin at all: it makes local runs pass where CI still OOMs, which
+// is exactly this defect with extra confidence attached.
+//
+// ⛔ Do not raise this to make a local measurement complete. `--re-measure`
+// OOMing under this ceiling is the gate WORKING -- it is CI's failure,
+// reproduced on your box before you push. What grew is the type graph, not the
+// memory CI has. (`packages/spec/tsup.config.ts` carries the other half of this
+// lesson from the build side: a ceiling above the box's real memory does not
+// buy a bigger run, it converts a recoverable heap error into an exit-137
+// SIGKILL that carries no diagnostic at all.)
+const CI_TSC_HEAP_CEILING_MB = 4096;
+
+/**
+ * The last `--max-old-space-size` in a `NODE_OPTIONS` string, in MB, or null.
+ *
+ * LAST, not first, because that is what V8 does with a repeated flag -- measured
+ * both ways: `--max-old-space-size=8192 --max-old-space-size=512` reports a
+ * 560 MB limit and the reverse order reports 8240. That is the whole reason
+ * `heapCappedEnv` below can APPEND rather than having to rewrite what the
+ * caller set, and the reason this parser has to agree with V8 about which
+ * occurrence wins: reading the first one would let a caller's stale flag decide
+ * a ceiling V8 has already discarded.
+ *
+ * Only the `=` spelling exists to parse. `NODE_OPTIONS="--max-old-space-size 512"`
+ * is not a lower ceiling, it is a node startup error (measured: the space-split
+ * form makes node reject an unrelated option and exit), so a run that reaches
+ * this gate at all never carries one. Both the dashed and the underscored flag
+ * names are accepted, because V8 accepts both.
+ *
+ * @param {string | undefined} nodeOptions
+ * @returns {number | null}
+ */
+function maxOldSpaceMb(nodeOptions) {
+  let mb = null;
+  for (const m of String(nodeOptions ?? '').matchAll(/--max[-_]old[-_]space[-_]size=(\d+)/g)) {
+    mb = Number(m[1]);
+  }
+  return mb;
+}
+
+/**
+ * The ceiling this run will hand tsc, and the honest name of where it came from.
+ *
+ * The rule is a MINIMUM over three numbers, and each one is there for a failure
+ * that has actually happened somewhere in this repo:
+ *
+ *   the CI ceiling      the point of the exercise -- a roomier box must not
+ *                       measure a roomier world than the box whose verdict
+ *                       counts.
+ *   this process's own  never RAISE a ceiling. On a box smaller than CI,
+ *                       promising V8 memory the box does not have does not buy
+ *                       a bigger run: the kernel kills the process at the
+ *                       container limit long before V8 reaches the ceiling, and
+ *                       exit 137 carries no diagnostic (`packages/spec`'s DTS
+ *                       pass was killed on every docs deploy for two days that
+ *                       way). Lower than CI is the safe direction anyway: heap
+ *                       headroom is monotone, so a program that fits under a
+ *                       smaller ceiling fits under CI's.
+ *   the caller's        an explicit `NODE_OPTIONS` cap is honoured when it is
+ *                       TIGHTER, and refused when it is roomier. A caller who
+ *                       could hand this gate more heap than CI has could hand
+ *                       back the exact green-here-red-there reading this
+ *                       ceiling exists to abolish.
+ *
+ * `stale` is the other direction, and it is the one nothing else can catch. If
+ * the runner's OWN default is below the pinned constant, then the constant is
+ * no longer a description of CI: every local run is roomier than CI again,
+ * silently, and this file's green is back to meaning nothing. That is only
+ * measurable on the runner itself, so it is measured there and refused there --
+ * an advisory would be a declaration nobody reads, which is the shape this
+ * repo's ledgers exist to stop.
+ *
+ * @param {{heapLimitMb: number, nodeOptions?: string, onCi?: boolean}} where
+ * @returns {{mb: number, from: string, machineMb: number, stale: string | null}}
+ */
+function remeasureHeapCeiling({ heapLimitMb, nodeOptions, onCi = false }) {
+  const caller = maxOldSpaceMb(nodeOptions);
+  const candidates = [
+    { mb: CI_TSC_HEAP_CEILING_MB, from: `the CI-shaped ceiling pinned by ${SELF}` },
+    { mb: heapLimitMb, from: "this machine's own default, which is BELOW CI's ceiling" },
+    ...(caller === null ? [] : [{ mb: caller, from: "the caller's NODE_OPTIONS, which is tighter" }]),
+  ];
+  // Ties keep the earlier candidate, so the CI ceiling keeps its name on the
+  // machine that IS CI -- where all three numbers agree and the label is the
+  // only thing left to read.
+  const chosen = candidates.reduce((a, b) => (b.mb < a.mb ? b : a));
+  const stale = onCi && heapLimitMb < CI_TSC_HEAP_CEILING_MB
+    ? `${SELF} pins a CI heap ceiling of ${CI_TSC_HEAP_CEILING_MB} MB, but THIS CI runner's own default is `
+      + `${heapLimitMb} MB -- the pin is now ABOVE the ceiling it claims to describe, so every local run of `
+      + `this gate is roomier than CI again and its green says nothing about this job. Re-pin `
+      + `CI_TSC_HEAP_CEILING_MB from this reading (the runner shrank; the remedy is one constant), and `
+      + `⛔ do not delete the pin instead -- an unpinned run is the defect #12856 closed.`
+    : null;
+  return { mb: chosen.mb, from: chosen.from, machineMb: heapLimitMb, stale };
+}
+
+/**
+ * `env` with the ceiling appended to `NODE_OPTIONS`.
+ *
+ * APPENDED, never substituted: V8 takes the last occurrence (see
+ * `maxOldSpaceMb`), so this wins over whatever the caller set without this
+ * function having to understand the rest of their `NODE_OPTIONS` -- and the
+ * caller's own flags, which may be the reason their run works at all, survive.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @param {number} mb
+ * @returns {NodeJS.ProcessEnv}
+ */
+function heapCappedEnv(env, mb) {
+  return { ...env, NODE_OPTIONS: `${(env.NODE_OPTIONS ?? '').trim()} --max-old-space-size=${mb}`.trim() };
+}
+
+// Read once, at the ceiling this process actually got rather than at a number
+// about the box: `heap_size_limit` already accounts for a caller's flags, a
+// cgroup, and whatever V8 decided from physical memory, which is three ways of
+// being wrong that this file then does not have to model.
+const REMEASURE_HEAP = remeasureHeapCeiling({
+  heapLimitMb: Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024)),
+  nodeOptions: process.env.NODE_OPTIONS,
+  onCi: process.env.GITHUB_ACTIONS === 'true',
+});
+
 /**
  * Run the repo's own tsc over one project and return its raw error count.
  * `--pretty false` so the count does not depend on whether a TTY is attached;
@@ -2736,6 +2894,11 @@ function tscErrorCount(project, options = {}) {
     cwd: ROOT,
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
+    // The CI-shaped ceiling (#12856). Every tsc this gate runs gets it, not
+    // just the generated TEST_DEBT program that happened to OOM first: a DEBT
+    // entry measured under a roomier ceiling than CI's is the same reading
+    // dressed as a different one.
+    env: heapCappedEnv(process.env, REMEASURE_HEAP.mb),
   });
   if (run.error) throw new Error(`tsc could not be run for ${project}: ${run.error.message}`);
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
@@ -4887,6 +5050,112 @@ function selfTest() {
     if (got !== c.expect) failures.push(`TSC_SETUP_ERROR — ${c.label}: expected ${c.expect}, got ${got}`);
   }
 
+  // THE CI-SHAPED HEAP CEILING (#12856). The only instrument this rule can
+  // have. Its production reading is a ceiling that is applied and a run that
+  // then passes -- and a run that passes is precisely what the UNPINNED gate
+  // also produced on every machine that had the memory to spare. So the
+  // production verdict cannot tell a correct ceiling from no ceiling at all,
+  // and the adversarial inputs below are the whole difference.
+  const ceilingCases = [
+    {
+      label: 'a roomier box than CI is capped to the CI ceiling -- the defect this pin closes',
+      where: { heapLimitMb: 8240 },
+      expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      label: 'on a box shaped like CI the ceiling is a no-op that still names itself',
+      where: { heapLimitMb: CI_TSC_HEAP_CEILING_MB + 48, onCi: true },
+      expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // Never RAISE. Promising V8 memory the box does not have trades a
+      // recoverable heap error for a kernel SIGKILL that says nothing.
+      label: 'a box SMALLER than CI keeps its own lower ceiling',
+      where: { heapLimitMb: 2096 },
+      expect: { mb: 2096, stale: false },
+    },
+    {
+      label: "a caller's TIGHTER NODE_OPTIONS cap is honoured",
+      where: { heapLimitMb: 8240, nodeOptions: '--max-old-space-size=1024' },
+      expect: { mb: 1024, stale: false },
+    },
+    {
+      // The hole a "respect the caller" rule would leave: a roomier explicit
+      // cap is the green-here-red-there reading, handed back by request.
+      label: "a caller's ROOMIER NODE_OPTIONS cap is refused, not respected",
+      where: { heapLimitMb: 12288, nodeOptions: '--max-old-space-size=12288' },
+      expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // The direction nothing else can catch: the runner shrank, so the pin is
+      // now ABOVE the ceiling it describes and every local run is roomier than
+      // CI again -- silently, and with the pin's own confidence attached.
+      label: 'a CI runner whose own default is BELOW the pin is refused, loudly',
+      where: { heapLimitMb: 2096, onCi: true },
+      expect: { mb: 2096, stale: true },
+    },
+    {
+      // THE CONTROL for the case above. Off CI the same numbers are an
+      // ordinary small box, not evidence about CI -- reading them as a stale
+      // pin would refuse on every laptop with 4 GB in it.
+      label: 'the same reading OFF ci is a small box, not a stale pin',
+      where: { heapLimitMb: 2096, onCi: false },
+      expect: { mb: 2096, stale: false },
+    },
+  ];
+  for (const c of ceilingCases) {
+    const got = remeasureHeapCeiling(c.where);
+    if (got.mb !== c.expect.mb || (got.stale !== null) !== c.expect.stale) {
+      failures.push(
+        `remeasureHeapCeiling — ${c.label}: expected ${c.expect.mb} MB and stale=${c.expect.stale}, `
+          + `got ${got.mb} MB and stale=${got.stale === null ? 'false' : JSON.stringify(got.stale)}`,
+      );
+    }
+    if (got.machineMb !== c.where.heapLimitMb) {
+      failures.push(
+        `remeasureHeapCeiling — ${c.label}: reported machineMb ${got.machineMb} for a box of `
+          + `${c.where.heapLimitMb} MB. That figure is what a CI log carries forward as the runner's own `
+          + `reading, so a wrong one re-pins the constant wrong.`,
+      );
+    }
+  }
+
+  // The two mechanical halves of the ceiling: which occurrence V8 obeys, and
+  // that appending is therefore enough. Both measured against node itself
+  // before they were written down -- `--max-old-space-size=8192
+  // --max-old-space-size=512` reports a 560 MB limit, the reverse 8240.
+  const heapEnvCases = [
+    { label: 'no NODE_OPTIONS is no caller cap', options: undefined, expect: null },
+    { label: 'an unrelated flag is not a cap', options: '--enable-source-maps', expect: null },
+    { label: 'the flag without a value is not a cap', options: '--max-old-space-size', expect: null },
+    { label: 'the dashed spelling parses', options: '--max-old-space-size=4096', expect: 4096 },
+    { label: 'the underscored spelling V8 also accepts parses', options: '--max_old_space_size=512', expect: 512 },
+    { label: 'a repeated flag reads the LAST, as V8 does', options: '--max-old-space-size=8192 --max-old-space-size=512', expect: 512 },
+    { label: 'the cap is found among other flags', options: '--enable-source-maps --max-old-space-size=2048 --no-warnings', expect: 2048 },
+  ];
+  for (const c of heapEnvCases) {
+    const got = maxOldSpaceMb(c.options);
+    if (got !== c.expect) failures.push(`maxOldSpaceMb — ${c.label}: expected ${c.expect}, got ${got}`);
+    // The appended env must be the thing V8 then obeys -- i.e. OUR flag has to
+    // be the last one in the string, whatever the caller put there.
+    const appended = heapCappedEnv({ PATH: '/usr/bin', NODE_OPTIONS: c.options }, 777);
+    if (maxOldSpaceMb(appended.NODE_OPTIONS) !== 777) {
+      failures.push(
+        `heapCappedEnv — ${c.label}: the appended ceiling does not win; V8 would obey `
+          + `${maxOldSpaceMb(appended.NODE_OPTIONS)} from ${JSON.stringify(appended.NODE_OPTIONS)}`,
+      );
+    }
+    if (appended.PATH !== '/usr/bin') {
+      failures.push(`heapCappedEnv — ${c.label}: dropped the rest of the environment`);
+    }
+    if (c.options !== undefined && !appended.NODE_OPTIONS.startsWith(c.options)) {
+      failures.push(
+        `heapCappedEnv — ${c.label}: dropped the caller's own NODE_OPTIONS (${JSON.stringify(c.options)}), `
+          + `which may be the reason their run works at all`,
+      );
+    }
+  }
+
   // AUTO-LOWERING (#6376). What it refuses matters more than what it writes.
   const planCases = [
     {
@@ -5082,7 +5351,8 @@ function selfTest() {
       `${TYPECHECK_CONFIGS_CASES + coverCases.length + unreadCases.length + accountedCases.length
         + derivedCases.length + sourceCandidateCases.length + includeRootCases.length
         + chainCases.length + generatorCases.length + layerCases.length} observation case(s) + ` +
-      `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
+      `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length
+        + ceilingCases.length + heapEnvCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
       `built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) hold.`,
@@ -5155,6 +5425,21 @@ console.log(
 // measure, and a wall of tsc output would bury the real failure. Reported after
 // the summary so the two verdicts read in the order they were reached.
 if (process.argv.includes('--re-measure')) {
+  // The ceiling FIRST, before the four minutes of tsc it shapes (#12856). Two
+  // jobs, and the second is the one that keeps the constant honest: on CI this
+  // line prints the RUNNER's own default into the run log, so the number
+  // `CI_TSC_HEAP_CEILING_MB` claims is re-derivable from any CI log of this
+  // step rather than from archaeology through a failed job's GC trace.
+  if (REMEASURE_HEAP.stale) {
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::error::${REMEASURE_HEAP.stale}`);
+    console.error(`\ncheck-type-check-coverage --re-measure: ${REMEASURE_HEAP.stale}`);
+    process.exit(1);
+  }
+  console.log(
+    `  heap: tsc runs under --max-old-space-size=${REMEASURE_HEAP.mb} MB -- ${REMEASURE_HEAP.from}; `
+      + `this process's own limit is ${REMEASURE_HEAP.machineMb} MB. A measurement is only as portable as `
+      + `the ceiling it ran under (#12856).`,
+  );
   const started = Date.now();
   const measurements = measureLedgers(packages, root.name, state);
   const { problems: drift, notes, surplus, surplusEntries } = evaluateMeasurements(measurements);
