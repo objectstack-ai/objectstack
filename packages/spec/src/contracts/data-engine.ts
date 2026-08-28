@@ -382,4 +382,35 @@ export interface IDataEngine {
    * (re)connect, or pool removal).
    */
   clearDatasourceUnavailable?(name: string): void;
+
+  /**
+   * Sync ONE object's physical storage on demand — create/alter its
+   * table, or for a federated (external) object register its DDL-free read
+   * metadata (ADR-0015 §18) so remote-table/column mapping and coercion
+   * exist for queries. Boot-time schema sync runs once at startup, so an
+   * object that becomes live later — a published draft, or an object bound
+   * to a datasource whose driver connects after boot — has a registry entry
+   * but no physical mapping until this is called. Idempotent: implementations
+   * only create what is absent (and alter to add new columns).
+   *
+   * Optional for the same reason as the lifecycle trio above: only an
+   * engine that owns drivers and DDL can answer; test doubles and
+   * remote/virtual engines omit it, and callers probe
+   * (`engine.syncObjectSchema?.(name)` / `typeof === 'function'`).
+   *
+   * [#12482] Declared under the [#4251]/[#11493] evidence bar, per the
+   * 2026-08-25 #11833 ruling's item-4 precedent as executed by #12248 —
+   * the member #12010's inventory left "not verified", verified now:
+   * ObjectQL has implemented it since the ADR-0015 federation work, and
+   * two service packages already consume it cross-package, each through
+   * consumer-local structural recovery. `service-datasource`'s
+   * `DatasourceConnectionService` declares it on its `ConnectionEngineLike`
+   * re-declaration and calls it per bound external object after connect;
+   * `service-messaging`'s system-table provisioning reached it through an
+   * `as unknown as` cast whose own comment recorded that the member "lives
+   * on the concrete ObjectQL engine, not the contract" — the #4251 shape
+   * exactly: producer meets no compiler, drift lands silently in two
+   * consumers.
+   */
+  syncObjectSchema?(objectName: string): Promise<void>;
 }

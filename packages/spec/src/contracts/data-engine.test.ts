@@ -540,4 +540,61 @@ describe('Data Engine Contract', () => {
       expect(exact).toBe('void');
     });
   });
+
+  describe('syncObjectSchema (#12482 — the #12010 "not verified" member, via the #11833 ruling item-4 precedent)', () => {
+    type SyncMember = IDataEngine['syncObjectSchema'];
+
+    it('is optional — only engines owning drivers and DDL answer', () => {
+      // Same population as the lifecycle trio above: test doubles and
+      // remote/virtual engines omit it, and callers keep their runtime
+      // probes (`engine.syncObjectSchema?.(name)`).
+      type Optional = undefined extends SyncMember ? 'optional' : never;
+      const optional: Optional = 'optional';
+      expect(optional).toBe('optional');
+    });
+
+    it('takes the object name and answers Promise of void — exactly', () => {
+      type Answer = ReturnType<NonNullable<SyncMember>>;
+      type Exact = Answer extends Promise<void>
+        ? (Promise<void> extends Answer ? 'exact' : never)
+        : never;
+      const exact: Exact = 'exact';
+      const sync: NonNullable<SyncMember> = async (_objectName: string) => {};
+      expect(exact).toBe('exact');
+      expect(typeof sync).toBe('function');
+    });
+
+    it('the contract member satisfies both measured consumer-local recoveries', () => {
+      // The two structural re-declarations this member retires, verbatim
+      // shapes from the consumers: `service-datasource`'s
+      // `ConnectionEngineLike.syncObjectSchema?` (called per bound external
+      // object after its driver connects, ADR-0015 §18) and the slice
+      // `service-messaging`'s system-table provisioning recovered through
+      // `as unknown as`. The contract member must remain assignable to
+      // both, or substituting the contract for the local type needs a cast
+      // — the outcome the ruling forbids.
+      type ConnectionEngineSlice = { syncObjectSchema?: (objectName: string) => Promise<void> };
+      type MessagingSlice = { syncObjectSchema?: (name: string) => Promise<void> };
+      const asConnectionEngine = (engine: IDataEngine): ConnectionEngineSlice => engine;
+      const asMessagingEngine = (engine: IDataEngine): MessagingSlice => engine;
+      const provision = async (engine: IDataEngine, objectName: string): Promise<void> => {
+        // The messaging call pattern, cast-free: probe, then call.
+        const sync = engine.syncObjectSchema;
+        if (typeof sync !== 'function') return;
+        await sync.call(engine, objectName);
+      };
+      expect(typeof asConnectionEngine).toBe('function');
+      expect(typeof asMessagingEngine).toBe('function');
+      expect(typeof provision).toBe('function');
+    });
+
+    it('refuses an implementation answering synchronously', () => {
+      // The member is awaited by both consumers inside try/catch isolation;
+      // an implementation answering `void` (fire-and-forget) would silently
+      // detach those failures from their per-object handling.
+      // @ts-expect-error - a synchronous void answer is not the contract
+      const misShapen: NonNullable<SyncMember> = (_objectName: string): void => {};
+      expect(misShapen).toBeTruthy();
+    });
+  });
 });

@@ -350,9 +350,11 @@ export class MessagingServicePlugin implements Plugin {
      * safe on every boot; per-object failures are isolated.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-        // `syncObjectSchema` lives on the concrete ObjectQL engine, not the
-        // IDataEngine contract; engines without on-demand DDL skip provisioning.
-        const sync = (engine as unknown as { syncObjectSchema?: (name: string) => Promise<void> }).syncObjectSchema;
+        // [#12482] `syncObjectSchema?` is declared on the IDataEngine contract
+        // (optional — only engines owning drivers and DDL answer); the
+        // pre-#12482 `as unknown as` structural recovery is gone. The runtime
+        // probe stays: engines without on-demand DDL skip provisioning.
+        const sync = engine.syncObjectSchema;
         if (typeof sync !== 'function') return;
         const objects = [
             // The L2 event is provisioned with the rest of the pipeline it
