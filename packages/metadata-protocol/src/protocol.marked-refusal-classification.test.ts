@@ -49,17 +49,32 @@
 // shared prefix would hide.
 //
 // ---------------------------------------------------------------------------
-// Reverse verification — direction predicted BEFORE running
+// Reverse verification — direction predicted BEFORE running, then MEASURED
 // ---------------------------------------------------------------------------
-// With `protocol.ts` restored from origin/main, predicted:
-//   - RED: §1 (every marked case — they assert the refusal category and the
-//     author's text, which the unfixed producer replaces with the 503), and
-//     §3's marked cases (`failed[].userMessage` / `cleanups[].userMessage` do
-//     not exist on the unfixed row).
-//   - GREEN in both directions, and therefore [GUARD] rather than evidence:
-//     §2 in its entirety. The store fault is unchanged BY DESIGN, so a green
-//     §2 before and after is exactly the claim — it is the over-reach bound,
-//     and it is what turns "I did not break the 503" into a measurement.
+// Ablation: `git checkout <branch point> -- protocol.ts` (this file untouched),
+// mutation confirmed on disk by blob hash + anchored counts, restored with
+// `git checkout HEAD --` and proven by an empty `git diff HEAD`. No rebuild is
+// involved and none is owed: the subject is imported by RELATIVE path from
+// inside its own package, so vitest compiles the mutated source itself — and
+// that is not assumed, it is what the pre-fix and post-fix runs of the same
+// harness measured, with no package build between them.
+//
+// PREDICTED: §1 red, §3's marked cases red, §2 green throughout.
+// MEASURED: 11 red / 6 green — and the prediction was WRONG about §2's
+// granularity, which is recorded rather than tidied away:
+//
+//   - §1 — 6 red, 1 green. The green one is "a blank or non-string
+//     `userMessage` is not a marking": it asserts the 503, which the UNFIXED
+//     producer also gives. A guard, green in both directions, and it belongs
+//     to §1 by subject rather than by direction.
+//   - §2 — 2 red, 2 green, not the 4 green predicted. Two of §2's cases speak
+//     about the MARKED side (the positive control, and "the two conversations
+//     are distinguishable"), so they must go red on an unfixed producer. The
+//     two that are genuinely fault-only — the byte-for-byte envelope and the
+//     NEGATIVE PIN — stayed green, and those two are the real over-reach
+//     bound: they are what turns "the 503 did not move" into a measurement.
+//   - §2.0 — 2 green. Pure scanner self-tests; no producer is involved.
+//   - §3 — 3 red, 1 green. The green one is the driver-fault row guard.
 
 import { describe, it, expect, vi } from 'vitest';
 import { declaredUserMessage, resolveThrownHttpError } from '@objectstack/types';
