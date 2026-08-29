@@ -76,6 +76,61 @@
  *     the judged population, has the strictest one. Below any floor the gate
  *     refuses (`exit 2`) instead of passing.
  *
+ * ## The provenance of a floor, and how to reproduce it
+ *
+ * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
+ * about `main`. It is the census the floors under it were derived from, not a
+ * statement about the tree you are running on.
+ *
+ * ⚠️ `MEASURED.ref` is this gate's PR BASE, and this gate DOES NOT EXIST in
+ * that tree: the census was taken on the PR branch, and the base is the sha the
+ * branch had to record. So the obvious recipe -- check the ref out and run the
+ * gate there -- fails with `MODULE_NOT_FOUND` (measured 2026-08-29), and the
+ * reader who tries it learns nothing about the record. Reproduce it by running
+ * TODAY's instrument AGAINST that tree instead. `sweep` is exported and takes a
+ * root for exactly this:
+ *
+ *   git worktree add --detach ../os-keyed-provenance "$REF"   # $REF = MEASURED.ref
+ *   node --input-type=module -e "import('./scripts/check-keyed-text-bounds.mjs')
+ *     .then((m) => console.log(m.sweep('../os-keyed-provenance').counts))"
+ *
+ * All five counts are source-only, so where the tree is available the
+ * re-derivation is cheap: no install and no build. Re-derived at `MEASURED.ref`
+ * on 2026-08-29: 113/118/255/594/151 -- exactly the record, which is the
+ * measurement that rules out "the original count was written wrong".
+ *
+ * ⚠️ A SHALLOW clone cannot do this at all -- `MEASURED.ref` predates the
+ * default checkout window, so the commit is simply absent. That is why the
+ * reconciliation below is a PRINTED comparison and not a computed assertion:
+ * the ref's tree is not reliably on disk. And note what a computed assertion
+ * would be worth even where it works -- a commit's tree is IMMUTABLE, so
+ * re-deriving the record at its ref can never go red. The only thing that moves
+ * is today's tree, and comparing today's tree to the record is the equality
+ * ruled out below.
+ *
+ * ## Why no equality against the tree, and why no band either
+ *
+ * An equality reds on every legitimate move. This population shrinks for good
+ * reasons as readily as it grows: retiring an object, folding two objects into
+ * one, or dropping an index each decrement it with nothing wrong. A band around
+ * the record is the next thing to reach for, and it fails a derivation rather
+ * than a taste test. Two reasons, either one sufficient:
+ *
+ *   1. The band already exists and is called the FLOOR. `MIN_FILES` IS
+ *      `MEASURED.files` minus the headroom this gate declared. A second,
+ *      narrower band would be a second tolerance for one fact, and its width
+ *      would be invented rather than measured.
+ *   2. No width measures anything. Measured 2026-08-29, the three gates in
+ *      `scripts/` carrying a record of this shape had drifted -5, -1 and +28
+ *      from theirs, in both directions, within days of landing. A band narrow
+ *      enough to notice this file's -1 reds on the +28 next door; one wide
+ *      enough to survive the +28 cannot see a -1.
+ *
+ * So the repair is not enforcement. What was missing is that a GREEN run never
+ * showed the reader the two censuses side by side, so the record could stop
+ * describing the tree with nothing, anywhere, saying so. `provenanceLine`
+ * prints both on every pass: the drift is a fact in the log, not a discovery.
+ *
  * ## "text-family" is READ OFF THE EMITTER, not retyped here
  *
  * The three pins this gate supersedes each hard-coded
@@ -236,13 +291,29 @@ const ALLOWLIST = [
 const ALLOWLIST_KINDS = new Set(['unboundable', 'pending']);
 
 // ---------------------------------------------------------------------------
-// Vacuity floors. Each is set just under the value measured on `fa5d137ab0`,
-// so a walk or a matcher that collapses REFUSES instead of reporting the empty
-// finding set that success also looks like.
+// Vacuity floors, and the provenance of the census they were derived from --
+// the header is the authority on how to reproduce it and on why it is recorded
+// rather than enforced. Each floor sits just under its measured value, so a
+// walk or a matcher that collapses REFUSES instead of reporting the empty
+// finding set that success also looks like. The ref lives INSIDE the record, so
+// a count and the tree it came from cannot be edited apart, and every site that
+// quotes either interpolates from here instead of restating it. Re-measuring UP
+// is free; LOWERING a floor to make a run pass is the move this block exists to
+// make visible in a diff.
 
-const MEASURED = {
-  files: 113, objects: 118, indexEntries: 255, textFields: 594, keyedTextColumns: 151,
-};
+const MEASURED = Object.freeze({
+  // The commit this census describes. ⚠️ It is this gate's PR BASE, not a tree
+  // the gate ever ran in -- see the header for the recipe that actually
+  // reproduces it, and for why that distinction is not a detail. Immutable, so
+  // the record stays reproducible forever even as `main` moves away from it.
+  // ⛔ Never repoint it without re-running all five counts against the new ref.
+  ref: 'fa5d137ab0',
+  files: 113,
+  objects: 118,
+  indexEntries: 255,
+  textFields: 594,
+  keyedTextColumns: 151,
+});
 const MIN_FILES = 105;
 const MIN_OBJECTS = 110;
 const MIN_INDEX_ENTRIES = 235;
@@ -854,9 +925,39 @@ function floorProblem(counts) {
   for (const [key, min, what, why] of FLOORS) {
     const got = counts?.[key] ?? 0;
     if (got >= min) continue;
-    return `discovered only ${got} ${what}, below the floor of ${min} (measured ${MEASURED[key]} on fa5d137ab0).\n${why}`;
+    return `discovered only ${got} ${what}, below the floor of ${min} (measured ${MEASURED[key]} on ${MEASURED.ref}).\n${why}`;
   }
   return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: the census this run read, the floors
+ * it cleared, the census those floors were derived from, and the ref that
+ * census belongs to -- side by side.
+ *
+ * This is the whole repair. The floors are inequalities on purpose, so no run
+ * can ever contradict the record; without this line the record could stop
+ * describing the tree and every green log would look identical either way. The
+ * delta is reported as INFORMATION and never as a verdict: this population
+ * moves in both directions for good reasons (see the header), and only the
+ * floors decide anything.
+ *
+ * Pure, so `--self-test` drives it with no tree.
+ *
+ * @param {{files?: number, objects?: number, indexEntries?: number, textFields?: number, keyedTextColumns?: number}} counts
+ * @returns {string}
+ */
+export function provenanceLine(counts) {
+  const got = FLOORS.map(([key]) => counts?.[key] ?? 0);
+  const rec = FLOORS.map(([key]) => MEASURED[key]);
+  const floors = FLOORS.map(([, min]) => min);
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  const names = FLOORS.map(([key]) => key).join('/');
+  return `  provenance — ${names}: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
+    + ' reasons, and only the floors decide. Reproduce the record: see this file\'s header.';
 }
 
 function familyProblem(family) {
@@ -948,6 +1049,7 @@ function main() {
     + `Allowlist: ${pending} pending, ${unboundable} unboundable, all rows still real. `
     + `${unclassified} unclassified field(s), none of them keyed.`,
   );
+  console.log(provenanceLine(result.counts));
   return 0;
 }
 
@@ -1237,7 +1339,43 @@ export function selfTest() {
       floorProblem({ files: 999, objects: 999, indexEntries: 0, textFields: 999, keyedTextColumns: 999 }) !== null);
     t('a tree whose keyed-text INTERSECTION collapses trips its own floor',
       floorProblem({ files: 999, objects: 999, indexEntries: 999, textFields: 999, keyedTextColumns: 0 }) !== null);
-    t('the floors pass at the values measured on fa5d137ab0', floorProblem(MEASURED) === null);
+    t('the floors pass at the values in the record', floorProblem(MEASURED) === null);
+    t('every floor sits at or below the value it was measured from -- a floor ABOVE its own '
+      + 'measurement reds every real run, the opposite failure and just as invisible in review',
+      FLOORS.every(([key, min]) => min <= MEASURED[key]),
+      JSON.stringify(FLOORS.map(([key, min]) => `${key}: ${min} vs ${MEASURED[key]}`)));
+
+    // ── provenance: the record must stay reproducible, and visibly so ──────
+    //
+    // ⛔ None of these can red on a tree that legitimately moved -- that is the
+    // point, and an equality here is the thing the header rules out. They red
+    // when the RECORD stops being a self-contained, reproducible claim: a ref
+    // that is not a ref, a quotation that restated the ref instead of reading
+    // it, or a pass line that stopped showing the reader both censuses.
+    t('PROVENANCE — the record carries the ref it was measured on, inside the frozen record',
+      typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref) && Object.isFrozen(MEASURED),
+      JSON.stringify(MEASURED.ref));
+    t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
+      (floorProblem({ ...MEASURED, files: 0 }) ?? '').includes(MEASURED.ref),
+      JSON.stringify(floorProblem({ ...MEASURED, files: 0 })));
+    const provDrifted = provenanceLine({
+      files: 112, objects: 117, indexEntries: 251, textFields: 589, keyedTextColumns: 148,
+    });
+    t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
+      provDrifted.includes('112/117/251/589/148')
+      && provDrifted.includes(FLOORS.map(([key]) => MEASURED[key]).join('/'))
+      && provDrifted.includes(FLOORS.map(([, min]) => min).join('/'))
+      && provDrifted.includes(MEASURED.ref), provDrifted);
+    t('PROVENANCE — drift is reported in BOTH directions, and equality says so',
+      provDrifted.includes('-1/-1/-4/-5/-3')
+      && provenanceLine(MEASURED).includes('=/=/=/=/=')
+      && provenanceLine({ ...MEASURED, files: MEASURED.files + 28 }).includes('+28/'),
+      provDrifted);
+    t('PROVENANCE — the delta is marked as information, never as a verdict',
+      /not a verdict/i.test(provDrifted) && !/✗|REFUS/.test(provDrifted), provDrifted);
+    t('PROVENANCE — the PASS path actually prints it (a line nothing calls is the defect above)',
+      readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'provenanceLine'}(result.counts))`),
+      'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
 
     // ── the watch-hint declaration vs the repo-wide walk ─────────────────
     const outsideHints = run({ 'tools/stray.object.ts': objectFile(`{ name: 'o', fields: { c: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['c'] }] }`) });
