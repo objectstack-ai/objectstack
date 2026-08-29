@@ -48,3 +48,5 @@ asserting against a mock.
 Scope: the five families whose producers live in this repo. The 38
 better-auth-backed `auth.*` / `organizations.*` / `oauth.*` methods of the same
 class are untouched and remain ledgered.
+
+<!-- adr-0087: not-required (no-migration-prescription) A TypeScript return-type narrowing on five runtime SDK methods. No authorable key, schema property or metadata shape is removed, renamed or re-shaped anywhere — `packages/spec` is untouched — so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite; a ledger entry would have no artifact to project into. The channel that reaches an affected caller is the compile error at their own call site, which names the envelope and is why the change is worth shipping: the remedy (`.data.rows` instead of `.rows`) is a source edit in consumer code, which no migration entry can perform on an upgrader's behalf. -->
