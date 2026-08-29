@@ -122,11 +122,18 @@ function pgParseableUrl<S extends z.ZodString>(schema: S, key: string) {
   });
 }
 
-/** Prescription for a pool knob written inside `config` instead of `pool`. */
+/**
+ * Prescription for a pool knob written inside `config` instead of `pool`.
+ *
+ * The knobs were declared on this config surface and read by nothing until the
+ * #4410 liveness audit moved them onto the datasource's own `pool` block; the
+ * id is kept HERE, in a comment, and out of the prescription — a customer being
+ * refused has no tracker to resolve it against.
+ */
 const poolBelongsOnDatasource = (key: string, canonical: string) =>
   `\`${key}\` is not driver config — connection pooling is configured once for every driver in `
   + `the datasource's own \`pool\` block. Move it to \`pool: { ${canonical}: … }\`. `
-  + `(It was declared here and read by nothing until #4410.)`;
+  + `(It was declared here and read by nothing.)`;
 
 export const PostgresConfigSchema = lazySchema(() => strictObject(
   {

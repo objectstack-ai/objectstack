@@ -616,7 +616,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
 | **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec 17.0.0. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -688,7 +688,16 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
 | **reset** | `boolean` | optional |  |
+| **seq** | `integer` | optional | Monotonic sequence number of the metadata event this delete appended to the item history (sys_metadata_history.event_seq) — the ordering token the history/audit trail is read by, and the same key both write-verb siblings declare. Unlike `version` it is not an OCC token. Optional HERE, unlike on those siblings, because only the repository path's delete-ful branch appends an event: a no-op reset (no overlay row existed) and the control-plane legacy raw-engine path both answer without one. Absence means "this branch appended no history event", never "nothing was deleted" — read `reset` for that. |
+| **projectionApplied** | `{ success: boolean; error?: string }` | optional | Outcome of the awaited ADR-0094 mutation projector — the post-persist step that materializes this metadata into its derived data-plane read model. The same receipt `{@link SaveMetaItemResponseSchema}` and `{@link PublishMetaItemResponseSchema}` carry, because the projector runs on all three verbs of this door: on a delete it re-reads the layered state and either retires the derived record or resets it to the artifact baseline. Present ONLY when a projector is registered for this metadata type AND a row was actually deleted, which is why it is optional: its absence means "no projector ran", never "the projection failed". Best-effort by design — a projector failure is reported here and logged, never thrown, so a caller that needs the read model to be live must check `projectionApplied.success` rather than rely on the 200. |
 | **message** | `string` | optional |  |
+
+### Nested Shape: `DeleteMetaItemResponse.projectionApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the projector threw; the metadata delete itself still succeeded. |
+| **error** | `string` | optional | Projector failure message, present only when `success` is false. |
 
 
 ---
@@ -2705,7 +2714,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **atomic** | `boolean` | optional (default: `false`) | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | optional (default: `false`) | If true, return full record data in response |
 | **continueOnError** | `boolean` | optional (default: `false`) | If true (and atomic=false), continue processing remaining records after errors. Default false: the first failure ENDS the run — records before it stay written (nothing is rolled back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total`. |
-| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec 17.0.0. It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---

@@ -20,11 +20,13 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  *
  * `organizationId` is the session's ACTIVE organization — the scope the upload
  * is happening in, and the value threaded into `createFile` so the new
- * `sys_file` row is stamped rather than landing NULL. It is optional in both
- * directions on purpose: a resolver that only knows the user (every
- * pre-#12745 implementation, and every single-tenant deployment) keeps
- * type-checking and keeps working, and a session with no active organization
- * resolves to `undefined` rather than to a guess.
+ * `sys_file` row is stamped rather than landing NULL, and (since #12928) into
+ * `createSession` so the chunked door's `sys_upload_session` row is stamped
+ * for the same reason. It is optional in both directions on purpose: a
+ * resolver that only knows the user (every pre-#12745 implementation, and
+ * every single-tenant deployment) keeps type-checking and keeps working, and a
+ * session with no active organization resolves to `undefined` rather than to a
+ * guess.
  */
 export interface StorageUploadSession {
   userId?: string;
@@ -478,23 +480,31 @@ export function registerStorageRoutes(
       const resumeToken = randomUUID();
       const expiresAt = new Date(Date.now() + sessionTtl * 1000).toISOString();
 
-      await store.createSession({
-        id: uploadId,
-        file_id: fileId,
-        key,
-        filename,
-        mime_type: mimeType,
-        total_size: totalSize,
-        chunk_size: chunkSize,
-        total_chunks: totalChunks,
-        resume_token: resumeToken,
-        backend_upload_id: backendUploadId,
-        scope: scope ?? 'user',
-        bucket,
-        metadata: metadata ? JSON.stringify(metadata) : undefined,
-        status: 'in_progress',
-        expires_at: expiresAt,
-      });
+      // The session row is stamped from the SAME session value the
+      // `createFile` above already threads (#12928). `sys_upload_session` is a
+      // tenancy-enabled object too, so an insert with no context lands
+      // `organization_id` NULL — invisible to its own tenant under a walled
+      // posture, since both walled Layer 0 predicates exclude NULL.
+      await store.createSession(
+        {
+          id: uploadId,
+          file_id: fileId,
+          key,
+          filename,
+          mime_type: mimeType,
+          total_size: totalSize,
+          chunk_size: chunkSize,
+          total_chunks: totalChunks,
+          resume_token: resumeToken,
+          backend_upload_id: backendUploadId,
+          scope: scope ?? 'user',
+          bucket,
+          metadata: metadata ? JSON.stringify(metadata) : undefined,
+          status: 'in_progress',
+          expires_at: expiresAt,
+        },
+        { organizationId: session?.organizationId },
+      );
 
       sendOk(res, {
         uploadId,

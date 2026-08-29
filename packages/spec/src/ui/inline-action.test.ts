@@ -164,7 +164,7 @@ describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not
     expect(paramsIssue!.code).toBe('invalid_type');
     expect((paramsIssue as unknown as { expected: string }).expected).toBe('array');
     expect(paramsIssue!.message).toContain('bodyExtra');
-    expect(paramsIssue!.message).toContain('#5777');
+    expect(paramsIssue!.message).not.toMatch(/#\d{3,5}\b/);
     // And it says what `params` IS, not only what it is not.
     expect(paramsIssue!.message).toContain('DEFINITION array');
   });
@@ -246,7 +246,8 @@ describe('object-form `params` prescribes per action type (#6828)', () => {
     expect((issue as unknown as { expected: string }).expected).toBe('array');
     expect(issue.message).toContain('`target` string');
     expect(issue.message).toContain("openIn: 'new-tab'");
-    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+    expect(issue.message).toContain('RETIRED, not renamed');
+    expect(issue.message).not.toMatch(/#\d{3,5}\b/);
   });
 
   it('names the retired `params.newTab` escape hatch, so the flag half has an answer too', () => {
@@ -275,7 +276,7 @@ describe('object-form `params` prescribes per action type (#6828)', () => {
     const issue = paramsIssue(r);
     expect(issue.code).toBe('invalid_type');
     expect(issue.message).toContain('bodyExtra: { … }');
-    expect(issue.message).toContain('(#5777)');
+    expect(issue.message).not.toMatch(/#\d{3,5}\b/);
   });
 
   it('guides the REGISTERED action surface identically — the field factory is shared', () => {
@@ -292,8 +293,9 @@ describe('object-form `params` prescribes per action type (#6828)', () => {
     }) as { success: boolean; error?: z.ZodError };
     const issue = paramsIssue(r);
     expect(issue.code).toBe('invalid_type');
-    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+    expect(issue.message).toContain('RETIRED, not renamed');
     expect(issue.message).toContain('bodyExtra: { … }');
+    expect(issue.message).not.toMatch(/#\d{3,5}\b/);
   });
 
   it('leaves the definition-array meaning of `params` accepted on a url action', () => {

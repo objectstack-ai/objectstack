@@ -34,9 +34,10 @@
  * names which channel regressed.)
  */
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, it, expect, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The repo's ONE code/prose separator, typed by the hand-written `.d.mts`
@@ -45,7 +46,12 @@ import { fileURLToPath } from 'node:url';
 // port", and a comment claiming it does is precisely what was there before.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
-import { resolveBoundPort } from './serve.js';
+import {
+  publishBoundPort,
+  resolveBoundPort,
+  runtimeBoundPortChannels,
+  type BoundPortChannels,
+} from './serve.js';
 import { MAX_PORT } from '../utils/port-contract.js';
 
 /** …/packages/cli/src/commands — seeded from `import.meta.url`. */
@@ -175,21 +181,146 @@ describe('#13062 resolveBoundPort — the transport answers, not the request', (
   });
 });
 
-describe('#13062 all THREE channels publish that one number — read off the code', () => {
-  it('the `objectstack:listening` IPC message', () => {
-    expect(
-      SERVE,
-      'the IPC message no longer publishes `boundPort` — `os dev` reads this channel to learn '
-      + 'where its child ended up, and #13061 records that `os start` could read it too',
-    ).toContain("process.send({ type: 'objectstack:listening', port: boundPort, url: runtimeUrl });");
+/** Temp `OS_HOME` directories made by the behavioural pins below. */
+const publishHomes: string[] = [];
+/** `runtimeBoundPortChannels` registers one `exit` cleanup per state file written. */
+const exitListenersAtLoad = process.listeners('exit').slice();
+
+afterEach(() => {
+  for (const listener of process.listeners('exit')) {
+    if (!exitListenersAtLoad.includes(listener)) process.removeListener('exit', listener);
+  }
+  while (publishHomes.length) {
+    const home = publishHomes.pop() as string;
+    try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
+/**
+ * Run `fn` with `OS_HOME` at a fresh temp dir and `OS_ENVIRONMENT_ID` unset,
+ * then restore both — including "was not set at all", which a bare reassignment
+ * cannot express. Returns the directory so the caller can read what was written.
+ */
+function withTempHome<T>(fn: (home: string) => T): { home: string; value: T } {
+  const home = mkdtempSync(join(tmpdir(), 'os-bound-port-publication-'));
+  publishHomes.push(home);
+  const priorHome = process.env.OS_HOME;
+  const priorEnvId = process.env.OS_ENVIRONMENT_ID;
+  process.env.OS_HOME = home;
+  delete process.env.OS_ENVIRONMENT_ID;
+  try {
+    return { home, value: fn(home) };
+  } finally {
+    if (priorHome === undefined) delete process.env.OS_HOME; else process.env.OS_HOME = priorHome;
+    if (priorEnvId === undefined) delete process.env.OS_ENVIRONMENT_ID; else process.env.OS_ENVIRONMENT_ID = priorEnvId;
+  }
+}
+
+/**
+ * Drive `fn` with `process.send` replaced by a recorder, and hand back what it
+ * was given.
+ *
+ * ⚠️ Under vitest's `forks` pool `process.send` is the RUNNER's own control
+ * channel, so this must never deliver a real `objectstack:listening` message to
+ * it. The swap is synchronous, spans one call, and is undone in `finally`.
+ */
+function recordingProcessSend(fn: () => void): unknown[] {
+  const sent: unknown[] = [];
+  const prior = process.send;
+  (process as { send?: unknown }).send = (message: unknown) => { sent.push(message); return true; };
+  try { fn(); } finally { (process as { send?: unknown }).send = prior; }
+  return sent;
+}
+
+/**
+ * #13062: all three channels publish ONE number, and it is the BOUND one.
+ *
+ * ## Why three of these are DRIVEN now, where they used to be source greps
+ *
+ * They read the source because `run()` is one ~3000-line method needing a whole
+ * kernel to enter, so nothing in-process could observe what its three publish
+ * sites read. #13193 changed the shape: the publish is now one exported seam,
+ * {@link publishBoundPort}, that takes its three channels as ARGUMENTS. So
+ * "all three publish that one number" is now driven and observed instead of
+ * grepped — strictly stronger, because a grep passes on text that never runs,
+ * and it survives the next refactor of the same code.
+ *
+ * ⛔ What did NOT become reachable is the WIRING question — whether the seam is
+ * handed `boundPort` or `port` at its call site inside `run()`. That is still
+ * un-enterable in-process, so it stays a source pin, and it is a better one
+ * than before: there is now exactly ONE site to get wrong instead of three.
+ *
+ * ⛔ The ORDER the seam drives the three in is #13193's property, pinned in
+ * `test/serve-bound-port-publish-order.test.ts`. Kept separate deliberately —
+ * these two files fail for different reasons and should keep naming them.
+ */
+describe('#13062 all THREE channels publish that one number', () => {
+  it('hands the SAME bound number to the state file and the IPC message', () => {
+    let written: { port: number; url: string } | undefined;
+    let announced: { type?: string; port?: unknown; url?: unknown } | undefined;
+    let banners = 0;
+
+    publishBoundPort(45062, {
+      writeRuntimeState: (published) => { written = published; },
+      announceListening: (message) => { announced = message; },
+      printBanner: () => { banners += 1; },
+    } satisfies BoundPortChannels);
+
+    // ⛔ Not "each carries a port" — that passes for the very defect #13062
+    // fixed, where all three agreed on the REQUESTED number. The assertion is
+    // that both carry THE SAME one, and that the URL is composed from it.
+    expect(written).toEqual({ port: 45062, url: 'http://localhost:45062' });
+    expect(announced).toEqual({
+      type: 'objectstack:listening',
+      port: 45062,
+      url: 'http://localhost:45062',
+    });
+    expect(announced?.port, 'the two channels disagree').toBe(written?.port);
+    expect(announced?.url).toBe(written?.url);
+    expect(banners, 'the third channel was not driven at all').toBe(1);
   });
 
-  it('`runtime.<environment>.json`', () => {
-    expect(
-      SERVE,
-      'the runtime state file no longer publishes `boundPort` — external supervisors and health '
-      + 'checks read it for the address to poll',
-    ).toMatch(/pid: process\.pid,\s*\n\s*port: boundPort,/);
+  it('`runtime.<environment>.json` really lands, carrying `pid` beside that port', () => {
+    // The supervisor contract this file has always guarded, now read off the
+    // FILE instead of off a regex about how the object literal is formatted.
+    const { home } = withTempHome(() => {
+      publishBoundPort(45063, runtimeBoundPortChannels(() => { /* banner not under test here */ }));
+    });
+
+    const runtimeFile = join(home, 'runtime.env_local.json');
+    expect(existsSync(runtimeFile), 'no runtime state file was written at all').toBe(true);
+    const state = JSON.parse(readFileSync(runtimeFile, 'utf8'));
+    expect(state.port, 'the state file does not publish the bound port').toBe(45063);
+    expect(state.url).toBe('http://localhost:45063');
+    expect(state.pid, 'external supervisors read `pid` beside the port').toBe(process.pid);
+    expect(state.environmentId).toBe('env_local');
+  });
+
+  it('the `objectstack:listening` IPC message really reaches `process.send`', () => {
+    // `os dev` reads this channel to learn where its child ended up, and #13061
+    // records that `os start` could read it too — so the leg is pinned by
+    // OBSERVING the send, not by grepping for the call.
+    const channels = runtimeBoundPortChannels(() => { /* banner not under test here */ });
+    const sent = recordingProcessSend(() => {
+      channels.announceListening({ type: 'objectstack:listening', port: 45064, url: 'http://localhost:45064' });
+    });
+
+    expect(sent).toEqual([{ type: 'objectstack:listening', port: 45064, url: 'http://localhost:45064' }]);
+  });
+
+  it('and stays silent, rather than throwing, when no IPC channel is open', () => {
+    // The ordinary `os serve` case: no parent, no fd 3. A publish that threw
+    // here would take the banner and the state file down with it.
+    const channels = runtimeBoundPortChannels(() => { /* unused */ });
+    const prior = process.send;
+    (process as { send?: unknown }).send = undefined;
+    try {
+      expect(() => channels.announceListening({
+        type: 'objectstack:listening', port: 45065, url: 'http://localhost:45065',
+      })).not.toThrow();
+    } finally {
+      (process as { send?: unknown }).send = prior;
+    }
   });
 
   it('the ready banner, through the runtime\'s own base-URL chain', () => {
@@ -199,8 +330,19 @@ describe('#13062 all THREE channels publish that one number — read off the cod
     ).toContain('externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin');
   });
 
-  it('the URL those channels carry is composed from the same number', () => {
-    expect(SERVE).toContain('const runtimeUrl = `http://localhost:${boundPort}`;');
+  it('the ONE wiring site hands the seam the BOUND port, never the requested one', () => {
+    // The half that cannot be driven in-process, and the whole of what is left
+    // of the source scan for these channels: `run()` reaches the seam once, and
+    // what it passes decides all three channels at once.
+    expect(
+      SERVE,
+      'the publish site no longer hands `publishBoundPort` the resolved bound port',
+    ).toContain('publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));');
+    // Exactly two mentions in CODE: the declaration and that single call.
+    expect(
+      SERVE.match(/publishBoundPort\(/g) ?? [],
+      'a second publish site can disagree with the first — that is the #13062 defect returning',
+    ).toHaveLength(2);
   });
 
   it('⛔ and NONE of the three has drifted back onto the requested port', () => {
@@ -208,7 +350,11 @@ describe('#13062 all THREE channels publish that one number — read off the cod
     // one leaves two lying in a place nobody thinks to look next time.
     expect(SERVE).not.toContain('port: Number(port)');
     expect(SERVE).not.toContain('externalBaseOrigin: resolveAuthBaseUrl(port)');
-    expect(SERVE).not.toContain('const runtimeUrl = `http://localhost:${port}`');
+    // ⛔ `const runtimeUrl = ...` is gone (#13193 folded it into the seam), so a
+    // negative naming it would pass for the wrong reason. The live spelling of
+    // the same regression is the seam being handed the REQUESTED port.
+    expect(SERVE).not.toContain('publishBoundPort(port,');
+    expect(SERVE).not.toContain('publishBoundPort(Number(port)');
   });
 
   it('resolves it ONCE, from the transport, after the boot', () => {

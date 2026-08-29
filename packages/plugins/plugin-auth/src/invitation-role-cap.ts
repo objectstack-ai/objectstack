@@ -98,7 +98,7 @@ export function orgRoleGrade(raw: unknown): number {
  * a hand-written copy drops the comma-joined (`'owner,member'`) and array
  * spellings `parseOrgRoles` handles, and on a security path that difference is
  * silent. Second consumer, and the reason this is exported: the break-glass
- * ban guard (`last-admin-ban-guard.ts`, ADR-0024 D5.2), which counts the
+ * ban guard (`last-admin-ban-guard.ts`, cloud ADR-0024 D5.2), which counts the
  * administrators an environment would have left after a ban — a guard that
  * mistook the only owner for an ordinary member would wave the lockout
  * through.

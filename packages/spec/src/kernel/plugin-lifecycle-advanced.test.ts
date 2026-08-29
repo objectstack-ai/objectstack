@@ -211,8 +211,11 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         // the byte string.
         const message = result.success ? '' : result.error.issues[0]?.message ?? '';
         expect(message).toContain('were removed');
-        expect(message).toContain('#12340');
         expect(message).toContain('ADR-0049');
+        // The customer-resolvable anchors stay; the tracker id does not reach
+        // this audience at all. Negative pin, so a re-introduced id reds here
+        // rather than only at `check:doc-authoring`.
+        expect(message).not.toMatch(/#\d{3,5}\b/);
         expect(message).toMatch(/memory fallback|in-memory Map/);
         expect(message).toContain("Use 'memory'");
       });
@@ -226,7 +229,6 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       expect(result.success).toBe(false);
       const message = result.success ? '' : result.error.issues[0]?.message ?? '';
       expect(message).not.toContain('were removed');
-      expect(message).not.toContain('#12340');
     });
 
     it('still accepts the two strategies the runtime implements', () => {

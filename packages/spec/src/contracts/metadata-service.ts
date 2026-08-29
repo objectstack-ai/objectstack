@@ -46,7 +46,6 @@ import type { MetadataQuery, MetadataQueryResult, MetadataValidationResult, Meta
 import type { MetadataWatchEvent } from '../system/metadata-persistence.zod';
 import type { ApiEndpoint } from '../api/endpoint.zod';
 import type { Action } from '../ui/action.zod';
-import type { MetadataOverlay } from '../kernel/metadata-customization.zod';
 import type { PackagePublishResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataDiffResult } from '../system/metadata-persistence.zod';
 
 /**
@@ -617,47 +616,18 @@ export interface IMetadataService {
     bulkUnregister?(items: Array<{ type: string; name: string }>, options?: MetadataWriteOptions): Promise<MetadataBulkResult>;
 
     // ==========================================
-    // Overlay / Customization Management
+    // Overlay / Customization Management — REMOVED
     // ==========================================
-
-    /**
-     * Get the active overlay for a metadata item.
-     * Returns the customization delta applied on top of the base definition.
-     * @param type - Metadata type
-     * @param name - Item name
-     * @param scope - Overlay scope ('platform' or 'user')
-     * @returns The overlay, or undefined if no customization exists
-     */
-    getOverlay?(type: string, name: string, scope?: 'platform' | 'user'): Promise<MetadataOverlay | undefined>;
-
-    /**
-     * Save/update an overlay for a metadata item.
-     * @param overlay - The overlay to save
-     */
-    saveOverlay?(overlay: MetadataOverlay): Promise<void>;
-
-    /**
-     * Remove an overlay, reverting to the base definition.
-     * @param type - Metadata type
-     * @param name - Item name
-     * @param scope - Overlay scope
-     */
-    removeOverlay?(type: string, name: string, scope?: 'platform' | 'user'): Promise<void>;
-
-    /**
-     * Get the effective (merged) metadata after applying all overlays.
-     * Resolution order: system ← merge(platform) ← merge(user)
-     * @param type - Metadata type
-     * @param name - Item name
-     * @param context - Optional auth context for user-scoped overlay resolution
-     * @returns The effective metadata with all overlays applied
-     */
-    getEffective?(type: string, name: string, context?: {
-        userId?: string;
-        tenantId?: string;
-        positions?: string[];
-        permissions?: string[];
-    }): Promise<unknown | undefined>;
+    //
+    // The optional `getOverlay` / `saveOverlay` / `removeOverlay` /
+    // `getEffective` members (typed against the paper protocol's
+    // `MetadataOverlay`) were REMOVED per ADR-0049 enforce-or-remove
+    // (#13135, re-charter of #12057): their only implementation was
+    // `packages/metadata`'s in-memory limb, served by no route and called
+    // only by its own unit tests; ADR-0126 §6 wall 4 supersedes the protocol
+    // on the record. The layered read that actually ships is
+    // `getMetaItemLayered` on the protocol dispatcher (ADR-0005 org
+    // overlay), not an optional member here.
 
     // ==========================================
     // Watch / Subscribe

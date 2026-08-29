@@ -251,7 +251,7 @@ const navItemSurface = (variant: NavItemVariant): StrictObjectOptions => ({
     ...(variant === 'separator' ? SEPARATOR_NAV_ITEM_GUIDANCE : {}),
   },
   history:
-    'Until #4001 these were dropped silently — the entry still parsed, so a mis-spelled ' +
+    'Until this shape was closed these were dropped silently — the entry still parsed, so a mis-spelled ' +
     'config shipped as a nav item that quietly ignored it (a stripped `visible` renders ' +
     'an entry that should have been gated).',
 });

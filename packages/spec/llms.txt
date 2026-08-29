@@ -77,7 +77,7 @@ const query = {
 
 ---
 
-## 3. Schema Inventory by Domain (208 schemas)
+## 3. Schema Inventory by Domain (207 schemas)
 
 Counted as `*.zod.ts` modules under `packages/spec/src/<domain>/` — the sources
 that ship in this tarball (`files` includes `src/**/*.zod.ts`), so every number
@@ -86,7 +86,7 @@ here is verifiable from the installed package.
 | Domain | Count | Key Schemas |
 |--------|-------|-------------|
 | system | 36 | Auth, Cache, Compliance, Encryption, HTTP Server, License, Logging, Metrics |
-| kernel | 32 | Plugin, Manifest, Events (6 sub-modules), Feature, Context, Package Registry |
+| kernel | 31 | Plugin, Manifest, Events (6 sub-modules), Feature, Context, Package Registry |
 | data | 30 | Object, Field, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Cube |
 | api | 30 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope, Package Lifecycle |
 | ui | 18 | View, App, Action, Dashboard, Page, Chart, Component, Animation |
@@ -166,7 +166,7 @@ function registerObject(rawConfig: unknown) {
 
 | Contract | Methods |
 |----------|---------|
-| `IMetadataService` | register, get, list, delete, query, bulk ops, overlay, watch, import/export |
+| `IMetadataService` | register, get, list, delete, query, bulk ops, watch, import/export |
 | `IAnalyticsService` | query, aggregate, timeSeries |
 | `IAuthService` | authenticate, authorize, validateToken |
 | `IAutomationService` | executeFlow, triggerWorkflow |

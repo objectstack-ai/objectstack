@@ -199,19 +199,23 @@
  * `check` and the read-side lowering; splitting them re-opens the hole PR #5962
  * closed, with the sign reversed), rewrite four independent copies of
  * `nullValueSatisfiesOperator`, re-rule the two enrolled `$ne` / `$not` rows,
- * and touch the live query paths of two backends inside the #5499 investment
- * freeze. What it buys is a WORSE failure mode: a filter that silently drops
- * rows the author expected, in place of one that returns rows they can see and
- * narrow — silent absence for visible surplus. With no business pull behind it,
- * the maintainer kept include.
+ * and touch the live query paths of two backends that were then inside the
+ * #5499 investment freeze (lifted 2026-08-11, after this table was decided).
+ * What it buys is a WORSE failure mode: a filter that silently drops rows the
+ * author expected, in place of one that returns rows they can see and narrow —
+ * silent absence for visible surplus. With no business pull behind it, the
+ * maintainer kept include.
  *
  * ⚠️ One cell of the three is still short of its ruling, and it is the cell that
  * SURVIVED. `$exists` = has-value is settled and shipped on the surfaces the
  * ruling named — `formula` and `driver-memory`'s reference matcher both read it
  * that way (#5298 ③ / #5369, landed in #5962). Still reading key-presence:
- * `driver-memory`'s live mingo path and `driver-mongodb`, both frozen by #5499,
- * and both among the FIVE drivers this gate scores. So a `$exists` row cannot be
- * enrolled here yet.
+ * `driver-memory`'s live mingo path and `driver-mongodb`, both among the FIVE
+ * drivers this gate scores. The #5499 investment freeze that once explained why
+ * neither had moved was lifted on 2026-08-11 (recorded in
+ * `./aggregation-conformance.ts`), so the gap is now unexcused rather than
+ * deferred — but it is still a gap, so a `$exists` row cannot be enrolled here
+ * yet.
  *
  * ⛔ And the blocker on that row is NOT a missing wording, which is worth
  * stating because the obvious workaround does not exist: **the DEBT ledger in

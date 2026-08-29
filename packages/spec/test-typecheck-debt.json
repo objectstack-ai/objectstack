@@ -4,7 +4,6 @@
     "src/ai/conversation.test.ts": 5,
     "src/api/documentation.test.ts": 1,
     "src/api/errors.test.ts": 1,
-    "src/api/metadata.test.ts": 1,
     "src/api/odata.test.ts": 1,
     "src/api/package-api.test.ts": 4,
     "src/api/rest-server.test.ts": 2,

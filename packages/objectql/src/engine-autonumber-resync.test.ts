@@ -680,9 +680,11 @@ describe('ObjectQL autonumber resync (#6806)', () => {
 
       // The honest outcome: the number is issued a second time, the write
       // SUCCEEDS, and nothing anywhere says so. Fixing this needs uniqueness in
-      // the driver — `packages/drivers/**` is under the #5499 freeze, and a
-      // pre-issue existence probe in the engine would cost a query per insert
-      // and still be racy. Reported as a follow-up, not implemented here.
+      // the driver, and a pre-issue existence probe in the engine would cost a
+      // query per insert and still be racy. (`packages/drivers/**` was under
+      // the #5499 freeze when this was written; it was lifted on 2026-08-11,
+      // and the remedy is still the driver's.) Reported as a follow-up, not
+      // implemented here.
       expect(written.doc_no).toBe('D-0005');
       expect(rows.filter((r) => r.doc_no === 'D-0005')).toHaveLength(2);
       // One create attempt: with no rejection there is nothing to retry.

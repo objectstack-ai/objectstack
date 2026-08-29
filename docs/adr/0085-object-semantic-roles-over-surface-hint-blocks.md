@@ -115,3 +115,15 @@ Execution landed across both repos; differences from the proposal are noted inli
 - **Cross-surface consumption** — kanban default card fields ride `highlightFields` (objectui#2541), alongside grids/lists/detail strip.
 - **Verification** — parse: `@objectstack/spec` suite; served pipeline: `packages/qa/dogfood/test/semantic-roles.dogfood.test.ts`; real-backend browser pass over the four detail shapes (grouped / ungrouped / `stageField: false` / related-heavy): framework#3019, runbook + results in `docs/audits/2026-07-adr-0085-detail-shapes-browser-verify.md`, and a permanent Playwright spec in `examples/app-showcase/e2e/detail-shapes.spec.ts`.
 - **Consequence surfaced by the browser pass** — because detail bodies hide strip fields, a fully-highlighted group silently disappears from detail pages. Judged working-as-intended (one curated list, every surface) but author-surprising — hence the `field-group-shadowed` warning and the semantic-zoo fixture keeping one non-highlighted member per group.
+
+## Addendum (2026-08-28): `fieldGroups[].visibleWhen` re-introduced, with its enforcement
+
+§3 removed the group-level visibility slot under the ADR-0049 enforce-or-remove rule, with the exit condition stated in the same breath: *"re-add with its enforcement when a consumer ships."* That consumer shipped — objectui#6236 landed the section-gating contract (a `section-divider` row carries a membership claim, `FormField.fields`, and the form renderer gates the whole claimed group — header included — on the divider's own visibility verdict). Its six-way ablation matrix then measured the two fieldGroups-derived synthesis paths (ModalForm / DrawerForm `derivedSections`) as structurally fail-open for exactly one reason: this vocabulary had no predicate slot for the divider to carry (#12715).
+
+Maintainer ruling (2026-08-28, #12715): **option A — re-introduce the slot, this time with enforcement**, closing the loop as designed:
+
+- **`fieldGroups[].visibleWhen`** — CEL via `ExpressionInputSchema`, the ADR-0089 canonical spelling shared with field, action and row predicates. No second predicate language, no new semantics.
+- **§5's shared derivation** (`deriveFieldGroupLayout`) passes the predicate through to the derived section verbatim (bare string or expression envelope), alongside `icon`/`description`/`collapse`. Evaluation stays the renderer's: grouping is static layout, visibility is per-record state.
+- **Whole-group disappearance (header included) rides the landed objectui#6236 contract unchanged** — FALSE (or a faulting predicate, fail-closed) hides the divider and every claimed member.
+- The `visibleOn` spelling stays rejected with guidance pointing at `visibleWhen` (the #8382 posture: pointed, not aliased).
+- Both directions of the ADR-0049 trichotomy are now on this key's record: removed while unenforced, re-declared when declared = enforced holds on day one.

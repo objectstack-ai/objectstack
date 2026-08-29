@@ -5821,7 +5821,7 @@ export class AuthManager {
   }
 
   /**
-   * Maintain `sys_user.source` (ADR-0024 D4 provenance) as accounts are linked.
+   * Maintain `sys_user.source` (cloud ADR-0024 D4 provenance) as accounts are linked.
    * Drives the managed-vs-native user-mgmt gating: a managed (`idp-provisioned`)
    * user holds no local credential, so the password / identity-edit actions
    * hide for them — preventing a managed user from self-minting a local

@@ -89,6 +89,26 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     // positions from artifact ingestion.
     positions: 'position',
     permissions: 'permission',
+    // [ADR-0066 D1] `capabilities` reaches the door at #12892 step 1, the
+    // maintainer's `option 1` ruling ("the door owns the registration
+    // route" for the five artifact security collections). Until #12894
+    // measured it, `AppPlugin`'s `SECURITY_FIELDS` block
+    // (packages/runtime/src/app-plugin.ts) was this collection's SOLE
+    // registrar on an artifact boot — the one security collection the door
+    // could not reach — so a declared capability was registered from bytes
+    // nothing strict-parses, with no schema default and no ADR-0010
+    // provenance. Measured on the two-reader harness, the door's copy adds
+    // exactly four keys the raw copy lacks: `scope` (the schema default)
+    // and `_packageId` / `_packageVersion` / `_provenance`.
+    //
+    // ⚠️ This entry makes the door a SECOND writer, not yet the only one:
+    // `AppPlugin` still registers `capabilities`, and it runs last, so the
+    // raw copy still wins a real artifact boot. Step 2 of the ruling (that
+    // block stops registering these five on the artifact path, after a
+    // census of the non-artifact boot paths) is what makes this the only
+    // copy. Until then the divergence is the interim reality the ruling
+    // explicitly permits, and #12878's pins are what keep it visible.
+    capabilities: 'capability',
     sharingRules: 'sharing_rule',
     // `policies: 'policy'` removed at #12894: the stack schema is a
     // `strictObject` that declares no top-level `policies` key, so a
@@ -363,7 +383,7 @@ export class MetadataPlugin implements Plugin {
 
         ctx.logger.info('MetadataPlugin providing metadata service (primary mode)', {
             mode: this.options.artifactSource?.mode ?? 'file-system',
-            features: ['watch', 'multi-format', 'query', 'overlay', 'type-registry']
+            features: ['watch', 'multi-format', 'query', 'type-registry']
         });
     }
 

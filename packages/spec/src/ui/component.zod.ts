@@ -1212,18 +1212,18 @@ export const RecordActivityProps = strictObject({
 // `issue.input` so only a value which used to be legal gets the "was removed"
 // message (the `view.exportOptions` `'pdf'` precedent, #8010).
 const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
-  ['sidebar', "'sidebar' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+  ['sidebar', "'sidebar' was removed from `record:chatter` / `record:discussion` `position` — "
     + 'no renderer branch ever compared the old vocabulary: `RecordChatterPanel` docks on '
     + "'right'/'left' and renders in flow on 'bottom', so a spec-valid 'sidebar' silently fell "
     + "through to the in-flow render. Write 'right' — the docked side panel 'sidebar' meant. "
     + 'Run `os migrate meta` to list the mechanical edits for existing sources '
     + '(registered under protocol major 18); apply them by hand.'],
-  ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+  ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` — "
     + 'no renderer branch ever compared the old vocabulary. Write \'bottom\' — the renderer\'s '
     + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta` to "
     + 'list the mechanical edits for existing sources (registered under protocol major 18); '
     + 'apply them by hand.'],
-  ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` (#8762) "
+  ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` "
     + 'with no successor: no renderer branch ever implemented an overlay drawer — the value fell '
     + "through to the in-flow render. Write 'right' — the docked side panel is the nearest "
     + 'surviving shape of a side drawer. Run `os migrate meta` to list the mechanical edits '
@@ -1892,7 +1892,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
  */
 const elementFilterRetired = (key: string): string =>
   '`element:filter` property `' + key + '` was removed in @objectstack/spec 17 '
-  + '(#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
+  + '(ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
   + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
   + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
   + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
@@ -1938,11 +1938,11 @@ export const ElementFilterPropsSchema = lazySchema(() => strictObject({
  */
 const elementFormRetired = (key: string): string =>
   '`element:form` property `' + key + '` was removed in @objectstack/spec 17 '
-  + '(#9249, ADR-0049) — the whole `element:form` element is retired: no renderer for it '
+  + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
   + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
   + 'no-renderer exclusion — "use the object-bound `object-form` block"), so every key on '
   + 'this element was a capability claim nothing kept. Delete the `element:form` component '
-  + 'and use the object-bound `object-form` block instead (#7751) — it is rendered, '
+  + 'and use the object-bound `object-form` block instead — it is rendered, '
   + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
   + '`submitText`). '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
@@ -2237,9 +2237,9 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * absent from the map entirely, so even the #5068 gate said nothing.
  */
 const objectBlockHistory = (type: string) =>
-  `Until #7751 \`${type}\` had no entry in ComponentPropsMap at all, so the #5068 authoring gate `
-  + 'skipped the type: a misspelled key inside `properties` parsed clean, was stored, reached '
-  + "objectui's renderer and was ignored there (the #7750 shape — `filters` for `filter` silently "
+  `Until this type was added to ComponentPropsMap, \`${type}\` had no entry there at all, so `
+  + 'the authoring gate skipped it: a misspelled key inside `properties` parsed clean, was '
+  + "stored, reached objectui's renderer and was ignored there (`filters` for `filter` silently "
   + 'unfiltered a personal work queue, with a success receipt).';
 
 /**
@@ -2629,22 +2629,22 @@ export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
 // a bare `z.string()` — and the authored-value census on both repos (this
 // repo + objectui#5939's) found zero occurrences to rewrite.
 const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
-  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): only the current wizard step\'s fields mount and the block\'s single '
+  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: only the current wizard step\'s fields mount and the block\'s single '
     + "Save bar acts as the wizard's Next, so parent + details never save through the atomic batch "
     + "(ADR-0001, the block's whole contract). Write 'simple' (sections render stacked) or 'tabbed'; "
     + "for a wizard without inline details author an `object-form`, where 'wizard' is honoured."],
-  ['split', "'split' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders inline but persists via `dataSource.create`, '
+  ['split', "'split' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders inline but persists via `dataSource.create`, '
     + "bypassing the atomic parent+details batch (ADR-0001, the block's whole contract). Write "
     + "'simple' or 'tabbed'; for a split presentation without inline details author an "
     + "`object-form`, where 'split' is honoured."],
-  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders in a portal dialog outside the master-detail '
     + "container, so the block's Save bar has no form to submit. Write 'simple' or 'tabbed'; for a "
     + "drawer overlay without inline details author an `object-form`, where 'drawer' is honoured."],
-  ['modal', "'modal' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+  ['modal', "'modal' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders in a portal dialog outside the master-detail '
     + "container (the same portal shape as 'drawer'), so the block's Save bar has no form to "
     + "submit. Write 'simple' or 'tabbed'; for a modal overlay without inline details author an "
     + "`object-form`, where 'modal' is honoured."],

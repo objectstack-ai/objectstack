@@ -565,7 +565,7 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Plugin Lifecycle', pages: ['plugin', 'plugin-lifecycle-events', 'plugin-lifecycle-advanced', 'plugin-runtime', 'plugin-loading', 'plugin-registry', 'plugin-structure', 'plugin-validator'] },
     { section: 'Plugin Security & Dependencies', pages: ['plugin-security', 'plugin-security-advanced', 'plugin-capability', 'plugin-versioning', 'dependency-resolution', 'manifest'] },
     { section: 'Packages', pages: ['package-artifact', 'package-registry', 'package-upgrade'] },
-    { section: 'Metadata & Runtime', pages: ['metadata-plugin', 'metadata-loader', 'metadata-customization', 'metadata-protection', 'metadata-persistence', 'misc', 'context', 'execution-context', 'service-registry', 'startup-orchestrator', 'cluster', 'feature', 'cli-extension', 'dev-plugin', 'state-machine'] },
+    { section: 'Metadata & Runtime', pages: ['metadata-plugin', 'metadata-loader', 'metadata-protection', 'metadata-persistence', 'misc', 'context', 'execution-context', 'service-registry', 'startup-orchestrator', 'cluster', 'feature', 'cli-extension', 'dev-plugin', 'state-machine'] },
   ],
   system: [
     { section: 'Config & Settings', pages: ['settings-manifest', 'settings-client', 'registry-config', 'auth-config', 'email-config', 'email-template', 'license', 'migration', 'deploy-bundle', 'environment-artifact', 'app-install', 'provisioning', 'tenant'] },

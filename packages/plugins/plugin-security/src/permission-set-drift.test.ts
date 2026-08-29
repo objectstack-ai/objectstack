@@ -24,8 +24,18 @@ import {
 } from './permission-set-drift.js';
 import { permissionSetRowFields } from './permission-set-projection.js';
 
-/** Minimal in-memory ql: sys_permission_set + sys_metadata + $in support. */
-function makeQl(declared: any[] = []) {
+/**
+ * Minimal in-memory ql: sys_permission_set + sys_metadata + $in support.
+ *
+ * `refuseUpdatesWith` makes every `update` throw AFTER the dispatch predicate
+ * has accepted the call shape — the real failure ORDER (the engine validates,
+ * the store refuses), and the only one `tryUpdate`'s catch ever sees. Placing
+ * the throw first would let a call shape the real engine rejects pass this
+ * suite. Extended in place rather than added as a second double, deliberately:
+ * this file's `update` double is pinned 1-per-file in
+ * `scripts/engine-double-contract.pinned.json`.
+ */
+function makeQl(declared: any[] = [], refusal: { refuseUpdatesWith?: Error } = {}) {
   const permRows: any[] = [];
   const metaRows: any[] = [];
   const tableFor = (object: string) =>
@@ -63,6 +73,7 @@ function makeQl(declared: any[] = []) {
     async update(object: string, data: any, options?: any) {
       const rows = tableFor(object);
       const dispatch = assertEngineUpdateDispatch(data, options);
+      if (refusal.refuseUpdatesWith) throw refusal.refuseUpdatesWith;
       const targets = dispatch.kind === 'by-id'
         ? (rows ?? []).filter((r: any) => r.id === dispatch.id)
         : (rows ?? []).filter((r: any) => matches(r, options?.where));
@@ -205,5 +216,111 @@ describe('persistPermissionSetDriftDiagnostics — writes are equality-gated', (
 
     const second = await runPermissionSetDriftDiagnostics(ql);
     expect(second.updated).toBe(0); // nothing changed — no round trip
+  });
+});
+
+
+/* ------------------------------------------------------------------------- *
+ *  pin 6 — a REFUSED diagnostic write must be LOUD
+ *
+ *  The defect: `persistPermissionSetDriftDiagnostics` counted only the writes
+ *  that LANDED, and `runPermissionSetDriftDiagnostics` reported only when that
+ *  count was non-zero. So a boot on which every drift write was refused
+ *  computed the drift correctly, persisted none of it, and printed NOTHING —
+ *  byte-identical to a deployment with no drift, while the drifted sets kept
+ *  enforcing grants that differ from the shipped artifact.
+ *
+ *  Driver-error spellings are taken from the shipped classifier's own measured
+ *  fixtures (see `seed-write-refusal.test.ts`), never invented here.
+ * ------------------------------------------------------------------------- */
+
+/** Records every channel separately, with `error`'s real 3-arg shape. */
+function recordingLogger() {
+  const info: any[] = [];
+  const warn: any[] = [];
+  const error: any[] = [];
+  return {
+    info, warn, error,
+    sink: {
+      info: (m: string, meta?: any) => { info.push({ m, meta }); },
+      warn: (m: string, meta?: any) => { warn.push({ m, meta }); },
+      error: (m: string, e?: any, meta?: any) => { error.push({ m, e, meta }); },
+    },
+  };
+}
+
+/** NOT a unique violation — the realistic refusal for an update-by-id. */
+const connectionFailure = () =>
+  Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
+
+describe('runPermissionSetDriftDiagnostics — pin 6: a refused diagnostic write is visible', () => {
+  it('a pass whose every write is REFUSED still reports — the drifted set is named, and the refusal is reported on the durability channel', async () => {
+    const artifact = declaredSet();
+    const ql = makeQl([artifact], { refuseUpdatesWith: connectionFailure() });
+    ql.permRows.push(inSyncRow({
+      managed_by: 'admin', // provenance_skip — real drift
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true } }),
+    }));
+    const log = recordingLogger();
+
+    const result = await runPermissionSetDriftDiagnostics(ql, { logger: log.sink });
+
+    // The drift was computed correctly and NONE of it landed.
+    expect(result.diagnostics[0].status).toBe('provenance_skip');
+    expect(result.updated).toBe(0);
+    expect(result.refused).toBe(1);
+    expect(ql.permRows[0].drift_status).toBeUndefined();
+
+    // ⭐ The boot is no longer indistinguishable from a clean one.
+    expect(log.error).toHaveLength(1);
+    expect(log.error[0].m).toContain('REFUSED');
+    expect(log.error[0].meta.refused).toBe(1);
+    expect(log.error[0].meta.refusals[0]).toMatchObject({
+      object: 'sys_permission_set', class: 'other', count: 1,
+    });
+    // The value-free code channel, never the bound statement.
+    expect(log.error[0].meta.refusals[0].driverCodes).toContain('ECONNREFUSED');
+    // Never the catalog-seed prose: this pass seeds nothing, and sending an
+    // operator after a legacy platform-wide catalog index would be a
+    // confident wrong answer. See `reportDriftWriteRefusals`.
+    expect(log.error[0].m).not.toContain('RBAC catalog');
+
+    // …and the line that NAMES the drifted set is no longer gated behind the
+    // counter the refusal suppressed.
+    const drift = log.warn.find((l) => l.m.includes('differ from the shipped artifact'));
+    expect(drift).toBeDefined();
+    expect(drift!.meta.drifted).toEqual([{ name: 'ehr_quality_inspector', status: 'provenance_skip' }]);
+    expect(drift!.meta.updated).toBe(0);
+    expect(drift!.meta.refused).toBe(1);
+  });
+
+  it('⭐ counter-direction: a steady-state pass (nothing to write, nothing refused) still prints NOTHING', async () => {
+    const ql = makeQl([declaredSet()]);
+    ql.permRows.push(inSyncRow({ drift_status: null, drift_detail: null }));
+    const log = recordingLogger();
+
+    const result = await runPermissionSetDriftDiagnostics(ql, { logger: log.sink });
+
+    expect(result.updated).toBe(0);
+    expect(result.refused).toBe(0);
+    // The new `refused > 0` limb re-opens the refusal case and nothing else —
+    // a quiet boot stays exactly as quiet as it was.
+    expect(log.error).toHaveLength(0);
+    expect(log.warn).toHaveLength(0);
+  });
+
+  it('against a REDUCED sink with no `error`, the refusal still prints — at `warn`, never nowhere', async () => {
+    const ql = makeQl([declaredSet()], { refuseUpdatesWith: connectionFailure() });
+    ql.permRows.push(inSyncRow({
+      managed_by: 'admin',
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true } }),
+    }));
+    const warn: any[] = [];
+
+    // `{ warn }` alone is a legal ProjectionLogger — hosts do inject reduced
+    // sinks, which is exactly why the durability fallback is mandatory.
+    await runPermissionSetDriftDiagnostics(ql, { logger: { warn: (m: string, meta?: any) => { warn.push({ m, meta }); } } });
+
+    expect(warn.some((l) => l.m.includes('REFUSED'))).toBe(true);
   });
 });

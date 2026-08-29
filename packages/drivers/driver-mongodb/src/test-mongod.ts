@@ -41,9 +41,27 @@
  * merge queue at least three red builds in one day and ejected unrelated PRs.
  *
  * The maintainer's call was to RETIRE the download rather than build
- * single-flight / prewarm infrastructure for a driver family whose investment is
- * frozen (#5499). So: no `globalSetup` pre-download, no cross-worker lock, no
- * workflow cache warming. The binary-dependent suites simply do not run unless a
+ * single-flight / prewarm infrastructure. Two premises stood behind that call
+ * and only one of them survives.
+ *
+ * The survivor is the MEASURED merge-queue hazard above: the unsettleable
+ * promise cost at least three red builds in one day and ejected unrelated PRs,
+ * which is what made this download not worth its coverage. That measurement is
+ * independent of any investment posture, so the retirement stands on it alone.
+ *
+ * The premise that is GONE is #5499, this driver family's investment freeze —
+ * the clause that used to answer "why not just build the infrastructure
+ * instead". It dissolved 2026-08-11 (head note of `@objectstack/spec`'s
+ * `aggregation-conformance.ts`).
+ *
+ * So, still: no `globalSetup` pre-download, no cross-worker lock, no workflow
+ * cache warming — but read that as NOBODY HAS BUILT IT, and never as "it must
+ * not be built". Nothing forbids building it now; the measured hazard above is
+ * why it was not worth building. Whether the opt-in coverage now justifies that
+ * infrastructure is a maintainer call about coverage versus CI cost — a
+ * separate card, not this file's to settle.
+ *
+ * The binary-dependent suites simply do not run unless a
  * human asks for them with {@link MONGOD_TESTS_ENV}, and the gate is checked
  * before the library is even imported, so a default run starts zero downloads.
  *

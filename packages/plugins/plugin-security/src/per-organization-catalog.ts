@@ -145,8 +145,18 @@ export type SeedLogger = {
  *
  * The `?.` on `warn` is the backstop for hosts the TYPE cannot reach (a
  * plain-JS embedder, or a cast), not doubt about the declaration.
+ *
+ * EXPORTED rather than module-private, for the reason its own doc gives — the
+ * fallback "lives in {@link logSeedDurabilityFailure} so no site can forget
+ * it". Two sites outside the catalog seed now report a refused write and owe
+ * the identical fallback: `permission-set-drift.ts` (a refused drift-diagnostic
+ * write) and `permission-set-overlay-discard.ts` (a refused resync after a
+ * sanctioned overlay discard). They reuse this spelling and NOT
+ * {@link reportSeedWriteRefusals}, whose PROSE is catalog-seed-specific — see
+ * the deviation note in each of those call sites. Deliberately absent from the
+ * package's `index.ts`: this is an intra-package helper, not public API.
  */
-function logSeedDurabilityFailure(
+export function logSeedDurabilityFailure(
   logger: SeedLogger | undefined,
   message: string,
   meta?: Record<string, any>,

@@ -62,7 +62,10 @@ import '@objectstack/plugin-security';
 // because DevPlugin imports
 // `@objectstack/runtime` on the line BEFORE it and that import throws, so the
 // driver import is never evaluated and a mock for it would be dead weight. It
-// is a frozen driver under a retirement census (#5499/#5704/#6664), where an
+// is a driver under a retirement census — #5704/#6664, whose census it is;
+// #5499 was the INVESTMENT freeze, never the census, and it dissolved
+// 2026-08-11 (head note of `@objectstack/spec`'s `aggregation-conformance.ts`).
+// Under that census an
 // unnecessary module binding is the defect the census exists to catch, so the
 // dead mock is not harmless bookkeeping. Probed, not reasoned: a marker in the
 // factory printed 0 times across the whole file while the same marker in the

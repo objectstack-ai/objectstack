@@ -236,6 +236,51 @@ function carriesDescription(shape: NestedShape): boolean {
  * through `ctx.schemaHref`, which the generator closes over the rendering
  * category with (`schemaHrefFrom`) precisely because a bare name is not a
  * schema identity (#4696).
+ *
+ * ## The section grammar is NOT addressable — decided, not overlooked (#12862)
+ *
+ * Four of the headings below carry no qualifier by construction: `### Properties`,
+ * `### Allowed Values` (the whole-schema vocabulary branch), `### Union Options`
+ * and `#### Option N`. One page carries many schema sections, so these **repeat by
+ * design** — and that is the whole difference between them and the per-key
+ * headings emitted beside them. `### Nested Shape: \`Schema.key\`` and
+ * `### Allowed Values: \`Owner.key\`` are qualified *precisely* so that one page
+ * cannot mint the same anchor twice (#12590); those stay addressable. This
+ * grammar never was.
+ *
+ * Measured on the emitted tree: **1316 excess section-grammar headings across 162
+ * of the 214 reference pages** — 1133 `### Properties`, 145 `### Allowed Values`,
+ * 12 `### Union Options`, 26 `#### Option N`. `content/docs/references/ui/view.mdx`
+ * alone carries 45 `### Properties`.
+ *
+ * They do not COLLIDE. Measured by driving the docs site's own compile path
+ * (`fumadocs-mdx/node` `register` configured by `apps/docs/source.config.ts`, ids
+ * read out of the compiled module — never inferred from library docs):
+ * `remarkHeading` plus the workspace's single copy of `github-slugger@2.0.0`
+ * de-duplicates them into `properties`, `properties-1`, `properties-2`, …,
+ * identically on all three surfaces that consume an anchor — the rendered HTML
+ * `id`, the fumadocs TOC url, and the search index. `ui/view.mdx` renders 215
+ * headings with 215 distinct ids and 0 duplicates.
+ *
+ * ⛔ **So nothing should link to them**, and the missing qualifier is not a bug to
+ * repair. That suffix is **positional**: `properties-17` means *the 18th
+ * `Properties` heading in document order*, so inserting a schema section earlier
+ * on the same page silently renumbers every anchor below it. A section-grammar
+ * anchor is therefore unstable even though it is unique — only qualifying the
+ * headings could buy stable addressing. Nothing in the repo links to one today
+ * (measured: 0 hits across all 7296 tracked files, with a positive control and a
+ * pattern control), and `check:doc-anchors` verifies that links RESOLVE, never
+ * that anchors are UNIQUE — so its green says nothing about this in either
+ * direction.
+ *
+ * Disposition: **accepted on the measurement.** The two alternatives were
+ * qualifying the section grammar (rewriting every heading on 162 pages) and
+ * demoting it to a non-heading rendering (changing the published rendering shape);
+ * both pay a large price for a defect that has zero correctness harm — no
+ * collision exists — and zero measured demand — no inbound link exists. Not closed
+ * forever: should stable addressing of the section grammar ever become a product
+ * requirement, qualification returns to the table, and the counts above are what
+ * price it.
  */
 export function renderSchemaSection(schemaName: string, schema: any, ctx: SectionContext = {}): string {
   const defs = schema?.definitions || schema?.$defs || {};
@@ -259,6 +304,10 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
   const renderProperties = (
     props: any,
     required: Set<string> = new Set(),
+    // The largest section-grammar population on the tree — 1133 of the 1316
+    // excess headings (#12862). It repeats once per schema section on the page
+    // and is deliberately unqualified; see the anchor note on
+    // `renderSchemaSection` above for why, and for why nothing may link to it.
     heading = '### Properties',
     // A nested-shape table does not open tables of its own. ONE level, matched
     // to the ONE shape level `SHAPE_DEPTH_LIMIT` lets a cell open: the table

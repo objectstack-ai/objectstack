@@ -488,14 +488,19 @@ export async function returnTypePrecisionPins12104(): Promise<void> {
     // @ts-expect-error `queryDataset` is served bare by @objectstack/rest — there is no envelope
     void (await client.analytics.queryDataset({ selection: { measures: ['n'] } })).data;
 
-    // The two spec response types that LOOK like the right binding and are
-    // narrower than the contract their route relays. Pinned at the binding so a
-    // future sweep cannot "tidy" either annotation onto them: the keys below are
-    // served by the real producers and neither schema declares them.
-    // @ts-expect-error `TriggerFlowResponse.data` declares no `runId` — a paused run carries one
-    void (undefined as unknown as TriggerFlowResponse).data.runId;
-    // @ts-expect-error `TriggerFlowResponse.data` declares no `screen` — a screen-flow pause carries one
-    void (undefined as unknown as TriggerFlowResponse).data.screen;
+    // [#13078] RE-JUDGED, not re-spelled (the #6442 treatment): two
+    // suppressions here used to pin that `TriggerFlowResponse.data` declared
+    // neither `runId` nor `screen` — the near-miss trap that made binding the
+    // schema a false narrowing. That premise is retired by design:
+    // #13078 widened both stale schemas to parity with the contracts their
+    // routes relay, so the old pins' suppressions would now be UNUSED
+    // (TS2578) precisely because the defect they pinned is fixed. The new
+    // truth is stronger and pinned as an equality: the schema's `data` IS the
+    // producer contract. Narrow the schema again and this goes red — the same
+    // guard, pointing in the direction that is now true. (The annotations
+    // above still bind the CONTRACT on purpose: it is the source the routes
+    // relay; the schema is its transcription.)
+    expectTypeOf<TriggerFlowResponse['data']>().toEqualTypeOf<AutomationResult>();
 }
 
 /**

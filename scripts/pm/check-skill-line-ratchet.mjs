@@ -205,7 +205,11 @@ export const CEILINGS = new Map([
   // to the reference file below (lowering is always legitimate).
   // Lowered 243 → 242 by the restructuring round: the stale hourly-fire
   // rationale clause collapsed into a pointer at contract-review.md.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 274],
+  // 274 -> 278 (maintainer ruling, 2026-08-29, PM chat, verbatim: 「12813 同意」 — option A):
+  // one ruling sized to the merged end-state of the three stacked PRs on this file. The +4 is
+  // the measured residual of the ⑦-method section after compression to its reasoned floor and
+  // real-deletion cuts were exhausted; re-wrap funding was refused per the 2026-08-17 rule.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 278],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -254,9 +258,11 @@ export const CEILINGS = new Map([
   // covered: post-roll placement/latency reading with the waker-bias re-draw
   // physics, one real user-path probe, the tourniquet rule for replayed live
   // state, orphaned-loop resumption, and the honesty clause. Set at landed line
-  // count (headroom 0, same convention as the entries above). Its pointer from
-  // landing-operations.md rides existing slack on that file's last
-  // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
+  // count (headroom 0, same convention as the entries above). It is pointed at
+  // from landing-operations.md, whose ceiling is the entry directly above and is
+  // deliberately not restated here: a live number copied into a neighbour's
+  // comment goes stale the next time that file moves — which is what happened to
+  // the arithmetic this sentence replaces.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
   // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log

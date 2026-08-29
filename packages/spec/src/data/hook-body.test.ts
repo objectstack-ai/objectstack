@@ -83,7 +83,9 @@ describe('HookBody', () => {
       const message = r.success ? '' : JSON.stringify(r.error.issues);
       // The prescription itself, not a bare "invalid enum value": it must name
       // the token, say it was removed, and tell the author what to do instead.
-      expect(message).toMatch(/crypto\.hash.*was removed.*17.*#4391/s);
+      expect(message).toMatch(/crypto\.hash.*was removed.*17.*ADR-0049/s);
+      // Negative pin: the tracker id resolves to nothing for this audience.
+      expect(message).not.toMatch(/#\d{3,5}\b/);
       expect(message).toMatch(/sandbox never implemented it/s);
       expect(message).toMatch(/Delete the capability/s);
     });
