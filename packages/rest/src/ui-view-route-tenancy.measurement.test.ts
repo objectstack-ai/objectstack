@@ -556,6 +556,10 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
         const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
         const body = observed.body;
 
+        // ⭐ Pinned to the CROSSED body first, so this is an inventory of what
+        // environment B disclosed and not of whatever the route happened to
+        // answer — an envelope assertion alone is true of either environment.
+        expect(labelOf(body)).toBe('Beta Environment Accounts');
         expect(Object.keys(body).sort()).toEqual(['list', 'object']);
         expect(body.object).toBe('account');
         // Post-#5948 shape: `object` on the CONTAINER. A `dist/` from before
@@ -571,6 +575,8 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
     it('⛔ NO record data crosses — the payload carries metadata only', async () => {
         const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
         const serialized = JSON.stringify(observed.body);
+        // Same pinning as above: this is a statement about B's payload.
+        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
         for (const key of ['rows', 'records', 'data', 'total', 'values', 'items']) {
             expect(observed.body[key], `body carried \`${key}\``).toBeUndefined();
         }
@@ -633,6 +639,10 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
             params: { object: 'no_such_object_here', type: 'list' },
         });
         expect(present.status).toBe(200);
+        // Pinned to B, so the oracle is a reading about the NAMED environment's
+        // object namespace rather than about the default one.
+        expect(labelOf(present.body)).toBe('Beta Environment Accounts');
+        expect(absent.acquired).toEqual([ENV_B]);
         expect(absent.status).not.toBe(200);
     }, 120_000);
 });
