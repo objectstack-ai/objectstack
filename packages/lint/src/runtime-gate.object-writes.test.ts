@@ -355,7 +355,7 @@ describe('collection-resident finding paths are name-keyed on the wire (#10064)'
         name: 'shop_invoice_line',
         sharingModel: 'private',
         fields: {
-          invoice: { type: 'master_detail', reference: { object: 'shop_invoice' } },
+          invoice: { type: 'master_detail', reference: 'shop_invoice' },
         },
       },
     ];

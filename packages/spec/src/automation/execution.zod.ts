@@ -55,10 +55,19 @@ export type ExecutionStatus = z.input<typeof ExecutionStatus>;
  * And `unmeasuredEffect` is the third answer, which a two-counter model would
  * have had to fake: a `connector_action` reaches an external system, and when
  * the action declares nothing about whether it reads or writes, `0` understates
- * a write and `1` overstates a read. Both are worse than saying so — an
- * understated `0` fires the broken-sweep alert on a healthy run until operators
- * learn to ignore it, and an overstated `1` makes the alert never fire at all,
- * which is the original bug back again.
+ * a write and `1` overstates a read. Both are worse than saying so, and in
+ * opposite directions — an understated `0` puts a run that DID act inside the
+ * broken-sweep FIRST FILTER (`selected > 0 AND acted = 0 AND unmeasured = 0`),
+ * and an overstated `1` keeps a run that acted on nothing outside it, which is
+ * the original bug back again.
+ *
+ * Being inside that filter is not the accusation an alarm reading makes of it:
+ * it is a first filter and not a verdict (#12685) — a healthy idempotent sweep
+ * that re-selects the same records and gates each one on "already handled"
+ * satisfies it on every run too, and what separates the two is the per-node
+ * fold spelled out on `FlowRunSummarySchema` below. That is also what makes a
+ * fabricated count the expensive kind of wrong: the fold is the step that would
+ * have settled it, and a faked `acted` is a fact the fold can only repeat.
  *
  * [#4395] "Declares nothing" is now the fallback rather than the only case:
  * `ConnectorActionSchema.effect` lets an action say `read` or `write`, and a

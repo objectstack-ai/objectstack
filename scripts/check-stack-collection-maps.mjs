@@ -592,15 +592,21 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['datasets', 'jobs', 'datasources', 'translations', 'capabilities'],
+        keys: ['datasets', 'jobs', 'datasources', 'translations'],
         reason:
-          'DRIFT with a real, bounded consequence — #6242 row 4(b). Four of the five are consumed '
+          'DRIFT with a real, bounded consequence — #6242 row 4(b). All four are consumed '
           + 'functionally by AppPlugin straight off the bundle, so boot is not broken; what they never do is '
           + 'register as METADATA ITEMS, so under `bootstrap: \'artifact-only\'` (edge / serverless / '
           + 'immutable image) `GET /meta/job`, `/meta/translation`, `/meta/datasource` and `/meta/dataset` '
           + 'answer empty for a package that ships them. Adding them changes what a sealed runtime serves '
           + 'and must be measured on a real artifact-only boot first — the filing card says so, and this '
-          + 'gate does not smuggle it in.',
+          + 'gate does not smuggle it in. `capabilities` was the FIFTH key on this row and left it at '
+          + '#12892 step 1 (maintainer ruling, option 1: the door owns the registration route for the five '
+          + 'security collections). It was never the same fact as the other four: AppPlugin registers it as '
+          + 'a METADATA ITEM through `registerInMemory`, so `GET /meta/capability` was already non-empty on '
+          + 'an artifact-only boot — what was missing from that answer was the strict-parsed shape, the '
+          + '`scope` default and the ADR-0010 provenance stamp. Driven on a real artifact-only boot before '
+          + 'the entry landed, per the sentence above.',
       },
       {
         direction: 'missing',
@@ -677,9 +683,12 @@ const SITES = [
           + 'never runs; every other collection reaches the registry through the door or its own seam. '
           + 'Recorded as one row rather than left implicit so that a NEW security collection has to be '
           + 'considered here once — which is the direction this site was actually wrong in: `capabilities` '
-          + 'is registered here and NOT by the door, making this block that collection\'s sole registrar on '
-          + 'an artifact boot (#12894 half 2, carried to #12892 for the ownership decision — measured, '
-          + 'deliberately not changed here).',
+          + 'was registered here and NOT by the door, making this block that collection\'s sole registrar '
+          + 'on an artifact boot (#12894 half 2, carried to #12892 for the ownership decision). The door '
+          + 'reaches it as of #12892 step 1, so this block is no longer that collection\'s sole registrar — '
+          + 'it is the SECOND one, on the same boot path, which is the interim state the ruling permits '
+          + 'while step 2 (this block stops registering the five on the ARTIFACT path only, after a census '
+          + 'of the non-artifact boots that depend on it) lands.',
       },
     ],
   },

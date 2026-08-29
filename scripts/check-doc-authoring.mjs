@@ -676,6 +676,25 @@ function calleeName(call, ts) {
  * schema, not prose) or a `StrictObjectOptions`-typed / `*_STRICT_OPTIONS`
  * const, which is how the shared visibility and editability option sets are
  * written.
+ *
+ * The const's declared type is read through {@link declaredTypeText} — the same
+ * helper {@link collectTextSinkConsts} uses — so the two type anchors in this
+ * file cannot answer differently about the same declaration. They could before:
+ * this one read `decl.type` alone and was blind to `… satisfies
+ * StrictObjectOptions`, a spelling the tree already uses for the sibling type
+ * (`WIDGET_GUIDANCE_SETS`, `ui/dashboard.zod.ts`), while its sibling anchor had
+ * been widened and this one had not.
+ *
+ * That divergence was never visible in the VERDICT, and saying so is the point:
+ * {@link collectTextSinkConsts} reaches the same prose by its own type anchor
+ * plus the const→const closure, so a `satisfies`-spelled options table was
+ * reported either way — measured, both spellings, before and after. What the
+ * divergence cost was the REDUNDANCY. The spelling was carried by exactly one
+ * mechanism, and the seed path through here — the one that reaches a guidance
+ * table hoisted out of the options object — would not have compensated if that
+ * one were ever narrowed. Which is why the case pinned in `--self-test` is on
+ * this predicate rather than on a scan: end to end the two anchors are
+ * indistinguishable, so a fixture would pass with this widening reverted.
  */
 function inStrictOptions(prop, ts) {
   let cur = prop;
@@ -686,7 +705,7 @@ function inStrictOptions(prop, ts) {
     }
     if (ts.isVariableDeclaration(p)) {
       const nm = p.name.getText();
-      return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(p.type ? p.type.getText() : '');
+      return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(declaredTypeText(p, ts));
     }
     if (ts.isReturnStatement(p) || ts.isArrowFunction(p) || ts.isFunctionDeclaration(p)) return false;
     cur = p;
@@ -706,14 +725,73 @@ function identifiersIn(node, ts, out = new Set()) {
 }
 
 /**
+ * The type a const DECLARES, in either spelling TypeScript offers.
+ *
+ * `const X: T = …` and `const X = … satisfies T` are the same statement about
+ * the same const, and this tree writes guidance tables both ways —
+ * `COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[]` (`ui/component.zod.ts`)
+ * and `WIDGET_GUIDANCE_SETS = […] as const satisfies readonly KeySetGuidance[]`
+ * (`ui/dashboard.zod.ts`). A type anchor that reads only `decl.type` sees the
+ * first and is silently blind to the second — and silence is the failure mode
+ * this whole file exists to prevent. `as const` is walked THROUGH rather than
+ * stopped at, because the `satisfies` sits outside it in that spelling.
+ *
+ * Both type anchors in this file route through here — {@link inStrictOptions}'s
+ * const branch and {@link collectTextSinkConsts}'s — so "what type does this
+ * const declare" has ONE answer. Two copies of the read is how the second one
+ * came to be a spelling behind the first.
+ *
+ * The INITIALIZER is deliberately not searched for the type name: a local like
+ * `new Set<KeySetGuidance>()` (`shared/suggestions.zod.ts`, inside the error
+ * builder) mentions the type without being one, and reporting the runtime's own
+ * bookkeeping as authoring prose is how a gate gets routed around. Pinned in
+ * `--self-test`.
+ */
+function declaredTypeText(decl, ts) {
+  if (decl.type) return decl.type.getText();
+  const parts = [];
+  let cur = decl.initializer;
+  for (let hops = 0; cur && hops < 8; hops++) {
+    if (!ts.isSatisfiesExpression(cur) && !ts.isAsExpression(cur)) break;
+    parts.push(cur.type.getText());
+    cur = cur.expression;
+  }
+  return parts.join(' ');
+}
+
+/**
  * Module-local const names whose CONTENTS reach a customer-facing sink.
  *
  * The blind spot this closes is argued in the Rule 3 header: the guidance maps
  * and a good share of the refusal messages are hoisted into a named const and
  * referenced from the sink, so a matcher that only reads a literal's own
- * position never reaches them. Seeded from every recognised sink and from the
- * two naming conventions, then closed to a FIXED POINT so a const referenced by
- * a const referenced by a `guidance:` is covered too.
+ * position never reaches them. Seeded from every recognised sink, from the
+ * naming conventions and from the TYPE anchors below, then closed to a FIXED
+ * POINT so a const referenced by a const referenced by a `guidance:` is covered
+ * too.
+ *
+ * ## The cross-module sink: a const whose only consumer is another file
+ *
+ * Seeding from in-file sinks alone leaves one shape unreachable BY
+ * CONSTRUCTION. A guidance table declared in a shared module and handed to
+ * `guidanceSets:` from OTHER files has no recognised anchor in its own file, so
+ * the whole const walks free — measured live on
+ * `SELECT_OPTION_EDITABILITY_GUIDANCE` (`shared/editability-boundary.ts`),
+ * whose prescription is printed verbatim at a refusing author on both the
+ * object-field face and the form-view face, and which this rule reported clean
+ * from the day it landed. Its neighbour `EDITABILITY_BOUNDARY_GUIDANCE`, same
+ * file and same shape, was reachable only by ACCIDENT: it happens to be
+ * consumed in-module by a `StrictObjectOptions` const. The gap is a property of
+ * the CONSUMPTION SITE, not of the const — so no amount of care at the
+ * declaration would have avoided it.
+ *
+ * A const whose declared type is `KeySetGuidance` is therefore a sink in its own
+ * right, on the same footing as `StrictObjectOptions`: the type exists solely to
+ * be handed to `guidanceSets:`, and `strictUnknownKeyError` prints the
+ * `prescription` it carries verbatim at the author. Anchoring on the TYPE rather
+ * than on a named list of guidance modules closes the CLASS — a named list
+ * would have to be edited again for the next shared guidance const, which is
+ * this same blind spot moved one level up.
  *
  * Name-based within one module rather than a scope analysis, deliberately: a
  * shadowed local of the same name would be a false positive, which costs an
@@ -733,8 +811,12 @@ function collectTextSinkConsts(sf, ts) {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
       decls.set(n.name.text, n.initializer);
       if (/_RETIRED_KEY_GUIDANCE$/.test(n.name.text)) sinks.set(n.name.text, 'tombstone');
-      const ty = n.type ? n.type.getText() : '';
-      if (/_STRICT_OPTIONS$/.test(n.name.text) || /\bStrictObjectOptions\b/.test(ty)) {
+      const ty = declaredTypeText(n, ts);
+      if (
+        /_STRICT_OPTIONS$/.test(n.name.text)
+        || /\bStrictObjectOptions\b/.test(ty)
+        || /\bKeySetGuidance\b/.test(ty)
+      ) {
         sinks.set(n.name.text, 'strictObject');
       }
     }
@@ -1263,7 +1345,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, and `.describe()` prose; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position and `extraKeys` key names all pass; test bodies out, and the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1519,6 +1601,147 @@ function selfTestRule3(expect) {
     expect('the describe red names the position', r.violations[0]?.where, '.describe()');
     expect('the describe red names the bucket', r.violations[0]?.bucket, 'describe');
 
+    // RED #11 — the CROSS-MODULE guidance const. Typed `KeySetGuidance`,
+    // exported, and consumed by NO sink in its own file: every anchor this pass
+    // had before was in-file, so a shared guidance table handed to
+    // `guidanceSets:` from other modules walked free while its prescription was
+    // printed at refusing authors. Measured live on
+    // `SELECT_OPTION_EDITABILITY_GUIDANCE`, which this rule reported clean from
+    // the day it landed. Written here in the spelling the tree really uses —
+    // the id on a LATER operand than the type annotation that anchors it.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export const OPTION_EDITABILITY_GUIDANCE: KeySetGuidance = {',
+      "  name: 'OPTION_EDITABILITY_KEYS',",
+      "  keys: ['disabled', 'readonly'],",
+      '  prescription:',
+      "    'Editability is not a per-OPTION concern — a deliberate boundary, not a '",
+      "    + 'missing key (#8201): withdraw the option with `visibleWhen` instead.',",
+      '};',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a `KeySetGuidance` const consumed only CROSS-MODULE is RED',
+      r.violations.length, 1);
+    expect('the cross-module red names the const it travelled through',
+      r.violations[0]?.where, 'via OPTION_EDITABILITY_GUIDANCE');
+    expect('the cross-module red is bucketed as a strictObject option',
+      r.violations[0]?.bucket, 'strictObject');
+
+    // RED #12 — the same const in the `as const satisfies` spelling, which this
+    // tree also uses (`WIDGET_GUIDANCE_SETS`, `ui/dashboard.zod.ts`). A type
+    // anchor reading only the ANNOTATION is blind to it, so the next shared
+    // guidance const written the modern way would reopen RED #11's gap — the
+    // same blind spot one spelling over.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export const OPTION_GUIDANCE_SETS = [',
+      '  {',
+      "    name: 'OPTION_EDITABILITY_KEYS',",
+      "    keys: ['disabled'],",
+      "    prescription: 'not a missing key (#8201) — withdraw the option instead.',",
+      '  },',
+      '] as const satisfies readonly KeySetGuidance[];',
+    ].join('\n'));
+    r = scan();
+    expect('an id in an `as const satisfies readonly KeySetGuidance[]` const is RED',
+      r.violations.length, 1);
+    expect('the satisfies-spelling red names its const',
+      r.violations[0]?.where, 'via OPTION_GUIDANCE_SETS');
+
+    // RED #13 — a whole OPTIONS TABLE in the `satisfies StrictObjectOptions`
+    // spelling, with the id one object deeper than the key that anchors it. The
+    // const is deliberately NOT named `*_STRICT_OPTIONS`, so the name branch
+    // cannot be what rescues it, and the prose is nested `guidance` rather than
+    // a top-level string, so reaching it means the climb really arrived.
+    //
+    // ⚠️ What this case pins, and what it does NOT. It is RED on both sides of
+    // the {@link inStrictOptions} widening: {@link collectTextSinkConsts} already
+    // registers this const by its declared type, and {@link customerTextPosition}
+    // resolves the string at `via NAV_ITEM_SURFACE` without ever consulting the
+    // position test. So this is a REGRESSION pin on the class — the shape stays
+    // reported — and NOT the reverse proof for the widening. The reverse proof is
+    // the predicate battery below, because end to end the two anchors are
+    // redundant and no fixture can tell them apart.
+    writeFileSync(target, [
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'export const NAV_ITEM_SURFACE = {',
+      "  surface: 'this navigation item',",
+      '  guidance: {',
+      "    legacyKey: '`legacyKey` was removed in protocol 17 (#13105). Delete it.',",
+      '  },',
+      '} satisfies StrictObjectOptions;',
+    ].join('\n'));
+    r = scan();
+    expect('an id in the nested guidance of a `satisfies StrictObjectOptions` options table is RED',
+      r.violations.length, 1);
+    expect('the options-table red names the const it travelled through',
+      r.violations[0]?.where, 'via NAV_ITEM_SURFACE');
+    expect('the options-table red is bucketed as a strictObject option',
+      r.violations[0]?.bucket, 'strictObject');
+
+    // ── The TYPE ANCHORS, asserted on the PREDICATE ─────────────────────
+    //
+    // Not through a scan, and the reason is the whole point of this block: the
+    // two anchors are REDUNDANT in the verdict, so a fixture written to prove
+    // this one would pass with it reverted — a case reporting an anchor as
+    // covered while proving only that its sibling still works. Measured: with
+    // {@link collectTextSinkConsts} reverted to the annotation-only read, this
+    // widening alone recovers the HOISTED shapes (a guidance table lifted out of
+    // the options object, reached through the seed path here) and nothing else.
+    //
+    // Redundancy is the point rather than the excuse. The `satisfies` spelling
+    // is carried by one mechanism today; two anchors that read a declaration the
+    // same way is the property whose absence let one of them fall a spelling
+    // behind in the first place, silently, with every gate green.
+    const anchor = (head, tail) => {
+      const sf = parseSourceFile('packages/spec/src/ui/anchor.zod.ts', [
+        "import type { StrictObjectOptions } from '../shared/strict-object';",
+        `export const ${head} = {`,
+        "  surface: 'this navigation item',",
+        "  guidance: { legacyKey: '`legacyKey` was removed in protocol 17. Delete it.' },",
+        `}${tail};`,
+      ].join('\n'));
+      let prop;
+      let decl;
+      const walk = (n) => {
+        if (!decl && ts.isVariableDeclaration(n)) decl = n;
+        if (!prop && ts.isPropertyAssignment(n) && n.name.getText() === 'guidance') prop = n;
+        ts.forEachChild(n, walk);
+      };
+      ts.forEachChild(sf, walk);
+      return { prop, decl };
+    };
+
+    // [label, declaration head, trailing type expression, is a StrictObjectOptions position]
+    const SPELLINGS = [
+      ['the ANNOTATION', 'NAV_ITEM_SURFACE: StrictObjectOptions', '', true],
+      ['`satisfies`', 'NAV_ITEM_SURFACE', ' satisfies StrictObjectOptions', true],
+      ['`as const satisfies`, where the type sits OUTSIDE the `as`',
+        'NAV_ITEM_SURFACE', ' as const satisfies StrictObjectOptions', true],
+      ['some OTHER satisfied type', 'NAV_ITEM_SURFACE', ' satisfies Record<string, unknown>', false],
+    ];
+    // A battery that registered no cases is a battery that passes, which is the
+    // failure this file is a monument to wearing a harness hat.
+    expect('the spelling battery actually registered its cases', SPELLINGS.length, 4);
+    for (const [label, head, tail, want] of SPELLINGS) {
+      const { prop, decl } = anchor(head, tail);
+      expect(`the position test reads ${label}`, inStrictOptions(prop, ts), want);
+      expect(`...and BOTH type anchors agree about the same declaration — ${label}`,
+        /\bStrictObjectOptions\b/.test(declaredTypeText(decl, ts)), want);
+    }
+
+    // The NAME branch is asserted apart from the four above, because it is the
+    // half a type read cannot cover: no type is written here at all, so a
+    // widening of the type read must leave it firing rather than absorb it.
+    {
+      const { prop, decl } = anchor('NAV_STRICT_OPTIONS', '');
+      expect('the `*_STRICT_OPTIONS` NAME branch fires with no type written at all',
+        inStrictOptions(prop, ts), true);
+      expect('...and it is the NAME doing it — the type read is empty here, so the name branch '
+        + 'is still load-bearing rather than shadowed by the widened type read',
+        declaredTypeText(decl, ts), '');
+    }
+
     // ── Precision: what must NEVER fire ─────────────────────────────────────
 
     // A validator's VALUE argument is not prose. `.min(3, …)` takes a message;
@@ -1566,6 +1789,23 @@ function selfTestRule3(expect) {
       "}, { name: z.string() });",
     ].join('\n'));
     expect('precision — `extraKeys` is key names, not prose', scan().violations.length, 0);
+
+    // A local that MENTIONS `KeySetGuidance` is not one. `shared/suggestions.zod.ts`
+    // really writes `const firedSets = new Set<KeySetGuidance>()` inside the
+    // error builder, so a type anchor that searched the initializer's text
+    // instead of the DECLARED type would report the runtime's own bookkeeping
+    // as authoring prose — and a gate that reports values as prose is one
+    // authors route around.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export function fire(sets: readonly KeySetGuidance[]) {',
+      '  const fired = new Set<KeySetGuidance>();',
+      "  for (const s of sets) if (s.name === '#4286') fired.add(s);",
+      '  return fired;',
+      '}',
+    ].join('\n'));
+    expect('precision — an inferred local whose INITIALIZER mentions `KeySetGuidance` is not a sink',
+      scan().violations.length, 0);
 
     // GREEN again from the same scan, so every red above was the id and nothing
     // else about the tree.
