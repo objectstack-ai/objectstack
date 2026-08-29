@@ -4,8 +4,8 @@
  * [cloud ADR-0024 D5.2] Break-glass — a write may never leave this environment
  * with ZERO administrators able to sign in.
  *
- * FOUR write shapes can take the last administrator away, and this guard
- * holds on all of them — they are one invariant, not four policies:
+ * FIVE write shapes can take the last administrator away, and this guard
+ * holds on all of them — they are one invariant, not five policies:
  *
  *  1. **`sys_user.banned = true`** (#5892) — how every *disable* lands: the
  *     better-auth admin plugin's ban endpoint writes it, and
@@ -41,6 +41,17 @@
  *     one click on a Setup row action that carries no visibility or condition
  *     guard — which is why it needs its own two hooks rather than a wider filter
  *     on the three tables above.
+ *  5. **moving a `sys_user` row off the DECLARED administrator list** (#11663
+ *     L2) — the first shape that revokes nothing stored. Since the
+ *     platform-admin re-anchor, `resolveAuthzContext` also derives
+ *     `PLATFORM_ADMIN` from a `sys_user` row whose own `email` is on the
+ *     deployment's `OS_PLATFORM_OWNER_EMAIL` list AND whose `email_verified`
+ *     reads verified. So an ordinary change-of-address write, or an
+ *     `email_verified` reset from a re-verification flow, an import or an IdP
+ *     re-assertion, takes that standing away — with no ban, no delete, and no
+ *     grant table touched. `resolveAdminUserIds` counts those administrators
+ *     too, through the resolver's OWN predicate, so the enumeration and the
+ *     derivation cannot disagree about who they are.
  *
  * In the case that matters both are driven by an EXTERNAL system: nobody reads
  * the payload before it commits, so one mis-scoped IdP group or one over-broad
@@ -276,7 +287,12 @@ import {
   MEMBERSHIP_ROLE_OWNER,
 } from '@objectstack/spec/identity';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
-import { isGrantActive, isRowActive } from '@objectstack/core';
+import {
+  isGrantActive,
+  isRowActive,
+  matchesConfiguredPlatformAdmin,
+  resolvePlatformAdminEmails,
+} from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
 
@@ -345,7 +361,8 @@ type GuardedOp =
   | 'grant-update'
   | 'grant-delete'
   | 'permission-set-update'
-  | 'permission-set-delete';
+  | 'permission-set-delete'
+  | 'user-standing-update';
 
 interface OpWords {
   /** Reads after "Refusing this …". */
@@ -425,6 +442,18 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
     subject: 'permission sets',
     table: SystemObjectName.PERMISSION_SET,
   },
+  // [#11663 L2] Deliberately generic wording: ONE payload can carry an address
+  // change and an `email_verified` reset together, and the refusal has to read
+  // correctly for either alone as well as for both. `standingOrigin` carries
+  // the sys_user-specific advice.
+  'user-standing-update': {
+    noun: 'account change',
+    verb: 'change',
+    gerund: 'changing',
+    Verb: 'Change',
+    subject: 'accounts',
+    table: SystemObjectName.USER,
+  },
 };
 
 /**
@@ -444,6 +473,14 @@ function standingOrigin(table: string, noun: string): string {
       `If the ${noun} came from a metadata delete, an 'os meta' run or a package uninstall, ` +
       `revoke the '${ADMIN_FULL_ACCESS}' grants first — the permission-set row every platform ` +
       'admin is derived from is the last thing an environment gives up, not the first.'
+    );
+  }
+  if (table === SystemObjectName.USER) {
+    return (
+      `If the ${noun} was a change of address or an email re-verification, the account it moves ` +
+      'is one this deployment names as a platform administrator in OS_PLATFORM_OWNER_EMAIL. ' +
+      'Declare the new address there first (comma-separated for several) and roll the process, ' +
+      'then make the change — the configuration is the anchor, and this row only matches it.'
     );
   }
   return (
@@ -506,7 +543,11 @@ function toId(value: unknown): string | undefined {
  * updated and `patch` is the caller's payload, applied over each row.
  */
 interface PendingStandingWrite {
-  /** `sys_member`, `sys_user_permission_set` or `sys_permission_set` (#6084). */
+  /**
+   * `sys_member`, `sys_user_permission_set`, `sys_permission_set` (#6084) or —
+   * since #11663 L2 — `sys_user`, whose `email` / `email_verified` pair is the
+   * config anchor's half of the derivation.
+   */
   table: string;
   /** Ids of the rows this one write addresses (by-id, or the predicate's matches). */
   ids: Set<string>;
@@ -614,6 +655,37 @@ export const GRANT_STANDING_KEYS = [
 export const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
 
 /**
+ * [#11663 L2] Same, for `sys_user` — the FIFTH write shape, and the first one
+ * that does not revoke anything stored.
+ *
+ * The platform-admin re-anchor gave `resolveAuthzContext` a second anchor
+ * beside the unscoped `admin_full_access` grant: a `sys_user` row whose
+ * `email` is on the deployment's declared administrator list AND whose
+ * `email_verified` reads verified. Both columns are therefore derivation
+ * columns now (`ADMIN_STANDING_SURFACE.sys_user`, reclassified from
+ * `reads-only` in the same landing), and each is reachable through an
+ * ORDINARY write:
+ *
+ *  - `email` — a change-of-address write moves the row off the configured
+ *    list, and the standing goes with it. Nothing about the write looks
+ *    administrative.
+ *  - `email_verified` — resetting it to false (a re-verification flow, an
+ *    import, an IdP that re-asserts the claim) takes the standing away while
+ *    leaving the address in place. This is the sharp one: the column exists
+ *    precisely so an UNVERIFIED account holding a configured address confers
+ *    nothing, which means writing `false` to it is a revocation.
+ *
+ * Neither is a ban and neither is a delete, so the two `sys_user` halves that
+ * predate this list (write shapes 1 and 2) never see them — `guardBan` filters
+ * on `banned` and `guardDelete` only fires on a delete.
+ *
+ * `id` and `ai_access` are excluded below rather than listed; `banned` is
+ * absent from BOTH because the resolver does not read it (the ban half of this
+ * guard judges it for its own, different reason).
+ */
+export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
+
+/**
  * [#8734] The three lists above, keyed by the table each one judges — the shape
  * the correspondence gate consumes.
  *
@@ -634,6 +706,7 @@ export const STANDING_KEYS_BY_TABLE: Readonly<Record<string, readonly string[]>>
   [SystemObjectName.MEMBER]: MEMBER_STANDING_KEYS,
   [USER_PERMISSION_SET]: GRANT_STANDING_KEYS,
   [SystemObjectName.PERMISSION_SET]: PERMISSION_SET_STANDING_KEYS,
+  [SystemObjectName.USER]: USER_STANDING_KEYS,
 };
 
 /**
@@ -702,6 +775,19 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       'Tab visibility per app. Same reason as `system_permissions`: it is content of the set, '
       + 'never the name-and-active pair the derivation reads.',
     tabPermissions: 'Camel-case spelling of `tab_permissions` — same reason.',
+  },
+
+  [SystemObjectName.USER]: {
+    id:
+      'The `where` key the resolver reads its own row by, and — as on the two lists above — on '
+      + 'this engine `data.id` on an update ADDRESSES the row rather than proposing a new primary '
+      + 'key, so a key rewrite is not expressible through this write path at all.',
+    ai_access:
+      'ADR-0024 `ai_seat` synthesis (§7). It grants an AI seat, never administrator standing: the '
+      + 'posture rung is derived from the unscoped `admin_full_access` grant and, since #11663 L2, '
+      + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
+      + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
+      + 'not a break-glass one.',
   },
 };
 
@@ -836,6 +922,54 @@ export function registerLastAdminGuard(
       if (!isOrgAdminGrade(m.role)) continue;
       const uid = toId(m.user_id ?? m.userId);
       if (uid) ids.add(uid);
+    }
+
+    // 3) [#11663 L2] Config-anchored platform admins — a `sys_user` row whose
+    //    own `email` is on the deployment's declared administrator list and
+    //    whose `email_verified` reads verified. This half exists because the
+    //    enumeration must answer the SAME question `resolveAuthzContext` does:
+    //    an administrator this count cannot see is an administrator the guard
+    //    would happily let a write take away, and the whole file is one
+    //    invariant off one enumeration.
+    //
+    //    The predicate is imported, never re-spelled — `matchesConfiguredPlatformAdmin`
+    //    is the resolver's own, so the normalization, the list parse and the
+    //    fail-closed verified check cannot drift between the two readers. With
+    //    no variable declared, `emails` is empty and this costs no read at all,
+    //    which is why every deployment that has not adopted the config anchor
+    //    sees this guard behave exactly as it did.
+    //
+    //    ⛔ NOT re-priced here: which of this guard's REFUSALS become obsolete
+    //    once no runtime write can empty the platform-admin population is a
+    //    separate, reviewed step (design §5 step 5). This addition is only the
+    //    half that keeps the count honest — it can make the guard refuse MORE,
+    //    never less.
+    //    The `where` pushes the NORMALIZED addresses down, and the predicate
+    //    re-checks each returned row in JS — the same two-step
+    //    `auth-manager.ts`'s invitation lookup argues for, for the same two
+    //    reasons: better-auth's `internalAdapter.createUser` lowercases
+    //    `user.email` before storing it (and every producer in this repo does
+    //    the same), so the pushed-down filter is exact on a case-SENSITIVE
+    //    store; while a case-FOLDING collation (MySQL's default) returns extra
+    //    rows, which the predicate then drops.
+    const platformAdminConfig = resolvePlatformAdminEmails();
+    if (platformAdminConfig.emails.length > 0) {
+      const declared = await scan(op, SystemObjectName.USER, {
+        where: { email: { $in: [...platformAdminConfig.emails] } },
+        fields: ['id', 'email', 'email_verified'],
+      });
+      for (const raw of declared) {
+        // Simulated exactly like the grant rows above: a pending write can
+        // delete the row, move its `email` off the list, or reset
+        // `email_verified` — each is RE-TESTED through the resolver's own
+        // predicate rather than assumed, because the scan's `where` only proved
+        // what the address was BEFORE the write.
+        const u = applyPending(raw, pending, SystemObjectName.USER);
+        if (!u) continue;
+        if (!matchesConfiguredPlatformAdmin(u, platformAdminConfig)) continue;
+        const uid = toId(u.id);
+        if (uid) ids.add(uid);
+      }
     }
 
     // The legacy service account is not loginable — it can never be the escape
@@ -1345,6 +1479,27 @@ export function registerLastAdminGuard(
     );
   };
 
+  /**
+   * [#11663 L2] The FIFTH write shape: an ordinary `sys_user` profile write
+   * that moves the row off the deployment's declared administrator list
+   * (`email`) or un-verifies it (`email_verified`).
+   *
+   * Registered beside `guardBan` on the same event and object rather than
+   * folded into it, because the two ask different questions of the same table:
+   * `guardBan` fires on a payload that turns `banned` ON and nothing else, and
+   * a change-of-address is not a ban. A payload touching neither standing key
+   * (USER_STANDING_KEYS) provably cannot move the enumeration, so every
+   * ordinary profile write — name, avatar, locale, `ai_access` — still costs
+   * this guard no reads at all.
+   */
+  const guardUserStandingUpdate = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.USER) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (!touchesAny(data, USER_STANDING_KEYS)) return;
+    await enforceStanding('user-standing-update', SystemObjectName.USER, ctx.input, data);
+  };
+
   const guardPermissionSetDelete = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
@@ -1391,6 +1546,11 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeUpdate', guardUserStandingUpdate, {
+    object: SystemObjectName.USER,
+    priority: 20,
+    packageId,
+  });
   engine.registerHook('beforeUpdate', guardPermissionSetUpdate, {
     object: SystemObjectName.PERMISSION_SET,
     priority: 20,
@@ -1403,8 +1563,9 @@ export function registerLastAdminGuard(
   });
 
   logger?.info(
-    '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete), ' +
-      'sys_member and sys_user_permission_set (standing revocation), and sys_permission_set ' +
+    '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
+      'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
+      'sys_user_permission_set (standing revocation), and sys_permission_set ' +
       '(the admin_full_access row every platform admin is derived from) — ADR-0024 D5.2',
   );
 }

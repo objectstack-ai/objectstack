@@ -55,6 +55,20 @@
  * the table-level half of the same guarantee: a resolver that starts deriving
  * administrator standing from a new table would otherwise be invisible to a
  * column-set comparison, because the new table appears in neither side's list.
+ *
+ * ## ⚠️ Tables are no longer the whole surface (#11663 L2)
+ *
+ * Since the platform-admin re-anchor's core leg, one input to the administrator
+ * derivation is NOT a table at all: the deployment's declared administrator
+ * list, read from the environment on every resolution
+ * (`security/platform-admin.ts`). A file that listed only tables would go on
+ * being perfectly accurate about the tables while silently claiming the
+ * derivation reads nothing else — the same shape as the stale comment this file
+ * replaced, one level up. {@link ADMIN_STANDING_NON_TABLE_INPUTS} is the place
+ * that says so, and it is deliberately a SEPARATE export rather than a
+ * pseudo-row in the table map: the map is compared for equality against
+ * observed table reads, and a pseudo-row would have to be excluded from that
+ * comparison by name, which is exactly the kind of special case that rots.
  */
 
 /** How a table this resolver reads relates to "who is an administrator". */
@@ -83,9 +97,11 @@ export interface AdminStandingTable {
  * principal, and therefore all of `resolveUserAuthzGrants`. The API-key
  * ADMISSION path (`resolveApiKeyAdmission`) is outside it on purpose: it
  * authenticates a principal and seeds `permissions` with the key's scopes, and
- * confers no administrator standing of its own — `hasPlatformAdminGrant` (§6b)
- * is set only from a `sys_permission_set` row reached through an UNSCOPED
- * `sys_user_permission_set` grant, never from a scope string.
+ * confers no administrator standing of its own — `hasPlatformAdminGrant` is set
+ * from a `sys_permission_set` row reached through an UNSCOPED
+ * `sys_user_permission_set` grant (§6b) or from the deployment config matched
+ * against the caller's own STORED `sys_user` row (§6b-config), never from a
+ * scope string and never from the caller-seedable `grants.email`.
  */
 export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>> = {
   sys_permission_set: {
@@ -146,12 +162,25 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
   },
 
   sys_user: {
-    role: 'reads-only',
+    role: 'derives',
     reason:
-      'Read for the `current_user.email` RLS fallback and the ADR-0024 `ai_seat` synthesis (§7). '
-      + 'Neither confers administrator standing. The guard does watch this table, but for the '
-      + 'ban/delete WRITE SHAPES — `banned` is never read here, so it is not a derivation column '
-      + 'and carries no standing-key list.',
+      '[#11663 L2] RECLASSIFIED from `reads-only`. This table used to be read only for the '
+      + '`current_user.email` RLS fallback and the ADR-0024 `ai_seat` synthesis (§7), and the '
+      + 'note here said so: "Neither confers administrator standing." That sentence is now FALSE. '
+      + 'The config anchor (§6b-config) matches the row\'s own `email` against the deployment\'s '
+      + 'declared administrator list and requires `email_verified` to read verified, so a write '
+      + 'that changes either column takes platform-admin standing away from a config-derived '
+      + 'administrator — an address change and an email_verified reset are both ordinary, '
+      + 'reachable writes, and neither touches a grant table. `banned` stays absent from the '
+      + 'column list because the resolver still never reads it; the guard watches the ban/delete '
+      + 'WRITE SHAPES on this table for its own reasons, which is a different question from what '
+      + 'this resolver consumes.',
+    columns: [
+      'id',
+      'email',
+      'email_verified',
+      'ai_access',
+    ],
   },
 
   sys_user_position: {
@@ -179,6 +208,46 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'platform-admin standing.',
   },
 };
+
+/** A derivation input that is not a table — see {@link ADMIN_STANDING_NON_TABLE_INPUTS}. */
+export interface AdminStandingNonTableInput {
+  /** How the value reaches the resolver, e.g. `env` for a process environment variable. */
+  readonly kind: 'env';
+  /** The exact spelling an operator sets — quotable verbatim in a refusal message. */
+  readonly name: string;
+  /** What it decides, and what a break-glass guard can and cannot do about it. */
+  readonly reason: string;
+}
+
+/**
+ * [#11663 L2] Inputs to the administrator derivation that no table write can
+ * reach — declared here so this file's silence about them cannot be read as
+ * "the derivation reads only tables".
+ *
+ * The practical consequence is the one worth writing down: a break-glass guard
+ * simulates a pending WRITE, and there is no write to simulate for any of
+ * these. Standing that rests on one of them is taken away by changing the
+ * deployment's configuration and rolling the process, which is deliberately
+ * outside every in-product path — including every path an agent could be talked
+ * into calling. That is the whole point of the config anchor, and it is also
+ * the reason a guard cannot promise to prevent this class of lockout: it can
+ * only refuse the writes it can see.
+ */
+export const ADMIN_STANDING_NON_TABLE_INPUTS: readonly AdminStandingNonTableInput[] = [
+  {
+    kind: 'env',
+    name: 'OS_PLATFORM_OWNER_EMAIL',
+    reason:
+      'The deployment\'s declared platform administrator(s) — one address or a comma-separated '
+      + 'list, matched case-insensitively against `sys_user.email` and conferring standing only '
+      + 'when that row\'s `email_verified` reads verified (§6b-config). Read live on every '
+      + 'derivation with a per-process memo keyed on the raw string, so a rolled process picks up '
+      + 'a change with no special path. Unset, blank, or carrying any unparseable entry means '
+      + 'ZERO config-derived administrators, fail closed. No runtime write reaches it, so no '
+      + 'break-glass guard can simulate a change to it: revocation is a configuration change plus '
+      + 'a process roll, by design.',
+  },
+];
 
 /** The tables a write to which can change who is an administrator. */
 export function adminStandingTables(): string[] {
