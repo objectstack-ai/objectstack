@@ -286,7 +286,7 @@ UI metadata types (`view`, `dashboard`, `page`, `app`, `theme`) are first-class 
 
 ```typescript
 // Get a view definition
-const view = await metadataService.get('view', 'account_list');
+const view = await metadataService.get('view', 'account.default');
 
 // List all views for an object
 const views = await metadataService.listViews('account');
