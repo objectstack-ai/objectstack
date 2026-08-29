@@ -222,7 +222,7 @@ export const PluginHealthReportSchema = lazySchema(() => z.object({
  */
 const HOT_RELOAD_STATE_STRATEGY_RETIRED =
   "`HotReloadConfig.stateStrategy: 'disk'` and `HotReloadConfig.stateStrategy: "
-  + "'distributed'` were removed in @objectstack/spec 18 (#12340, ADR-0049 "
+  + "'distributed'` were removed in @objectstack/spec 18 (ADR-0049 "
   + 'enforce-or-remove) — neither was ever implemented. Both switch arms in '
   + "`PluginStateManager.saveState` wrote to the SAME in-memory Map as 'memory' "
   + "(the in-source comments said 'memory fallback'), and the only trace was a "

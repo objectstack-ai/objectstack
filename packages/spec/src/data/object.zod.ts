@@ -417,7 +417,7 @@ const declaredIndexUniqueScopeError: z.core.$ZodErrorMap = (issue) => {
     `(one holder across the whole installation — materialized over exactly ` +
     `\`fields\`, and the positional meaning of bare true on a declared index: ` +
     `bare true is warned by lint unique/unscoped-declared-index in 17.x and ` +
-    `rejected at protocol 18, #5082).${nearMiss}`
+    `rejected at protocol 18).${nearMiss}`
   );
 };
 
@@ -1413,7 +1413,7 @@ export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSc
  * which is why the message can prescribe a single answer.
  */
 const MANAGED_BY_SYSTEM_RETIRED =
-  "`object.managedBy: 'system'` was removed in @objectstack/spec 17 (#3355, ADR-0103 v17 "
+  "`object.managedBy: 'system'` was removed in @objectstack/spec 17 (ADR-0103 v17 "
   + 'addendum) — v16 moved every engine-owned object to `engine-owned`, leaving `system` '
   + 'labelling admin/user-writable platform DATA under a name that says the opposite. '
   + "Use `managedBy: 'system-data'` (platform-defined schema, admin/user-writable data; "
@@ -1422,7 +1422,7 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'create, edit, delete and exportCsv (the old `system` default was locked) — so a '
   + '`userActions` block that existed only to re-open create/edit/delete is now redundant '
   + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
-  + 'default (#4671): it stays opt-in per object via `userActions: { import: true }`, which '
+  + 'default: it stays opt-in per object via `userActions: { import: true }`, which '
   + 'is what a v16 `system` object already resolved to. '
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 

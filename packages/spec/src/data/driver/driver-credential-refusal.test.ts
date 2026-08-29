@@ -644,8 +644,12 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     const at = result.error!.issues.filter((i) => i.path.join('.') === 'options.auth.password');
     expect(at.length).toBe(2);
     const texts = at.map((i) => i.message).join('\n');
-    expect(texts).toContain('#9040');
-    expect(texts).toContain('#8336');
+    // Pinned on what each refusal SAYS, not on a tracker id: the ids were
+    // stripped from customer-facing refusal prose, so a text pin on them would
+    // pin the thing that must not be there.
+    expect(texts).toContain('is a credential and is not accepted in the driver-options passthrough');
+    expect(texts).toContain('placeholder');
+    expect(texts).not.toMatch(/#\d{3,5}\b/);
   });
 
   it('re-paths the refusal under `config.options.auth.password` on the authored artefact', () => {

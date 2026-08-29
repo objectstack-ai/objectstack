@@ -111,7 +111,7 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
  * record is the semantic migration `driver-capabilities-inert-bits-removed`.
  */
 const capRemoved = (key: string, mechanism: string) =>
-  `\`DriverCapabilities.${key}\` was removed in @objectstack/spec 17.0.0 (#4634, ADR-0049 ` +
+  `\`DriverCapabilities.${key}\` was removed in @objectstack/spec 17.0.0 (ADR-0049 ` +
   `enforce-or-remove) — no code in any repository ever read it, so its value never changed ` +
   `which code path ran. ${mechanism} Delete the key.`;
 

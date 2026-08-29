@@ -99,11 +99,13 @@ describe('unique scope rejection message — the two surfaces disagree about bar
     expect(message).toContain("'global'");
     expect(message).toContain('the positional meaning of bare true on a declared index');
 
-    // The migration the author is standing in front of (#5082): the 17.x
-    // warning channel and the protocol-18 rejection, named where they are read.
+    // The migration the author is standing in front of: the 17.x warning
+    // channel and the protocol-18 rejection, named where they are read. The
+    // tracker id that used to sit beside them is gone — it resolved to nothing
+    // for the author reading this refusal.
     expect(message).toContain('unique/unscoped-declared-index');
     expect(message).toContain('protocol 18');
-    expect(message).toContain('#5082');
+    expect(message).not.toMatch(/#\d{3,5}\b/);
 
     // And the organization scope described by what it DOES here, not by an
     // equivalence to `true` that does not hold on this surface.
