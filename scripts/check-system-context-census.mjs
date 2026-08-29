@@ -350,6 +350,18 @@ export const DECLARED_COUNTS = [
     why: 'the decomposition table: the census answer',
   },
   {
+    id: 'table-carry-onward',
+    pattern: /\| — carry the flag onward only \(rows \d+–\d+ above\) \|\s*(\d+) \|/,
+    value: (c, page) => carryOnwardRowCount(page),
+    why: "the decomposition table: how many sites only propagate the flag — held to section 6's own row count",
+  },
+  {
+    id: 'table-behaviour-bearing',
+    pattern: /\| — behaviour-bearing \(rows \d+–\d+ above\) \|\s*(\d+) \|/,
+    value: (c, page) => c.sites.length - carryOnwardRowCount(page),
+    why: 'the decomposition table: the remaining sites, derived so the two halves must sum to the census',
+  },
+  {
     id: 'table-packages',
     pattern: /\| Packages containing at least one elevation read \|\s*\*\*(\d+)\*\* \|/,
     value: (c) => c.packages.length,
@@ -374,6 +386,28 @@ export const DECLARED_COUNTS = [
     why: "the ruling's package count",
   },
 ];
+
+/**
+ * How many numbered rows section 6 ("Reads that only carry the flag onward") has.
+ *
+ * The page splits its 109 sites into behaviour-bearing rows and carry-onward rows.
+ * Neither number is derivable from the census alone -- which row is which is the
+ * page's own editorial call -- so the split is anchored to the thing that IS
+ * mechanical: the size of that table. Zero rows is a refusal, not a zero: it means
+ * the section was renamed and the split stopped being checked.
+ *
+ * @param {string} pageText
+ * @returns {number}
+ */
+export function carryOnwardRowCount(pageText) {
+  const start = pageText.indexOf('### 6.');
+  if (start === -1) return -1;
+  const rest = pageText.slice(start);
+  const end = rest.indexOf('\n---');
+  const section = end === -1 ? rest : rest.slice(0, end);
+  const rows = section.split('\n').filter((line) => /^\|\s*\d+\s*\|/.test(line));
+  return rows.length;
+}
 
 /** Tracked files, for anchor resolution. */
 export function trackedFiles(root = ROOT) {
@@ -558,7 +592,14 @@ export function evaluate({
       continue;
     }
     const stated = Number(match[1]);
-    const actual = declared.value(census);
+    const actual = declared.value(census, pageText);
+    if (!Number.isInteger(actual) || actual < 0) {
+      problems.push(
+        `[count-underivable] \`${declared.id}\` could not be derived (${declared.why}) -- the page ` +
+          'structure it reads is gone. Fix the reader together with the page.'
+      );
+      continue;
+    }
     if (stated !== actual) {
       problems.push(
         `[declared-count] \`${declared.id}\` says ${stated}, the census says ${actual} (${declared.why}).`
@@ -620,24 +661,25 @@ export function fixAnchors({ pageText, census, tracked, readFile, ledger = NON_R
   }
   for (const [path, fileAnchors] of byFile) {
     const ledgerLines = new Set(ledgerByFile.get(path) ?? []);
-    const censusLines = census.sites.filter((s) => s.file === path).map((s) => s.line);
-    // Anchors already on a ledger line, or on a census line, keep their meaning.
-    const readAnchors = fileAnchors.filter(
-      (a) => !ledgerLines.has(a.line) && !(ledgerByFile.get(path) ?? []).includes(a.line)
-    );
-    if (readAnchors.length !== censusLines.length) {
+    const censusLines = [...new Set(census.sites.filter((s) => s.file === path).map((s) => s.line))];
+    // A row cites the same line more than once (`:274` appears in the table AND in
+    // the rough edges), so the comparable unit is a DISTINCT line, not an anchor.
+    const readAnchors = fileAnchors.filter((a) => !ledgerLines.has(a.line));
+    const readLines = [...new Set(readAnchors.map((a) => a.line))].sort((a, b) => a - b);
+    if (readLines.length !== censusLines.length) {
       refused.push(
-        `${path}: page anchors ${readAnchors.length} read site(s), census finds ` +
+        `${path}: page anchors ${readLines.length} distinct read line(s), census finds ` +
           `${censusLines.length} -- the POPULATION changed, this is not a shift. A row has to be ` +
           'written or deleted by hand.'
       );
       continue;
     }
-    const sorted = [...readAnchors].sort((a, b) => a.line - b.line);
     const target = [...censusLines].sort((a, b) => a - b);
-    sorted.forEach((anchor, i) => {
-      if (anchor.line !== target[i]) newLine.set(anchor, target[i]);
-    });
+    const shift = new Map(readLines.map((line, i) => [line, target[i]]));
+    for (const anchor of readAnchors) {
+      const to = shift.get(anchor.line);
+      if (to !== undefined && to !== anchor.line) newLine.set(anchor, to);
+    }
   }
 
   // Ledger anchors: an anchor whose file has exactly one ledger line it is nearest
@@ -650,7 +692,8 @@ export function fixAnchors({ pageText, census, tracked, readFile, ledger = NON_R
     const orphans = fileAnchors.filter(
       (a) => !ledgerLines.includes(a.line) && !sites.has(`${path}:${a.line}`) && !newLine.has(a)
     );
-    if (free.length === 1 && orphans.length === 1) newLine.set(orphans[0], free[0]);
+    const orphanLines = new Set(orphans.map((a) => a.line));
+    if (free.length === 1 && orphanLines.size === 1) for (const a of orphans) newLine.set(a, free[0]);
   }
 
   // Apply, latest anchor first, so earlier offsets stay valid.
@@ -895,6 +938,35 @@ function selfTest() {
     run(fixturePage(), FIXTURE_CENSUS, FIXTURE_COUNTS).problems.some((p) =>
       p.startsWith('[count-pattern-unmatched]')
     )
+  );
+
+  const sectionPage = [
+    '### 6. Reads that only carry the flag onward',
+    '',
+    '| # | Site |',
+    '|:--|:---|',
+    '| 62 | `pkg/a.ts:2` |',
+    '| 63 | `pkg/a.ts:2` |',
+    '',
+    '---',
+    '',
+    '| — carry the flag onward only (rows 62–63 above) | 2 |',
+  ].join('\n');
+  t('COUNTS: the carry-onward split is read from section 6 itself', carryOnwardRowCount(sectionPage) === 2);
+  t('COUNTS: a renamed section 6 is underivable, not zero', carryOnwardRowCount('nothing here') === -1);
+  const underivable = evaluate({
+    pageText: fixturePage(),
+    census: FIXTURE_CENSUS,
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: FIXTURE_LEDGER,
+    declaredCounts: [
+      { id: 'x', pattern: /helper at `pkg\/a\.ts:(\d+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
+    ],
+  });
+  t(
+    'COUNTS: an underivable value is a finding, never compared as -1',
+    underivable.problems.some((p) => p.startsWith('[count-underivable]'))
   );
 
   // ── absence is loud ────────────────────────────────────────────────────────
