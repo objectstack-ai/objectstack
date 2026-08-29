@@ -260,10 +260,11 @@ describe('[#12509] the exits read the shared rule, they do not restate it', () =
 // 4. The prose axis, pinned AS IT STANDS — #12281's card, not this one
 // ---------------------------------------------------------------------------
 
-describe('[#12509] the MESSAGE is untouched here — #12281 owns that axis', () => {
+describe('[#12509] the MESSAGE axis — now widened by #12281, and the code axis is unaffected', () => {
     it('a declared 5xx WITH a code still has its prose withheld at errorResponseBase', async () => {
-        // `declaresServerFault` needs both a 5xx status and a string code, and
-        // this shape has both, so the withhold already fires.
+        // Unchanged by #12281: this shape declared a 5xx, so it was withheld
+        // under `declaresServerFault` and is withheld under
+        // `serverFaultProvenance`. Kept as the no-regression end of the band.
         const answer = await postAnalyticsQuery(
             thrown('the acme ledger service is down', { status: 503, code: 'ACME_LEDGER_OFFLINE' }),
         );
@@ -274,18 +275,35 @@ describe('[#12509] the MESSAGE is untouched here — #12281 owns that axis', () 
         expect(answer.body.error.declaredCode).toBe('ACME_LEDGER_OFFLINE');
     });
 
-    it('⚠️ a declared 5xx with NO code keeps its prose — this is what #12281 changes', async () => {
-        // The population measurement the ruling asked for is non-empty:
-        // `action-execution.ts` throws `{ statusCode: 503, message: 'Data
-        // service not available' }` at six sites and a 501 at a seventh, all
-        // code-less. `declaresServerFault` is false for them, so their prose
-        // travels today. When #12281 lands this expectation flips to the
-        // generic sentence — deliberately pinned so that lands as a CHANGE
-        // rather than as drift nobody sees.
+    it('[#12281] a declared 5xx with NO code ALSO has its prose withheld now', async () => {
+        // ⚠️ FLIPPED, as this file said it would be. Until #12281 this asserted
+        // `'Data service not available'` on the wire, with the note: "When
+        // #12281 lands this expectation flips to the generic sentence —
+        // deliberately pinned so that lands as a CHANGE rather than as drift
+        // nobody sees." This is that landing.
+        //
+        // Ruled 2026-08-27 on #12509 (option D), propagated to #12281:
+        // `errorResponseBase` adopts the structural withhold for EVERY declared
+        // 5xx message. `serverFaultProvenance` reads `status ?? statusCode` and
+        // does not consult `code`, so this shape — `action-execution.ts`'s
+        // code-less `statusCode` throw — is now on the withheld side by BOTH of
+        // the axes that used to exclude it.
         const answer = await postAnalyticsQuery({ statusCode: 503, message: 'Data service not available' });
         expect(answer.status).toBe(503);
-        expect(answer.body.error.message).toBe('Data service not available');
+        expect(answer.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
         // Nothing to withhold on the code channel: the producer declared none.
+        // The code axis this file owns is genuinely unaffected by the flip.
         expect(answer.body.error).not.toHaveProperty('declaredCode');
+    });
+
+    it('[#12281] an UNDECLARED 5xx still keeps its prose — the two axes stay independent', async () => {
+        // The control that keeps the flip above honest. This file's own subject
+        // is `demotedDeclaredCode`, which withholds the CODE on an undeclared
+        // 5xx; #12281 withholds the MESSAGE on a DECLARED one. They read
+        // opposite limbs of `serverFaultProvenance`, so an edit that collapsed
+        // them into "5xx ⇒ withhold everything" would go red here.
+        const answer = await postAnalyticsQuery(thrown('no strategy can handle query for cube "pipeline"', {}));
+        expect(answer.status).toBe(500);
+        expect(String(answer.body.error.message)).toMatch(/no strategy can handle query/);
     });
 });
