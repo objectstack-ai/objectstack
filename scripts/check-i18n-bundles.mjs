@@ -92,6 +92,7 @@ import {
   atRepoRoot,
   CLI,
   CLI_BUILD_FIX,
+  closureBuildFix,
   looksLikeMissingCliCommand,
   looksLikeStaleWorkspaceDist,
   oclifCommandFileFor,
@@ -295,6 +296,46 @@ function discoverExtractConfigs() {
     .map((c) => c.rel)
     .sort();
 }
+
+/**
+ * This gate's WHOLE build prerequisite, named once (#12564) — the CLI plus the
+ * build closure of every package whose extract config it runs, derived from the
+ * population rather than written down.
+ *
+ * `CLI_BUILD_FIX` alone under-prescribes here and always did: `os i18n extract`
+ * loads the package it is pointed at, so a tree with only the CLI built still
+ * cannot be measured. What made that expensive rather than merely incomplete is
+ * that the remedy a reader reaches for next is the ONE package the diagnosis
+ * names — and that one is all node can name, because it stops resolving a
+ * config's imports at the first specifier with no `dist/`. One package per
+ * round, however many are missing.
+ *
+ * The walk can throw (#11647), and main() turns that into its own worded verdict.
+ * A throw at MODULE scope would print a node stack instead of that verdict, so
+ * this catches and degrades to the coarser remedy — never to a partial one.
+ */
+const POPULATION_CLOSURE = (() => {
+  try {
+    return closureBuildFix(discoverExtractConfigs());
+  } catch (err) {
+    return { unknown: `the population could not be walked (${String(err?.message ?? err)})` };
+  }
+})();
+
+/** …that closure as a command, or the strict superset when it cannot be derived. */
+const WORKSPACE_CLOSURE_FIX = POPULATION_CLOSURE.command ?? 'pnpm build';
+
+/**
+ * Why the one-command remedy is the one to run, said once so the two CLI-shaped
+ * prerequisites cannot drift apart on it.
+ */
+const CLOSURE_FIX_NOTE = [
+  `That is this gate's WHOLE prerequisite in ONE command (#12564) — the CLI, plus the`,
+  `build closure of every package whose extract config it runs.`,
+  `⛔ Clearing it one package at a time does NOT converge: node stops resolving a`,
+  `config's imports at the FIRST one with no \`dist/\`, so each round can name exactly`,
+  `one more, however many are missing. Run the closure once.`,
+];
 
 /**
  * The detail for a walk that threw. Pure, so `--self-test` can pin the one
@@ -989,13 +1030,19 @@ function checkCliBuildPrerequisite() {
   // all, so anchoring the read without anchoring this would have traded a harmless
   // deferral for a false hard failure.
   if (existsSync(atRepoRoot(resolved.file))) return;
-  reportPrerequisiteNotMet('the workspace CLI is not built', [
-    `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
-    `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
-    `output — and that command is not there:`,
-    ``,
-    `  ${resolved.file}`,
-  ]);
+  reportPrerequisiteNotMet(
+    'the workspace CLI is not built',
+    [
+      `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
+      `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
+      `output — and that command is not there:`,
+      ``,
+      `  ${resolved.file}`,
+      ``,
+      `Only the CLI: ${CLI_BUILD_FIX}`,
+    ],
+    { fix: WORKSPACE_CLOSURE_FIX, alsoFix: CLOSURE_FIX_NOTE },
+  );
 }
 
 checkCliBuildPrerequisite();
@@ -1107,7 +1154,7 @@ for (const [index, config] of configs.entries()) {
           `Every remaining package would fail the same way for the same one reason, so the`,
           `loop stopped here rather than reporting it ${configs.length} times as bundle problems.`,
         ],
-        { scanned: index },
+        { fix: WORKSPACE_CLOSURE_FIX, alsoFix: CLOSURE_FIX_NOTE, scanned: index },
       );
     }
     const stale = looksLikeStaleWorkspaceDist(`${stdout}\n${stderr}`);
@@ -1117,7 +1164,13 @@ for (const [index, config] of configs.entries()) {
         staleWorkspaceDistDetail(stale, { pkg, status: run.status, remaining: configs.length - index - 1 }),
         {
           fix: workspaceBuildFix(stale.pkg),
-          alsoFix: ['…or `pnpm build`, on a tree whose other packages may be stale too.'],
+          alsoFix: [
+            `…or the whole prerequisite at once, on a tree whose other packages may be stale`,
+            `too. node names only the FIRST unresolvable import per round, so rebuilding the`,
+            `one package above and re-running can simply name the next (#12564):`,
+            ``,
+            `  ${WORKSPACE_CLOSURE_FIX}`,
+          ],
           scanned: index,
         },
       );

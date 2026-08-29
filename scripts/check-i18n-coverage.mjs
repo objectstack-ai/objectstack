@@ -151,6 +151,7 @@ import { randomUUID } from 'node:crypto';
 import {
   CLI,
   CLI_BUILD_FIX,
+  closureBuildFix,
   looksLikeMissingCliCommand,
   oclifCommandFileFor,
   resolveCliCommandFile,
@@ -187,14 +188,43 @@ const at = (rel) => join(REPO_ROOT, rel);
 const LINT_COMMAND_ID = ['lint'];
 
 /**
+ * This gate's WHOLE build prerequisite, named once (#12564) — the CLI plus the
+ * build closure of every config in the population, derived from the population
+ * itself rather than written down.
+ *
+ * Computed at module scope on purpose: it is one command for the ROUND, not one
+ * per config, which is what keeps it eligible for `SHARED_REMEDIES` below. A
+ * remedy narrowed to the configs that actually failed would have to reach a
+ * classifier, and a classifier that can see the population is a classifier that
+ * can put per-round detail in a cause's identity — the #11395 hole, re-opened
+ * from the other side. Round-constant, so `groupFailuresByCause` keys exactly as
+ * it did before.
+ */
+const POPULATION_CLOSURE = closureBuildFix([...discoverExamples(), ...discoverPackages()]);
+
+/**
  * The remedy when a config's OWN workspace dependencies were never built (#6033) —
  * distinct from `CLI_BUILD_FIX`, which clears only the CLI. An example config
  * imports workspace packages by name, so a tree with just the CLI built still
  * cannot be linted, and the two remedies must not be confused for each other.
+ *
+ * ⭐ It used to say `pnpm build`, which is CORRECT and is not what a reader does
+ * (#12564). Sitting directly under it is a `why:` line naming ONE package, and
+ * that line is the specific, actionable-looking one — so a reader builds that
+ * package, re-runs, and is told the next one, because node stops resolving a
+ * config's imports at the first missing `dist/` (the mechanism is written out
+ * over `closureBuildFix`). Measured: four locked build rounds to get one reading,
+ * and the walk was six rounds long — the reporter escaped at four only by
+ * abandoning the diagnosis and building an owning package's closure instead.
+ * Naming the closure here is what makes the specific line and the remedy agree.
+ *
+ * Falls back to the coarser `pnpm build` when the closure cannot be derived: a
+ * strict superset costs time, never coverage, and a PARTIAL closure would be this
+ * card's own defect wearing a derivation's clothes (see `closureBuildFix`).
  */
-const WORKSPACE_BUILD_FIX = 'pnpm build';
+const WORKSPACE_BUILD_FIX = POPULATION_CLOSURE.command ?? 'pnpm build';
 /** …and when the package is not on disk at all, a build alone cannot help. */
-const INSTALL_THEN_BUILD_FIX = 'pnpm install && pnpm build';
+const INSTALL_THEN_BUILD_FIX = `pnpm install && ${WORKSPACE_BUILD_FIX}`;
 
 const update = process.argv.includes('--update');
 
@@ -1009,9 +1039,16 @@ function reportPrerequisiteNotMet(headline, detail) {
   console.error(
     `\ncheck-i18n-coverage: PREREQUISITE NOT MET — ${headline}\n\n` +
       detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
-      `\n\n  Fix:  ${CLI_BUILD_FIX}\n` +
-      `        …and on a tree that has never been built, \`pnpm build\`: this gate also\n` +
-      `        lints \`examples/*\`, whose configs import other workspace packages.\n\n` +
+      `\n\n  Fix:  ${WORKSPACE_BUILD_FIX}\n\n` +
+      `        That is this gate's WHOLE prerequisite in ONE command (#12564) — the CLI,\n` +
+      `        plus the build closure of every config in its population. Clearing only\n` +
+      `        the CLI (\`${CLI_BUILD_FIX}\`)\n` +
+      `        moves the wall rather than removing it: this gate also lints \`examples/*\`,\n` +
+      `        whose configs import workspace packages by name.\n` +
+      `        ⛔ And clearing it one package at a time does NOT converge. node stops\n` +
+      `        resolving a config's imports at the FIRST one with no \`dist/\`, so each\n` +
+      `        round can name exactly one more, however many are missing — measured at\n` +
+      `        six rounds down a single config's import list. Run the closure once.\n\n` +
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
