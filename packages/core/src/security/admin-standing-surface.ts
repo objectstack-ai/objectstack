@@ -107,9 +107,15 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
   sys_permission_set: {
     role: 'derives',
     reason:
-      'The row `platform_admin` is resolved BY NAME from (§6b). Renaming it, deleting it or '
-      + 'switching it off (ADR-0049 `active`, read here since #8613) un-makes every platform '
-      + 'admin at once, with no identity table touched.',
+      'The row `admin_full_access` is resolved BY NAME from (§6b) — `platform_admin` is the '
+      + "POSITION that row derives, not the row's own name. Renaming it, deleting it or switching "
+      + 'it off (ADR-0049 `active`, read here since #8613) un-makes every GRANT-derived platform '
+      + 'admin at once, with no identity table touched. ⚠️ It does NOT un-make a CONFIG-derived '
+      + 'one (§6b-config, #11970): that route sets the same standing from '
+      + "`ADMIN_FULL_ACCESS_CAPABILITIES` in `@objectstack/spec` and matches the caller's own "
+      + 'stored `sys_user` row, so it touches an identity table and never reads this one. With '
+      + '`OS_PLATFORM_OWNER_EMAIL` unset the first sentence is the whole truth; with it declared, '
+      + 'this row stops being the single point that un-makes every administrator.',
     columns: [
       'id',
       'name',
