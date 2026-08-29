@@ -132,7 +132,7 @@ export const SELECT_OPTION_EDITABILITY_GUIDANCE: KeySetGuidance = {
   keys: EDITABILITY_BOUNDARY_KEYS,
   prescription:
     'Editability is not a per-OPTION concern — a deliberate boundary, not a missing '
-    + 'key (#8201): an option declares WHICH value may be picked and WHEN it is offered, '
+    + 'key: an option declares WHICH value may be picked and WHEN it is offered, '
     + 'and nothing in the field pipeline reads a per-option enabled/disabled flag today '
     + '(the select and radio widgets treat the FIELD-level state as the single '
     + 'authority), so a key here would be metadata the renderer never honours '

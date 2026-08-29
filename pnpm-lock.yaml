@@ -643,9 +643,18 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/rest':
+        specifier: workspace:*
+        version: link:../rest
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@objectstack/service-analytics':
+        specifier: workspace:*
+        version: link:../services/service-analytics
+      '@objectstack/service-automation':
+        specifier: workspace:*
+        version: link:../services/service-automation
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
