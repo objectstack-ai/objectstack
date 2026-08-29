@@ -36,10 +36,14 @@
 
 import { BUILTIN_IDENTITY_NAMES, BUILTIN_IDENTITY_METADATA, EVERYONE_POSITION, GUEST_POSITION } from '@objectstack/spec';
 import {
+  createSeedWriteRefusals,
   resolveOwnOrganizationRow,
   rowMatchesDeclaration,
   seedCtx,
   warnOrganizationLessRows,
+  reportSeedWriteRefusals,
+  type SeedLogger,
+  type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
 /**
@@ -73,15 +77,37 @@ async function tryFind(ql: any, object: string, where: any, limit = 100, organiz
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
+// ⛔ The `catch` RECORDS before it answers — see the sibling in
+// `bootstrap-declared-positions.ts`. Answering `null`/`false` alone is what
+// made a refused write indistinguishable from "nothing to do".
+async function tryInsert(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<any | null> {
+  try {
+    return await ql.insert(object, data, { context: seedCtx(organizationId) });
+  } catch (e) { refusals?.record(object, e); return null; }
 }
-async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
-  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
+async function tryUpdate(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<boolean> {
+  try {
+    await ql.update(object, data, { context: seedCtx(organizationId) }); return true;
+  } catch (e) { refusals?.record(object, e); return false; }
 }
 
 interface SeedOptions {
-  logger?: { info: (m: string, meta?: Record<string, any>) => void; warn: (m: string, meta?: Record<string, any>) => void };
+  logger?: {
+    info: (m: string, meta?: Record<string, any>) => void;
+    warn: (m: string, meta?: Record<string, any>) => void;
+    /**
+     * Durability channel for a catalog write that was refused — see
+     * {@link SeedLogger.error} for the signature and why it is optional.
+     * Declared here so the level this seeder reaches for is visible in its
+     * own options rather than only inside the reporter; absent, the report
+     * falls back to `warn` and is never dropped.
+     */
+    error?: SeedLogger['error'];
+  };
   /**
    * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
    * one place an organization-less catalog row is the correct shape.
@@ -101,6 +127,8 @@ export async function bootstrapBuiltinRoles(
   let updated = 0;
   let unchanged = 0;
   const residue: string[] = [];
+  // One log per pass, not per refused row (see the sibling seeders).
+  const refusals = createSeedWriteRefusals();
   const rows: Array<[string, { label: string; description: string }]> = [
     ...BUILTIN_IDENTITY_NAMES.map((n) => [n, BUILTIN_IDENTITY_METADATA[n]] as [string, { label: string; description: string }]),
     ...Object.entries(AUDIENCE_ANCHOR_METADATA),
@@ -121,11 +149,11 @@ export async function bootstrapBuiltinRoles(
     if (own?.id) {
       // O(changed declarations): an unchanged row costs no write at all.
       if (rowMatchesDeclaration(own, fields)) { unchanged += 1; continue; }
-      if (await tryUpdate(ql, 'sys_position', { id: own.id, ...fields }, organizationId)) updated += 1;
+      if (await tryUpdate(ql, 'sys_position', { id: own.id, ...fields }, organizationId, refusals)) updated += 1;
     } else {
       const created = await tryInsert(ql, 'sys_position', {
         id: genId('position'), name, ...fields, active: true, is_default: false,
-      }, organizationId);
+      }, organizationId, refusals);
       if (created) seeded += 1;
     }
   }
@@ -134,6 +162,8 @@ export async function bootstrapBuiltinRoles(
     // writer survives for `sys_position`, so no platform bucket is declared.
     warnOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
   }
+  // Before the counts, so an operator reads WHY the count is zero beside it.
+  reportSeedWriteRefusals(options.logger, refusals, organizationId);
   if (seeded + updated > 0) {
     options.logger?.info?.('[security] built-in identity names + audience anchors seeded into sys_position', {
       seeded, updated, unchanged, total: rows.length, ...(organizationId ? { organization: organizationId } : {}),

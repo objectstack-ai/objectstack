@@ -28,9 +28,20 @@
     // no file in it imports either specifier and neither producer's source is
     // pulled in here. The test program that does pull them in already sets
     // `rootDir` to the workspace root.
+    // [#12104] Same rule, same reason, for the three producers
+    // `src/analytics-automation-json-erasure.test.ts` DRIVES to measure what
+    // the five `return res.json()` methods really resolve to. That suite's
+    // claim is "the annotation matches what the producer sends", so its verdict
+    // must be about the producer's SOURCE; through `exports` it would be about
+    // the last `pnpm build` of three other packages. Each publishes a single
+    // `"."` entry point, so one bare-name rule each — no star, per the
+    // paragraph above.
     "paths": {
       "@objectstack/metadata-core": ["../metadata-core/src/index.ts"],
-      "@objectstack/metadata-protocol": ["../metadata-protocol/src/index.ts"]
+      "@objectstack/metadata-protocol": ["../metadata-protocol/src/index.ts"],
+      "@objectstack/rest": ["../rest/src/index.ts"],
+      "@objectstack/service-analytics": ["../services/service-analytics/src/index.ts"],
+      "@objectstack/service-automation": ["../services/service-automation/src/index.ts"]
     }
   },
   "include": ["src/**/*"],
