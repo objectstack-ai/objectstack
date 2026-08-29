@@ -1085,12 +1085,69 @@ export function splitTopLevel(args) {
   return out;
 }
 
-/** Parameter NAMES, in order: `readonly a: T = x` → `a`. */
+/**
+ * [#13227] The leading MODIFIER RUN of a TypeScript parameter, enumerated from
+ * the grammar rather than approximated.
+ *
+ * A parameter property admits an accessibility modifier, then `override`, then
+ * `readonly` — in that fixed order, up to THREE of them, and the compiler
+ * rejects any other order (`readonly public x` → "'public' modifier must
+ * precede 'readonly' modifier"; `readonly override x` → "'override' modifier
+ * must precede 'readonly' modifier"). Measured against the repo's own
+ * TypeScript 6.0.3 on a derived class, because `override` is only legal where a
+ * base class exists and a check on a standalone class reports it as a class
+ * error rather than as a parameter one. `static` and `abstract` are rejected on
+ * a parameter outright, and `in`/`out` are TYPE-parameter modifiers, which
+ * never appear in the value-parameter slice `enclosingDeclaration` hands over.
+ *
+ * The order is encoded rather than looped deliberately: a "strip any word in
+ * this set, repeatedly" loop accepts spellings TypeScript does not, which is
+ * the match-everything direction this gate has paid for before.
+ */
+const PARAM_MODIFIER_RUN = /^(?:(?:public|private|protected)\s+)?(?:override\s+)?(?:readonly\s+)?/;
+
+/**
+ * Parameter NAMES, in order: `readonly a: T = x` → `a`,
+ * [#13227] `private readonly code: string` → `code`.
+ *
+ * The strip used to be a single anchored alternation carrying a `g` flag. The
+ * flag reads as "strip them all", but `^` with no `m` matches at position 0
+ * once, so exactly ONE modifier came off: `private readonly code: string`
+ * parsed as a parameter literally named `readonly`, and `helperCodesFor`'s
+ * `indexOf(ident)` then answered -1 — no site, no unresolved, the whole helper
+ * dropped in silence, one layer inside the same failure class as #9223 /
+ * #9460 / #10918 / #13131.
+ *
+ * ⚠️ A modifier word is only a modifier when a NAME follows it. `readonly`,
+ * `override` and the accessibility words are not reserved, so each is a legal
+ * parameter name in its own right — `override: MetricsRegistry | undefined` is
+ * live in this tree three times over. `override:` / `override?:` never enter
+ * the run (no whitespace follows the word), and the guard below covers the
+ * spaced spelling `readonly : T`, where the run would otherwise eat the
+ * parameter's own name and report nothing.
+ *
+ * ⛔ Textual on purpose, and the reason is measured rather than inherited.
+ * `enclosingDeclaration`'s `DECL_HEADER_RE` also matches `const x = someCall(`,
+ * so of the 7646 slices this function is handed on `packages/**` non-test
+ * source, 1218 are not a valid parameter list at all — they are ARGUMENT
+ * lists — and on 1072 of those a recovering TypeScript parse invents MORE THAN
+ * ONE parameter: `authService as any` becomes three confident parameters named
+ * `authService`, `as` and `any`; `await res.json()` becomes `await`, `res`,
+ * `json`. Those names are exactly what `helperCodesFor` searches with
+ * `indexOf(ident)`, so an AST route would MANUFACTURE the wrong-INDEX hazard
+ * this card only warns about — a finding that reads as ordinary while naming a
+ * value from another argument position — across a thousand slices. A textual
+ * reader degrades to one bad name instead of several. The over-matching header
+ * regex is #13226's subject and is deliberately untouched here.
+ */
 export function parseParamNames(params) {
   if (!params.trim()) return [];
   return splitTopLevel(params).map((raw) => {
-    const cleaned = raw.replace(/^\s*(?:readonly|public|private|protected|\.\.\.)\s+/g, '').trim();
-    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned.replace(/^\.\.\./, ''));
+    const rest = raw.trim().replace(/^\.\.\.\s*/, '');
+    const run = PARAM_MODIFIER_RUN.exec(rest)[0];
+    const tail = rest.slice(run.length);
+    const cleaned = /^[A-Za-z_$]/.test(tail) ? tail : rest;
+    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned);
     return m ? m[1] : '';
   });
 }
