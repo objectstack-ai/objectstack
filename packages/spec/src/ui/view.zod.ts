@@ -2484,7 +2484,10 @@ function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
  * `@objectstack/lint`, which already resolves field references against object
  * declarations. Enforcing half loudly beats enforcing none.
  */
-const SUBMIT_REDIRECT_RULING = 'ruled 2026-08-11 on #7496';
+// The ruling is #7496 on the tracker — internal readers get the id here; the
+// customer-facing sentence carries the date only, which is what a refused
+// author can act on.
+const SUBMIT_REDIRECT_RULING = 'ruled 2026-08-11';
 
 /** The ONE interpolation `submitBehavior.url` accepts. Global — used to strip. */
 const SUBMIT_REDIRECT_URL_TOKEN_RE = /\{\{record\.[a-z_][a-z0-9_]*\}\}/g;
@@ -2620,7 +2623,9 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
  * authoring shape is the source string, and build emits the AST from sources
  * this gate has already accepted.
  */
-const FORM_VIEW_FEATURES_RULING = 'ruled 2026-08-27 on objectui#6262';
+// The ruling is objectui#6262 on the tracker — internal readers get the id
+// here; the customer-facing sentence carries the date only.
+const FORM_VIEW_FEATURES_RULING = 'ruled 2026-08-27';
 
 /** CEL string literals (both quote styles, with escapes) — stripped before the root scan. */
 const CEL_STRING_LITERAL_RE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g;

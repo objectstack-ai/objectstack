@@ -919,7 +919,7 @@ describe('FieldSchema', () => {
         const issue = r.error.issues.find((i) => i.message.includes('last_30_days'));
         expect(issue, 'the preset refusal must surface through relatedListFilter').toBeTruthy();
         expect(issue!.path).toEqual(['relatedListFilter', 'created_at', '$gte']);
-        expect(issue!.message).toContain('#8793');
+        expect(issue!.message).toContain('Refused at authoring time so the error surfaces where the filter is written.');
       }
     });
 

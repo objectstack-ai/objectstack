@@ -198,7 +198,7 @@ export function defaultValueTokenIssue(
     `Field "${name}" (${def.type}): the default ${JSON.stringify(dv)} is the runtime token \`current_user\` — `
     + `resolved by the engine to the acting user's \`sys_user.id\` at insert time — and a \`${def.type}\` field `
     + `cannot hold one${lookupAside}. It is legal only on a \`user\` field or a \`lookup\` with `
-    + "`reference: 'sys_user'` (#4560 records what happens when that id lands anywhere else). Use one of "
+    + "`reference: 'sys_user'` — anywhere else the resolved id is dead data at best. Use one of "
     + 'those, or write a literal record id.'
   );
 }
