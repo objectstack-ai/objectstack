@@ -85,7 +85,7 @@
  */
 
 import { PermissionSetSchema } from '@objectstack/spec/security';
-import { seedCtx } from './per-organization-catalog.js';
+import { seedCtx, type SeedWriteRefusals } from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 import {
   ENV_PROJECTION_MARKER,
@@ -117,11 +117,33 @@ export async function tryFind(ql: any, object: string, where: any, limit = 100, 
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-export async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
+/**
+ * ⛔ The `catch` RECORDS the refusal before it answers, when the caller passed
+ * a log to record into.
+ *
+ * Answering `null`/`false` alone is what made a refused write
+ * indistinguishable from "nothing to do": the caller's `seeded` counter never
+ * increments, the pass returns normally, and the boot reports a successful
+ * seed of zero rows. `refusals` is optional so the callers that already report
+ * their own outcome honestly — the package/environment door, whose publish
+ * answers `success: false` with a reason when it materialized nothing — are
+ * unchanged. It is passed by the boot CATALOG seeders, which had no such
+ * channel. Never a rethrow either way: these helpers report, they do not
+ * decide whether the deployment boots.
+ */
+export async function tryInsert(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<any | null> {
+  try {
+    return await ql.insert(object, data, { context: seedCtx(organizationId) });
+  } catch (e) { refusals?.record(object, e); return null; }
 }
-export async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
-  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
+export async function tryUpdate(
+  ql: any, object: string, data: any, organizationId?: string, refusals?: SeedWriteRefusals,
+): Promise<boolean> {
+  try {
+    await ql.update(object, data, { context: seedCtx(organizationId) }); return true;
+  } catch (e) { refusals?.record(object, e); return false; }
 }
 
 export interface ProjectionLogger {

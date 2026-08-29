@@ -61,9 +61,12 @@ import {
 } from './seed-name-lookup.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
+  createSeedWriteRefusals,
   resolveOwnOrganizationRow,
   seedCtx,
   warnOrganizationLessRows,
+  reportSeedWriteRefusals,
+  type SeedWriteRefusals,
 } from './per-organization-catalog.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
@@ -190,6 +193,14 @@ export async function upsertPackagePermissionSet(
     organizationId?: string;
     /** Collects names whose pre-fix organization-less row is still standing. */
     residue?: string[];
+    /**
+     * Collects writes the database REFUSED, so the pass can report them once
+     * instead of returning a zero that reads as "nothing to do". Passed by the
+     * boot catalog loop; the ADR-0086 P2 publish materializer passes nothing
+     * and keeps its own honest outcome (`success: false` with a reason when it
+     * materialized nothing).
+     */
+    refusals?: SeedWriteRefusals;
   },
 ): Promise<PermissionSeedOutcome> {
   const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
@@ -232,7 +243,7 @@ export async function upsertPackagePermissionSet(
       package_id: packageId,
       managed_by: 'package',
     };
-    const created = await tryInsert(ql, 'sys_permission_set', row, organizationId);
+    const created = await tryInsert(ql, 'sys_permission_set', row, organizationId, opts?.refusals);
     if (created) {
       out.seeded += 1;
       // A batched oracle is a snapshot taken before the loop — tell it about
@@ -263,7 +274,7 @@ export async function upsertPackagePermissionSet(
       // beautiful round-trip curve.
       if (!recordDiffersFromBody(existing, ps)) {
         out.unchanged += 1;
-      } else if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) }, organizationId)) {
+      } else if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) }, organizationId, opts?.refusals)) {
         out.updated += 1;
       }
     } else {
@@ -325,13 +336,16 @@ export async function bootstrapDeclaredPermissions(
   // organization's own row is created regardless — the leftover is reported,
   // never treated as "already seeded" (#10103).
   const residue: string[] = [];
+  // One log per pass, not per refused row: a legacy platform-wide unique index
+  // refuses EVERY declared permission set, and a line each would bury the remedy.
+  const refusals = createSeedWriteRefusals();
 
   for (const ps of sets) {
     if (!ps?.name) continue;
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
-    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue });
+    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue, refusals });
     out.seeded += r.seeded;
     out.updated += r.updated;
     out.unchanged += r.unchanged;
@@ -349,6 +363,8 @@ export async function bootstrapDeclaredPermissions(
       options.platformBucketNames ?? SHIPPED_PLATFORM_BUCKET_NAMES,
     );
   }
+  // Before the counts, so an operator reads WHY the count is zero beside it.
+  reportSeedWriteRefusals(options.logger, refusals, organizationId);
   if (out.unreadable > 0) {
     // Said once, with the count: these sets were neither seeded nor reconciled
     // because the record could not be READ. Silence here would read exactly
