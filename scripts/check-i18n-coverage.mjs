@@ -962,16 +962,20 @@ function selfTest() {
     (derivedClosure.command ?? '').includes('--filter=@objectstack/cli'),
     'the closure must clear the CLI prerequisite it is offered as the remedy for',
   );
-  // ⛔ ALL-OR-NOTHING. An empty population would render as a filter-less
-  // `turbo run build`, and one unowned config would render a confident command
-  // missing exactly that config. Both must come back as a REASON, never a
-  // command — the same rule `emptyPopulationVerdict` states for the verdict.
+  // ⛔ ALL-OR-NOTHING. A broken scan is the sharp case: with the CLI always
+  // seeded, an EMPTY population would render as `--filter=@objectstack/cli`
+  // alone — byte-for-byte the CLI-only remedy this card exists to replace,
+  // presented as though it were the whole closure. That is a guard whose
+  // total-failure output is indistinguishable from a plausible success. One
+  // unowned config is the same defect part-way. Both must come back as a REASON,
+  // never a command — the rule `emptyPopulationVerdict` states for the verdict.
   const emptyClosure = closureBuildFix([]);
   const partialClosure = closureBuildFix([...onRoot, 'no/such/place/objectstack.config.ts']);
   expect(
     '#12564 an empty population names no closure',
     emptyClosure.command === undefined && typeof emptyClosure.unknown === 'string',
-    `an empty population produced a command (${emptyClosure.command}) — with no filters that builds EVERYTHING`,
+    `an empty population produced a command (${emptyClosure.command}) — a broken scan must not render as the ` +
+      'CLI-only remedy wearing the closure\'s name',
   );
   expect(
     '#12564 …and one unowned config refuses the WHOLE closure',

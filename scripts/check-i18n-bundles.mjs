@@ -852,8 +852,8 @@ function selfTest() {
     '#12564 an empty population names no closure, and one unowned config refuses the whole',
     closureBuildFix([]).command === undefined &&
       closureBuildFix([...onRootPopulation, 'no/such/place/scripts/i18n-extract.config.ts']).command === undefined,
-    'a filter-less `turbo run build` builds EVERYTHING, and a partial closure is this defect wearing a ' +
-      "derivation's clothes",
+    'an empty population would render as the CLI-only remedy under the closure\'s name, and a partial closure ' +
+      "is this defect wearing a derivation's clothes",
   );
   // ⛔ Fence: the remedy got longer; the REFUSAL did not become a pass. The
   // prerequisite reporter still exits non-zero and still says nothing was judged.
