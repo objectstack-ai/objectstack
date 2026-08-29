@@ -29,6 +29,25 @@
  * the question and prints the answer is a different fact with its own test —
  * `run-dev-unbuilt-workspace.e2e.test.ts` drives the real binary, and deleting
  * the wiring reds THAT one, not this one.
+ *
+ * ## What this suite's verdict is really a function of
+ *
+ * Three files outside this package, all declared in
+ * `scripts/cross-package-test-inputs.mjs` so a change to any of them re-runs
+ * this suite:
+ *
+ *   - `scripts/cli-unbuilt-workspace-lead.mjs` — the module imported below.
+ *   - `scripts/cli-build-prerequisite.mjs` — where the module delegates BOTH
+ *     halves of its answer. `looksLikeStaleWorkspaceDist` decides whether there
+ *     is anything to say, and `workspaceBuildFix` renders the remedy this file
+ *     asserts character for character, so that module can move these
+ *     expectations without either file above it changing.
+ *   - `scripts/cli-unbuilt-workspace-lead.d.mts` — the hand-written declaration
+ *     that lets a `.ts` file import an untyped `.mjs`. Without it this import is
+ *     TS7016, and this file sits in `@objectstack/cli`'s ledgered hidden test
+ *     layer, whose entry says the first new error in it goes red rather than
+ *     being absorbed. `check:declaration-mirrors` keeps it in step with the
+ *     module; it asserts name, kind and required arity, never types.
  */
 
 import { describe, it, expect } from 'vitest';
