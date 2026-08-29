@@ -16,6 +16,18 @@ import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
 
 /**
  * Aggregation function descriptor from QueryAST.
+ *
+ * [#12818] `function` stays a bare `string`, deliberately: the enforcement is
+ * {@link refuseAggregateFunction} at the lowering site, not this annotation.
+ * Narrowing it to `AggregationFunction` was the card's other candidate remedy
+ * and it does not close the hole it names — `MongoDBDriver.aggregate` reads its
+ * aggregations through `(query as any).aggregations`, so a narrowed type meets
+ * no value at this driver's own call site, and this module is EXPORTED, so a
+ * caller hands the builder whatever string it likes. A door that cannot be
+ * reached by the values it governs looks shut and is not. The narrowing would
+ * additionally delete the `array_agg` / `string_agg` arms below as a side
+ * effect (both left the enum at #6188), which is a second accept-face change
+ * and a separate card. See {@link LOWERED_HERE}.
  */
 export interface AggregationInput {
   function: string;
@@ -354,6 +366,143 @@ function malformedGroupByError(node: unknown): Error {
 }
 
 /**
+ * [#12818] The aggregate functions {@link buildAccumulator} LOWERS into a
+ * `$group` accumulator — and therefore the exact population that is NOT
+ * refused.
+ *
+ * A ROSTER rather than `driver-sql`'s table of lowerings, because this face's
+ * lowerings are not one shape with a name in it: `count` branches on whether a
+ * `field` was given, `count_distinct` splits its work with
+ * {@link postProcessAggregation}, and the four arithmetic/order arms wrap
+ * {@link numericAggregandExpr}. So the `switch` stays the compiler and this is
+ * what the refusal messages read; `mongodb-unrecognised-aggregate-function.test.ts`
+ * holds the two equal in BOTH directions (every name here lowers, every name
+ * absent from here refuses), which is the drift a hand-written list otherwise
+ * develops the day after it is typed — the note over `driver-memory`'s
+ * `SUPPORTED_FIELD_OPERATORS` (#5345), applied to the aggregate vocabulary.
+ *
+ * ⚠️ Two entries are NOT declared by `AggregationFunction`: `array_agg` and
+ * `string_agg` left the enum at #6188 (ADR-0049 enforce-or-remove) and both SQL
+ * faces refuse them as undeclared names today, while this face still lowers
+ * them. That divergence is real, it PRE-DATES this change, and closing it is a
+ * second accept-face narrowing with its own changeset — filed as #13075 rather
+ * than ridden in here. What it must not do is leak into a refusal: the messages
+ * offer {@link LOWERED_AND_DECLARED}, because a remedy naming a retired
+ * spelling is a remedy `AggregationNodeSchema` rejects at the protocol door.
+ */
+const LOWERED_HERE: readonly string[] = [
+  'count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg',
+];
+
+/**
+ * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
+ * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
+ * "declared" has exactly one definition and this driver cannot drift from it.
+ */
+const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.options;
+
+/**
+ * [#12818] What a refusal offers back as the remedy: lowered HERE *and*
+ * writable by a caller. The intersection, not {@link LOWERED_HERE} itself —
+ * see that constant's warning.
+ */
+const LOWERED_AND_DECLARED: readonly string[] =
+  LOWERED_HERE.filter((f) => DECLARED_AGGREGATE_FUNCTIONS.includes(f));
+
+/**
+ * [#12818] Class 1 — a function name the Query Protocol does not declare.
+ *
+ * The caller wrote something no backend can run (`median`), so this is a
+ * request-shaped mistake: `INVALID_QUERY` / 400, the catalogued
+ * `StandardErrorCode` for "malformed query syntax" and a member of
+ * `@objectstack/rest`'s `isExpectedQueryRejection` list, so a client mistake
+ * stops being logged as an unhandled server fault. It is also the code the
+ * PROTOCOL DOOR already gives this condition — `metadata-protocol`'s
+ * `invalidQueryError` refuses "a function outside the spec enum" with exactly
+ * `400 INVALID_QUERY` (#4254) — so a caller who reaches this driver in-process
+ * gets the same wire identity as one who came through REST.
+ *
+ * The FIRST SENTENCE is shared verbatim with the twins in `driver-sql`'s
+ * `undeclaredAggregateFunctionError` and `driver-turso`'s `remote-transport.ts`
+ * (#5240 — one condition, one wording): a caller must not be able to tell which
+ * backend answered from the words it used. Spelled out rather than imported,
+ * which is what the two SQL faces do to each other; the bytes are pinned
+ * against those faces' literals in
+ * `mongodb-unrecognised-aggregate-function.test.ts`.
+ *
+ * Judged against the declared enum CASE-SENSITIVELY, which is what the enum is:
+ * `COUNT_DISTINCT` is not `count_distinct` (`AggregationFunction.parse('COUNT')`
+ * throws), so answering "declared but not implemented" for it would be false.
+ */
+function undeclaredAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is not a declared aggregate function. `
+    + `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} `
+    + `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] `
+    + `entry — the Query Protocol has no such function, so this is a query no backend can run, `
+    + `not a gap in this one (#5907). It is refused rather than accumulated: until #12818 this `
+    + `builder answered any unrecognised name with a $sum of that column under the alias the `
+    + `caller asked for, which is a plausible number nothing downstream can tell from an answer.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#12818] Class 2 — a DECLARED function this backend does not lower.
+ *
+ * Kept distinct from {@link undeclaredAggregateFunctionError} for the reason
+ * #5907 gives on the SQL faces: `count_distinct` is declared and implemented by
+ * several backends, so telling a dashboard author their correct query is a typo
+ * would be false. The line #5345 drew in `driver-memory`'s `filter-refusal.ts`
+ * between "the protocol has no such operator" and "the protocol has it, this
+ * face cannot lower it".
+ *
+ * ⚠️ **This class is EMPTY today, and the producer is kept deliberately** —
+ * {@link LOWERED_HERE} covers every member of `AggregationFunction`, pinned as
+ * a positive assertion ("the declared-but-unlowered set is empty") rather than
+ * left to be rediscovered. Deleting it as dead code was considered and
+ * rejected, exactly as on `driver-sql`: the branch is not an unenforced
+ * declaration, it is the CLASSIFIER that decides which of two truths a future
+ * name is told. Without it, the first function a later spec bump adds would be
+ * told the protocol has no such name — the misreport #5907 exists to prevent,
+ * landing precisely in the window between a spec change and a driver change.
+ *
+ * `NOT_IMPLEMENTED` / 501 from the ADR-0112 STANDARD catalog, whose own
+ * `HttpStatusErrorCodeMap` pairs the two — the same envelope
+ * {@link refuseDateBucketedGroupBy} and {@link refusePerAggregationFilter}
+ * already answer with, one seam over in this file.
+ */
+function uncompilableAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is declared but not implemented by this backend. `
+    + `Lowered here: ${LOWERED_AND_DECLARED.join(', ')} (driver-mongodb). The name is spelled `
+    + `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap `
+    + `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 `
+    + `rather than a 400. Aggregate with a function this backend lowers; whether the declaration `
+    + `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
+ * [#12818] Which refusal a name this builder cannot lower deserves.
+ *
+ * Written ONCE and reached from the single `default:` arm, so "is this the
+ * caller's mistake or ours?" cannot be answered two ways for one query. `func`
+ * is the name the CALLER wrote — not a normalised form — because that is what
+ * the enum is judged against and what the message has to quote back.
+ */
+function refuseAggregateFunction(func: string): never {
+  throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
+    ? uncompilableAggregateFunctionError(func)
+    : undeclaredAggregateFunctionError(func);
+}
+
+/**
  * Build a MongoDB aggregation pipeline from QueryAST components.
  *
  * @param where - Filter condition (translated to $match)
@@ -650,7 +799,33 @@ function buildAccumulator(agg: AggregationInput): Document {
       refuseRetiredAggregateFunction(agg.function);
 
     default:
-      return { $sum: fieldRef ?? 0 };
+      // [#12818] REFUSED, where this arm used to `return { $sum: fieldRef ?? 0 }`.
+      //
+      // Any name this switch does not lower — a typo, a function added to the
+      // contract but not to this file, an unnarrowed `method` arriving from
+      // `StrategyContext.executeAggregate` (#12776) — was answered as a SUM of
+      // that column, under the alias the caller asked for. No error, no
+      // envelope, no log. It is the worst available answer precisely because a
+      // sum of a numeric column is arithmetically plausible: a dashboard tile
+      // renders it without complaint, so nothing downstream can notice that the
+      // function it asked for was never run. The `"[object Object]"` group id
+      // (#6850) and the null-carrying `count_distinct` (#6814) are this file's
+      // earlier members of the same family, and both emitted well-formed
+      // pipelines too.
+      //
+      // The refusal is also what makes the rest of this file consistent with
+      // itself: one seam over, a `groupBy` entry carrying a granularity this
+      // driver cannot bucket is refused rather than grouped by the raw instant
+      // ({@link refuseDateBucketedGroupBy}), and a per-aggregation `filter` it
+      // cannot lower is refused rather than accumulated unfiltered
+      // ({@link refusePerAggregationFilter}). Aggregation function and groupBy
+      // entry are the two halves of one lowering; they no longer disagree about
+      // what to do with a shape this driver does not model.
+      //
+      // Reached before anything is sent to the server — `buildAggregationPipeline`
+      // throws while assembling stages into a local array, so no partial
+      // pipeline executes.
+      return refuseAggregateFunction(agg.function);
   }
 }
 

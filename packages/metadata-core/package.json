@@ -23,7 +23,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
+    "build": "rm -rf dist && tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",

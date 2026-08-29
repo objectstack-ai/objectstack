@@ -143,8 +143,19 @@ jobs:
             const run = context.payload.workflow_run;
             const { owner, repo } = context.repo;
 
-            // Queue branches are named gh-readonly-queue/<base>/pr-<N>-<sha>.
-            const m = /^gh-readonly-queue\/.+\/pr-(\d+)-[0-9a-f]{40}$/.exec(run.head_branch ?? '');
+            // Queue branches are named gh-readonly-queue/<base>/pr-<N>-<sha>, and
+            // BOTH captures are load-bearing. The trailing sha is not decoration:
+            // it is the commit the queue built this PR ON TOP OF, so it names the
+            // PR's position in GitHub's speculative stack. Reading it is what lets
+            // limb ② tell "another PR hit this too" from "another PR inherited this
+            // one's tree" — see `stackEdges` below. It was matched but discarded
+            // until 2026-08-29, which is why the victim counts read as flake
+            // evidence when they were measuring queue depth.
+            //
+            // The base-branch segment is `.+` rather than `[^/]+` because a base
+            // branch may itself contain slashes (`release/v5`).
+            const QUEUE_REF = /^gh-readonly-queue\/.+\/pr-(\d+)-([0-9a-f]{40})$/;
+            const m = QUEUE_REF.exec(run.head_branch ?? '');
             if (!m) {
               core.info(`head_branch '${run.head_branch}' is not a merge-queue branch — nothing to do.`);
               return;
@@ -324,6 +335,97 @@ jobs:
               r.conclusion === 'failure' && (r.head_branch ?? '').includes(`/pr-${prNumber}-`)).length;
             const queueFailures24h = ciRuns.filter((r) => r.conclusion === 'failure').length;
 
+            // runId -> { base, head } for every merge_group run in the window,
+            // plus this one. `recent` is ALREADY in hand for the two counts above,
+            // and a run object already carries `head_branch` and `head_sha` — so
+            // the speculative stack costs ZERO additional API calls. That is the
+            // whole reason this discriminator is affordable in a job whose header
+            // calls itself rate-limit-shaped.
+            //
+            // `recent` is deliberately NOT narrowed to this workflow_id here: the
+            // sightings below are keyed by run id, and a wider index can only
+            // resolve more of them.
+            const stackEdges = new Map();
+            const noteRun = (r) => {
+              const q = QUEUE_REF.exec(r?.head_branch ?? '');
+              // A head_sha that is not a full sha cannot be compared to a base by
+              // equality, and an equality that silently never holds is the same
+              // failure as no data at all — so it is left OUT of the index rather
+              // than stored as something a comparison would quietly reject.
+              if (!q || !/^[0-9a-f]{40}$/.test(String(r?.head_sha ?? ''))) return;
+              stackEdges.set(String(r.id), { base: q[2], head: String(r.head_sha) });
+            };
+            for (const r of recent) noteRun(r);
+            noteRun(run);
+
+            /**
+             * Partition a key's victim PRs into speculative STACKS.
+             *
+             * Under speculative stacking GitHub builds each queued PR on top of
+             * the previous entry's queue head, so a build whose BASE commit IS
+             * another victim's queue HEAD contains that victim's tree by
+             * construction. One deterministic break therefore ejects everyone
+             * behind it, and the raw victim count measures QUEUE DEPTH.
+             *
+             * ⚠️ The test is full-sha equality in the strict direction: one
+             * victim's base == another victim's head. ⛔ Never a base PREFIX and
+             * ⛔ never time ordering — both would fuse genuinely independent hits
+             * into one stack, trading this limb's false positive for a false
+             * negative, which is strictly worse. The count exists to be true.
+             *
+             * A victim whose runs are not in the index (a run older than the
+             * window, or a ref that is not a queue ref) is left as its own group:
+             * "cannot prove downstream" must read as INDEPENDENT, never as
+             * same-stack. `unresolved` reports how many of those there were, so a
+             * partial index cannot pass as a complete one.
+             */
+            const stacksFor = (byPr) => {
+              const parent = new Map([...byPr.keys()].map((p) => [p, p]));
+              const find = (x) => { while (parent.get(x) !== x) x = parent.get(x); return x; };
+              const union = (a, b) => { const ra = find(a); const rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+
+              // head sha -> the victim PRs that PRODUCED it.
+              const producers = new Map();
+              for (const [pr, runs] of byPr) {
+                for (const id of runs) {
+                  const e = stackEdges.get(String(id));
+                  if (!e) continue;
+                  if (!producers.has(e.head)) producers.set(e.head, new Set());
+                  producers.get(e.head).add(pr);
+                }
+              }
+
+              const inherited = new Set();
+              let unresolved = 0;
+              for (const [pr, runs] of byPr) {
+                let resolved = false;
+                for (const id of runs) {
+                  const e = stackEdges.get(String(id));
+                  if (!e) continue;
+                  resolved = true;
+                  for (const upstream of producers.get(e.base) ?? []) {
+                    if (upstream === pr) continue;
+                    inherited.add(pr);
+                    union(pr, upstream);
+                  }
+                }
+                if (!resolved) unresolved++;
+              }
+
+              const groups = new Map();
+              for (const pr of byPr.keys()) {
+                const root = find(pr);
+                if (!groups.has(root)) groups.set(root, []);
+                groups.get(root).push(pr);
+              }
+              const ordered = [...groups.values()]
+                .map((g) => g.sort((x, y) => x - y))
+                .sort((a, b) => a[0] - b[0]);
+              const stackOf = new Map();
+              ordered.forEach((g, i) => { for (const pr of g) stackOf.set(pr, { index: i + 1, size: g.length }); });
+              return { groups: ordered, stackOf, inherited, unresolved };
+            };
+
             // ── Limb ②: cross-PR signature aggregation ─────────────────────
             //
             // The ledger is this workflow's OWN comments. Every triage comment
@@ -374,10 +476,38 @@ jobs:
 
             // Only keys THIS ejection actually hit are aggregated: an ejection
             // must not re-file anchors for signatures it had nothing to do with.
+            // ⛔ The trigger stays `a.prs.size >= 2`. Stack inheritance changes
+            // what this limb REPORTS, never what it notices: raising the bar to
+            // "2 independent hits" would silence a real deterministic break that
+            // has already eaten the whole queue behind it, which is precisely the
+            // case a reader most needs to see. Honest counting, not a quieter one.
             const aggregated = runKeys
-              .map((key) => ({ key, prs: sightings.get(key) ?? new Map() }))
+              .map((key) => {
+                const prs = sightings.get(key) ?? new Map();
+                return { key, prs, ...stacksFor(prs) };
+              })
               .filter((a) => a.prs.size >= 2)
               .sort((a, b) => b.prs.size - a.prs.size);
+
+            /**
+             * The one sentence four call sites need: how many PRs, and how many of
+             * them are actually independent.
+             *
+             * Single-sourced because the four `anchorNotes` branches below (refresh
+             * / refresh-failed / not-established / create-failed) each render it,
+             * and a phrase copied four times is a phrase that drifts in three.
+             */
+            const victimPhrase = (a) => {
+              const n = a.prs.size;
+              const c = a.groups.length;
+              const list = [...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、');
+              const tail = a.unresolved > 0
+                ? `（其中 ${a.unresolved} 个的队列构建不在 24h 窗口索引内，无法判定栈关系，已按独立计）`
+                : '';
+              if (c === n) return `24h 内已弹出 **${n} 个互相独立的 PR**（${list}）${tail}`;
+              if (c === 1) return `24h 内已弹出 **${n} 个 PR**（${list}），但它们同属 **1 条投机栈** ⇒ **1 次独立命中**${tail}`;
+              return `24h 内已弹出 **${n} 个 PR**（${list}），分属 **${c} 条投机栈** ⇒ **${c} 次独立命中**${tail}`;
+            };
 
             const ANCHOR_LABEL = 'finding';
             const MAX_ANCHOR_PAGES = 3;
@@ -387,19 +517,47 @@ jobs:
               // Stable across refreshes — the victim count lives in the body, so
               // a growing count cannot make the anchor unfindable by title.
               const title = `Queue-flake anchor: ${a.key}`;
-              const prRows = [...a.prs.entries()].sort((x, y) => x[0] - y[0]).map(([pr, runs]) =>
-                `| #${pr} | ${[...runs].map((r) => `[${r}](https://github.com/${owner}/${repo}/actions/runs/${r})`).join(' · ')} |`);
+              const prRows = [...a.prs.entries()].sort((x, y) => x[0] - y[0]).map(([pr, runs]) => {
+                const s = a.stackOf.get(pr);
+                const cell = !s || s.size < 2
+                  ? 'independent'
+                  : `S${s.index} · ${a.inherited.has(pr) ? 'inherited' : 'root'}`;
+                return `| #${pr} | ${cell} | ${[...runs].map((r) => `[${r}](https://github.com/${owner}/${repo}/actions/runs/${r})`).join(' · ')} |`;
+              });
+              const independent = a.groups.length;
               const body = [
-                `\`${a.key}\` has ejected **${a.prs.size} distinct pull requests** from the merge queue`,
-                'within a rolling 24 hours. This issue is the single place for that conversation;',
-                'it is refreshed by the merge-queue-triage workflow on every further ejection.',
+                `\`${a.key}\` has ejected **${a.prs.size} pull request${a.prs.size === 1 ? '' : 's'}** from the merge`,
+                `queue within a rolling 24 hours — **${independent} independent hit${independent === 1 ? '' : 's'}** once`,
+                "GitHub's speculative stacking is accounted for. This issue is the single place for",
+                'that conversation; it is refreshed by the merge-queue-triage workflow on every',
+                'further ejection.',
                 '',
-                '| PR | queue build |',
-                '|---|---|',
+                '| PR | stack | queue build |',
+                '|---|---|---|',
                 ...prRows,
                 '',
+                ...(independent < a.prs.size
+                  ? [
+                    "⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue",
+                    'branch names: GitHub builds each queued PR on top of the previous entry, so a',
+                    "build whose BASE commit IS another victim's queue HEAD contains that victim's",
+                    'tree by construction. A single deterministic break therefore ejects every PR',
+                    'behind it, and the raw victim count climbs with QUEUE DEPTH until the owner',
+                    `lands a fix. Start with the ${independent === 1 ? 'root' : 'roots'} above; an `
+                      + '`inherited` row is a bystander until shown otherwise.',
+                    '',
+                  ]
+                  : []),
+                ...(a.unresolved > 0
+                  ? [
+                    `⚠️ ${a.unresolved} of the rows above could not be placed in a stack at all (their`,
+                    'queue build fell outside the 24 h run index). They are counted as INDEPENDENT',
+                    'here, which is the safe direction but may overstate the independent-hit count.',
+                    '',
+                  ]
+                  : []),
                 '**This issue is a NAME, not a diagnosis.** The workflow that files it reads the',
-                'failing test file path out of the job logs and counts distinct PRs; it does not',
+                'failing test file path out of the job logs and counts PRs; it does not',
                 'know whether this is a flake, a load/timing cliff, a semantic conflict between',
                 'queued PRs, or a real regression, and it does not act on any of those. No test is',
                 'skipped, quarantined or re-queued by it, and no PR is labelled by it — weakening',
@@ -446,9 +604,9 @@ jobs:
                   await github.rest.issues.update({
                     owner, repo, issue_number: existing.number, body,
                   });
-                  anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。汇总 issue：#${existing.number}（已刷新）`);
+                  anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。汇总 issue：#${existing.number}（已刷新）`);
                 } catch (error) {
-                  anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 汇总 issue #${existing.number} 刷新失败（${describe(error)}），上面的名单就是全部事实。`);
+                  anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。⚠️ 汇总 issue #${existing.number} 刷新失败（${describe(error)}），上面的名单就是全部事实。`);
                   core.warning(`Could not refresh the anchor issue #${existing.number} for ${a.key} (${describe(error)}).`,
                     { title: 'Queue-signature anchor not refreshed' });
                 }
@@ -460,7 +618,7 @@ jobs:
                 // second anchor for a key that already has one, which is exactly
                 // the duplication the marker exists to prevent — so this says so
                 // instead of guessing.
-                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 没能确认是否已有汇总 issue（${refusal ?? `open issue 列表超过 ${MAX_ANCHOR_PAGES} 页仍未匹配`}），本次不新建，避免开出重复的锚点。`);
+                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。⚠️ 没能确认是否已有汇总 issue（${refusal ?? `open issue 列表超过 ${MAX_ANCHOR_PAGES} 页仍未匹配`}），本次不新建，避免开出重复的锚点。`);
                 core.warning(`Could not establish whether an anchor issue already exists for ${a.key}; not creating one.`,
                   { title: 'Queue-signature anchor not created' });
                 continue;
@@ -470,9 +628,9 @@ jobs:
                 const created = await github.rest.issues.create({
                   owner, repo, title, body, labels: [ANCHOR_LABEL],
                 });
-                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。汇总 issue：#${created.data.number}（新建）`);
+                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。汇总 issue：#${created.data.number}（新建）`);
               } catch (error) {
-                anchorNotes.push(`- \`${a.key}\` — 24h 内已弹出 **${a.prs.size} 个不同 PR**（${[...a.prs.keys()].sort((x, y) => x - y).map((p) => `#${p}`).join('、')}）。⚠️ 汇总 issue 新建失败（${describe(error)}），上面的名单就是全部事实。`);
+                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。⚠️ 汇总 issue 新建失败（${describe(error)}），上面的名单就是全部事实。`);
                 core.warning(`Could not file the anchor issue for ${a.key} (${describe(error)}).`,
                   { title: 'Queue-signature anchor not created' });
               }

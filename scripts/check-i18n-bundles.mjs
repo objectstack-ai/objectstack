@@ -92,9 +92,11 @@ import {
   atRepoRoot,
   CLI,
   CLI_BUILD_FIX,
+  closureBuildFix,
   looksLikeMissingCliCommand,
   looksLikeStaleWorkspaceDist,
   oclifCommandFileFor,
+  owningPackageOf,
   resolveCliCommandFile,
   workspaceBuildFix,
 } from './cli-build-prerequisite.mjs';
@@ -295,6 +297,49 @@ function discoverExtractConfigs() {
     .map((c) => c.rel)
     .sort();
 }
+
+/**
+ * This gate's WHOLE build prerequisite, named once (#12564) — the CLI plus the
+ * build closure of every package whose extract config it runs, derived from the
+ * population rather than written down.
+ *
+ * `CLI_BUILD_FIX` alone under-prescribes here and always did: `os i18n extract`
+ * loads the package it is pointed at, so a tree with only the CLI built still
+ * cannot be measured. What made that expensive rather than merely incomplete is
+ * that the remedy a reader reaches for next is the ONE package the diagnosis
+ * names — and that one is all node can name, because it stops resolving a
+ * config's imports at the first specifier with no `dist/`. One package per
+ * round, however many are missing.
+ *
+ * The walk can throw (#11647), and main() turns that into its own worded verdict.
+ * A throw at MODULE scope would print a node stack instead of that verdict, so
+ * this catches and degrades to the coarser remedy — never to a partial one.
+ */
+const POPULATION_CLOSURE = (() => {
+  try {
+    return closureBuildFix(discoverExtractConfigs());
+  } catch (err) {
+    return { unknown: `the population could not be walked (${String(err?.message ?? err)})` };
+  }
+})();
+
+/** …that closure as a command, or the strict superset when it cannot be derived. */
+const WORKSPACE_CLOSURE_FIX = POPULATION_CLOSURE.command ?? 'pnpm build';
+
+/**
+ * Why the one-command remedy is the one to run, said once so the two CLI-shaped
+ * prerequisites cannot drift apart on it.
+ */
+const CLOSURE_FIX_NOTE = [
+  `That is this gate's WHOLE prerequisite in ONE command (#12564) — the CLI, plus the`,
+  `build closure of every package whose extract config it runs. Clearing only the CLI`,
+  `(\`${CLI_BUILD_FIX}\`)`,
+  `moves the wall rather than removing it: \`os i18n extract\` loads the package it is`,
+  `pointed at, so that package needs its own build output too.`,
+  `⛔ Clearing it one package at a time does NOT converge: node stops resolving a`,
+  `config's imports at the FIRST one with no \`dist/\`, so each round can name exactly`,
+  `one more, however many are missing. Run the closure once.`,
+];
 
 /**
  * The detail for a walk that threw. Pure, so `--self-test` can pin the one
@@ -782,6 +827,44 @@ function selfTest() {
     offRootPopulation.every((c) => !c.startsWith('/') && !c.includes(REPO_ROOT)),
     `absolute paths would leak into the rerun command and the extractor argv; got ${JSON.stringify(offRootPopulation.slice(0, 2))}`,
   );
+
+  // The build-prerequisite CLOSURE (#12564). `CLI_BUILD_FIX` alone was never
+  // enough for THIS gate — `os i18n extract` loads the package it is pointed at —
+  // and the remedy is only worth naming if ONE round of it clears the whole
+  // population. So the property is COMPLETENESS, checked per config against the
+  // manifests the derivation read rather than against a list written here.
+  const missingFromClosure = onRootPopulation
+    .map((configPath) => owningPackageOf(configPath))
+    .filter((owner) => !owner || !WORKSPACE_CLOSURE_FIX.includes(`--filter=${owner}`));
+  expect(
+    '#12564 the closure names every package this gate extracts',
+    POPULATION_CLOSURE.command !== undefined && missingFromClosure.length === 0,
+    `${missingFromClosure.length} owner(s) absent (${missingFromClosure.join(', ')})${
+      POPULATION_CLOSURE.unknown ? ` — no closure was derived: ${POPULATION_CLOSURE.unknown}` : ''
+    } — a closure missing one package leaves the reader the round-trip it exists to remove`,
+  );
+  expect(
+    '#12564 …and the CLI it spawns',
+    WORKSPACE_CLOSURE_FIX.includes('--filter=@objectstack/cli'),
+    'the closure is offered as the remedy for the CLI prerequisite, so it must clear it',
+  );
+  // ⛔ ALL-OR-NOTHING, the floor: a closure that names SOME of the population is
+  // specific, looks derived, and still does not converge. Both degenerate inputs
+  // must come back as a REASON rather than a command.
+  expect(
+    '#12564 an empty population names no closure, and one unowned config refuses the whole',
+    closureBuildFix([]).command === undefined &&
+      closureBuildFix([...onRootPopulation, 'no/such/place/scripts/i18n-extract.config.ts']).command === undefined,
+    'an empty population would render as the CLI-only remedy under the closure\'s name, and a partial closure ' +
+      "is this defect wearing a derivation's clothes",
+  );
+  // ⛔ Fence: the remedy got longer; the REFUSAL did not become a pass. The
+  // prerequisite reporter still exits non-zero and still says nothing was judged.
+  expect(
+    '#12564 the closure remedy is not the CLI-only one',
+    WORKSPACE_CLOSURE_FIX !== CLI_BUILD_FIX && WORKSPACE_CLOSURE_FIX !== POPULATION_FIX,
+    'the three remedies answer different failures and must not collapse into one another',
+  );
   expect(
     '#11647 …and the bare spelling demonstrably would not have',
     bareWalkOffRoot === 'ENOENT',
@@ -854,7 +937,8 @@ function selfTest() {
   console.log(
     '✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key, missing-CLI-build, ' +
       'stale-workspace-dist and empty-population classifiers all go red, and stay distinct; ' +
-      'the population walk is CWD-independent.',
+      'the population walk is CWD-independent; and the build-prerequisite closure names every ' +
+      'package this gate extracts plus the CLI, refusing whole rather than naming some.',
   );
 }
 
@@ -989,13 +1073,17 @@ function checkCliBuildPrerequisite() {
   // all, so anchoring the read without anchoring this would have traded a harmless
   // deferral for a false hard failure.
   if (existsSync(atRepoRoot(resolved.file))) return;
-  reportPrerequisiteNotMet('the workspace CLI is not built', [
-    `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
-    `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
-    `output — and that command is not there:`,
-    ``,
-    `  ${resolved.file}`,
-  ]);
+  reportPrerequisiteNotMet(
+    'the workspace CLI is not built',
+    [
+      `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
+      `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
+      `output — and that command is not there:`,
+      ``,
+      `  ${resolved.file}`,
+    ],
+    { fix: WORKSPACE_CLOSURE_FIX, alsoFix: CLOSURE_FIX_NOTE },
+  );
 }
 
 checkCliBuildPrerequisite();
@@ -1107,7 +1195,7 @@ for (const [index, config] of configs.entries()) {
           `Every remaining package would fail the same way for the same one reason, so the`,
           `loop stopped here rather than reporting it ${configs.length} times as bundle problems.`,
         ],
-        { scanned: index },
+        { fix: WORKSPACE_CLOSURE_FIX, alsoFix: CLOSURE_FIX_NOTE, scanned: index },
       );
     }
     const stale = looksLikeStaleWorkspaceDist(`${stdout}\n${stderr}`);
@@ -1117,7 +1205,13 @@ for (const [index, config] of configs.entries()) {
         staleWorkspaceDistDetail(stale, { pkg, status: run.status, remaining: configs.length - index - 1 }),
         {
           fix: workspaceBuildFix(stale.pkg),
-          alsoFix: ['…or `pnpm build`, on a tree whose other packages may be stale too.'],
+          alsoFix: [
+            `…or the whole prerequisite at once, on a tree whose other packages may be stale`,
+            `too. node names only the FIRST unresolvable import per round, so rebuilding the`,
+            `one package above and re-running can simply name the next (#12564):`,
+            ``,
+            `  ${WORKSPACE_CLOSURE_FIX}`,
+          ],
           scanned: index,
         },
       );

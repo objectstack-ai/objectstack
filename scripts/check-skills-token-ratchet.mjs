@@ -246,7 +246,12 @@ export const CEILINGS = new Map([
   // Every row re-measured after the internal issue-id strip — see
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   ['skills/objectstack-ai/SKILL.md', 6806], //          -18 (was 6824)
-  ['skills/objectstack-api/SKILL.md', 6331], //         -11 (was 6342)
+  // -12 (was 6331): the `http.server` decision-table row dropped a trailing
+  // clause that taught `contributes.routes` as a key that "parses but serves
+  // nothing". The key is retired — an authored entry is now REFUSED, carrying
+  // the removal prescription — so the clause described a state the runtime no
+  // longer has. Lowered to the measurement, per the shrink-only discipline.
+  ['skills/objectstack-api/SKILL.md', 6319],
   // 12511 -> 12643 (#11348): the flow value-expression section documented the
   // expression surface but not the function vocabulary (round/floor/ceil/abs/
   // min/max); an unknown function fails at RUNTIME, not at flow-save, so the

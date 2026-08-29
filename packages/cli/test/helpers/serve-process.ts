@@ -383,8 +383,10 @@ function stripAnsi(text: string): string {
  *
  * ⚠️ It carries the bound PORT only conditionally, which is why the read-back
  * below has an `unreadable` state rather than a boolean. `serve.ts` builds the
- * row from `resolveAuthBaseUrl(port).baseOrigin`, whose chain is `OS_AUTH_URL`
- * → `BETTER_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>`. So a child
+ * row from `resolveAuthBaseUrl(boundPort).baseOrigin`, whose chain is
+ * `OS_AUTH_URL` → `BETTER_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>`
+ * — and `boundPort` is the port the transport reports it BOUND (#13062), which
+ * is the requested one for every value but `0`. So a child
  * carrying any of those three prints an origin that is NOT what it bound, and
  * an unparseable one prints paths with no origin at all. Measured on this tree
  * (`f28f00fbd`): nothing under `packages/cli/test` and nothing in the runner
@@ -538,11 +540,35 @@ export function portDriftError(
       + 'does not name a `http://localhost:<port>` address, so this harness cannot tell whether '
       + `the child bound the ${requested} it was asked for.\n`
       + `  API row: ${readback.apiRow}\n`
-      + 'That row is `resolveAuthBaseUrl(port).baseOrigin` (`serve.ts`), so a child carrying '
+      + 'That row is `resolveAuthBaseUrl(boundPort).baseOrigin` (`serve.ts`), so a child carrying '
       + 'OS_AUTH_URL, BETTER_AUTH_URL or OS_BASE_URL prints THAT origin instead of the address it '
       + 'bound — and this read-back channel goes with it.\n'
       + '⛔ Reported rather than skipped on purpose (#12525): a silent skip here is the same '
       + 'false green the read-back exists to remove.\n'
+      + `--- child output ---\n${output}`,
+    );
+  }
+
+  // ⭐ `--port 0` is a REQUEST for a kernel-assigned port, not an expectation
+  // about WHICH one — `utils/port-contract.ts` declares `MIN_PORT = 0` from its
+  // own measurement and states that 0 is "a REQUEST, not an error". A child
+  // asked for 0 therefore binds something else BY DESIGN, and reading that as
+  // drift would reject every healthy `--port 0` boot.
+  //
+  // ⛔ Not the silent skip this file's header forbids, either: there is exactly
+  // one answer such a boot can get wrong, and it is announcing the REQUEST back
+  // (#13062 — the banner, the IPC message and `runtime.<env>.json` all printed
+  // `localhost:0`, an address nothing was listening on). That one is reported;
+  // beyond it there is genuinely no comparison this harness can make.
+  if (requested === 0) {
+    if (readback.port !== 0) return null;
+    return new Error(
+      `ANNOUNCED PORT 0 on \`${what}\`: the child was asked for port 0 — a request for a `
+      + 'kernel-assigned port — and its ready banner names `http://localhost:0`, which is not '
+      + 'an address anything can listen on.\n'
+      + 'The banner is built from the port `serve.ts` PUBLISHES, so this is the #13062 defect: '
+      + 'the requested port announced in place of the bound one. The same wrong number reaches '
+      + 'the `objectstack:listening` IPC message and `runtime.<environment>.json`.\n'
       + `--- child output ---\n${output}`,
     );
   }

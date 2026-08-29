@@ -725,6 +725,35 @@ column does not move and the `strip` column falls by the count of what left.
 | `time-relative-trigger.zod.ts` | authorable | **Undeclared until the #4001 re-measurement, and invisible for the worst possible reason**: `TimeRelativeTriggerSchema` is written `z\n  .object({`, the old textual counter matched zero sites, and a zero-site file is SKIPPED by the coverage walk as "nothing to classify". So the gate whose whole promise is "no undeclared surface" reported green over an authorable schema — the same shape as `data/driver/`, one layer subtler, because this time the file was not hidden by the walk but by the counter feeding it. Classification is not a guess: the file's own `@example` blocks author it by hand into a flow start node (`config: { timeRelative: { object, dateField, offsetDays, filter } }`), which is the authoring door. A stripped key here means the sweep silently never matches — `offsetDay` for `offsetDays` returns a trigger that never fires, reported as configured. **Strict as of #4001 batch 11**, and closing it turned up one thing the triage did not predict: this schema is `safeParse`d at BIND time by `TimeRelativeTriggerPlugin` (`time-relative-trigger.ts`), not only at authoring — so the descriptor sitting under the deliberately-OPEN node `config` slot (ADR-0018) now has exactly one gate, and it is a runtime one. The behaviour change is the campaign's whole thesis in miniature: `{ …valid, offsetDay: 7 }` used to bind a sweep that ran daily with the author's narrowing discarded; it now refuses to bind and the plugin's warning carries the key and the rename |
 | `flow-function.zod.ts` | authorable | `FlowFunctionDeclarationSchema` (#4396) — the `{ handler, effect }` form of a `defineStack({ functions })` entry. Authored, but note what an undeclared key here would be: a sibling of a **live function**, not data. `defineStack`'s union already rejects a record whose `handler` is not callable, and the boot-path reader is the hand-written `normalizeFlowFunctionEntry` rather than a `.parse()` (re-validating a live handler every boot buys nothing), so strictness would bind at authoring only. **Strict as of #4001 batch 11**, and the verify-first pass confirmed that reading exactly — stated in the code rather than left implied, because a tightening must not claim reach it does not have. It is still worth having for the reason the reading first made it look pointless: `normalizeFlowFunctionEntry` takes TWO keys and ignores the rest **by construction**, so a misspelled `effect` was dropped at the schema and then not looked for by the reader — and the failure runs the quiet way. The function registers, runs, and its writes are counted as none, which is precisely what keeps #4354's broken-sweep query (`selected > 0 AND acted = 0 AND unmeasured = 0`) silent on the one run that needed it |
 
+> **⚠️ ERRATUM (2026-08-29) — the `flow-function.zod.ts` row's closing sentence.**
+> The row is left exactly as written, because this is a dated record of what the
+> 2026-07 audit concluded. Its last clause has since been measured wrong in two
+> ways, and they travel together: correcting only the vocabulary would leave a
+> more authoritative wrong sentence behind.
+>
+> 1. **`selected > 0 AND acted = 0 AND unmeasured = 0` is a FIRST FILTER, not a
+>    detector** (#12685). It cannot separate a broken sweep from a healthy
+>    idempotent one: a sweep that re-selects the same records and gates each on
+>    "already handled" satisfies the predicate on every run while that work
+>    stands. The discriminator is the per-node fold — `FlowRunSummary.nodes[]` /
+>    `gates[]`, where a healthy skip is accounted for by a read this run
+>    performed (`runs > 0` and `selected > 0` on the lookup the gate depends on)
+>    while a dead gate skips just as often with nothing behind it (`runs: 0`, or
+>    `selected: 0`). Every live surface now teaches that framing.
+> 2. **The causal direction is backwards** (#13096). A dropped `effect: 'writes'`
+>    does not keep the query *silent* on that run. It makes the `script` step
+>    report no `unmeasuredEffect` at all, so the run folds to `selected > 0,
+>    acted 0, unmeasured 0` — which **satisfies** the filter. The run lands
+>    **INSIDE** the candidate set, reading exactly like a dead sweep, rather than
+>    escaping it. That is the same failure, but it surfaces as a false positive
+>    among the candidates, not as a silence.
+>
+> The corrected reading of this exact mechanism is carried in the schema's own
+> `@module` block (`packages/spec/src/automation/flow-function.zod.ts`) and is
+> pinned end to end by
+> `packages/qa/dogfood/test/flow-function-effect.dogfood.test.ts`. The row's
+> `authorable` verdict, its strictness claim and its counts are unaffected.
+
 `trigger-registry.zod.ts` had a row here (11 sites, "mixed — descriptors are code-registered (wire-ish); bindings authored") until #4499 deleted the file: all 11 sites were the third connector-vocabulary declaration (`ConnectorSchema` / `Authentication*` / `Operation*` / `ConnectorInstance`), and the old row's classification was optimistic twice over — nothing was ever code-registered against these descriptors and no binding was ever authored. The engine registers against `integration/connector.zod.ts` (ADR-0097), which keeps its own row.
 
 ### `security/` — file-level triage

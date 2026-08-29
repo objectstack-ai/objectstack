@@ -40,6 +40,26 @@ export default defineConfig({
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts'),
       },
+      // [#12104] The three producers `analytics-automation-json-erasure.test.ts`
+      // DRIVES to measure what the five `return res.json()` methods really
+      // resolve to. Same reason as the pair above, plus one specific to that
+      // suite: its whole claim is "the annotation matches what the producer
+      // sends", so it must read the producer IN THIS CHECKOUT. Against `dist/`
+      // a producer whose envelope had already changed in source would keep the
+      // suite green on the old shape — certifying a declaration that is by then
+      // false, which is precisely the failure the annotations exist to prevent.
+      {
+        find: /^@objectstack\/rest$/,
+        replacement: path.resolve(__dirname, '../rest/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-analytics$/,
+        replacement: path.resolve(__dirname, '../services/service-analytics/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-automation$/,
+        replacement: path.resolve(__dirname, '../services/service-automation/src/index.ts'),
+      },
     ],
   },
 });

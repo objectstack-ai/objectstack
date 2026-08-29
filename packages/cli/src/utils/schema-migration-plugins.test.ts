@@ -9,6 +9,8 @@ import {
   composeForDeclarations,
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
+  describeUnloadableHostConfig,
+  type SchemaMigrationComposition,
 } from './schema-migration-plugins.js';
 
 /**
@@ -185,15 +187,104 @@ describe('buildSchemaMigrationPlugins', () => {
 
     const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
 
-    // Not fatal — this command worked before without ever reading the config,
-    // and a plan that stops working is a worse regression than a reduced one.
+    // The composition still COMPLETES — the reduced set is composed and
+    // returned. What changed with #12953 is the verdict the COMMANDS draw from
+    // it (a non-zero exit), not whether this function throws.
     expect(out.hostConfigPath).toBe(join(dir, 'objectstack.config.ts'));
-    // …but it must be DISTINGUISHABLE. `managedTables` alone cannot say this:
+    // …and it must be DISTINGUISHABLE. `managedTables` alone cannot say this:
     // the platform floor still lands, so the count rises either way.
     expect(out.hostConfigLoaded).toBe(false);
     const said = out.notes.join(' ');
     expect(said).toContain('could not be loaded');
     expect(said).toContain('UNMEASURED');
+    // [#12953] The underlying failure, carried structurally so the refusal can
+    // NAME it rather than re-parsing the prose above.
+    expect(out.hostConfigError).toContain('OS_SOME_SECRET is required');
+  });
+
+  it('leaves hostConfigError null when there is no host config at all', async () => {
+    const none = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: tempProject() });
+    expect(none.hostConfigError).toBeNull();
+  });
+
+  it('leaves hostConfigError null when the host config LOADS', async () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, 'objectstack.config.ts'), 'export default { objects: [] };\n');
+    const loaded = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(loaded.hostConfigLoaded).toBe(true);
+    expect(loaded.hostConfigError).toBeNull();
+    // Loading a real config runs `bundle-require`/esbuild — well past the 5 s
+    // default on a cold, shared box.
+  }, 60_000);
+});
+
+/**
+ * #12953 — the predicate behind the non-zero exit, in all three directions.
+ *
+ * Maintainer ruling 2026-08-29 (verbatim 「同意」): a host config that EXISTS
+ * and could not be loaded makes `os migrate plan` / `apply` exit non-zero,
+ * because a green exit over an UNMEASURED partial metadata set is the
+ * false-green a migration tool must never emit. The ruling pinned the OTHER
+ * two directions just as hard — config absent, and config loadable, both keep
+ * today's behaviour — so all three are pinned here.
+ *
+ * ⚠️ The trap this file exists to hold: `hostConfigLoaded` is `false` on the
+ * config-ABSENT shape too (nothing loaded, because there was nothing to load).
+ * A predicate written as `!hostConfigLoaded` therefore turns the untouched
+ * population red, and every assertion about direction 1 still passes while it
+ * does. The second case below is the one that fails if anyone writes it that
+ * way.
+ *
+ * The exit STATUS itself is pinned over a real child process in
+ * `packages/cli/test/migrate-unloadable-host-config-exit.e2e.test.ts` — a
+ * `process.exitCode` set inside a vitest worker is not an exit status.
+ */
+describe('describeUnloadableHostConfig (#12953)', () => {
+  function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
+    return {
+      plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
+      notes: [], coverage: null, ...over,
+    };
+  }
+
+  it('direction 1 — config PRESENT and unloadable: names the config, the cause and the remedy', () => {
+    const said = describeUnloadableHostConfig(composition({
+      hostConfigPath: '/srv/app/objectstack.config.ts',
+      hostConfigLoaded: false,
+      hostConfigError: 'Missing required environment variable AUTH_SECRET',
+    }));
+
+    expect(said).not.toBeNull();
+    // The three things the ruling requires the error to name.
+    expect(said).toContain('/srv/app/objectstack.config.ts');
+    expect(said).toContain('Missing required environment variable AUTH_SECRET');
+    expect(said).toMatch(/Remedy:/);
+    // And that it is a FAILURE, not another warning — the whole point.
+    expect(said).toContain('UNMEASURED');
+  });
+
+  it('direction 2 — config ABSENT: null, even though hostConfigLoaded is false', () => {
+    // `hostConfigPath === null` with `hostConfigLoaded === false` is the
+    // untouched population. If this ever answers non-null, every project with
+    // no config starts failing `os migrate plan`.
+    expect(describeUnloadableHostConfig(composition({
+      hostConfigPath: null, hostConfigLoaded: false,
+    }))).toBeNull();
+  });
+
+  it('direction 3 — config PRESENT and loadable: null', () => {
+    expect(describeUnloadableHostConfig(composition({
+      hostConfigPath: '/srv/app/objectstack.config.ts', hostConfigLoaded: true,
+    }))).toBeNull();
+  });
+
+  it('still names something when the load threw without a message', () => {
+    const said = describeUnloadableHostConfig(composition({
+      hostConfigPath: '/srv/app/objectstack.config.mjs', hostConfigLoaded: false,
+      hostConfigError: null,
+    }));
+    expect(said).toContain('/srv/app/objectstack.config.mjs');
+    expect(said).toContain('the load threw without a message');
   });
 });
 

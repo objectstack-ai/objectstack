@@ -312,7 +312,7 @@ UI metadata types (`view`, `dashboard`, `page`, `app`, `theme`) are first-class 
 
 ```typescript
 // Get a view definition
-const view = await metadataService.get('view', 'account_list');
+const view = await metadataService.get('view', 'account.default');
 
 // List all views for an object
 const views = await metadataService.listViews('account');
@@ -330,7 +330,7 @@ Users can customize views via the overlay system:
 await metadataService.saveOverlay({
   id: 'overlay-platform-1',
   baseType: 'view',
-  baseName: 'account_list',
+  baseName: 'account.default',
   scope: 'platform',
   patch: { columns: ['name', 'email', 'status', 'created_at'] },
 });
@@ -339,14 +339,14 @@ await metadataService.saveOverlay({
 await metadataService.saveOverlay({
   id: 'overlay-user-123',
   baseType: 'view',
-  baseName: 'account_list',
+  baseName: 'account.default',
   scope: 'user',
   owner: 'user-123',
   patch: { columns: ['name', 'status'] },  // user only wants 2 columns
 });
 
 // Resolve effective view for a specific user
-const effectiveView = await metadataService.getEffective('view', 'account_list', {
+const effectiveView = await metadataService.getEffective('view', 'account.default', {
   userId: 'user-123',
 });
 // Result: base view ← platform overlay ← user-123 overlay

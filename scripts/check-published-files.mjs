@@ -27,7 +27,7 @@
 //   node scripts/check-published-files.mjs
 //   node scripts/check-published-files.mjs --self-test
 //
-// Five invariants, per non-private workspace package:
+// Six invariants, per non-private workspace package:
 //
 //   DECLARED    `files` exists and is a non-empty array of strings.
 //   COMPLETE    the whitelist covers `CHANGELOG.md` (#4261). AGENTS.md requires
@@ -47,6 +47,53 @@
 //               `CHANGELOG.md` carries a reason in EXTRA_ENTRIES, reconciled in
 //               BOTH directions so a stale exemption is an error rather than
 //               dead text.
+//   GATED       `exports` exists and names something (#12879). `files` decides
+//               what SHIPS; `exports` decides what a consumer may RESOLVE of
+//               what shipped, and without it those two are the same set.
+//
+// GATED, and the census control that keeps it honest (#12879)
+// ----------------------------------------------------------
+//
+// A package with no `exports` map answers "is this symbol part of the public
+// surface?" twice, differently: the DECLARED surface is what the entry barrel
+// exports, the REACHABLE surface is every module under `dist/`, because
+// `main` + `files` alone put no gate on subpath resolution. This repo decides
+// semver level and "is this internal?" by reading the barrel -- so in such a
+// package that reading is not wrong, it is merely one of two answers, and the
+// disagreement surfaces later as "why did an internal refactor break a
+// consumer".
+//
+// The other direction is the subtler one, and it is why the fix is the map
+// rather than a policy: if accidental reachability were treated AS the public
+// contract, every internal refactor of such a package would owe a minor bump --
+// ratcheting the whole package for a reachability nobody deliberately offered.
+// Close the hole; do not reprice changes against it.
+//
+// Measured when this landed: 71 of 80 tracked manifests declared a map, and of
+// the nine that did not, seven were private (docs app, an example, the root,
+// a scaffold template, three QA packages) and exactly two published a dist --
+// `@objectstack/cli` and `@objectstack/plugin-hono-server`. A convention
+// holding at 69 of 71 publishable packages is a ratchet waiting to be written
+// down, which is this invariant.
+//
+// What the invariant does NOT require is a `"."` entry. Two packages here
+// declare a map with no root export on purpose -- `@objectstack/console` is
+// static assets whose only resolvable subpath is `./package.json` (the CLI
+// resolves it that way precisely BECAUSE bare resolution throws), and
+// `create-objectstack` publishes only `./created-summary`. Requiring `"."`
+// would fail both for doing the right thing. The claim here is narrower and is
+// the whole point: the package has decided what is resolvable.
+//
+// CENSUS CONTROL. This gate reads a POSITIVE signal off every publishable
+// manifest, so the way it fails silently is for that reading to return nothing
+// at all -- an enumerator that yields no members, a key read under the wrong
+// name, a parse that quietly drops everything. Each of those makes "no package
+// violates GATED" true by vacuity, and the gate would print a green line
+// naming a population it never had. So the run also asserts the control the
+// #12879 ruling names: a census that finds nobody declaring `exports` means
+// the instrument broke, not that the convention is absent. EXPORTS_CENSUS_FLOOR
+// below is that reading's floor, and it fails in its own words, distinct from
+// any package's violation.
 //
 // Deliberately NOT checked: the contents of dist/. It does not exist in a fresh
 // checkout and the lint job does not build, so reading it would make the
@@ -79,6 +126,15 @@ const CANONICAL = new Set(['dist', 'README.md', 'CHANGELOG.md']);
 // else. npm stopped packing CHANGELOG unconditionally (see ALWAYS_PACKED), so
 // only an explicit `files` entry keeps that promise true (#4261).
 const REQUIRED = ['CHANGELOG.md'];
+
+// The floor the GATED census is read against (#12879). Its job is to catch
+// COLLAPSE -- a reading that returns nothing, which is the only way this gate
+// can be wrong while printing green -- so it sits well under the live count
+// (71 publishable packages declared a map when this landed) rather than
+// tracking it. The self-test holds it inside a band against the live tree in
+// both directions: above it and the gate is permanently red for the wrong
+// reason, far below it and the control is disarmed.
+const EXPORTS_CENSUS_FLOOR = 50;
 
 // Package name -> { files entry -> why it is published }. Reconciled against
 // the manifests on every run: an entry here for a pattern no longer declared is
@@ -308,6 +364,60 @@ function entryPoints(manifest) {
 }
 
 /**
+ * The GATED verdict: does this manifest declare a resolution gate that names
+ * something?
+ *
+ * `ok` is the census signal, so the three failing shapes are kept apart rather
+ * than folded into one boolean -- they are different defects with opposite
+ * symptoms. No map at all means EVERYTHING under `dist/` resolves; a `null`,
+ * empty or non-map `exports` means nothing does, including the package's own
+ * entry point. A single "bad exports" message would send an author of the
+ * second kind looking for the first kind's fix.
+ */
+function exportsVerdict(manifest) {
+  const map = manifest.exports;
+  if (map === undefined) {
+    return {
+      ok: false,
+      lines: [
+        'declares no `exports` map, so every module under `dist/` is importable by any',
+        'consumer, whatever the entry barrel names. The DECLARED surface (the barrel) and',
+        'the REACHABLE surface (all of dist/) are then different sets, and an internal',
+        'refactor breaks whoever deep-imported one of them -- silently, until it does (#12879).',
+        'Fix: add an `exports` map naming the entry point(s) this package MEANS to offer.',
+        '     Do NOT enumerate what happens to be reachable today: that ratifies an accidental',
+        '     surface and prices every later internal refactor at a minor bump.',
+      ],
+    };
+  }
+  const empty =
+    map === null ||
+    (typeof map === 'string' && map.trim() === '') ||
+    (Array.isArray(map) && map.length === 0) ||
+    (typeof map === 'object' && !Array.isArray(map) && Object.keys(map).length === 0);
+  if (empty) {
+    return {
+      ok: false,
+      lines: [
+        `declares \`exports\`: ${JSON.stringify(map)}, which names nothing resolvable -- Node`,
+        'refuses every specifier into this package, its own entry point included.',
+        'Fix: name the entry point(s), e.g. { ".": { "types": "./dist/index.d.ts", ... } }.',
+      ],
+    };
+  }
+  if (typeof map !== 'string' && typeof map !== 'object') {
+    return {
+      ok: false,
+      lines: [
+        `declares \`exports\` as a ${typeof map}, which Node cannot read as a map.`,
+        'Fix: a target string, or an object of conditions / subpaths.',
+      ],
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * The pattern semantics above are the one part of this guard that can be wrong
  * without any package being wrong -- a matcher that over-matches turns MINIMAL
  * into noise, and one that under-matches makes SUFFICIENT wave a broken package
@@ -404,6 +514,81 @@ function selfTest() {
     if (!ok) failures.push(`ROOT_DIR_WATCH_HINTS: ${name}`);
   }
 
+  // ── GATED and its census floor (#12879) ───────────────────────────────────
+  //
+  // The verdict cases pin the two directions apart: a map that is merely ABSENT
+  // leaves everything resolvable, a map that is present and EMPTY leaves nothing
+  // resolvable, and both must be refused for their own reason. The `"."`-less
+  // shapes are pinned as PASSING on purpose -- `@objectstack/console` and
+  // `create-objectstack` really ship those, so a future tightening to "must
+  // declare a root entry" fails here rather than in their manifests.
+  const verdictCases = [
+    ['no exports key', {}, false],
+    ['a root entry', { exports: { '.': './dist/index.js' } }, true],
+    ['a conditions object', { exports: { types: './dist/index.d.ts', default: './dist/index.js' } }, true],
+    ['a bare string target', { exports: './dist/index.js' }, true],
+    ['subpath-only, no root (@objectstack/console)', { exports: { './package.json': './package.json' } }, true],
+    ['subpath-only, no root (create-objectstack)', { exports: { './created-summary': { types: './d.ts' } } }, true],
+    ['an empty object', { exports: {} }, false],
+    ['an empty string', { exports: '' }, false],
+    ['an empty array', { exports: [] }, false],
+    ['null', { exports: null }, false],
+    ['a number', { exports: 7 }, false],
+    ['a fallback array', { exports: ['./dist/index.js'] }, true],
+  ];
+  for (const [label, manifest, expected] of verdictCases) {
+    const actual = exportsVerdict(manifest).ok;
+    if (actual !== expected) {
+      failures.push(`exportsVerdict(${label}).ok === ${actual}, expected ${expected}`);
+    }
+  }
+  for (const [label, manifest, expected] of verdictCases) {
+    if (expected) continue;
+    const { lines } = exportsVerdict(manifest);
+    if (!Array.isArray(lines) || lines.length === 0 || !lines.some((l) => l.startsWith('Fix:'))) {
+      failures.push(`exportsVerdict(${label}) refuses without a Fix: line`);
+    }
+  }
+
+  // The floor is the control, so it is itself controlled -- against the live
+  // tree, in both directions. A floor ABOVE the real count makes the gate
+  // permanently red for a reason that has nothing to do with any package; a
+  // floor far below it (the 1 someone reaches for to quiet a red run) would
+  // wave through a census that found a single package, which is the exact
+  // vacuity the control exists to catch.
+  let liveDeclaring = 0;
+  let livePublishable = 0;
+  for (const dir of workspaceDirs()) {
+    let m;
+    try {
+      m = JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!m.name || m.private === true) continue;
+    livePublishable++;
+    if (exportsVerdict(m).ok) liveDeclaring++;
+  }
+  const floorCases = [
+    [
+      `EXPORTS_CENSUS_FLOOR is a positive integer (is ${EXPORTS_CENSUS_FLOOR})`,
+      Number.isInteger(EXPORTS_CENSUS_FLOOR) && EXPORTS_CENSUS_FLOOR > 0,
+    ],
+    [
+      `EXPORTS_CENSUS_FLOOR (${EXPORTS_CENSUS_FLOOR}) is not above the live publishable count ` +
+        `(${livePublishable}) — a floor no tree can reach is a red gate about nothing`,
+      EXPORTS_CENSUS_FLOOR <= livePublishable,
+    ],
+    [
+      `EXPORTS_CENSUS_FLOOR (${EXPORTS_CENSUS_FLOOR}) is at least half the live publishable count ` +
+        `(${livePublishable}) — a lower floor disarms the control instead of measuring with it`,
+      EXPORTS_CENSUS_FLOOR >= Math.ceil(livePublishable / 2),
+    ],
+  ];
+  for (const [name, ok] of floorCases) {
+    if (!ok) failures.push(`GATED census: ${name}`);
+  }
+
   // The shared enumerator is a plain module, so no workflow invokes it and it
   // has no self-test of its own to schedule (#11510 — being a gate is exactly
   // what it must not be). Its coverage is that every gate which consolidated
@@ -419,7 +604,9 @@ function selfTest() {
   console.log(
     `✓ check:published-files --self-test — ${cases.length} pattern case(s), ` +
       `${forbidden.length} classification case(s), ${declarationCases.length} ` +
-      `population-declaration case(s) and the shared workspace enumerator's own ` +
+      `population-declaration case(s), ${verdictCases.length} \`exports\` verdict case(s), ` +
+      `${floorCases.length} census-floor case(s) (floor ${EXPORTS_CENSUS_FLOOR} vs ` +
+      `${liveDeclaring} of ${livePublishable} live) and the shared workspace enumerator's own ` +
       `assertions, over ${liveGlobs.length} live workspace glob(s).`,
   );
 }
@@ -433,6 +620,7 @@ const problems = [];
 const declaredExtrasByPackage = new Map();
 let members = 0;
 let publishable = 0;
+let exportsDeclaring = 0;
 
 for (const dir of workspaceDirs()) {
   const manifestPath = posix.join(dir, 'package.json');
@@ -449,6 +637,17 @@ for (const dir of workspaceDirs()) {
 
   const name = manifest.name;
   const lines = [];
+
+  // --- GATED ---------------------------------------------------------------
+  // Read before the `files` invariants so the census below sees every
+  // publishable package, and independent of them: what a package SHIPS and what
+  // a consumer may RESOLVE of it are separate claims. (A package that also
+  // fails DECLARED loses this line to that block's early exit; it is already
+  // being told its manifest is wrong, and the next run says the rest.)
+  const gated = exportsVerdict(manifest);
+  if (gated.ok) exportsDeclaring++;
+  else lines.push(...gated.lines);
+
   const files = manifest.files;
 
   // --- DECLARED ------------------------------------------------------------
@@ -579,6 +778,26 @@ for (const [name, patterns] of Object.entries(EXTRA_ENTRIES)) {
   }
 }
 
+// --- GATED, the census control ---------------------------------------------
+// The one failure this gate cannot report as a violation: if the reading itself
+// returns nothing, "no package violates GATED" is true and green. So the
+// positive signal is asserted against a floor, in its own words (#12879).
+if (exportsDeclaring < EXPORTS_CENSUS_FLOOR) {
+  problems.push({
+    dir: SELF,
+    name: 'GATED census control',
+    lines: [
+      `read an \`exports\` map off ${exportsDeclaring} of ${publishable} publishable package(s), under the`,
+      `floor of ${EXPORTS_CENSUS_FLOOR}. A census returning "nobody declares exports" means THIS`,
+      'INSTRUMENT BROKE, not that the convention is absent (#12879) -- an enumerator that',
+      'yields no members, a key read under the wrong name, or a parse that drops manifests',
+      'each make every GATED verdict vacuous while this gate prints green.',
+      'Fix: repair the reading. Lower EXPORTS_CENSUS_FLOOR only when packages were really',
+      `     removed, never to silence this — it is the control, not a threshold to tune.`,
+    ],
+  });
+}
+
 if (problems.length > 0) {
   const plural = problems.length === 1 ? 'package publishes' : 'packages publish';
   console.error(`✗ check:published-files — ${problems.length} ${plural} the wrong thing (#4248)\n`);
@@ -602,5 +821,7 @@ console.log(
   `✓ check:published-files — ${publishable} publishable package(s) of ${members} workspace ` +
     'member(s) declare a `files` whitelist that covers every entry point plus CHANGELOG.md ' +
     `and admits no test, test-harness config or build script; ${withExtras} publish more ` +
-    'than dist/ + README.md + CHANGELOG.md, each with a registered reason.',
+    'than dist/ + README.md + CHANGELOG.md, each with a registered reason; ' +
+    `${exportsDeclaring} declare an \`exports\` map gating what of that is resolvable ` +
+    `(census control: floor ${EXPORTS_CENSUS_FLOOR}).`,
 );
