@@ -1,43 +1,48 @@
 {
-    "name": "@objectstack/connector-openapi",
-    "version": "17.2.0",
-    "license": "Apache-2.0",
-    "description": "OpenAPI 3.x connector generator for ObjectStack — turns a declarative OpenAPI document into connector actions on the automation engine's registry, with a self-contained static-auth HTTP transport (ADR-0023).",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.mjs",
-            "require": "./dist/index.js"
-        }
-    },
-    "scripts": {
-        "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --noEmit"
-    },
-    "dependencies": {
-        "@objectstack/core": "workspace:*",
-        "@objectstack/spec": "workspace:*"
-    },
-    "devDependencies": {
-        "@objectstack/service-automation": "workspace:*",
-        "@types/node": "^26.2.0",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.10"
-    },
-    "keywords": [
-        "objectstack",
-        "connector",
-        "openapi",
-        "swagger",
-        "integration",
-        "api"
-    ],
-    "files": [
-        "dist",
-        "README.md",
-        "CHANGELOG.md"
-    ]
+  "name": "@objectstack/connector-openapi",
+  "version": "17.2.0",
+  "license": "Apache-2.0",
+  "description": "OpenAPI 3.x connector generator for ObjectStack — turns a declarative OpenAPI document into connector actions on the automation engine's registry, with a self-contained static-auth HTTP transport (ADR-0023).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/service-automation": "workspace:*",
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "objectstack",
+    "connector",
+    "openapi",
+    "swagger",
+    "integration",
+    "api"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ]
 }

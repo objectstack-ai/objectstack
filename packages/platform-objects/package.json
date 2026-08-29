@@ -7,59 +7,114 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./identity": {
-      "types": "./dist/identity/index.d.ts",
-      "import": "./dist/identity/index.mjs",
-      "require": "./dist/identity/index.js"
+      "import": {
+        "types": "./dist/identity/index.d.mts",
+        "default": "./dist/identity/index.mjs"
+      },
+      "require": {
+        "types": "./dist/identity/index.d.ts",
+        "default": "./dist/identity/index.js"
+      }
     },
     "./security": {
-      "types": "./dist/security/index.d.ts",
-      "import": "./dist/security/index.mjs",
-      "require": "./dist/security/index.js"
+      "import": {
+        "types": "./dist/security/index.d.mts",
+        "default": "./dist/security/index.mjs"
+      },
+      "require": {
+        "types": "./dist/security/index.d.ts",
+        "default": "./dist/security/index.js"
+      }
     },
     "./audit": {
-      "types": "./dist/audit/index.d.ts",
-      "import": "./dist/audit/index.mjs",
-      "require": "./dist/audit/index.js"
+      "import": {
+        "types": "./dist/audit/index.d.mts",
+        "default": "./dist/audit/index.mjs"
+      },
+      "require": {
+        "types": "./dist/audit/index.d.ts",
+        "default": "./dist/audit/index.js"
+      }
     },
     "./integration": {
-      "types": "./dist/integration/index.d.ts",
-      "import": "./dist/integration/index.mjs",
-      "require": "./dist/integration/index.js"
+      "import": {
+        "types": "./dist/integration/index.d.mts",
+        "default": "./dist/integration/index.mjs"
+      },
+      "require": {
+        "types": "./dist/integration/index.d.ts",
+        "default": "./dist/integration/index.js"
+      }
     },
     "./metadata": {
-      "types": "./dist/metadata/index.d.ts",
-      "import": "./dist/metadata/index.mjs",
-      "require": "./dist/metadata/index.js"
+      "import": {
+        "types": "./dist/metadata/index.d.mts",
+        "default": "./dist/metadata/index.mjs"
+      },
+      "require": {
+        "types": "./dist/metadata/index.d.ts",
+        "default": "./dist/metadata/index.js"
+      }
     },
     "./system": {
-      "types": "./dist/system/index.d.ts",
-      "import": "./dist/system/index.mjs",
-      "require": "./dist/system/index.js"
+      "import": {
+        "types": "./dist/system/index.d.mts",
+        "default": "./dist/system/index.mjs"
+      },
+      "require": {
+        "types": "./dist/system/index.d.ts",
+        "default": "./dist/system/index.js"
+      }
     },
     "./apps": {
-      "types": "./dist/apps/index.d.ts",
-      "import": "./dist/apps/index.mjs",
-      "require": "./dist/apps/index.js"
+      "import": {
+        "types": "./dist/apps/index.d.mts",
+        "default": "./dist/apps/index.mjs"
+      },
+      "require": {
+        "types": "./dist/apps/index.d.ts",
+        "default": "./dist/apps/index.js"
+      }
     },
     "./pages": {
-      "types": "./dist/pages/index.d.ts",
-      "import": "./dist/pages/index.mjs",
-      "require": "./dist/pages/index.js"
+      "import": {
+        "types": "./dist/pages/index.d.mts",
+        "default": "./dist/pages/index.mjs"
+      },
+      "require": {
+        "types": "./dist/pages/index.d.ts",
+        "default": "./dist/pages/index.js"
+      }
     },
     "./metadata-translations": {
-      "types": "./dist/metadata-translations/index.d.ts",
-      "import": "./dist/metadata-translations/index.mjs",
-      "require": "./dist/metadata-translations/index.js"
+      "import": {
+        "types": "./dist/metadata-translations/index.d.mts",
+        "default": "./dist/metadata-translations/index.mjs"
+      },
+      "require": {
+        "types": "./dist/metadata-translations/index.d.ts",
+        "default": "./dist/metadata-translations/index.js"
+      }
     },
     "./plugin": {
-      "types": "./dist/plugin.d.ts",
-      "import": "./dist/plugin.mjs",
-      "require": "./dist/plugin.js"
+      "import": {
+        "types": "./dist/plugin.d.mts",
+        "default": "./dist/plugin.mjs"
+      },
+      "require": {
+        "types": "./dist/plugin.d.ts",
+        "default": "./dist/plugin.js"
+      }
     }
   },
   "scripts": {

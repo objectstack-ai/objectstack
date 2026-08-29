@@ -2,14 +2,19 @@
   "name": "@objectstack/plugin-security",
   "version": "17.2.0",
   "license": "Apache-2.0",
-  "description": "Security Plugin for ObjectStack \u2014 RBAC, RLS, and Field-Level Security Runtime",
+  "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "scripts": {
