@@ -63,6 +63,22 @@
  * reserved for platform-provided objects, and its module header records what a
  * fourth hand-rolled copy of the prefix heuristic cost the last time.
  *
+ * ## The declaration set has to be the deployment's own, or the question is unaskable
+ *
+ * "No declaration accounts for this table" is only answerable when the composed
+ * object set actually MIRRORS what this deployment's `os serve` boot registers.
+ * On a project with a compiled artifact and no host config, the composed set is
+ * the artifact plus the platform FLOOR — measured: `sys_metadata` and its four
+ * siblings, `sys_migration`, `sys_migration_journal`, `sys_metadata_activation`,
+ * `sys_secret`, and nothing else — so a database carrying the other ~40
+ * platform tables would have every one of them reported. That is the cry-wolf
+ * failure, from a knowingly partial premise rather than from a wrong predicate.
+ *
+ * So the sweep runs only when `composition.hostConfigLoaded` is true — the same
+ * discriminator #12953's ruling kept for consumers, and for the same reason: a
+ * composition that does not mirror the deployment produces an UNMEASURED
+ * result, and an unmeasured result must say so rather than render as findings.
+ *
  * ## ⛔ "Could not look" is never reported as "nothing found"
  *
  * Every path that fails to obtain an answer returns {@link UnmanagedTablesUnreadable}
@@ -297,13 +313,27 @@ const unreadable = (detail: string): UnmanagedTablesUnreadable => ({
  *
  * @param driver the driver whose managed set the plan diffed.
  * @param declaredObjects everything the booted stack registered (`stack.allObjects()`).
+ * @param composition what the boot composed — read for `hostConfigLoaded`, the
+ *   premise above.
  * @param normalize `normalizeRows` — flattens the three dialect result shapes.
  */
 export async function collectUnmanagedTables(opts: {
   driver: unknown;
   declaredObjects: readonly unknown[];
+  composition: { hostConfigLoaded: boolean; hostConfigPath: string | null };
   normalize: (result: unknown) => Record<string, unknown>[];
 }): Promise<UnmanagedTablesReport> {
+  if (!opts.composition.hostConfigLoaded) {
+    return unreadable(
+      opts.composition.hostConfigPath === null
+        ? 'this project has no host config, so the composed object set is the compiled artifact plus the '
+          + 'platform floor rather than what `os serve` registers — against a knowingly partial declaration '
+          + 'set, "declared by nothing" is UNMEASURED rather than false'
+        : `the host config ${opts.composition.hostConfigPath} did not load, so the composed object set covers `
+          + 'only a fraction of this deployment — "declared by nothing" is UNMEASURED against it',
+    );
+  }
+
   const managed = readManagedTableNames(opts.driver);
   if (managed === null) {
     return unreadable(

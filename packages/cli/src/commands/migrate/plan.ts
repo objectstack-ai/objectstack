@@ -187,6 +187,7 @@ export default class MigratePlan extends Command {
       const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
         driver: stack.driver,
         declaredObjects: stack.allObjects(),
+        composition: stack.composition,
         normalize: normalizeRows,
       });
 

@@ -69,15 +69,20 @@ function fakeDriver(opts: {
 /** Catalog rows in the sqlite shape the sweep's own SELECT produces. */
 const rows = (...names: string[]) => names.map((name) => ({ table_name: name }));
 
+/** A composition that mirrors the deployment — the premise the sweep requires. */
+const MIRRORED = { hostConfigLoaded: true, hostConfigPath: '/app/objectstack.config.ts' };
+
 async function sweep(opts: {
   managed?: string[] | null;
   declared?: Array<{ name: string }>;
   client?: string | null;
   answer?: unknown | (() => unknown);
+  composition?: { hostConfigLoaded: boolean; hostConfigPath: string | null };
 }): Promise<UnmanagedTablesReport> {
   return collectUnmanagedTables({
     driver: fakeDriver(opts),
     declaredObjects: opts.declared ?? [],
+    composition: opts.composition ?? MIRRORED,
     normalize,
   });
 }
@@ -255,6 +260,31 @@ describe('collectUnmanagedTables — every no-answer path is unreadable, not emp
       answer: [{ TABLE_NAME: 'sys_scim_provider' }],
     });
     expect(report).toMatchObject({ status: 'read', tables: [{ table: 'sys_scim_provider' }] });
+  });
+
+  it('is unreadable when no host config was loaded — the declaration set is knowingly partial', async () => {
+    // Measured: with a compiled artifact and NO config, the composed set is the
+    // artifact plus the platform FLOOR — ten objects, of which the `sys_*` half
+    // is `sys_metadata` + its four siblings, `sys_migration`,
+    // `sys_migration_journal`, `sys_metadata_activation`, `sys_secret`. A
+    // database carrying the other ~40 platform tables would have every one of
+    // them reported. That is the cry-wolf shape, and it is UNMEASURED, not
+    // false.
+    const noConfig = await sweep({
+      managed: ['sys_metadata'],
+      answer: rows('sys_user', 'sys_session', 'sys_account'),
+      composition: { hostConfigLoaded: false, hostConfigPath: null },
+    });
+    expect(noConfig.status).toBe('unreadable');
+    expect((noConfig as { detail: string }).detail).toContain('no host config');
+
+    const brokenConfig = await sweep({
+      managed: ['sys_metadata'],
+      answer: rows('sys_user'),
+      composition: { hostConfigLoaded: false, hostConfigPath: '/app/objectstack.config.ts' },
+    });
+    expect(brokenConfig.status).toBe('unreadable');
+    expect((brokenConfig as { detail: string }).detail).toContain('/app/objectstack.config.ts');
   });
 
   it('is unreadable when the managed map cannot be read', async () => {
