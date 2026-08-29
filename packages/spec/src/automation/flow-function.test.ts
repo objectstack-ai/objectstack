@@ -191,7 +191,11 @@ describe('defineStack({ functions }) — the authoring surface (#4396)', () => {
 // ignores everything else by construction, so a misspelled `effect` was
 // dropped at the schema and then not looked for — and the failure is the quiet
 // direction: the function registers, runs, and its writes are counted as none,
-// keeping #4354's broken-sweep query silent on the one run that needed it.
+// so the run reports `selected > 0, acted 0, unmeasured 0` — which SATISFIES
+// #4354's broken-sweep FIRST FILTER. The run lands in the candidate set
+// reading exactly like a dead sweep, on a flow that did its work; the `effect`
+// declaration is what would have kept it out (`unmeasured > 0`), and the
+// misspelling is what dropped it.
 describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
   const base = {
     manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },

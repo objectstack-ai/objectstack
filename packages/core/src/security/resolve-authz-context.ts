@@ -29,6 +29,7 @@ import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   ADMIN_FULL_ACCESS,
+  ADMIN_FULL_ACCESS_CAPABILITIES,
   ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
@@ -37,6 +38,11 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive } from './grant-validity.js';
+import {
+  matchesConfiguredPlatformAdmin,
+  reportLegacyPlatformAdminGrant,
+  resolvePlatformAdminEmails,
+} from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
 import { isRowActive } from './row-active.js';
 
@@ -63,7 +69,9 @@ export interface ResolvedAuthzContext {
   /**
    * [ADR-0095 D2/D3] The monotonic posture rung this principal resolves to,
    * DERIVED once here from held capability grants (never a better-auth role):
-   * `PLATFORM_ADMIN` (unscoped `admin_full_access`) > `TENANT_ADMIN`
+   * `PLATFORM_ADMIN` (an unscoped `admin_full_access` grant, or — since #11663
+   * L2 — a VERIFIED `sys_user.email` on the deployment's declared
+   * administrator list) > `TENANT_ADMIN`
    * (`organization_admin`) > `MEMBER` (the authenticated floor). `EXTERNAL` is
    * defined/test-locked but never resolved yet (no external principal type —
    * see `posture-ladder.ts`). Present only for an authenticated principal;
@@ -362,7 +370,20 @@ export async function resolveUserAuthzGrants(
   // email OR did not seed `ai_seat` — a fully-seeded API-key principal never
   // touched the table, and the batch must not start (equivalence suite pins
   // the query multiset per fixture).
-  const needsUserRow = !grants.email || !grants.permissions.includes('ai_seat');
+  //
+  // [#11663 L2] The CONFIG anchor adds a third reason to read `sys_user`: §6b's
+  // config branch compares the caller's STORED email against the declared
+  // administrator list, so the row is needed whenever that list is non-empty.
+  // Resolved here — before the batch — precisely so the read joins the SAME
+  // wave rather than opening a sixth sequential leg after it. The read stays
+  // CONDITIONAL ON CONFIG on purpose (pin P2: empty/unset config answers "not a
+  // platform admin" before touching any row), which is why a deployment that
+  // has not declared administrators issues byte-identically the same queries it
+  // issued before this leg — see the batch-equivalence goldens, which are
+  // unchanged for exactly that reason.
+  const platformAdminConfig = resolvePlatformAdminEmails();
+  const needsUserRow =
+    !grants.email || !grants.permissions.includes('ai_seat') || platformAdminConfig.emails.length > 0;
   const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
     needsUserRow ? getUserRow() : Promise.resolve(undefined),
     tryFind(ql, 'sys_member', { user_id: userId }, 200),
@@ -595,6 +616,51 @@ export async function resolveUserAuthzGrants(
     if (Object.keys(mergedTabs).length > 0) grants.tabPermissions = mergedTabs;
   }
 
+  // 6b-config. [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN —
+  //     the second route to the same `hasPlatformAdminGrant`, inside the same
+  //     derivation site. Ruled bundle 1A/2B/3A/6A/7A (design comment
+  //     5394453215; maintainer acceptance 2026-08-25). Read `platform-admin.ts`
+  //     before changing anything here; the reasoning for every branch is there.
+  //
+  //     ⚠️ The comparison reads `userRow.email` — the caller's OWN STORED row —
+  //     and never `grants.email`. `grants.email` is seeded from `opts.seedEmail`
+  //     (a caller/session-supplied string that deliberately WINS over the stored
+  //     read for RLS purposes), so deriving superuser standing from it would add
+  //     a new escalation channel inside the change meant to close one. This is
+  //     the single most important mechanical pin of this leg and it is pinned by
+  //     test: "a session payload carrying a configured address over a sys_user
+  //     row that does not resolves NON-admin".
+  //
+  //     ADDITIVE, never subtractive: nothing above is revoked here (design §5
+  //     step 3). A deployment that has declared no administrators resolves
+  //     exactly as it did — `platformAdminConfig.emails` is empty, the branch
+  //     short-circuits before it looks at any row, and the legacy grant read
+  //     above remains the only anchor.
+  const configConfersPlatformAdmin =
+    platformAdminConfig.emails.length > 0
+    && matchesConfiguredPlatformAdmin(await getUserRow(), platformAdminConfig);
+  if (configConfersPlatformAdmin) {
+    // [Choice 6A] The capability CONTENT comes from the one declaration in
+    // `@objectstack/spec` — the same object plugin-security spreads into its
+    // `admin_full_access` permission-set entry — so the derived envelope and
+    // the declared set cannot drift. The NAME is pushed for the same reason
+    // §6b pushes `ps.name`: downstream `resolvePermissionSets` resolves object
+    // grants from the name, and a config-derived admin must carry the identical
+    // envelope a grant-derived one carries.
+    hasPlatformAdminGrant = true;
+    if (!grants.permissions.includes(ADMIN_FULL_ACCESS)) grants.permissions.push(ADMIN_FULL_ACCESS);
+    for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
+      if (!grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
+    }
+  } else if (hasPlatformAdminGrant) {
+    // [#11663 P5] Standing rests on the LEGACY grant row alone. Honoured — the
+    // migration is loud, not breaking — with a once-per-process pointer at the
+    // config line that re-anchors it. The row is read only if it was already
+    // loaded, so this notice never adds a query (and so never moves the pinned
+    // query multiset for a deployment that declared nothing).
+    reportLegacyPlatformAdminGrant({ userId, email: userRow?.email });
+  }
+
   // 6c. Project the derived platform_admin built-in role (leads the list).
   if (hasPlatformAdminGrant && !grants.positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) {
     grants.positions.unshift(BUILTIN_IDENTITY_PLATFORM_ADMIN);
@@ -631,9 +697,13 @@ export async function resolveUserAuthzGrants(
  * hasPlatformAdminStanding — the ID-SHAPED platform-admin question, asked in
  * exactly one place.
  *
- * ADR-0068 D2 defines PLATFORM standing as one thing: an UNSCOPED
+ * ADR-0068 D2 defined PLATFORM standing as one thing: an UNSCOPED
  * (`organization_id = null`) `sys_user_permission_set` grant on the
- * `admin_full_access` set, held **now**. A surface that only knows a user id —
+ * `admin_full_access` set, held **now**. Since #11663 L2 there is a SECOND
+ * anchor beside it — a `sys_user` row whose VERIFIED email is on the
+ * deployment's declared administrator list (`OS_PLATFORM_OWNER_EMAIL`) — and
+ * this predicate answers for both, for free, because it is a projection rather
+ * than a copy (see below). A surface that only knows a user id —
  * a session-payload derivation, a platform-operator route gate, an
  * impersonation oracle — asks here, so it never has to re-read the grant tables
  * itself, which is the prohibition this module's header states.

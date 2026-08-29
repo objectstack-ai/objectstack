@@ -2477,6 +2477,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/seed-write-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/select-only-write-visibility.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3219,6 +3224,26 @@
     {
       "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-ttl-sweep.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

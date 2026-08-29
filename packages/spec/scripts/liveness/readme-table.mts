@@ -305,6 +305,99 @@ export function foldStateCounts(
 }
 
 /**
+ * The fold's own blind spot, made ARITHMETIC (#13083).
+ *
+ * `foldStateCounts` above reads four names and nothing else, so a `byStatus`
+ * bucket it cannot name — a ledger row written `"status": "planed"` — is dropped
+ * on the floor. Every check downstream then agrees with every other, because
+ * they are all reading the same understated fold: `renderStateCounts` computes
+ * the `classified` column as the SUM OF THE FOUR COLUMNS BESIDE IT, the
+ * freshness leg compares those bytes against a re-render of the same fold, and
+ * the README agrees with that. The published total is smaller than the ledger by
+ * exactly the typo'd population and nothing in the gate can say so — a reading
+ * that cannot come back wrong because the thing it reads is invisible to it.
+ *
+ * The fix is a SECOND, INDEPENDENT source for that number. `cat.classified` is
+ * counted by its own `++` in the walk, one per classified property, never
+ * through the `byStatus` map — so binding the artifact's total to it is the one
+ * comparison in this file whose two sides cannot be the same measurement twice.
+ *
+ * Deliberately NOT an "other" column. That would change what the artifact
+ * PUBLISHES — a fifth column, new bytes, a re-render of every row — and the
+ * defect here is that the gate cannot SEE a dropped status, not that the table
+ * should carry one. This leg leaves `renderStateCounts` byte-identical and adds
+ * a reading; the file's idiom for "a population the artifact must not hide" is a
+ * `reconcile*` returning named errors (see `reconcileStateCounts`, and the
+ * heading rule its interface states), not a wider table.
+ *
+ * Two failures reach here and only one of them is a typo:
+ *   • a bucket outside `STATUS_COLUMNS` — the #13083 case, named row by row;
+ *   • a status ADDED to `STATUS_COLUMNS` without a matching field on
+ *     `StateCountsRow` — accepted by the data-side guard in check-liveness.mts
+ *     precisely because it IS published vocabulary, and dropped here anyway.
+ *     Nothing else in either file catches that one.
+ *
+ * A `byStatus` key that is not a governed TYPE is not this leg's population: the
+ * row set is reconciled against `GOVERNED` separately (#7257), and both callers
+ * build `governed` from the same report they build `byStatus` from, so the case
+ * cannot arise here without arising there first. One population per heading.
+ */
+export function reconcileStateCountTotals({
+  governed,
+  byStatus,
+  classified,
+}: {
+  /** The governed type list the fold renders, in its order. */
+  governed: readonly string[];
+  /** The gate's `types.<type>.byStatus`, exactly as the fold reads it. */
+  byStatus: Readonly<Record<string, Readonly<Record<string, number>> | undefined>>;
+  /** The gate's `types.<type>.classified` — the walk's own counter, not derived from `byStatus`. */
+  classified: Readonly<Record<string, number | undefined>>;
+}): string[] {
+  const named = new Set<string>(STATUS_COLUMNS);
+  const errors: string[] = [];
+
+  for (const row of foldStateCounts(governed, byStatus)) {
+    const columnSum = STATUS_COLUMNS.reduce((a, c) => a + row[c], 0);
+    const walked = classified[row.type] ?? 0;
+    if (columnSum === walked) continue;
+
+    const unnamed = Object.entries(byStatus[row.type] ?? {}).filter(([s]) => !named.has(s));
+    errors.push(
+      `${row.type} — ${STATE_COUNTS_FILE} publishes ${columnSum} classified, the walk counted ${walked}` +
+        (unnamed.length
+          ? `; ${unnamed.map(([s, n]) => `${n} in \`${s}\``).join(', ')} — not one of ${STATUS_COLUMNS.join(' / ')}`
+          : '; no unnamed status accounts for the gap — the fold and the walk have come apart for another reason'),
+    );
+  }
+
+  return errors;
+}
+
+/** The prescription printed under a total that does not reconcile. */
+export const STATE_COUNTS_TOTALS_GUIDANCE = [
+  'The count columns are a FOLD of four status names, and this is the arithmetic that',
+  'says the fold dropped something (#13083). It is NOT a stale-artifact failure, and',
+  `\`${STATE_COUNTS_GEN_COMMAND}\` is not the repair: the generator folds through`,
+  'exactly the same four names, so it would only re-publish the same understated total.',
+  '',
+  'Read the buckets named above:',
+  '',
+  `  • a MISSPELLED status in a ledger — the ordinary case. Fix the value in`,
+  '    packages/spec/liveness/<type>.json; the unrecognized-status failure above names',
+  '    the offending row. Never add the misspelling to STATUS_COLUMNS to get green.',
+  '',
+  '  • a status DELIBERATELY added to STATUS_COLUMNS — then the vocabulary grew and',
+  '    the fold did not. `StateCountsRow`, `foldStateCounts` and `renderStateCounts`',
+  '    all name the four columns by hand, and a fifth one publishes as a COLUMN, which',
+  '    changes what the artifact contains. That is an artifact-shape decision (#7377):',
+  '    make it deliberately, move all four sites together, and regenerate.',
+  '',
+  '⛔ Never satisfy this by editing the artifact. The number it publishes is not the',
+  'one in dispute — the population behind it is.',
+];
+
+/**
  * Render the whole artifact. The generator writes this; the gate renders it again
  * and compares BYTES.
  *

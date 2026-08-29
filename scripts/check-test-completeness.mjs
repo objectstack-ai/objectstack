@@ -84,6 +84,44 @@
 //     [--scheduled <shard-packages.txt> --package-list <turbo-ls.json>]
 //   node scripts/check-test-completeness.mjs --self-test
 //
+// ## Exit codes -- and why a REFUSAL has its own one
+//
+//   0  the log was graded and both questions above came back clean.
+//   1  a FINDING: a shortfall (Q1) or a silent scheduled package (Q2). A claim
+//      about the tree. Also a malformed command line -- see the boundary below.
+//   3  PREREQUISITE NOT MET. There was no log to grade, so nothing was measured
+//      and this says NOTHING about the tree. ⛔ NOT a finding.
+//
+// This gate used to answer a missing log with exit 1 plus a usage banner, and
+// exit 1 plus text on a gate script is, at a glance, a finding. It is not a
+// hypothetical cost: six devs on six unrelated cards, in ONE session, each ran
+// the bare form, each worked out that it was an invocation error, and each
+// reported it as NOT MEASURED. All six got it right -- that is the point. The
+// price was not a wrong verdict, it was six correct readers paying the same
+// re-derivation, with a seventh, less careful, one red PR away. And the bare
+// form is not a mistake any of them chose: the gate family
+// `scripts/pm/dispatch-gates.mjs` derives NAMES this script with no argument,
+// so the tooling hands out the invocation that cannot succeed.
+//
+// ⭐ Keep the direction straight, because this file now guards BOTH of them.
+// A gate that cannot measure and reports CLEAN is a vacuous pass -- and this
+// file already refuses that one: an empty log exits 0 saying "no vitest
+// summaries ... nothing to verify" instead of the bare word OK, and a shard
+// with ungraded packages says PARTIAL instead of OK. A gate that cannot
+// measure and reports RED is the mirror image, and it is what exit 3 ends
+// here. Both are the instrument speaking in the vocabulary of a verdict; only
+// the sign differs. Neither is fixed by making the message longer -- the EXIT
+// CODE is what a reader and a script both act on, so the refusal needs a code
+// of its own.
+//
+// ⛔ The boundary, deliberately: exit 3 is for a MISSING or UNREADABLE LOG --
+// the input this gate needs did not exist. A MALFORMED command line (an
+// unknown flag, half of the `--scheduled`/`--package-list` pair) stays exit 1.
+// That is not a prerequisite the world failed to supply, it is a typo in the
+// caller's own line, it names itself as one, and ⛔ nothing emits it: the
+// derived family prints the bare form, never a misspelled flag. So it charges
+// no reader the toll above.
+//
 // Reads a saved `turbo run test` log rather than wrapping vitest, so it needs no
 // change to the 60+ per-package vitest configs. In CI the test step tees its
 // output here. NOTE the tee: `cmd | tee f` reports TEE's exit status, so the
@@ -108,6 +146,12 @@ import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// The exit-code contract, named rather than spelled inline, so the self-test
+// below pins the ACTUAL value each path returns instead of a comment about it.
+export const EXIT_OK = 0;
+export const EXIT_FINDINGS = 1;
+export const EXIT_PREREQUISITE_NOT_MET = 3;
 
 // `@objectstack/cli:test:  Tests  381 passed | 3 skipped (384)`
 //  ^ turbo prefix (absent when vitest runs directly)   ^ tallies   ^ declared
@@ -413,6 +457,118 @@ function describeFromPackageList(listPath) {
   };
 }
 
+/**
+ * The shared refusal frame, in the wording `check-dual-build-cjs-loads.mjs` and
+ * `check-half-states.mjs` already use: what is unmet, why, the way out, and --
+ * load-bearing -- that nothing was measured, so the exit code says nothing
+ * about this gate's actual question.
+ */
+function prerequisiteNotMet({ headline, detail, fix }) {
+  return {
+    exit: EXIT_PREREQUISITE_NOT_MET,
+    lines: [
+      '',
+      `check-test-completeness: PREREQUISITE NOT MET — ${headline}`,
+      '',
+      ...detail.map((l) => (l ? `  ${l}` : '')),
+      '',
+      `  Fix:  ${fix}`,
+      '',
+      '  Nothing was measured: this gate exited before parsing a single summary line, so',
+      '  this result says NOTHING about whether every test vitest counted actually ran,',
+      '  nor about whether every scheduled package reported.',
+      '  ⛔ It is NOT a finding, and it is not evidence that anything in the tree is wrong.',
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — but a pipe reports the PIPE's`,
+      '  status, so `node scripts/check-test-completeness.mjs | tail -4` reads green either',
+      '  way. Capture `echo "EXIT=$?"` BEFORE any pipe.)',
+    ],
+  };
+}
+
+/**
+ * Read the command line and answer with EXACTLY ONE of: the paths to work from,
+ * or the verdict that stops the run. Pure over argv, and exported, so the exit
+ * codes above are PINNED by the self-test rather than asserted in prose -- the
+ * code an invocation returns is the whole subject of this contract, and a
+ * comment claiming "exit 3" is worth nothing if the branch says otherwise.
+ */
+export function invocationVerdict(argv) {
+  const stop = (verdict) => ({ verdict, paths: null });
+  let logPath = null;
+  let scheduledPath = null;
+  let packageListPath = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--scheduled') scheduledPath = argv[++i];
+    else if (arg === '--package-list') packageListPath = argv[++i];
+    else if (!arg.startsWith('--') && logPath === null) logPath = arg;
+    else {
+      // ⛔ Stays a finding-shaped exit: a typo in the caller's own line, not a
+      // prerequisite the world failed to supply. See the header boundary.
+      return stop({ exit: EXIT_FINDINGS, lines: [`check-test-completeness: unrecognized argument: ${arg}`] });
+    }
+  }
+  if (!logPath) {
+    return stop(
+      prerequisiteNotMet({
+        headline: 'this gate grades a saved `turbo run test` log, and no log was named.',
+        detail: [
+          'Usage:  node scripts/check-test-completeness.mjs <turbo-test-log>',
+          '          [--scheduled <shard-packages.txt> --package-list <turbo-ls.json>]',
+          '',
+          'The log comes from a test RUN. This gate does not run tests and cannot produce',
+          'one. CI tees it and passes the path on every invocation (.github/workflows/',
+          'ci.yml -- "Test completeness guard" in Test Core and in Dogfood), so this branch',
+          'is unreachable there and CI behaviour is unchanged.',
+          '',
+          '⚠ Arrived here from the gate family `scripts/pm/dispatch-gates.mjs` derives?',
+          'That list names this script with NO argument, which is this branch. There is no',
+          'local log to hand it, so the local reading for this gate is NOT MEASURED.',
+          '⛔ It is not a red, and there is nothing here to fix.',
+        ],
+        fix: 'pass a saved `turbo run test` log — or, running the family locally, record this gate as NOT MEASURED.',
+      }),
+    );
+  }
+  if (Boolean(scheduledPath) !== Boolean(packageListPath)) {
+    // ⛔ Also stays exit 1, and for the same reason as the unknown flag above:
+    // half a flag pair is a malformed line, not an absent prerequisite.
+    return stop({
+      exit: EXIT_FINDINGS,
+      lines: [
+        'check-test-completeness: --scheduled and --package-list go together -- the scheduled ' +
+          'list carries names only, and the turbo ls document is what resolves each to a directory.',
+      ],
+    });
+  }
+  return { verdict: null, paths: { logPath, scheduledPath, packageListPath } };
+}
+
+/**
+ * A log path was named and could not be read -- absent, a directory, permission
+ * denied. Same class as naming none: this gate obtained no log, so it measured
+ * nothing. ⛔ Not a finding.
+ */
+export function unreadableLogVerdict(logPath, message) {
+  return prerequisiteNotMet({
+    headline: `the log named on the command line could not be read: ${logPath}`,
+    detail: [
+      `Reason: ${message}`,
+      '',
+      'A named-but-unreadable log and no log at all are the same fact for this gate:',
+      'it has nothing to grade. CI checks the file exists before invoking this script',
+      '(`[ ! -f "$RUNNER_TEMP/..." ]`), so this branch is not reached there either.',
+    ],
+    fix: 'point the argument at a saved `turbo run test` log that exists and is readable.',
+  });
+}
+
+/** Print a verdict from either classifier above and leave with its own code. */
+function reportVerdict(verdict) {
+  for (const line of verdict.lines) console.error(line);
+  process.exit(verdict.exit);
+}
+
 function selfTest({ quiet = false } = {}) {
   const eq = (actual, expected, what) => {
     const a = JSON.stringify(actual);
@@ -708,6 +864,38 @@ function selfTest({ quiet = false } = {}) {
     'backstop: a reported failure was charged as silent',
   );
 
+  // -- The invocation contract: a refusal must not wear a verdict's code. ----
+  // ⛔ This block exists to make the regression LOUD, not to describe it. The
+  // defect it pins was measured six times in one session: the bare invocation
+  // -- the one the derived gate family prints -- answered exit 1 plus a usage
+  // banner, which reads as a finding. If a later edit sends it back to exit 1,
+  // these cases red on the very next invocation of this script.
+  eq(invocationVerdict([]).verdict.exit, EXIT_PREREQUISITE_NOT_MET, 'bare invocation: not the refusal code');
+  eq(invocationVerdict([]).verdict.exit === EXIT_FINDINGS, false, 'bare invocation: regressed to a finding code');
+  eq(invocationVerdict([]).paths, null, 'bare invocation: handed back paths to work from anyway');
+  eq(invocationVerdict([]).verdict.lines.some((l) => l.includes('PREREQUISITE NOT MET')), true, 'bare invocation: no refusal headline');
+  eq(invocationVerdict([]).verdict.lines.some((l) => l.includes('Nothing was measured')), true, 'bare invocation: does not say nothing was measured');
+  eq(invocationVerdict([]).verdict.lines.some((l) => l.includes('NOT a finding')), true, 'bare invocation: does not say it is not a finding');
+  // ⭐ The DUAL, and it is what makes the four assertions above readings rather
+  // than a classifier that can only ever refuse: the same function returns
+  // "proceed" for a well-formed line, and returns the path it was given.
+  eq(invocationVerdict(['t.log']).verdict, null, 'well-formed invocation: refused a usable command line');
+  eq(invocationVerdict(['t.log']).paths.logPath, 't.log', 'well-formed invocation: lost the log path');
+  eq(invocationVerdict(['t.log', '--scheduled', 's.txt', '--package-list', 'p.json']).paths.packageListPath, 'p.json', 'well-formed invocation: lost a flag value');
+  // A named log that cannot be read is the same fact as no log at all.
+  eq(unreadableLogVerdict('/nope.log', 'ENOENT').exit, EXIT_PREREQUISITE_NOT_MET, 'unreadable log: not the refusal code');
+  eq(unreadableLogVerdict('/nope.log', 'ENOENT').lines.some((l) => l.includes('NOT a finding')), true, 'unreadable log: does not say it is not a finding');
+  // ⛔ The deliberate boundary, pinned so it is a decision and not a leftover:
+  // a malformed command line is NOT a prerequisite and keeps exit 1.
+  eq(invocationVerdict(['--bogus']).verdict.exit, EXIT_FINDINGS, 'unrecognized argument: exit code moved');
+  eq(invocationVerdict(['t.log', '--scheduled', 's.txt']).verdict.exit, EXIT_FINDINGS, 'half a flag pair: exit code moved');
+  // If the codes ever collide the whole distinction is decorative.
+  eq(
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== EXIT_OK,
+    true,
+    'exit codes: the refusal code collides with a verdict code',
+  );
+
   if (!quiet) console.log('check-test-completeness: self-test OK');
 }
 
@@ -720,40 +908,15 @@ function main() {
   // Every invocation, not a lint step -- see the header note on why.
   selfTest({ quiet: true });
 
-  let logPath = null;
-  let scheduledPath = null;
-  let packageListPath = null;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--scheduled') scheduledPath = argv[++i];
-    else if (arg === '--package-list') packageListPath = argv[++i];
-    else if (!arg.startsWith('--') && logPath === null) logPath = arg;
-    else {
-      console.error(`check-test-completeness: unrecognized argument: ${arg}`);
-      process.exit(1);
-    }
-  }
-  if (!logPath) {
-    console.error(
-      'check-test-completeness: usage: check-test-completeness.mjs <turbo-test-log> ' +
-        '[--scheduled <shard-packages.txt> --package-list <turbo-ls.json>]',
-    );
-    process.exit(1);
-  }
-  if (Boolean(scheduledPath) !== Boolean(packageListPath)) {
-    console.error(
-      'check-test-completeness: --scheduled and --package-list go together -- the scheduled ' +
-        'list carries names only, and the turbo ls document is what resolves each to a directory.',
-    );
-    process.exit(1);
-  }
+  const { verdict, paths } = invocationVerdict(argv);
+  if (verdict) reportVerdict(verdict);
+  const { logPath, scheduledPath, packageListPath } = paths;
 
   let raw;
   try {
     raw = readFileSync(logPath, 'utf8');
   } catch (err) {
-    console.error(`check-test-completeness: cannot read ${logPath} -- ${err.message}`);
-    process.exit(1);
+    reportVerdict(unreadableLogVerdict(logPath, err.message));
   }
 
   const text = stripAnsi(raw);
