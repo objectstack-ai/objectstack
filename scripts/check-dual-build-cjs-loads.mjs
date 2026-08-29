@@ -93,9 +93,38 @@
  * whole gate: a runtime load failure is a fact about a dependency, a parse
  * failure is always a fact about what WE emitted. Pinned in `--self-test`.
  *
- * The ledger reconciles in both directions -- an entry that now loads must be
- * deleted in the same PR that fixes it, so a stale exemption is an error
- * rather than dead text.
+ * The ledger reconciles in BOTH directions, and "both" is two checks rather
+ * than one, because a row goes stale two different ways:
+ *
+ *   * a ledgered entry that now LOADS is a finding -- the exemption must be
+ *     deleted in the same PR that fixes it, so a stale row is an error rather
+ *     than dead text;
+ *   * a ledgered entry that is no longer in the POPULATION at all -- the
+ *     subpath stopped declaring a `require` condition, the package was renamed
+ *     or unpublished -- is a finding too, and until #13014 it was not. Nothing
+ *     else could see it: the only read of the ledger was `ledger[r.id]` from
+ *     inside the walk over DISCOVERED rows, so a key no row names was never
+ *     looked up, and a lookup that never happens cannot report. Measured on
+ *     `8cb96ec41b` before the fix -- a row exempting a package that does not
+ *     exist left the pass line byte-identical, exit 0, the id unmentioned.
+ *
+ * The second direction is the shape the card is about rather than a detail of
+ * this file: a lookup that comes back empty must be an ERROR, never silence.
+ * The same file already had it right one invariant over -- `runBehaviourProbes`
+ * refuses a probe naming an entry point that no longer exists, because it "is
+ * asserting nothing" -- so the ledger was the odd one out, not a new idea.
+ *
+ * ## Vacuity floors -- an empty sweep reports what a clean tree reports
+ *
+ * Every count in this gate's pass line is also a way for it to pass having read
+ * nothing: a manifest walk that discovers nothing, an `exports` resolver that
+ * reads no `require` condition, a CommonJS collector that matches no file, a
+ * probe table that was emptied. Each produces zero findings, and zero findings
+ * is exactly what success looks like. So each carries a floor measured on
+ * `8cb96ec41b` and held with margin, and below any of them the gate REFUSES
+ * (`exit 2`) rather than passing. Same idiom and same reason as
+ * `check-keyed-text-bounds.mjs` (five floors) and
+ * `check-undeclared-dep-imports.mjs` (three).
  *
  * ## Where it runs, and why not in the lint job
  *
@@ -215,7 +244,69 @@ const DUAL_FORMAT_BEHAVIOUR_PROBES = [
 
 const EXIT_OK = 0;
 const EXIT_FINDINGS = 1;
+const EXIT_REFUSE = 2;
 const EXIT_PREREQ = 3;
+
+// ---------------------------------------------------------------------------
+// Vacuity floors -- see the header. Measured on `8cb96ec41b` (a full `pnpm
+// build`, then this gate), each floor held with margin. Re-measuring UP is
+// free; LOWERING one to make a run pass is the move this block exists to make
+// visible in a diff.
+
+const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1 });
+const MIN_ENTRIES = 90;
+const MIN_PACKAGES = 58;
+const MIN_CJS_FILES = 520;
+const MIN_PROBES = 1;
+
+/**
+ * The first floor a run falls below, as a refusal message -- or `null` when
+ * every count clears. Pure, so `--self-test` drives every floor with no tree.
+ *
+ * @param {{entries?: number, packages?: number, cjsFiles?: number, probes?: number}} counts
+ * @returns {string | null}
+ */
+export function floorProblem(counts) {
+  const rows = [
+    [counts?.entries ?? 0, MIN_ENTRIES, MEASURED.entries, 'published `require` entry point(s)',
+      'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.'],
+    [counts?.packages ?? 0, MIN_PACKAGES, MEASURED.packages, 'publishable package(s)',
+      'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.'],
+    [counts?.cjsFiles ?? 0, MIN_CJS_FILES, MEASURED.cjsFiles, 'emitted CommonJS file(s)',
+      'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.'],
+    [counts?.probes ?? 0, MIN_PROBES, MEASURED.probes, 'cross-format behaviour probe(s) run',
+      'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.'],
+  ];
+  for (const [got, min, measured, what, why] of rows) {
+    if (got >= min) continue;
+    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on 8cb96ec41b).\n`
+      + `  ${why}\n`
+      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read.';
+  }
+  return null;
+}
+
+/**
+ * Ledger rows naming an id the discovered population does not contain. Pure.
+ *
+ * A separate pass over `Object.keys(ledger)` rather than another branch inside
+ * the row walk, and that is the whole point: the row walk can only ever reach a
+ * key some row NAMES, so the orphan direction is unreachable from there. See
+ * the header for the measurement.
+ *
+ * @param {Record<string, {reason?: string}>} ledger
+ * @param {{id: string}[]} rows
+ * @returns {string[]}
+ */
+export function orphanLedgerRows(ledger, rows) {
+  const ids = new Set((rows ?? []).map((r) => r.id));
+  return Object.keys(ledger ?? {})
+    .filter((id) => !ids.has(id))
+    .sort()
+    .map((id) => `${id} — ${BASELINE_PATH} exempts an entry point that is not in the population: `
+      + 'no published `require` condition resolves to it. Delete the row — it is exempting nothing, '
+      + 'and a reader takes it for coverage that was never checked.');
+}
 
 const PARSE_CONCURRENCY = 8;
 
@@ -451,7 +542,7 @@ export function isParseFailure(stderr) {
 // ---------------------------------------------------------------------------
 
 /**
- * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], cjsFileCount: number, probesRun: number}>}
+ * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, probesRun: number}>}
  */
 export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) {
   const rows = collectEntries(root);
@@ -459,6 +550,10 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   const prereq = [];
   const ledgerHits = [];
   const staleLedger = [];
+  // Computed off the population alone, so it survives the prerequisite early
+  // return below: an orphaned exemption is a fact about the ledger, not about
+  // whether anything was built.
+  const orphanLedger = orphanLedgerRows(ledger, rows);
   let cjsFileCount = 0;
 
   for (const r of rows) {
@@ -472,7 +567,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
     r.cjsFiles = commonJsFilesUnder(r.distDir, r.isModuleType);
     cjsFileCount += r.cjsFiles.length;
   }
-  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, cjsFileCount, probesRun: 0 };
+  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun: 0 };
 
   // PARSES — over the union of emitted CommonJS files, deduped across the
   // several entries a package may declare.
@@ -512,7 +607,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   const probeResults = await runBehaviourProbes(root, rows, probes);
   findings.push(...probeResults.findings);
 
-  return { rows, findings, prereq, ledgerHits, staleLedger, cjsFileCount, probesRun: probeResults.ran };
+  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun: probeResults.ran };
 }
 
 /** Read the expectation a probe declares. Only `spec-version` exists today. */
@@ -575,7 +670,7 @@ function readLedger(root) {
 async function main(argv) {
   const root = REPO_ROOT;
   const ledger = readLedger(root);
-  const { rows, findings, prereq, ledgerHits, staleLedger, cjsFileCount, probesRun } = await scan(root, ledger);
+  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun } = await scan(root, ledger);
 
   if (argv.includes('--list')) {
     for (const r of rows) console.log(`${r.id.padEnd(48)} ${r.target}`);
@@ -591,7 +686,21 @@ async function main(argv) {
     return EXIT_PREREQ;
   }
 
-  const problems = [...findings, ...staleLedger];
+  // ⛔ Before any verdict: a run that read (almost) nothing must refuse, not
+  // report the clean tree. Ordered after the prerequisite check so an unbuilt
+  // tree still answers 3 — "nothing was measured" has its own code.
+  const floor = floorProblem({
+    entries: rows.length,
+    packages: new Set(rows.map((r) => r.pkg)).size,
+    cjsFiles: cjsFileCount,
+    probes: probesRun,
+  });
+  if (floor !== null) {
+    console.error(`check:dual-build-cjs-loads REFUSES — ${floor}`);
+    return EXIT_REFUSE;
+  }
+
+  const problems = [...findings, ...staleLedger, ...orphanLedger];
   if (problems.length) {
     console.error(`✗ check:dual-build-cjs-loads — ${problems.length} finding(s) across ${rows.length} published require entry point(s):`);
     for (const f of problems) console.error(`  ✗ ${f}`);
@@ -705,6 +814,25 @@ export async function selfTest() {
     const r3 = await scan(root, { '@t/good#.': { reason: 'stale' } }, []);
     t('a ledger entry that now loads is a finding (shrink-only)', r3.staleLedger.some((s) => s.startsWith('@t/good#.')), JSON.stringify(r3.staleLedger));
 
+    // THE #13014 case: a row whose id left the population. Unreachable from
+    // the row walk by construction, so it needs its own pass and its own pin.
+    const rOrphan = await scan(root, { '@t/vanished#./gone': { reason: 'exempts an entry point that no longer exists' } }, []);
+    t('THE #13014 case: a ledger row naming an entry NOT in the population is a finding',
+      rOrphan.orphanLedger.some((s) => s.startsWith('@t/vanished#./gone')), JSON.stringify(rOrphan.orphanLedger));
+    t('…and the finding says the row is exempting nothing',
+      rOrphan.orphanLedger.some((s) => s.includes('exempting nothing')));
+    t('…and it is reported even with the rest of the tree clean',
+      rOrphan.orphanLedger.length === 1, JSON.stringify(rOrphan.orphanLedger));
+    // GREEN CONTROL — the half that proves the new pass is not just "always
+    // red". A row that DOES name a live entry point must stay silent here.
+    t('GREEN CONTROL — a ledger row naming a live entry point is not an orphan',
+      r2.orphanLedger.length === 0, JSON.stringify(r2.orphanLedger));
+    t('GREEN CONTROL — an empty ledger produces no orphans', r1.orphanLedger.length === 0);
+    // Pure, so it can be driven without a tree at all.
+    t('orphanLedgerRows() reads the ids, not the order',
+      orphanLedgerRows({ 'b#.': {}, 'a#.': {} }, [{ id: 'a#.' }]).length === 1
+      && orphanLedgerRows({ 'b#.': {}, 'a#.': {} }, [{ id: 'a#.' }])[0].startsWith('b#.'));
+
     // ── AGREES: the cross-format behaviour probe, both directions ────────────
     writePkg(root, 'agree', { name: '@t/agree', version: '0.0.0', ...dual }, {
       'dist/index.js': "export const v = () => 'same';\n",
@@ -757,10 +885,37 @@ export async function selfTest() {
     rmSync(root, { recursive: true, force: true });
   }
 
+  // ── the vacuity floors, each driven to zero ──────────────────────────────
+  //
+  // A floor that cannot refuse is the joke this card is about, so every one is
+  // driven down individually AND the measured tuple is asserted to clear them
+  // all — a floor accidentally set above its own measurement would red every
+  // real run, which is the opposite failure and just as invisible in review.
+  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes };
+  t('FLOOR — the values measured on 8cb96ec41b clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
+  t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
+  t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
+  t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
+  t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', floorProblem({ ...full, probes: 0 }) !== null);
+  t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
+  t('FLOOR — the refusal names the count, the floor and the measurement',
+    /measured only 0 .* below the floor of \d+ \(613 on 8cb96ec41b\)/s.test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
+    JSON.stringify(floorProblem({ ...full, cjsFiles: 0 })));
+  t('FLOOR — every floor sits at or below the value it was measured from',
+    MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
+    && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes);
+  t('FLOOR — the refusal code is distinct from findings and prerequisite',
+    EXIT_REFUSE !== EXIT_FINDINGS && EXIT_REFUSE !== EXIT_PREREQ && EXIT_REFUSE !== EXIT_OK);
+
   // ── the real ledger is well-formed and shrink-only in shape ───────────────
   const realLedger = readLedger(REPO_ROOT);
   t('every real ledger entry carries a reason', Object.values(realLedger).every((v) => typeof v?.reason === 'string' && v.reason.length > 20));
   t('every real ledger key is `<package>#<subpath>`', Object.keys(realLedger).every((k) => /^[^#]+#(\.|\.\/.+|\(main\))$/.test(k)));
+  // The shipped ledger against the REAL population — the shipped half of the
+  // orphan direction, and the one a self-test over fixtures cannot give.
+  t('every shipped ledger row names a live require entry point',
+    orphanLedgerRows(realLedger, collectEntries(REPO_ROOT)).length === 0,
+    JSON.stringify(orphanLedgerRows(realLedger, collectEntries(REPO_ROOT))));
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
@@ -768,7 +923,7 @@ export async function selfTest() {
     console.error(`✗ check-dual-build-cjs-loads self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both ledger directions, and the parse failure the ledger may never silence).`);
+  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, and the parse failure the ledger may never silence).`);
   return EXIT_OK;
 }
 
