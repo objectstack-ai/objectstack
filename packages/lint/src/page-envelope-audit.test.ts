@@ -235,12 +235,16 @@ describe('cycle guard — a self-referential page terminates instead of killing 
   });
 
   it('terminates on a cycle that goes through an ARRAY rather than a record', () => {
-    // `const ring = [component]; component.properties.children = ring` — no
-    // record repeats on the path, so a guard that only tracked records would
-    // still die here.
+    // A ring with NO record on it: the array contains ITSELF. This is the
+    // shape that separates this walk from the shared component walk —
+    // `walkPageComponents` only ever recurses on records, so an ancestor set
+    // of records is enough there, while `collectBare` descends into arrays as
+    // values, which makes an array a cycle carrier in its own right. A
+    // record-only ancestor set still dies here, which is why the guard's set
+    // holds any object identity rather than just records.
     const ring: unknown[] = [];
+    ring.push(ring);
     const node: AnyRec = { type: 'page:card', visibleWhen: BARE, properties: { children: ring } };
-    ring.push(node);
     const page: AnyRec = {
       name: 'cyc_array',
       label: 'Cyclic',
