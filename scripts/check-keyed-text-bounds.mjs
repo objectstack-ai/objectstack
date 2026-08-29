@@ -1355,9 +1355,28 @@ export function selfTest() {
     t('PROVENANCE — the record carries the ref it was measured on, inside the frozen record',
       typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref) && Object.isFrozen(MEASURED),
       JSON.stringify(MEASURED.ref));
-    t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
+    t('PROVENANCE — the refusal names the ref and the measurement',
       (floorProblem({ ...MEASURED, files: 0 }) ?? '').includes(MEASURED.ref),
       JSON.stringify(floorProblem({ ...MEASURED, files: 0 })));
+    // ⚠️ The case above is NOT sufficient, and an ablation proved it: replacing
+    // `${MEASURED.ref}` in the refusal with the same sha typed out by hand
+    // leaves the OUTPUT identical, so an assertion over the output stays green
+    // while the ref and the count have become editable apart -- which is the
+    // whole defect this file was repaired for. The only thing separating
+    // "interpolated from the record" from "restated and currently agreeing" is
+    // that the literal occurs exactly ONCE in the CODE: inside the record.
+    //
+    // Comments are masked first, with this tree's own masker, because PROSE
+    // naming the ref is fine and sometimes necessary -- the header explains how
+    // to reproduce the census, and a sibling docblock may date a different
+    // claim to the same commit. What may never happen twice is a ref the
+    // MACHINE reads, because that is the pair that can drift apart.
+    const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const ownCode = blank(ownSource, scanSource(ownSource).comment);
+    t('PROVENANCE — the ref literal appears exactly ONCE in the CODE: inside the record. '
+      + 'Every other site interpolates it, so a count and its tree cannot be edited apart',
+      ownCode.split(MEASURED.ref).length - 1 === 1,
+      `${ownCode.split(MEASURED.ref).length - 1} code occurrence(s) of the ref literal`);
     const provDrifted = provenanceLine({
       files: 112, objects: 117, indexEntries: 251, textFields: 589, keyedTextColumns: 148,
     });

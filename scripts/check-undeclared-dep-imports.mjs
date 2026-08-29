@@ -954,8 +954,27 @@ function selfTest() {
     t('PROVENANCE — the census is a CONSTANT, not a comment: every count is a number code can read',
       [MEASURED.packages, MEASURED.scannedFiles, MEASURED.specifiers].every(Number.isInteger));
     const floorRefusal = floorProblems({ packages: [], scannedFiles: 99999, specifiers: 99999 }) ?? '';
-    t('PROVENANCE — the refusal reads the ref AND the measurement from the record',
+    t('PROVENANCE — the refusal names the ref AND the measurement',
       floorRefusal.includes(MEASURED.ref) && floorRefusal.includes(String(MEASURED.packages)), floorRefusal);
+    // ⚠️ The case above is NOT sufficient, and an ablation proved it: replacing
+    // `${MEASURED.ref}` in the refusal with the same sha typed out by hand
+    // leaves the OUTPUT identical, so an assertion over the output stays green
+    // while the ref and the count have become editable apart -- which is the
+    // whole defect this file was repaired for. The only thing separating
+    // "interpolated from the record" from "restated and currently agreeing" is
+    // that the literal occurs exactly ONCE in the CODE: inside the record.
+    //
+    // Comments are masked first, with this tree's own masker, because PROSE
+    // naming the ref is fine and sometimes necessary -- the header explains how
+    // to reproduce the census, and a sibling docblock may date a different
+    // claim to the same commit. What may never happen twice is a ref the
+    // MACHINE reads, because that is the pair that can drift apart.
+    const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const ownCode = blank(ownSource, scanSource(ownSource).comment);
+    t('PROVENANCE — the ref literal appears exactly ONCE in the CODE: inside the record. '
+      + 'Every other site interpolates it, so a count and its tree cannot be edited apart',
+      ownCode.split(MEASURED.ref).length - 1 === 1,
+      `${ownCode.split(MEASURED.ref).length - 1} code occurrence(s) of the ref literal`);
     const provDrifted = provenanceLine({ packages: 78, scannedFiles: 2085, specifiers: 1819 });
     t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
       provDrifted.includes('78/2085/1819')
