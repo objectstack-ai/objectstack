@@ -1901,6 +1901,78 @@ function selfTest() {
       'splitTopLevel counted a nested or templated comma as a separator',
     );
     ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
+
+    // [#13227] The MODIFIER RUN, pinned at every length TypeScript admits and
+    // in the order it admits them. `private readonly code: string` parsed as a
+    // parameter named `readonly` because the strip was anchored-plus-`g`,
+    // which takes exactly ONE modifier off. The run is up to three long
+    // (accessibility → `override` → `readonly`), measured against the repo's
+    // own TypeScript rather than assumed from the card's two-modifier example.
+    for (const [params, expected, note] of [
+      ['code: string, msg: string', 'code,msg', 'no modifier'],
+      ['readonly code: string', 'code', 'one modifier'],
+      ['private code: string', 'code', 'one modifier, accessibility'],
+      ['private readonly code: string, private readonly msg: string', 'code,msg', 'two modifiers, both parameters'],
+      ['public readonly code: string, msg: string', 'code,msg', 'two modifiers, mixed list'],
+      ['protected readonly code: string', 'code', 'two modifiers, protected'],
+      ['override readonly code: string', 'code', 'two modifiers, no accessibility'],
+      ['private override readonly code: string', 'code', 'THREE modifiers — the maximum'],
+      ['public override readonly code: string, msg: string', 'code,msg', 'three modifiers, mixed list'],
+      ['private readonly code: Map<string, number> = x, b?: string', 'code,b', 'modifier run plus a generic default'],
+      ['...rest: string[]', 'rest', 'rest parameter, unchanged by the run'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames mis-read a parameter list (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // ⛔ The NEGATIVE half — the strip must not become a match-everything.
+    // None of these words is reserved, so each is a legal parameter name, and
+    // `override` is one THREE TIMES in this repo's own `packages/**` source
+    // (`observability-service-plugin.ts`, `cache-service-plugin.ts`,
+    // `storage-service-plugin.ts`). A run that ate them would rename a real
+    // parameter and hand `helperCodesFor` a wrong INDEX — a finding that reads
+    // as ordinary while naming a value from another argument position.
+    for (const [params, expected, note] of [
+      ['ctx: PluginContext, override?: ErrorReporter', 'ctx,override', 'a parameter named `override`'],
+      ['override: MetricsRegistry | undefined', 'override', '`override` alone'],
+      ['readonly: string, message: string', 'readonly,message', 'a parameter named `readonly`'],
+      ['public: number', 'public', 'a parameter named `public`'],
+      ['readonly : string', 'readonly', '`readonly` spaced off its own colon — no name follows the run'],
+      ['private: string, readonly: string', 'private,readonly', 'two modifier-WORDS used as names'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames ate a real parameter name (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // [#13227] End to end through the real `deriveSites`, because the parse is
+    // only interesting for what it costs downstream: the whole helper was
+    // DROPPED — no site AND no unresolved — which is the silent-drop class this
+    // gate exists to refuse. Paired with the single-modifier POSITIVE CONTROL,
+    // so the zero on `main` was a reading rather than a dead harness.
+    {
+      const helper = (params, arg) =>
+        `class E {\n  constructor(${params}) {\n    (this as any).code = code;\n  }\n}\n` +
+        `throw new E('${arg}', 'x');\n`;
+      const derive = (source) =>
+        deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+      for (const [params, probe, note] of [
+        ['readonly code: string, readonly message: string', 'ONE_MODIFIER_HELPER', 'the single-modifier positive control'],
+        ['private readonly code: string, readonly message: string', 'PARAM_PROPERTY_HELPER', 'the two-modifier parameter property'],
+      ]) {
+        const { sites, unresolved } = derive(helper(params, probe));
+        ok(
+          sites.some((s) => s.shape === 'codehelper' && s.code === probe),
+          `a constructor code helper was dropped — ${note} derived ${sites.length} site(s) and ` +
+            `${unresolved.length} unresolved, neither naming ${probe}`,
+        );
+      }
+    }
   }
 
   // [#9568] The value-level reduction: a constant holding a TERNARY or a
