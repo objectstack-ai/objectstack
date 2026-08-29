@@ -43,11 +43,34 @@ const NOW = Date.parse('2026-08-29T00:00:00.000Z');
 
 interface Recorded { object: string; where: unknown }
 
-/** A minimal ObjectQL double that records the reads it served. */
+/**
+ * A minimal ObjectQL double that records the reads it served.
+ *
+ * Its `matches` REFUSES every top-level `$` key rather than implementing one.
+ * The resolver issues no combinator query on this path, so the alternative to
+ * a throw is not a combinator implementation — it is a matcher that reads
+ * `$or` as an ordinary FIELD NAME, compares `row.$or` (undefined) against the
+ * array, matches nothing, and leaves the suite asserting on an empty result
+ * with nothing erroring. `check:where-matcher` grades exactly that shape, and
+ * refusing is what most of this repo's conforming doubles do — including the
+ * sibling double in `resolve-authz-context.batch-equivalence.test.ts`, whose
+ * spelling this copies verbatim.
+ *
+ * ⛔ Do not "fix" a future red here by teaching this double `$or`/`$and`: a
+ * test fixture that grows query-engine semantics is a second, unreviewed
+ * implementation of the driver's filter contract. If the resolver ever does
+ * issue a combinator query on this path, that is a change worth seeing fail
+ * loudly first.
+ *
+ * `$in` is untouched by the refusal and stays supported: it appears in VALUE
+ * position (`{ email: { $in: [...] } }`), which is a per-field operator the
+ * resolver really does issue, not a top-level combinator.
+ */
 function makeQl(tables: Record<string, Array<Record<string, unknown>>>) {
   const calls: Recorded[] = [];
   const matches = (row: Record<string, unknown>, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
       return row[k] === v;
     });
