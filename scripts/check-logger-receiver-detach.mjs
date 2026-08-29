@@ -165,7 +165,11 @@ const repoRoot = resolve(HERE, '..');
  * local assertion would stay green, and the gate would silently drop out of every
  * dispatch brief.
  */
-const ROOT_DIR_WATCH_HINTS = ['packages/**/*.ts', 'examples/**/*.ts', 'apps/**/*.ts'];
+const ROOT_DIR_WATCH_HINTS = [
+    'packages/**/*.ts', 'packages/**/*.tsx', 'packages/**/*.mts',
+    'examples/**/*.ts',
+    'apps/**/*.ts', 'apps/**/*.tsx',
+];
 
 /**
  * The three roots that hold shipped runtime code. Measured cost of stopping
@@ -657,9 +661,27 @@ function selfTest() {
     expect('…and that sibling is NOT walked (limitation 2 is real, not aspirational)',
         Boolean(testSibling) && !walked.has(testSibling));
 
-    // The dispatch-gates declaration names the roots actually walked.
-    expect('every walked root is covered by a declared watch hint',
-        SCAN_ROOTS.every((r) => ROOT_DIR_WATCH_HINTS.some((h) => h.startsWith(`${r}/`))));
+    // ── The dispatch-gates declaration, held to the walk in BOTH directions ──
+    //
+    // ⛔ Checked with a local matcher rather than by importing
+    // `scripts/pm/dispatch-gates.mjs`: the import specifier would itself be a path
+    // literal in this file's source, so the derivation would hand this gate that
+    // module's declared population as if it were this gate's own -- a fabricated
+    // watch surface, and a gate a reviewing seat cannot run in place.
+    const declaresFile = (f) => ROOT_DIR_WATCH_HINTS.some((h) => {
+        const m = /^([^/]+)\/\*\*\/\*(\.[a-z]+)$/.exec(h);
+        return Boolean(m) && f.startsWith(`${m[1]}/`) && f.endsWith(m[2]);
+    });
+    const undeclared = files.filter((f) => !declaresFile(f));
+    expect(`every walked file is named by a declared hint -- an undeclared one is a file this `
+        + `gate opens and no dispatch brief can see (${undeclared.length} miss(es)`
+        + `${undeclared.length ? `: ${undeclared.slice(0, 3).join(', ')}` : ''})`,
+        undeclared.length === 0);
+    expect('and no hint is DEAD -- each one names at least one file this gate really walks',
+        ROOT_DIR_WATCH_HINTS.every((h) => files.some((f) => {
+            const m = /^([^/]+)\/\*\*\/\*(\.[a-z]+)$/.exec(h);
+            return Boolean(m) && f.startsWith(`${m[1]}/`) && f.endsWith(m[2]);
+        })));
     expect('and no hint names a root this gate does not walk',
         ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.some((r) => h.startsWith(`${r}/`))));
 
