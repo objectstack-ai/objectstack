@@ -3053,8 +3053,11 @@ jobs:
       # --self-test first: the detector can be broken while the census is fine,
       # and a scan that stops matching would report OK while reading nothing
       # (#4868's family — DISCOVERED refuses an empty scan for that reason).
-      # It polices the retirement programme's bookkeeping; it is not investment in
-      # the driver, which stays frozen under #5499.
+      # It polices the retirement programme's bookkeeping; it is not investment
+      # in the driver. (#5499 froze that investment on 2026-08-05 and the
+      # maintainer dissolved the freeze on 2026-08-11 -- in COMMENTS on #5499,
+      # which is a `tracking` anchor and is still open. This gate's scope is the
+      # same either way: bookkeeping, never investment.)
       - name: driver-memory census gate
         run: pnpm check:driver-memory-census
 
