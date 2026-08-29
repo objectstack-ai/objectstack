@@ -154,6 +154,7 @@ import {
   closureBuildFix,
   looksLikeMissingCliCommand,
   oclifCommandFileFor,
+  owningPackageOf,
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
 
@@ -861,9 +862,22 @@ function selfTest() {
   // about them may move. Pinned as the literal remedy strings a reader acts on.
   expect(
     '#11395 the classified branches are untouched',
-    explainConfigFailure(REAL_UNBUILT_DEP_ERROR).fix === 'pnpm build' &&
-      explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts").fix === 'pnpm install && pnpm build',
+    explainConfigFailure(REAL_UNBUILT_DEP_ERROR).fix === WORKSPACE_BUILD_FIX &&
+      explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts").fix ===
+        INSTALL_THEN_BUILD_FIX,
     'the two classified remedies are the text a reader runs; they must not move',
+  );
+
+  // The two remedies are still DISTINCT and still say what they used to say
+  // about each other: a package that is on disk but unbuilt needs a build, and
+  // one that is not there at all needs an install FIRST. #12564 changed what the
+  // build half spells, not which branch prescribes it.
+  expect(
+    '#12564 the two classified remedies stay distinct',
+    WORKSPACE_BUILD_FIX !== INSTALL_THEN_BUILD_FIX &&
+      INSTALL_THEN_BUILD_FIX === `pnpm install && ${WORKSPACE_BUILD_FIX}` &&
+      WORKSPACE_BUILD_FIX !== CLI_BUILD_FIX,
+    'the unbuilt / not-installed / CLI-only remedies must not collapse into one another',
   );
 
   // -------------------------------------------------------------------------
@@ -913,6 +927,67 @@ function selfTest() {
     '#10907 …spelled repo-relative, as the baseline keys are',
     offRoot.every((p) => !p.startsWith('/') && !p.includes(REPO_ROOT)),
     `absolute paths would silently re-key every baseline entry; got ${JSON.stringify(offRoot.slice(0, 2))}`,
+  );
+
+  // -------------------------------------------------------------------------
+  // The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming
+  // is that ONE round of it clears the whole population — so the property to pin
+  // is COMPLETENESS, and the failure to refuse is a closure that names SOME of
+  // the population. A partial closure is the worse half of this card's defect: it
+  // looks derived, it is specific, and it still does not converge.
+  // -------------------------------------------------------------------------
+  const derivedClosure = closureBuildFix(onRoot);
+  expect(
+    '#12564 the live population yields a closure',
+    typeof derivedClosure.command === 'string' && derivedClosure.command.length > 0,
+    `no closure could be named for ${onRoot.length} config(s): ${derivedClosure.unknown ?? '(no reason given)'}`,
+  );
+  // Every config's OWN owner must be in the command. Compared per config against
+  // the same manifests the derivation read, not against a list written here — a
+  // list would be the hand-maintained note this derivation exists to avoid.
+  const missingOwners = onRoot
+    .map((configPath) => owningPackageOf(configPath))
+    .filter((owner) => !owner || !(derivedClosure.command ?? '').includes(`--filter=${owner}`));
+  expect(
+    '#12564 …naming every config in the population',
+    missingOwners.length === 0,
+    `${missingOwners.length} owner(s) absent from the closure (${missingOwners.join(', ')}) — a closure that ` +
+      'misses one config leaves the reader exactly the round-trip this remedy exists to remove',
+  );
+  // The CLI is in it too. Without that, the command printed under PREREQUISITE
+  // NOT MET would not clear the prerequisite it is printed for — a remedy whose
+  // success condition it cannot itself reach.
+  expect(
+    '#12564 …and the CLI the gate spawns',
+    (derivedClosure.command ?? '').includes('--filter=@objectstack/cli'),
+    'the closure must clear the CLI prerequisite it is offered as the remedy for',
+  );
+  // ⛔ ALL-OR-NOTHING. An empty population would render as a filter-less
+  // `turbo run build`, and one unowned config would render a confident command
+  // missing exactly that config. Both must come back as a REASON, never a
+  // command — the same rule `emptyPopulationVerdict` states for the verdict.
+  const emptyClosure = closureBuildFix([]);
+  const partialClosure = closureBuildFix([...onRoot, 'no/such/place/objectstack.config.ts']);
+  expect(
+    '#12564 an empty population names no closure',
+    emptyClosure.command === undefined && typeof emptyClosure.unknown === 'string',
+    `an empty population produced a command (${emptyClosure.command}) — with no filters that builds EVERYTHING`,
+  );
+  expect(
+    '#12564 …and one unowned config refuses the WHOLE closure',
+    partialClosure.command === undefined && typeof partialClosure.unknown === 'string',
+    'a closure missing one config is this card\'s own defect wearing a derivation\'s clothes',
+  );
+  // The refusals this gate is CREDITED for do not move (#12564 fence 2). The
+  // remedy got longer; nothing about it may turn a refusal into a pass, so the
+  // two headlines stay reachable and the partial round still declines to judge.
+  expect(
+    '#12564 the refusal semantics did not move',
+    measureAllConfigs(['x.ts', 'y.ts'], (c) =>
+      c === 'x.ts' ? { failure: explainConfigFailure(REAL_UNBUILT_DEP_ERROR) } : { count: 0 },
+    ).failures.length === 1,
+    'a partial round must still collect a failure — a round that reports green over an unmeasured config is ' +
+      'strictly worse than the four rounds this card is about',
   );
 
   // The SHARED probe's own anchoring (#11394). #10907 anchored this FILE; the
@@ -1004,7 +1079,9 @@ function selfTest() {
     `✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, ` +
       `stay distinct, and a failing config does not end the round; all ${FAILURE_BRANCHES.length} failure branches state ` +
       `one shared cause ONCE, with no config path in the key; the population resolves to ${onRoot.length} config(s) ` +
-      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK.`,
+      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK; ` +
+      `the build-prerequisite closure names all ${onRoot.length} of them plus the CLI, and refuses whole rather ` +
+      `than naming some.`,
   );
 }
 
