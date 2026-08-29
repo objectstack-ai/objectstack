@@ -25,9 +25,14 @@ import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
  * no value at this driver's own call site, and this module is EXPORTED, so a
  * caller hands the builder whatever string it likes. A door that cannot be
  * reached by the values it governs looks shut and is not. The narrowing would
- * additionally delete the `array_agg` / `string_agg` arms below as a side
- * effect (both left the enum at #6188), which is a second accept-face change
- * and a separate card. See {@link LOWERED_HERE}.
+ * additionally have deleted the `array_agg` / `string_agg` arms below as a side
+ * effect (both left the enum at #6188), which was a second accept-face change
+ * and a separate card: #13075, now LANDED. It did not land as a deletion —
+ * those two arms are NAMED and refused ({@link refuseRetiredAggregateFunction}),
+ * because this switch's `default` answers a `$sum` and falling through would
+ * have turned a visibly-wrong array into a plausible number. The reasoning
+ * above is unchanged by it: `function` is still a bare `string`, and the
+ * enforcement is still at the lowering site. See {@link LOWERED_HERE}.
  */
 export interface AggregationInput {
   function: string;
@@ -381,17 +386,24 @@ function malformedGroupByError(node: unknown): Error {
  * develops the day after it is typed — the note over `driver-memory`'s
  * `SUPPORTED_FIELD_OPERATORS` (#5345), applied to the aggregate vocabulary.
  *
- * ⚠️ Two entries are NOT declared by `AggregationFunction`: `array_agg` and
- * `string_agg` left the enum at #6188 (ADR-0049 enforce-or-remove) and both SQL
- * faces refuse them as undeclared names today, while this face still lowers
- * them. That divergence is real, it PRE-DATES this change, and closing it is a
- * second accept-face narrowing with its own changeset — filed as #13075 rather
- * than ridden in here. What it must not do is leak into a refusal: the messages
- * offer {@link LOWERED_AND_DECLARED}, because a remedy naming a retired
- * spelling is a remedy `AggregationNodeSchema` rejects at the protocol door.
+ * ⚠️ This roster CARRIED two entries `AggregationFunction` does not declare —
+ * `array_agg` and `string_agg`, which left the enum at #6188 (ADR-0049
+ * enforce-or-remove) while this face went on lowering them, so one query
+ * answered 400 on `driver-sql` and `driver-turso` and a `$push` array here.
+ * #13075 CLOSED that divergence: {@link buildAccumulator} names both arms and
+ * refuses them ({@link refuseRetiredAggregateFunction}), so they are off this
+ * roster too — a roster that named what the switch no longer lowers would be a
+ * lie, and it is what the refusal messages read.
+ *
+ * The reason they were kept OUT of those messages stands, and is why
+ * {@link LOWERED_AND_DECLARED} still filters rather than being collapsed into
+ * this constant: a remedy naming a retired spelling is a remedy
+ * `AggregationNodeSchema` rejects at the protocol door. The two sets are equal
+ * TODAY; the filter is what keeps that true of the next name this face lowers
+ * ahead of the enum, instead of only of those two.
  */
 const LOWERED_HERE: readonly string[] = [
-  'count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg',
+  'count', 'sum', 'avg', 'min', 'max', 'count_distinct',
 ];
 
 /**
