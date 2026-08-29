@@ -415,6 +415,21 @@ describe('#8201 — an option is offered or withheld, never shown-but-unselectab
     expect(prescription).not.toContain('disabledWhen');
   });
 
+  it('carries no bare internal issue id — the reader has no tracker', () => {
+    // `check:doc-authoring` Rule 3 owns this repo-wide, but it could not SEE
+    // this const until its hoisted-const pass learned to anchor on the
+    // `KeySetGuidance` type: the table is consumed only cross-module
+    // (`data/field.zod.ts`, `ui/view.zod.ts`), so nothing in its own file
+    // anchored it and the gate reported it clean from the day it landed. The
+    // durable half of the citation stays — ADR-0049 and ADR-0068 are in the
+    // same sentence and resolve for a reader outside this tracker.
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    const prescription = m.slice(m.indexOf('\n  • '));
+    expect(prescription).not.toMatch(/#\d{3,5}/);
+    expect(prescription).toContain('ADR-0049');
+    expect(prescription).toContain('ADR-0068');
+  });
+
   it('says what is true TODAY and leaves the decision open', () => {
     // Triage left real product pull for non-selectable field options open as a
     // maintainer decision that would widen the accepted set. The prescription

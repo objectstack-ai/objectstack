@@ -324,13 +324,22 @@ describe('checkCitationLines', () => {
 // Contract test against the REAL ledgers: the gate reports these, so a rotted
 // pointer committed to a ledger fails here too.
 describe('shipped ledgers', () => {
+  // The statuses whose `evidence` the gate scans (#13041), mirrored from
+  // `EVIDENCE_SCANNED_STATUSES` in check-liveness.mts. This filter used to read
+  // `live` alone, which is what the gate itself read — and when the gate widened
+  // to the refusal statuses this contract test would have stayed on the narrower
+  // population, re-creating one layer down the exact split the card is about:
+  // pointers the census counts and nothing verifies. `dead` stays out here for
+  // the reason the gate states there: a dead row's pointer lives in `note`.
+  const SCANNED_STATUSES = new Set(['live', 'planned', 'experimental']);
+
   it('every local evidence path resolves', () => {
     const missing: string[] = [];
     let local = 0;
     for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
       const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
       const visit = (key: string, entry: any) => {
-        if (entry?.status !== 'live' || typeof entry?.evidence !== 'string') return;
+        if (!SCANNED_STATUSES.has(entry?.status) || typeof entry?.evidence !== 'string') return;
         const r = checkEvidence(entry.evidence, (p) => existsSync(join(repoRoot, p)));
         local += r.local.length;
         r.missing.forEach((m) => missing.push(`${ledger.type}/${key} → ${m}`));
