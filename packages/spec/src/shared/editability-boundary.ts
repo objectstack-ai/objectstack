@@ -102,7 +102,7 @@ const EDITABILITY_BOUNDARY_GUIDANCE: KeySetGuidance = {
   keys: EDITABILITY_BOUNDARY_KEYS,
   prescription:
     'Editability is a FIELD-level concern. This shape gates VISIBILITY only — a '
-    + 'deliberate boundary, not a missing key (#7887): a section / page component has '
+    + 'deliberate boundary, not a missing key: a section / page component has '
     + 'no read-only semantics of its own to enforce. Write `readonly: true` (or the '
     + 'conditional `readonlyWhen` predicate) on the form field(s) inside it instead; to '
     + 'hide the whole section or component, use `visibleWhen`.',
@@ -137,8 +137,8 @@ export const SELECT_OPTION_EDITABILITY_GUIDANCE: KeySetGuidance = {
     + '(the select and radio widgets treat the FIELD-level state as the single '
     + 'authority), so a key here would be metadata the renderer never honours '
     + '(ADR-0049). To withdraw ONE option, give it the per-option `visibleWhen` '
-    + 'predicate — the one `*When` surface that also binds `current_user` (ADR-0068), '
-    + 'so an option can be withheld per record or per role, and the rule validator '
+    + 'predicate — it binds `current_user` (ADR-0068), so an option can be withheld '
+    + 'per record or per role, and the rule validator '
     + 'refuses a write of a value whose predicate is false. To freeze the WHOLE picker, '
     + 'write `readonly: true` (or the conditional `readonlyWhen` predicate) on the field '
     + 'that owns these options. If a shown-but-unselectable option ever earns a reader, '

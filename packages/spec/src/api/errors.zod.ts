@@ -376,9 +376,9 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
    * `message`.
    */
   userMessage: z.string().optional().describe(
-    'Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. '
+    'Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. '
     + 'Present only when the producer opted in at throw time; unmarked errors keep the generic '
-    + 'consumer substitution (#3821).',
+    + 'consumer substitution.',
   ),
   category: ErrorCategory.optional().describe('Error category'),
   httpStatus: z.number().optional().describe('HTTP status code'),
@@ -405,7 +405,7 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
    */
   fieldErrors: retiredKey(
     '`EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 ' +
-    '(ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every ' +
+    '(ADR-0114 D4) — the array is unchanged, only the property name. Every ' +
     'producer already emitted `fields`; `fieldErrors` was declared and never emitted, ' +
     'so a reader keying on it was reading a field no server sent.',
   ),

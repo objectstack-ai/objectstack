@@ -4,16 +4,20 @@ import { describe, it, expect } from 'vitest';
 import { buildAggregationPipeline, postProcessAggregation } from './mongodb-aggregation.js';
 
 /**
- * [#11151] The aggregand `sum` and `avg` now consume: the field path, with a
- * BOOLEAN rendered as the number it is worth. Spelled once here because the
- * pins below are about ALIAS ROUTING and stage shape — which accumulator lands
- * under which key — and the accumulator's own internals are pinned, with the
- * reasons, in `mongodb-11151-boolean-aggregand-answers.test.ts`.
+ * [#11151/#11152] The aggregand all four arithmetic/order accumulators now
+ * consume: the field path, with a BOOLEAN rendered as the number it is worth.
+ * Spelled once here because the pins below are about ALIAS ROUTING and stage
+ * shape — which accumulator lands under which key — and the accumulator's own
+ * internals are pinned, with the reasons, in
+ * `mongodb-11151-boolean-aggregand-answers.test.ts`.
  *
- * ⛔ `min` / `max` deliberately do NOT take this wrapper: they are order
- * statistics and #11249 ruled they answer `false` / `true`, not `0` / `1`. The
- * `builds min/max aggregations` case below reads their bare field path and is
- * the pin that says so from this file.
+ * `sum`/`avg` have worn the wrapper since #11151; `min`/`max` wear it since
+ * the #11152 ruling (maintainer 2026-08-28, superseding #11249's
+ * `false`/`true`): booleans aggregate as NUMBERS on every face, no
+ * per-aggregate exception. The wrapper is applied at BUILD time to every
+ * `min`/`max` because the column's type is unknown statically; at RUN time the
+ * `$cond` coerces only actual booleans — every other value takes the
+ * pass-through branch and is ranked exactly as the bare path would rank it.
  */
 const coerced = (path: string) => ({
   $cond: [{ $eq: [{ $type: path }, 'bool'] }, { $cond: [path, 1, 0] }, path],
@@ -95,8 +99,10 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
         { function: 'max', field: 'price', alias: 'max_price' },
       ],
     });
-    expect(pipeline[0].$group.min_price).toEqual({ $min: '$price' });
-    expect(pipeline[0].$group.max_price).toEqual({ $max: '$price' });
+    // [#11152] The same wrapper `$sum`/`$avg` wear — build-time on every
+    // min/max, runtime pass-through for anything that is not a boolean.
+    expect(pipeline[0].$group.min_price).toEqual({ $min: coerced('$price') });
+    expect(pipeline[0].$group.max_price).toEqual({ $max: coerced('$price') });
   });
 
   describe('postProcessAggregation', () => {

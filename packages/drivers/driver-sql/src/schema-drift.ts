@@ -389,6 +389,78 @@ export function isHashShadowColumn(name: string): boolean {
   return name.endsWith(HASH_SHADOW_SUFFIX);
 }
 
+/**
+ * The hash-shadow column that carries `indexName` (#11627), capped to MySQL's
+ * 64-character identifier limit.
+ *
+ * ⚠️ Lives HERE, beside {@link isHashShadowColumn}, rather than in the driver:
+ * #13015 was the price of the split. The ORPHAN-column pass knew the shadow
+ * vocabulary and the INDEX differ did not, so a healthy shadow-carried UNIQUE
+ * had its column protected from a drop while the index that column carries was
+ * proposed for a destructive rebuild. Both passes now ask the same module the
+ * same question, and `SqlDriver.hashShadowColumnFor` delegates here so the name
+ * the sync CREATES and the name the differ LOOKS FOR cannot drift apart.
+ *
+ * Derived from the INDEX name rather than from the column list, deliberately:
+ * one shadow serves one declared index, a composite index has no single column
+ * to name it after, and the index name is already the differ's identity for the
+ * constraint. The overflow branch keeps a truncated prefix for readability and
+ * appends a digest of the FULL name, so two long index names that share a
+ * prefix still get different shadows.
+ */
+export function hashShadowColumnFor(indexName: string): string {
+  const direct = `${indexName}${HASH_SHADOW_SUFFIX}`;
+  if (direct.length <= 64) return direct;
+  const digest = createHash('sha256').update(indexName).digest('hex').slice(0, 8);
+  const keep = 64 - HASH_SHADOW_SUFFIX.length - digest.length - 1;
+  return `${indexName.slice(0, keep)}_${digest}${HASH_SHADOW_SUFFIX}`;
+}
+
+/**
+ * One key part a hash shadow hashes: the column identity, and whether the
+ * generation expression folds it through the NULL-safe `COALESCE(col, ...)`
+ * form (ADR-0120 D3, carried into the shadow by #12998).
+ */
+export interface HashShadowKeyPart {
+  column: string;
+  nullSafe: boolean;
+}
+
+/**
+ * Read the DECLARED key parts back out of a hash shadow's stored
+ * `GENERATION_EXPRESSION` (#13015).
+ *
+ * This is what makes a shadow-carried key COMPARABLE rather than merely
+ * skippable. Since #12998 the expression carries the NULL-safe parts in their
+ * COALESCE spelling, so the FORM of the key — which columns, and which of them
+ * are folded — survives the round trip, and the differ can ask the real
+ * question ("does this shadow enforce what metadata declares?") instead of the
+ * blind one ("is this a shadow at all?").
+ *
+ * ⛔ Why the blind question is not good enough: a shadow created BEFORE #12998
+ * hashes the RAW columns, so `CONCAT` returns NULL for every NULL-organization
+ * row and the rows the COALESCE bucket exists to constrain are constrained by
+ * nothing (#5030's shape). It is indistinguishable BY NAME from a healthy one.
+ * Skipping every shadow would make that class of drift permanently invisible —
+ * trading a false destructive finding for a true silent one.
+ *
+ * MySQL stores the expression normalized and back-quoted — e.g.
+ * `unhex(sha2(concat(coalesce(`org`,_utf8mb4'__global__'),0x1f,`v`),256))` — so
+ * the key parts are exactly the back-quoted runs in key order, and the optional
+ * `coalesce(` prefix marks the folded ones. The `unhex` / `sha2` / `concat`
+ * wrapper and the `_utf8mb4'...'` literal carry no back quotes and contribute
+ * nothing.
+ */
+export function parseHashShadowKeyParts(generationExpression: string): HashShadowKeyPart[] {
+  const matches = String(generationExpression ?? '').matchAll(
+    /(coalesce\s*\(\s*)?`((?:[^`]|``)+)`/gi,
+  );
+  return [...matches].map((m) => ({
+    column: m[2]!.replace(/``/g, '`'),
+    nullSafe: m[1] != null,
+  }));
+}
+
 /** Minimal shape of an introspected physical column (see SqlDriver.introspectColumns). */
 export interface PhysicalColumn {
   name: string;
@@ -1416,6 +1488,17 @@ export interface PhysicalIndex {
    * key part is a plain column.
    */
   nullSafeColumns?: string[];
+  /**
+   * When this index is physically carried by a #11627 hash shadow, the
+   * DECLARED key parts that shadow hashes, read back from the generation
+   * expression (#13015 via #12998) by `SqlDriver.introspectIndexes`.
+   *
+   * Absent both when the index is NOT shadow-carried and when it is but the
+   * expression could not be read. {@link isHashShadowCarrier} tells those two
+   * apart — the differ compares the resolved key, and treats the unresolved
+   * carrier as not-ours-to-reconcile rather than as drift.
+   */
+  shadowKey?: HashShadowKeyPart[];
 }
 
 /**
@@ -1851,7 +1934,44 @@ function indexSignature(
  * any `COALESCE(col, <literal>)` folds NULL into one bucket, so two spellings
  * of the literal are the same constraint and must not read as drift.
  */
-function canonicalIndexKey(columns: string[], nullSafeColumns?: ReadonlyArray<string> | null): string {
+/**
+ * Is this physical index carried by a #11627 hash shadow — i.e. does it key
+ * exactly the one driver-owned generated column that stands in for the
+ * declared key MySQL could not express directly?
+ *
+ * Answerable from the index alone, by NAME: the shadow is derived from the
+ * index name ({@link hashShadowColumnFor}), so a carrier is an index whose sole
+ * key column is its own shadow. That is what makes this the FAIL-SAFE half of
+ * #13015 — it holds even when the generation expression cannot be read, and a
+ * carrier is never a thing this differ may propose destroying on a guess.
+ */
+export function isHashShadowCarrier(index: PhysicalIndex): boolean {
+  return index.columns.length === 1 && index.columns[0] === hashShadowColumnFor(index.name);
+}
+
+/**
+ * The key an index ENFORCES, which is not always the key it STORES (#13015).
+ *
+ * For an ordinary index the two are the same. For a #11627 shadow-carried
+ * UNIQUE the stored key is one VARBINARY(32) generated column and the enforced
+ * key is the declared column set the shadow hashes — so every comparison in
+ * this module has to run against THIS, or a healthy constraint reads as an
+ * index over a column no metadata declares.
+ */
+export function enforcedIndexKey(index: PhysicalIndex): {
+  columns: string[];
+  nullSafeColumns?: string[];
+} {
+  if (!index.shadowKey) {
+    return { columns: index.columns, nullSafeColumns: index.nullSafeColumns };
+  }
+  return {
+    columns: index.shadowKey.map((k) => k.column),
+    nullSafeColumns: index.shadowKey.filter((k) => k.nullSafe).map((k) => k.column),
+  };
+}
+
+export function canonicalIndexKey(columns: string[], nullSafeColumns?: ReadonlyArray<string> | null): string {
   const ns = new Set(nullSafeColumns ?? []);
   return columns.map((c) => (ns.has(c) ? `coalesce:${c}` : c)).join(',');
 }
@@ -1905,6 +2025,11 @@ export function diffManagedIndexes(args: {
       if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
       if (!p.unique || p.partial === true) return false;
       if ((p.expressions?.length ?? 0) > 0 || (p.nullSafeColumns?.length ?? 0) > 0) return false;
+      // #13015: nor is a hash-shadow carrier. Its stored key is one generated
+      // column, so the identity comparison below already excludes it — stated
+      // outright because the exclusion must survive that comparison changing,
+      // and because `replace_unique_index` DROPS the legacy name.
+      if (isHashShadowCarrier(p)) return false;
       return (
         p.columns.length === l.legacyColumns.length &&
         p.columns.every((c, i) => c === l.legacyColumns[i])
@@ -1968,10 +2093,13 @@ export function diffManagedIndexes(args: {
       continue;
     }
     // Same normalization on BOTH sides (#4884, ADR-0120 D3): column identity
-    // AND key-part form, literal-agnostic on the COALESCE literal.
+    // AND key-part form, literal-agnostic on the COALESCE literal — asked of
+    // the key the index ENFORCES, which for a #11627 shadow-carried UNIQUE is
+    // not the column it stores (#13015).
+    const pk = enforcedIndexKey(p);
     if (
       p.unique === e.unique &&
-      canonicalIndexKey(p.columns, p.nullSafeColumns) === canonicalIndexKey(e.columns, e.nullSafeColumns)
+      canonicalIndexKey(pk.columns, pk.nullSafeColumns) === canonicalIndexKey(e.columns, e.nullSafeColumns)
     ) {
       continue;
     }
@@ -1984,6 +2112,20 @@ export function diffManagedIndexes(args: {
     // (`recreate_index` → drop first) this differ cannot undo. Not ours to
     // reconcile (#4884).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
+    // #13015, fail-safe half: a hash-shadow carrier whose generation
+    // expression could NOT be read (`shadowKey` unresolved). We know by name
+    // that the index is driver-owned and that its stored key is a digest, so
+    // the identity comparison above is meaningless for it — but we do not know
+    // WHAT it hashes, and the remedy below is a DROP. Report nothing rather
+    // than propose destroying a constraint on a guess.
+    //
+    // ⛔ The `!p.shadowKey` half is load-bearing, and was measured: without it
+    // this guard swallows the RESOLVED carriers too, which silently demotes the
+    // whole fix to the blind skip — every shadow-carried index unreportable,
+    // including a pre-#12998 one hashing the RAW columns whose constraint does
+    // not cover NULL-organization rows at all. Green, quiet, and the exact
+    // trade this fix exists to refuse.
+    if (isHashShadowCarrier(p) && !p.shadowKey) continue;
     // Same name, different definition. `syncDeclaredIndexes` skips by name, so
     // this never self-heals: it has to be dropped and rebuilt. Tightening to
     // UNIQUE is destructive — the CREATE can fail on existing duplicates, and
@@ -1995,20 +2137,30 @@ export function diffManagedIndexes(args: {
     // marked so the driver can run the duplicate pre-flight probe on it:
     // clean → recategorised `safe` (dev autoMigrate may apply); duplicates →
     // blocked with a row report, the old index left in place.
+    //
+    // #13015: read through the ENFORCED key, so a pre-#12998 shadow — same
+    // columns, hashed RAW instead of through the NULL-safe COALESCE — is
+    // recognised as exactly this tightening and gets the same duplicate
+    // pre-flight before anything is dropped. The explicit "physical side is
+    // bare" clause is what `p.expressions.length === 0` used to imply on its
+    // own (`nullSafeColumns` is only ever recorded alongside an expression key
+    // part); a resolved shadow key can carry NULL-safe parts with no
+    // expressions at all, so the implication no longer holds.
     const tightenNullSafeOnly =
       e.unique &&
       p.unique &&
       (e.nullSafeColumns?.length ?? 0) > 0 &&
       (p.expressions?.length ?? 0) === 0 &&
+      (pk.nullSafeColumns?.length ?? 0) === 0 &&
       p.partial !== true &&
-      p.columns.join(',') === e.columns.join(',');
+      pk.columns.join(',') === e.columns.join(',');
     out.push({
       kind: 'index_mismatch',
       remoteName: table,
       table,
       column: e.columns[0],
       expected: indexSignature(e.columns, e.unique, e.nullSafeColumns),
-      actual: indexSignature(p.columns, p.unique, p.nullSafeColumns),
+      actual: indexSignature(pk.columns, p.unique, pk.nullSafeColumns),
       severity: e.unique ? 'error' : 'warning',
       category: e.unique ? 'destructive' : 'needs_confirm',
       op: {
@@ -2022,11 +2174,11 @@ export function diffManagedIndexes(args: {
         ...(tightenNullSafeOnly ? { tightenNullSafeOnly: true } : {}),
       },
       message: tightenNullSafeOnly
-        ? `${table}: index '${e.name}' is ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} but metadata declares ` +
+        ? `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} but metadata declares ` +
           `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} (ADR-0120 D3: the organization key part is NULL-safe, ` +
           `so rows without an organization are constrained too). Pure tightening — eligibility is decided by the ` +
           `duplicate pre-flight probe.`
-        : `${table}: index '${e.name}' is ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} but metadata declares ` +
+        : `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} but metadata declares ` +
           `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} — the additive sync skips it by name, so it must be rebuilt` +
           (e.unique
             ? `. Creating the UNIQUE index can fail on existing duplicates: "os migrate apply --allow-destructive".`
@@ -2045,18 +2197,22 @@ export function diffManagedIndexes(args: {
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
+    // #13015: an orphaned shadow carrier is still an orphan — its declaration
+    // is gone, and `drop_index` is the right remedy — but the report must name
+    // the constraint it enforced, not the digest column it stored.
+    const po = enforcedIndexKey(p);
     out.push({
       kind: 'unmapped_index',
       remoteName: table,
       table,
       column: p.columns[0],
       expected: '(absent)',
-      actual: indexSignature(p.columns, p.unique, p.nullSafeColumns),
+      actual: indexSignature(po.columns, p.unique, po.nullSafeColumns),
       severity: 'warning',
       category: 'destructive',
       op: { type: 'drop_index', table, column: p.columns[0], indexName: p.name },
       message:
-        `${table}: index '${p.name}' ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} carries ObjectStack's generated naming ` +
+        `${table}: index '${p.name}' ${indexSignature(po.columns, p.unique, po.nullSafeColumns)} carries ObjectStack's generated naming ` +
         `but matches no declared index (orphaned) — "os migrate apply --allow-destructive" to drop it.`,
     });
   }

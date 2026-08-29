@@ -61,12 +61,18 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `190fbd01d`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-08-22 — previously measured at `9a3daf8d3`, originally at
-  // `6314e87f2`. `ObjectGrid.tsx` DID change across that move, so both claims
-  // below were re-derived rather than carried over, and they now carry line
-  // anchors: `ObjectGrid.tsx:2492-2507` and `hooks/useBulkExecutor.ts:284-288`,
-  // the latter byte-identical at both pins):
+  // (`.objectui-sha` = `9602dc820`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-08-28 — previously measured at `190fbd01d`, before that at
+  // `9a3daf8d3`, originally at `6314e87f2`. `ObjectGrid.tsx` DID change across
+  // the move off `190fbd01d`, so both claims below were re-derived rather than
+  // carried over: `ObjectGrid.tsx:2586-2601`, whose block is byte-identical to
+  // the one cited at `190fbd01d:2492-2507` and shifted only by insertions above
+  // it, and `hooks/useBulkExecutor.ts:284-289`, in a file byte-identical at both
+  // pins. That second span is WIDENED BY ONE LINE from the `284-288` cited
+  // before: it stopped short of `label = 'bulk delete'`, truncating the second
+  // of the two branches it names — the #10274 class of anchor error, found here
+  // by re-reading rather than by the file changing, which is why byte-identity
+  // is never taken as proof an anchor is right):
   //
   //  · No checkbox column is rendered. None of the object's four list views
   //    declares `bulkActions` / `bulkActionDefs` / `selection`, and `ObjectGrid`

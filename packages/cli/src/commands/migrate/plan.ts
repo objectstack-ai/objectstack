@@ -19,6 +19,7 @@ import {
   summarize,
   summarizePendingSchemaWork,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
@@ -69,7 +70,26 @@ export default class MigratePlan extends Command {
     json: Flags.boolean({ description: 'Output as JSON' }),
   };
 
+  /**
+   * #13027 — the process must end when the plan does.
+   *
+   * The body is {@link plan}; this wrapper exists so every one of its early
+   * `return`s funnels through one deliberate exit. A composed host stack can
+   * leave the event loop alive — its `start()` was suppressed, so anything it
+   * armed during `init()` has no release path — and this command has measurably
+   * outlived its own "Graceful shutdown complete" by 78 minutes.
+   *
+   * ⛔ The FAILURE paths are deliberately NOT routed here: `this.exit(n)` throws
+   * an `ExitError` that oclif's `handle()` turns into a `process.exit` of its
+   * own, so they already terminate — and catching them here to exit "tidily"
+   * would swallow the report with them.
+   */
   async run(): Promise<void> {
+    await this.plan();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async plan(): Promise<void> {
     const { flags } = await this.parse(MigratePlan);
     const timer = createTimer();
 
@@ -99,6 +119,12 @@ export default class MigratePlan extends Command {
         // this — it flushes the deferred DDL after confirmation and needs a
         // real file to flush into.
         readOnlyProbe: true,
+        // #12938 — diff the object set this deployment actually serves. Without
+        // it the plan covers the five-table data stack alone: on a control plane
+        // carrying ~80 `sys_*` tables that printed "in sync" while the driver's
+        // own boot detector reported ten findings on the same database, and the
+        // command those findings name is this one.
+        composeHostStack: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
@@ -150,6 +176,27 @@ export default class MigratePlan extends Command {
                 },
               }
             : {}),
+          // [#12938] What the diffed object set was composed from — present
+          // only when there WAS a deployment to compose, so a project with
+          // neither a config nor a compiled artifact emits the same document it
+          // always did. A consumer asserting coverage needs `hostConfigLoaded`
+          // and not just `managedTables`: a config that fails to load also
+          // raises the count (the platform floor still lands), and a count alone
+          // cannot tell that apart from a deployment that is genuinely small.
+          ...(stack.composition.notes.length > 0
+            ? {
+                composition: {
+                  hostConfig: stack.composition.hostConfigPath,
+                  hostConfigLoaded: stack.composition.hostConfigLoaded,
+                  // [#13028] The plan's own boundary, so a consumer gate can
+                  // refuse a PARTIAL plan instead of reading `managedTables`
+                  // as coverage. `unexaminedObjects > 0` is the discriminator;
+                  // `reasons` says which kind of partial it is.
+                  ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
+                  notes: stack.composition.notes,
+                },
+              }
+            : {}),
           ...(occupancy.status === 'busy'
             ? { occupancy: { status: 'busy', signal: occupancy.signal, detail: occupancy.detail } }
             : {}),
@@ -172,10 +219,29 @@ export default class MigratePlan extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
+      // What the object set was composed from (#12938) — never silent about a
+      // host config it could not load, and empty (so this block prints nothing)
+      // when there was no deployment to compose.
+      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
       console.log('');
 
       if (drift.length === 0 && pending.length === 0) {
-        printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        // [#13028] "In sync" is a claim about the objects this plan EXAMINED.
+        // On a composed host that examined a strict subset — a control plane
+        // declaring ~80 tables of which 8 reached the diffed driver — printing
+        // the unqualified sentence tells an operator the deployment is
+        // migrated when most of it was never looked at. Say which it is.
+        const partial = (stack.composition.coverage?.unexaminedObjects ?? 0) > 0;
+        if (partial) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `No drift over the ${c.examinedObjects} object(s) this plan examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL plan: it is not evidence that the deployment is in sync.',
+          );
+        } else {
+          printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        }
         console.log('');
         return;
       }

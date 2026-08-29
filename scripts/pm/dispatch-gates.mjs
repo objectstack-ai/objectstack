@@ -136,6 +136,68 @@
  * them is printed in the residue rather than left as an absence — a schedule
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
+ * ## Why a declaration can only NARROW, and what that guarantee costs (#12842)
+ *
+ * `declaredInheritedPopulation` refuses any path its own module does not
+ * already spell, so a declaration can only ever REMOVE leads a caller would
+ * otherwise inherit — never invent one, and never hide a real population. That
+ * is a property this file asserts without reading any declaration's intent,
+ * which is what lets every dispatch built on this derivation be trusted without
+ * re-deriving it. It has a measured price, recorded here rather than left to be
+ * rediscovered card by card.
+ *
+ * A hint is a path PREFIX and `hintCovers` matches subtrees, so no declaration
+ * can express "the compiled subset of this tree". `cli-build-prerequisite.mjs`
+ * declares `packages/cli/src` — the honest spelling, since the CLI's source
+ * tree really is what compiles into the command `check:i18n` and
+ * `check:i18n-coverage` spawn — and that prefix also names the 101 interleaved
+ * test files under it plus `src/utils/console-route-ledger.ts`. All 102 are
+ * excluded by `packages/cli/tsconfig.build.json`, so none can change a byte of
+ * the `dist/` those two gates read. Measured on b1a987e4a, over the 322 tracked
+ * files of `packages/cli`:
+ *
+ *                                    BEFORE #12841   AFTER
+ *     covered by the inherited hints       322         214
+ *       really read by the gates           112         112
+ *       false leads                        210         102
+ *
+ * 102 files per gate — 204 (file, gate) pairs across the family. Priced the
+ * same day, over the 4076 first-parent commits on `origin/main` in the 30 days
+ * to 2026-08-28: 35 of them named these gates while provably unable to move
+ * them (0.86% of all landings, 10.5% of the 332 touching `packages/cli`), and
+ * each such card pays about 3m30s of compute to reach any reading at all —
+ * both gates refuse outright on an unbuilt tree, `check:i18n` after a 56-task
+ * CLI closure build and `check:i18n-coverage` only after a full `pnpm build`,
+ * which its own second prerequisite demands one round LATER. Roughly two hours
+ * of fleet compute per 30 days, before queueing.
+ *
+ * Maintainer ruling, 2026-08-28 (#12842): pay it. A mechanism that lets a
+ * declaration SUBTRACT is a mechanism that can subtract a REAL population, and
+ * that failure would be SILENT — a gate quietly no longer watching live code
+ * while every dispatch order still reads normal. Today's cost is loud and
+ * self-limiting; the trade runs the wrong way. ⛔ Do not give
+ * `declaredInheritedPopulation` a subtraction spelling — not a marker suffix,
+ * not a second marker.
+ *
+ * The recorded fallback, should the price ever escalate, is to apply a
+ * classifier on the DERIVATION side for named gate families, so that no
+ * declaration expresses anything. ⚠️ Two measured caveats it must carry:
+ * `isTestFilePath` reaches 100 of these 102, not all of them (it judges the
+ * filename infix, deliberately, so the `__tests__/` helper and the ledger file
+ * both fall outside it), and every use of it in this file today is ADDITIVE —
+ * see CHANGE_KIND_GATES — so this would be the first SUBTRACTIVE rule inside
+ * the derivation itself. ⛔ Consulting the package's own `tsconfig.build.json`
+ * instead is worse rather than better, and measurably so: an edit to that file
+ * names ZERO i18n-family gates today (measured on b1a987e4a; nine other
+ * families are named in the same run, so the zero is a reading, not a broken
+ * instrument), so the input doing the subtracting would be one nobody is ever
+ * named for.
+ *
+ * ⚠️ ORDER, carried from the card: the mirror axis is UNDER-naming (#12322,
+ * fixed in e980f6448 / PR #12476 and still open on its own terms), and that is
+ * exactly what a subtraction would put back at risk. Revisiting the rejected
+ * option requires that card closed and re-verified FIRST.
+ *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows, package.json, or the tracked-file corpus the
  * reachability sweep needs exits non-zero (#4690: unreadable input must never
@@ -446,6 +508,344 @@ export function extractTriggerPaths(workflowText) {
       inEvent = true;
       eventIndent = indent;
     }
+  }
+  return out;
+}
+
+/**
+ * ── The population a job's `if:` names one hop away (#12956) ────────────────
+ *
+ * `extractTriggerPaths` above reads the one path declaration CI obeys at the
+ * WORKFLOW level. A job can carry a second, and this tree's busiest workflow
+ * uses only that second one: `ci.yml` declares no `on.pull_request.paths` at
+ * all and instead runs a `filter` job whose `dorny/paths-filter` step computes
+ * per-area outputs, which every other job then reads in its own `if:`:
+ *
+ *   filter:                                  console-pin:
+ *     outputs:                                 name: Console Pin Gate
+ *       console: ${{ steps.changes.outputs.console || 'true' }}
+ *     steps:                                   needs: filter
+ *       - uses: dorny/paths-filter@v4          if: ${{ !cancelled() &&
+ *         id: changes                                needs.filter.outputs.console != 'false' }}
+ *         with:
+ *           filters: |
+ *             console:
+ *               - '.objectui-sha'
+ *
+ * The population is real, correct, and sitting in the workflow file — just
+ * expressed one hop from where the derivation read. The measured consequence:
+ * a single-file `.objectui-sha` diff derived ZERO families, so the two gates a
+ * pin bump exists to run (`check:console-sha`, `check:console-injection`) were
+ * named in neither half of the output and reached the dev only from CI.
+ *
+ * ## What this closes, and what it deliberately does NOT
+ *
+ * It closes the INDIRECTION: a declared path population the tool could not
+ * follow. It does not close, and cannot, the gate that declares no population
+ * ON PURPOSE. `check:objectui-pin-citations` is unfiltered because `lint.yml`
+ * says a `packages/spec/**` filter "would go dormant on exactly the PR that
+ * moves `.objectui-sha`, which is the PR this exists to catch" — the
+ * correctness requirement and the derivability requirement are in direct
+ * opposition there, and the gate is right. Nothing here gives it a filter.
+ *
+ * ## Why a strict whitelist rather than an expression evaluator
+ *
+ * Every refusal below costs a MISSING lead; every over-permissive reading buys
+ * a FABRICATED one, and this file errs in the first direction everywhere (see
+ * the header's "22 leads is the same as none"). So an `if:` contributes a
+ * population only when it reduces, exactly, to filter-output comparisons ORed
+ * together. `&&` between two filter outputs would be an INTERSECTION this
+ * returns null for rather than guessing; a negated or unrecognised comparison
+ * is refused whole. `!cancelled()` is the one term stripped, because it is a
+ * status function that discriminates no path — THE FILTER CONTRACT on ci.yml's
+ * `filter` job is why every one of these `if:`s carries it.
+ */
+const JOB_IF_STATUS_TERM = /(?:^|\s)!\s*cancelled\(\)\s*&&\s*/g;
+const JOB_FILTER_OUTPUT_TERM =
+  /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)\s*(?:!=\s*(['"])false\3|==\s*(['"])true\4)$/;
+
+/**
+ * The `needs.<job>.outputs.<name>` references a job `if:` resolves to, as
+ * `[{ job, output }]`, or null when the expression is anything this refuses to
+ * read. Null is the safe answer: the job then contributes no population and the
+ * family keeps whatever verdict it had before.
+ */
+export function jobFilterOutputRefs(ifExpression) {
+  if (typeof ifExpression !== 'string') return null;
+  let expr = ifExpression.trim();
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
+  if (wrapped) expr = wrapped[1].trim();
+  expr = expr.replace(JOB_IF_STATUS_TERM, ' ').trim();
+  // One balanced outer paren pair at a time — `(A || B)` is the live spelling.
+  for (;;) {
+    if (!expr.startsWith('(') || !expr.endsWith(')')) break;
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < expr.length; i++) {
+      if (expr[i] === '(') depth++;
+      else if (expr[i] === ')') depth--;
+      if (depth === 0 && i < expr.length - 1) { balanced = false; break; }
+    }
+    if (!balanced) break;
+    expr = expr.slice(1, -1).trim();
+  }
+  if (expr === '') return null;
+  const refs = [];
+  for (const term of expr.split('||')) {
+    const m = JOB_FILTER_OUTPUT_TERM.exec(term.trim());
+    if (!m) return null;
+    refs.push({ job: m[1], output: m[2] });
+  }
+  return refs.length ? refs : null;
+}
+
+/**
+ * The `jobs:` mapping's entries, each as `{ id, name, if: <text|null>, text }`.
+ *
+ * `text` keeps the original indentation, so every extractor above — which are
+ * all indentation-RELATIVE — reads a job block exactly as it reads a whole
+ * file. That is the only reason this can hand a job's text back to
+ * `extractCheckInvocations` instead of growing a second command scanner.
+ *
+ * `name` is read from the job's own `name:` key at its child indent and falls
+ * back to the job id. It is load-bearing rather than cosmetic: the id
+ * `console-pin` is not what CI, branch protection or a red check calls that
+ * job, and a lead a dev cannot find in the Checks tab is a lead they will not
+ * act on.
+ */
+export function extractJobBlocks(workflowText) {
+  const lines = workflowText.split('\n');
+  const blocks = [];
+  let inJobs = false;
+  let jobIndent = -1;
+  let current = null;
+  const close = () => {
+    if (!current) return;
+    current.text = current.lines.join('\n');
+    delete current.lines;
+    blocks.push(current);
+    current = null;
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (trimmed !== '' && !trimmed.startsWith('#') && indent === 0) {
+      close();
+      inJobs = /^jobs:\s*$/.test(trimmed);
+      jobIndent = -1;
+      continue;
+    }
+    if (!inJobs) continue;
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      if (current) current.lines.push(line);
+      continue;
+    }
+    const key = /^([A-Za-z_][\w-]*):\s*$/.exec(trimmed);
+    if (key && (jobIndent === -1 || indent === jobIndent)) {
+      close();
+      jobIndent = indent;
+      current = { id: key[1], name: key[1], if: null, childIndent: -1, lines: [line] };
+      continue;
+    }
+    if (!current) continue;
+    current.lines.push(line);
+    if (current.childIndent === -1 && indent > jobIndent) current.childIndent = indent;
+    if (indent !== current.childIndent) continue;
+    const named = /^name:\s*(\S.*)$/.exec(trimmed);
+    if (named) current.name = unquoteScalar(named[1]);
+    const cond = /^if:\s*(\S.*)$/.exec(trimmed);
+    // A block-scalar `if:` is not read: the value would be the header `|`, and
+    // a refused expression costs a missing lead where a misread one fabricates.
+    if (cond && !BLOCK_SCALAR_HEADER.test(cond[1].trim())) current.if = cond[1].trim();
+  }
+  close();
+  for (const b of blocks) delete b.childIndent;
+  return blocks;
+}
+
+/** The action reference of a `dorny/paths-filter` step, in any pinned form. */
+const PATHS_FILTER_ACTION = /^uses:\s*['"]?(?:[\w.-]+\/)*dorny\/paths-filter(?:@|['"]?\s*$)/;
+
+/**
+ * Every `dorny/paths-filter` step's `filters:` block in one workflow, keyed by
+ * the step `id:` that downstream `steps.<id>.outputs.<name>` references use:
+ * `Map<stepId, Map<filterName, string[]>>`.
+ *
+ * The filters value is a YAML block scalar carrying its own mapping, parsed the
+ * same indentation-walk way as everything else here, and for the same reason
+ * (`extractTriggerPaths`' docblock: this script is dependency-free because a
+ * dispatch is written from a bare checkout).
+ */
+export function extractPathsFilterSteps(workflowText) {
+  const lines = workflowText.split('\n');
+  const out = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([ \t]*)(-[ \t]+)?(uses:.*)$/.exec(lines[i]);
+    if (!m || !PATHS_FILTER_ACTION.test(m[3].trim())) continue;
+    const keyColumn = m[1].length + (m[2] ? m[2].length : 0);
+    let stepId = null;
+    let filters = null;
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (t === '' || t.startsWith('#')) continue;
+      const ind = /^[ \t]*/.exec(lines[j])[0].length;
+      if (ind < keyColumn || (ind === keyColumn && /^-[ \t]/.test(t))) break;
+      if (ind === keyColumn) {
+        const id = /^id:\s*(\S.*)$/.exec(t);
+        if (id) stepId = unquoteScalar(id[1]);
+        continue;
+      }
+      const f = /^filters:\s*(.*)$/.exec(t);
+      if (f && BLOCK_SCALAR_HEADER.test(f[1].trim())) {
+        const body = [];
+        let k = j + 1;
+        for (; k < lines.length; k++) {
+          if (lines[k].trim() === '') { body.push(''); continue; }
+          if (/^[ \t]*/.exec(lines[k])[0].length <= ind) break;
+          body.push(lines[k]);
+        }
+        filters = parseFilterMapping(body.join('\n'));
+        j = k - 1;
+      }
+    }
+    if (stepId && filters && filters.size) out.set(stepId, filters);
+  }
+  return out;
+}
+
+/** `<name>:` / `- <glob>` mapping inside a paths-filter block scalar. */
+export function parseFilterMapping(body) {
+  const out = new Map();
+  let baseIndent = -1;
+  let currentName = null;
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (baseIndent === -1) baseIndent = indent;
+    if (indent === baseIndent) {
+      const key = /^([A-Za-z_][\w.-]*):\s*(.*)$/.exec(trimmed);
+      if (!key) { currentName = null; continue; }
+      currentName = key[1];
+      if (!out.has(currentName)) out.set(currentName, []);
+      const flow = flowSequenceItems(key[2]);
+      if (flow.length) out.get(currentName).push(...flow);
+      continue;
+    }
+    if (indent <= baseIndent || !currentName) continue;
+    const item = /^-\s*(.*)$/.exec(trimmed);
+    if (item && item[1] !== '') out.get(currentName).push(unquoteScalar(item[1]));
+  }
+  for (const [k, v] of out) if (v.length === 0) out.delete(k);
+  return out;
+}
+
+/**
+ * A job's `outputs:` mapping, resolved to the `steps.<id>.outputs.<name>` each
+ * value reads: `Map<jobOutputName, { step, output }>`.
+ *
+ * The indirection is not decorative in this tree. Every one of ci.yml's four
+ * outputs is `${{ steps.changes.outputs.<x> || 'true' }}` — the `|| 'true'`
+ * being half 1 of THE FILTER CONTRACT (when in doubt, run everything). Reading
+ * the step reference rather than assuming the names match is what keeps this a
+ * derivation instead of a coincidence.
+ */
+export function extractJobOutputSources(jobText) {
+  const lines = jobText.split('\n');
+  const out = new Map();
+  let mapIndent = -1;
+  let itemIndent = -1;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (mapIndent === -1) {
+      if (/^outputs:\s*$/.test(trimmed)) mapIndent = indent;
+      continue;
+    }
+    if (indent <= mapIndent) break;
+    if (itemIndent === -1) itemIndent = indent;
+    if (indent !== itemIndent) continue;
+    const entry = /^([A-Za-z_][\w.-]*):\s*(\S.*)$/.exec(trimmed);
+    if (!entry) continue;
+    const ref = /steps\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)/.exec(entry[2]);
+    if (ref) out.set(entry[1], { step: ref[1], output: ref[2] });
+  }
+  return out;
+}
+
+/**
+ * An extglob construct — `!(a)`, `@(a|b)`, `+(a)`, `?(a)`, `*(a)`.
+ *
+ * `dorny/paths-filter` matches with picomatch, which supports these;
+ * `triggerPatternRegex` implements GitHub's own `paths:` language, which does
+ * not. Translating one language with the other is how a derivation goes
+ * confidently wrong, so a glob carrying an extglob is DROPPED from the derived
+ * population and counted, never approximated. Live specimen and the whole cost
+ * of the refusal on this tree: `apps/!(docs)/**` in ci.yml's `core` filter, one
+ * entry of six — the other five (`packages/**`, `examples/**`, `package.json`,
+ * `pnpm-lock.yaml`, `tsconfig.json`, plus the workflow file itself) carry the
+ * filter. A dropped POSITIVE entry can only narrow what is claimed; a dropped
+ * NEGATION would WIDEN it, so one of those refuses the whole population instead.
+ */
+const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
+
+/**
+ * The path population a job's `if:` resolves to, or null — the whole of
+ * direction 1, assembled from the three readings above.
+ *
+ * Returns `{ paths, outputs, dropped }`. `paths` is a UNION: the `if:` is an OR
+ * of filter outputs, so CI schedules the job when ANY of them matched.
+ */
+export function jobFilterPopulation(job, filterStepsByOutputSource) {
+  const refs = jobFilterOutputRefs(job.if);
+  if (!refs) return null;
+  const paths = [];
+  const outputs = [];
+  let dropped = 0;
+  for (const ref of refs) {
+    const globs = filterStepsByOutputSource.get(`${ref.job}.${ref.output}`);
+    if (!globs) return null;
+    for (const g of globs) {
+      if (EXTGLOB_CONSTRUCT.test(g)) {
+        // A negation that cannot be translated cannot be dropped either: the
+        // remaining list would claim paths the negation excludes.
+        if (g.startsWith('!')) return null;
+        dropped++;
+        continue;
+      }
+      paths.push(g);
+    }
+    outputs.push(`${ref.job}.${ref.output}`);
+  }
+  return paths.length ? { paths, outputs, dropped } : null;
+}
+
+/**
+ * Every job in one workflow that resolves to a path population, with the check
+ * families it invokes: `[{ job, name, outputs, paths, dropped, checks }]`.
+ */
+export function jobPathPopulations(workflowText, workflowFile) {
+  const stepFilters = extractPathsFilterSteps(workflowText);
+  if (stepFilters.size === 0) return [];
+  const jobs = extractJobBlocks(workflowText);
+  // `<jobId>.<outputName>` -> globs, resolved through the job's own `outputs:`
+  // indirection so a rename on either side of it is followed, not assumed.
+  const byOutput = new Map();
+  for (const job of jobs) {
+    for (const [name, src] of extractJobOutputSources(job.text)) {
+      const globs = stepFilters.get(src.step)?.get(src.output);
+      if (globs?.length) byOutput.set(`${job.id}.${name}`, globs);
+    }
+  }
+  if (byOutput.size === 0) return [];
+  const out = [];
+  for (const job of jobs) {
+    const population = jobFilterPopulation(job, byOutput);
+    if (!population) continue;
+    const checks = [...new Set(extractCheckInvocations(job.text, workflowFile).map((i) => i.check))];
+    if (!checks.length) continue;
+    out.push({ job: job.id, name: job.name, ...population, checks });
   }
   return out;
 }
@@ -2235,6 +2635,26 @@ export function coveringTrigger(entry, inputPath) {
 }
 
 /**
+ * The first of a family's JOB-level filters whose derived population covers the
+ * input path, or null. Same claim as `coveringTrigger` one hop in: CI decides
+ * whether to schedule this job from this list, stated by the repo, in the file
+ * CI itself obeys — see `jobPathPopulations` for how the hop is followed and
+ * what it refuses to follow.
+ *
+ * The JOB NAME travels with the answer because that is what a dev sees go red.
+ * `console-pin` is the id; `Console Pin Gate` is the required check, and the
+ * measured failure this closes (#12956) was a dev reading a derived list that
+ * named neither.
+ */
+export function coveringJobFilter(entry, inputPath) {
+  for (const jf of entry.jobFilters ?? []) {
+    const pattern = triggerListCovers(jf.paths, inputPath);
+    if (pattern) return { ...jf, pattern };
+  }
+  return null;
+}
+
+/**
  * The key that makes one check family relevant to one input path, or null —
  * the family's OWN script files first, then CI's declared trigger for it, then
  * the path literals scanned out of those files.
@@ -2291,6 +2711,17 @@ export function coveringKey(entry, inputPath) {
   if (identity) return { key: identity, via: 'gate script' };
   const trigger = coveringTrigger(entry, inputPath);
   if (trigger) return { key: trigger.pattern, via: `CI trigger in ${trigger.workflow}` };
+  // A job filter is the same KIND of claim as the workflow trigger — a
+  // declaration CI obeys — so it outranks a literal scanned out of a script,
+  // and sits below the workflow trigger because that one decides whether the
+  // job is reachable at all. Where both fire the stronger provenance prints.
+  const jobFilter = coveringJobFilter(entry, inputPath);
+  if (jobFilter) {
+    return {
+      key: jobFilter.pattern,
+      via: `CI job filter for '${jobFilter.name}' in ${jobFilter.workflow}`,
+    };
+  }
   const hint = (entry.hints ?? []).find((h) => hintCovers(h, inputPath));
   if (!hint) return null;
   // A hint a gate spells itself and one it inherits from a module it imports
@@ -4538,10 +4969,17 @@ export function pendingChangesetLines(pending, probe = CHANGESET_PROBE_PATH) {
  *
  * ## Why the unfiltered-workflow count is printed, and why it is NOT a bucket
  *
- * `unfiltered` counts the families every one of whose workflows declares no
- * `on.pull_request.paths` filter. CI schedules those on EVERY pull request, so
- * no path derivation can ever narrow them — the trigger key added in #9171
- * reaches the filtered workflows and stops precisely there. It cuts across all
+ * `unfiltered` counts the families reached by NEITHER path declaration CI
+ * obeys: no `on.pull_request.paths` filter on any of their workflows, and no
+ * job `if:` resolving to a `dorny/paths-filter` population (#12956). CI
+ * schedules those on EVERY pull request, so no path derivation can ever narrow
+ * them.
+ *
+ * The second half is not decorative. Counting only the workflow trigger kept
+ * this line asserting "no path derivation can narrow them" about the six
+ * families in ci.yml's filtered jobs — including the two a pin bump exists to
+ * run — in the same output where the derivation had just narrowed them. A count
+ * that contradicts the answer above it is worse than no count. It cuts across all
  * three verdicts (an unfiltered family can be matched, undetermined or silent),
  * so it is deliberately outside the accounting throw: adding it to the
  * partition would double-count and turn a correct run into a thrown error.
@@ -4604,12 +5042,26 @@ export function unreachableLines(unreachable, swept) {
         '(an empty listing and an empty sweep read alike without it — #4690)',
     );
   }
+  const scheduled = unreachable.filter((u) => (u.entry?.jobFilters?.length ?? 0) > 0).length;
   const lines = [
     `Unreachable — the ${unreachable.length} famil(ies) whose declared population matches NOTHING in this tree,` +
       ` swept over ${swept} tracked file(s).`,
-    '  ⛔ NOT a skip list: CI runs these on every pull request. This says only that no path derivation can name them,',
-    '    so they score the same quiet green for every card in the tree — yours included — whether they still work or not.',
+    '  ⛔ NOT a skip list. This says only that the family\'s OWN declared literals name nothing here, so its verdict',
+    '    is the same quiet green for every card in the tree — yours included — whether it still works or not.',
   ];
+  // Since #12956 the two facts can come apart, and saying otherwise would make
+  // this heading contradict the matched list two screens up: a family whose own
+  // literals reach nothing can still be SCHEDULED from a path population, when
+  // the job that runs it carries a resolvable paths-filter `if:`. The blanket
+  // "CI runs these on every pull request" was true of every entry before that
+  // and is not true of those, so it is stated per entry instead.
+  lines.push(
+    scheduled === 0
+      ? '  Every one of them also sits outside any path filter, so CI schedules it on EVERY pull request.'
+      : `  Nonetheless SCHEDULED from a path population: ${scheduled} of the ${unreachable.length} — the job running each` +
+        ' carries a resolvable paths-filter `if:`, so it IS named in the matched list above for the cards that job runs on,'
+        + ' and is marked below. The rest sit outside any path filter, so CI schedules those on EVERY pull request.',
+  );
   if (unreachable.length === 0) {
     lines.push('  (none — every declaring family reaches something in the tree.)');
     return lines;
@@ -4630,7 +5082,13 @@ export function unreachableLines(unreachable, swept) {
           ' to the gate or the tree makes it one:',
     );
     for (const { entry, dead } of items) {
-      lines.push(`    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}`);
+      const jf = entry.jobFilters ?? [];
+      const schedule = jf.length
+        ? `   ⇢ but SCHEDULED by ${jf.map((f) => `'${f.name}' in ${f.workflow}`).join(', ')} — reachable through that job's filter, not through its own literals`
+        : '';
+      lines.push(
+        `    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}${schedule}`,
+      );
     }
   }
   return lines;
@@ -4723,8 +5181,9 @@ export function residueLines(
             ' EITHER direction — it is the shape that reads as a clearance and is not. Named, with the discriminator and the remedy, under --residue.'
           : ' None of their rosters sits in a directory your paths are in. They are named, with the discriminator, under --residue.'
       }`,
-    `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
-      ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
+    `  ${unfiltered} of the ${discovered} are reached by NEITHER path declaration CI obeys — no workflow pull_request path filter,` +
+      ' and no job `if:` that resolves to a dorny/paths-filter population. CI schedules those on EVERY pull request, so no path' +
+      ' derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
       ' their own sources name paths and this repo has none of them, so they score the same quiet green for every card in the tree' +
       ' whether they still work or not. A standing repo fact, not a verdict about your paths; they are named ABOVE on every run,' +
@@ -5032,10 +5491,24 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // invocations come out of — one read, two answers, no chance of the pair
   // describing different revisions of a file.
   const triggerPathsByWorkflow = new Map();
+  // The SECOND path declaration CI obeys (#12956) — a job `if:` that reads a
+  // `dorny/paths-filter` output. Read from the same text as the two above, for
+  // the reason stated there: one read, three answers, no chance of them
+  // describing different revisions of a file.
+  const jobPopulationsByCheck = new Map();
   for (const wf of workflows) {
     const text = readFileSync(join(wfDir, wf), 'utf8');
     invocations.push(...extractCheckInvocations(text, wf));
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
+    for (const pop of jobPathPopulations(text, wf)) {
+      for (const check of pop.checks) {
+        if (!jobPopulationsByCheck.has(check)) jobPopulationsByCheck.set(check, []);
+        jobPopulationsByCheck.get(check).push({
+          workflow: wf, job: pop.job, name: pop.name,
+          outputs: pop.outputs, paths: pop.paths, dropped: pop.dropped,
+        });
+      }
+    }
   }
   if (invocations.length === 0) throw new Error('no check:* invocations found in any workflow');
 
@@ -5052,6 +5525,9 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     entry.triggers = [...entry.workflows]
       .map((wf) => ({ workflow: wf, paths: triggerPathsByWorkflow.get(wf) ?? [] }))
       .filter((t) => t.paths.length > 0);
+    // Only the jobs whose `if:` RESOLVED become job-filter keys, for the same
+    // reason: a job CI schedules unconditionally discriminates nothing.
+    entry.jobFilters = jobPopulationsByCheck.get(entry.check) ?? [];
   }
   for (const entry of byCheck.values()) {
     // A direct entry carries its script path in `script` rather than reusing
@@ -5279,7 +5755,13 @@ function derive(paths, { showResidue = false } = {}) {
     matched: matched.size,
     undetermined: undetermined.length,
     silent: silent.length,
-    unfiltered: [...byCheck.values()].filter((e) => e.triggers.length === 0).length,
+    // Neither declaration reaches them: no workflow `paths:` trigger AND no job
+    // `if:` that resolves to a paths-filter population (#12956). Counting only
+    // the first would keep printing 'no path derivation can narrow them' about
+    // families this run just narrowed.
+    unfiltered: [...byCheck.values()].filter(
+      (e) => e.triggers.length === 0 && (e.jobFilters?.length ?? 0) === 0,
+    ).length,
     unreachable: unreachable.length,
     swept: swept.length,
     artifactRosters: rosters.length,
@@ -8091,6 +8573,205 @@ function selfTest() {
   t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
   t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
 
+  // ── The population a job `if:` names one hop away (#12956) ────────────────
+  //
+  // The card: an `.objectui-sha` diff derived NO pin-critical gate, because
+  // ci.yml declares no workflow `paths:` at all — its filtering lives in a
+  // `filter` job's dorny/paths-filter step, read by every other job's `if:`.
+  // The fixture carries every shape that must be READ and every shape that must
+  // be REFUSED, because the refusals are the half that keeps a widening from
+  // fabricating leads across a whole workflow at once.
+  const jobFilterWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    '    branches: [main]',
+    'jobs:',
+    '  filter:',
+    '    runs-on: ubuntu-latest',
+    '    outputs:',
+    "      console: ${{ steps.changes.outputs.console || 'true' }}",
+    // The indirection is real: the job output NAME and the filter name differ.
+    "      area: ${{ steps.changes.outputs.core || 'true' }}",
+    '    steps:',
+    '      - uses: dorny/paths-filter@v4',
+    '        id: changes',
+    '        with:',
+    '          filters: |',
+    '            console:',
+    "              - '.objectui-sha'",
+    '            core:',
+    "              - 'packages/**'",
+    '              # a comment between entries',
+    "              - 'apps/!(docs)/**'",
+    '  console-pin:',
+    '    name: Console Pin Gate',
+    '    needs: filter',
+    "    if: ${{ !cancelled() && needs.filter.outputs.console != 'false' }}",
+    '    steps:',
+    '      - run: pnpm check:console-sha',
+    '  both:',
+    '    name: Two Areas',
+    "    if: ${{ !cancelled() && (needs.filter.outputs.console != 'false' || needs.filter.outputs.area != 'false') }}",
+    '    steps:',
+    '      - run: pnpm check:two',
+    '  always-on:',
+    '    name: Always',
+    '    steps:',
+    '      - run: pnpm check:always',
+    '  intersected:',
+    '    name: Intersected',
+    "    if: ${{ needs.filter.outputs.console != 'false' && needs.filter.outputs.area != 'false' }}",
+    '    steps:',
+    '      - run: pnpm check:intersected',
+    '',
+  ].join('\n');
+
+  const fixtureJobs = extractJobBlocks(jobFilterWf);
+  t(
+    'every job under jobs: is segmented, and nothing above it is',
+    fixtureJobs.map((j) => j.id).join('|') === 'filter|console-pin|both|always-on|intersected',
+  );
+  t(
+    "a job's declared name is read, and an unnamed job falls back to its id",
+    fixtureJobs.find((j) => j.id === 'console-pin')?.name === 'Console Pin Gate'
+      && fixtureJobs.find((j) => j.id === 'filter')?.name === 'filter',
+  );
+  t(
+    'a job block keeps its own steps and NOT the next job\'s',
+    fixtureJobs.find((j) => j.id === 'console-pin')?.text.includes('check:console-sha')
+      && !fixtureJobs.find((j) => j.id === 'console-pin').text.includes('check:two'),
+  );
+  const fixtureSteps = extractPathsFilterSteps(jobFilterWf);
+  t('the paths-filter step is keyed by the id downstream references use', fixtureSteps.has('changes'));
+  t(
+    'its filters block scalar is parsed into named glob lists',
+    fixtureSteps.get('changes')?.get('console')?.join('|') === '.objectui-sha'
+      && fixtureSteps.get('changes')?.get('core')?.join('|') === 'packages/**|apps/!(docs)/**',
+  );
+  t(
+    "the job's outputs: mapping is resolved to the STEP output each value reads, not assumed to share its name",
+    (() => {
+      const src = extractJobOutputSources(fixtureJobs.find((j) => j.id === 'filter').text);
+      return src.get('console')?.output === 'console' && src.get('area')?.output === 'core'
+        && src.get('area')?.step === 'changes';
+    })(),
+  );
+
+  // The `if:` whitelist, in both directions. Everything the live tree spells is
+  // read; everything else is refused rather than approximated.
+  t(
+    "the live spelling reads: !cancelled() is stripped and != 'false' is the run condition",
+    jobFilterOutputRefs("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")
+      ?.map((r) => `${r.job}.${r.output}`).join('|') === 'filter.console',
+  );
+  t(
+    'an OR of two outputs reads as BOTH, in declaration order',
+    jobFilterOutputRefs("${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}")
+      ?.map((r) => r.output).join('|') === 'core|crosspkg',
+  );
+  t("the == 'true' spelling of the same condition reads too", jobFilterOutputRefs("${{ needs.filter.outputs.core == 'true' }}")?.length === 1);
+  t('an AND of two filter outputs is REFUSED — that is an intersection this does not compute', jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && needs.f.outputs.b != 'false' }}") === null);
+  t('an INVERTED comparison is refused, not read as its opposite', jobFilterOutputRefs("${{ needs.f.outputs.a == 'false' }}") === null);
+  t('a term this cannot read refuses the WHOLE expression', jobFilterOutputRefs("${{ github.event_name == 'push' || needs.f.outputs.a != 'false' }}") === null);
+  t('an if: naming no filter output at all yields no population', jobFilterOutputRefs("${{ github.ref == 'refs/heads/main' }}") === null);
+  t('an absent if: is not an expression', jobFilterOutputRefs(null) === null);
+
+  const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
+  t(
+    'only the jobs whose if: RESOLVED and that invoke a check family contribute a population',
+    fixturePops.map((p) => p.job).join('|') === 'console-pin|both',
+  );
+  t(
+    'the console job resolves to the globs its filter declares, and names the check it runs',
+    fixturePops[0].paths.join('|') === '.objectui-sha' && fixturePops[0].checks.join('|') === 'check:console-sha',
+  );
+  t(
+    'a two-output if: takes the UNION of both filters',
+    fixturePops[1].paths.join('|') === '.objectui-sha|packages/**',
+  );
+  t(
+    'the extglob entry is DROPPED and COUNTED, never translated with a language that lacks it',
+    fixturePops[1].dropped === 1 && !fixturePops[1].paths.some((p) => p.includes('!(')),
+  );
+  t(
+    'a job CI schedules unconditionally contributes nothing — it discriminates no path',
+    !fixturePops.some((p) => p.job === 'always-on'),
+  );
+  t(
+    'and the AND-joined job contributes nothing rather than an over-claimed union',
+    !fixturePops.some((p) => p.job === 'intersected'),
+  );
+  t(
+    'an extglob NEGATION refuses the whole population — dropping it would WIDEN what is claimed',
+    jobFilterPopulation(
+      { if: "${{ needs.f.outputs.a != 'false' }}" },
+      new Map([['f.a', ['packages/**', '!(vendor)/**']]]),
+    ) === null,
+  );
+  t(
+    'a workflow with no paths-filter step at all yields no job populations',
+    jobPathPopulations("on:\n  pull_request:\n    branches: [main]\njobs:\n  a:\n    steps:\n      - run: pnpm check:x\n", 'x.yml').length === 0,
+  );
+
+  // Matching, and the precedence question the new key raises. A job filter is a
+  // DECLARATION CI obeys, so it outranks a literal scanned out of a script and
+  // sits under the workflow trigger, which decides whether the job runs at all.
+  const jfEntry = {
+    files: [], hints: ['scripts/somewhere'], triggers: [],
+    jobFilters: [{ workflow: 'ci.yml', job: 'console-pin', name: 'Console Pin Gate', outputs: ['filter.console'], paths: ['.objectui-sha'], dropped: 0 }],
+  };
+  t(
+    'a job filter matches its path and names the JOB a dev will see go red',
+    coveringKey(jfEntry, '.objectui-sha')?.via === "CI job filter for 'Console Pin Gate' in ci.yml",
+  );
+  t('a path the job filter does not cover gains nothing from it', coveringKey(jfEntry, 'packages/spec/src/x.ts') === null);
+  t(
+    'the workflow trigger still outranks the job filter where both fire',
+    coveringKey({ ...jfEntry, triggers: [{ workflow: 'ci.yml', paths: ['.objectui-sha'] }] }, '.objectui-sha')?.via
+      === 'CI trigger in ci.yml',
+  );
+  t(
+    'and the job filter outranks a scanned hint that also covers',
+    coveringKey({ ...jfEntry, hints: ['.objectui-sha'] }, '.objectui-sha')?.via
+      === "CI job filter for 'Console Pin Gate' in ci.yml",
+  );
+  t(
+    'a family with no job filters is unchanged by the new key',
+    coveringKey({ files: [], hints: ['scripts/somewhere'], triggers: [] }, 'scripts/somewhere/x.mjs')?.via === 'gate source',
+  );
+
+  // ── LIVE: the card's acceptance criterion, pinned against the real ci.yml ──
+  //
+  // Pinned rather than left to the fixture, because the whole finding was that
+  // the FIXTURE-shaped question ("can it follow an indirection?") had a
+  // different answer from the LIVE one. If the console job is renamed or its
+  // filter re-spelled, re-point these cases — do not delete them: they are the
+  // measured statement that a pin bump derives its own gates.
+  const liveCiPops = jobPathPopulations(readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
+  const livePinJob = liveCiPops.find((p) => p.checks.includes('check:console-sha'));
+  t('the live console job is found by the gate it runs', Boolean(livePinJob));
+  t('and it is named Console Pin Gate — the name branch protection and the Checks tab use', livePinJob?.name === 'Console Pin Gate');
+  t(
+    'its derived population covers the pin file, which is the whole acceptance criterion',
+    Boolean(livePinJob && triggerListCovers(livePinJob.paths, '.objectui-sha')),
+  );
+  t(
+    'both console gates are reached, not just the one the card named',
+    Boolean(livePinJob?.checks.includes('check:console-sha') && livePinJob?.checks.includes('check:console-injection')),
+  );
+  // The NEGATIVE control, and it is the half that keeps the widening honest: a
+  // path in none of the four filters must derive nothing extra. AGENTS.md is a
+  // repo-root file no filter names.
+  t(
+    'a path none of the live filters covers matches NO job filter — the widening is not a blanket',
+    !liveCiPops.some((p) => triggerListCovers(p.paths, 'AGENTS.md')),
+  );
+  t(
+    'and the same sweep DOES cover a packages/ path, so that zero is a reading rather than a broken instrument',
+    liveCiPops.some((p) => triggerListCovers(p.paths, 'packages/spec/src/index.ts')),
+  );
+
   // The pattern language. `*` must not cross a slash and `**` must, or a
   // trigger reads as narrower or wider than the one CI obeys.
   t('a double-star trigger covers a file any depth below it', triggerCovers('packages/spec/**', 'packages/spec/src/data/filter.zod.ts'));
@@ -9003,7 +9684,28 @@ function selfTest() {
   // unreachable when #12514 taught the matcher to follow a dropped extension.
   // The corpus size beside it is `treeFixture.length` and did not move.
   t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
-  t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
+  // Re-pointed by #12956, not weakened: the ⛔ correction is still asserted, and
+  // so is the sentence that used to carry it. What moved is that "CI runs these
+  // on every pull request" became a per-entry fact once a job filter could
+  // schedule an unreachable family — see the two cases below for the split.
+  t('⛔ and states plainly that this is not a skip list — the one wrong reading', /NOT a skip list/.test(listedText));
+  t('and that CI still schedules them on every PR, which is what makes the wrong reading wrong', /CI schedules (?:those|it) on EVERY pull request/.test(listedText));
+  t(
+    'with no job filter in the fixture, the listing says so of EVERY entry rather than counting exceptions',
+    /Every one of them also sits outside any path filter/.test(listedText)
+      && !/Nonetheless SCHEDULED/.test(listedText),
+  );
+  // The other branch: an unreachable family whose JOB carries a resolvable
+  // filter is scheduled from a path population, so the blanket claim above is
+  // false of it. Both halves are pinned — the count line and the per-entry mark
+  // — because a count with no marked entry sends a reader looking for one.
+  const scheduledSweep = sweep.map((u, i) => (i === 0
+    ? { ...u, entry: { ...u.entry, jobFilters: [{ workflow: 'ci.yml', job: 'test', name: 'Test Core', outputs: ['filter.core'], paths: ['packages/**'], dropped: 0 }] } }
+    : u));
+  const scheduledText = unreachableLines(scheduledSweep, treeFixture.length).join('\n');
+  t('a scheduled unreachable family is COUNTED as the exception it is', /Nonetheless SCHEDULED from a path population: 1 of the 3/.test(scheduledText));
+  t('and the entry itself says which job schedules it', /SCHEDULED by 'Test Core' in ci\.yml/.test(scheduledText));
+  t('while the blanket every-PR claim is withdrawn for the set that has one', !/Every one of them also sits outside any path filter/.test(scheduledText));
   t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
   t('the real miss sorts BEFORE the standing facts, never buried among them', listedText.indexOf('THE LAYOUT MOVED') < listedText.indexOf('BY CONSTRUCTION'));
@@ -9921,7 +10623,7 @@ function selfTest() {
     const plainOut = plainRun.stdout ?? '';
     t('the DEFAULT run answers at all', plainRun.status === 0 && plainOut.trim().length > 0);
     t('the DEFAULT run — no --residue — names the unreachable families itself', /^Unreachable — the \d+ famil\(ies\)/m.test(plainOut));
-    t('and carries the ⛔ correction into the default output, where the wrong reading would be made', /NOT a skip list: CI runs these on every pull request/.test(plainOut));
+    t('and carries the ⛔ correction into the default output, where the wrong reading would be made', /NOT a skip list/.test(plainOut) && /CI schedules (?:those|it) on EVERY pull request/.test(plainOut));
     t('and the default run stays free of the residue listings the flag owns', !/^Silent \(source names paths/m.test(plainOut));
     // The two repaired families must not be named as unreachable by a REAL run.
     const unreachableBlock = plainOut.slice(plainOut.indexOf('Unreachable — the'), plainOut.indexOf('Residue — all'));

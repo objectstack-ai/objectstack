@@ -41,6 +41,11 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'User',
             required: true,
             searchable: true,
+            // [#12978] Referenced-column bound (#11374 route A): a
+            // `sys_user.id` — physical varchar(255), the id column driver-sql
+            // creates (`table.string('id').primary()`) — or the 1-char
+            // literal '*'.
+            maxLength: 255,
             description: "Recipient user id, or '*' for the admin-global default.",
         }),
 
@@ -49,6 +54,13 @@ export const NotificationPreference = ObjectSchema.create({
             required: true,
             searchable: true,
             defaultValue: '*',
+            // [#12978] Sibling-declaration bound (#11374 route A): rows are
+            // matched against the event's `sys_notification.topic`
+            // (maxLength: 200 there) — `preference-resolver` keys
+            // `${user}|${topic}|${channel}` against `ctx.topic` — so a longer
+            // stored topic could never match an event the platform can store.
+            // '*' is 1 char.
+            maxLength: 200,
             description: "Notification topic, or '*' for all topics.",
         }),
 
@@ -56,6 +68,13 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'Channel',
             required: true,
             defaultValue: '*',
+            // [#12978] Machine channel-id vocabulary (#11374 route A), same
+            // sourcing as `sys_notification_delivery.channel`: registered
+            // `MessagingChannel.id`s (inbox/email/sms today; spec's widest
+            // enum member is 7 chars), 64 per the landed machine-vocabulary
+            // precedent (sys_session.revoke_reason, maxLength: 64). '*' is
+            // 1 char.
+            maxLength: 64,
             description: "Channel id (inbox/email/push/…), or '*' for all channels.",
         }),
 

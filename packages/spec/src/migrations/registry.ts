@@ -5267,7 +5267,20 @@ const step18: MigrationStep = {
     'grant in `permissions[].objects` (pure lossless delete — they never had an ' +
     'effect to lose). `allowTransfer` is ENFORCED (#3004) and stays. The keys return ' +
     'with the M2 lifecycle initiative (feature + RBAC in one batch); #1883 stays ' +
-    'open as the anchor.',
+    'open as the anchor. ' +
+    'Finally, it narrows the per-option `default` key OUT of the form-view options ' +
+    'vocabulary (#12868, ADR-0049 declared-but-unenforced; maintainer ruling 2026-08-28 ' +
+    'on the objectui#6263 analysis, disposition 甲): `SelectOptionSchema` serves two ' +
+    'surfaces and only the OBJECT-field face reads `default` (#7246 / PR #7388 — ' +
+    '`applyFieldDefaults` falls back to the option marked `default: true`; that face, its ' +
+    'alias rows and its precedence pin are untouched). On a form-view field\'s option list ' +
+    'the key parsed clean and nothing read it — the insert-path fallback consults the ' +
+    'object definition\'s options, never a form view\'s, and no form renderer seeds a value ' +
+    'from it (measured on objectui#6263; the ruled census found ZERO authored occurrences ' +
+    'across the tree, the example apps and the published *.form.ts corpus). The FormView ' +
+    'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses ' +
+    'the key with the prescription; the mechanical conversion strips it from stored ' +
+    'sources (pure lossless delete — it never had an effect on this surface to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5282,6 +5295,7 @@ const step18: MigrationStep = {
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
     'permission-allow-restore-purge-removed',
+    'form-view-option-default-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6988,6 +7002,53 @@ const step18: MigrationStep = {
         + 'not collapse.',
     },
     {
+      id: 'scim-provider-object-retired',
+      surface:
+        'the `sys_scim_provider` platform object (`SysScimProvider` in '
+        + '`@objectstack/platform-objects/identity`, re-exported from the package '
+        + 'root) and its name in `PLATFORM_PROVIDED_OBJECT_NAMES` '
+        + '(`@objectstack/spec/system` constants). The rc.1-era `@better-auth/scim` '
+        + 'connection row: one row per SCIM bearer connection, written only by the '
+        + 'retired `/scim/generate-token` endpoint.',
+      replacement:
+        '(removed — no direct replacement row. The stable `@better-auth/scim` '
+        + '1.7.x line (#3653, PR #12726) derives no `scimProvider` model: SCIM '
+        + 'state lives in the seven stable platform objects '
+        + '(`sys_scim_connection_binding`, `sys_scim_group`, '
+        + '`sys_scim_group_member`, `sys_scim_identity_tombstone`, '
+        + '`sys_scim_projection_grant`, `sys_scim_subject`, `sys_scim_user`) and '
+        + 'connection credentials in the ObjectStack-owned '
+        + '`sys_scim_connection_credential`, minted/verified by '
+        + '`scim-connection-service.ts` behind the application-owned '
+        + '`verifyBearerToken`. A SCIM-enabled deployment re-registers its '
+        + 'connections on the stable surface; rc.1 token digests are not portable '
+        + 'on any path, so the IdP reissues its token — a migration-day operator '
+        + 'action, not a code rewrite.)',
+      reason:
+        'Maintainer ruling 2026-08-24 on #11693 (verbatim: 「11700 11693 不需要考虑'
+        + '历史数据，其他按照你的建议继续」) — disposition A: retire, with no '
+        + 'data-migration path owed for existing rows (reaffirmed 2026-08-25: SCIM '
+        + 'has no real customers; the binding constraint is a smooth upgrade). '
+        + 'Executed as #11757 after the stable-1.7.1 migration landed (#3653 / '
+        + 'PR #12726): the installed library derives no `scimProvider` model, so '
+        + 'the object backed nothing — nothing could write a row to it any more. '
+        + 'Retiring it also removes its `provider_id` unique index, whose '
+        + 'stricter-than-upstream uniqueness was flagged on #3653 and parked '
+        + 'pending exactly this retirement.',
+      acceptanceCriteria:
+        'No code imports `SysScimProvider` from `@objectstack/platform-objects` '
+        + '(TS2305 after upgrade); `isPlatformProvidedObjectName(\'sys_scim_provider\')` '
+        + 'returns false, so a stack referencing the name is flagged as a probable '
+        + 'typo rather than resolved; plugin-auth provisions no `sys_scim_provider` '
+        + 'object and `AUTH_MODEL_TO_PROTOCOL` carries no `scimProvider` entry; the '
+        + 'spec registry conformance test (`platform-object-names.test.ts`) pins '
+        + 'the absence bidirectionally — re-adding either the object file or the '
+        + 'registry name alone reds `registry group "platform-objects" is out of '
+        + 'date` (measured both ways on #11757). Existing `sys_scim_provider` '
+        + 'tables in deployed databases are left in place untouched, by ruling — '
+        + 'no backfill, no reaper, no migrate command.',
+    },
+    {
       id: 'send-template-input-org-retired',
       surface: 'contracts.emailService.sendTemplate input.org',
       replacement:
@@ -7127,6 +7188,53 @@ const step18: MigrationStep = {
         + 'the per-row `results[].errors[].code` (`ROLLED_BACK` / `NOT_ATTEMPTED`) instead '
         + 'of an envelope-level code; constructing an ApiError with a retired spelling '
         + 'fails `StandardErrorCode`/`ApiErrorSchema` parse rather than passing silently.',
+    },
+    {
+      id: 'strategy-context-aggregation-method-narrowed',
+      surface: 'StrategyContext.executeAggregate aggregations[].method '
+        + '(contracts/analytics-service.ts, exported from @objectstack/spec/contracts) '
+        + '- the parameter type, declared as bare string',
+      replacement: 'AggregationFunction (count | sum | avg | min | max | count_distinct, '
+        + 'data/query.zod.ts) - the same closed vocabulary IDataEngine.aggregate already '
+        + 'declares for the identical slot (AggregationNodeSchema.function; the analytics '
+        + 'bridge renames method to function and forwards). A caller filling method from a '
+        + 'string-typed value narrows the value to the enum - typing it '
+        + 'AggregationFunction, or parsing with the spec\'s own AggregationFunction zod '
+        + 'enum where the value enters from data. Values outside the six were never '
+        + 'served: the bridge has parsed-and-refused them at runtime since #11833, and '
+        + 'that refusal stays as defence in depth',
+      reason:
+        '#12776, maintainer ruling 2026-08-28 (option A, census-first). Two spec-declared '
+        + 'surfaces described the same value and disagreed about its type: '
+        + 'IDataEngine.aggregate\'s aggregations[].function is the closed six-value '
+        + 'AggregationFunction enum while StrategyContext.executeAggregate declared the '
+        + 'same slot aggregations[].method: string, so nothing on the analytics side of '
+        + 'that seam was compile-checked against the engine\'s vocabulary - an author, '
+        + 'very often an AI (ADR-0033), writing an analytics strategy got no compile-time '
+        + 'help and could carry any method name all the way to the bridge\'s runtime '
+        + 'refusal. One slot now has one declaration. Bookkeeping: this is a TYPE '
+        + 'narrowing on a runtime TS interface member - no authorable metadata key, no '
+        + 'wire shape and no walked-shape def changed, so nothing lands in '
+        + 'RETIRED_KEYS_BY_MAJOR / RETIRED_DEFS_BY_MAJOR and the surface ratchets are '
+        + 'expected byte-identical. It is a SEMANTIC entry rather than a D2 conversion '
+        + 'because there is no authored document or sys_metadata row for the chain to '
+        + 'rewrite: the only consumers are TypeScript call sites, and the compile error '
+        + 'is the channel that reaches them. In-repo census at the ruling (hard '
+        + 'precondition, measured before the narrowing landed): every implementor and '
+        + 'every call site filling method is legal under the enum - '
+        + 'ObjectQLStrategy.resolveMeasureAggregation emits only the six post-#12209 '
+        + 'refusal, the two literal producers write count, and every test fixture is '
+        + 'implementor-side and stays assignable by contravariance.',
+      acceptanceCriteria:
+        'External implementors of StrategyContext stay source-compatible: a handler '
+        + 'accepting method: string accepts a superset and remains assignable to the '
+        + 'narrowed member. External callers filling method with a string-typed or '
+        + 'out-of-vocabulary value fail tsc at the executeAggregate call site on upgrade; '
+        + 'the fix is narrowing the value\'s type to AggregationFunction (parsing with '
+        + 'the spec enum where it enters from data), never widening a local mirror of '
+        + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
+        + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
+        + 'and no stored metadata or document needs editing.',
     },
     {
       id: 'ui-cloud-connection-widgets-unknown-keys-refused',

@@ -412,7 +412,7 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
   sortability: ObjectSortabilitySchema.optional().describe(
-    'Per-column sortability projection (#10235) — present exactly when `type` '
+    'Per-column sortability projection — present exactly when `type` '
     + 'is `object`, on every serving branch. Computed at serve time from the '
     + 'served document via the spec\'s own storage predicates; consumers render '
     + 'sort affordances from this signal and never re-derive it from field '
@@ -545,7 +545,7 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
     + 'write types (`object` / `permission` / `book`) the TOP-LEVEL collection '
     + 'entry is keyed by NAME (`objects.acme_invoice.sharingModel`), never by '
     + 'an array index — the gate evaluates against a private per-write '
-    + 'snapshot whose indexes no caller can resolve (#10064). Every other '
+    + 'snapshot whose indexes no caller can resolve. Every other '
     + 'write type is the sole member of its own collection, so its `[0]` is '
     + 'trivially stable and stays positional (`flows[0]...`), as do nested '
     + 'positions inside one named item (`objects.acme_invoice.indexes[1]`), '
@@ -580,7 +580,7 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
   name: MetadataItemNameSchema.describe(
     'Item name — lowercase snake_case segments, optionally dot-qualified '
     + '(`crm_lead`, `crm_lead.pipeline`). Slash-compound names are refused at '
-    + 'the publish door (#12176).',
+    + 'the publish door.',
   ),
   item: z.unknown().describe('Metadata item definition'),
 }));
@@ -642,10 +642,10 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '`projectionApplied.success` rather than rely on the 200.',
   ),
   advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    'Non-gating findings from the runtime authoring gate — the same '
     + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
     + 'applied to this body on its way to `active`. The write SUCCEEDED; these '
-    + 'are what the gate has to say about it anyway (#4717, closing #4463 D3). '
+    + 'are what the gate has to say about it anyway (closing D3). '
     + 'Present ONLY when at least one advisory was raised — an empty array is '
     + 'never emitted, so a clean save\'s response bytes are unchanged and '
     + 'absence means "nothing to report", never "the gate did not run". '
@@ -654,10 +654,10 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '422 `invalid_metadata` envelope instead of here. A caller that ignores '
     + 'this key behaves exactly as before. Runtime-only: the CLI surfaces the '
     + 'same findings on its own stdout, and a Studio / MCP / AI author has no '
-    + 'CLI at all, which is the gap #4463 exists to close. The gate runs on '
-    + 'both write doors (#4463 D1), and both report: '
+    + 'CLI at all, which is the gap this key exists to close. The gate runs on '
+    + 'both write doors (D1), and both report: '
     + '`POST /meta/:type/:name/publish` carries the same key on '
-    + '`PublishMetaItemResponseSchema` (#9176).',
+    + '`PublishMetaItemResponseSchema`.',
   ),
   message: z.string().optional(),
 }));
@@ -694,17 +694,17 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
   name: MetadataItemNameSchema.describe(
     'Item name — lowercase snake_case segments, optionally dot-qualified '
     + '(`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the '
-    + 'same grammar as `saveMetaItem` (#12194).',
+    + 'same grammar as `saveMetaItem`.',
   ),
   organizationId: z.string().optional().describe(
     'Organization (tenant) scope for the promotion. The implementation resolves '
-    + 'the draft through the org partition (ADR-0005, #8805), so a draft '
+    + 'the draft through the org partition (ADR-0005), so a draft '
     + 'authored org-scoped must be published under the same scope or the lookup '
     + 'answers 404 `[no_draft]`. Absent = environment-wide.',
   ),
   actor: z.string().optional().describe(
     'Identity recorded on the `op=\'publish\'` history event. On the REST door '
-    + 'this is the request\'s authenticated identity (one producer, #7749) — '
+    + 'this is the request\'s authenticated identity (one producer) — '
     + 'never a caller-supplied header.',
   ),
   message: z.string().optional().describe(
@@ -713,7 +713,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
   packageId: z.string().nullable().optional().describe(
     'ADR-0048 — the software package the draft being promoted was listed '
     + 'under, when the caller has one to state (`?package=<id>` on the REST '
-    + 'door; #10063 / #10350). ⚠️ `null` is NOT the same as absent, and the '
+    + 'door). ⚠️ `null` is NOT the same as absent, and the '
     + 'difference is load-bearing: the implementation branches on the KEY '
     + 'BEING PRESENT, so an ABSENT key keeps the historical "match any '
     + 'package" resolution while `null` pins the lookup to the '
@@ -839,11 +839,11 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + 'and logged, never thrown.',
   ),
   advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    'Non-gating findings from the runtime authoring gate — the same '
     + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
-    + 'applied to the DRAFT body this promotion carried to `active` (#9176, '
+    + 'applied to the DRAFT body this promotion carried to `active` ('
     + 'the same key `SaveMetaItemResponseSchema` carries, because the gate '
-    + 'runs on both write doors by #4463 D1). The promotion SUCCEEDED; these '
+    + 'runs on both write doors, D1). The promotion SUCCEEDED; these '
     + 'are what the gate has to say about it anyway. Present ONLY when at '
     + 'least one advisory was raised — an empty array is never emitted, so a '
     + 'clean publish\'s response bytes are unchanged and absence means '
@@ -853,7 +853,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + '`invalid_metadata` envelope instead of here. A caller that ignores '
     + 'this key behaves exactly as before. This door is the one Studio\'s '
     + 'designer takes on every edit (draft save, then publish), and a Studio '
-    + '/ MCP / AI author has no CLI at all — which is the gap #4463 exists '
+    + '/ MCP / AI author has no CLI at all — which is the gap this key exists '
     + 'to close.',
   ),
   message: z.string().optional().describe(
@@ -861,7 +861,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + '[seq=3]`. The producer sets it on every publish today; it stays optional '
     + 'to match the producer\'s own signature and its `SaveMetaItemResponse` '
     + 'twin, and because an absent human-readable string strips no data — the '
-    + 'failure mode #5745 exists to prevent.',
+    + 'failure mode this key exists to prevent.',
   ),
 }));
 
@@ -913,13 +913,13 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     'True only when every pending draft promoted (`failed` empty) AND at '
     + 'least one item published. A pre-flight refusal or an ADR-0067 D2 '
     + 'rollback answers false on a 200 — but so does a publish with nothing '
-    + 'to promote, so false alone is NOT a refusal: read `outcome` (#10462), '
+    + 'to promote, so false alone is NOT a refusal: read `outcome`, '
     + 'not this boolean or the HTTP status. Always equal to '
     + '`outcome === \'published\'` (pinned). It does NOT cover the '
     + 'best-effort receipts below, each of which reports its own `success`.',
   ),
   outcome: z.enum(['published', 'refused', 'nothing_to_publish']).describe(
-    'First-class discriminant for WHICH exit answered (#10462) — the fact '
+    'First-class discriminant for WHICH exit answered — the fact '
     + '`success` compresses into one boolean. `published`: at least one draft '
     + 'promoted and none refused. `refused`: the batch was refused — a '
     + 'pre-flight violation or the ADR-0067 D2 all-or-nothing rollback; the '
@@ -955,8 +955,8 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + 'part of this contract.',
     ),
     advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
-      'Non-gating findings the #4463 runtime authoring gate raised against '
-      + 'THIS draft\'s promotion (#9343 — the same element shape and the '
+      'Non-gating findings the runtime authoring gate raised against '
+      + 'THIS draft\'s promotion (the same element shape and the '
       + 'same omitted-when-empty discipline as '
       + '`PublishMetaItemResponseSchema.advisories`, riding each element '
       + 'rather than a parallel top-level map). Present ONLY when at least '
@@ -980,7 +980,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + 'A refusal that produced structured findings states a one-sentence '
       + 'HEADLINE here (what failed, where, which rules, how many); the '
       + 'per-path detail rides `issues[]` instead of being restated in this '
-      + 'string (#10524 — consumers rendering both channels were showing '
+      + 'string (consumers rendering both channels were showing '
       + 'every finding twice).',
     ),
     code: z.string().optional().describe(
@@ -990,13 +990,13 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
     issues: z.array(RuntimeAuthoringIssueSchema).optional().describe(
       'The structured findings behind the refusal, when the refusing error '
-      + 'carried them — today the #4463 author-time gate\'s '
+      + 'carried them — today the author-time gate\'s '
       + 'INVALID_METADATA refusal on the causal item. The producer has '
-      + 'emitted this key since #8333; declaring it (#10524) is what lets a '
+      + 'emitted this key; declaring it is what lets a '
       + 'typed consumer read it back, and what lets `error` stay a headline '
       + 'without losing the per-path detail. Same element shape as '
       + '`published[].advisories` and the single-item 422\'s `issues[]` '
-      + '(#4717 — one dialect, declared once). Present ONLY on the causal '
+      + '(— one dialect, declared once). Present ONLY on the causal '
       + 'item and only when the refusal produced structured findings; '
       + 'BATCH_ABORTED siblings never carry it. Absent means "this refusal '
       + 'carried no structured findings", never "no problems".',
@@ -1025,7 +1025,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       'Single failure message, present when the apply failed before the '
       + 'loader ran (including "no readable seed bodies"). When the failure '
       + 'is the seed bodies\' own schema refusal, this is a one-sentence '
-      + 'headline and the per-path detail rides `issues[]` (#10524).',
+      + 'headline and the per-path detail rides `issues[]`.',
     ),
     errors: z.array(z.unknown()).optional().describe(
       'Per-record failures reported by the seed loader, plus any seed-body '
@@ -1040,16 +1040,16 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       message: z.string().describe('What is wrong, in the schema\'s own words.'),
       code: z.string().optional().describe(
         'Zod\'s own issue code, verbatim — deliberately NOT the ADR-0114 '
-        + '`fields[]` vocabulary (the #5364 decision: this is a '
+        + '`fields[]` vocabulary (the decision: this is a '
         + 'metadata-authoring diagnostic and its consumers read raw zod '
         + 'codes; aligning the vocabularies is a separate decision).',
       ),
     })).optional().describe(
       'Structured spec-validation findings behind `error`, present when the '
       + 'apply was refused by the seed bodies\' own schema — the declared '
-      + '422 `seedRequestValidationError` mints (#8443). The per-path '
-      + 'detail lives HERE, once; `error` stays a one-sentence headline '
-      + '(#10524). Absent on non-validation failures (driver faults, '
+      + '422 `seedRequestValidationError` mints. The per-path '
+      + 'detail lives HERE, once; `error` stays a one-sentence headline'
+      + '. Absent on non-validation failures (driver faults, '
       + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),
   }).optional().describe(
@@ -1095,7 +1095,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     'ADR-0038 L3 post-publish runtime probe report — one real read per '
     + 'published artifact (seeded objects have rows, views are readable, '
     + 'widget dataset selections execute). DELIBERATELY OPAQUE in this '
-    + 'contract (#9406): the key is declared and carried through verbatim, '
+    + 'contract: the key is declared and carried through verbatim, '
     + 'but its inner shape is intentionally not modeled until a consumer '
     + 'needs a field of it. Present only when something was publishable; '
     + 'probes never fail the publish.',
@@ -1110,14 +1110,14 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'has no drafts, only this flip). Attached by the REST door, not the '
     + 'protocol helper. Present ONLY when at least one app flipped — on a '
     + 'mid-loop failure it names the apps that DID persist, beside '
-    + '`unhideError` (#5242\'s split report). Spelling is a permanent wire '
-    + 'contract (see the door\'s #6955 note).',
+    + '`unhideError` (\'s split report). Spelling is a permanent wire '
+    + 'contract (see the door\'s note).',
   ),
   unhideError: z.string().optional().describe(
     'Present when the ADR-0045 visibility flip failed (wholly or partway): '
     + 'the drafts ARE published, but apps still stored `_unpublished: true` '
     + 'stay externally unobservable. Client-facing text only — undeclared '
-    + 'driver text is withheld per ADR-0112 (#8516); the full cause is in '
+    + 'driver text is withheld per ADR-0112; the full cause is in '
     + 'the server log. The route is idempotent: re-run it once the cause is '
     + 'resolved.',
   ),
@@ -1126,7 +1126,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'everything is published and stored, but boot-cached consumers keep '
     + 'the pre-publish view until re-run or restart (a newly published '
     + 'record-triggered flow does not bind its trigger). Client-facing text '
-    + 'only, same ADR-0112 withhold as `unhideError` (#8516).',
+    + 'only, same ADR-0112 withhold as `unhideError`.',
   ),
 }));
 
@@ -1156,7 +1156,7 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the reset (#8805). Load-bearing, not '
+    'Organization (tenant) scope for the reset. Load-bearing, not '
     + 'advisory: it selects the ADR-0005 overlay partition, so it decides '
     + 'WHICH row the reset destroys — an org-scoped delete removes that '
     + 'tenant\'s own overlay, while an org-less delete reaches the '
@@ -1172,9 +1172,9 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   ),
   actor: z.string().optional().describe(
     'Identity recorded on the delete\'s history tombstone row. On the REST '
-    + 'door this is the request\'s authenticated identity (one producer, '
-    + '#7749) — never a caller-supplied header. Absent, the event is recorded '
-    + 'actor-less (null), deliberately not attributed to "system" (#4556).',
+    + 'door this is the request\'s authenticated identity (one producer) '
+    + '— never a caller-supplied header. Absent, the event is recorded '
+    + 'actor-less (null), deliberately not attributed to "system".',
   ),
   state: z.enum(['active', 'draft']).optional().describe(
     'Which lifecycle row to discard: `draft` discards the pending draft '
@@ -1223,7 +1223,7 @@ export const AuditMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   organizationId: z.string().nullable().optional().describe(
-    'Organization (tenant) scope for the read (#8747). With an organization, '
+    'Organization (tenant) scope for the read. With an organization, '
     + 'the trail includes that org\'s rows AND the env-wide '
     + '(`organization_id IS NULL`) rows — the env-wide limb is load-bearing, '
     + 'because env-level writes are stamped org-less. `null` and absent are '
@@ -1339,7 +1339,7 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
  * implementation detail rather than a declared union.
  */
 export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().describe(
-  'The published metadata item body, opaque by ruling (#12038 1C). Shape is '
+  'The published metadata item body, opaque by ruling (1C). Shape is '
   + 'the item\'s own metadata-type schema, resolved at read time — never '
   + 'frozen into this contract.',
 ));
@@ -1487,12 +1487,12 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
   locale: z.string().optional().describe(
     'Resolved response locale. Folded into the ETag so a language switch '
     + 'never returns a stale-locale 304 — metadata is translated *after* the '
-    + 'cache validator check (issue #1319).',
+    + 'cache validator check (issue).',
   ),
   organizationId: z.string().optional().describe(
     'Organization (tenant) scope for the read. Selects the org partition in the '
     + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — exactly as on the uncached read (#9454). Also '
+    + 'over packaged artifact — exactly as on the uncached read. Also '
     + 'folded into the ETag, so a scope switch never returns a stale 304 from '
     + 'another scope\'s cached representation. Absent = environment-wide read.',
   ),
@@ -1649,9 +1649,9 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
   id: z.string().describe('The ID of the newly created record.'),
   record: z.record(z.string(), z.unknown()).describe('The created record, including server-generated fields (created_at, owner).'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability (#3407/#3431): caller-supplied fields that were LEGALLY stripped ' +
+    'Write-observability: caller-supplied fields that were LEGALLY stripped ' +
     'before the record was written — a non-system create cannot seed a static `readonly` ' +
-    'column (#3043 ingress strip), so those keys are dropped and the field re-derives its ' +
+    'column (ingress strip), so those keys are dropped and the field re-derives its ' +
     'default. Present ONLY when ≥1 field was dropped; the create still succeeded without ' +
     'them (status/success semantics unchanged). REST additionally surfaces this as the ' +
     '`X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the ' +
@@ -1749,7 +1749,7 @@ export const ValidateDataResponseSchema = lazySchema(() => z.object({
     'The ADR-0104 posture the verdict was reached under — reported because it is the difference between ' +
     '"this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified ' +
     'deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to ' +
-    'know which it got. An unconditionally-strict preview was considered and rejected (#4633 option B): it ' +
+    'know which it got. An unconditionally-strict preview was considered and rejected (option B): it ' +
     'would fail rows on every un-migrated deployment that the write would have accepted.',
   ),
 }));
@@ -1787,9 +1787,9 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
   id: z.string().describe('Updated record ID'),
   record: z.record(z.string(), z.unknown()).describe('Updated record'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability (#3407/#3431): caller-supplied fields the engine LEGALLY stripped ' +
-    'from the write before persisting — static `readonly` (#2948) or a TRUE `readonlyWhen` ' +
-    'predicate (#3042). Present ONLY when ≥1 field was dropped; the update still succeeded ' +
+    'Write-observability: caller-supplied fields the engine LEGALLY stripped ' +
+    'from the write before persisting — static `readonly` or a TRUE `readonlyWhen` ' +
+    'predicate. Present ONLY when ≥1 field was dropped; the update still succeeded ' +
     'without them (status/success semantics unchanged — stripping is legitimate, not an ' +
     'error). REST additionally surfaces this as the `X-ObjectStack-Dropped-Fields` response ' +
     'header. Optional — omit-when-empty keeps the shape backward-compatible for existing ' +
@@ -1847,7 +1847,7 @@ export const SearchAllHitSchema = lazySchema(() => z.object({
   snippet: z.string().optional().describe(
     'Excerpt cut around the first matched term in a searchable text column, ellipsized at '
     + 'both ends when truncated. ABSENT when no source column literally contains a term '
-    + '(e.g. a pinyin companion match, #7643) — absence is a correct answer, not a miss.'
+    + '(e.g. a pinyin companion match) — absence is a correct answer, not a miss.'
   ),
   record: z.record(z.string(), z.unknown()).describe(
     'The matched record as the engine\'s find path returns it (row-level security applied, '
@@ -1883,7 +1883,7 @@ export const SearchAllResponseSchema = lazySchema(() => z.object({
   totalObjects: z.number().describe(
     'Number of objects the sweep actually SCANNED (searchable, API-enabled, with a '
     + 'resolvable search-field set) — not the number of objects with hits. An object '
-    + 'whose table was never provisioned is skipped and not counted (#8896).'
+    + 'whose table was never provisioned is skipped and not counted.'
   ),
   totalHits: z.number().describe(
     'Number of hits returned — equals `hits.length`. NOT a deployment-wide total-match '
@@ -1929,7 +1929,7 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability (#3407/#3431/#3455): caller-supplied `readonly` fields the #3043 ' +
+    'Write-observability: caller-supplied `readonly` fields the ' +
     'create-ingress strip removed before the rows were written. AGGREGATED across the batch ' +
     '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
     'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
@@ -2289,7 +2289,7 @@ export const NotificationSchema = lazySchema(() => z.object({
  */
 const NOTIFICATIONS_CURSOR_REMOVED =
   '`cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 '
-  + '(#6361, ADR-0049) — it was declared on the request AND the response and honoured on '
+  + '(ADR-0049) — it was declared on the request AND the response and honoured on '
   + 'neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the '
   + 'response key, so a caller paginating by it re-read the first window forever with no '
   + 'error and no 400. Delete the key; the `cursor` argument of '
@@ -2650,7 +2650,7 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
     code: z.string().describe('BCP-47 locale code (e.g., en-US, zh-CN)'),
     label: z.string().describe(
-      'Locale label. Equals `code` on every serving surface today — the client names locales for its UI (#7634)',
+      'Locale label. Equals `code` on every serving surface today — the client names locales for its UI',
     ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),

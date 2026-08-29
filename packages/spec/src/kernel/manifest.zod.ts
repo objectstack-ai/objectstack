@@ -350,7 +350,7 @@ export const ManifestSchema = z.object({
       id: z.string().describe('The generic identifier of the kind (e.g., "sys.bi.report")'),
       /** REMOVED (#11169) — discovery reads the metadata type registry's `filePatterns`, never this. */
       globs: retiredKey(
-        '`manifest.contributes.kinds[].globs` was removed in @objectstack/spec 17 (#11169, ' +
+        '`manifest.contributes.kinds[].globs` was removed in @objectstack/spec 17 (' +
         'ADR-0049 enforce-or-remove) — it never had an effect: file-type discovery globs ' +
         '`filePatterns` off the metadata type registry, which `contributes.kinds` does not ' +
         'extend (`metadata-plugin.zod.ts` states this outright), so the watch patterns ' +
@@ -364,7 +364,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — the declaration drove nothing; subscribe in plugin code. */
     events: retiredKey(
-      '`manifest.contributes.events` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.events` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read the list: its only in-repo ' +
       'author already subscribed imperatively in plugin code, so the declaration was ' +
       'decorative. Delete the key. Subscribe to system events in the plugin itself — ' +
@@ -374,7 +374,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — use app `navigation` / `manifest.navigationContributions`. */
     menus: retiredKey(
-      '`manifest.contributes.menus` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.menus` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — no renderer ever read it; two alias maps already ' +
       'redirected this spelling to `navigation`. Delete the key. Declare navigation in ' +
       "the app's `navigation` tree, or inject items into another package's app via " +
@@ -383,7 +383,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — this `{id,label,path}` shape had no reader anywhere. */
     themes: retiredKey(
-      '`manifest.contributes.themes` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.themes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — it never had an effect: theme registration reaches ' +
       'the registry only through the stack-level `themes` collection (a ' +
       '`ThemeSchema` surface, unrelated to this `{ id, label, path }` shape), never ' +
@@ -394,7 +394,7 @@ export const ManifestSchema = z.object({
     /** REMOVED (#10724) — use the `translation` metadata type / stack `translations`. */
     translations: retiredKey(
       '`manifest.contributes.translations` was removed in @objectstack/spec 17 ' +
-      '(#10724, ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
+      '(ADR-0049 enforce-or-remove) — no loader ever read these `{ locale, ' +
       'path }` entries; authoring them registered no translations. Delete the key. ' +
       'Declare translations as `translation` metadata: `defineTranslationBundle({ … })` ' +
       "in the stack's `translations` collection (`defineStack({ translations: […] })`), " +
@@ -403,7 +403,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — use the stack `actions` collection / `registerAction`. */
     actions: retiredKey(
-      '`manifest.contributes.actions` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.actions` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it; actions declared here were ' +
       'never invocable. Delete the key. Declare actions in the stack `actions` ' +
       'collection (registered by the engine) or register imperatively via ' +
@@ -412,7 +412,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — a driver is a `driver.*` kernel service, not a declaration. */
     drivers: retiredKey(
-      '`manifest.contributes.drivers` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.drivers` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — it never had an effect: a storage driver is wired ' +
       'by registering a kernel SERVICE named `driver.*` (the objectql plugin picks it ' +
       'up and calls `registerDriver`), and its only in-repo author was registered that ' +
@@ -421,7 +421,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — no field-type registration seam exists. */
     fieldTypes: retiredKey(
-      '`manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.fieldTypes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — there is no `registerFieldType` seam anywhere: ' +
       'the declaration advertised an extension point the platform does not have, so ' +
       'authoring it configured nothing. Delete the key. The field-type vocabulary is ' +
@@ -431,7 +431,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10724) — use `defineStack({ functions })` → `registerFunction`. */
     functions: retiredKey(
-      '`manifest.contributes.functions` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.functions` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it; ObjectQL functions declared ' +
       'here were never registered. Delete the key. Declare functions on the stack ' +
       '(`defineStack({ functions: […] })`), which the hook binder registers via ' +
@@ -440,7 +440,7 @@ export const ManifestSchema = z.object({
 
     /** REMOVED (#10726) — mount code-handler routes on the `http.server` service; declarative endpoints are `defineStack({ apis })`. */
     routes: retiredKey(
-      '`manifest.contributes.routes` was removed in @objectstack/spec 17 (#10726, ' +
+      '`manifest.contributes.routes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it: the HttpDispatcher never ' +
       'registered a prefix from the declaration, so an entry here parsed cleanly and ' +
       'served nothing while published material kept recommending it. Delete the key. ' +
@@ -458,7 +458,7 @@ export const ManifestSchema = z.object({
      * `objectstack.config.ts` plugins array no longer determines CLI commands."
      */
     commands: retiredKey(
-      '`manifest.contributes.commands` was removed in @objectstack/spec 17 (#10724, ' +
+      '`manifest.contributes.commands` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — the CLI never resolved commands from this ' +
       'declaration: commands are auto-discovered through oclif\'s native plugin system ' +
       "(the plugin package declares an `oclif` section in its own `package.json`; see " +
@@ -521,7 +521,7 @@ export const ManifestSchema = z.object({
    * made this a security concern and not merely tidying.
    */
   loading: retiredKey(
-    '`manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 ' +
+    '`manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 ' +
     'enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, ' +
     '`dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, ' +
     '`sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it ' +

@@ -19,6 +19,7 @@ import {
   parseKeyMentionBaseline,
   reconcileKeyMentions,
 } from './key-mention.mts';
+import type { KeyMentionExemption } from './key-mention.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -161,11 +162,92 @@ describe('parseKeyMentionBaseline', () => {
     expect(() => parseKeyMentionBaseline({})).toThrow(/exemptions/);
   });
 
-  it('parses the SHIPPED baseline, and every row explains which name the file uses', () => {
-    const doc = parseKeyMentionBaseline(
-      JSON.parse(readFileSync(join(here, 'key-mention.baseline.json'), 'utf8')),
-    );
-    expect(doc.exemptions.length).toBeGreaterThan(0);
-    for (const row of doc.exemptions) expect(row.why.length).toBeGreaterThan(40);
+  // ── the row-quality rule, and the pair that keeps it discriminating ──
+  //
+  // `key-mention.baseline.json` declares itself, in its own `_note`, a
+  // `SHRINK-ONLY RATCHET (#11457)`: a finite, enumerated debt ledger that
+  // exists to be driven to zero. Everything below follows from that one fact.
+  //
+  // What stood here was ONE case that read the shipped file and then asserted
+  // `doc.exemptions.length > 0` before looping over the rows. It conflated two
+  // claims, and got both of them wrong at the same moment:
+  //
+  //   * the floor was a pin on the DEBT BEING PRESENT. It goes red on the
+  //     commit that deletes the last exemption — i.e. exactly when the
+  //     burn-down SUCCEEDS. The two reactions available to the seat that hits
+  //     it are "park a row to keep the test green" and "weaken the assertion",
+  //     and both are wrong.
+  //   * deleting the floor alone would not have been the repair either:
+  //     `for (const row of [])` asserts nothing, so it trades the red for a
+  //     silent no-op — the `[].every(...)` second-order defect the witness
+  //     pair below exists to prevent.
+  //
+  // So the two claims are split: a SYNTHETIC witness pair carries the rule (it
+  // keeps discriminating at zero), and the shipped ledger is held to the rule
+  // CONDITIONALLY on rows existing rather than being required to have them.
+  // The rule is named once, here, so the pair and the ledger case cannot be
+  // held to two definitions of it that drift apart.
+  //
+  // 40 characters is the original threshold, carried over unchanged: a `why`
+  // shorter than that is the reassuring sentence the file's own `_exemptions`
+  // note forbids — "a row that only asserts 'this is fine'" — rather than a
+  // statement of WHICH name the cited file actually uses.
+  const explainsWhichNameIsUsed = (row: KeyMentionExemption): boolean => row.why.length > 40;
+
+  // Both witnesses are SYNTHETIC — neither reads the shipped file — which is
+  // the whole point: this pair goes on discriminating after the ledger burns
+  // down to zero, where a rule carried on the live rows alone would not.
+  // PR #12050 is the worked instance of the idiom.
+  const WITNESS_EXPLAINED: KeyMentionExemption = {
+    entry: 'email_template/fromOverride',
+    path: 'email-service.ts',
+    why: 'the file reads the compound remap `from_address`; no camelCase→snake_case fold reaches that spelling',
+  };
+  const WITNESS_REASSURING: KeyMentionExemption = {
+    entry: 'email_template/fromOverride',
+    path: 'email-service.ts',
+    why: 'this is fine',
+  };
+
+  it('accepts a conforming row, and the row-quality rule REJECTS one that only reassures', () => {
+    // Positive half — the parser accepts a conforming row and hands it back
+    // intact, and the rule holds for it.
+    const parsed = parseKeyMentionBaseline({ exemptions: [WITNESS_EXPLAINED] });
+    expect(parsed.exemptions).toEqual([WITNESS_EXPLAINED]);
+    expect(parsed.exemptions.every(explainsWhichNameIsUsed)).toBe(true);
+
+    // Negative half — and the rule can FAIL. `WITNESS_REASSURING` is
+    // STRUCTURALLY valid, so the parser accepts it: that is precisely why row
+    // quality is a claim of its own and not one the parse already covers.
+    expect(() => parseKeyMentionBaseline({ exemptions: [WITNESS_REASSURING] })).not.toThrow();
+    expect(explainsWhichNameIsUsed(WITNESS_REASSURING)).toBe(false);
+  });
+
+  it('reads the SHIPPED ledger, and every row that IS there explains which name the file uses', () => {
+    const raw = JSON.parse(readFileSync(join(here, 'key-mention.baseline.json'), 'utf8')) as {
+      _note?: unknown;
+    };
+
+    // PROOF OF READ, asserted independently of how many rows come back — the
+    // rule #11694 carries. An empty ledger is the burn-down SUCCEEDING; a file
+    // that was never read is this case losing its subject; the two must not
+    // look alike from here. `readFileSync` and `parseKeyMentionBaseline` throw
+    // on the ways that can happen, and this says so out loud instead of
+    // leaving it implicit in a loop that would be silent at zero.
+    const note = raw._note;
+    expect(typeof note).toBe('string');
+    expect(String(note)).toContain('SHRINK-ONLY RATCHET');
+
+    const doc = parseKeyMentionBaseline(raw);
+
+    // ⛔ Deliberately no `toBeGreaterThan(0)`: zero rows is this ledger
+    // reaching its goal. The check below is CONDITIONAL on rows existing and
+    // vacuous at zero BY DESIGN — the witness pair above is what still
+    // discriminates at that point. Reported as a list so a failure names the
+    // offending pairs rather than a bare count.
+    const unexplained = doc.exemptions
+      .filter((row) => !explainsWhichNameIsUsed(row))
+      .map((row) => `${row.entry} → ${row.path}`);
+    expect(unexplained).toEqual([]);
   });
 });

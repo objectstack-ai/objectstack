@@ -77,7 +77,7 @@ import { strictObject } from '../shared/strict-object';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
-  'Until #4001 an undeclared key here was dropped at the execute-time parse — the step still ran and the run '
+  'Until this shape was closed, an undeclared key here was dropped at the execute-time parse — the step still ran and the run '
   + 'still reported success, minus whatever the key was meant to configure.';
 
 /**
@@ -109,17 +109,17 @@ const BUILTIN_NODE_CONFIG_HISTORY =
 const CRUD_ALIAS_GUIDANCE = {
   object:
     'The object slot is `objectName`. `object` was the last tenant of the `readAliasedConfig` executor shim; it '
-    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias` (#3796), which rewrites it at load. '
+    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias`, which rewrites it at load. '
     + 'If `objectName` is also present, this node names two different objects and the conversion left both keys '
-    + 'alone rather than picking for you (#4923) — decide which object this node acts on, put it on `objectName`, '
+    + 'alone rather than picking for you — decide which object this node acts on, put it on `objectName`, '
     + 'and delete `object`.',
   filters:
     'The match map is `filter` (singular). `filters` was a consumer-side executor fallback that graduated into the '
     + 'ADR-0087 D2 conversion `flow-node-crud-filter-alias`, which rewrites it at load; delete it once `filter` '
     + 'carries the pairs. If `filter` is also present, the two carry DIFFERENT match maps and the conversion kept '
-    + 'both rather than choosing (#4923) — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
-    + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare (#3810 — a '
-    + 'match-everything write).',
+    + 'both rather than choosing — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
+    + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare — it is a '
+    + 'match-everything write.',
 } as const;
 
 /**
@@ -141,7 +141,7 @@ const CRUD_RECORD_ID_GUIDANCE =
   'CRUD nodes address rows through `filter`, never through a `recordId` key — no executor has ever read one. '
   + "Write the id as a filter VALUE: `filter: { id: '{record.id}' }`, which is the shape the node's own descriptor "
   + 'documents. This matters most on `delete_record`: a config whose only "constraint" is an unread key is a '
-  + 'match-everything delete, the #3810 hazard.';
+  + 'match-everything delete, the hazard.';
 
 /**
  * `fieldValues` — the AI-authoring dialect that never had a runtime reader.
@@ -154,7 +154,7 @@ const CRUD_RECORD_ID_GUIDANCE =
  */
 const FIELD_VALUES_GUIDANCE =
   'The write map is `fields`. `fieldValues` was an AI-authoring dialect that never had a runtime reader, and a '
-  + 'consumer-side `cfg.fields ?? cfg.fieldValues` alias was rejected by design (#2419) — the fix is the authoring '
+  + 'consumer-side `cfg.fields ?? cfg.fieldValues` alias was rejected by design — the fix is the authoring '
   + 'source and this rejection, not a runtime fallback.';
 
 /**
@@ -167,8 +167,8 @@ const FIELD_VALUES_GUIDANCE =
  * reaches nothing.
  */
 const NO_OUTPUT_VARIABLE_GUIDANCE =
-  'This node binds no output — the executor reads no `outputVariable`, and #4045 recorded that absence '
-  + 'deliberately after re-verifying the executor. Its siblings (`get_record`, `create_record`, `map`) do declare '
+  'This node binds no output — the executor reads no `outputVariable`, and that absence is '
+  + 'deliberate, recorded after re-verifying the executor. Its siblings (`get_record`, `create_record`, `map`) do declare '
   + 'one, which is why the key looks universal and is not. To use what was written, follow this node with a '
   + '`get_record` that reads the row back.';
 
@@ -196,7 +196,7 @@ const NO_OUTPUT_VARIABLE_GUIDANCE =
  */
 const BULK_INTENT_PRESCRIPTION =
   'Bulk intent is declared with `multi: true` — the same word the data engine has always used for it '
-  + '(`options.multi`), so the concept keeps one name from node config to driver call. Until #5393 NO spelling of '
+  + '(`options.multi`), so the concept keeps one name from node config to driver call. Until this key arrived NO spelling of '
   + 'it existed on this node, which is why a predicate write was refused by the engine '
   + '(`… requires an ID or options.multi=true`) and no flow could reach `updateMany`/`deleteMany` at all. Leaving '
   + 'it off is still a valid, deliberate choice: without it the write must name one row by scalar `id`.';
@@ -204,7 +204,7 @@ const BULK_INTENT_PRESCRIPTION =
 const BULK_INTENT_OPTIONS_PRESCRIPTION =
   'This is the NODE config, not the data engine\'s options bag — declare `multi: true` at the top level of '
   + '`config`, never `options: { multi: true }`. Translating the declared intent into `options.multi` on the '
-  + 'engine call is the executor\'s job, and it is the only thing that should be doing it (#5393).';
+  + 'engine call is the executor\'s job, and it is the only thing that should be doing it.';
 
 const CRUD_BULK_INTENT_GUIDANCE = {
   bulk: BULK_INTENT_PRESCRIPTION,
@@ -374,7 +374,7 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   guidance: {
     visibleIf:
       'The visibility predicate is `visibleWhen` — bare CEL (ADR-0032), forwarded raw and re-evaluated '
-      + 'client-side as the user types (#3528). `visibleIf` is four edits away from the right key, which is why '
+      + 'client-side as the user types. `visibleIf` is four edits away from the right key, which is why '
       + 'the registration-time rejection prints the declared set rather than trusting a suggester; it is also the '
       + 'typo the whole undeclared-key ladder descends from — three diagnostic passes for a field that silently '
       + 'never hid.',
@@ -485,9 +485,9 @@ export const MapConfigSchema = lazySchema(() => strictObject({
   guidance: {
     flow:
       'The per-item subflow is named by `flowName`. `flow` was an undeclared executor fallback no schema or form '
-      + 'described; it graduated into the ADR-0087 D2 conversion `flow-node-map-flow-alias` (#4045), which rewrites '
+      + 'described; it graduated into the ADR-0087 D2 conversion `flow-node-map-flow-alias`, which rewrites '
       + 'it at load. If `flowName` is also present, the two name DIFFERENT subflows and the conversion kept both '
-      + 'rather than picking one to run per item (#4923) — decide which flow this is, put it on `flowName`, and '
+      + 'rather than picking one to run per item — decide which flow this is, put it on `flowName`, and '
       + 'delete `flow`.',
   },
 }, {

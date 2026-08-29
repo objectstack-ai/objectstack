@@ -1,36 +1,36 @@
 {
   "type": "capability",
-  "_note": "CapabilityDeclarationSchema (ADR-0066 D1). The DECLARATION side of the three-way separation — packages DEFINE a capability here, permission sets GRANT it via `systemPermissions`, resources REQUIRE it via `requiredPermissions`. Seeded 2026-08-08 with #5961, the PR that made `capability` a registered metadata kind; every property was call-graph-closed at that time against `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`, which is the one consumer that turns a declaration into a `sys_capability` row. The ADR-0010 envelope keys carry the same `null` verdict as `permission`/`position`: they are loader-stamped, not authored.",
+  "_note": "CapabilityDeclarationSchema (ADR-0066 D1). The DECLARATION side of the three-way separation — packages DEFINE a capability here, permission sets GRANT it via `systemPermissions`, resources REQUIRE it via `requiredPermissions`. Seeded 2026-08-08 with #5961, the PR that made `capability` a registered metadata kind; every property was call-graph-closed at that time against `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`, which is the one consumer that turns a declaration into a `sys_capability` row. The ADR-0010 envelope keys carry the same `null` verdict as `permission`/`position`: they are loader-stamped, not authored. 2026-08-28 (#13003): all six `path:NNN` citations in this file were re-anchored to their consuming symbols. Five of the six were wrong and every one was IN RANGE; the three row-field pointers had drifted as a block onto three consecutive lines of one unrelated docblock, which reads as precision right up until you open the file.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-08",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:203-210 (upsertPackageCapability — the name is the `sys_capability` upsert key, is matched against PLATFORM_CAPABILITY_NAMES to refuse shadowing a curated capability, and is the string `systemPermissions` / `requiredPermissions` resolve a grant by); packages/lint/src/validate-capability-references.ts:99 (the authoring lint's known-name set)",
-      "note": "The whole identity of a capability. This is also why the kind's write door matters: the name is resolved by string from both the grant side and the requirement side, so an unvalidated row lands directly in the authorization namespace (#5961)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#upsertPackageCapability (the name is the `sys_capability` upsert key and is matched against `PLATFORM_CAPABILITY_NAMES` to refuse a package shadowing a curated capability; it is also the string `systemPermissions` / `requiredPermissions` resolve a grant by); packages/lint/src/validate-capability-references.ts#validateCapabilityReferences (`known.add(cap.name)` — the authoring lint's known-name set)",
+      "note": "The whole identity of a capability. This is also why the kind's write door matters: the name is resolved by string from both the grant side and the requirement side, so an unvalidated row lands directly in the authorization namespace (#5961). 2026-08-28: RE-ANCHORED (#13003), and REPOINTED on the bootstrap leg — `:203-210` had rotted onto the opening `/**` of the unowned-declaration diagnostic's docblock; `upsertPackageCapability` begins ~43 lines below it. The lint leg was ACCURATE (`:99` is still `known.add(cap.name)`) and is migrated, not repaired. Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-08-08",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:122 (capabilityRowFields — written to sys_capability.label, falling back to humanize(name) when absent)",
-      "note": "display (Setup's capability list/detail, rendered from the sys_capability row)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#capabilityRowFields (`label: typeof cap.label === 'string' && cap.label ? cap.label : humanize(cap.name)` — written to `sys_capability.label`)",
+      "note": "display (Setup's capability list/detail, rendered from the sys_capability row). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:122` had rotted onto a docblock sentence about the `unchanged` outcome counter, ~45 lines above `capabilityRowFields`. Its two siblings cited `:123` and `:124`, the next two lines of that same docblock: the three row-field pointers had drifted as ONE block, which is why none of them looked wrong beside the others. Re-closed by hand against 8cb96ec41."
     },
     "description": {
       "status": "live",
-      "verifiedAt": "2026-08-08",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:123 (capabilityRowFields — written to sys_capability.description, falling back to `Capability <name>.` when absent)",
-      "note": "display."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#capabilityRowFields (`description: … ? cap.description : `Capability ${cap.name}.`` — written to `sys_capability.description`)",
+      "note": "display. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:123` had rotted onto the closing `*/` of that docblock (see the `label` entry: all three of this file's row-field pointers moved together). Re-closed by hand against 8cb96ec41."
     },
     "scope": {
       "status": "live",
-      "verifiedAt": "2026-08-08",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:124 (capabilityRowFields — written to sys_capability.scope, normalized to 'org' only on an exact 'org' match, else 'platform')",
-      "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowOrgOverride: false`."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#capabilityRowFields (`scope: cap.scope === 'org' ? 'org' : 'platform'` — normalized on an exact `org` match, else `platform`)",
+      "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowOrgOverride: false`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:124` had rotted onto `unchanged: number;`, the counter field itself (see the `label` entry). Re-closed by hand against 8cb96ec41."
     },
     "packageId": {
       "status": "live",
-      "verifiedAt": "2026-08-08",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:294 (`const packageId = cap._packageId ?? cap.packageId` — the ADR-0086 D3 author-declared FALLBACK provenance, consulted when the registry stamp is absent; with neither, upsertPackageCapability takes the no-owning-package refusal at :214 and the capability is materialized with no package provenance)",
-      "note": "Deliberately a fallback and not the primary: #5870 added `capabilities` to the ObjectQL engine's stamped-collection list (packages/objectql/src/engine.ts:2393), so `_packageId` now reaches a declaration and takes precedence. The key stays live because the fallback branch is still read and still decides materialization for any declaration that arrives unstamped."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#bootstrapDeclaredCapabilities (`const packageId: string | undefined = cap._packageId ?? cap.packageId ?? undefined` — the ADR-0086 D3 author-declared FALLBACK provenance, consulted when the registry stamp is absent); packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#upsertPackageCapability (with neither, this takes the no-owning-package refusal and the capability is materialized with no package provenance)",
+      "note": "Deliberately a fallback and not the primary: #5870 added `capabilities` to the ObjectQL engine's stamped-collection list (packages/objectql/src/engine.ts:2393), so `_packageId` now reaches a declaration and takes precedence. The key stays live because the fallback branch is still read and still decides materialization for any declaration that arrives unstamped. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:294` had rotted onto a `//` continuation line inside the unowned-declaration refusal's comment block, and the read itself had moved OUT of `upsertPackageCapability` into its caller, which is the distinction the two anchors now hold apart. The note's `engine.ts:2393` pointer was stale in the same way; the stamped-collection list is `packages/objectql/src/engine.ts#METADATA_ARRAY_KEYS`. Re-closed by hand against 8cb96ec41."
     },
     "_lock": null,
     "_lockReason": null,

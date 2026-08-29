@@ -40,10 +40,18 @@ relying on. It is now declared in two halves:
 ## What is deliberately not here
 
 A blanket `unmeasuredEffect` on every `script` step (the escape hatch #4354
-gave `connector_action`) was rejected: it would suppress the broken-sweep
-signal on every flow that calls any function, in order to accommodate the
-flows that break the rule — paying for a rule-breaker with everyone else's
-signal, and fossilizing the violation as supported behaviour.
+gave `connector_action`) was rejected: it would drop every flow that calls
+any function out of the broken-sweep FIRST FILTER
+(`selected > 0 AND acted = 0 AND unmeasured = 0`), in order to accommodate
+the flows that break the rule — paying for a rule-breaker with everyone
+else's measurement, and fossilizing the violation as supported behaviour.
+That predicate is a first filter and not a verdict (#12685: a healthy
+idempotent sweep that re-selects the same records and gates each one on
+"already handled" matches it on every run too, and what discriminates is the
+per-node fold in `FlowRunSummary.nodes[]` / `gates[]`). Dropping out of it is
+still costly even so: a run the filter never selects is never folded over
+either, so the escape hatch is declared per function rather than granted to
+every `script` step.
 
 Nor is this *enforcement*. The runtime hands a function no data reach —
 `FlowFunctionContext` in `@objectstack/service-automation` carries

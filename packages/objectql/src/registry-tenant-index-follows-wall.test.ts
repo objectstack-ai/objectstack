@@ -195,8 +195,7 @@ describe('[#8608] the tenant index follows the wall’s derivation', () => {
     // being dialect-dependent). It is the ONE shipped platform object whose
     // answer this card changes; every other table that would qualify already
     // declares its own single-column tenant index (`sys_invitation`,
-    // `sys_team`, `sys_scim_provider`) or is tenancy-disabled
-    // (`sys_sso_provider`).
+    // `sys_team`) or is tenancy-disabled (`sys_sso_provider`).
     const out: any = applySystemFields(leadWith({ managedBy: 'better-auth' }), {
       multiTenant: true,
     });

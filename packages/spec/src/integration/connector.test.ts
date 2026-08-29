@@ -994,7 +994,7 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     ]) {
       const result = schema.safeParse({ source: 'a', target: 'b', transform: unionForm });
       expect(result.success).toBe(false);
-      expect(result.error!.issues.some((i) => /#5552/.test(i.message))).toBe(true);
+      expect(result.error!.issues.some((i) => /FieldMappingTransform/.test(i.message))).toBe(true);
     }
     // The enum form does not get in either — retired is retired, whatever the
     // value's shape.

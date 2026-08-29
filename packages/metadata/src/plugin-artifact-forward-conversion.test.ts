@@ -166,7 +166,7 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
         } catch (e: any) {
             const message = String(e?.message ?? e);
             expect(message).toContain('allowRestore');
-            expect(message).toContain('was removed in @objectstack/spec 17 (#12497, ADR-0049)');
+            expect(message).toContain('was removed in @objectstack/spec 17 (ADR-0049)');
             expect(message).toContain('Run `os migrate meta --from 17`');
         }
     });

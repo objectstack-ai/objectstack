@@ -24,21 +24,21 @@
         },
         {
           "step": 2,
-          "call": "PUT /api/v1/meta/objects/qa_vault?package=com.objectstack.qa.attachments",
+          "call": "PUT /api/v1/meta/object/qa_vault?package=com.objectstack.qa.attachments",
           "body": { "name": "qa_vault", "label": "QA Vault", "sharingModel": "private", "enable": { "files": true }, "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
           "expect": "2xx. This is THE object the area was missing: private OWD (owner-only) AND attachments-enabled, so a member who is not the owner genuinely cannot read the parent and the 403 deny side becomes provable.",
           "source": "`sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts:1827; ADR-0090 D4 — legacy aliases removed). `enable.files` is the #2727 attachments opt-in, default false (object.zod.ts:281). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts:262,319)"
         },
         {
           "step": 3,
-          "call": "PUT /api/v1/meta/objects/qa_shared?package=com.objectstack.qa.attachments",
+          "call": "PUT /api/v1/meta/object/qa_shared?package=com.objectstack.qa.attachments",
           "body": { "name": "qa_shared", "label": "QA Shared", "sharingModel": "public_read", "enable": { "files": true }, "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
           "expect": "2xx. The entitled-member contrast: every member reads the parent, only the owner writes it — so a 403 here would be a real finding rather than a fixture artifact.",
           "source": "same citations as step 2"
         },
         {
           "step": 4,
-          "call": "PUT /api/v1/meta/objects/qa_nofiles?package=com.objectstack.qa.attachments",
+          "call": "PUT /api/v1/meta/object/qa_nofiles?package=com.objectstack.qa.attachments",
           "body": { "name": "qa_nofiles", "label": "QA No Files", "sharingModel": "public_read", "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
           "expect": "2xx. `enable.files` is OMITTED deliberately (it defaults to false) — this is the FILES_DISABLED probe target, purpose-built rather than borrowed from showcase_account, so the negative keeps holding if showcase ever enables files on its own objects.",
           "source": "packages/spec/src/data/object.zod.ts:281 — enable.files defaults to false; 'Opt-in: true surfaces the panel and permits attachments to target this object; otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike' (re-quoted post-#10733; the prior citation ended at 'creation is rejected', which #10170 made stale — see attach-requires-parent-edit clause 5)"
@@ -81,7 +81,7 @@
         },
         {
           "step": 2,
-          "call": "PUT /api/v1/meta/objects/qa_media?package=com.objectstack.qa.media",
+          "call": "PUT /api/v1/meta/object/qa_media?package=com.objectstack.qa.media",
           "body": { "name": "qa_media", "label": "QA Media", "sharingModel": "public_read_write", "fields": { "name": { "type": "text", "label": "Name", "required": true }, "poster": { "type": "image", "label": "Poster", "accept": ["image/png", "image/jpeg"], "maxSize": 1048576 }, "doc": { "type": "file", "label": "Doc", "accept": [".pdf"] } } },
           "expect": "2xx. `poster` is the MIME-entry + maxSize probe; `doc` (accept = ['.pdf'] ONLY, no maxSize) is the extension-entry probe whose dotless-filename hole is a documented boundary of the enforcement. `enable.files` is deliberately ABSENT: field-owned files ride file-reference-lifecycle.ts (activeFileFields keys on file-class field types), not the #2727 sys_attachment opt-in gate, so the object needs no attachments enablement.",
           "source": "accept/maxSize are declared FieldSchema keys since ADR-0104 D3 wave 2 (packages/spec/src/data/field.zod.ts:876-883 — 'Offered to the file picker AND enforced on write'); authoring-call shape identical to qa-scratch-authz step 2 (meta.ts:262,319 for ?package=); file-class field set is FILE_REFERENCE_TYPES = image/file/avatar/video/audio (packages/spec/src/data/field-value.zod.ts:146-148)"

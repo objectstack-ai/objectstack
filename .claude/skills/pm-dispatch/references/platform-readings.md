@@ -33,11 +33,11 @@
 - **状态核验用最小字段**(search/list + `fields`)或等事件,整对象 `get` 留给入队决策点;门禁放行
   判据 = 承载门禁族 job 的 conclusion,聚合(`blocked`/`dirty`)只作阴性筛查再定位,放行按名定向读
   单条 job,⛔ 不拉全表(按名定位失败才拉)。
-- **转 draft 不是可靠的踢队手段 —— 两向都有实测,处置按最坏走**:本仓测得转 draft 同时掉
-  auto-merge 与队列成员资格(均不自动恢复,转正后重新挂);objectui 2026-08-25 测得相反 —— 已入
-  队 PR 转 draft 后条目保位、~40 分钟后队列照样合并,彼时 `disable_pr_auto_merge` 已拒绝(仓别/时
-  机差异未分辨)。共同支持的补救:转 draft + disable 都做(本仓测得 disable 单独不踢队、objectui
-  彼时径直拒绝),**验队列 ref 与未落地**(拼写见「零成本等价物」),⛔ 不据单读数报补救。
+- **转 draft 不是可靠的踢队手段 —— 两向相反实测,处置按最坏走**:本仓转 draft 同时掉
+  auto-merge 与队列成员资格(均不自动恢复,转正后重挂);objectui 2026-08-25 已入队 PR 转 draft 条目
+  保位、~40 分钟后队列照样合并(仓别/时机未分辨)。补救:转 draft + disable 都做(本仓
+  `disable_pr_auto_merge` 单独不踢队、objectui 彼时径直拒绝);出队按下方「队列 ref」条阳性探针
+  答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论、不据单读数报补救。
 - **`update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 对 draft PR 的任何调用必须显式带
   `draft: true`**(reviewers/title/body/labels 单字段调用同坑;objectui 2026-08-25 实测:一次只传
   reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路 = REST
@@ -51,11 +51,11 @@
   `merge`(2026-08-24 两张 PR、一张 disable→enable 复验同值)、队列路径回显空字段而入队照发,落
   地仍无一例外单亲 squash(方法归队列,本仓 `allow_merge_commit:false`)⇒ ⛔ 不拿回显当任何方向
   的证据、不为它翻转空转;「空字段=静默空转签名」旧读法已推翻,权威信号见下两条。
-- **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:一次「成功」后 2.5 小时
-  零动静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**,
-  按下条序列以队列分支/timeline 入队事件确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空
-  本接口给不了(`pull_request_read` 与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果
-  读数只有队列分支、timeline 入队事件、最终落地三种;已死假说:已绿 PR 会静默空转。
+- **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:「成功」后 2.5 小时零动
+  静,同期别的 PR 正常合入;配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**,按下
+  条阳性探针确认,⛔ 不拿成功报文收工;回读 `auto_merge` 非空本接口给不了(`pull_request_read`
+  与 `fields` 枚举都无该成员,armed 与否读回逐字节相同)⇒ 效果读数 = 下条探针①②、timeline
+  入队事件、最终落地,队列分支仅在场时算;已死假说:已绿 PR 会静默空转。
 - **队列 ref 答 BUILD 不答成员资格**(旧读法「存在即在队」作废):`gh-readonly-queue/*` **只在存在
   时**有意义(= 有 build 在跑),⛔ 缺席不是任何方向的读数。**阳性探针按成本序**:①
   `update_pull_request_branch` 回「Branches that are queued for merging cannot be updated」= 在队,正常返回顺
@@ -89,14 +89,13 @@
 - **REST 可用性是会话属性,⛔ 不是全局事实 —— 开轮探一次,按班存档;探针必须
   repo-scoped**:直连受会话级授权门钳制(会话起点快照),门关着 repo-scoped 路径**整类**回 403
   `GitHub access is not enabled for this session`(⛔ 不是限流,重试改不了它),而 `/rate_limit` 照答 200
-  —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后 `/rate_limit` 是**单调用
-  凭据判别**:15000/时 = 凭据活、被 repo-scoping 拒;60/时或 auth 错 = 无凭据(实测有席位 token
-  是 14 字节占位串),两形同症不同治。**按班矩阵**:2026-08-25 两车道 5+ dev 席全被门拒(整类
-  403、读写同门 —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发);2026-08-26
-  反例一席门开,加法 POST 回 200;顶层席同窗分裂(两 403、一 200)⇒ **门态逐容器变**,⛔ 不据
-  他席、他日读数推本席,唯一安全读法即本行 repo-scoped 探针。**门关着时的降级梯**:① git
-  先行(「零成本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列
-  表**单标签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
+  —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后的单调用凭据判别见
+  `references/rest-channel.md`。**按班矩阵**:2026-08-25 两车道 5+ dev 席全被门拒(整类 403、读写同门
+  —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发);2026-08-26 反例一席门
+  开,加法 POST 回 200;顶层席同窗分裂(两 403、一 200)⇒ **门态逐容器变**,⛔ 不据他席、他日
+  读数推本席,唯一安全读法即本行 repo-scoped 探针。**门关着时的降级梯**:① git 先行(「零成
+  本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列表**单标
+  签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
 - **默认读序 git → payload → REST → MCP/GraphQL**(2026-08-23 策略翻转,2026-08-25 增补 payload 档;
   ⚠️ REST 档以**本班 repo-scoped 探针绿**为前提 —— 前提就住本行,403 会话改按降级梯读)。
   list/查重/卡与 PR 读/标签回读默认走容器 curl 的 REST 通道 —— App installation token,core
@@ -176,9 +175,15 @@
   同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走
   REST `POST /issues/{n}/labels`,⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;
   写后照标签纪律回读。
-- **`issue_read` 的 `get_labels` 只解析 Issue 型**:传 PR 号回 GraphQL「Could not resolve to an Issue」
-  —— REST「PR 也是 issue」的惯例在此方法不成立;PR 的标签读数走 `pull_request_read get`(labels
-  随响应回来),⛔ 不为它花一次 search 调用(2026-08-27 两个 dev 独立实测,失效是响亮报错)。
+- **PR 标签的三条读腿全盲、两条静默**(2026-08-28 同日实测):① `issue_read get_labels` 传 PR 号
+  回「Could not resolve to an Issue」—— REST「PR 也是 issue」的惯例在此方法不成立;**响亮失败即
+  路由信号**,改走腿③。② `pull_request_read get` 的 `labels` **时缺时滞**:dev 席同一张新 PR 两读
+  整个字段缺席(非空数组),PM 席三张老 PR 三读齐备 ⇒ 连盲都不稳定,比整类缺席更险。③
+  payload 档:issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中**零**,PR 侧拼写是
+  `data-name="NAME"`(片链到 `issues?q=…label%3A…`)。⇒ **读成功而标签空/缺席 ⛔ 不读
+  作「没有标签」**:按 `data-name=` 确认,否则整集作 UNKNOWN、优先加法端点(可达时);⛔ 单读与
+  单次**即时**读回都不决断(compare-read-back 报 3 个,数分钟后再读只回 1 个,两个 auto 标签无写
+  入而消失)⇒ union-write 欠一次**延迟确认**;必需标签(如 `skip-changeset`)其后每次触碰重核。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已认领卡与空闲卡
   响应逐字节相同,清单只是**候选名单**:认领前必须过完整 `issue_read`(它才返回 `assignees`)。
 - **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments
@@ -212,12 +217,6 @@
   再报 blocked**(2026-08-22 同席同分钟:`git rev-parse … && git push origin <分支> 2>&1 | tail` 被拒,裸
   `git push origin <分支>` 放行并成功 —— 只差链接与管道,拒绝文案不点名违规元素;判定还跨
   天翻面)⇒ ⛔ 一次拒绝不是能力边界,`permissions.allow` 条目才是仓库侧唯一确定性通道。
-- **`refs/remotes/origin/main` 全 worktree 共享,别的 agent 一次 fetch 就推进它**(worktree 只隔离工作树
-  与 HEAD,`.git/` 下 refs、stash 栈、config、hooks 皆共享):`git reset --soft origin/main` 把你分支点之
-  后**他人已合并的文件**整批 stage 成你的改动 —— 报成功、唯一症状是 `git status` 里的他
-  人文件(实测一次 stage 进四个 agent 的合并文件,commit 前才逮住);「我从哪开始」的
-  reset/diff/log/rebase 一律锚建分支时记录的 base sha(`BASE=$(git rev-parse HEAD)`),⛔ 永不锚
-  `origin/main`。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上缺一个已合
   修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即
   是。
@@ -242,12 +241,9 @@
   重写毁掉的是正确内容。判据 = 数**空的行内代码跨度**:一个空跨度恰是短尖括号片段被
   吃掉的签名(判据是**尖括号**不是反引号:有的正文本来就把标识符不带尖括号写);数字实
   体(如撇号成 `&#39;`)是普通实体编码,**不是**截断证据(2026-08-23 实测)。
-- **写侧 sanitizer 作者规则,一条管三坑**:必须字面携带 tag / script / markup-declaration 形状的文本
-  进围栏并把危险字符**用词拼出**(⛔ 围栏本身不防护 —— 防护的是拼写,实测见下条),或
-  改花括号占位符(`{n}`)/整句用词描述;要字面尖括号写实体 `&lt;` / `&gt;`;裸标识符(无尖括号)
-  存活 ⇒ SKILL 提取契约(字面文本 grep + 裸标识符回退)仍有效。写返回 200、损耗只在回读可
-  见 ⇒ **含尖括号的任何写后回读逐个确认**(失效完全静默);⛔ 评论不豁免、⛔ 只回读标
-  记不算验证 —— 要**回读尾部**确认正文结束在它该结束的地方。
+- **写侧 sanitizer 作者规则**:规则住 AGENTS.md「GitHub mutates body BYTES」(围栏**不**防护、危险字
+  符用词拼出、写后回读),⛔ 不在本表复述;本表只补两条实测:要字面尖括号写实体 `&lt;` /
+  `&gt;`;裸标识符(无尖括号)存活 ⇒ SKILL 提取契约(字面文本 grep + 裸标识符回退)仍有效。
 - **写侧实测行为 · issue body(落库删字节,网页同显)**:sanitizer 按 **tag 形状**删、不按尖括
   号 —— 行内反引号里的 tag 形状 token(读作未知 HTML 标签者:注释标记、占位符、泛型)整个
   被删,HTML 注释形状标记裸写被整删留空行;孤立 less-than / greater-than 在行内代码**存活**,
@@ -261,6 +257,10 @@
   正文** —— 标记扫描照报成功,只有真去解析才发现;引信是普通 TS 形状(泛型一类)不是奇
   异语法。⚠️ 边界:姊妹仓一次受控探针测到的是**选择性删除**而非截断到尾 ⇒ **写侧按
   最坏的截断防护**。
+- **写侧实测行为 · PR 正文(尾部 `---` 与其后的署名页脚一并被吃)**:写调用照报成功;去掉横
+  线只写页脚则原样存活(2026-08-28 两仓同轮、两张 PR 全文回读)。**评论不受影响**(两种拼法
+  都活)⇒ 失效既**依拼写**又**依载体**:评论里验过页脚**对 PR 正文什么都没证明**。⇒ PR
+  正文页脚**不带前置横线**、且**写后回读正文**(唯一检测手段);评论两形皆可。
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲突两侧收据都
   保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不是历史),⛔ 不从
   两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。

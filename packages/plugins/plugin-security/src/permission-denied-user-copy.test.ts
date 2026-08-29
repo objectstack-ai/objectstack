@@ -254,7 +254,7 @@ describe('#7414 — the 403 an end user reads', () => {
   it('speaks the caller locale, not English', async () => {
     const zh = await denyDelete('zh-CN');
     expect(zh.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].permission_denied);
-    expect(zh.message).toBe('您没有执行此操作的权限,如需访问请联系管理员。');
+    expect(zh.message).toBe('您没有执行此操作的权限，如需访问请联系管理员。');
 
     const ja = await denyDelete('ja-JP');
     expect(ja.message).toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'].permission_denied);

@@ -82,6 +82,10 @@ import {
   expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
+  canonicalIndexKey,
+  hashShadowColumnFor,
+  isHashShadowCarrier,
+  parseHashShadowKeyParts,
   indexedKeyColumns,
   isIndexDriftOp,
   isUniqueScopeDeclared,
@@ -91,6 +95,7 @@ import {
   parseIndexDdl,
   uniqueIndexesFromFields,
   type DeclaredIndexInput,
+  type HashShadowKeyPart,
   type ManagedDriftEntry,
   type DriftOp,
   type PhysicalIndex,
@@ -8209,17 +8214,17 @@ export class SqlDriver implements IDataDriver {
         // aggregates on Postgres — the one dialect that stores `Field.boolean`
         // as a real `boolean` column and defines no `sum`/`avg`/`min`/`max`
         // over it (SQLSTATE `42883`, measured on PG 16.13; SQLite stores 0/1
-        // INTEGER and MySQL `tinyint(1)`, so both compute natively). #11249
-        // ruled the answers (maintainer 2026-08-23): `sum`/`avg` answer
-        // arithmetic over 1/0, and `min`/`max` answer `false`/`true` — a
-        // member of the input domain — so this face must ANSWER; refusing
-        // cannot satisfy the ruled contract. `cast(?? as int)` keeps the
-        // column in a knex identifier binding exactly as the uncast form does.
-        // `count`/`count_distinct` are deliberately NOT cast (both lower to
-        // `count`, defined over boolean everywhere — their answers were
-        // correct before this and must not move). The 1/0 the cast computes
-        // for `min`/`max` is presented back as a JSON boolean below, where the
-        // result column is tracked.
+        // INTEGER and MySQL `tinyint(1)`, so both compute natively). The
+        // answers are ruled: this face must ANSWER — refusing cannot satisfy
+        // the contract — and [#11152] (maintainer 2026-08-28, superseding
+        // #11249's `false`/`true` for the order statistics) pins ALL FOUR as
+        // numbers: `sum`/`avg` arithmetic over 1/0, `min`/`max` the `0`/`1`
+        // the cast computes, presented as-is (see the presentation note
+        // below). `cast(?? as int)` keeps the column in a knex identifier
+        // binding exactly as the uncast form does. `count`/`count_distinct`
+        // are deliberately NOT cast (both lower to `count`, defined over
+        // boolean everywhere — their answers were correct before this and
+        // must not move).
         const castBooleanAggregand =
           this.isPostgres &&
           lowering.sql !== 'count' &&
@@ -8244,24 +8249,23 @@ export class SqlDriver implements IDataDriver {
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
-            // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
-            // not only under `readPresentationKind`'s dialect gate. That gate
-            // mirrors `formatOutput`'s ROW reads (SQLite + MySQL since #11782;
-            // SQLite-only when this landed), where the storage-form dialects
-            // hand back a number — but on this door the backend ALSO answers
-            // `min`/`max` as 1/0 on Postgres (the `cast(?? as int)` above,
-            // over a column whose row reads need no presentation), and the
-            // ruled contract is `false` / `true` in JSON: order statistics
-            // return a member of the input domain, and SQL drivers convert at
-            // the driver boundary. The `??` fallback is what carries Postgres.
-            // `presentReadValue('boolean', …)` leaves `null` (no rows / all
-            // NULL) untouched and is idempotent on a value already boolean.
-            const kind =
-              this.readPresentationKind(table, agg.field) ??
-              (table !== null && this.booleanFields[table]?.includes(agg.field)
-                ? ('boolean' as const)
-                : null);
-            if (kind) presentedOutput.set(agg.alias, kind);
+            // [#11152] A BOOLEAN aggregand is the ruled exception to "the
+            // result still needs the column's presentation": the maintainer's
+            // 2026-08-28 ruling (superseding #11249's `false`/`true`, which
+            // #11635 implemented here) pins that booleans aggregate as NUMBERS
+            // on every face, with no per-aggregate exception — `min`/`max`
+            // answer `0`/`1`, the same numeric domain `sum`/`avg` answer in.
+            // Every dialect's backend already computes exactly that number
+            // (SQLite 0/1 INTEGER storage, MySQL `tinyint(1)`, Postgres via
+            // the `cast(?? as int)` above), so the ruled answer is the value
+            // with NO boolean presentation — the `'boolean'` kind is skipped
+            // rather than mapped. ROW reads are untouched: `find()` still
+            // presents a declared boolean as a JSON boolean; it is the
+            // AGGREGATION context that is numeric by rule. Temporal kinds
+            // still present (`sql-driver-aggregate-temporal-output.test.ts`),
+            // and the SQLite-only numeric repair still applies.
+            const kind = this.readPresentationKind(table, agg.field);
+            if (kind && kind !== 'boolean') presentedOutput.set(agg.alias, kind);
           }
         } else {
           if (fieldExpr === '*') {
@@ -9364,7 +9368,26 @@ export class SqlDriver implements IDataDriver {
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
-    await this.ensureDatabaseExists();
+
+    // [#13028] …and NOT while DDL is deferred. Under {@link deferredDdl} every
+    // branch below is skipped in favour of recording the work, so there is no
+    // DDL for a database to exist FOR — while `ensureDatabaseExists()` is the
+    // one line here that can WRITE: it `mkdir -p`s a sqlite parent directory
+    // and, on Postgres/MySQL, issues `SELECT 1` and CREATEs THE DATABASE when
+    // that comes back `3D000` / `ER_BAD_DB_ERROR`.
+    //
+    // That made a declared dry run able to create a database (#6743 closed the
+    // sqlite half by opening an absent file in memory; this is the same
+    // promise, kept at the source and for every dialect), and it charged one
+    // round-trip per object to do it — on a control plane at ~300ms RTT × ~80
+    // objects, a `plan` that computes in seconds would have spent minutes
+    // asking a database it was never going to touch whether it existed.
+    //
+    // ⛔ NOT a relaxation of the guarantee for real DDL: `flushDeferredSchemaDdl`
+    // clears `deferredDdl` BEFORE re-entering this method with the deferred
+    // objects, so the confirmed `os migrate apply` still ensures the database
+    // ahead of the first `CREATE TABLE`.
+    if (!this.deferredDdl) await this.ensureDatabaseExists();
 
     for (const obj of objects) {
       // Re-read what the registration above recorded, rather than recomputing:
@@ -11206,12 +11229,72 @@ export class SqlDriver implements IDataDriver {
           if (r.COLUMN_NAME != null) entry.columns.push(r.COLUMN_NAME);
           else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
         }
+        await this.resolveHashShadowKeys(tableName, [...byName.values()]);
       }
     } catch (e) {
       // Only a caller that can CORRECT a short read may ask for one (#7332).
       if (opts.onFailure !== 'partial') throw e;
     }
     return [...byName.values()];
+  }
+
+  /**
+   * Record, on each #11627 hash-shadow CARRIER, the declared key its shadow
+   * actually hashes (#13015).
+   *
+   * ## Why introspection and not the differ
+   *
+   * A carrier is recognisable by name alone — its sole key column is
+   * {@link SqlDriver.hashShadowColumnFor} of its own index name — but a NAME
+   * cannot say WHAT is hashed, and that difference decides between two
+   * opposite verdicts. A shadow written since #12998 hashes the declared key
+   * with its NULL-safe `COALESCE(organization_id, '__global__')` parts intact
+   * and is HEALTHY; one written before it hashes the RAW columns, so `CONCAT`
+   * yields NULL for every NULL-organization row and the constraint those rows
+   * were promised does not exist (#5030's shape). Both look identical from the
+   * `STATISTICS` view. Only the stored `GENERATION_EXPRESSION` separates them,
+   * and reading it is the difference between the differ SKIPPING shadows and
+   * the differ UNDERSTANDING them.
+   *
+   * ## Why the failure is swallowed
+   *
+   * This is an ENRICHMENT of a read with other consumers — the upsert
+   * conflict-target check and the boot's index-presence probe among them — and
+   * none of them may start failing because a second query did. A carrier whose
+   * key stays unresolved is still recognised as a carrier by
+   * `isHashShadowCarrier`, and `diffManagedIndexes` then reports NOTHING for it
+   * rather than proposing a rebuild it cannot reason about. The degraded
+   * outcome is a missing finding, never a dropped constraint.
+   */
+  protected async resolveHashShadowKeys(
+    tableName: string,
+    indexes: PhysicalIndex[],
+  ): Promise<void> {
+    const carriers = indexes.filter((i) => isHashShadowCarrier(i));
+    if (carriers.length === 0) return;
+    try {
+      const rows: Array<Record<string, unknown>> = await this.knex
+        .select('COLUMN_NAME', 'GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({ TABLE_SCHEMA: this.knex.client.database(), TABLE_NAME: tableName })
+        .whereIn(
+          'COLUMN_NAME',
+          carriers.map((i) => i.columns[0]!),
+        );
+      const exprByColumn = new Map<string, string>();
+      for (const r of rows) {
+        const column = String(r.COLUMN_NAME ?? r.column_name ?? '');
+        if (column) {
+          exprByColumn.set(column, String(r.GENERATION_EXPRESSION ?? r.generation_expression ?? ''));
+        }
+      }
+      for (const i of carriers) {
+        const parts = parseHashShadowKeyParts(exprByColumn.get(i.columns[0]!) ?? '');
+        if (parts.length > 0) i.shadowKey = parts;
+      }
+    } catch {
+      /* see the head note: an unresolved carrier degrades to "no finding". */
+    }
   }
 
   /**
@@ -11435,7 +11518,14 @@ export class SqlDriver implements IDataDriver {
           // nothing. Those cases stay refused below, and stay tracked.
           if (unique) {
             try {
-              if (await this.createHashShadowUniqueIndex(tableName, name, columns)) {
+              // #12998: the shadow must hash the DECLARED key, so the NULL-safe
+              // organization key parts (ADR-0120 D3) ride along — without them
+              // the generation expression hashed the RAW columns, `CONCAT`
+              // returned NULL for every NULL-organization row, and the rows the
+              // COALESCE bucket exists to constrain were constrained by nothing
+              // (#5030's shape, reintroduced by the fallback while the boot log
+              // reported the constraint as carried).
+              if (await this.createHashShadowUniqueIndex(tableName, name, columns, nullSafe)) {
                 existing.add(name);
                 continue;
               }
@@ -11443,6 +11533,43 @@ export class SqlDriver implements IDataDriver {
               const shadowMsg = String(shadowErr?.message ?? shadowErr);
               if (/already exists|duplicate key name/i.test(shadowMsg)) {
                 existing.add(name);
+                continue;
+              }
+              if (nullSafe.size > 0 && isUniqueViolationError(shadowErr)) {
+                // #12998: the shadow ALTER computes the generated column for the
+                // EXISTING rows, so a database that accumulated duplicates under
+                // the NULL-safe key while the constraint was void fails here
+                // with a uniqueness violation — the same data-dependent
+                // #5030-made-visible case the direct route handles below. Same
+                // disposition: do not take the boot down, name what collided
+                // and what fixes it, and let the ADR-0120 D4 drift pre-flight
+                // keep reporting the exact rows.
+                let report = '';
+                try {
+                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, [
+                    ...nullSafe,
+                  ]);
+                  if (duplicates.length > 0) {
+                    const shown = duplicates
+                      .slice(0, 5)
+                      .map((g) => `(${g.key}) × ${g.rows} rows`)
+                      .join('; ');
+                    report = ` Conflicting group(s): ${shown}${
+                      duplicates.length > 5 ? `; …and ${duplicates.length - 5} more` : ''
+                    }.`;
+                  }
+                } catch {
+                  // The probe is a diagnostic; the refusal below stands without it.
+                }
+                this.logDurabilityFailure(
+                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — ` +
+                    `existing rows violate the NULL-safe key (duplicates the previous void constraint ` +
+                    `admitted, #5030).${report} The constraint '${columns
+                      .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
+                      .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
+                    `for the conflicting rows (ADR-0120 D4).`,
+                  shadowMsg,
+                );
                 continue;
               }
               // Fall through to the named refusal, which is still the honest
@@ -13913,8 +14040,26 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
-   * that names the columns at fault and the declaration that fixes them
-   * (#11374).
+   * that names the columns at fault and the remedy that actually applies
+   * (#11374, #12999).
+   *
+   * ## TWO remedies, because the refusal has two causes
+   *
+   * | path | the fact | what fixes it |
+   * |---|---|---|
+   * | **create** | the field declares no usable `maxLength` | declare one — the next create emits `varchar(n)` |
+   * | **upgrade** | the field declares one; the COLUMN predates it and is still TEXT | convert the column by hand |
+   *
+   * One message served both until #12999, and on the upgrade path both of its
+   * halves were false: it diagnosed a missing declaration that was present, and
+   * prescribed a declaration that was already made. That is not merely
+   * imprecise — it fires once per boot on a production upgrade and reads as the
+   * release that added the bound being broken, so the operator's next move is to
+   * doubt a correct fix. The second cause exists at all because the additive
+   * sync is additive: it adds columns and indexes and never rewrites a column's
+   * type (#3728), by design — the rewrite needs an exclusive metadata lock
+   * (see the `lock_wait_timeout` note this file opens with), which is a manual
+   * floor rather than something a boot may decide to do.
    *
    * Worth the extra `columnInfo()` read because it only happens on the failure
    * path, and because the raw server error is actively misleading about where
@@ -13955,6 +14100,75 @@ export class SqlDriver implements IDataDriver {
       offenders.length > 0
         ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
         : 'One or more of its key columns is stored as TEXT';
+
+    // #12999: the SAME refusal has two causes, and the message below is true of
+    // only one of them. On CREATE the field really declares no usable bound, so
+    // "declare `maxLength`" is the fix. On an UPGRADE the bound IS declared —
+    // the additive sync never rewrites a column's type (#3728), so a column
+    // created before the declaration stays TEXT forever — and that same sentence
+    // tells the operator to do what they already did, once per boot, in
+    // production, which reads as the release they just deployed being broken.
+    //
+    // The discriminator is per COLUMN and needs BOTH halves, which is why it is
+    // computed here rather than inferred from the error code: a bounded
+    // declaration alone does not imply a stale column, because `ER_TOO_LONG_KEY`
+    // can refuse a COMPOSITE whose parts are each individually keyable (see
+    // {@link MAX_KEYABLE_VARCHAR_CHARS} — the bound is per KEY, not per column).
+    // So the branch fires only where the physical column is TEXT *and*
+    // {@link keyableTextLength} says a fresh create would have emitted
+    // `varchar(n)` for it. When `columnInfo()` fails, `offenders` is empty and
+    // this map stays empty, so the CREATE-path message stands — the honest
+    // reading, since without introspection the two causes are indistinguishable.
+    //
+    // `declaredFieldsFor` returns `undefined` for a table this driver does not
+    // own the column set of, and misses a SHARD table (registered under the base
+    // name). Both degrade to the message below rather than guessing.
+    const declaredFields = this.declaredFieldsFor(tableName);
+    const staleBounds = new Map<string, number>();
+    for (const c of offenders) {
+      const field = declaredFields?.[c];
+      const bound = field ? this.keyableTextLength(field) : null;
+      if (bound !== null) staleBounds.set(c, bound);
+    }
+
+    if (staleBounds.size > 0) {
+      const staleNamed = [...staleBounds]
+        .map(([c, n]) => `"${c}" (declares \`maxLength: ${n}\`)`)
+        .join(', ');
+      const [firstColumn, firstBound] = [...staleBounds][0];
+      // Named in full, deliberately. The mirror case in `schema-drift.ts` (the
+      // unbounded field over a stale `varchar`) already had to derive this, and
+      // the two MySQL `MODIFY` hazards it names are recorded twice more in this
+      // file, on the datetime and time widenings: MODIFY does NOT repeat a
+      // `NOT NULL`, and it DROPS a `DEFAULT` it does not restate. An operator
+      // who follows an abbreviated version of this remedy ends up worse off than
+      // the no-op they started with — a column that lost its default.
+      const others =
+        offenders.length > staleBounds.size
+          ? ` Column(s) ${offenders
+              .filter((c) => !staleBounds.has(c))
+              .map((c) => `"${c}"`)
+              .join(', ')} in the same key declare no usable bound and DO need \`maxLength\` ` +
+            `declared on the field (#11374).`
+          : '';
+      return (
+        `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
+        `column in a key without a key length. Column(s) ${staleNamed} are stored as TEXT even though the ` +
+        `field ALREADY declares a usable \`maxLength\` — the column was created before that bound was ` +
+        `declared, and the additive sync never rewrites a column's type, so re-declaring \`maxLength\` ` +
+        `changes nothing here (#12999). REMEDY: convert the column(s) to varchar(n) by hand, with a backup ` +
+        `taken first, restating the FULL column definition on MySQL (MODIFY drops a NOT NULL or DEFAULT you ` +
+        `do not repeat) — e.g. ALTER TABLE \`${tableName}\` MODIFY \`${firstColumn}\` ` +
+        `varchar(${firstBound}) plus that column's existing NOT NULL / DEFAULT clauses, restated verbatim; ` +
+        `— and let the next boot create this index. ObjectStack does NOT rewrite the column for you: that ` +
+        `ALTER needs an exclusive metadata lock on the table, which makes it a destructive, hard-to-roll-back ` +
+        `action and a deliberate manual floor rather than a boot-time one.${others} The table exists but this ` +
+        `index does NOT, so any uniqueness it declared is currently unenforced. A prefix index is deliberately ` +
+        `not substituted: on a UNIQUE index it constrains the prefix rather than the value, and rejects two ` +
+        `different values that share one.`
+      );
+    }
+
     return (
       `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
       `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
@@ -13989,11 +14203,12 @@ export class SqlDriver implements IDataDriver {
    * get different shadows.
    */
   protected static hashShadowColumnFor(indexName: string): string {
-    const direct = `${indexName}${SqlDriver.HASH_SHADOW_SUFFIX}`;
-    if (direct.length <= 64) return direct;
-    const digest = createHash('sha256').update(indexName).digest('hex').slice(0, 8);
-    const keep = 64 - SqlDriver.HASH_SHADOW_SUFFIX.length - digest.length - 1;
-    return `${indexName.slice(0, keep)}_${digest}${SqlDriver.HASH_SHADOW_SUFFIX}`;
+    // #13015: DELEGATES rather than re-deriving. The differ has to look for
+    // exactly the column the sync creates, and the two halves of that question
+    // lived in different modules — which is how a healthy shadow-carried
+    // UNIQUE came to be reported as destructive drift while the shadow column
+    // itself was protected as driver-owned. One derivation, both readers.
+    return hashShadowColumnFor(indexName);
   }
 
   /**
@@ -14065,35 +14280,157 @@ export class SqlDriver implements IDataDriver {
    * a crash. {@link explainHashShadowDuplicate} exists so the driver can tell
    * the two apart by reading the source columns back, and name whichever it is.
    *
+   * ## The NULL-safe organization key parts ride along (#12998)
+   *
+   * The shadow hashes the DECLARED key, not the raw columns. For a key part
+   * `normalizeDeclaredIndex` marked NULL-safe (ADR-0120 D3 — the organization
+   * key part of an org-scoped unique), the generation expression embeds the
+   * same `COALESCE(col, '__global__')` the direct index would have carried, so
+   * NULL-organization rows fold into the global bucket and DO collide with each
+   * other. Without it, `CONCAT` returned NULL for every NULL-organization row
+   * and the shadow silently reintroduced #5030's zero-constraint on exactly the
+   * rows (single-tenant / admin-global defaults) the COALESCE exists for —
+   * while the boot log reported the constraint as carried. Plain key parts keep
+   * the CONCAT-NULL semantics above: an any-NULL tuple still conflicts with
+   * nothing, matching MySQL's own composite-UNIQUE behaviour.
+   *
    * Returns `true` when the shadow index now exists.
    */
   protected async createHashShadowUniqueIndex(
     tableName: string,
     indexName: string,
     columns: string[],
+    nullSafeColumns?: ReadonlySet<string>,
   ): Promise<boolean> {
     if (!this.isMysql) return false;
     const shadow = SqlDriver.hashShadowColumnFor(indexName);
     const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
+    // The DECLARED key part: NULL-safe parts in their COALESCE form (#12998),
+    // plain parts as the bare column.
+    const part = (c: string) =>
+      nullSafeColumns?.has(c) ? `COALESCE(${ref(c)}, '${GLOBAL_TENANT}')` : ref(c);
     // ONE argument needs no separator, and CONCAT of one value would only add
     // a chance to get the encoding wrong.
     const expr =
       columns.length === 1
-        ? ref(columns[0]!)
-        : `CONCAT(${columns.map((c) => ref(c)).join(', 0x1f, ')})`;
-    const sql =
-      `ALTER TABLE ${ref(tableName)} ` +
-      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED, ` +
-      `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
-    await this.knex.raw(sql);
+        ? part(columns[0]!)
+        : `CONCAT(${columns.map(part).join(', 0x1f, ')})`;
+    const addColumn =
+      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED`;
+    const addKey = `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
+    // #13015: the shadow column OUTLIVES the index it carries. Dropping a
+    // UNIQUE key by name does not drop the generated column keyed by it, so
+    // every path that drops and re-syncs — `recreate_index` above all — arrives
+    // back here with the survivor still on the table. The unconditional
+    // `ADD COLUMN` then failed with a duplicate-COLUMN error, which is matched
+    // by NEITHER the "already exists" absorb (that spells index names) nor the
+    // unique-violation branch, so the apply ended with the constraint DROPPED
+    // and not re-created: an operator following the differ's own advice removed
+    // a live uniqueness guarantee. The survivor is therefore inspected, never
+    // assumed absent.
+    const state = await this.hashShadowColumnState(tableName, indexName, columns, nullSafeColumns);
+    if (state === 'foreign') {
+      // A real, non-generated column already owns the name. It is not ours to
+      // drop — it may hold data — so this route is refused and the caller falls
+      // through to the named #11374 refusal, which is the honest outcome.
+      this.logDurabilityFailure(
+        `[sql-driver] cannot carry UNIQUE index '${indexName}' on "${tableName}" on a hash shadow — the ` +
+          `column "${shadow}" already exists and is NOT a generated column, so it is not the driver's to ` +
+          `replace (#11627/#13015). The declared constraint is NOT enforced; rename or drop that column.`,
+      );
+      return false;
+    }
+    if (state === 'reusable') {
+      // The survivor already hashes exactly the declared key — re-key it rather
+      // than rebuild the table for a column that is byte-for-byte what we want.
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addKey}`);
+    } else if (state === 'stale') {
+      // The survivor hashes a DIFFERENT key than metadata now declares — the
+      // pre-#12998 raw-column shadow is exactly this case. Reusing it would
+      // re-enforce the old constraint under the new name, which is the silent
+      // wrong answer; the column carries no user data (it is derived), so it is
+      // dropped and re-generated. Two statements rather than one ALTER: the
+      // index it carried is already gone by the time we are here, and a single
+      // `DROP COLUMN c, ADD COLUMN c` is a shape not worth relying on.
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} DROP COLUMN ${ref(shadow)}`);
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
+    } else {
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
+    }
+    // The boot log describes the key the shadow actually enforces — the
+    // NULL-safe parts in their COALESCE spelling — so "carried" can be read
+    // literally (#12998).
+    const described = columns
+      .map((c) => (nullSafeColumns?.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
+      .join(', ');
     this.logger.warn(
       `[sql-driver] UNIQUE index '${indexName}' on "${tableName}" is carried by the hash-shadow column ` +
-        `"${shadow}" (SHA-256 of ${columns.join(', ')}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
+        `"${shadow}" (SHA-256 of ${described}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
         `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly (#11627). The declared ` +
-        `constraint is enforced over the full value; only the physical key differs.`,
-      { tableName, indexName, columns, shadow },
+        `constraint is enforced over the full value; only the physical key differs.` +
+        (state === 'reusable'
+          ? ` The shadow column already existed and hashes this exact key — re-keyed in place (#13015).`
+          : state === 'stale'
+            ? ` A surviving shadow column hashed a DIFFERENT key and was re-generated (#13015).`
+            : ''),
+      { tableName, indexName, columns, shadow, shadowColumnState: state },
     );
     return true;
+  }
+
+  /**
+   * What is already sitting where this index's hash shadow goes (#13015)?
+   *
+   *  - `absent`   — nothing; create the column and the key together.
+   *  - `reusable` — a generated column hashing EXACTLY the declared key. The
+   *                 index that keyed it was dropped (a `recreate_index`, a
+   *                 manual `DROP INDEX`, a half-applied migration); re-key it.
+   *  - `stale`    — a generated column hashing a DIFFERENT key. The pre-#12998
+   *                 shadow over RAW columns is this case: reusing it would
+   *                 re-enforce the OLD constraint under the new name — green,
+   *                 silent, and wrong — so it is re-generated instead.
+   *  - `foreign`  — a column of that name that is not generated at all. Not
+   *                 ours; refuse rather than drop something that may hold data.
+   *
+   * "Same key" is decided by {@link canonicalIndexKey}, the differ's own
+   * identity for an index key, so the question this asks and the question
+   * `diffManagedIndexes` asks cannot answer differently.
+   *
+   * An unreadable catalog degrades to `absent` — exactly the behaviour that
+   * shipped before this probe existed — rather than converting a transient
+   * read failure into a refused constraint.
+   */
+  protected async hashShadowColumnState(
+    tableName: string,
+    indexName: string,
+    columns: string[],
+    nullSafeColumns?: ReadonlySet<string>,
+  ): Promise<'absent' | 'reusable' | 'stale' | 'foreign'> {
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = await this.knex
+        .select('GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
+        });
+    } catch {
+      return 'absent';
+    }
+    if (rows.length === 0) return 'absent';
+    const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
+    if (expr.trim() === '') return 'foreign';
+    const parts = parseHashShadowKeyParts(expr);
+    if (parts.length === 0) return 'stale';
+    const carried = canonicalIndexKey(
+      parts.map((k) => k.column),
+      parts.filter((k) => k.nullSafe).map((k) => k.column),
+    );
+    return carried === canonicalIndexKey(columns, [...(nullSafeColumns ?? [])])
+      ? 'reusable'
+      : 'stale';
   }
 
   /**
@@ -14143,29 +14480,57 @@ export class SqlDriver implements IDataDriver {
     const sources = await this.hashShadowSourceColumns(tableName, indexName);
     if (sources.length === 0) return null;
     // Only the source columns the failing write actually supplied; a partial
-    // update cannot be re-selected on columns it never mentioned.
-    if (!sources.every((c) => Object.prototype.hasOwnProperty.call(values, c))) return null;
+    // update cannot be re-selected on columns it never mentioned. A NULL-safe
+    // key part (#12998) is exempt: the enforced key COALESCEs an absent or
+    // NULL value into the '__global__' bucket, so its key part is knowable
+    // without the write mentioning the column.
+    if (
+      !sources.every(
+        (s) => s.nullSafe || Object.prototype.hasOwnProperty.call(values, s.column),
+      )
+    ) {
+      return null;
+    }
     let existing = 0;
     try {
-      const rows = await this.knex(tableName)
-        .where(Object.fromEntries(sources.map((c) => [c, values[c]])))
-        .limit(1);
+      // Re-select by the key the index ENFORCES, not by raw equality (#12998):
+      // a NULL-safe part compares through the same COALESCE the generation
+      // expression carries (NULL and absent both land in the global bucket),
+      // and plain parts use `<=>` — MySQL's NULL-safe equality; this whole
+      // route is inside `isMysql`. A bare `.where({col: null})` would compare
+      // `= NULL`, match nothing, and misreport a genuine NULL-organization
+      // duplicate as a HASH COLLISION.
+      let q = this.knex(tableName);
+      for (const s of sources) {
+        q = s.nullSafe
+          ? q.whereRaw(`COALESCE(??, '${GLOBAL_TENANT}') = COALESCE(?, '${GLOBAL_TENANT}')`, [
+              s.column,
+              (values[s.column] ?? null) as any,
+            ])
+          : q.whereRaw('?? <=> ?', [s.column, (values[s.column] ?? null) as any]);
+      }
+      const rows = await q.limit(1);
       existing = rows.length;
     } catch {
       return null;
     }
+    // Describe the key parts as enforced — NULL-safe parts in their COALESCE
+    // spelling — so the message names the actual constraint (#12998).
+    const described = sources
+      .map((s) => (s.nullSafe ? `COALESCE(${s.column}, '${GLOBAL_TENANT}')` : s.column))
+      .join(', ');
     if (existing > 0) {
       // The ordinary case: a real duplicate. Say so in the declared terms
       // rather than leaving MySQL's binary digest as the only explanation.
       return (
         `[sql-driver] duplicate value for the UNIQUE constraint '${indexName}' on "${tableName}" ` +
-        `(${sources.join(', ')}). The constraint is physically carried by a hash-shadow column, so the ` +
+        `(${described}). The constraint is physically carried by a hash-shadow column, so the ` +
         `server's own message quotes a binary digest instead of the value (#11627).`
       );
     }
     return (
       `[sql-driver] HASH COLLISION on the shadow-carried UNIQUE index '${indexName}' on "${tableName}" ` +
-      `(${sources.join(', ')}): the write was rejected as a duplicate, but NO existing row carries these ` +
+      `(${described}): the write was rejected as a duplicate, but NO existing row carries these ` +
       `values. Uniqueness on this index is enforced over a SHA-256 of them (#11627), so two different ` +
       `values produced the same digest. This is expected at a rate near 10^-59 for a billion rows — if ` +
       `you are reading this, please report it with the values above; the write itself is legitimate and ` +
@@ -14173,11 +14538,6 @@ export class SqlDriver implements IDataDriver {
     );
   }
 
-  /**
-   * The declared key columns a shadow-carried index hashes, read back from the
-   * registered metadata so the disambiguating select above filters on the same
-   * columns the shadow was generated from.
-   */
   /**
    * Attach {@link explainHashShadowDuplicate}'s verdict to a failing write, or
    * return the error untouched (#11627).
@@ -14210,7 +14570,18 @@ export class SqlDriver implements IDataDriver {
     });
   }
 
-  protected async hashShadowSourceColumns(tableName: string, indexName: string): Promise<string[]> {
+  /**
+   * The declared key parts a shadow-carried index hashes, read back from the
+   * generation expression the server stores, so the disambiguating select
+   * above filters on the same key the shadow was generated from. Per part:
+   * the column identity, and whether the expression wraps it in the NULL-safe
+   * `COALESCE(col, …)` form (ADR-0120 D3 via #12998) — the read side must
+   * compare through the same fold the enforced key applies.
+   */
+  protected async hashShadowSourceColumns(
+    tableName: string,
+    indexName: string,
+  ): Promise<HashShadowKeyPart[]> {
     try {
       const rows: Array<{ GENERATION_EXPRESSION?: string; generation_expression?: string }> =
         await this.knex
@@ -14222,8 +14593,13 @@ export class SqlDriver implements IDataDriver {
             COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
           });
       const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
-      // `unhex(sha2(`a`,256))` or `unhex(sha2(concat(`a`,0x1f,`b`),256))`
-      return [...expr.matchAll(/`((?:[^`]|``)+)`/g)].map((m) => m[1]!.replace(/``/g, '`'));
+      // `unhex(sha2(`a`,256))`, `unhex(sha2(concat(`a`,0x1f,`b`),256))`, or with
+      // a NULL-safe part: `…concat(coalesce(`org`,_utf8mb4'__global__'),0x1f,`b`)…`
+      // (#12998). #13015 moved the parse itself next to the shadow vocabulary
+      // in `schema-drift.ts`: the differ reads the same expression to decide
+      // whether a shadow-carried index enforces what metadata declares, and two
+      // copies of this regex would be two answers to one question.
+      return parseHashShadowKeyParts(expr);
     } catch {
       return [];
     }

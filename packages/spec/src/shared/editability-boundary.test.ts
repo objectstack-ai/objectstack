@@ -364,7 +364,7 @@ describe('#8201 — an option is offered or withheld, never shown-but-unselectab
 
   it('the history sentence still comes last', () => {
     const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
-    expect(m.indexOf(OPTION_TEXT)).toBeLessThan(m.indexOf('Until #4001 closed this shape'));
+    expect(m.indexOf(OPTION_TEXT)).toBeLessThan(m.indexOf('Until this shape was closed'));
   });
 
   it('it is NOT the containers\' prescription — an option has no fields inside it', () => {
@@ -386,10 +386,17 @@ describe('#8201 — an option is offered or withheld, never shown-but-unselectab
   it('it points at per-option `visibleWhen`, and that predicate really parses HERE', () => {
     // Prose must not claim what the schema does not honour. Both readings the
     // prescription advertises are parsed back: a record-dependent predicate and
-    // the `current_user` one that only this surface binds (ADR-0068).
+    // a `current_user` one (ADR-0068). ⚠️ The prescription no longer calls this
+    // "the one `*When` surface that also binds `current_user`" — a form view's
+    // field and section predicates bind those roots too (objectui#6010 / #6110
+    // / #6111), client-side. What is still unique here, and what the
+    // prescription now rests on, is the clause below it: the rule validator
+    // refuses the WRITE. Pinned so the retired exclusivity cannot return.
     const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
     expect(m).toContain('per-option `visibleWhen`');
     expect(m).toContain('`current_user` (ADR-0068)');
+    expect(m).not.toContain('the one `*When` surface');
+    expect(m).toContain('rule validator refuses a write');
     expect(SelectOptionSchema.safeParse({ ...OPTION, visibleWhen: 'record.country == "cn"' }).success).toBe(true);
     expect(SelectOptionSchema.safeParse({ ...OPTION, visibleWhen: '"admin" in current_user.positions' }).success).toBe(true);
   });

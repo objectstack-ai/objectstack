@@ -21,7 +21,7 @@ import { strictObject } from '../shared/strict-object';
  * agent, which is why this surface hides its mistakes better than most.
  */
 const AGENT_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the agent still registered '
+  'Until this shape was closed these were dropped silently — the agent still registered '
   + 'and still answered, minus whatever the key was meant to configure or constrain.';
 
 export const AIModelConfigSchema = lazySchema(() => strictObject({
@@ -169,12 +169,12 @@ export const AgentSchema = lazySchema(() => strictObject({
     // believed the agent was hidden. It was listed to everyone, and had been
     // all along.
     visibility:
-      '`visibility` was removed in #1901 — it never hid anything. No runtime read it: '
+      '`visibility` was removed — it never hid anything. No runtime read it: '
       + 'the chat-access evaluator ignored it and the agent list route did not filter on it, '
       + "so `private` listed the agent to everyone. Use `access` (who may chat) and/or "
-      + '`permissions` (required permission-set capabilities) — both ENFORCED at the chat route since #1884.',
+      + '`permissions` (required permission-set capabilities) — both ENFORCED at the chat route.',
     tenantId:
-      '`tenantId` was removed in #2377 — it never scoped anything. Tenancy comes from the '
+      '`tenantId` was removed — it never scoped anything. Tenancy comes from the '
       + 'request context (`resolveAuthzContext`), never from a field on the artifact, so this '
       + 'key did not restrict which tenant could reach the agent. Delete it; scope reachability '
       + 'with `access` / `permissions`.',
@@ -195,7 +195,7 @@ export const AgentSchema = lazySchema(() => strictObject({
   /** Cognition */
   instructions: z.string().describe('System Prompt / Prime Directives'),
   model: AIModelConfigSchema.optional(),
-  lifecycle: StateMachineSchema.optional().describe('[EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet (liveness #1878/#1893).'),
+  lifecycle: StateMachineSchema.optional().describe('[EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet.'),
 
   /**
    * ADR-0063 §1 / ADR-0064 — the product surface this agent IS. The kernel
@@ -233,7 +233,7 @@ export const AgentSchema = lazySchema(() => strictObject({
    * often an AI (ADR-0033), actually reads (`shared/retired-key.ts`).
    */
   tools: retiredKey(
-    '`agent.tools` was removed in @objectstack/spec 17 (#3894) — use `skills`. ' +
+    '`agent.tools` was removed in @objectstack/spec 17 — use `skills`. ' +
     'An agent reaches exactly the tools its surface-compatible skills declare ' +
     '(ADR-0064), so move each reference into a skill: a platform tool by its ' +
     'registered name, or `action_<name>` for one of your own AI-exposed Actions. ' +
@@ -250,7 +250,7 @@ export const AgentSchema = lazySchema(() => strictObject({
   // knowledge-tools.ts:96). An author who "scoped" retrieval here scoped
   // nothing — the dangerous direction, same shape as tool.permissions.
   knowledge: retiredKey(
-    '`agent.knowledge` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`agent.knowledge` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'declaring knowledge sources/indexes on an agent never scoped retrieval: the ' +
     "`search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments, not from " +
     'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
@@ -300,7 +300,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     guidance: {
       // The removal recorded in the note below, given the rejection it never had.
       shortTerm:
-        '`shortTerm` was removed (ADR-0013 D3, cloud#339) — it declared a working-memory '
+        '`shortTerm` was removed (ADR-0013 D3) — it declared a working-memory '
         + 'window nothing in the runtime consumed. Cross-turn grounding comes from tools reading '
         + 'live state, and the context budget is governed by the per-request token guardrail, '
         + 'not by this block. Delete it.',
@@ -331,7 +331,7 @@ export const AgentSchema = lazySchema(() => strictObject({
 
     /** Reflection interval — how often the agent reflects on past actions */
     reflectionInterval: z.number().int().min(1).optional().describe('Reflect every N interactions to improve behavior'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet (liveness #1878/#1893).'),
+  }).optional().describe('[EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet.'),
 
   /** Guardrails */
   guardrails: strictObject({
@@ -361,10 +361,10 @@ export const AgentSchema = lazySchema(() => strictObject({
 
     /** Topics or actions the agent must avoid */
     blockedTopics: z.array(z.string()).optional().describe('Forbidden topics or action names'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service (liveness #1878/#1893).'),
+  }).optional().describe('[EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service.'),
 
   /** Structured Output */
-  structuredOutput: StructuredOutputConfigSchema.optional().describe('[EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet (liveness #1878/#1893).'),
+  structuredOutput: StructuredOutputConfigSchema.optional().describe('[EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet.'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it

@@ -215,6 +215,32 @@ describe('[#11065] InMemoryDriver data face — a boolean aggregand is worth 1 o
     }) as any[];
     expect(row.rate).toBeNull();
   });
+
+  /**
+   * [#11152] `min`/`max` join the numeric family — maintainer ruling
+   * 2026-08-28 (superseding #11249's `false`/`true`): booleans aggregate as
+   * NUMBERS on every face, no per-aggregate exception. Asserted STRICTLY
+   * (`toBe(0)`/`toBe(1)`): the superseded booleans satisfy a `Number()`
+   * reading, so a coerced comparison would pass on exactly the wrong
+   * spelling. Grouped: the open group is all-true, so its `min` is `1` — a
+   * whole-table computation or a sticky `0` fails there and only there.
+   */
+  it('min/max over the boolean answer the NUMBERS 0/1, ungrouped and grouped', async () => {
+    const [row] = await driver.aggregate(TABLE, {
+      aggregations: [
+        { function: 'min', field: 'is_sla_violated', alias: 'lo' },
+        { function: 'max', field: 'is_sla_violated', alias: 'hi' },
+      ],
+    }) as any[];
+    expect(row.lo).toBe(0);
+    expect(row.hi).toBe(1);
+    const rows = await driver.aggregate(TABLE, {
+      groupBy: ['is_closed'],
+      aggregations: [{ function: 'min', field: 'is_sla_violated', alias: 'lo' }],
+    }) as any[];
+    const byClosed = Object.fromEntries(rows.map((r) => [String(r.is_closed), r.lo]));
+    expect(byClosed).toEqual({ true: 0, false: 1 });
+  });
 });
 
 /**
@@ -235,6 +261,8 @@ describe('[#11065] the analytics face answers the same rate', () => {
     measures: {
       slaViolationRate: { name: 'sla_violation_rate', label: 'SLA Violation Rate', type: 'avg', sql: 'is_sla_violated' },
       slaViolations: { name: 'sla_violations', label: 'SLA Violations', type: 'sum', sql: 'is_sla_violated' },
+      minViolated: { name: 'min_violated', label: 'Min violated', type: 'min', sql: 'is_sla_violated' },
+      maxViolated: { name: 'max_violated', label: 'Max violated', type: 'max', sql: 'is_sla_violated' },
       count: { name: 'count', label: 'Cases', type: 'count', sql: 'id' },
       avgNote: { name: 'avg_note', label: 'Avg note', type: 'avg', sql: 'note' },
     },
@@ -286,6 +314,23 @@ describe('[#11065] the analytics face answers the same rate', () => {
       (result.rows as any[]).map((r) => [String(r['cases.isClosed']), [r['cases.slaViolationRate'], r['cases.count']]]),
     );
     expect(byClosed).toEqual({ true: [0.25, 4], false: [1, 1] });
+  });
+
+  /**
+   * [#11152] The mingo route answers the same ruled numbers — the `$min`/
+   * `$max` arms wrap `numericAggregandExpr` exactly as `$sum`/`$avg` do, and
+   * one face aligned alone is how this package's faces come to disagree.
+   * Strict for the data-face reason: the superseded `false`/`true` (#11249)
+   * satisfies any coerced reading.
+   */
+  it('min/max over the boolean answer the NUMBERS 0/1 here too', async () => {
+    const result = await service.query({
+      cube: 'cases',
+      measures: ['cases.minViolated', 'cases.maxViolated'],
+    } as any);
+    const row = result.rows[0] as Record<string, unknown>;
+    expect(row['cases.minViolated']).toBe(0);
+    expect(row['cases.maxViolated']).toBe(1);
   });
 
   /** The same narrowness guard the data face carries: text stays excluded. */

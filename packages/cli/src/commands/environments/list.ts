@@ -45,23 +45,23 @@ export default class EnvironmentsList extends Command {
 
       requireAuth(token);
 
-      const res = await client.projects.list({
+      const res = await client.environments.list({
         organization_id: flags.org,
         status: flags.status,
       });
 
-      const projects = res?.projects ?? [];
+      const environments = res?.environments ?? [];
 
       if (flags.format === 'json') {
         await formatOutput(res, 'json');
       } else if (flags.format === 'yaml') {
         await formatOutput(res, 'yaml');
       } else {
-        console.log(`\nEnvironments (${projects.length}):\n`);
-        if (projects.length === 0) {
+        console.log(`\nEnvironments (${environments.length}):\n`);
+        if (environments.length === 0) {
           console.log('  (no environments)');
         } else {
-          for (const p of projects) {
+          for (const p of environments) {
             const active = p.id === activeId ? ' ★' : '';
             const defaultTag = p.is_default ? ' [default]' : '';
             const systemTag = p.is_system ? ' [system]' : '';

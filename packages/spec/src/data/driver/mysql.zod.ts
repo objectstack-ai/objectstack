@@ -69,7 +69,7 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
         + 'actually receives it.',
     },
     history:
-      'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+      'Until this shape was closed, nothing validated `datasource.config` at all — an unrecognised connection key '
       + 'was accepted in silence and the datasource then connected on the client defaults '
       + '(localhost:3306) rather than failing.',
   },

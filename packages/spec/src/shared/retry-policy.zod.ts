@@ -121,7 +121,7 @@ export function retryPolicyShape() {
     // rename, where a bare unknown-key rejection would only carry the key.
     // `retry-policy-converged` rewrites it on the load path.
     retryDelayMs: retiredKey(
-      '`retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now ' +
+      '`retryDelayMs` was removed in @objectstack/spec 17.0.0 — the retry policy now ' +
       'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
       "a `try_catch` node's `retry` and `flow.errorHandling`. " +
       'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +

@@ -546,14 +546,28 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  * hide showing for everyone". That is precise for exactly one of them. The
  * measurement, at both ends of each slot:
  *
- *  - **`visibleWhen` — client-only, fail-OPEN, sentence was correct.** The
- *    server never evaluates a FIELD-level `visibleWhen` at all:
+ *  - **`visibleWhen` — client-only, and since objectui#6010 it fails in TWO
+ *    ways rather than one.** The server half is unchanged and still exactly
+ *    right: it never evaluates a FIELD-level `visibleWhen` at all —
  *    `rule-validator.ts`'s `ConditionalFieldDef` has no such member, and
  *    `hasFieldRules` gates on `requiredWhen || readonlyWhen ||
  *    fieldHasOptionVisibility` — the `visibleWhen` it does evaluate is the
- *    per-OPTION one. So the only verdict is the renderer's, and
- *    `resolveFieldRuleState` passes `fallback: true` for visibility. Field
- *    visible to everyone, exactly as the old sentence said.
+ *    per-OPTION one. The RENDERER half moved. `plugin-form`'s
+ *    `sectionFields.ts` (`fromObjectSchema`) copies an object field's ADR-0036
+ *    `visibleWhen` / `readonlyWhen` / `requiredWhen` straight onto the runtime
+ *    form field, and the SDUI form renderer resolves those through
+ *    `resolveFieldRuleState` **with `predicateScope` bound**. So under a host
+ *    that publishes a scope the predicate does not fault: it RESOLVES, the
+ *    control is hidden in that one form, and the server still returns the value
+ *    to every other reader — a silent enforcement gap. Only where no host
+ *    publishes a scope (the public `/f/:slug` route, every non-form reader)
+ *    does the old sentence still describe what happens: unbound root, fault,
+ *    `fallback: true`, field visible to everyone.
+ *
+ *    ⛔ This is not a reason to relax {@link FIELD_RULE_BOUND_ROOTS}. The
+ *    verdict is MORE justified than when it was written, not less: trading a
+ *    loud lint error for a gap nobody can see is the one outcome worse than
+ *    the error. Only the causal clause was re-measured.
  *  - **`readonlyWhen` — the two ends fault in OPPOSITE directions, and the
  *    server wins.** Server: `isReadonlyWhenLocked` matches the fault with
  *    `unknownVariableOf` and returns `true` — "the declared lock is not
@@ -590,7 +604,16 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  * the option's `visibleWhen`" answers a question nobody asked. Three tiers:
  *
  *  - **user roots** (`current_user` / `user` / `ctx` / `os`) keep the existing
- *    two user-specific prescriptions plus the `record` rewrite;
+ *    two user-specific prescriptions plus the `record` rewrite. What changed is
+ *    the GROUNDING of the first one, not the prescription: it used to read
+ *    "per-option is the one `*When` surface that binds `current_user`", and
+ *    since objectui#6010 a form VIEW's field predicate binds those roots too —
+ *    client-side only, because nothing on the write path evaluates a form-view
+ *    field `visibleWhen`. So per-option is recommended for the reason that
+ *    survives the change: the rule validator enforces it on write. The message
+ *    now says that, and names the view surface only to refuse it as a
+ *    destination for a server-enforced object rule (trading a loud lint error
+ *    for a silent enforcement gap is the one outcome worse than the error);
  *  - **`data`** gets the metadata-form-vs-runtime-form explanation, because
  *    that is what the mistake IS — the same key name, the other form kind's
  *    root;
@@ -619,10 +642,23 @@ const FIELD_RULE_SLOT_CONSEQUENCE_GENERIC =
 /** Axis 1 — see "the consequence, by SLOT" above. Every cell is measured. */
 const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   visibleWhen:
-    'the predicate faults and the renderer falls back to VISIBLE ' +
-    '(`resolveFieldRuleState` evaluates visibility with `fallback: true`, and no server-side ' +
-    'gate evaluates a field-level `visibleWhen` at all), leaving the field the test was meant ' +
-    'to hide showing for everyone (#6146)',
+    'the predicate no longer merely faults — and BOTH of its outcomes are wrong, in opposite ' +
+    'directions. Under a host that publishes a predicate scope the renderer RESOLVES it ' +
+    // `sectionFields` is spelled WITHOUT its `.ts` extension for the same
+    // reason the `*.form` spelling below is: this is a STRING literal, and
+    // #5017's receiver scan strips comments but not strings, so `sectionFields.ts`
+    // inside the message registers `sectionFields` as a read receiver of this
+    // rule. Measured — it went red on the first run, exactly as the sibling did.
+    '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
+    '`resolveFieldRuleState` evaluates it with the host scope bound, objectui#6010) — so the ' +
+    'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
+    '`visibleWhen` at all: the record still carries the value and every other reader still ' +
+    'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
+    '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
+    'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
+    '`fallback: true`), leaving the field the test was meant to hide showing for everyone ' +
+    '(#6146). The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
+    'silent one does not',
   readonlyWhen:
     'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
     'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
@@ -676,11 +712,14 @@ export function fieldRuleRootIssue(
   const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
   const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
     ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
-      `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +
-      `surface that binds \`current_user\` and its ADR-0068 aliases. To hide the FIELD by role, ` +
-      `declare field-level security on a permission set ` +
-      `(\`fields: { '<object>.<field>': { readable: false } }\`), which the server enforces. ` +
-      `To gate on record state, rewrite the predicate against \`record\`.`
+      `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — the rule validator evaluates ` +
+      `that one against \`current_user\` and its ADR-0068 aliases on every write, so the gate ` +
+      `holds server-side. To hide the FIELD by role, declare field-level security on a ` +
+      `permission set (\`fields: { '<object>.<field>': { readable: false } }\`), which the ` +
+      `server enforces. To gate on record state, rewrite the predicate against \`record\`. ` +
+      `Note that a form VIEW's own field predicate HAS bound these roots since objectui#6010 — ` +
+      `but only in the renderer, so moving a server-enforced object rule there swaps a loud ` +
+      `error for a silent enforcement gap; it is not a fourth answer.`
     : root === 'data'
       // The `*.form` spelling is deliberately not `*.form.ts`: this is a
       // STRING literal, and #5017's receiver scan strips comments but not

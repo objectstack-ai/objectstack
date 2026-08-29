@@ -187,8 +187,27 @@ export interface EngineTransactionInfo {
  */
 export interface IObjectQLEngine extends IDataEngine {
     // ── Schema access ────────────────────────────────────────────────────
-    /** The registered schema for an object, or `undefined` — the write guards' `managedBy` source. */
-    getSchema(objectName: string): unknown;
+    /**
+     * The registered schema for an object, or `undefined` — the write
+     * guards' `managedBy` source.
+     *
+     * [#12481] Typed as the spec's registered-object type — the #11833
+     * ruling's fork 3 as executed by #12248, one member over, applied by
+     * inheritance: `ObjectQL.getSchema` has always answered
+     * `ServiceObject | undefined` ({@link getObject} is literally its
+     * alias, `return this.getSchema(name)`), and `ServiceObject` lives in
+     * spec (`data/object.zod.ts`), so the header's "engine-local type"
+     * rationale for `unknown` no longer applied here either. While it said
+     * `unknown`, consumers re-narrowed through casts or `any`
+     * (`plugin-security`'s engine-owned write guard casting to its
+     * `EngineOwnedSchemaLike` slice, `runtime`'s route-action resolver,
+     * `metadata-core`'s structural field-presence probes,
+     * `service-messaging`'s outbox header-redaction read) — the #4251
+     * drift shape this contract exists to end. Authored state (`z.input`,
+     * ADR-0122), matching {@link getObject}: the registry stores what was
+     * registered.
+     */
+    getSchema(objectName: string): ServiceObject | undefined;
     /**
      * Engine-level alias of {@link EngineSchemaRegistryView.getObject} (the
      * migration-flag reader's shape).

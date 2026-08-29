@@ -1732,7 +1732,7 @@ describe('ObjectStackClient.automation', () => {
  * `data.find()` transport parameters — ONE expectation table, BOTH copies.
  *
  * `find` is implemented twice: `ObjectStackClient.data.find` and
- * `ScopedProjectClient.data.find`. They are two faces of ONE wire contract
+ * `ScopedEnvironmentClient.data.find`. They are two faces of ONE wire contract
  * (the scoped one differs only in the URL prefix) and were byte-identical
  * copies of the same normalization — including the same defect. Every row
  * below is therefore driven through BOTH and compared against the SAME
@@ -1762,7 +1762,7 @@ describe('data.find() — canonical/legacy transport parameters (both copies)', 
         const direct = queryOf(a.fetchMock.mock.calls[0][0] as string);
 
         const b = createMockClient(body);
-        await b.client.project('env-1').data.find('task', options);
+        await b.client.environment('env-1').data.find('task', options);
         const scoped = queryOf(b.fetchMock.mock.calls[0][0] as string);
 
         return { direct, scoped };
@@ -1955,7 +1955,7 @@ describe('data.find() — canonical/legacy transport parameters (both copies)', 
         expect(a.fetchMock).not.toHaveBeenCalled();
 
         const b = createMockClient({ success: true, data: { object: 'task', records: [] } });
-        await expect(b.client.project('env-1').data.find('task', nested)).rejects.toThrow(
+        await expect(b.client.environment('env-1').data.find('task', nested)).rejects.toThrow(
             /expand\['contact'\] carries a nested query \(fields\)/,
         );
         expect(b.fetchMock).not.toHaveBeenCalled();
@@ -1982,13 +1982,13 @@ describe('QueryBuilder — offset() alias', () => {
 });
 
 // ----------------------------------------------------------------------
-// ScopedProjectClient — project-scoped sub-client (Phase 2)
+// ScopedEnvironmentClient — environment-scoped sub-client (Phase 2)
 // ----------------------------------------------------------------------
 
-describe('ScopedProjectClient', () => {
-    it('prefixes meta.getTypes with /projects/:id', async () => {
+describe('ScopedEnvironmentClient', () => {
+    it('prefixes meta.getTypes with /environments/:id', async () => {
         const { client, fetchMock } = createMockClient({ types: ['object'] });
-        const scoped = client.project('proj-123');
+        const scoped = client.environment('proj-123');
         await scoped.meta.getTypes();
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/environments/proj-123/meta',
@@ -1996,9 +1996,9 @@ describe('ScopedProjectClient', () => {
         );
     });
 
-    it('prefixes data.find with /projects/:id', async () => {
+    it('prefixes data.find with /environments/:id', async () => {
         const { client, fetchMock } = createMockClient({ records: [] });
-        const scoped = client.project('proj-123');
+        const scoped = client.environment('proj-123');
         await scoped.data.find('task', { top: 5 });
         const url = (fetchMock.mock.calls[0] as any[])[0] as string;
         expect(url.startsWith('http://localhost:3000/api/v1/environments/proj-123/data/task')).toBe(true);
@@ -2007,7 +2007,7 @@ describe('ScopedProjectClient', () => {
 
     it('prefixes data.get / data.create / data.update / data.delete', async () => {
         const { client, fetchMock } = createMockClient({ id: 't1' });
-        const scoped = client.project('proj-xyz');
+        const scoped = client.environment('proj-xyz');
 
         await scoped.data.get('task', 't1');
         expect(fetchMock).toHaveBeenLastCalledWith(
@@ -2036,7 +2036,7 @@ describe('ScopedProjectClient', () => {
 
     it('url-encodes the environmentId', async () => {
         const { client, fetchMock } = createMockClient({ types: [] });
-        const scoped = client.project('proj with space');
+        const scoped = client.environment('proj with space');
         await scoped.meta.getTypes();
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/environments/proj%20with%20space/meta',
@@ -2052,12 +2052,12 @@ describe('ScopedProjectClient', () => {
         // suppressed nothing and reported TS2578 ("unused") the first time a tsc
         // program read the file. Its own comment said what the test actually
         // proves: the empty id is rejected at RUNTIME, by the guard below.
-        expect(() => client.project('')).toThrow(/environmentId is required/);
+        expect(() => client.environment('')).toThrow(/environmentId is required/);
     });
 
     it('exposes environmentId via getProjectId()', () => {
         const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
-        const scoped = client.project('00000000-0000-0000-0000-000000000001');
+        const scoped = client.environment('00000000-0000-0000-0000-000000000001');
         expect(scoped.getProjectId()).toBe('00000000-0000-0000-0000-000000000001');
     });
 
@@ -2071,7 +2071,7 @@ describe('ScopedProjectClient', () => {
         (client as any)['discoveryInfo'] = {
             routes: { data: '/backend/api/v9/data', metadata: '/backend/api/v9/meta' },
         };
-        const scoped = client.project('proj-123');
+        const scoped = client.environment('proj-123');
         const base = 'http://localhost:3000/backend/api/v9/environments/proj-123';
 
         // All namespaces build off ONE scope() — drive one method from each so
@@ -2098,7 +2098,7 @@ describe('ScopedProjectClient', () => {
         (client as any)['discoveryInfo'] = {
             routes: { data: '/backend/api/v9/records', metadata: '/backend/api/v9/meta' },
         };
-        await client.project('proj-123').meta.getTypes();
+        await client.environment('proj-123').meta.getTypes();
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/environments/proj-123/meta',
         );
@@ -2117,7 +2117,7 @@ describe('ScopedProjectClient', () => {
             },
             scoping: { enabled: true, resolution: 'auto', scoped: true, environmentId: 'env-served' },
         };
-        await client.project('proj-other').meta.getTypes();
+        await client.environment('proj-other').meta.getTypes();
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/backend/api/v9/environments/proj-other/meta',
         );
@@ -2138,7 +2138,7 @@ describe('ScopedProjectClient', () => {
             },
             scoping: { enabled: true, resolution: 'auto', scoped: true },
         };
-        await client.project('proj-other').meta.getTypes();
+        await client.environment('proj-other').meta.getTypes();
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/backend/api/v9/environments/proj-other/meta',
         );
@@ -2155,7 +2155,7 @@ describe('ScopedProjectClient', () => {
             routes: { data: '/backend/api/v9/tenants/t1/data' },
             scoping: { enabled: true, resolution: 'auto', scoped: true },
         };
-        await client.project('proj-other').meta.getTypes();
+        await client.environment('proj-other').meta.getTypes();
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/environments/proj-other/meta',
         );
@@ -2163,7 +2163,7 @@ describe('ScopedProjectClient', () => {
 
     it('prefixes the screen-flow automation.resume / getScreen calls', async () => {
         const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
-        const scoped = client.project('proj-123');
+        const scoped = client.environment('proj-123');
 
         await scoped.automation.resume('my_flow', 'run_1', { inputs: { note: 'ok' } });
         expect(fetchMock).toHaveBeenLastCalledWith(
@@ -2509,9 +2509,15 @@ describe('HTTP error shaping — envelope normalisation', () => {
 
 describe('packages.install', () => {
     const MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
+    // [#12034] The body the ONLY serving surface actually sends: `success(pkg)`,
+    // i.e. the bare `InstalledPackage` row under `data`. These two cases assert
+    // the REQUEST and never read the response, so the fixture is inert either
+    // way — but it used to spell `data: { package: … }`, a body nothing emits,
+    // and a decoy fixture is how the next sweep concludes the envelope is real.
+    const INSTALLED_ROW = { manifest: MANIFEST, status: 'installed', enabled: true };
 
     it('POSTs the manifest and omits `overwrite` unless requested', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        const { client, fetchMock } = createMockClient({ success: true, data: INSTALLED_ROW });
         await client.packages.install(MANIFEST, { enableOnInstall: true });
 
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/packages', expect.any(Object));
@@ -2524,7 +2530,7 @@ describe('packages.install', () => {
     });
 
     it('passes `overwrite: true` through for intentional upgrade / re-install', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        const { client, fetchMock } = createMockClient({ success: true, data: INSTALLED_ROW });
         await client.packages.install(MANIFEST, { overwrite: true });
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -2603,7 +2609,7 @@ describe('data.batchTransaction', () => {
 
     it('is mirrored on the environment-scoped client', async () => {
         const { client, fetchMock } = createMockClient({ results: [] });
-        await client.project('proj-1').data.batchTransaction(OPS);
+        await client.environment('proj-1').data.batchTransaction(OPS);
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/environments/proj-1/batch',
             expect.objectContaining({ method: 'POST' }),
@@ -2756,7 +2762,7 @@ describe('[#11391] meta.saveItem query string (unscoped client)', () => {
 describe('[#11391] meta.saveItem query string (environment-scoped twin)', () => {
     it('threads `force: true` on the scoped client too', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
-        await client.project('proj-123').meta.saveItem(
+        await client.environment('proj-123').meta.saveItem(
             'object', 'customer', { name: 'customer' }, { force: true },
         );
         const [url, init] = fetchMock.mock.calls[0];
@@ -2768,7 +2774,7 @@ describe('[#11391] meta.saveItem query string (environment-scoped twin)', () => 
 
     it('exposes the same three parameters as the unscoped twin', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
-        await client.project('proj-123').meta.saveItem('object', 'customer', {}, {
+        await client.environment('proj-123').meta.saveItem('object', 'customer', {}, {
             force: true,
             packageId: 'app.crm',
             mode: 'draft',
@@ -2781,7 +2787,7 @@ describe('[#11391] meta.saveItem query string (environment-scoped twin)', () => 
 
     it('BACKWARD COMPATIBLE: a 3-argument scoped call still sends no query string', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
-        await client.project('proj-123').meta.saveItem('object', 'customer', {});
+        await client.environment('proj-123').meta.saveItem('object', 'customer', {});
         expect(String(fetchMock.mock.calls[0][0])).toBe(
             'http://localhost:3000/api/v1/environments/proj-123/meta/object/customer',
         );
@@ -2795,7 +2801,7 @@ describe('[#11391] meta.saveItem query string (environment-scoped twin)', () => 
         const { client, fetchMock } = createMockClient({ success: true });
         const opts = { force: true, packageId: 'app.crm', mode: 'draft' } as const;
         await client.meta.saveItem('object', 'customer', {}, opts);
-        await client.project('proj-123').meta.saveItem('object', 'customer', {}, opts);
+        await client.environment('proj-123').meta.saveItem('object', 'customer', {}, opts);
         const queryOf = (u: unknown) => new URL(String(u)).search;
         expect(queryOf(fetchMock.mock.calls[1][0])).toBe(queryOf(fetchMock.mock.calls[0][0]));
         expect(queryOf(fetchMock.mock.calls[0][0])).toBe('?force=true&package=app.crm&mode=draft');
@@ -2974,7 +2980,7 @@ describe('[#11713] meta.saveItem sends the If-Match header (unscoped client)', (
 describe('[#11713] meta.saveItem sends the If-Match header (environment-scoped twin)', () => {
     it('sends the header on the scoped client too', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
-        await client.project('proj-123').meta.saveItem(
+        await client.environment('proj-123').meta.saveItem(
             'object', 'customer', { name: 'customer' }, { ifMatch: OCC_TOKEN },
         );
         expect(String(fetchMock.mock.calls[0][0])).toBe(
@@ -2985,7 +2991,7 @@ describe('[#11713] meta.saveItem sends the If-Match header (environment-scoped t
 
     it('ABSENT on the scoped client when the caller does not pin', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
-        await client.project('proj-123').meta.saveItem('object', 'customer', { name: 'customer' });
+        await client.environment('proj-123').meta.saveItem('object', 'customer', { name: 'customer' });
         expect(headersOfCall(fetchMock)['If-Match']).toBeUndefined();
         expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
     });
@@ -2997,7 +3003,7 @@ describe('[#11713] meta.saveItem sends the If-Match header (environment-scoped t
         const { client, fetchMock } = createMockClient({ success: true });
         const opts = { ifMatch: OCC_TOKEN, force: true } as const;
         await client.meta.saveItem('object', 'customer', {}, opts);
-        await client.project('proj-123').meta.saveItem('object', 'customer', {}, opts);
+        await client.environment('proj-123').meta.saveItem('object', 'customer', {}, opts);
         expect(headersOfCall(fetchMock, 1)['If-Match']).toBe(headersOfCall(fetchMock, 0)['If-Match']);
         expect(headersOfCall(fetchMock, 0)['If-Match']).toBe(OCC_TOKEN);
     });
@@ -3005,7 +3011,7 @@ describe('[#11713] meta.saveItem sends the If-Match header (environment-scoped t
     it('IN STEP when unpinned too: neither twin adds a header', async () => {
         const { client, fetchMock } = createMockClient({ success: true });
         await client.meta.saveItem('object', 'customer', {}, { force: true });
-        await client.project('proj-123').meta.saveItem('object', 'customer', {}, { force: true });
+        await client.environment('proj-123').meta.saveItem('object', 'customer', {}, { force: true });
         expect(headerNamesOf(fetchMock, 0)).toEqual(BASELINE_HEADERS);
         expect(headerNamesOf(fetchMock, 1)).toEqual(BASELINE_HEADERS);
     });

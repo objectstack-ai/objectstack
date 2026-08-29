@@ -235,7 +235,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
  * walker's reconstruction of it.
  */
 const PROPS_HISTORY =
-  'Until #4001 batch A an undeclared prop was dropped in silence: the props schema stripped it '
+  'Until this shape was closed, an undeclared prop was dropped in silence: the props schema stripped it '
   + 'and `PageComponent.properties` is an open bag, so the key reached objectui\'s renderer, was '
   + 'not read there, and the author got a success receipt for configuration that did nothing.';
 
@@ -276,7 +276,7 @@ const COMPONENT_NODE_VISIBILITY_GUIDANCE: KeySetGuidance =
       'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '
       + 'component node\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '
       + '`id` — one canonical spelling per layer, not because the props-level form is inert. '
-      + 'Since objectui#5505 (`c86185eb5`, merged 2026-08-21) the hoisted form IS evaluated by '
+      + 'Since the console release of 2026-08-21 (`c86185eb5`) the hoisted form IS evaluated by '
       + 'the node-level gate: the two gates evaluate the same value and compose as an '
       + 'idempotent AND, so leaving it in `properties` duplicates the canonical key rather '
       + 'than silently failing to gate.',
@@ -378,8 +378,8 @@ export const PageContainerProps = strictObject(
       // schedule rather than an authorable key. Closing the shape is what makes
       // that distinction reach the author.
       body: '`body` is not an authorable spelling of the composition slot — write `children`. '
-        + 'The renderers still read `body` as a back-compat fallback for documents stored before '
-        + '#5775, but one composition key is the contract (Prime Directive #12).',
+        + 'The renderers still read `body` as a back-compat fallback for documents stored under '
+        + 'the older spelling, but one composition key is the contract (Prime Directive #12).',
     },
   },
   {
@@ -454,7 +454,7 @@ export const PageHeaderProps = strictObject({
    * buttons beside it.
    */
   icon: retiredKey(
-    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
     + 'never off the header\'s own props bag, and the component registry never published it as an '
     + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
@@ -566,7 +566,7 @@ export const PageTabsProps = strictObject({
    * called `type`. The live mechanism is `tabStyle`.
    */
   type: retiredKey(
-    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — '
+    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
@@ -639,9 +639,10 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:662-668` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:662-668` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
@@ -746,7 +747,7 @@ export const PageCardProps = strictObject({
    * `children` or `footer` (`element:button`, `record:quick_actions`).
    */
   actions: retiredKey(
-    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
     + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
     + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
@@ -772,7 +773,7 @@ export const PageCardProps = strictObject({
    * already reads both. The live mechanism is `children`.
    */
   body: retiredKey(
-    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
+    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
     + 'components) is unchanged. '
@@ -817,7 +818,7 @@ export const RecordDetailsProps = strictObject({
    * dead branch on the next pin bump.
    */
   layout: retiredKey(
-    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
     + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
     + 'values took the same branch and the key selected nothing. Delete the key — the body is '
@@ -1119,7 +1120,7 @@ export const RecordHighlightsField = z.union([
       // no `retiredKey` tombstone — the key is out of the walked shape
       // entirely, and the refusal is the arm's own named `unrecognized_keys`).
       icon:
-        '`record:highlights` field `icon` was removed in @objectstack/spec 17 (#10054, ADR-0049) — '
+        '`record:highlights` field `icon` was removed in @objectstack/spec 17 (ADR-0049) — '
         + 'no render path ever read it: the renderer normalized the authored object and passed '
         + '`icon` to a highlight chip with no icon slot, and the key could travel nowhere else '
         + '(`useRegisterHighlightFields` registers field NAMES only; the Studio designer publishes '
@@ -1371,7 +1372,7 @@ export const ReferenceRailEntrySchema = strictObject({
      */
     filter: 'The rail honours no per-entry `filter`: it issues one fixed query per entry '
       + '(`{ [relationshipField]: parentId }`, `$top` = `limit`) and reads nothing else — before '
-      + 'this shape existed the key parsed, shipped, and silently filtered nothing (#8691). '
+      + 'this shape existed the key parsed, shipped, and silently filtered nothing. '
       + '`record:related_list` is the component whose `filter` is real; if the rail is ever '
       + 'granted one, this entry shape is where it gets declared and enforced.',
     icon: '`icon` is read by nothing: the rail renderer declares it in its TS interface and the '
@@ -1646,9 +1647,10 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:851-857` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:851-857` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
@@ -1822,33 +1824,46 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-   * `button.tsx` is byte-identical to the one at `9a3daf8d3`, so every anchor
-   * below is unmoved): `components/src/renderers/form/
-   * button.tsx:44-47` resolves `schema.icon`, and `:69` / `:71` render it on
-   * either side of the label per `iconPosition` (`mr-2 h-4 w-4` left,
-   * `ml-2 h-4 w-4` right), both suppressed while `loading`.
+   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — the
+   * read point MOVED rather than died, and the anchors below now hop into a
+   * second file): `components/src/renderers/form/
+   * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
+   * and `:57` / `:59` render it on either side of the label per
+   * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
+   * suppressed while `loading`.
    *
    * ⚠️ The resolution path is NOT `LazyIcon`, the slot the container icons on
-   * this surface use — it is a second, older path with its own normaliser and
-   * its own rename map, and the two accept different spellings:
-   *   - here: `toPascalCase` (splits on `-` only) → a one-entry rename map
-   *     (`Home` → `House`) → `icons[name]` from `lucide-react`
-   *     (`button.tsx:14-27`). An unknown name resolves to `undefined` and the
-   *     button renders with NO icon and no diagnostic anywhere.
+   * this surface use — it is the `action:*` resolver, and the two accept
+   * different spellings:
+   *   - here: `resolveIcon`
+   *     (`components/src/renderers/action/resolve-icon.ts:30-35`) →
+   *     `toPascalCase`, which splits on `-` only, then a one-entry rename map
+   *     (`Home` → `House`), both at `:14-24` → `icons[name]` from
+   *     `lucide-react`. An unknown name resolves to `null` and the button
+   *     renders with NO icon and no diagnostic anywhere.
    *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
    *     normalises to kebab-case, checks the name against Lucide's own name
    *     list, and degrades an unknown name to the `Database` glyph.
    *   So a spelling that draws an icon in a tab trigger can draw nothing here.
    *
+   * That the resolver is SHARED is what this record most recently had to be
+   * corrected for: until objectui#5993 `button.tsx` carried its own
+   * `toPascalCase` + `iconNameMap` + `icons` index — the same algorithm, but
+   * not the same function, so a rename added to `resolve-icon.ts` to absorb a
+   * lucide retirement (objectui#5586, objectui#5622) reached every `action:*`
+   * site and silently missed this one. Removing the duplicate changed where
+   * the algorithm lives, not what an author may write: the accept/reject
+   * behaviour promised above is the same on both sides of that move.
+   *
    * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:82-98` lists `label`, `variant`, `size`,
-   * `className`), so the Studio block designer does not offer the key.
-   * Unpublished is not unread — the header `icon` above is refused for the
-   * second, not the first, and this docblock exists to hold them apart.
+   * `icon` input (`button.tsx:70-87` lists `label`, `variant`, `size`,
+   * `className`; `:88-92` is `defaultProps`), so the Studio block designer
+   * does not offer the key. Unpublished is not unread — the header `icon`
+   * above is refused for the second, not the first, and this docblock exists
+   * to hold them apart.
    */
   icon: z.string().optional().describe(
-    'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
+    'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
   ),
   iconPosition: z.enum(['left', 'right'])
     .optional().default('left').describe('Icon position relative to label'),
@@ -2064,7 +2079,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   targetVariable: retiredKey(
     '`element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 '
-    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + '(ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
     + "runs the other direction, resolved from the page variable whose `source` names this "
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the picked record id, declare it on the variable — '
@@ -2080,7 +2095,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   displayField: retiredKey(
     '`element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
+    + '(ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -2091,7 +2106,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   searchFields: retiredKey(
     '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
+    + '(ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
     + 'query path does apply. '
@@ -2103,7 +2118,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   multiple: retiredKey(
     '`element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
+    + '(ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -2148,7 +2163,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
    */
   targetVariable: retiredKey(
     '`element:text_input` property `targetVariable` was removed in @objectstack/spec 17 '
-    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + '(ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
     + "runs the other direction, resolved from the page variable whose `source` names this "
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the typed value, declare it on the variable — '
@@ -2262,7 +2277,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   label: I18nLabelSchema.optional().describe('Grid label — used as the table caption and export file title'),
   title: I18nLabelSchema.optional().describe('Fallback for `label` (the renderer reads `label || title`)'),
   columns: z.array(z.unknown()).optional()
@@ -2270,7 +2285,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   fields: z.array(z.unknown()).optional()
     .describe('Field list fallback used when `columns` is absent'),
   filter: z.unknown().optional()
-    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural'),
+    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
   sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
@@ -2297,7 +2312,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * delete when `sort` is present, since the fallback was never read then).
    */
   defaultSort: retiredKey(
-    '`object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — '
+    '`object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — '
     + 'it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when '
     + '`sort` was absent, so one intent had two spellings and a grid authoring both silently ignored '
     + 'this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` '
@@ -2376,7 +2391,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead'),
   label: I18nLabelSchema.optional().describe('Metric label'),
   description: I18nLabelSchema.optional().describe('Helper text under the value'),
   title: I18nLabelSchema.optional().describe('Drill-down panel title; defaults to the metric label'),
@@ -2390,11 +2405,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 — all
-   * four files in the chain below, plus `lazy-icon.tsx`, are byte-identical to
-   * the ones at `9a3daf8d3`, so every anchor is unmoved), and the chain runs
+   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — of the
+   * files in the chain below, `index.tsx` DID change across the move off
+   * `190fbd01d` and its anchor moved `161` → `204`, while `ObjectMetricWidget
+   * .tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are
+   * byte-identical to the ones at `190fbd01d`; every anchor below was re-READ
+   * at the new pin rather than inferred from that identity), and the chain runs
    * three files:
-   * `plugin-dashboard/src/index.tsx:161` publishes it as a designer input
+   * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
    * `MetricWidget`; `MetricWidget.tsx:312-321` resolves it via
@@ -2462,7 +2480,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   },
 }, {
   objectName: z.string().optional()
-    .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   groupBy: z.string().optional().describe('Field whose values become the board columns'),
   columns: z.array(z.unknown()).optional()
     .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
@@ -2517,7 +2535,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   calendar: z.unknown().optional()
     .describe('Calendar field config: { startDateField, endDateField?, titleField?, colorField?, allDayField? }'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
@@ -2548,7 +2566,7 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   objectName: z.string().optional()
-    .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Record to load (edit/view modes)'),
   mode: z.enum(['create', 'edit', 'view']).optional().describe('Form mode'),
   formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
@@ -2661,13 +2679,13 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   objectName: z.string().optional()
-    .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121)'),
+    .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Parent record to load (edit mode)'),
   mode: z.enum(['create', 'edit']).optional().describe('Form mode'),
   formType: z.enum(['simple', 'tabbed'], {
     error: (issue) =>
       typeof issue.input === 'string' ? MASTER_DETAIL_FORM_TYPE_RETIRED.get(issue.input) : undefined,
-  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939)"),
+  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
   details: z.array(z.unknown()).optional()

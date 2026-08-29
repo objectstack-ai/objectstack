@@ -176,11 +176,11 @@ export interface ClientConfig {
    */
   debug?: boolean;
   /**
-   * Active project id (UUID of `sys_environment`). When present, the
+   * Active environment id (UUID of `sys_environment`). When present, the
    * client injects an `X-Environment-Id` header on every request so the
    * server's tenant router can resolve the physical data-plane database.
    *
-   * @see docs/adr/0002-project-database-isolation.md
+   * @see docs/adr/0002-environment-database-isolation.md
    */
   environmentId?: string;
   /**
@@ -309,7 +309,7 @@ const QUERY_OPTIONS_V2_ONLY_KEYS: Record<QueryOptionsV2OnlyKey, true> = {
  * Does this options bag speak canonical {@link QueryOptionsV2} vocabulary?
  *
  * ONE definition read by both `data.find()` implementations
- * (`ObjectStackClient` and `ScopedProjectClient`), which are two faces of one
+ * (`ObjectStackClient` and `ScopedEnvironmentClient`), which are two faces of one
  * wire contract and were byte-identical copies of the old inline condition.
  */
 function isCanonicalQueryOptions(options: QueryOptions | QueryOptionsV2): options is QueryOptionsV2 {
@@ -563,7 +563,7 @@ function normalizeActionResult<T>(payload: any): { success: boolean; data?: T; e
 
 /**
  * Write options for `meta.saveItem` on BOTH clients — the unscoped
- * `ObjectStackClient.meta` and {@link ScopedProjectClient.meta}.
+ * `ObjectStackClient.meta` and {@link ScopedEnvironmentClient.meta}.
  *
  * Named for the WRITE, not for the query string: three members ride the query
  * string and `ifMatch` rides a request HEADER (#11713). One bag per write
@@ -737,6 +737,133 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
     // Verbatim and UNQUOTED. The door tolerates ETag-style quotes by stripping
     // them, but the token a save resolves carries none, and wrapping it here
     // would put bytes on the wire the sibling first-party client does not send.
+    return { 'If-Match': String(options.ifMatch) };
+}
+
+/**
+ * Request options for `meta.deleteItem` — the carriers the REST reset door
+ * reads, made reachable from the SDK (#12181).
+ *
+ * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
+ * reads THREE carriers. This bag declares TWO of them, and the third's
+ * absence is a ruling rather than an oversight:
+ *
+ * - {@link DeleteMetaItemOptions.ifMatch} — the ADR-0008 OCC pin. The door
+ *   already reads `If-Match` and threads it as `parentVersion`, and
+ *   `DeleteMetaItemRequest.parentVersion` names that header in the spec text
+ *   itself. Without an argument for it, every SDK reset was last-write-wins
+ *   on the one verb whose whole job is destroying an overlay row.
+ * - {@link DeleteMetaItemOptions.state} — `?state=draft`, the NARROWER
+ *   reset: discard the pending draft and leave the published overlay
+ *   serving. Its absence did not make the SDK safer, it made the SDK's only
+ *   reachable reset the full one.
+ *
+ * ⛔ `?dropStorage=true` is deliberately NOT a member, and adding it "for
+ * completeness" reverses a decision. It is the one carrier of the three that
+ * ADDS destructive reach — it drops the object's physical table after the
+ * metadata row goes — no caller was measured needing it from this client,
+ * and the door's repeated-parameter refusal exists because of that
+ * destructiveness. Maintainer-seat ruling on #12181: a destructive surface
+ * with no measured pull is not published. A caller that needs it is a
+ * separate, separately reviewable widening.
+ *
+ * Same bag on BOTH `deleteItem` declarations — the unscoped client and the
+ * environment-scoped twin — for the reason #7019 states: the scoped mount is
+ * not a second implementation, it is one `registerForBase` call replayed
+ * against `/environments/:environmentId`, so a bag on one client only would
+ * be a fresh divergence, not half a fix.
+ */
+export interface DeleteMetaItemOptions {
+    /**
+     * `If-Match: <version>` — the ADR-0008 optimistic-concurrency pin, and
+     * the one member here that is NOT a query parameter.
+     *
+     * Echo back the `version` a previous `saveItem` (or `publishItem`)
+     * resolved, and a concurrent edit is refused with `409
+     * metadata_conflict` instead of silently resetting the row the other
+     * author just wrote. Omit for the last-write-wins behaviour every reset
+     * had before this member existed — the pin is opt-in on the door too
+     * (Studio's "Reset" button is deliberately unpinned).
+     *
+     * Opaque: echo it verbatim, never parse it.
+     *
+     * Only a non-empty token reaches the wire. `undefined` and `''` both OMIT
+     * the header rather than sending an empty `If-Match`: the door reads the
+     * header's PRESENCE as "pin this reset", so an empty spelling would pin
+     * against the empty string and refuse a reset the caller never asked to
+     * pin.
+     *
+     * Same member name, same header, same truthy guard as the sibling
+     * first-party `@object-ui/data-objectstack` `MetadataClient.reset`, and
+     * as {@link SaveMetaItemOptions.ifMatch} on this same client.
+     */
+    ifMatch?: string;
+    /**
+     * `?state=draft` — discard ONLY the pending draft overlay, leaving the
+     * still-active overlay serving.
+     *
+     * `'active'` is the explicit spelling of the default and deliberately
+     * sends NOTHING: the door acts on `state=draft` alone and treats every
+     * other value as active, so emitting `?state=active` would put a value on
+     * the wire the server ignores. Same shape as
+     * {@link SaveMetaItemOptions.mode}, and the same vocabulary the spec
+     * declares (`DeleteMetaItemRequest.state`: `'active' | 'draft'`).
+     *
+     * This is the LESS destructive reset, not a new destructive one: without
+     * it the only reachable reset is the full one, which drops the published
+     * overlay too.
+     */
+    state?: 'active' | 'draft';
+}
+
+/**
+ * Compose the `meta.deleteItem` query string — the ONE builder both
+ * `deleteItem` declarations call, for the same reason
+ * {@link DeleteMetaItemOptions} is one type: the twins must not be able to
+ * drift in what they put on the wire.
+ *
+ * Returns `''` (not `'?'`) when nothing is set, so an options-less call is
+ * BYTE-IDENTICAL to what this method sent before the bag existed.
+ *
+ * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
+ * repeated `state` (#6877), so a builder that could emit the key twice would
+ * turn a caller's option into a 400.
+ */
+function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
+    if (!options) return '';
+    const params = new URLSearchParams();
+    // Only `'draft'` is actionable server-side; `'active'` is the default
+    // said out loud and sends nothing.
+    if (options.state === 'draft') params.set('state', 'draft');
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
+/**
+ * Compose the `meta.deleteItem` request headers — the ONE builder both
+ * `deleteItem` declarations call, for the same reason {@link metaDeleteQuery}
+ * is one function.
+ *
+ * Returns `undefined` (never `{}`) when nothing is set, so the call site can
+ * omit the `headers` key entirely and an options-less reset stays
+ * BYTE-IDENTICAL to what it sent before this existed.
+ *
+ * ⛔ `ifMatch` must never be added to {@link metaDeleteQuery}. It is a
+ * header; the reset door reads no `?ifMatch=` parameter, so a query spelling
+ * would look set at the call site and protect nothing.
+ *
+ * Deliberately a sibling of {@link metaSaveHeaders} rather than a call into
+ * it: the two methods carry two separately-ruled option bags (#11713 for
+ * `saveItem`, #12181 for this one), so neither type may quietly acquire the
+ * other's members. The two builders are pinned IN STEP by a test instead —
+ * one token in, identical header bytes out.
+ */
+function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, string> | undefined {
+    if (!options?.ifMatch) return undefined;
+    // Verbatim and UNQUOTED — the door tolerates ETag-style quotes by
+    // stripping them, but the token a save resolves carries none, and
+    // wrapping it here would put bytes on the wire the sibling first-party
+    // client does not send.
     return { 'If-Match': String(options.ifMatch) };
 }
 
@@ -997,14 +1124,39 @@ export class ObjectStackClient {
     },
 
     /**
-     * Delete a metadata item
+     * Delete a metadata item — reset it to its artifact default by removing
+     * the ADR-0005 customization overlay row.
+     *
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
+     * @param options - {@link DeleteMetaItemOptions}: the ADR-0008 OCC pin
+     *   (`ifMatch`) and the narrower draft-only discard (`state: 'draft'`).
+     *
+     * PIN THE RESET. This verb destroys a row: unpinned, a reset issued
+     * against a version somebody else has already replaced silently destroys
+     * their edit and answers 200. Echo the `version` a previous `saveItem`
+     * resolved as `options.ifMatch` and the same situation answers `409
+     * metadata_conflict` instead — the door has always read the header
+     * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
+     * had no argument for it until #12181.
      */
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
+    deleteItem: async (
+        type: string,
+        name: string,
+        options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}`, {
+        // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
+        // the three meanings `qs` holds in this file.
+        const query = metaDeleteQuery(options);
+        // The OCC token rides a HEADER, not the query string — see
+        // {@link metaDeleteHeaders}. `undefined` when unset, and the spread
+        // then omits the `headers` key altogether, so an unpinned reset hands
+        // `fetch` the same `init` it always did.
+        const headers = metaDeleteHeaders(options);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`, {
             method: 'DELETE',
+            ...(headers ? { headers } : {}),
         });
         return this.unwrapResponse(res);
     },
@@ -1504,7 +1656,7 @@ export class ObjectStackClient {
      * an extra `source: 'database' | 'registry' | 'both'` discriminator that is
      * deliberately NOT declared here — the dispatcher rows have no such key, so
      * declaring it would be false on that surface. #8140 bound the identical
-     * scoped sibling (`ScopedProjectClient.packages.list`) the same way.
+     * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
      */
     list: async (filters?: { status?: string; type?: string; enabled?: boolean }): Promise<{ packages: InstalledPackage[]; total: number }> => {
         const route = this.getRoute('packages');
@@ -1521,16 +1673,27 @@ export class ObjectStackClient {
     /**
      * Get a specific installed package by its ID (reverse domain identifier).
      *
-     * ⛔ [#11925] NOT bound, and the `{ package }` envelope is left exactly as
-     * it was — the two mounted surfaces answer this route with DIFFERENT
-     * envelopes, so no single declaration is true (#12034). `runtime`'s
-     * `/packages` domain sends `success(pkg)` — the bare row — while `rest`'s
-     * `GET {base}/packages/:id` sends `sendOk(res, { package: { ...pkg,
-     * source } })`, and the REST routes "shadow live dispatcher twins" only
-     * where a `package` service is registered. Binding the member here would
-     * harden a claim that is already false on one of the two.
+     * ⛔ [#11925 / #12034] STILL NOT bound, and the `{ package }` envelope is
+     * left exactly as it was. #12034 shipped its `install` / `enable` /
+     * `disable` neighbours (one producer each) and deliberately did NOT ship
+     * this one, because this route is a REAL fork with no single true type.
+     * Both bodies below were MEASURED by driving each registrar, not read off
+     * the source:
      *
-     * Its SCOPED twin `ScopedProjectClient.packages.get` IS bound, because
+     *     dispatcher  handlePackages('/<id>', 'GET')
+     *       -> { success: true, data: { id, manifest, enabled, status } }
+     *     rest        GET /api/v1/packages/:id
+     *       -> { success: true, data: { package: { …row, source } } }
+     *
+     * `unwrapResponse` strips one envelope, so the post-unwrap value is the
+     * BARE row on the dispatcher and `{ package }` on REST. Binding either
+     * member here hardens a claim that is false on the other surface. Making
+     * it bindable means converging the two PRODUCERS — a wire-behaviour change
+     * to two mounted surfaces, above this card's authority, with a clause-②
+     * narrowing analysis of its own. The measured convergence cost is recorded
+     * on #12034 for that ruling.
+     *
+     * Its SCOPED twin `ScopedEnvironmentClient.packages.get` IS bound, because
      * only the REST registrar serves the scoped mount — one surface, one
      * shape.
      */
@@ -1543,14 +1706,25 @@ export class ObjectStackClient {
     /**
      * Install a new package from its manifest.
      *
-     * ⛔ [#11925] NOT bound. This method and its `enable` / `disable`
-     * neighbours declare `{ package; message? }`, and the ONLY surface that
-     * serves them — `runtime`'s `/packages` domain; `rest` mounts no twin for
-     * any of the three — answers `success(pkg)`, the bare row (#12034). The
-     * declared envelope is not merely erased, it is false, and the `any`
-     * member is what keeps that invisible. Correcting it is a response-shape
-     * decision with its own clause-② analysis, not the `any`-binding this card
-     * carries, so the shape is left untouched here.
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope.
+     *
+     * What this REPLACED was not an erasure but a FALSEHOOD: the declaration
+     * read `{ package: any; message?: string }`, a shape no surface has ever
+     * sent, and the `any` member is what kept that invisible —
+     * `(await client.packages.install(m)).package` compiled and was
+     * `undefined` at runtime. There is exactly ONE serving surface, so there
+     * was never a "which surface do we match" question: `rest`'s registrar
+     * mounts only `POST /packages/publish`, `GET /packages`,
+     * `GET /packages/:id` and `DELETE /packages/:id` (measured by driving
+     * `registerPackageRoutes` and enumerating what it mounted — this route is
+     * `NO_HANDLER` there), leaving `runtime`'s `/packages` domain alone to
+     * answer, and it answers `success(pkg)`: `{ success: true, data: <row> }`,
+     * status 201. `message` is gone with the wrapper — no surface sends one.
+     *
+     * The wire fact is pinned end-to-end in
+     * `packages-write-envelope.test.ts` (the real dispatcher answering a real
+     * client call), and the DECLARATION in `return-type-precision.test.ts` —
+     * a runtime test cannot observe a return-type narrowing at all.
      *
      * By default the server rejects a manifest whose `id` is already
      * installed with **409 Conflict** (duplicate-id guard) instead of
@@ -1560,7 +1734,7 @@ export class ObjectStackClient {
     install: async (
         manifest: any,
         options?: { settings?: Record<string, any>; enableOnInstall?: boolean; overwrite?: boolean },
-    ) => {
+    ): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}`, {
             method: 'POST',
@@ -1571,7 +1745,7 @@ export class ObjectStackClient {
                 ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
             }),
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
@@ -1587,24 +1761,38 @@ export class ObjectStackClient {
 
     /**
      * Enable a disabled package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, for
+     * the reason spelled out on `install` above: one serving surface
+     * (`PATCH /packages/:id/enable` is `NO_HANDLER` on the REST registrar),
+     * and it answers `success(registry.enablePackage(id))`. The
+     * `{ package: any; message?: string }` this replaces was never emitted by
+     * anything.
      */
-    enable: async (id: string) => {
+    enable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/enable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
      * Disable an installed package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, same
+     * single-producer argument as `install` / `enable` above
+     * (`PATCH /packages/:id/disable` is `NO_HANDLER` on the REST registrar).
+     * The dispatcher answers `success(registry.disablePackage(id))`, so the
+     * row comes back with `enabled: false` — the caller reads the row itself,
+     * never a `.package` member.
      */
-    disable: async (id: string) => {
+    disable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/disable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /* [#3563 PR-4] Lifecycle beyond install/enable — these eleven routes
@@ -1795,19 +1983,19 @@ export class ObjectStackClient {
   /**
    * Environment Management Services
    *
-   * Environments are the v4.1+ isolation primitive — each project owns a
+   * Environments are the v4.1+ isolation primitive — each environment owns a
    * physically separate data-plane database. All Studio-level switching goes
    * through this API.
    *
    * Endpoints:
    * - GET    /api/v1/cloud/environments            → list environments
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
-   * - POST   /api/v1/cloud/environments            → provision a new project
+   * - POST   /api/v1/cloud/environments            → provision a new environment
    * - PATCH  /api/v1/cloud/environments/:id        → update (displayName, plan, status, …)
-   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active project
+   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
    *
-   * @see docs/adr/0002-project-database-isolation.md
+   * @see docs/adr/0002-environment-database-isolation.md
    */
   /**
    * ⛔ [#11925] Every unannotated method in this namespace, and in the
@@ -1830,7 +2018,7 @@ export class ObjectStackClient {
    * #8140 recorded, at family scale. The control-plane implementation is not
    * in this repo, so the casing cannot be settled from here.
    */
-  projects = {
+  environments = {
     /**
      * List environments visible to the current session. Optionally filter
      * by organization (control-plane query — not routed through a data-plane DB).
@@ -1843,16 +2031,16 @@ export class ObjectStackClient {
       const qs = params.toString();
       const url = `${this.baseUrl}/api/v1/cloud/environments${qs ? '?' + qs : ''}`;
       const res = await this.fetch(url);
-      return this.unwrapResponse<{ projects: any[]; total: number }>(res);
+      return this.unwrapResponse<{ environments: any[]; total: number }>(res);
     },
 
     /**
-     * Get a single project (joined with its database and membership row).
+     * Get a single environment (joined with its database and membership row).
      */
     get: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`);
       return this.unwrapResponse<{
-        project: any;
+        environment: any;
         database?: any;
         credential?: any;
         membership?: any;
@@ -1861,16 +2049,31 @@ export class ObjectStackClient {
     },
 
     /**
-     * Provision a new project. Delegates to
-     * `ProjectProvisioningService.provisionProject` on the server.
+     * Provision a new environment — `POST /api/v1/cloud/environments`.
+     *
+     * ⛔ This sentence names the ENDPOINT on purpose, and must keep doing so.
+     * It used to name a server class (`ProjectProvisioningService`, method
+     * `provisionProject`) that the control plane does not have: measured
+     * 2026-08-28 against the cloud repo's `main`, that spelling has ZERO hits
+     * anywhere in `packages/service-cloud/src`. The class was renamed there
+     * and this docblock rotted in silence, because the implementation lives in
+     * a repo this one never compiles against — no gate here could ever have
+     * caught it. The endpoint is the one identifier this method itself builds,
+     * so it is the only one an in-repo reader can verify. Do not reintroduce a
+     * server-class name here (ADR-0006 D1 point 3).
+     *
+     * What that endpoint does today: the control plane creates the
+     * `sys_environment` row, provisions its physically separate data-plane
+     * database, and answers `201` with the created environment. Environments
+     * are created EMPTY — starter content is installed afterwards from the App
+     * Marketplace (`sys_package` with `is_starter = true`), which
+     * `environments.packages.install` already does.
      *
      * No `template_id`: it was removed in #3731 because no control plane has
      * ever read it — the `blank`/`crm`/`todo` registry it addressed died with
      * the `apps/server` templates route, and `sys_environment` has no such
-     * column, so the field was accepted, transmitted, and dropped. Starter
-     * content is installed from the App Marketplace (`sys_package` with
-     * `is_starter = true`), which `projects.packages.install` already does.
-     * Its listing counterpart went the same way in #3702.
+     * column, so the field was accepted, transmitted, and dropped. Its
+     * listing counterpart went the same way in #3702.
      */
     create: async (req: {
       organization_id: string;
@@ -1891,24 +2094,43 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify(req),
       });
-      return this.unwrapResponse<{ project: any; database: any }>(res);
+      // Two corrections in one declaration, both measured against the cloud
+      // repo's `main` on 2026-08-28 (the handler is
+      // `packages/service-cloud/src/routes/environment-lifecycle.ts`, POST
+      // `/cloud/environments`, which builds its body key by key):
+      //
+      //  - the single-row key is `environment`. This route has NEVER emitted a
+      //    `project` key — unlike its siblings it was not carrying the old
+      //    spelling, so the old declaration here was not merely pre-rename, it
+      //    was FALSE against the running control plane.
+      //  - there is no `database` key. It was declared non-optional, so every
+      //    caller was told `res.database` is always present when the server
+      //    never sends it at all; reading it is a runtime TypeError the types
+      //    promised could not happen. `get` is the method that really does
+      //    answer a `database` block.
+      //
+      // The keys the route DOES send beside `environment` (`warnings`,
+      // `durationMs`, and a conditional `hostnameAssignment`) are deliberately
+      // not declared here — adding them is new published surface and a
+      // separate decision, not part of this rename.
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Update a project (display_name, plan, status, is_default, metadata).
+     * Update an environment (display_name, plan, status, is_default, metadata).
      */
     update: async (id: string, patch: Record<string, unknown>) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Cascade-delete a project: cleans up credential/member/package_installation
+     * Cascade-delete an environment: cleans up credential/member/package_installation
      * rows, releases the physical database via the provisioning adapter, and
-     * removes the `sys_environment` row. Default projects require `force: true`.
+     * removes the `sys_environment` row. Default environments require `force: true`.
      */
     delete: async (id: string, opts?: { force?: boolean }) => {
       const qs = opts?.force ? '?force=1' : '';
@@ -1920,19 +2142,19 @@ export class ObjectStackClient {
     },
 
     /**
-     * Activate this project for the current session. The server writes
+     * Activate this environment for the current session. The server writes
      * `active_environment_id` on the better-auth session; subsequent requests
-     * are routed to this project's database.
+     * are routed to this environment's database.
      */
     activate: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/activate`, {
         method: 'POST',
       });
-      return this.unwrapResponse<{ project: any; sessionUpdated: boolean }>(res);
+      return this.unwrapResponse<{ environment: any; sessionUpdated: boolean }>(res);
     },
 
     /**
-     * Rotate the active database credential for this project.
+     * Rotate the active database credential for this environment.
      */
     rotateCredential: async (id: string, plaintext: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/credentials/rotate`, {
@@ -1943,7 +2165,7 @@ export class ObjectStackClient {
     },
 
     /**
-     * Update the hostname bound to this project. Validates format and
+     * Update the hostname bound to this environment. Validates format and
      * uniqueness server-side; invalidates the dispatcher's routing cache.
      */
     updateHostname: async (id: string, hostname: string) => {
@@ -1951,14 +2173,14 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify({ hostname }),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * Update the visibility of this project ('private' | 'public').
-     * `private` (default) hides the project from /pub/v1 enumeration but
+     * Update the visibility of this environment ('private' | 'public').
+     * `private` (default) hides the environment from /pub/v1 enumeration but
      * still allows anonymous artifact downloads when the URL includes an
-     * exact `?commit=<id>` (share-by-link). `public` lists the project and
+     * exact `?commit=<id>` (share-by-link). `public` lists the environment and
      * freely exposes all revisions.
      */
     updateVisibility: async (id: string, visibility: 'private' | 'public') => {
@@ -1966,11 +2188,11 @@ export class ObjectStackClient {
         method: 'PATCH',
         body: JSON.stringify({ visibility }),
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
-     * List published artifact revisions for a project. Each revision has
+     * List published artifact revisions for an environment. Each revision has
      * an immutable commitId (content-addressable) and storage_key.
      * Optional `branch` filter narrows to a single logical branch
      * (default branch `main` also matches rows with NULL `branch`).
@@ -2004,7 +2226,7 @@ export class ObjectStackClient {
     },
 
     /**
-     * List logical branches for a project. Each branch has a head commit
+     * List logical branches for an environment. Each branch has a head commit
      * (latest published revision on that branch) and a count of revisions.
      * Branches without a head row (e.g. all rows demoted) are omitted.
      */
@@ -2057,21 +2279,21 @@ export class ObjectStackClient {
     },
 
     /**
-     * Retry provisioning for a project stuck in `failed` (or
+     * Retry provisioning for an environment stuck in `failed` (or
      * `provisioning`) state. The server re-runs the driver handshake; on
-     * success the project flips to `active`, on failure it stays
+     * success the environment flips to `active`, on failure it stays
      * `failed` with `metadata.provisioningError` updated.
      */
     retryProvisioning: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/retry`, {
         method: 'POST',
       });
-      return this.unwrapResponse<{ project: any }>(res);
+      return this.unwrapResponse<{ environment: any }>(res);
     },
 
     /**
      * List ObjectQL drivers registered on the server. Useful for populating a
-     * driver selector when provisioning a new project (memory / turso /
+     * driver selector when provisioning a new environment (memory / turso /
      * future sql drivers). Returned `name` is the short alias (e.g. `memory`,
      * `turso`); `driverId` is the full FQN (e.g. `com.objectstack.driver.memory`).
      */
@@ -2089,17 +2311,17 @@ export class ObjectStackClient {
     // back when a route exists to back it, with an `sdk` ledger row proving so.
 
     /**
-     * Per-project package installation management (Power Apps "solution" model).
+     * Per-environment package installation management (Power Apps "solution" model).
      * Install records are stored in the environment's own database.
      */
     packages: {
-      /** List all packages installed in a specific project. */
+      /** List all packages installed in a specific environment. */
       list: async (envId: string) => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(envId)}/packages`);
         return this.unwrapResponse<{ packages: any[]; total: number }>(res);
       },
 
-      /** Install a package into the project. */
+      /** Install a package into the environment. */
       install: async (envId: string, body: {
         packageId: string;
         version?: string;
@@ -2135,7 +2357,7 @@ export class ObjectStackClient {
         return this.unwrapResponse<{ package: any }>(res);
       },
 
-      /** Uninstall a package from the project. Forbidden for scope=platform packages. */
+      /** Uninstall a package from the environment. Forbidden for scope=platform packages. */
       uninstall: async (envId: string, pkgId: string) => {
         const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(envId)}/packages/${encodeURIComponent(pkgId)}`, {
           method: 'DELETE',
@@ -2155,11 +2377,16 @@ export class ObjectStackClient {
   };
 
   /**
-   * Project-scoped client factory.
+   * Environment-scoped client factory.
    *
    * Returns a thin wrapper around the data / meta / packages namespaces that
    * prefixes every request with `/api/v1/environments/:environmentId/...`. Use this
    * when the server has `enableProjectScoping: true` in its REST API config.
+   * (That config key keeps the old spelling deliberately here: it is a REAL,
+   * live key read by `packages/cli/src/commands/serve.ts`, on the REST API's
+   * surface rather than this client's, so renaming it is a different breaking
+   * change on a different package — naming it correctly is what keeps this
+   * sentence true.)
    *
    * Backward compatibility: `client.data.*`, `client.meta.*`, and
    * `client.packages.*` continue to work unchanged; they hit unscoped routes
@@ -2172,19 +2399,19 @@ export class ObjectStackClient {
    *
    * declare const client: ObjectStackClient;
    *
-   * const scoped = client.project('00000000-0000-0000-0000-000000000001');
+   * const scoped = client.environment('00000000-0000-0000-0000-000000000001');
    * const tasks = await scoped.data.find('task', { top: 10 });
    * const objects = await scoped.meta.getItems('object');
    * ```
    */
-  project(environmentId: string): ScopedProjectClient {
+  environment(environmentId: string): ScopedEnvironmentClient {
     if (!environmentId) {
-      throw new Error('[ObjectStack] project(id): environmentId is required');
+      throw new Error('[ObjectStack] environment(id): environmentId is required');
     }
-    return new ScopedProjectClient(this, environmentId);
+    return new ScopedEnvironmentClient(this, environmentId);
   }
 
-  // ── Internal accessors exposed to ScopedProjectClient ────────────────
+  // ── Internal accessors exposed to ScopedEnvironmentClient ──────────────
   // The scoped client lives in the same module so using module-level access
   // works; TypeScript requires these to be accessible, so we expose them via
   // small protected getters that keep the public surface unchanged.
@@ -3667,7 +3894,7 @@ export class ObjectStackClient {
       },
 
       /**
-       * Flat aliases mirroring the ScopedProjectClient.automation surface so
+       * Flat aliases mirroring the ScopedEnvironmentClient.automation surface so
        * Studio (and other consumers) can use the same call shape regardless of
        * whether they hold a scoped or unscoped client.
        *
@@ -3832,7 +4059,7 @@ export class ObjectStackClient {
    *
    * The path is fixed (`/api/v1/actions`), not discovery-routed: `actions` is
    * not part of `ApiRoutesSchema`, so `getRoute()` cannot resolve it — same
-   * precedent as the `projects` surface's `/api/v1/cloud`.
+   * precedent as the `environments` surface's `/api/v1/cloud`.
    *
    * The dispatcher accepts the record id either in the URL or in the body;
    * this client always sends it in the body (`{ recordId, params }`), which
@@ -3909,7 +4136,7 @@ export class ObjectStackClient {
    * returned exactly once (only its hash is stored; it is never
    * re-displayable). Until this surface existed the SDK had no way to create
    * an API key at all. Fixed path — `keys` is not in `ApiRoutesSchema`
-   * (same precedent as `actions` / `projects`).
+   * (same precedent as `actions` / `environments`).
    */
   keys = {
       /**
@@ -4951,7 +5178,7 @@ export class ObjectStackClient {
         // ── Normalize V2 canonical options → HTTP transport params ───
         // Detect V2 options by presence of canonical-only keys. The predicate
         // is derived from QueryOptionsV2 itself and SHARED with the copy of
-        // this method on ScopedProjectClient — see QUERY_OPTIONS_V2_ONLY_KEYS
+        // this method on ScopedEnvironmentClient — see QUERY_OPTIONS_V2_ONLY_KEYS
         // for why an inline hand-written key list is not allowed here (#6322).
         const v2 = options as QueryOptionsV2;
         const normalizedOptions: QueryOptions = {} as QueryOptions;
@@ -4989,7 +5216,7 @@ export class ObjectStackClient {
         // `skip=0` is a consistency change only: it already equals the
         // server's default, so the request means the same either way — but one
         // emitter must not hold two rules for one pair.
-        // Mirrored verbatim in `ScopedProjectClient.data.find`.
+        // Mirrored verbatim in `ScopedEnvironmentClient.data.find`.
         if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
         if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
 
@@ -5595,15 +5822,18 @@ export class ObjectStackClient {
  *
  * Wraps an {@link ObjectStackClient} and prefixes every request with
  * `/api/v1/environments/:environmentId/...` so a single client instance can talk to
- * multiple projects without mutating global state.
+ * multiple environments without mutating global state.
  *
  * The scoped client exposes the same shape as the `data`, `meta`, `batch`,
  * and `packages` namespaces on `ObjectStackClient` — only the URL prefix
  * differs. The server-side dual-mode route registration (see
  * `packages/rest/src/rest-server.ts`) accepts both shapes when
- * `projectResolution` is `'auto'` or `'optional'`.
+ * `projectResolution` is `'auto'` or `'optional'`. That config key keeps its
+ * old spelling on purpose: it is a real key on the REST API's surface, not
+ * this client's, so renaming it is a separate breaking change on a separate
+ * package — naming it as it is spelled is what keeps this sentence true.
  */
-export class ScopedProjectClient {
+export class ScopedEnvironmentClient {
   private readonly parent: ObjectStackClient;
   private readonly environmentId: string;
 
@@ -5687,9 +5917,31 @@ export class ScopedProjectClient {
       });
       return this.parent._unwrap<SaveMetaItemResponse>(res);
     },
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}`), {
+    /**
+     * Reset a metadata item to its artifact default, scoped to this
+     * environment.
+     *
+     * `options` is the SAME {@link DeleteMetaItemOptions} bag the unscoped
+     * twin takes, and reaches the SAME handler: the scoped mount is not a
+     * second implementation, it is one `registerForBase` call replayed
+     * against `/environments/:environmentId` (see `RestServer`), so this door
+     * reads `?state=` — and the `If-Match` header — byte-identically. A bag
+     * on only one of the two clients would be a fresh divergence of the kind
+     * #7019 rules against, not half a fix.
+     */
+    deleteItem: async (
+      type: string,
+      name: string,
+      options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaDeleteQuery(options);
+      // Header half of the same bag, through the same one builder the twin
+      // calls — see {@link metaDeleteHeaders}.
+      const headers = metaDeleteHeaders(options);
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
+        ...(headers ? { headers } : {}),
       });
       return this.parent._unwrap(res);
     },

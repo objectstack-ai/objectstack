@@ -153,6 +153,16 @@ export type { StateNodeConfig } from './automation/state-machine.zod';
 // declaring module (both already public on `/data`).
 export type { BaseValidationRuleShape } from './data/validation.zod';
 export type { FilterCondition } from './data/filter.zod';
+// [#12414] The invariant generalized to every public entry, not just the root:
+// probing every `define*` factory across all 17 subpaths found the class was
+// never closed by #11350/#11709 — four more entries leak a structurally-
+// mentioned type through a factory return value. Same invariant (maintainer
+// ruling recorded on #11350), same one-line-per-name repair: re-export from
+// the declaring module. All three are already public on their own subpaths
+// (`/system`, `/ui`).
+export type { Book } from './system/book.zod';
+export type { FormField } from './ui/view.zod';
+export type { NavigationItem } from './ui/app.zod';
 
 // DX factories for the remaining authoring domains (issue #2035) — one type-safe
 // entry per writable domain, mirroring the 19 factories above. `defineX` is a

@@ -119,9 +119,9 @@ describe('Project-scoped REST routing (live Hono)', () => {
         expect(res.status).toBe(200);
     });
 
-    it('client.project(id).data.find() hits the scoped URL end-to-end', async () => {
+    it('client.environment(id).data.find() hits the scoped URL end-to-end', async () => {
         const client = new ObjectStackClient({ baseUrl });
-        const scoped = client.project('proj-alpha');
+        const scoped = client.environment('proj-alpha');
         // Should resolve without throwing — the route must exist on the server.
         await expect(scoped.data.find('task')).resolves.toBeDefined();
     });

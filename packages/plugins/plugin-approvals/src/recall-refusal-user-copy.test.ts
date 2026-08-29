@@ -144,7 +144,7 @@ const ADMIN_ZH = {
  * itself cannot tell Chinese from English. Its twin lives in
  * `packages/spec/src/system/operation-message.test.ts`; the two move together.
  */
-const ZH_SENTENCE = '只有提交人可以撤回这条审批请求,如需撤回请联系提交人或管理员。';
+const ZH_SENTENCE = '只有提交人可以撤回这条审批请求，如需撤回请联系提交人或管理员。';
 
 /** What `@objectstack/rest`'s `handleApprovalError` does to a thrown message. */
 const WIRE_CODE = (msg: string) => /^FORBIDDEN/.test(msg);

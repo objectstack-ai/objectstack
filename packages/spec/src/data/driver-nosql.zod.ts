@@ -422,7 +422,7 @@ export const NoSQLIndexSchema = lazySchema(() => z.object({
    * `UniqueScopeSchema` here (import it — never fork the union) in the same
    * change.
    */
-  unique: z.boolean().default(false).describe("Enforce uniqueness over exactly the listed `fields`. Boolean on purpose — no ADR-0120 scope vocabulary here: this is the raw driver-descriptor layer, below tenancy. The 'organization'/'global' boundary is stated on the authorable surfaces (FieldSchema.unique, IndexSchema.unique) and resolved into physical key columns before a descriptor like this is built, so an organization key part, when there is one, is already a listed field (#11215)"),
+  unique: z.boolean().default(false).describe("Enforce uniqueness over exactly the listed `fields`. Boolean on purpose — no ADR-0120 scope vocabulary here: this is the raw driver-descriptor layer, below tenancy. The 'organization'/'global' boundary is stated on the authorable surfaces (FieldSchema.unique, IndexSchema.unique) and resolved into physical key columns before a descriptor like this is built, so an organization key part, when there is one, is already a listed field"),
   
   /**
    * Sparse index (only index documents with the field)

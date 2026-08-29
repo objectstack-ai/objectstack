@@ -69,11 +69,11 @@ export const PositionSchema = lazySchema(() => strictObject(
         'created in Setup or by an app\'s kernel:ready binder). The `sys_position` ' +
         'row column of the same name — a "JSON-serialized array of permission ' +
         'strings" textarea no producer ever wrote and no runtime path ever read — ' +
-        'was retired under ADR-0049 enforce-or-remove (#9885). Delete the key; to ' +
+        'was retired under ADR-0049 enforce-or-remove. Delete the key; to ' +
         'grant capability, bind permission sets to the position instead.',
     },
     history:
-      'Until #4001 these were dropped silently — the position still parsed, so the ' +
+      'Until this shape was closed, these were dropped silently — the position still parsed, so the ' +
       'author believed a distribution property was declared that the runtime never saw.',
   },
   {

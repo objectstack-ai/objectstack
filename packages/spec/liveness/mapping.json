@@ -1,12 +1,12 @@
 {
   "type": "mapping",
-  "_note": "MappingSchema (#2611 reusable import mapping). Consumers: the REST import path — resolveNamedMapping fetches the artifact by name and validates it against the request (packages/rest/src/import-mapping.ts:60-107), applyMappingToRows runs the fieldMapping pipeline (:115-167), and import-prepare adopts the artifact's mode/upsertKey as request defaults (packages/rest/src/import-prepare.ts:321-326); objectui's ImportWizard offers registered mappings in a saved-mapping picker (@940ba24 packages/plugin-grid/src/ImportWizard.tsx:979). Seeded 2026-08-01 (#4488) at 8 of 11 live; 7 of 7 live since #4509 removed the three that were not. The IMPORT half of the schema is real and loudly enforced (unsupported transforms/formats are 400s, not silent skips — Prime Directive #10). What left in 17.0.0: the EXPORT half (`extractQuery` — no exporter reads a mapping artifact at all) and the two tuning knobs (`errorPolicy`, `batchSize` — error handling belongs to the import REQUEST, and the write path sizes its own batches). Rows DELETED rather than kept: MappingSchema is strict, so the keys left the walked shape and a retained row would report ORPHAN. Both knobs were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied) — removal was the only channel that could reach an author, which is why they went out inside the 17.0.0 window rather than after a deprecation cycle.",
+  "_note": "MappingSchema (#2611 reusable import mapping). Consumers: the REST import path — resolveNamedMapping fetches the artifact by name and validates it against the request (packages/rest/src/import-mapping.ts:60-107), applyMappingToRows runs the fieldMapping pipeline (:115-167), and import-prepare adopts the artifact's mode/upsertKey as request defaults (packages/rest/src/import-prepare.ts:321-326); objectui's ImportWizard offers registered mappings in a saved-mapping picker (@940ba24 packages/plugin-grid/src/ImportWizard.tsx:979). Seeded 2026-08-01 (#4488) at 8 of 11 live; 7 of 7 live since #4509 removed the three that were not. The IMPORT half of the schema is real and loudly enforced (unsupported transforms/formats are 400s, not silent skips — Prime Directive #10). What left in 17.0.0: the EXPORT half (`extractQuery` — no exporter reads a mapping artifact at all) and the two tuning knobs (`errorPolicy`, `batchSize` — error handling belongs to the import REQUEST, and the write path sizes its own batches). Rows DELETED rather than kept: MappingSchema is strict, so the keys left the walked shape and a retained row would report ORPHAN. Both knobs were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied) — removal was the only channel that could reach an author, which is why they went out inside the 17.0.0 window rather than after a deprecation cycle. 2026-08-28 (#13003): all seven `path:NNN` citations in this file were re-anchored to their consuming symbols. This is the one file in batch 4 whose lines were mostly RIGHT — repaired and re-measured by #11210 on 2026-08-23 — and it is kept as the counter-example: five of the seven landed on the read or inside the statement that performs it, and the two that did not (`mode`, `upsertKey`) had already drifted five lines in five days, onto a guard and a comment inside the right function. Correctness of a line is a property of the day it was measured; the anchor is what makes it a property of the code.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/import-mapping.ts:70",
-      "note": "artifact resolution key for the request's `mappingName` (missing → 404 MAPPING_NOT_FOUND)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (the artifact is read by `{ type: 'mapping', name: mappingName }`; a miss is 404 MAPPING_NOT_FOUND)",
+      "note": "artifact resolution key for the request's `mappingName` (missing → 404 MAPPING_NOT_FOUND). 2026-08-28: RE-ANCHORED (#13003) — the cited line was inside the consuming function, so this is the grammar migration rather than a repair. This file is the batch's counter-example and worth keeping as one: its lines were right because #11210 re-measured them five days ago, and the anchor is what stops the next edit ABOVE the function from making them wrong again. Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "live",
@@ -16,33 +16,33 @@
     },
     "sourceFormat": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/import-mapping.ts:81-97",
-      "note": "declared-format gate: `xml`/`sql` are rejected outright (the import endpoint accepts csv/json/xlsx), and a csv-declared mapping applies to xlsx too; a mismatch is a 400, never a silent reinterpretation."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (`const declared = artifact.sourceFormat` — `xml`/`sql` are refused outright with MAPPING_FORMAT_UNSUPPORTED, a csv-declared mapping applies to xlsx too, and any other mismatch is MAPPING_FORMAT_MISMATCH; never a silent reinterpretation)",
+      "note": "declared-format gate: `xml`/`sql` are rejected outright (the import endpoint accepts csv/json/xlsx), and a csv-declared mapping applies to xlsx too; a mismatch is a 400, never a silent reinterpretation. 2026-08-28: RE-ANCHORED (#13003) — the enclosing function is unchanged, but the cited RANGE's endpoint (`:97`) had drifted onto the sibling `transform === 'javascript'` refusal, a different key's check inside the same function. That is precisely why the anchor names the function and not a span. Re-closed by hand against 8cb96ec41."
     },
     "targetObject": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/import-mapping.ts:75",
-      "note": "must equal the URL object or the import 400s (MAPPING_TARGET_MISMATCH)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (`if (artifact.targetObject !== objectName)` → 400 MAPPING_TARGET_MISMATCH)",
+      "note": "must equal the URL object or the import 400s (MAPPING_TARGET_MISMATCH). 2026-08-28: RE-ANCHORED (#13003) — the cited line was inside the consuming function, so this is the grammar migration rather than a repair. This file is the batch's counter-example and worth keeping as one: its lines were right because #11210 re-measured them five days ago, and the anchor is what stops the next edit ABOVE the function from making them wrong again. Re-closed by hand against 8cb96ec41."
     },
     "fieldMapping": {
       "status": "live",
-      "verifiedAt": "2026-08-23",
-      "evidence": "packages/rest/src/import-mapping.ts:95-102, packages/rest/src/import-mapping.ts:112-164",
-      "note": "Lines re-measured 2026-08-23 (#11210): the second range ended at :167 in a 164-line file — the file shrank under the citation and no gate could see it, since the FILE still resolved. The consumer never moved: the javascript rejection is the loop at :95-102 (was :98-105) and the pipeline is applyMappingToRows at :112-164 (was :115-167); the three inline line refs below were off by the same three lines and are corrected with them. the pipeline itself: source/target/transform/params all consumed. none/constant/map/split/join applied in applyMappingToRows (`params.separator` :121, `.value` :129, `.valueMap` :134); `lookup` copies through for the pipeline's metaMap reference resolution; `javascript` is REJECTED with a 400 (no server sandbox — implement-or-reject-loudly). SUB-WALK BOUNDARY, resolved: `params`' lookup-specific keys (`object`/`fromField`/`toField`/`autoCreate`) were read by nothing — reference resolution comes from the target object's own field definitions, not from these — and were REMOVED in the 17.x line (#10329, ADR-0049 enforce-or-remove; strict deletion, so nothing dead remains one level below the drill). Every spelling — the four canonical keys and their eleven ex-aliases — now lands on a guidance prescription at parse; the mapping-lookup-params-removed conversion (protocol 18) strips them from stored sources. The surviving params keys (`value`/`valueMap`/`separator`) are all consumed by applyMappingToRows."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (the `transform === 'javascript'` refusal — implement-or-reject-loudly, there is no server sandbox); packages/rest/src/import-mapping.ts#applyMappingToRows (the pipeline itself: source/target/transform/params, with none/constant/map/split/join applied here and `lookup` copied through for the pipeline's reference resolution)",
+      "note": "Lines re-measured 2026-08-23 (#11210): the second range ended at :167 in a 164-line file — the file shrank under the citation and no gate could see it, since the FILE still resolved. The consumer never moved: the javascript rejection is the loop at :95-102 (was :98-105) and the pipeline is applyMappingToRows at :112-164 (was :115-167); the three inline line refs below were off by the same three lines and are corrected with them. the pipeline itself: source/target/transform/params all consumed. none/constant/map/split/join applied in applyMappingToRows (`params.separator` :121, `.value` :129, `.valueMap` :134); `lookup` copies through for the pipeline's metaMap reference resolution; `javascript` is REJECTED with a 400 (no server sandbox — implement-or-reject-loudly). SUB-WALK BOUNDARY, resolved: `params`' lookup-specific keys (`object`/`fromField`/`toField`/`autoCreate`) were read by nothing — reference resolution comes from the target object's own field definitions, not from these — and were REMOVED in the 17.x line (#10329, ADR-0049 enforce-or-remove; strict deletion, so nothing dead remains one level below the drill). Every spelling — the four canonical keys and their eleven ex-aliases — now lands on a guidance prescription at parse; the mapping-lookup-params-removed conversion (protocol 18) strips them from stored sources. The surviving params keys (`value`/`valueMap`/`separator`) are all consumed by applyMappingToRows. 2026-08-28: RE-ANCHORED (#13003) — both ranges land inside their functions (their endpoints `:102` and `:164` are the functions' own closing braces), so this is the grammar migration. Worth recording beside the 2026-08-23 entry above: that repair moved these pointers three lines and they were right for five days; the anchor is the version that does not need re-measuring. Re-closed by hand against 8cb96ec41."
     },
     "mode": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/import-prepare.ts:322",
-      "note": "an artifact declaring update/upsert sets the import's writeMode default (an explicit request `writeMode` still wins)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-prepare.ts#prepareImportRequest (`if (body?.writeMode === undefined && (mappingArtifact.mode === 'update' || mappingArtifact.mode === 'upsert')) writeMode = mappingArtifact.mode` — a DEFAULT; an explicit request `writeMode` still wins)",
+      "note": "an artifact declaring update/upsert sets the import's writeMode default (an explicit request `writeMode` still wins). 2026-08-28: RE-ANCHORED (#13003) — the cited line was inside the consuming function, so this is the grammar migration rather than a repair. This file is the batch's counter-example and worth keeping as one: its lines were right because #11210 re-measured them five days ago, and the anchor is what stops the next edit ABOVE the function from making them wrong again. Re-closed by hand against 8cb96ec41."
     },
     "upsertKey": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/import-prepare.ts:325",
-      "note": "adopted as the upsert match fields when the request names none."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/import-prepare.ts#prepareImportRequest (`if (matchFields.length === 0 && Array.isArray(mappingArtifact.upsertKey))` — adopted as the upsert match fields only when the request names none)",
+      "note": "adopted as the upsert match fields when the request names none. 2026-08-28: RE-ANCHORED (#13003) — `:325` sat on a comment line two lines above the read, inside the right function. The grammar migration, not a repair. Re-closed by hand against 8cb96ec41."
     }
   }
 }

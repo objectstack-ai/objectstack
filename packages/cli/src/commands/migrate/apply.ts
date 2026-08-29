@@ -21,6 +21,7 @@ import {
   summarizePendingSchemaWork,
   groupByCategory,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
@@ -81,7 +82,18 @@ export default class MigrateApply extends Command {
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to mutate)' }),
   };
 
+  /**
+   * #13027 — the process must end when the apply does.
+   *
+   * See `migrate/plan.ts`'s twin for the measurement, and for why the failure
+   * paths deliberately stay on oclif's own exit.
+   */
   async run(): Promise<void> {
+    await this.apply();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async apply(): Promise<void> {
     const { flags } = await this.parse(MigrateApply);
     const timer = createTimer();
     const allowDestructive = flags['allow-destructive'];
@@ -126,7 +138,16 @@ export default class MigrateApply extends Command {
     try {
       // `deferSchemaDdl` is what makes the prompt below meaningful: without it
       // the boot has already created tables and added columns by this point.
-      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'], deferSchemaDdl: true });
+      // `composeHostStack` (#12938): reconcile the object set this deployment
+      // actually serves. It must be the SAME set `os migrate plan` diffed —
+      // the plan the operator just read is the thing being confirmed — so the
+      // two commands pass it identically.
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        deferSchemaDdl: true,
+        composeHostStack: true,
+      });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
@@ -141,6 +162,16 @@ export default class MigrateApply extends Command {
         return;
       }
 
+      // What the object set was composed from (#12938) — printed BEFORE the
+      // in-sync early return below, not with the plan. "Already in sync" over a
+      // set that is a fraction of the target's tables is precisely the reading
+      // this card exists to stop, so the account of what was composed has to
+      // reach the operator on that path too.
+      if (!flags.json) {
+        for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
+        if (stack.composition.notes.length > 0) console.log('');
+      }
+
       const drift = await stack.driver.detectManagedDrift();
       const grouped = groupByCategory(drift);
       // Additive work the boot sync was held back from doing. Not drift — it
@@ -148,8 +179,40 @@ export default class MigrateApply extends Command {
       // target database, so it belongs in the plan and behind the prompt.
       const pending = stack.pendingSchemaWork;
 
+      // [#13028] The boundary of what was reconciled, carried on every payload
+      // that can be read as "this deployment is migrated". A consumer gate
+      // needs `unexaminedObjects` — `applied: []` alone cannot tell "nothing to
+      // do" apart from "most of it was never looked at".
+      const compositionPayload = stack.composition.notes.length > 0
+        ? {
+            composition: {
+              hostConfig: stack.composition.hostConfigPath,
+              hostConfigLoaded: stack.composition.hostConfigLoaded,
+              ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
+              notes: stack.composition.notes,
+            },
+          }
+        : {};
+      const unexamined = stack.composition.coverage?.unexaminedObjects ?? 0;
+
       if (drift.length === 0 && pending.length === 0) {
-        if (flags.json) { await emitJson({ applied: [], skipped: [], created: [], message: 'in_sync' }, 0, { compact: true }); return; }
+        if (flags.json) {
+          await emitJson(
+            { applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
+            0,
+            { compact: true },
+          );
+          return;
+        }
+        if (unexamined > 0) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `Nothing to apply over the ${c.examinedObjects} object(s) this run examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL reconcile: it is not evidence that the deployment is in sync.',
+          );
+          return;
+        }
         printSuccess('Physical schema is already in sync with metadata — nothing to apply.');
         return;
       }
@@ -204,6 +267,7 @@ export default class MigrateApply extends Command {
           created,
           applied,
           skipped,
+          ...compositionPayload,
           duration: timer.elapsed(),
         });
         return;

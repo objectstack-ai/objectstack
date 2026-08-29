@@ -1,85 +1,85 @@
 {
   "type": "email_template",
-  "_note": "EmailTemplateDefinitionSchema. THE WHOLE SURFACE WENT LIVE with the #4509 materializer bridge — this file previously recorded the webhook (#3461) disconnect shape, all 13 props dead, and it is kept as the worked example that a dead verdict is a worklist entry, not a tombstone: enforce-or-remove resolved this one by ENFORCING. What closed it: `bootstrapDeclaredEmailTemplates` (packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts) validates each declared item through `EmailTemplateDefinitionSchema.parse()` (:148 — the spec schema finally has a real consumer, defaults and all) and materializes it into the `sys_email_template` ROW that the execution point reads, via `mapTemplateToRow` (:76) — the SAME mapping the built-in seeder uses (email-plugin.ts:533), shared deliberately so the two doors cannot drift. The execution end is unchanged: `IEmailService.sendTemplate` resolves (name, locale) with an en-US fallback (email-service.ts:402-416) and honors active/variables/fromOverride/replyTo off the row. THREE breaks had to close, not one: the engine never registered authored `emailTemplates:` into the registry at all (objectql/src/engine.ts metadataArrayKeys — the key was simply missing, so the bridge's source was empty); built-in seeds left `managed_by` at the column default 'admin', which made them masquerade as admin-authored and permanently outrank a declared template (email-plugin.ts:533 now stamps 'platform'); and only then did the bridge's write land. The ADR-0054 proof pins all three by asserting the AUTHORED wording is what sendTemplate actually renders. Runtime authoring is covered too: email_template is allowRuntimeCreate:true (unlike webhook), so a boot-only sweep would leave a Studio save inert until restart — the plugin also subscribes to `email_template` metadata changes and re-materializes the single changed item (email-plugin.ts:428-455). Seed-not-clobber mirrors sys_webhook (#3489): declared rows seed as `managed_by:'package'` and re-seed every boot, but an admin-authored ('admin') or admin-edited ('customized', stamped by email-template-provenance.ts) row is never overwritten — a reworded transactional mail survives redeploys. Nothing carries an authorWarn any more: authoring is no longer a no-op. `protection`/_lock*/_provenance are framework overlay fields, auto-live.",
+  "_note": "EmailTemplateDefinitionSchema. THE WHOLE SURFACE WENT LIVE with the #4509 materializer bridge — this file previously recorded the webhook (#3461) disconnect shape, all 13 props dead, and it is kept as the worked example that a dead verdict is a worklist entry, not a tombstone: enforce-or-remove resolved this one by ENFORCING. What closed it: `bootstrapDeclaredEmailTemplates` (packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts) validates each declared item through `EmailTemplateDefinitionSchema.parse()` (in `upsertDeclaredEmailTemplate` — the spec schema finally has a real consumer, defaults and all) and materializes it into the `sys_email_template` ROW that the execution point reads, via `mapTemplateToRow` — the SAME mapping the built-in seeder uses (`EmailServicePlugin.upsertTemplate`), shared deliberately so the two doors cannot drift. The execution end is unchanged in mechanism but NOT in shape: `IEmailService.sendTemplate` resolves (name, locale) with an en-US fallback and honors active/variables/fromOverride/replyTo off the row — except that since #9225 the resolve-and-render half lives in `EmailService.resolveAndRenderTemplate`, shared with the render-only `renderTemplate`, and `sendTemplate` keeps only the envelope reads. THREE breaks had to close, not one: the engine never registered authored `emailTemplates:` into the registry at all (objectql/src/engine.ts metadataArrayKeys — the key was simply missing, so the bridge's source was empty); built-in seeds left `managed_by` at the column default 'admin', which made them masquerade as admin-authored and permanently outrank a declared template (`upsertTemplate` now stamps 'platform'); and only then did the bridge's write land. The ADR-0054 proof pins all three by asserting the AUTHORED wording is what sendTemplate actually renders. Runtime authoring is covered too: email_template is allowRuntimeCreate:true (unlike webhook), so a boot-only sweep would leave a Studio save inert until restart — the plugin also subscribes to `email_template` metadata changes and re-materializes the single changed item (`EmailServicePlugin.wireTemplateMutationProjection`). Seed-not-clobber mirrors sys_webhook (#3489): declared rows seed as `managed_by:'package'` and re-seed every boot, but an admin-authored ('admin') or admin-edited ('customized', stamped by email-template-provenance.ts) row is never overwritten — a reworded transactional mail survives redeploys. Nothing carries an authorWarn any more: authoring is no longer a no-op. `protection`/_lock*/_provenance are framework overlay fields, auto-live. 2026-08-28 (#13003): every citation in this file was re-anchored to its consuming symbol; the file-level pointers above were carrying line numbers of their own and are now named by symbol for the same reason.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:78 (row mapping); packages/plugins/plugin-email/src/email-service.ts:411 (the sendTemplate lookup key)",
-      "note": "The (name, locale) resolution key at both ends of the bridge."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`name: tpl.name` — the row projection, and half the (name, locale) upsert key `upsertDeclaredEmailTemplate` matches on); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (`loader.load(input.template, wanted)` — the send-end lookup key, and `TEMPLATE_NOT_FOUND: ${input.template}` when it misses)",
+      "note": "The (name, locale) resolution key at both ends of the bridge. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE (`:78` still names the column), so that half is a pure grammar migration; the send-end leg had rotted. `email-service.ts:411` lands on a docblock line of the `TemplateLoader` interface (\"or `null` when none exists / inactive\"), ~780 lines above the read. ALL NINE of this file's `email-service.ts` citations rotted together and by the same cause: #9225 split the resolver out of `sendTemplate` into `resolveAndRenderTemplate`, and the reads moved with it from the 400s to the 1170-1310 band. That is the drift no existing check can see — the file exists, every cited line is still inside it, and the file still names each key, so the existence check, the line bound and the key-mention check all pass on a pointer that is ~750 lines wrong. Re-closed by hand against 93ea19bca."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:79",
-      "note": "Materialized into the `label` column — the Studio row title (sys_email_template nameField)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`label: tpl.label`)",
+      "note": "Materialized into the `label` column — the Studio row title (sys_email_template nameField). 2026-08-28: RE-ANCHORED (#13003) — `:79` was ACCURATE, so this is a grammar migration only. Re-closed by hand against 93ea19bca."
     },
     "category": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:80",
-      "note": "Materialized into `category`; a Studio filter facet on the row, never send behavior."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`category: tpl.category`)",
+      "note": "Materialized into `category`; a Studio filter facet on the row, never send behavior. 2026-08-28: RE-ANCHORED (#13003) — `:80` was ACCURATE, so this is a grammar migration only. Re-closed by hand against 93ea19bca."
     },
     "locale": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:81 (row mapping, and half the upsert key); packages/plugins/plugin-email/src/email-service.ts:411-416 ((name, locale) resolution with en-US fallback)",
-      "note": "Load-bearing in both directions: the same template in two locales materializes as two rows, and the recipient's locale picks between them."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`locale: tpl.locale` — the row projection, and the other half of the upsert key); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (the (name, locale) ladder: the caller's locale, then the documented default, then the loader's own no-locale answer); packages/plugins/plugin-email/src/email-service.ts#DEFAULT_TEMPLATE_LOCALE (the `en-US` the ladder's second rung asks for BY NAME — #7731 is what happened while that rung passed `undefined`)",
+      "note": "Load-bearing in both directions: the same template in two locales materializes as two rows, and the recipient's locale picks between them. The resolved row's locale is also the render locale for ADR-0053 format filters. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:411-416` had rotted onto the `TemplateLoader` docblock, the same #9225 resolver split that moved every `email-service.ts` citation in this file. The ladder is now anchored to the function that runs it plus the constant it names, so a rung deleted or the default renamed goes red instead of drifting. Re-closed by hand against 93ea19bca."
     },
     "subject": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
+      "verifiedAt": "2026-08-28",
       "proof": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts#email-template-materialization",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:82 (row mapping); packages/plugins/plugin-email/src/email-service.ts:444 (rendered with {{path}} holes by renderTemplate)",
-      "note": "ADR-0054 high-risk class (email-template-materialization): the authored subject is the representative check for the whole authoring→send pipeline, which crosses manifest-decomposition → the ObjectQL registry → the materializer → the sys_email_template row → the TemplateLoader → sendTemplate. Exactly the multi-layer seam that was broken here, and in three places at once. The proof authors a stack `emailTemplates:` entry overriding a BUILT-IN auth template and asserts the authored wording is what reaches the transport — the ADR-0078 false-compliance case #4509 named (an admin 'fixes' the password-reset mail and users keep receiving the built-in copy)."
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`subject: tpl.subject`); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (`renderTemplate(row.subject, data, renderOpts)` — the {{path}} holes filled with the resolved row's locale)",
+      "note": "ADR-0054 high-risk class (email-template-materialization): the authored subject is the representative check for the whole authoring→send pipeline, which crosses manifest-decomposition → the ObjectQL registry → the materializer → the sys_email_template row → the TemplateLoader → sendTemplate. Exactly the multi-layer seam that was broken here, and in three places at once. The proof authors a stack `emailTemplates:` entry overriding a BUILT-IN auth template and asserts the authored wording is what reaches the transport — the ADR-0078 false-compliance case #4509 named (an admin 'fixes' the password-reset mail and users keep receiving the built-in copy). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:444` had rotted onto an `EmailServiceOptions` docblock about sys_email PERSISTENCE, which is the most misleading rot in this file because it still reads as email-service configuration. The render moved with the #9225 resolver split. Re-closed by hand against 93ea19bca."
     },
     "bodyHtml": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:83 (bodyHtml→body_html); packages/plugins/plugin-email/src/email-service.ts:445",
-      "note": "The camelCase→snake_case remap the proof asserts alongside the subject."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`body_html: tpl.bodyHtml` — the camelCase→snake_case remap); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (`renderTemplate(row.body_html, data, renderOpts)`)",
+      "note": "The camelCase→snake_case remap the proof asserts alongside the subject. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:445` had rotted onto `persistence?: EmailPersistence;`, an options field, ~800 lines above the render. Same #9225 resolver split. Re-closed by hand against 93ea19bca."
     },
     "bodyText": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:84 (bodyText→body_text); packages/plugins/plugin-email/src/email-service.ts:446-448",
-      "note": "Omitted from the row rather than nulled when unset, so a re-seed never blanks it; the send path then auto-derives text from HTML (htmlToText)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`...(tpl.bodyText ? { body_text: tpl.bodyText } : {})` — omitted, never nulled); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (`row.body_text ? renderTemplate(row.body_text, …) : htmlToText(html)` — the auto-derive fallback)",
+      "note": "Omitted from the row rather than nulled when unset, so a re-seed never blanks it; the send path then auto-derives text from HTML (htmlToText). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:446-448` had rotted onto the `templateLoader` / `retries` option docblocks. Same #9225 resolver split. Re-closed by hand against 93ea19bca."
     },
     "variables": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:91 (variables→variables_json); packages/plugins/plugin-email/src/email-service.ts:427-431 (requireVars fails the send fast on a missing required var)",
-      "note": "All four child keys share this verdict — not drilled. `required` is a real runtime gate, not a hint."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`...(tpl.variables?.length ? { variables_json: JSON.stringify(tpl.variables) } : {})`); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (parses `row.variables_json`, filters to the `required` ones and calls `requireVars` — a missing one throws MISSING_VARIABLES and the send never happens)",
+      "note": "All four child keys share this verdict — not drilled. `required` is a real runtime gate, not a hint. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — BOTH legs were wrong, and the bootstrap one is the sharpest rot in this file: `bootstrap-declared-email-templates.ts:91` lands on `is_system: tpl.isSystem`, i.e. on the line `isSystem` cites for ITSELF. Two entries citing one line for two different keys is a state the ledger cannot detect from the inside — the file names both keys, so key-mention anchors both, and the row projection really is 15 lines of near-identical shape. The real mapping is the last line of the same object literal. `email-service.ts:427-431` had rotted onto the `EmailTemplateRow` interface — the row SHAPE rather than the gate that reads it, which is the plausible-sibling failure key-mention was built for and cannot catch inside one file. Re-closed by hand against 93ea19bca."
     },
     "fromOverride": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:85-88 (fromOverride.address/.name → from_address/from_name); packages/plugins/plugin-email/src/email-service.ts:450-453",
-      "note": "Both child keys share this verdict."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (fromOverride.address/.name → from_address/from_name, address-gated); packages/plugins/plugin-email/src/email-service.ts#sendTemplate (`input.from ?? (row.from_address ? { address: row.from_address, … } : undefined)` — the caller still wins); packages/plugins/plugin-email/src/email-service.ts#rowEnvelope (the generic row→message path, which REFUSES a row with no from_address)",
+      "note": "Both child keys share this verdict. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:450-453` had rotted onto the `logger` / `defaultTemplateContext` option fields. The send-end read stayed in `sendTemplate` across the #9225 split (it is an envelope read, not a render read), which is exactly why anchoring is worth doing here: the two halves of this entry moved apart and only the symbol names say which is which. `rowEnvelope` is added as the second local consumer — it was never cited, and it is the one that turns a missing from_address into a refusal rather than a silent send. Re-closed by hand against 93ea19bca."
     },
     "replyTo": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:89 (replyTo→reply_to); packages/plugins/plugin-email/src/email-service.ts:139",
-      "note": "Honored on the outbound message when the caller passes no explicit replyTo."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`...(tpl.replyTo ? { reply_to: tpl.replyTo } : {})`); packages/plugins/plugin-email/src/email-service.ts#sendTemplate (`input.replyTo ?? row.reply_to` — the row's value used only when the caller passes none); packages/plugins/plugin-email/src/email-service.ts#rowEnvelope (`if (row.reply_to) msg.replyTo = String(row.reply_to)` — the persisted row's own projection onto the outbound message)",
+      "note": "Honored on the outbound message when the caller passes no explicit replyTo. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:139` had rotted onto a docblock about the sys_email outbox id contract, ~1150 lines above the read and about a completely different mechanism. That is the largest single drift measured in this batch, and it passed every check for the usual reason. Re-closed by hand against 93ea19bca."
     },
     "active": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:90; packages/plugins/plugin-email/src/email-service.ts:418-419 (active:false → TEMPLATE_INACTIVE)",
-      "note": "Also the withdrawal mechanism: deleting a declared template deactivates its rows rather than destroying them (bootstrap-declared-email-templates.ts:201)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`active: tpl.active`); packages/plugins/plugin-email/src/email-service.ts#resolveAndRenderTemplate (`if (row.active === false) throw new Error('TEMPLATE_INACTIVE: …')` — the send refuses before rendering); packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#deactivateDeclaredEmailTemplate (the withdrawal path: a deleted declared template flips `active: false` on its package-managed rows rather than destroying them)",
+      "note": "Also the withdrawal mechanism: deleting a declared template deactivates its rows rather than destroying them. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-service.ts:418-419` had rotted onto the closing lines of the `TemplateLoader` docblock (`:419` is the bare `*/`), and the note's `bootstrap-declared-email-templates.ts:201` pointer — never in `evidence`, so nothing ever bounded it — lands on `if (row?.id) {` inside the seed-not-clobber branch, a different mechanism in the same file. The withdrawal path is now cited in `evidence` under its own symbol, where the checks can reach it. Re-closed by hand against 93ea19bca."
     },
     "isSystem": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:91 (isSystem→is_system); packages/plugins/plugin-email/src/email-plugin.ts:544 (gates built-in re-seeding)",
-      "note": "The BUILT-IN seeder's provenance axis, distinct from the declared bridge's managed_by/customized pair — a declared template lands is_system:false, which is what stops the built-in auth seed reclaiming the row on the next boot."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`is_system: tpl.isSystem`); packages/plugins/plugin-email/src/email-plugin.ts#upsertTemplate (`if (existingRow.is_system === false) return;` — the built-in seeder stands down rather than reclaiming the row)",
+      "note": "The BUILT-IN seeder's provenance axis, distinct from the declared bridge's managed_by/customized pair — a declared template lands is_system:false, which is what stops the built-in auth seed reclaiming the row on the next boot. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the bootstrap leg was ACCURATE; `email-plugin.ts:544` had rotted onto `const result = await target.sendInline({` inside the operator's TEST-MAIL button, ~980 lines from the gate and about sending rather than seeding. `email-plugin.ts` is 1550 lines and names `is_system` on exactly four of them, three of which are prose — a file that large is where a line citation is worth least and an anchor most. Re-closed by hand against 93ea19bca."
     },
     "description": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts:92",
-      "note": "Materialized into `description`; docs-shaped — read by humans in Studio, never by the send path."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts#mapTemplateToRow (`...(tpl.description ? { description: tpl.description } : {})`)",
+      "note": "Materialized into `description`; docs-shaped — read by humans in Studio, never by the send path. 2026-08-28: RE-ANCHORED (#13003) — `:92` was ACCURATE, so this is a grammar migration only. Re-closed by hand against 93ea19bca."
     }
   }
 }

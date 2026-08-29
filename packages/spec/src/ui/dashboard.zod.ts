@@ -72,7 +72,7 @@ export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widg
  * the widget was rescued from.
  */
 const DASHBOARD_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the dashboard still rendered, '
+  'Until this shape was closed these were dropped silently — the dashboard still rendered, '
   + 'without whatever the key was meant to configure.';
 
 /**
@@ -171,7 +171,7 @@ const WIDGET_GUIDANCE_SETS = [
     keys: ['component', 'data'],
     prescription:
       '`component` and inline `data` are objectui-internal renderer capabilities, '
-      + 'not part of the author-facing dashboard spec (framework#3251).',
+      + 'not part of the author-facing dashboard spec.',
   },
   {
     name: 'WIDGET_DRILL_NEAR_KEYS',
@@ -269,7 +269,7 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
 // an exact equivalent, and the rest are expressible as a kind plus the window
 // the widget's own `filter` resolves to.
 const COMPARE_TO_OFFSET_RETIRED =
-  '`dashboard.widgets[].compareTo.offset` was removed in @objectstack/spec 17.0.0 (#5011, '
+  '`dashboard.widgets[].compareTo.offset` was removed in @objectstack/spec 17.0.0 ('
   + 'ADR-0049 enforce-or-remove) — the analytics executor never had an `offset` concept, so on the '
   + 'ADR-0021 dataset path this arm did not shift a window, it threw '
   + '(`compareTo requires a timeDimension "undefined"`) and took the whole widget down with it. '
@@ -600,13 +600,13 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // shape are retired too (`page.zod.ts` tombstone, ADR-0049 D2); the live
   // per-breakpoint channel is `responsiveStyles` (ADR-0065).
   responsive: retiredKey(
-    '`dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (#4876, ADR-0049 D2) — ' +
+    '`dashboard.widgets[].responsive` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — ' +
     'no renderer ever read it, so per-widget breakpoint overrides were never applied: the value ' +
     'parsed, validated, and then did nothing. The dashboard grid reflows by its own layout rules ' +
     '(`columns` + `gap` on the dashboard, the `layout` box on each widget). Delete the key. ' +
     'This message used to point at `page.components[].responsive` as the live home of the shared ' +
     '`ResponsiveConfig` shape; that key was measured equally unread and removed with the shape ' +
-    'in #11027. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
+    'with it. For breakpoint behaviour that IS applied, use `responsiveStyles` on a page ' +
     'component (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
@@ -628,10 +628,10 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // "lift it up to the app" repair this note used to imply was a dead end
   // that also lost the block (#6756).
   aria: retiredKey(
-    '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 D2) — ' +
+    '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — ' +
     'no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach ' +
     'the DOM: the key promised accessibility compliance it did not deliver. This is the same ' +
-    'removal the dashboard-level `aria` got in 17.0.0 (#3896). Delete the key. The dashboard ' +
+    'removal the dashboard-level `aria` got in 17.0.0. Delete the key. The dashboard ' +
     'renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and ' +
     '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
     'The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, ' +
@@ -762,7 +762,7 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * keyed by. `optionsFrom.object` already proves the schema is willing to
    * name an object here — this reuses that same primitive one level up.
    */
-  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels (#7804)'),
+  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels'),
 
   /** Display label for the filter */
   label: I18nLabelSchema.optional().describe('Display label for the filter'),
@@ -923,13 +923,13 @@ export const DashboardSchema = lazySchema(() => strictObject({
   // inert — no DashboardRenderer path applied either (ledger: dead; the
   // report twins were removed in the report-liveness close-out).
   aria: retiredKey(
-    '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
+    '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no ' +
     'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
     'the DOM. Delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   performance: retiredKey(
-    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
+    '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (audit ' +
     'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
     'implemented. Delete the key. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',

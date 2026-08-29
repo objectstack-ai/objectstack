@@ -14,6 +14,11 @@ import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+// The ONE port contract, shared with `dev` and with the `serve` child this
+// command spawns (#12673). ⛔ Nothing about ports is declared in this file —
+// no range, no reader, no wording; a second copy of the bound is exactly what
+// #12620 and #12662 protected against.
+import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
@@ -301,12 +306,81 @@ export default class Start extends Command {
     }
     printKV('Database', redactConnectionUrl(databaseUrl), '🗄️');
     printKV('Environment', environmentId, '🎯');
-    // Resolve the port the child `serve` will actually bind, matching its
-    // flag default (`--port` > $OS_PORT/$PORT > 3000). Using `flags.port`
-    // alone printed the wrong URL whenever the port came from the env.
-    const bannerPort = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true }) ?? 3000;
-    if (flags.ui) printKV('Console', `http://localhost:${bannerPort}/_console/`, '🖥️');
+    // The port TEXT this command was given, for the refusal door below —
+    // ⛔ never for a URL. Nothing in this parent may print a port: see
+    // {@link childPortEnv} for the channel, and the spawn below for why the
+    // address this command used to advertise is now the child's to state.
+    const envPort = readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
 
+    // ── start's own door on the ONE port contract (#12673) ────────────────
+    // The same module `dev` and the `serve` child call, so the range exists
+    // once in the repository and all three doors enforce one set. What this
+    // repairs, measured on `origin/main` before the door existed:
+    // `os start --port 99999` was refused a process later as `PORT="99999"`,
+    // because the spawn below hands `flags.port` to the child as `PORT` — the
+    // operator typed `--port` and was told about an environment variable they
+    // had never set.
+    //
+    // ⛔ NOT `Flags.integer({ min, max })` on the flag, though this is the one
+    // command where that would have looked sufficient. Two measured reasons.
+    // (1) It is inert on the environment: oclif runs neither a flag `parse`
+    // nor an integer `min`/`max` over a value supplied by a `default`, and
+    // `$PORT`/`$OS_PORT` reach the child through exactly such a default on
+    // `serve`'s flag — so a bound declared here would guard `--port` and leave
+    // both env spellings behaving as before. (2) The bound would be a SECOND
+    // copy of the range, which is what #12620 and #12662 both declined to
+    // create and what this card's ruling names as the thing to protect.
+    //
+    // ⚠️ The text validated is the text FORWARDED. `Flags.integer` has already
+    // normalised argv by this point (`--port 08080` parses to `8080`), and
+    // {@link childPortEnv} writes `String(flags.port)` — so `String(flags.port)`
+    // is literally what the child will read, not a reconstruction of it. The env
+    // branch needs no such care: when no flag is given `start` writes neither
+    // port variable, the child inherits `$PORT`/`$OS_PORT` under their own
+    // names, and this door refuses them under those same names one process
+    // earlier.
+    const portText = flags.port !== undefined ? String(flags.port) : envPort;
+    if (portText !== undefined) {
+      const portSource = describePortSource(flags.port === undefined);
+      if (parseRequestedPort(portText) === null) {
+        // stderr — `redirectStdoutToStderr()` above already routes this
+        // command's stdout there; writing the refusal to stderr directly
+        // states the channel instead of depending on that redirection.
+        process.stderr.write(`${formatInvalidPortNotice(portText, portSource)}\n`);
+        process.exit(1);
+      }
+    }
+
+    // ── ⛔ NO `Console:` row here, and no other address either (#12992) ──────
+    // This command used to print `http://localhost:${flags.port ?? envPort ??
+    // 3000}/_console/` at exactly this point, and the line was wrong in TWO
+    // independent ways at once — both measured on a real boot of
+    // `OS_PORT=41077 os start --port 41078`:
+    //
+    //  1. The PORT. It was a SECOND resolution of a question the child answers
+    //     for itself, and the two answers disagreed: this one ranked the flag
+    //     first, the child ranks `$OS_PORT` first, so the banner said 41078
+    //     while `curl` found the server on 41077.
+    //  2. The MOUNT. `/_console/` was advertised unconditionally under
+    //     `flags.ui`, but whether a Console is actually served depends on the
+    //     `ConsoleUI` plugin loading in the CHILD. On the same boot that path
+    //     answered **404** — the row promised a page that was never mounted.
+    //
+    // ⭐ Both facts belong to the child and neither is knowable here. `serve`
+    // already states them together, AFTER its `listen()`, from the port it
+    // really bound and gated on the plugin really loading: `printServerReady`
+    // prints the `API:` row always and the `Console:` row when
+    // `loadedPlugins.includes('ConsoleUI')`, addressing both through the
+    // external-base resolver so they stay right behind a proxy too.
+    //
+    // ⛔ Do not reintroduce an address here fed from the child's `ipc`
+    // `objectstack:listening` message (the channel `dev` opens, and which
+    // `serve` publishes on unconditionally — so it IS available). It was
+    // measured and declined: the message carries `{ port, url }` and NOT the
+    // mount fact, so a row rebuilt from it would fix defect 1 and keep defect
+    // 2, and on a healthy boot it would restate — two lines later, in a second
+    // spelling — a row the child had already printed correctly. One process
+    // knows both facts; that process prints them.
     printStep('Starting server...');
 
     // ── Child env ───────────────────────────────────────────────────
@@ -334,7 +408,7 @@ export default class Start extends Command {
       OS_HOME: homeDir,
       OS_ENVIRONMENT_ID: environmentId,
       OS_DATABASE_URL: databaseUrl,
-      ...(flags.port ? { PORT: String(flags.port) } : {}),
+      ...childPortEnv(flags.port),
       ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
@@ -371,6 +445,88 @@ export default class Start extends Command {
     );
     child.on('exit', (code) => process.exit(code ?? 0));
   }
+}
+
+/**
+ * The port `start` hands its `serve` child, as environment (#12992).
+ *
+ * ## ⭐ The channel is the defect, not the value
+ *
+ * `start` used to write the flag as `{ PORT: String(flags.port) }` and leave an
+ * inherited `$OS_PORT` in place beside it. The child resolves
+ * `readEnvWithDeprecation('OS_PORT', 'PORT')` — `OS_PORT` FIRST — so an explicit
+ * `--port` was handed down on the channel its own child ranks LAST and lost to
+ * an environment variable the flag's help text says it overrides. Measured on a
+ * real boot before this function existed:
+ *
+ * ```
+ *   OS_PORT=41077 os start --port 41078   →  curl finds the server on 41077
+ * ```
+ *
+ * The child's precedence is CORRECT and is not what changed. The parent now
+ * writes the canonical name, so the explicit flag arrives first in the order the
+ * child already reads.
+ *
+ * ## Why BOTH names, and why that is one statement rather than two channels
+ *
+ * `OS_PORT` alone would satisfy the CLI, because the CLI reads the pair through
+ * one reader with a declared precedence. But the child's environment is read by
+ * more than the CLI: app code and third-party libraries read `process.env.PORT`
+ * directly, and this repo has such a consumer in
+ * `examples/app-showcase/src/system/self-url.ts`
+ * (`env.OS_PORT?.trim() || env.PORT?.trim()`). Leaving a stale `PORT` behind
+ * would repair the bind and leave the app computing its own address from a port
+ * nothing is listening on — this card's defect, one layer down. So the pair is
+ * written together and always agrees: ONE value, on a canonical name and its own
+ * documented alias, not two channels that could ever disagree.
+ *
+ * ⛔ NOT forwarded as `--port` on argv, though `dev` does exactly that and it
+ * would also make the flag win. Argv and environment are two mechanisms with
+ * DIFFERENT precedences, and a `start` that stated the same port on both would
+ * be the shape this card is about: if they ever drifted, argv would silently win
+ * while the environment — the thing the app reads — lied. `dev` forwards on argv
+ * because it writes no port into the child's environment at all; one command,
+ * one channel, in both cases.
+ *
+ * ## The deprecation hazard the card flagged: MEASURED ABSENT, and inverted
+ *
+ * The card warned that writing `OS_PORT` might surface a deprecation notice the
+ * operator never caused. It cannot, for two independent reasons:
+ *
+ *  - `OS_PORT` is the **preferred** argument of `readEnvWithDeprecation`, not
+ *    the legacy one. The warning branch fires only when the preferred name is
+ *    `undefined` and a LEGACY alias supplies the value, so setting the preferred
+ *    name is the one input that can never reach it. `PORT` — what this command
+ *    used to write, and still writes beside it — is the legacy half of the pair.
+ *  - Every read site of this pair in the repository passes `{ silent: true }`
+ *    (`commands/dev.ts`, `commands/serve.ts`, and the door in this file), which
+ *    `env.ts` documents as the setting for aliases that are "accepted
+ *    conventions rather than true legacy names — e.g. `PORT`, which PaaS
+ *    platforms inject automatically". So no spelling of this pair can warn.
+ *
+ * Driven through a real `serve` child, all four shapes were silent: today's
+ * `PORT`-only write (bound the WRONG port, 41077), writing `OS_PORT`, deleting
+ * `OS_PORT`, and argv — the last three all bound 41078 and none printed a
+ * deprecation line.
+ *
+ * ## ⛔ `!== undefined`, never `flags.port ?`
+ *
+ * The falsy guard this replaces DROPPED `--port 0`, and 0 is a legal, useful
+ * port: `utils/port-contract.ts` declares `MIN_PORT = 0` from a measurement and
+ * states that 0 is "a REQUEST, not an error" — it asks the kernel for any free
+ * port. Measured on the unrepaired command, `OS_PORT=41077 os start --port 0`
+ * printed `http://localhost:0/_console/` and bound **41077**: the flag was never
+ * forwarded at all. The refusal door a few lines up already spells the test
+ * `flags.port !== undefined`; this is the same question asked the same way.
+ *
+ * @param flagPort `flags.port` — oclif has already normalised it to an integer.
+ * @returns the keys to merge into the child env; EMPTY when no flag was given,
+ *   so an operator's own `$PORT`/`$OS_PORT` are inherited untouched.
+ */
+export function childPortEnv(flagPort: number | undefined): Record<string, string> {
+  if (flagPort === undefined) return {};
+  const value = String(flagPort);
+  return { OS_PORT: value, PORT: value };
 }
 
 /**

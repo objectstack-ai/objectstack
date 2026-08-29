@@ -2,6 +2,7 @@
 
 import type { AnalyticsQuery, Cube } from '../data/analytics.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
+import type { AggregationFunction } from '../data/query.zod.js';
 import type { PercentScale } from '../data/percent-scale.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { Dataset } from '../ui/dataset.zod.js';
@@ -296,8 +297,14 @@ export interface StrategyContext {
          * (`AggregationNodeSchema.filter`), which the engine honours on every
          * driver by lowering in memory when the driver has no native
          * conditional aggregation.
+         *
+         * `method` is the engine's own closed vocabulary
+         * (`AggregationFunction`, data/query.zod.ts) — the same slot
+         * `engine.aggregate`'s `aggregations[].function` declares. It was
+         * `string` until #12776; the bridge's runtime parse-and-refuse
+         * (#11833) stays as defence in depth behind this compile-time check.
          */
-        aggregations?: Array<{ field: string; method: string; alias: string; filter?: FilterCondition }>;
+        aggregations?: Array<{ field: string; method: AggregationFunction; alias: string; filter?: FilterCondition }>;
         filter?: Record<string, unknown>;
         /**
          * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).

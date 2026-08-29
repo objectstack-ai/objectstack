@@ -73,7 +73,7 @@ import { strictObject } from '../shared/strict-object';
  * registration bug, not a spelling one.
  */
 const STUDIO_PLUGIN_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the plugin still '
+  'Until these shapes were closed an unknown key was dropped silently — the plugin still '
   + 'loaded and activated, contributing less than its manifest declared.';
 
 export const ViewModeSchema = lazySchema(() => z.enum(['preview', 'design', 'code', 'data', 'history']));
@@ -314,7 +314,7 @@ export type StudioPluginContributionsParsed = z.infer<typeof StudioPluginContrib
 
 const STUDIO_ACTIVATION_EVENTS_RETIRED =
   '`studioPluginManifest.activationEvents` was removed in @objectstack/spec 17.0.0 '
-  + '(#4657, ADR-0049) — no Studio host ever read it: every plugin loads and activates '
+  + '(ADR-0049) — no Studio host ever read it: every plugin loads and activates '
   + 'immediately on registration, so the declared lazy-activation window never existed. '
   + 'Delete the key; `activate()` still runs at registration time. Lazy activation, if '
   + 'built, returns via the enforce route of ADR-0049 with a vocabulary its executor '

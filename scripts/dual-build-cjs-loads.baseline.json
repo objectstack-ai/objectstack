@@ -1,0 +1,4 @@
+{
+  "$comment": "Shrink-only, hand-edited. Published `require` entry points that legitimately cannot be require()d, each with the reason. Read by scripts/check-dual-build-cjs-loads.mjs. An entry that starts loading must be DELETED in the same PR that fixes it — the gate reds on a stale exemption. ⛔ A parse failure (SyntaxError in our own emitted bytes) is NEVER ledgerable: the gate ignores an entry here for that class on purpose, because a parse failure is always a fact about what we emitted, never about a dependency. Its steady state is NOT empty — read the reasons, never the count.",
+  "entries": {}
+}

@@ -1,54 +1,54 @@
 {
   "type": "doc",
-  "_note": "DocSchema (ADR-0046 flat Markdown package docs). Fully live. The schema header calls docs 'inert data' — true of the KERNEL (it stores `content` unparsed), but every property has a real runtime consumer in the delivery layer: the REST read layer localizes, audience-gates and serves docs (packages/rest/src/rest-server.ts:2944-3022 list, :3384-3390 single item), and the `/meta/book/:name/tree` endpoint resolves book membership from doc headers via the spec's own resolveBookTree (packages/spec/src/system/book.zod.ts:218). objectui's console docs portal is a faithful port of the same resolver (apps/console/src/pages/book-nav.ts @940ba24) rendering the reader UI — a delivery surface for readers, NOT an authoring preview. Seeded 2026-08-01 (#4488). NOTE: `tags` was DECLARED in 17.0.0 (#4509, ADR-0049) — the enforce half of enforce-or-remove: the book-side `include: { tag }` rule and the REST corpus (`d.tags`, rest-server.ts:2965) both already expected the key, so declaring it made the previously-inert `{ tag }` include variant live; see the `tags` entry below for the fix's full history.",
+  "_note": "DocSchema (ADR-0046 flat Markdown package docs). Fully live. The schema header calls docs 'inert data' — true of the KERNEL (it stores `content` unparsed), but every property has a real runtime consumer in the delivery layer: the REST read layer localizes, audience-gates and serves docs (`packages/rest/src/rest-server.ts`, inside `registerMetadataEndpointsInner` — the `doc` list branch, the `/meta/book/:name/tree` branch and the single-item branch), and the tree endpoint resolves book membership from doc headers via the spec's own `resolveBookTree` (packages/spec/src/system/book.zod.ts). objectui's console docs portal is a faithful port of the same resolver (apps/console/src/pages/book-nav.ts @940ba24) rendering the reader UI — a delivery surface for readers, NOT an authoring preview. Seeded 2026-08-01 (#4488). NOTE: `tags` was DECLARED in 17.0.0 (#4509, ADR-0049) — the enforce half of enforce-or-remove: the book-side `include: { tag }` rule and the REST corpus (`tags: d.tags`) both already expected the key, so declaring it made the previously-inert `{ tag }` include variant live; see the `tags` entry below for the fix's full history. 2026-08-28 (#13003): every citation in this file was re-anchored to its consuming symbol, and this file needed it most in the batch — ALL FIFTEEN of its line citations had rotted, because both cited files were reorganized under it. In `book.zod.ts` the pointers had come to rest inside the `ResolverDoc` / `ResolvedEntry` INTERFACES, i.e. on type declarations of the very fields whose consumers they claimed to cite; in `rest-server.ts` the entire doc-serving block moved ~1,600 lines down (the old 2,9xx-3,3xx pointers now land in the batch-endpoints and server-registration regions). Neither move is visible to the existence check, the line bound or the key-mention check.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:225, packages/rest/src/rest-server.ts:3129",
-      "note": "identity: the single-doc route key, the resolver's membership key (glob `include` matches over names), and the audience map key."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#matchesInclude (`globToRegExp(include).test(doc.name)` — the glob `include` rule matches over names); packages/spec/src/system/book.zod.ts#entryFromDoc (`{ doc: doc.name, … }` — the name is what a rendered tree entry points at); packages/rest/src/rest-server.ts#resolveDocAudiences (`audiences.get(d.name)` — the effective-audience map is keyed by name, on both the list and the tree branch)",
+      "note": "identity: the single-doc route key, the resolver's membership key (glob `include` matches over names), and the audience map key. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — BOTH legs were wrong. `book.zod.ts:225` is a BLANK LINE inside the `ResolvedBook` interface; `rest-server.ts:3129` lands on `upsertMany: batch.operations?.upsertMany ?? true` in the batch-endpoints config, ~1,480 lines from any doc read. Re-closed by hand against 93ea19bca."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:198, packages/spec/src/system/book.zod.ts:202",
-      "note": "tree entry title + the order tiebreak sort key (byOrderThenLabel)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#byOrderThenLabel (`(a.label ?? a.name).localeCompare(b.label ?? b.name)` — the order tiebreak); packages/spec/src/system/book.zod.ts#entryFromDoc (`label: doc.label` onto the rendered entry); packages/spec/src/system/doc.zod.ts#resolveDocLocale (`label: variant.label ?? base.label` — the per-locale swap, with per-field fallback to the base doc)",
+      "note": "tree entry title + the order tiebreak sort key (byOrderThenLabel). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — both legs were wrong and both were wrong in the same instructive way: `book.zod.ts:198` is `description?: string;` and `:202` is the `tags` docblock, i.e. two INTERFACE FIELD DECLARATIONS, one of them another key's. A field declaration is the most convincing wrong place a citation can land — the key is right there, in the right file, spelled correctly — and it proves nothing at all, because a declaration is what a `dead` key has too. Re-closed by hand against 93ea19bca."
     },
     "description": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:202, packages/rest/src/rest-server.ts:3131",
-      "note": "carried into tree entries and kept on the list response (which strips `content`) so portals can show summaries without fetching bodies."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#entryFromDoc (`description: doc.description` — carried onto the rendered tree entry); packages/spec/src/system/doc.zod.ts#resolveDocLocale (`description: variant.description ?? base.description`); packages/rest/src/rest-server.ts#resolveBookTree (the tree corpus projection `{ name, label, description, order, group, tags, packageId }` the route hands the resolver)",
+      "note": "carried into tree entries and kept on the list response (which strips `content`) so portals can show summaries without fetching bodies. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:202` is the `tags` docblock (a DIFFERENT key's documentation) and `rest-server.ts:3131` is `defaultAtomic: batch.defaultAtomic ?? true` in the batch-endpoints config. Re-closed by hand against 93ea19bca."
     },
     "content": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/rest-server.ts:3007, packages/spec/src/system/doc.zod.ts:120",
-      "note": "the document body: served whole on single-doc GET, deliberately stripped from list responses unless `?include=content`, locale-swapped by resolveDocLocale."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/doc.zod.ts#resolveDocLocale (`content: variant.content` — the locale swap, and the ONLY field with no per-field fallback: a variant that omits it yields undefined by design); packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (the `doc` list branch destructures `const { content: _content, ...rest } = it` unless `?include=content`; the single-item branch returns the collapsed doc whole)",
+      "note": "the document body: served whole on single-doc GET, deliberately stripped from list responses unless `?include=content`, locale-swapped by resolveDocLocale. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `rest-server.ts:3007` had rotted onto a docblock about `enableProjectScoping`, and `doc.zod.ts:120` onto the middle of the `tags` docblock — the sentence \"the consumer already existed, so this is the enforce half of enforce-or-remove\", which is about `tags`, cited as evidence for `content`. HONEST RESIDUAL on the rest-server leg: the `?include=content` strip is inline in a ~2,800-line route registrar with no enclosing named helper, so the anchor is the registrar itself. That is coarse, and it is stated rather than dressed up — the narrow half of this entry is the `doc.zod.ts` anchor, which is exact. Re-closed by hand against 93ea19bca."
     },
     "order": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:198",
-      "note": "sort key within a book group (0 when absent, then label)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#byOrderThenLabel (`(a.order ?? 0) - (b.order ?? 0)` — the primary sort, absent reads as 0); packages/rest/src/rest-server.ts#resolveDocAudiences (`order: d.order` in the list-branch corpus projection)",
+      "note": "sort key within a book group (0 when absent, then label). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:198` is `description?: string;` in the `ResolverDoc` interface: a citation for `order` landing on the DECLARATION of a different key. `order`'s own declaration is the next line but one, which is how close a wrong pointer can sit to a right one and still say nothing. Re-closed by hand against 93ea19bca."
     },
     "group": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/book.zod.ts:238",
-      "note": "explicit book-group membership; a doc joins the group whose `key` equals it when no `include` rule claims it first."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#resolveBookTree (a doc joins the first group whose `include` matches it OR whose `key` equals `doc.group`); packages/rest/src/rest-server.ts#resolveDocAudiences (`group: d.group` in the list-branch corpus projection)",
+      "note": "explicit book-group membership; a doc joins the group whose `key` equals it when no `include` rule claims it first. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:238` had rotted onto the docblock of `ResolvedEntrySchema` (a sentence about #12038's describe-only transcription), ~63 lines above `resolveBookTree`. Re-closed by hand against 93ea19bca."
     },
     "translations": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/doc.zod.ts:110, packages/rest/src/rest-server.ts:2996, packages/rest/src/rest-server.ts:3388",
-      "note": "per-locale {label,description,content} variants collapsed by resolveDocLocale on every read path (list, tree corpus, single item); the map itself is stripped from responses. This is the doc's OWN i18n mechanism — the generic bundle translator does not cover `doc`."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/doc.zod.ts#resolveDocLocale (`const { translations, ...base } = doc` then `translations[want] ?? translations[want.split('-')[0]]` — exact locale, then primary subtag, then the base doc; the map itself never survives into the return value); packages/rest/src/rest-server.ts#resolveDocLocale (called on every doc read path — the list branch maps it over the items, the tree branch over the corpus, the single-item branch over the one doc)",
+      "note": "per-locale {label,description,content} variants collapsed by resolveDocLocale on every read path (list, tree corpus, single item); the map itself is stripped from responses. This is the doc's OWN i18n mechanism — the generic bundle translator does not cover `doc`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — all three legs were wrong: `doc.zod.ts:110` is the `/**` that OPENS the `tags` docblock, and `rest-server.ts:2996` / `:3388` are comments about `os serve` config and `api.version` respectively. The rest-server leg is anchored to the imported symbol it calls rather than to the registrar, because that is what actually has to survive for this claim to hold: drop the import and the three call sites go with it, and the anchor reds. Re-closed by hand against 93ea19bca."
     },
     "tags": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
-      "evidence": "packages/spec/src/system/book.zod.ts:213 (matchesInclude tag branch), reached from :255 and :281; transported by packages/rest/src/rest-server.ts:3218",
-      "note": "DECLARED 2026-08-02 (#4509, ADR-0049) — the enforce half of enforce-or-remove. The consumer, the transport and the resolver-side interface all predated this key: matchesInclude compared `doc.tags` against a group's `include: { tag }`, the book route already forwarded `tags: d.tags`, and ResolverDoc declared `tags?: string[]` marked '(P3d; absent today)'. What was missing was one line HERE — DocSchema is strict, so authoring `tags:` was a parse error, every doc reached the resolver with tags undefined, and the `{ tag }` include variant could never match. Removing the variant was the alternative and was rejected: a union member has no clean tombstone (retiredKey covers object keys), so authors would have gotten a bare union error, and it would have discarded working matcher code. Live on arrival — the branch it feeds is reachable the moment a doc carries a tag."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/book.zod.ts#matchesInclude (`Array.isArray(doc.tags) && doc.tags.includes(include.tag)` — the tag branch of `include`); packages/spec/src/system/book.zod.ts#resolveBookTree (the caller that decides membership from it); packages/rest/src/rest-server.ts#resolveBookTree (`tags: d.tags` in the tree corpus the route hands the resolver — the transport half)",
+      "note": "DECLARED 2026-08-02 (#4509, ADR-0049) — the enforce half of enforce-or-remove. The consumer, the transport and the resolver-side interface all predated this key: matchesInclude compared `doc.tags` against a group's `include: { tag }`, the book route already forwarded `tags: d.tags`, and ResolverDoc declared `tags?: string[]` marked '(P3d; absent today)'. What was missing was one line HERE — DocSchema is strict, so authoring `tags:` was a parse error, every doc reached the resolver with tags undefined, and the `{ tag }` include variant could never match. Removing the variant was the alternative and was rejected: a union member has no clean tombstone (retiredKey covers object keys), so authors would have gotten a bare union error, and it would have discarded working matcher code. Live on arrival — the branch it feeds is reachable the moment a doc carries a tag. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `book.zod.ts:213` is `description?: string;` in the `ResolvedEntry` interface, and the parenthetical claiming it was \"matchesInclude tag branch\" named the right function ~61 lines away; the \"reached from :255 and :281\" hops were prose the ledger never bounded. `rest-server.ts:3218` had rotted onto `this.registerSecurityEndpoints(bp)` — a route-registration call, ~1,700 lines from the corpus that forwards the tags. Re-closed by hand against 93ea19bca."
     }
   }
 }

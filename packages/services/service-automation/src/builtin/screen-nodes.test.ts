@@ -182,7 +182,9 @@ describe('script retired branches, as a stored flow meets them (#4343)', () => {
         // this is what `tsc` and `os validate` put in front of an author.
         const result = ScriptConfigSchema.safeParse({ function: 'score_lead', actionType: 'email' });
         expect(result.success).toBe(false);
-        expect(result.error!.issues[0]!.message).toMatch(/#4343/);
+        expect(result.error!.issues[0]!.message).toMatch(/`script\.config\.actionType` was removed/);
+        expect(result.error!.issues[0]!.message, 'the prescription teaches the replacement, never a tracker id')
+            .not.toMatch(/#\d{3,5}/);
         expect(ScriptConfigSchema.parse({
             function: 'score_lead',
             inputs: { leadId: '{record.id}' },

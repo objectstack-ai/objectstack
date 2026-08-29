@@ -371,6 +371,55 @@ The two commands ultimately go through the same kernel — they just differ in w
 shape they accept. See [Source vs Artifact](#source-vs-artifact) below.
 </Callout>
 
+#### `os secret orphans`
+
+Reports the `sys_secret` rows no producer references any more, and — only behind
+`--delete` — removes the ones it can prove are the settings subsystem's to remove.
+**Report-only by default: without `--delete` it writes nothing and deletes nothing.**
+It is never run for you; nothing on any boot or upgrade path invokes it.
+
+```bash
+os secret orphans                                    # report (writes nothing)
+os secret orphans --json                             # the same report, machine-readable
+os secret orphans --no-declared-datasources          # state that this host declares none
+os secret orphans --delete --export ./secrets-backup.json --no-declared-datasources
+```
+
+**Options:**
+- `--delete` — remove the deletable rows (default off)
+- `--export <path>` — **mandatory with `--delete`**; refuses to overwrite an existing file
+- `--declared-datasources <path>` — JSON file (an array, or `{"datasources": [...]}`) of the datasource artefacts this host declares in code
+- `--no-declared-datasources` — state that this host declares none
+- `-y, --yes` — skip the confirmation prompt
+- `--database-url <url>`, `--json`
+
+A rotation performed before the settings subsystem learned to reap left the previous
+ciphertext behind, and the reaping that fixed it only fires going forward. This command
+is how an operator clears that residue deliberately.
+
+**A row is removed only when it is attributable to a declared encrypted settings
+specifier *and* named by no family of the complete reference union.** `sys_secret` is
+written by three producers and carries no producer column, so "unreferenced by
+`sys_setting`" is not "unreferenced" — a live credential belonging to an object's
+`secret` field or to a datasource can share a settings specifier's `(namespace, key)`.
+The command therefore reads all three holder families, and **refuses to delete whenever
+any of them could not be enumerated, naming the family**. A host that says nothing about
+its code-declared datasources leaves that family a gap; `--no-declared-datasources` is
+how you state there are none. Rows nothing attributes are never deleted, nor are rows
+whose setting still resolves through a legacy inline value, nor rows that were merely
+re-wrapped in place (a re-wrap keeps the handle and is not a retirement).
+
+<Callout type="warn">
+**This does not retire an exposed credential, and the export is not optional.** On the
+pre-fix rotation path the handle was never repointed, so the value **still in force** is
+the *oldest* one — the credential the administrator believed they had replaced — while
+each orphan holds a value that never took effect. If the administrator also rotated at
+the provider, the newest orphan may be a credential that is still valid there. The audit
+trail records content digests rather than handles, so a row deleted in error cannot be
+named afterwards: the export carries the cipher material, is written owner-only, and is
+read back and checked before any row is removed. Keep it until you are certain.
+</Callout>
+
 ### Build & Validate
 
 | Command | Description |

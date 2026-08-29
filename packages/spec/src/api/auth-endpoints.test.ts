@@ -113,7 +113,7 @@ describe('AuthFeaturesConfig retired flags (#7481)', () => {
 
   it('rejects `passkeys` with its own prescription, naming the missing consumer', () => {
     expect(() => AuthFeaturesConfigSchema.parse({ ...valid, passkeys: true }))
-      .toThrow(/`features\.passkeys` was removed.*Delete the key.*objectui#4179/s);
+      .toThrow(/`features\.passkeys` was removed.*Delete the key/s);
   });
 
   it('rejects `magicLink` with a prescription that keeps its endpoints alive', () => {
@@ -121,7 +121,7 @@ describe('AuthFeaturesConfig retired flags (#7481)', () => {
     // endpoints still answer, and a shared prescription would tell a magic-link
     // deployer to stop using a capability that was never withdrawn.
     expect(() => AuthFeaturesConfigSchema.parse({ ...valid, magicLink: true }))
-      .toThrow(/`features\.magicLink` was removed.*magic-link\/send.*objectui#4179/s);
+      .toThrow(/`features\.magicLink` was removed.*magic-link\/send/s);
   });
 
   it('does not serve either key on a clean parse', () => {

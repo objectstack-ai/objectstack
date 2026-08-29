@@ -470,7 +470,7 @@ describe('[#11027] PageComponentSchema — retired `responsive`', () => {
     // fully-qualified key, the version, the issue, and the fix.
     expect(message).toMatch(/page\.components\[\]\.responsive/);
     expect(message).toMatch(/removed in @objectstack\/spec 17/);
-    expect(message).toMatch(/#11027/);
+    expect(message, 'the key, the version and the fix carry it — not a tracker id').not.toMatch(/#\d{3,5}/);
     expect(message).toMatch(/Delete the key/);
     // It must point at the per-breakpoint channel that IS applied, or an
     // author who really wants breakpoints reads this as "responsive is gone".

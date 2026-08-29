@@ -63,7 +63,11 @@ import {
   describePortSource,
   formatInvalidPortNotice,
   type PortInputSource,
-} from './serve.js';
+// Moved out of `serve.ts` by #12673: the port contract is now ONE module that
+// `dev`, `start` and `serve` all import, so this suite reads it from its home
+// rather than through the command that used to declare it. The assertions are
+// unchanged — only the path is.
+} from '../utils/port-contract.js';
 
 /** Seeded from `import.meta.url`, the spelling `check:cross-package-test-inputs` recognises. */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');

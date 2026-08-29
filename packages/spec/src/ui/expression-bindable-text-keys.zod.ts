@@ -88,7 +88,7 @@ export type ExpressionBindableTextKey =
 export const ExpressionBindableTextKeySchema = z
   .enum(EXPRESSION_BINDABLE_TEXT_KEYS)
   .describe(
-    'One of the closed set of expression-bindable text keys — the top-level node keys a SchemaRenderer evaluation memo may evaluate (objectui#4795 Direction 1; carriage per component type is EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT).'
+    'One of the closed set of expression-bindable text keys — the top-level node keys a SchemaRenderer evaluation memo may evaluate (Direction 1; carriage per component type is EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT).'
   );
 
 export function isExpressionBindableTextKey(

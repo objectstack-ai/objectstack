@@ -9,7 +9,7 @@ import { formatOutput } from '../../utils/output-formatter.js';
  * `os environments show <id>` — show detailed information for a single environment.
  *
  * Renders the environment row plus its database, active credential, and
- * membership row (same shape as `client.projects.get(id)`).
+ * membership row (same shape as `client.environments.get(id)`).
  */
 export default class EnvironmentsShow extends Command {
   static override description = 'Show detailed information for an environment';
@@ -41,14 +41,14 @@ export default class EnvironmentsShow extends Command {
       const { client, token } = await createApiClient({ url: flags.url, token: flags.token });
       requireAuth(token);
 
-      const res = await client.projects.get(args.id);
+      const res = await client.environments.get(args.id);
 
       if (flags.format === 'json') {
         await formatOutput(res, 'json');
       } else if (flags.format === 'yaml') {
         await formatOutput(res, 'yaml');
       } else {
-        const p = res?.project ?? {};
+        const p = res?.environment ?? {};
         console.log(`\nEnvironment: ${p.display_name ?? p.id}`);
         console.log('─'.repeat(60));
         console.log(`  id:             ${p.id}`);

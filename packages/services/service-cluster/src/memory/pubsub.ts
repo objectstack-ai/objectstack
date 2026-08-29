@@ -15,7 +15,13 @@ import type {
  *   - Synchronous fan-out: every subscriber's handler is invoked in the
  *     same tick that `publish()` resolves. Handler errors are swallowed
  *     and logged via `onError` (so one bad subscriber can't poison the bus).
- *   - At-least-once semantics held vacuously (a single in-process delivery).
+ *   - Delivery is at-most-once: one synchronous in-process attempt per
+ *     subscriber, with no persistence, no retry and no replay. A handler that
+ *     throws loses that message outright — the error is swallowed above and
+ *     nothing redelivers it — and a publish to a channel nobody is subscribed
+ *     to at that moment is a silent no-op. This matches what `IPubSub`
+ *     documents: no shipped driver exceeds at-most-once, so handlers must be
+ *     idempotent **and** tolerate loss.
  *   - No cross-process delivery — use the redis/postgres/nats driver for
  *     real multi-node setups.
  */

@@ -252,10 +252,10 @@ describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
       .toContain('`events` → `triggers`');
   });
 
-  it('carries the #3494 removals as prescriptions, not bare rejections', () => {
+  it('carries the retired-knob removals as prescriptions, not bare rejections', () => {
     for (const key of ['body', 'payloadFields', 'includeSession', 'authentication', 'retryPolicy']) {
       const message = unknownKeyIssue({ ...valid, [key]: {} })!.message;
-      expect(message, `\`${key}\` should carry its #3494 reason`).toContain('#3494');
+      expect(message, `\`${key}\` should carry its removal reason`).toContain(`\`${key}\` was removed`);
     }
   });
 

@@ -91,7 +91,6 @@ import {
   SysInvitation,
   SysTeam,
   SysTeamMember,
-  SysScimProvider,
   SysScimConnectionBinding,
   SysScimConnectionCredential,
   SysScimGroup,
@@ -158,7 +157,6 @@ const AUTH_OBJECTS = [
   SysInvitation,
   SysTeam,
   SysTeamMember,
-  SysScimProvider,
   // The stable scim model set + the ObjectStack-owned credential store (#3653).
   SysScimConnectionBinding,
   SysScimConnectionCredential,

@@ -105,7 +105,7 @@ export type ETagParsed = z.infer<typeof ETagSchema>;
  * Request with cache validation headers
  * 
  * @example
- * // GET /api/v1/metadata/objects/account
+ * // GET /api/v1/metadata/object/account
  * // Headers:
  * // If-None-Match: "686897696a7c876b7e"
  * // If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
