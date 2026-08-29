@@ -40,6 +40,7 @@ export * from './action-params.zod';
 export * from './page.zod';
 export * from './widget.zod';
 export * from './component.zod';
+export * from './component-type-vocabulary';
 export * from './react-blocks';
 // `theme.zod.ts` was RETIRED WHOLE at #10485 (ADR-0049 enforce-or-remove;
 // maintainer ruling 2026-08-21: 退役授权面 — `app.branding` is the one colour
