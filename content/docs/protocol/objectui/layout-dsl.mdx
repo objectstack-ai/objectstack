@@ -375,13 +375,13 @@ sections:
 
   Earlier revisions of this page also showed an `Admin Settings` section gated on
   `permission: admin`. It is **removed rather than translated**, because rewriting it as a
-  `visibleWhen` role test would teach the anti-pattern this page warns about further down
-  — twice over. Nothing server-side evaluates a form-view section predicate, so a role
-  test here hides the controls and protects no data: the record still carries every value
-  in the section, and every other read surface still returns them. Worse, on the console's
-  public form route (`/f/:slug`) no host publishes a predicate scope, so the root is
-  unbound, the predicate **faults open**, and the section it was meant to hide is shown to
-  everyone. To withhold fields by role, declare
+  `visibleWhen` position test would teach the anti-pattern this page warns about further
+  down — twice over. Nothing server-side evaluates a form-view section predicate, so a
+  position test here hides the controls and protects no data: the record still carries
+  every value in the section, and every other read surface still returns them. Worse, on
+  the console's public form route (`/f/:slug`) no host publishes a predicate scope, so the
+  root is unbound, the predicate **faults open**, and the section it was meant to hide is
+  shown to everyone. To withhold a group of fields from some users, declare
   [field-level security](/docs/permissions/field-level-security) on a permission set, or
   [row-level security](/docs/permissions/rls) — both enforced on the server.
 </Callout>
