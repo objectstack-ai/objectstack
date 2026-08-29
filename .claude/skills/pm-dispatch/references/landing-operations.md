@@ -29,17 +29,18 @@ job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhoo
 读数。**契约复审链 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(清标与落地同一笔,见
 `contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 
-**转 ready / 挂 auto-merge 之前先读 `mergeable_state`**(事实行见平台读数):`dirty` ⇒ 先 merge
-`origin/main`(生成物在面上按 A 的固定序)再挂。**ready + 全绿 ≠ 已入队 —— 队列从不
-主动拉 PR,入队是显式动作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;
-② enable-auto-merge 调用根本没落地(重发与效果验证序列见平台读数);③ PR 碰
-`.github/workflows/**` 而 token 缺 workflows 权限。
+**转 ready / 挂 auto-merge 之前先判受管面**:`node scripts/pm/check-governed-merges.mjs --test` 加 PR 变更路
+径,一条命中 ⇒ 整 PR 改走人工合并道(复核照写 + 留 draft + 向授权批准人请审 + 状态评
+论),⛔ 不翻 ready、不入队;清标即落地同受此闸,漏判被队列守卫在 merge group 里拒收,白烧一
+轮队列。**再读 `mergeable_state`**(事实行见平台读数):`dirty` ⇒ 先 merge `origin/main`(生成物在面
+上按 A 的固定序)再挂。**ready + 全绿 ≠ 已入队 —— 队列从不主动拉 PR,入队是显式动
+作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;② enable-auto-merge 调用根本没落
+地(重发与效果验证序列见平台读数);③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
 
-**确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡 GitHub 代关、标签随
-卡离开在飞视图):`Part of` 卡开着不摘 `pm:dispatched`,就把无在飞物的卡永远算在
-`label:pm:dispatched is:open` 里。摘标(换回 `pm:queue` 或按剩余物定级)+ 一条评
-论(交付了什么、剩下归谁)与 MERGED 确认是一个动作,⛔ 不拆到下轮巡检;同刻读相关
-卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关(事实见平台读数)。
+**确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡 GitHub 代关):`Part of` 卡开着不摘
+`pm:dispatched`,就把无在飞物的卡永远算在 `label:pm:dispatched is:open` 里。摘标(换回 `pm:queue` 或按
+剩余物定级)+ 一条评论(交付了什么、剩下归谁)与 MERGED 确认是一个动作,⛔ 不拆到下轮巡
+检;同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关(事实见平台读数)。
 
 **每次合并后重拉一次车道盘点,与预期状态对账** —— 也是落地动作的一步,⛔ 不留给下
 轮巡检:取 open 卡清单,对照「应关哪些、不应关哪些」的预期 diff;预期之外从 open
@@ -48,12 +49,11 @@ job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhoo
 落地后**再核一次落地判据本身**:队列的合并同样走 os-regen 驱动,A 的静默吞并在队
 列合并这一步一样能发生。**MERGED 不是终点**:发版后义务见 `release-aftercare.md`。
 
-**落地窗口给关键 PR 挂 `subscribe_pr_activity`**(会话型座位专用;Routine 座位收
-不到,维持轮询):⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩(云卡出生即订阅不越
-界,报告在 draft PR 开出即到);订阅是感知补充,不替代 flip 定点;**MERGED / 关闭
-即退订,同刻把 `mode:cloud` 派的会话 `archive_session`** —— 触发条件是卡终局且报
-告已收复核,⛔ 合并前不归档(活会话是 dirty 自救的执行手;误归档可 unarchive,但
-容器现场已失,宁晚勿早);暂停/交接把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
+**落地窗口给关键 PR 挂 `subscribe_pr_activity`**(会话型座位专用;Routine 座位收不到,维持轮询):⛔
+不订阅 dev 交报告前的 PR —— 双驾驶员互踩;订阅是感知补充,不替代 flip 定点;**MERGED / 关闭
+即退订,同刻把 `mode:cloud` 派的会话 `archive_session`** —— 触发条件是卡终局且报告已收复
+核,⛔ 合并前不归档(活会话是 dirty 自救的执行手;误归档可 unarchive,但容器现场已失,宁晚勿
+早);暂停/交接把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 
 **main-red 事故两条约定**:① **p0 fix-forward 允许跳队**(维护者 2026-08-25「同意」):main 红的
 止血 PR(p0、机械、根因已核实)可跳队(GitHub 队列自带 jump-the-queue),或按既有 governed
