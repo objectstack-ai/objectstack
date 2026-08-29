@@ -2010,6 +2010,103 @@ describe('ApprovalService — admin override (#3424)', () => {
   });
 });
 
+// #12769 — the read-back after a successful mutation narrows by the CALLER's
+// org (`loadRequest`), so an org-less request row (every schedule /
+// time-relative / api trigger run produces one — #10131, pinned rather than
+// repaired by #9132) is invisible to an org-scoped caller. Ten result sites
+// used to paper over that with a `fresh!` non-null assertion, shipping a
+// well-formed success envelope whose declared-non-null `request` was `null`.
+// The contract now: the write lands, and the call refuses LOUDLY instead of
+// returning a malformed result. The org narrowing itself is a tenancy wall
+// and is deliberately untouched by these cases.
+describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-02-01T10:00:00Z').getTime();
+
+  // No tenantId — the acting-context shape of a schedule / time-relative /
+  // api trigger run, which stamps `organization_id = null` on the row.
+  const ORGLESS_SUBMITTER = { userId: 'u1', positions: [], permissions: [] } as any;
+  // Org-scoped platform admin: admitted by the override gate on any request
+  // (#3424), but their read-back narrows to 't1' and misses an org-less row.
+  const PLATFORM_ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  // Org-scoped ordinary slot holder — the same miss with no override involved.
+  const ORG_APPROVER = { userId: 'u9', tenantId: 't1', positions: [], permissions: [] } as any;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+  });
+
+  const openOrgless = async (recordId = 'opp1', runId = 'run_1') => {
+    const req: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId, nodeId: 'approve_step',
+      flowName: 'deal_approval',
+      config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const },
+      record: { id: recordId, amount: 100 },
+    }, ORGLESS_SUBMITTER);
+    // Precondition pin: the row this family is about really is org-less.
+    expect(req.organization_id ?? null).toBeNull();
+    return req;
+  };
+
+  it('recall: the row IS mutated and the call throws READ_BACK_FAILED — not a success with request:null', async () => {
+    const req = await openOrgless();
+    await expect(svc.recall(req.id, { actorId: 'root' }, PLATFORM_ADMIN))
+      .rejects.toThrow(/^READ_BACK_FAILED: /);
+    // The refusal is about the echo only — the recall itself landed.
+    const after = await svc.getRequest(req.id, SYS);
+    expect(after?.status).toBe('recalled');
+  });
+
+  it('the refusal names the request and says the write was recorded, not rolled back', async () => {
+    const req = await openOrgless();
+    const err: any = await svc.recall(req.id, { actorId: 'root' }, PLATFORM_ADMIN)
+      .then(() => null, (e: any) => e);
+    expect(err).toBeTruthy();
+    expect(String(err.message)).toMatch(/^READ_BACK_FAILED: /);
+    expect(String(err.message)).toContain(`'${req.id}'`);
+    expect(String(err.message)).toContain('was recorded');
+    expect(String(err.message)).toContain('NOT rolled back');
+  });
+
+  it('decide: an ordinary org-scoped slot holder hits the same refusal — no override involved', async () => {
+    const req = await openOrgless();
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER))
+      .rejects.toThrow(/^READ_BACK_FAILED: /);
+    const after = await svc.getRequest(req.id, SYS);
+    expect(after?.status).toBe('approved'); // the decision landed
+  });
+
+  it('comment (thread interaction): same refusal shape', async () => {
+    const req = await openOrgless();
+    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
+      .rejects.toThrow(/^READ_BACK_FAILED: /);
+    const acts = await svc.listActions(req.id, SYS);
+    expect(acts.at(-1)).toMatchObject({ action: 'comment', actor_id: 'u9' }); // the comment landed
+  });
+
+  it('control: an org-less caller (trigger/system context shape) reads back fine — no narrowing, no refusal', async () => {
+    const req = await openOrgless();
+    const out = await svc.recall(req.id, { actorId: 'u1' }, ORGLESS_SUBMITTER);
+    expect(out.request).not.toBeNull();
+    expect(out.request.status).toBe('recalled');
+  });
+
+  it('control: an org-MATCHED caller on an org-stamped request reads back fine', async () => {
+    const req: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId: 'opp2', runId: 'run_2', nodeId: 'approve_step',
+      config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const },
+      record: { id: 'opp2' },
+    }, CTX); // CTX carries tenantId 't1' → the row lands behind the 't1' wall
+    expect(req.organization_id).toBe('t1');
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER);
+    expect(out.request.status).toBe('approved');
+  });
+});
+
 describe('record-lock hook (node era)', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: ApprovalService;
