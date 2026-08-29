@@ -702,3 +702,99 @@ describe('check:liveness — the manifest is inside the governed universe (#1072
     expect(src).toContain("const schema = SPEC_ONLY_SCHEMAS[type] ?? getMetadataTypeSchema(type);");
   });
 });
+
+// A ledger `status` was free text: any truthy string was classified and counted,
+// then dropped by `foldStateCounts`, which reads four names and nothing else. The
+// gate stayed GREEN over an understated total, because `state-counts.md` computes
+// its `classified` column as the sum of those four columns and the freshness leg
+// compares it against a re-render of the same fold — every reconciliation in the
+// gate comparing that number against itself.
+//
+// Measured across all 31 ledgers on the commit that switched this on: live 819,
+// planned 10, dead 80, experimental 5 — 914 classified, no fifth value. So the
+// population is ZERO and a green `pnpm check:liveness` proves nothing about
+// whether either guard can fire. `--ledger-root` is what answers that, for the
+// #5623 reason every block above states: the REAL gate, a COPY with one status
+// misspelled, and a real exit code.
+describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-status-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Rewrite one property's `status` in a copied ledger. */
+  function setStatus(root: string, type: string, prop: string, status: string): void {
+    const file = path.join(root, `${type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    ledger.props[prop].status = status;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+  }
+
+  /** A copy of the real ledger root with `field.useGrouping` misspelled. */
+  function typodRoot(name: string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    // `field.useGrouping` is `planned` and carries no evidence, so the misspelling
+    // is the only thing in the copy that can move a verdict — no evidence-scan
+    // finding can be confused for it.
+    setStatus(root, 'field', 'useGrouping', 'planed');
+    return root;
+  }
+
+  // DISPOSITION 1. The row is named, with its coordinate and the offending value.
+  it("FAILS and names the row when a ledger `status` is misspelled", () => {
+    const { status, output } = runGate(typodRoot('d1-names-the-row'));
+    expect(status, output).toBe(1);
+    expect(output).toContain('whose `status` is not one of live / experimental / dead / planned');
+    expect(output).toContain('field/useGrouping → "planed"');
+  });
+
+  // The misspelled row is still COUNTED, deliberately. Dropping it would keep
+  // `classified` and the `byStatus` buckets in agreement and hide the row from
+  // the arithmetic below — silencing the second guard with the first.
+  it('still counts the misspelled row, under its own bucket name', () => {
+    const { output } = runGate(typodRoot('d1-still-counted'));
+    expect(output).toMatch(/^ {2}field {2,}\d+ classified \(.*\bplaned 1\b/m);
+  });
+
+  // DISPOSITION 2, through the real gate. The walk counted the row; the four
+  // columns did not; the artifact would have published the smaller number. This
+  // is the leg that fires even if the vocabulary itself grows — see
+  // readme-table.test.ts for that case, which no ledger typo can produce.
+  it('FAILS the totals arithmetic, because the fold cannot name that bucket', () => {
+    const { status, output } = runGate(typodRoot('d2-arithmetic'));
+    expect(status, output).toBe(1);
+    expect(output).toContain("do not add up to the walk's own count");
+    expect(output).toContain('1 in `planed`');
+    expect(output).toContain('is not the repair');
+  });
+
+  // The two are not one check reported twice: disposition 1 is the only one that
+  // can say WHICH row, and disposition 2 is the only one that reads a number the
+  // artifact actually publishes. A repair that satisfied one and not the other
+  // would leave the class open, so the split is pinned rather than assumed.
+  it('reports the two failures separately — one names the row, one names the number', () => {
+    const { output } = runGate(typodRoot('d1-d2-separate'));
+    const rowLine = output.split('\n').find((l) => l.includes('field/useGrouping → "planed"'));
+    const sumLine = output.split('\n').find((l) => l.includes("publishes") && l.includes('the walk counted'));
+    expect(rowLine, output).toBeTruthy();
+    expect(sumLine, output).toBeTruthy();
+    // The arithmetic is per TYPE — it cannot name the property, which is exactly
+    // why disposition 1 is not redundant with it.
+    expect(sumLine).not.toContain('useGrouping');
+    expect(sumLine).toContain('field');
+  });
+
+  // The quiet half, and the reason the whole thing could be switched on: the four
+  // real statuses are the entire population today, so an unmutated run must be
+  // green AND must show neither heading. "Exits 0" alone would also be satisfied
+  // by a guard wired to nothing.
+  it('stays GREEN on the real ledgers, where every status is one of the four', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    expect(output).not.toContain('whose `status` is not one of');
+    expect(output).not.toContain("do not add up to the walk's own count");
+  });
+});
