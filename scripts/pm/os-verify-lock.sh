@@ -999,6 +999,10 @@ ledger_append() {
 #   markerbirth= markerpre=   this file's own birth (`stat %W`) and whether it
 #                predates the derived boot -- the timestamp-based corroboration
 #                of `prev=`, and the row the two existing readings printed.
+#                ⚠ Both read `-` on a container's FIRST record, and correctly:
+#                the marker is created by that very append, so at the moment of
+#                measurement there was no marker to date. It says the same
+#                thing `prev=-` says.
 #   ledgerbirth= ledgerpre=   the same two for the LEDGER, which is a second
 #                marker with an independent lifetime, and the exact row those
 #                two readings were filed over.
@@ -1018,10 +1022,17 @@ ledger_append() {
 # nothing that outlives a process and needs REAPING, and it must never redden a
 # gate -- and both bind here:
 #
-#   - The common path FORKS NOTHING. It reads `/proc/uptime` and the boot id
-#     with the `read` builtin, reads this file with ONE builtin read, compares,
-#     and returns. Nothing is written and no subprocess is started, because on
-#     all but the first run of a boot there is nothing to record.
+#   - The common path FORKS NOTHING on bash 5.0+, which is what the fleet runs.
+#     It reads `/proc/uptime` and the boot id with the `read` builtin, reads
+#     this file with ONE builtin read, compares, and returns; nothing is
+#     written, because on all but the first run of a boot there is nothing to
+#     record. Below 5.0 it costs exactly one command substitution -- the
+#     `now_s` fallback in `boot_derive`, and that is the only one there is.
+#     Measured on this fleet, A/B against the same file without it, worst case
+#     (`--show-budget`, which does nothing else): +1.2 to 1.5 ms per
+#     invocation, of which ~1.1 ms is bash PARSING the added source and
+#     ~0.2-0.8 ms is the mechanism. Against a run that holds this lock for tens
+#     to hundreds of seconds that is under one part in a hundred thousand.
 #   - A record is appended ONCE PER BOOT, not once per run, so the file grows
 #     by one line per restart and is bounded besides.
 #   - NOTHING HERE NEEDS REAPING. Two fixed paths, exactly as `.holder` and
@@ -1198,7 +1209,7 @@ boots_birth() {
 # is on the once-per-boot path, so it may fork; the common path above may not.
 boot_marker_record() {
   local ts boot up btime pid1after pos mb mpre lb lpre fs machine size
-  local line rest hz ticks i k f hund whole probe_mtime
+  local line rest hz ticks i k f hund whole probe_mtime fsdir
   ts="$(now_s 2> /dev/null)" || return 0
   case "$ts" in '' | *[!0-9]*) return 0 ;; esac
   boot="$BOOT_DERIVED"
@@ -1282,7 +1293,14 @@ boot_marker_record() {
   mpre="$(pre_verdict "$mb" "$boot")"
   lpre="$(pre_verdict "$lb" "$boot")"
 
-  fs="$(stat -f -c %T "$BOOTS_FILE" 2> /dev/null)" || fs=''
+  # ⚠ Measured on the marker's DIRECTORY, never on the marker. On the first
+  # record the file does not exist yet -- it is created by the append two
+  # dozen lines below -- so statting the file answers `-` on exactly the
+  # reading that establishes a container's baseline. The directory is on the
+  # same filesystem by construction and always exists.
+  fsdir="${BOOTS_FILE%/*}"
+  [[ "$fsdir" == "$BOOTS_FILE" ]] && fsdir='.'
+  fs="$(stat -f -c %T "$fsdir" 2> /dev/null)" || fs=''
   case "$fs" in '' | *[[:space:]]*) fs='-' ;; esac
   machine='-'
   if [[ -r /etc/machine-id ]]; then
@@ -2064,6 +2082,12 @@ DISCLOSURE
 # anything in this function that outlived the process would be that option
 # rebuilt by accident. There is deliberately no `9>&-` on the command either:
 # closing an fd nobody opened would only imply one was.
+#
+# ⚠ THE CLAIM IS ABOUT THIS FUNCTION, NOT ABOUT THE INVOCATION. The boot marker
+# runs before dispatch, so on a Linux host two of its files can appear beside
+# the lock path even on this route. They are not lock state and not this
+# function's: nothing reads them to decide whether the lock is held, and they
+# are never reaped. The self-test pins the difference rather than the glob.
 run_unlocked() {
   local kind="$1" label="$2"
   shift 2
@@ -3046,8 +3070,25 @@ mode_self_test() {
   sleep 1.5
   kill -9 "$killpid" 2> /dev/null
   wait "$killpid" 2> /dev/null
-  st_case 'and a kill -9 mid-run leaves nothing behind to reap either' \
-    "$(ls -A "${ulock}"* 2> /dev/null | wc -l | tr -d ' ')" 0
+  # ⚠ NARROWED ONCE, AND THE NARROWING IS THE WHOLE OF THE CASE RATHER THAN AN
+  # ACCOMMODATION OF IT. This asserted that NOTHING AT ALL sat beside the lock
+  # path -- a convenient spelling of the invariant back when the only files that
+  # could be there were lock state. The boot marker puts two files beside it
+  # that are not: they carry no lock semantics, nothing reads them to decide
+  # whether the lock is held, a `kill -9` leaves them in a valid state because
+  # an append either landed whole or did not land, and REAPING them would
+  # destroy the measurement rather than tidy anything. So the assertion is
+  # re-spelled to the property it was always protecting -- no LOCK STATE
+  # survives an unlocked run -- and paired with a positive, because a narrowed
+  # assertion that counts only what it chose to look at is how a pin stops
+  # catching the regression it exists for. The residue is counted twice: once
+  # for what must not be there, once for what must.
+  local marker_expected=0
+  [[ -r /proc/uptime ]] && marker_expected=2
+  st_case 'and a kill -9 mid-run leaves no LOCK STATE behind to reap' \
+    "$(ls -A "${ulock}"* 2> /dev/null | grep -vc '\.boots$\|\.boots\.probe$')" 0
+  st_case "and the only residue is the boot marker pair this host can write (${marker_expected})" \
+    "$(ls -A "${ulock}"* 2> /dev/null | grep -c '\.boots$\|\.boots\.probe$')" "$marker_expected"
 
   # THE OTHER OUTCOME, and the reason the probe file's CREATION is checked apart
   # from the lock taken on it. A temp dir that cannot hold the probe says
