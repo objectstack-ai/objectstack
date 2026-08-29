@@ -22,6 +22,20 @@ export {
 } from './memory-tenancy-guard.js';
 export type { TenancyAwareSchema } from './memory-tenancy-guard.js';
 
+// [#13197] Field-level uniqueness — the refusal's wire identity and the
+// scoping helpers, exported so a consumer can assert the envelope (`code` AND
+// `status`, never merely "it threw") without string-matching the message.
+export {
+  UNIQUE_VIOLATION_CODE,
+  UNIQUE_VIOLATION_STATUS,
+  assertNoUniqueViolation,
+  tenantFieldOf,
+  uniqueConstraintsFromFields,
+  uniqueKeyOf,
+  uniqueViolationError,
+} from './memory-unique-constraint.js';
+export type { MemoryUniqueConstraint, UniqueAwareSchema } from './memory-unique-constraint.js';
+
 export default {
   id: 'com.objectstack.driver.memory',
   version: '1.0.0',

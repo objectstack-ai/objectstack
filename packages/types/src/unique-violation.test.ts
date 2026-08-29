@@ -43,6 +43,52 @@ describe('isUniqueViolationError — input shapes', () => {
         expect(isUniqueViolationError({ code: 1062 })).toBe(true);
         expect(isUniqueViolationError({ code: 1452 })).toBe(false);
     });
+
+    /**
+     * [#13197] The platform's OWN registered code, on the `code` channel.
+     *
+     * Not a dialect and not a heuristic — `UNIQUE_VIOLATION` is the value
+     * `error-code-ledger.zod.ts` registers for this exact condition and the one
+     * `@objectstack/rest` answers a SQL conflict with, so reading it is a
+     * tautology rather than a widened limb. It became load-bearing when
+     * `driver-memory` grew field-level uniqueness: an in-process driver raises
+     * no dialect prose and no SQLSTATE, and a conflict this predicate does not
+     * recognise leaves `ObjectQL.createWithAutonumberResync` unable to re-seed
+     * — the counter stays warm and every following insert collides too
+     * (#5495's PROBE3 storm), i.e. a silent duplicate traded for a
+     * non-converging insert loop.
+     */
+    it('recognises the platform\'s own `UNIQUE_VIOLATION` code, which in-process drivers raise (#13197)', () => {
+        expect(isUniqueViolationError({ code: 'UNIQUE_VIOLATION', status: 409 })).toBe(true);
+        expect(
+            isUniqueViolationError(
+                Object.assign(new Error('Unique constraint violated on `doc.doc_no`: a record with the value "D-0005" already exists. No record was written.'), {
+                    code: 'UNIQUE_VIOLATION',
+                    status: 409,
+                }),
+            ),
+        ).toBe(true);
+        // Still narrow: a NEIGHBOURING platform code is not this condition.
+        expect(isUniqueViolationError({ code: 'RESOURCE_CONFLICT', status: 409 })).toBe(false);
+        expect(isUniqueViolationError({ code: 'INVALID_FILTER', status: 400 })).toBe(false);
+    });
+
+    /**
+     * [#13197] The column question is answered `undefined` for that refusal,
+     * and that is the CORRECT answer rather than a gap: the driver names no
+     * column in a dialect spelling this module parses, and inventing one would
+     * mean imitating SQLite or Postgres prose. `undefined` is the documented
+     * fallback the autonumber resync already handles — the same answer MongoDB
+     * gives, and the reason an unnamed column counts as attributable there.
+     */
+    it('names no column for the in-process refusal — the documented `undefined` fallback (#13197)', () => {
+        expect(
+            uniqueViolationColumn({
+                code: 'UNIQUE_VIOLATION',
+                message: 'Unique constraint violated on `doc.doc_no`: a record with the value "D-0005" already exists. No record was written.',
+            }),
+        ).toBeUndefined();
+    });
 });
 
 describe('isUniqueViolationError — the `cause` chain', () => {

@@ -841,8 +841,10 @@ pass `persistence: 'auto'` (or `'file'`) explicitly. See
 For tests, prefer in-memory **SQLite** — `SqlDriver` with
 `connection: { filename: ':memory:' }`, or `SqliteWasmDriver({ filename: ':memory:' })`
 when you want no native build. Both give the SQL semantics production runs on;
-mingo does not enforce primary keys, uniqueness, `NOT NULL` or column types, so a
-green run against the memory driver is weaker evidence than it looks. The
+the memory driver enforces **field-level `unique`** (with the same
+per-organization scoping the SQL family applies) and nothing else — no primary
+keys, no `NOT NULL`, no column types and no object-level composite `indexes[]`
+— so a green run against it is still weaker evidence than it looks. The
 framework's own dogfood gate boots on WASM SQLite at `:memory:` for this reason.
 
 The memory driver remains fine where you want no setup at all and the assertions
