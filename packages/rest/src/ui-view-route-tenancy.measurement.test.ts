@@ -735,6 +735,29 @@ describe('[#13214] §4 preconditions', () => {
         expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
     }, 120_000);
 
+    it('⚠️ the route is also an ENVIRONMENT-ID ORACLE — a valid id and an invalid one get observably different answers', async () => {
+        // Bears directly on "what must an attacker already know". The id is
+        // validated, but the FAILURE is not signalled: an unknown id silently
+        // falls through to the default environment and answers 200 with THAT
+        // environment's view. So a caller with no credential can tell a real
+        // environment id from a made-up one by comparing two 200s — which is
+        // the difference between "must possess an id" and "can discover one".
+        const valid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
+        const invalid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: 'env_not_real', ctx: undefined });
+
+        expect(valid.status).toBe(200);
+        expect(invalid.status).toBe(200);
+        // Same status, different bytes — the oracle.
+        expect(JSON.stringify(valid.body)).not.toBe(JSON.stringify(invalid.body));
+        expect(labelOf(valid.body)).toBe('Beta Environment Accounts');
+        expect(labelOf(invalid.body)).toBe('Alpha Environment Accounts');
+        // ...and the same holds for the OTHER known environment, so the signal
+        // is "this id resolves" rather than "this id is B".
+        const otherValid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_A, ctx: undefined });
+        expect(labelOf(otherValid.body)).toBe('Alpha Environment Accounts');
+        expect(otherValid.idLookups).toContain(ENV_A);
+    }, 120_000);
+
     it('the unscoped mount passes `environmentId: undefined` — read off the registrar body, not off a grep of the file', () => {
         // The source half of the mechanism, scoped to the registrar so a
         // neighbour's code cannot satisfy it.
