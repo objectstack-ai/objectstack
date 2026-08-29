@@ -10788,8 +10788,34 @@ export class SqlDriver implements IDataDriver {
         // failures (a NULL-safe unique over data that still violates it) into
         // a loud log instead of a throw, so presence is the only proof.
         return (await this.getExistingIndexNames(op.table)).has(op.indexName);
-      case 'drop_index':
-        return await this.dropIndexIfExists(op.table, op.indexName);
+      case 'drop_index': {
+        // #13056: a TERMINAL removal — the name is retired, nothing will
+        // re-declare it, and the #11627 hash shadow derived from that name is
+        // dead the moment the index goes. Index FIRST, then the column it
+        // keyed: MySQL refuses to drop a column a key still uses, and the
+        // reverse order would take the constraint down with the column while
+        // the operator was told only that an index was dropped.
+        //
+        // ⚠️ Deliberately HERE and not inside `dropIndexIfExists`. That helper
+        // has two other callers and neither is terminal: `recreate_index`
+        // drops in order to re-create under the SAME name — routing it through
+        // this cleanup would destroy the survivor #13015's `reusable` branch
+        // exists to re-key in place, turning every rebuild into a full
+        // regeneration of a STORED generated column — and
+        // `replace_unique_index` cannot reach a shadow at all (its legacy
+        // detection excludes `isHashShadowCarrier`, stated outright in
+        // `diffManagedIndexes` precisely because that op DROPS the legacy
+        // name). "Which caller" is the wrong axis; "is this name coming back"
+        // is the right one, and only the op knows.
+        const dropped = await this.dropIndexIfExists(op.table, op.indexName);
+        // Applied when EITHER half changed the table. A half-applied migration
+        // leaves the index gone and the column behind, so an already-absent
+        // index is exactly the state whose leftover column still needs
+        // collecting — reporting that as `skipped` would claim the apply did
+        // nothing to a table it had just rewritten.
+        const shadowDropped = await this.dropOrphanedHashShadowColumn(op.table, op.indexName);
+        return dropped || shadowDropped;
+      }
       case 'recreate_index': {
         // Same name on both sides — the drop has to come first, and a UNIQUE
         // target can fail on existing duplicates. That is why this op is
@@ -14431,6 +14457,118 @@ export class SqlDriver implements IDataDriver {
     return carried === canonicalIndexKey(columns, [...(nullSafeColumns ?? [])])
       ? 'reusable'
       : 'stale';
+  }
+
+  /**
+   * Collect the #11627 hash shadow an index left behind when its name was
+   * retired for good (#13056).
+   *
+   * ## The contract this makes true
+   *
+   * {@link isHashShadowColumn}'s docblock is why the ORPHAN-column pass skips a
+   * shadow: dropping it blindly would take the UNIQUE index it carries with it.
+   * That docblock also stated what happens instead — the column "is then
+   * cleaned up by the index's own removal path" — and until this method there
+   * was no such path. Measured: `dropIndexIfExists` issues one statement family
+   * (`DROP CONSTRAINT` / `DROP INDEX` / `ALTER TABLE .. DROP INDEX`) and never
+   * touches a column, so when metadata stopped declaring a shadow-carried
+   * UNIQUE the differ reported the index as an orphan, the apply dropped it,
+   * and the `VARBINARY(32)` STORED generated column survived with nothing
+   * keying it — while the orphan-column pass declined to report it forever,
+   * exactly as designed. A STORED generated column is recomputed and written on
+   * every INSERT and on every UPDATE touching its sources, so a table that
+   * accumulates retired declarations pays for them permanently.
+   *
+   * ## Ownership is ESTABLISHED, never assumed
+   *
+   * Two refusals, in the shape of #13015's `foreign` guard — a column we have
+   * not proved is ours is left alone and named in the log, never dropped:
+   *
+   *  - a column of this name that is **not generated** may hold user data;
+   *  - a column something **still keys** is not the orphan this collects. That
+   *    second read is what turns "index first, then column" from an ordering
+   *    comment into a checked precondition: it fails closed when the drop above
+   *    silently did not take, and it declines to let a `DROP COLUMN` remove a
+   *    second index as a side effect.
+   *
+   * An unreadable catalog degrades to "leave it alone" — the behaviour that
+   * shipped before this method existed — rather than turning a transient read
+   * failure into a dropped column, the same trade
+   * {@link hashShadowColumnState} makes.
+   *
+   * Returns `true` only when a column was actually dropped.
+   */
+  protected async dropOrphanedHashShadowColumn(
+    tableName: string,
+    indexName: string,
+  ): Promise<boolean> {
+    // Shadows are a MySQL-only construct: `createHashShadowUniqueIndex` refuses
+    // every other dialect, so there is nothing to collect and no catalog read
+    // worth paying for.
+    if (!this.isMysql) return false;
+    const shadow = SqlDriver.hashShadowColumnFor(indexName);
+
+    let generationExpression: string;
+    try {
+      const rows = await this.knex
+        .select('GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: shadow,
+        });
+      if (rows.length === 0) return false; // nothing survived; the ordinary case
+      generationExpression = String(
+        rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '',
+      );
+    } catch {
+      return false;
+    }
+    if (generationExpression.trim() === '') {
+      this.logger.warn(
+        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
+          `'${indexName}' — a column of that name exists and is NOT a generated column, so it is not ` +
+          `the driver's to drop and may hold data (#11627/#13056). Remove it by hand if it is unwanted.`,
+        { tableName, indexName, shadow },
+      );
+      return false;
+    }
+
+    let stillKeyedBy: string[];
+    try {
+      const rows = await this.knex
+        .select('INDEX_NAME')
+        .from('information_schema.STATISTICS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: shadow,
+        });
+      stillKeyedBy = [
+        ...new Set(rows.map((r: any) => String(r.INDEX_NAME ?? r.index_name ?? ''))),
+      ].filter((n) => n !== '');
+    } catch {
+      return false;
+    }
+    if (stillKeyedBy.length > 0) {
+      this.logger.warn(
+        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
+          `'${indexName}' — ${stillKeyedBy.length} index(es) still key that column ` +
+          `(${stillKeyedBy.join(', ')}), so dropping it would remove them too (#13056).`,
+        { tableName, indexName, shadow, stillKeyedBy },
+      );
+      return false;
+    }
+
+    await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [tableName, shadow]);
+    this.logger.warn(
+      `[sql-driver] dropped the hash-shadow column "${shadow}" from "${tableName}" — the UNIQUE index ` +
+        `'${indexName}' it carried is retired, so the STORED generated column was recomputed on every ` +
+        `write for a constraint that no longer exists (#11627/#13056).`,
+      { tableName, indexName, shadow },
+    );
+    return true;
   }
 
   /**
