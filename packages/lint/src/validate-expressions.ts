@@ -546,14 +546,28 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  * hide showing for everyone". That is precise for exactly one of them. The
  * measurement, at both ends of each slot:
  *
- *  - **`visibleWhen` — client-only, fail-OPEN, sentence was correct.** The
- *    server never evaluates a FIELD-level `visibleWhen` at all:
+ *  - **`visibleWhen` — client-only, and since objectui#6010 it fails in TWO
+ *    ways rather than one.** The server half is unchanged and still exactly
+ *    right: it never evaluates a FIELD-level `visibleWhen` at all —
  *    `rule-validator.ts`'s `ConditionalFieldDef` has no such member, and
  *    `hasFieldRules` gates on `requiredWhen || readonlyWhen ||
  *    fieldHasOptionVisibility` — the `visibleWhen` it does evaluate is the
- *    per-OPTION one. So the only verdict is the renderer's, and
- *    `resolveFieldRuleState` passes `fallback: true` for visibility. Field
- *    visible to everyone, exactly as the old sentence said.
+ *    per-OPTION one. The RENDERER half moved. `plugin-form`'s
+ *    `sectionFields.ts` (`fromObjectSchema`) copies an object field's ADR-0036
+ *    `visibleWhen` / `readonlyWhen` / `requiredWhen` straight onto the runtime
+ *    form field, and the SDUI form renderer resolves those through
+ *    `resolveFieldRuleState` **with `predicateScope` bound**. So under a host
+ *    that publishes a scope the predicate does not fault: it RESOLVES, the
+ *    control is hidden in that one form, and the server still returns the value
+ *    to every other reader — a silent enforcement gap. Only where no host
+ *    publishes a scope (the public `/f/:slug` route, every non-form reader)
+ *    does the old sentence still describe what happens: unbound root, fault,
+ *    `fallback: true`, field visible to everyone.
+ *
+ *    ⛔ This is not a reason to relax {@link FIELD_RULE_BOUND_ROOTS}. The
+ *    verdict is MORE justified than when it was written, not less: trading a
+ *    loud lint error for a gap nobody can see is the one outcome worse than
+ *    the error. Only the causal clause was re-measured.
  *  - **`readonlyWhen` — the two ends fault in OPPOSITE directions, and the
  *    server wins.** Server: `isReadonlyWhenLocked` matches the fault with
  *    `unknownVariableOf` and returns `true` — "the declared lock is not
@@ -628,10 +642,18 @@ const FIELD_RULE_SLOT_CONSEQUENCE_GENERIC =
 /** Axis 1 — see "the consequence, by SLOT" above. Every cell is measured. */
 const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   visibleWhen:
-    'the predicate faults and the renderer falls back to VISIBLE ' +
-    '(`resolveFieldRuleState` evaluates visibility with `fallback: true`, and no server-side ' +
-    'gate evaluates a field-level `visibleWhen` at all), leaving the field the test was meant ' +
-    'to hide showing for everyone (#6146)',
+    'the predicate no longer merely faults — and BOTH of its outcomes are wrong, in opposite ' +
+    'directions. Under a host that publishes a predicate scope the renderer RESOLVES it ' +
+    '(`sectionFields.ts` copies this object rule onto the runtime form field and ' +
+    '`resolveFieldRuleState` evaluates it with the host scope bound, objectui#6010) — so the ' +
+    'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
+    '`visibleWhen` at all: the record still carries the value and every other reader still ' +
+    'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
+    '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
+    'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
+    '`fallback: true`), leaving the field the test was meant to hide showing for everyone ' +
+    '(#6146). The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
+    'silent one does not',
   readonlyWhen:
     'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
     'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
