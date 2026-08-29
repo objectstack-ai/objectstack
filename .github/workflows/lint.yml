@@ -3219,6 +3219,38 @@ jobs:
       - name: turbo.json package tasks name real packages and real scripts
         run: pnpm check:turbo-task-graph
 
+      # A relationship carrier is spelled as the target object's NAME (#13103).
+      # `FieldSchema.reference` is `z.string()`, and #13053 measured what a
+      # non-string one costs: a fixture spelling `reference: { object: '...' }`
+      # inside `fields:` is refused by `ObjectSchema.safeParse` AND read as
+      # `undefined` by the rule resolving it, so the suite was blind in both
+      # directions and the test still passed.
+      #
+      # ⛔ Deliberately NOT the broad guard that first suggests itself. Running
+      # every object fixture through `ObjectSchema.safeParse` was measured at
+      # 838 fixtures across 303 files going red, and those fixtures are invalid
+      # ON PURPOSE — the same carve-out `check:query-options-erasure` prints for
+      # itself: a rejection test must be able to build off-contract input. So
+      # the population judged here is the CARRIER, never the fixture.
+      #
+      # Lands as a ZERO-BASELINE ratchet: re-measured before landing at 443
+      # string carriers and 0 object/array ones at a field-def position, so
+      # there is no grandfathering file and nowhere to park the next defect.
+      # Two words keep it narrow, and the self-test is where both are observed:
+      # only a LITERAL is judged (identifiers, pass-throughs, Zod declarations
+      # and `reference: null` stay unjudged), and only at a field-def carrier
+      # POSITION (the generated i18n bundles write `reference:` as a field NAME,
+      # and are excluded BY SHAPE, never by a path ignore that would rot).
+      # A position it cannot resolve REFUSES with exit 3 rather than counting as
+      # "not a field def", and so does a run that measures zero carriers —
+      # a green whose success condition equals its total-failure condition.
+      #
+      # Reads source with scripts/ts-parse.mjs; no build, no spawns, ~5s.
+      - name: Relationship carriers are spelled as the string the spec declares
+        run: |
+          node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
+          node packages/lint/scripts/check-reference-carrier-shape.mjs
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
