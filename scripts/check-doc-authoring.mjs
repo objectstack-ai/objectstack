@@ -797,14 +797,68 @@ function identifiersIn(node, ts, out = new Set()) {
 }
 
 /**
+ * The type a const DECLARES, in either spelling TypeScript offers.
+ *
+ * `const X: T = …` and `const X = … satisfies T` are the same statement about
+ * the same const, and this tree writes guidance tables both ways —
+ * `COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[]` (`ui/component.zod.ts`)
+ * and `WIDGET_GUIDANCE_SETS = […] as const satisfies readonly KeySetGuidance[]`
+ * (`ui/dashboard.zod.ts`). A type anchor that reads only `decl.type` sees the
+ * first and is silently blind to the second — and silence is the failure mode
+ * this whole file exists to prevent. `as const` is walked THROUGH rather than
+ * stopped at, because the `satisfies` sits outside it in that spelling.
+ *
+ * The INITIALIZER is deliberately not searched for the type name: a local like
+ * `new Set<KeySetGuidance>()` (`shared/suggestions.zod.ts`, inside the error
+ * builder) mentions the type without being one, and reporting the runtime's own
+ * bookkeeping as authoring prose is how a gate gets routed around. Pinned in
+ * `--self-test`.
+ */
+function declaredTypeText(decl, ts) {
+  if (decl.type) return decl.type.getText();
+  const parts = [];
+  let cur = decl.initializer;
+  for (let hops = 0; cur && hops < 8; hops++) {
+    if (!ts.isSatisfiesExpression(cur) && !ts.isAsExpression(cur)) break;
+    parts.push(cur.type.getText());
+    cur = cur.expression;
+  }
+  return parts.join(' ');
+}
+
+/**
  * Module-local const names whose CONTENTS reach a customer-facing sink.
  *
  * The blind spot this closes is argued in the Rule 3 header: the guidance maps
  * and a good share of the refusal messages are hoisted into a named const and
  * referenced from the sink, so a matcher that only reads a literal's own
- * position never reaches them. Seeded from every recognised sink and from the
- * two naming conventions, then closed to a FIXED POINT so a const referenced by
- * a const referenced by a `guidance:` is covered too.
+ * position never reaches them. Seeded from every recognised sink, from the
+ * naming conventions and from the TYPE anchors below, then closed to a FIXED
+ * POINT so a const referenced by a const referenced by a `guidance:` is covered
+ * too.
+ *
+ * ## The cross-module sink: a const whose only consumer is another file
+ *
+ * Seeding from in-file sinks alone leaves one shape unreachable BY
+ * CONSTRUCTION. A guidance table declared in a shared module and handed to
+ * `guidanceSets:` from OTHER files has no recognised anchor in its own file, so
+ * the whole const walks free — measured live on
+ * `SELECT_OPTION_EDITABILITY_GUIDANCE` (`shared/editability-boundary.ts`),
+ * whose prescription is printed verbatim at a refusing author on both the
+ * object-field face and the form-view face, and which this rule reported clean
+ * from the day it landed. Its neighbour `EDITABILITY_BOUNDARY_GUIDANCE`, same
+ * file and same shape, was reachable only by ACCIDENT: it happens to be
+ * consumed in-module by a `StrictObjectOptions` const. The gap is a property of
+ * the CONSUMPTION SITE, not of the const — so no amount of care at the
+ * declaration would have avoided it.
+ *
+ * A const whose declared type is `KeySetGuidance` is therefore a sink in its own
+ * right, on the same footing as `StrictObjectOptions`: the type exists solely to
+ * be handed to `guidanceSets:`, and `strictUnknownKeyError` prints the
+ * `prescription` it carries verbatim at the author. Anchoring on the TYPE rather
+ * than on a named list of guidance modules closes the CLASS — a named list
+ * would have to be edited again for the next shared guidance const, which is
+ * this same blind spot moved one level up.
  *
  * Name-based within one module rather than a scope analysis, deliberately: a
  * shadowed local of the same name would be a false positive, which costs an
@@ -824,8 +878,12 @@ function collectTextSinkConsts(sf, ts) {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
       decls.set(n.name.text, n.initializer);
       if (/_RETIRED_KEY_GUIDANCE$/.test(n.name.text)) sinks.set(n.name.text, 'tombstone');
-      const ty = n.type ? n.type.getText() : '';
-      if (/_STRICT_OPTIONS$/.test(n.name.text) || /\bStrictObjectOptions\b/.test(ty)) {
+      const ty = declaredTypeText(n, ts);
+      if (
+        /_STRICT_OPTIONS$/.test(n.name.text)
+        || /\bStrictObjectOptions\b/.test(ty)
+        || /\bKeySetGuidance\b/.test(ty)
+      ) {
         sinks.set(n.name.text, 'strictObject');
       }
     }
@@ -1390,7 +1448,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, and `.describe()` prose; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position and `extraKeys` key names all pass; test bodies out, and the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, and `.describe()` prose; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out, and the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1659,6 +1717,53 @@ function selfTestRule3(expect) {
     expect('the describe red names the position', r.violations[0]?.where, '.describe()');
     expect('the describe red names the bucket', r.violations[0]?.bucket, 'describe');
 
+    // RED #11 — the CROSS-MODULE guidance const. Typed `KeySetGuidance`,
+    // exported, and consumed by NO sink in its own file: every anchor this pass
+    // had before was in-file, so a shared guidance table handed to
+    // `guidanceSets:` from other modules walked free while its prescription was
+    // printed at refusing authors. Measured live on
+    // `SELECT_OPTION_EDITABILITY_GUIDANCE`, which this rule reported clean from
+    // the day it landed. Written here in the spelling the tree really uses —
+    // the id on a LATER operand than the type annotation that anchors it.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export const OPTION_EDITABILITY_GUIDANCE: KeySetGuidance = {',
+      "  name: 'OPTION_EDITABILITY_KEYS',",
+      "  keys: ['disabled', 'readonly'],",
+      '  prescription:',
+      "    'Editability is not a per-OPTION concern — a deliberate boundary, not a '",
+      "    + 'missing key (#8201): withdraw the option with `visibleWhen` instead.',",
+      '};',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a `KeySetGuidance` const consumed only CROSS-MODULE is RED',
+      r.violations.length, 1);
+    expect('the cross-module red names the const it travelled through',
+      r.violations[0]?.where, 'via OPTION_EDITABILITY_GUIDANCE');
+    expect('the cross-module red is bucketed as a strictObject option',
+      r.violations[0]?.bucket, 'strictObject');
+
+    // RED #12 — the same const in the `as const satisfies` spelling, which this
+    // tree also uses (`WIDGET_GUIDANCE_SETS`, `ui/dashboard.zod.ts`). A type
+    // anchor reading only the ANNOTATION is blind to it, so the next shared
+    // guidance const written the modern way would reopen RED #11's gap — the
+    // same blind spot one spelling over.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export const OPTION_GUIDANCE_SETS = [',
+      '  {',
+      "    name: 'OPTION_EDITABILITY_KEYS',",
+      "    keys: ['disabled'],",
+      "    prescription: 'not a missing key (#8201) — withdraw the option instead.',",
+      '  },',
+      '] as const satisfies readonly KeySetGuidance[];',
+    ].join('\n'));
+    r = scan();
+    expect('an id in an `as const satisfies readonly KeySetGuidance[]` const is RED',
+      r.violations.length, 1);
+    expect('the satisfies-spelling red names its const',
+      r.violations[0]?.where, 'via OPTION_GUIDANCE_SETS');
+
     // ── The FOURTH population: text BUILT INSIDE A FUNCTION ─────────────────
     //
     // Ruled 2026-08-29, verbatim 「同意」 — the inheritance reaches refusal prose
@@ -1667,7 +1772,7 @@ function selfTestRule3(expect) {
     // the clause is written as "the FUNCTION must sit in a recognised position"
     // rather than "climb through function bodies".
 
-    // RED #11 — the founding shape of this population: an `error:` error map
+    // RED #13 — the founding shape of this population: an `error:` error map
     // written inline as an arrow function, its prose in a `+` chain.
     writeFileSync(target, [
       "import { z } from 'zod';",
@@ -1687,7 +1792,7 @@ function selfTestRule3(expect) {
     expect('the error-callback red gets its OWN bucket, not `message`',
       r.violations[0]?.bucket, 'functionBuilt');
 
-    // RED #12 — the HOISTED spelling of the same thing, which is how most of
+    // RED #14 — the HOISTED spelling of the same thing, which is how most of
     // this tree writes it: the prose lives in a module const and the `error`
     // callback only DISPATCHES to it, so the literal is not lexically inside
     // any function at all. Without `error:` seeding the sink pass, this const
@@ -1705,7 +1810,7 @@ function selfTestRule3(expect) {
     expect('an id in a const DISPATCHED from an `error:` callback is RED', r.violations.length, 1);
     expect('the hoisted error-map red names its const', r.violations[0]?.where, 'via PREVIEW_RETIRED');
 
-    // RED #13 — a message BUILDER function referenced from `message:`. The
+    // RED #15 — a message BUILDER function referenced from `message:`. The
     // literal sits in a function; the function is a text-sink const.
     writeFileSync(target, [
       "import { z } from 'zod';",
@@ -1721,7 +1826,7 @@ function selfTestRule3(expect) {
     expect('the builder red names the const it travelled through',
       r.violations[0]?.where, 'via INLINE_CREDENTIAL_REFUSED (built in a function)');
 
-    // RED #14 — a builder whose result is a `retiredKey()` argument, and one
+    // RED #16 — a builder whose result is a `retiredKey()` argument, and one
     // whose body ends in a `return` rather than a concise arrow body. The
     // `return` leg is a separate clause in the climb and was measured live.
     writeFileSync(target, [
@@ -1739,7 +1844,7 @@ function selfTestRule3(expect) {
     expect('the return-leg red names the const it travelled through',
       r.violations[0]?.where, 'via capRemoved (built in a function)');
 
-    // RED #15 — an options FACTORY declared by its return-type annotation. The
+    // RED #17 — an options FACTORY declared by its return-type annotation. The
     // literal sits at a recognised strictObject key inside a function nothing
     // else identifies, so only the annotation makes it reachable.
     writeFileSync(target, [
@@ -1757,7 +1862,7 @@ function selfTestRule3(expect) {
     expect('the options-factory red names the position',
       r.violations[0]?.where, 'strictObject history (built in a function)');
 
-    // RED #16 — a plain STRING at `error:`, zod 4's spelling of `message:`.
+    // RED #18 — a plain STRING at `error:`, zod 4's spelling of `message:`.
     // Nothing was built in a function, so it is bucketed `message`.
     writeFileSync(target, [
       "import { z } from 'zod';",
@@ -1882,6 +1987,23 @@ function selfTestRule3(expect) {
       "}, { name: z.string() });",
     ].join('\n'));
     expect('precision — `extraKeys` is key names, not prose', scan().violations.length, 0);
+
+    // A local that MENTIONS `KeySetGuidance` is not one. `shared/suggestions.zod.ts`
+    // really writes `const firedSets = new Set<KeySetGuidance>()` inside the
+    // error builder, so a type anchor that searched the initializer's text
+    // instead of the DECLARED type would report the runtime's own bookkeeping
+    // as authoring prose — and a gate that reports values as prose is one
+    // authors route around.
+    writeFileSync(target, [
+      "import type { KeySetGuidance } from '../shared/suggestions.zod';",
+      'export function fire(sets: readonly KeySetGuidance[]) {',
+      '  const fired = new Set<KeySetGuidance>();',
+      "  for (const s of sets) if (s.name === '#4286') fired.add(s);",
+      '  return fired;',
+      '}',
+    ].join('\n'));
+    expect('precision — an inferred local whose INITIALIZER mentions `KeySetGuidance` is not a sink',
+      scan().violations.length, 0);
 
     // GREEN again from the same scan, so every red above was the id and nothing
     // else about the tree.
