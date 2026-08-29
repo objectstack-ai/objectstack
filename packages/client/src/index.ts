@@ -80,6 +80,16 @@ import {
   // [#11924] The GLOBAL cross-object search body — NOT the per-object
   // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
   SearchAllResponse,
+  // [#12104] The `{ success, data }` envelope SKELETON, plus the two analytics
+  // route response types that already transcribe their producer's declared
+  // return. The four `return res.json()` methods bound by that card resolve to
+  // the WHOLE body — `res.json()` strips nothing, unlike `unwrapResponse` — so
+  // the envelope IS the annotation, not the payload under it. `BaseResponse` is
+  // reused rather than hand-spelled so a field added to the envelope reaches
+  // these annotations with it.
+  BaseResponse,
+  AnalyticsMetadataResponse,
+  AnalyticsSqlResponse,
   // [#12038] The meta history/diagnostics and package lifecycle response
   // contracts, bound under the recorded ruling (1C/2C/3A/4A/5A). Each is the
   // PAYLOAD the route answers — the value after `unwrapResponse` strips the
@@ -115,6 +125,7 @@ import type {
   ApprovalRecallResult,
   ApprovalResubmitResult,
   ApprovalSendBackResult,
+  AnalyticsResult,
   AudienceBindingSuggestion,
   AudienceBindingSuggestionSync,
   AutomationResult,
@@ -740,6 +751,133 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
     return { 'If-Match': String(options.ifMatch) };
 }
 
+/**
+ * Request options for `meta.deleteItem` — the carriers the REST reset door
+ * reads, made reachable from the SDK (#12181).
+ *
+ * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
+ * reads THREE carriers. This bag declares TWO of them, and the third's
+ * absence is a ruling rather than an oversight:
+ *
+ * - {@link DeleteMetaItemOptions.ifMatch} — the ADR-0008 OCC pin. The door
+ *   already reads `If-Match` and threads it as `parentVersion`, and
+ *   `DeleteMetaItemRequest.parentVersion` names that header in the spec text
+ *   itself. Without an argument for it, every SDK reset was last-write-wins
+ *   on the one verb whose whole job is destroying an overlay row.
+ * - {@link DeleteMetaItemOptions.state} — `?state=draft`, the NARROWER
+ *   reset: discard the pending draft and leave the published overlay
+ *   serving. Its absence did not make the SDK safer, it made the SDK's only
+ *   reachable reset the full one.
+ *
+ * ⛔ `?dropStorage=true` is deliberately NOT a member, and adding it "for
+ * completeness" reverses a decision. It is the one carrier of the three that
+ * ADDS destructive reach — it drops the object's physical table after the
+ * metadata row goes — no caller was measured needing it from this client,
+ * and the door's repeated-parameter refusal exists because of that
+ * destructiveness. Maintainer-seat ruling on #12181: a destructive surface
+ * with no measured pull is not published. A caller that needs it is a
+ * separate, separately reviewable widening.
+ *
+ * Same bag on BOTH `deleteItem` declarations — the unscoped client and the
+ * environment-scoped twin — for the reason #7019 states: the scoped mount is
+ * not a second implementation, it is one `registerForBase` call replayed
+ * against `/environments/:environmentId`, so a bag on one client only would
+ * be a fresh divergence, not half a fix.
+ */
+export interface DeleteMetaItemOptions {
+    /**
+     * `If-Match: <version>` — the ADR-0008 optimistic-concurrency pin, and
+     * the one member here that is NOT a query parameter.
+     *
+     * Echo back the `version` a previous `saveItem` (or `publishItem`)
+     * resolved, and a concurrent edit is refused with `409
+     * metadata_conflict` instead of silently resetting the row the other
+     * author just wrote. Omit for the last-write-wins behaviour every reset
+     * had before this member existed — the pin is opt-in on the door too
+     * (Studio's "Reset" button is deliberately unpinned).
+     *
+     * Opaque: echo it verbatim, never parse it.
+     *
+     * Only a non-empty token reaches the wire. `undefined` and `''` both OMIT
+     * the header rather than sending an empty `If-Match`: the door reads the
+     * header's PRESENCE as "pin this reset", so an empty spelling would pin
+     * against the empty string and refuse a reset the caller never asked to
+     * pin.
+     *
+     * Same member name, same header, same truthy guard as the sibling
+     * first-party `@object-ui/data-objectstack` `MetadataClient.reset`, and
+     * as {@link SaveMetaItemOptions.ifMatch} on this same client.
+     */
+    ifMatch?: string;
+    /**
+     * `?state=draft` — discard ONLY the pending draft overlay, leaving the
+     * still-active overlay serving.
+     *
+     * `'active'` is the explicit spelling of the default and deliberately
+     * sends NOTHING: the door acts on `state=draft` alone and treats every
+     * other value as active, so emitting `?state=active` would put a value on
+     * the wire the server ignores. Same shape as
+     * {@link SaveMetaItemOptions.mode}, and the same vocabulary the spec
+     * declares (`DeleteMetaItemRequest.state`: `'active' | 'draft'`).
+     *
+     * This is the LESS destructive reset, not a new destructive one: without
+     * it the only reachable reset is the full one, which drops the published
+     * overlay too.
+     */
+    state?: 'active' | 'draft';
+}
+
+/**
+ * Compose the `meta.deleteItem` query string — the ONE builder both
+ * `deleteItem` declarations call, for the same reason
+ * {@link DeleteMetaItemOptions} is one type: the twins must not be able to
+ * drift in what they put on the wire.
+ *
+ * Returns `''` (not `'?'`) when nothing is set, so an options-less call is
+ * BYTE-IDENTICAL to what this method sent before the bag existed.
+ *
+ * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
+ * repeated `state` (#6877), so a builder that could emit the key twice would
+ * turn a caller's option into a 400.
+ */
+function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
+    if (!options) return '';
+    const params = new URLSearchParams();
+    // Only `'draft'` is actionable server-side; `'active'` is the default
+    // said out loud and sends nothing.
+    if (options.state === 'draft') params.set('state', 'draft');
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
+/**
+ * Compose the `meta.deleteItem` request headers — the ONE builder both
+ * `deleteItem` declarations call, for the same reason {@link metaDeleteQuery}
+ * is one function.
+ *
+ * Returns `undefined` (never `{}`) when nothing is set, so the call site can
+ * omit the `headers` key entirely and an options-less reset stays
+ * BYTE-IDENTICAL to what it sent before this existed.
+ *
+ * ⛔ `ifMatch` must never be added to {@link metaDeleteQuery}. It is a
+ * header; the reset door reads no `?ifMatch=` parameter, so a query spelling
+ * would look set at the call site and protect nothing.
+ *
+ * Deliberately a sibling of {@link metaSaveHeaders} rather than a call into
+ * it: the two methods carry two separately-ruled option bags (#11713 for
+ * `saveItem`, #12181 for this one), so neither type may quietly acquire the
+ * other's members. The two builders are pinned IN STEP by a test instead —
+ * one token in, identical header bytes out.
+ */
+function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, string> | undefined {
+    if (!options?.ifMatch) return undefined;
+    // Verbatim and UNQUOTED — the door tolerates ETag-style quotes by
+    // stripping them, but the token a save resolves carries none, and
+    // wrapping it here would put bytes on the wire the sibling first-party
+    // client does not send.
+    return { 'If-Match': String(options.ifMatch) };
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -997,14 +1135,39 @@ export class ObjectStackClient {
     },
 
     /**
-     * Delete a metadata item
+     * Delete a metadata item — reset it to its artifact default by removing
+     * the ADR-0005 customization overlay row.
+     *
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
+     * @param options - {@link DeleteMetaItemOptions}: the ADR-0008 OCC pin
+     *   (`ifMatch`) and the narrower draft-only discard (`state: 'draft'`).
+     *
+     * PIN THE RESET. This verb destroys a row: unpinned, a reset issued
+     * against a version somebody else has already replaced silently destroys
+     * their edit and answers 200. Echo the `version` a previous `saveItem`
+     * resolved as `options.ifMatch` and the same situation answers `409
+     * metadata_conflict` instead — the door has always read the header
+     * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
+     * had no argument for it until #12181.
      */
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
+    deleteItem: async (
+        type: string,
+        name: string,
+        options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}`, {
+        // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
+        // the three meanings `qs` holds in this file.
+        const query = metaDeleteQuery(options);
+        // The OCC token rides a HEADER, not the query string — see
+        // {@link metaDeleteHeaders}. `undefined` when unset, and the spread
+        // then omits the `headers` key altogether, so an unpinned reset hands
+        // `fetch` the same `init` it always did.
+        const headers = metaDeleteHeaders(options);
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`, {
             method: 'DELETE',
+            ...(headers ? { headers } : {}),
         });
         return this.unwrapResponse(res);
     },
@@ -1311,8 +1474,35 @@ export class ObjectStackClient {
   /**
    * Analytics Services
    */
+  /**
+   * [#12104] ⚠️ THE THREE DISPATCHER-SERVED METHODS HERE RESOLVE TO THE
+   * ENVELOPE, not to the payload — read `.data`.
+   *
+   * They end `return res.json()` rather than `return this.unwrapResponse(res)`,
+   * and `res.json()` strips nothing, so the caller receives the dispatcher's
+   * `{ success, data }` body whole. That was invisible while the methods were
+   * erased to `Promise< any >` (no annotation, and `Response.json()` is declared
+   * `Promise< any >` in `lib.dom`); it is stated by the declarations now.
+   * `queryDataset` below is the exception and says why.
+   */
   analytics = {
-    query: async (payload: any) => {
+    /**
+     * Run an `AnalyticsQuery` (`POST /analytics/query`).
+     *
+     * The `data` member is `IAnalyticsService.query`'s declared return, relayed
+     * verbatim by the domain (`deps.success(await analyticsService.query(…))`).
+     *
+     * ⛔ NOT bound to `AnalyticsResultResponseSchema` (`@objectstack/spec/api`),
+     * which looks like the route's own response type: its
+     * `data.fields` declares `{ name, type }` only, while the contract this
+     * route relays also carries `label` / `format` / `currency` /
+     * `percentScale` and `totals` — measured on a real `AnalyticsService` in
+     * `analytics-automation-json-erasure.test.ts`. Binding it would have
+     * narrowed the declaration below what the producer serves, which is the
+     * bound-but-false shape #12034 paid to remove. (The schema's own drift is
+     * a spec-side question, filed separately.)
+     */
+    query: async (payload: any): Promise<BaseResponse & { data: AnalyticsResult }> => {
       const route = this.getRoute('analytics');
       const res = await this.fetch(`${this.baseUrl}${route}/query`, {
          method: 'POST',
@@ -1324,8 +1514,15 @@ export class ObjectStackClient {
      * Cube metadata listing. Pass `cube` to filter to a single cube
      * (`?cube=` — [#3584] the dispatcher shape; the old `/meta/:cube` path
      * segment was served by nothing and 404ed everywhere).
+     *
+     * [#12104] `AnalyticsMetadataResponse` is the route's own declared response
+     * type and it AGREES with the producer: its `data` is the bare `CubeMeta[]`
+     * discovery projection `IAnalyticsService.getMeta` returns (#6442 narrowed
+     * the schema to exactly that, and `spec`'s `analytics.test.ts` pins
+     * `data[number]` ≡ `CubeMeta` at compile time). There is no `cubes`
+     * wrapper under `data`.
      */
-    meta: async (cube?: string) => {
+    meta: async (cube?: string): Promise<AnalyticsMetadataResponse> => {
         const route = this.getRoute('analytics');
         const qs = cube ? `?cube=${encodeURIComponent(cube)}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/meta${qs}`);
@@ -1335,8 +1532,13 @@ export class ObjectStackClient {
      * Dry-run a query to its generated SQL (`POST /analytics/sql` — [#3584]
      * the dispatcher route; the old `/explain` route name was served by
      * nothing and 404ed everywhere).
+     *
+     * [#12104] `AnalyticsSqlResponse` is the route's own declared response type
+     * and its `data` — `{ sql, params }` — is exactly
+     * `IAnalyticsService.generateSql`'s declared return, so the schema and the
+     * producer say one thing here.
      */
-    explain: async (payload: any) => {
+    explain: async (payload: any): Promise<AnalyticsSqlResponse> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/sql`, {
             method: 'POST',
@@ -1350,13 +1552,21 @@ export class ObjectStackClient {
      * dialect. Provide `dataset` (inline definition, Studio preview) or
      * `datasetName` (saved), plus `selection.measures`; `previewDrafts`
      * runs over draft-overlaid definitions (ADR-0037 P3). (#3587 gap closure)
+     *
+     * [#12104] ⚠️ The ONE method in this namespace that resolves to the BARE
+     * payload. It is served by `@objectstack/rest` (the dispatcher mounts no
+     * twin), and that route ends `res.json(result)` with no envelope around it
+     * — so unlike its three siblings above there is no `.data` to read. Both
+     * halves measured on the real route in
+     * `analytics-automation-json-erasure.test.ts`; the shape is
+     * `IAnalyticsService.queryDataset`'s declared return.
      */
     queryDataset: async (payload: {
         dataset?: any;
         datasetName?: string;
         selection: { measures: string[]; [k: string]: any };
         previewDrafts?: boolean;
-    }) => {
+    }): Promise<AnalyticsResult> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/dataset/query`, {
             method: 'POST',
@@ -1521,14 +1731,25 @@ export class ObjectStackClient {
     /**
      * Get a specific installed package by its ID (reverse domain identifier).
      *
-     * ⛔ [#11925] NOT bound, and the `{ package }` envelope is left exactly as
-     * it was — the two mounted surfaces answer this route with DIFFERENT
-     * envelopes, so no single declaration is true (#12034). `runtime`'s
-     * `/packages` domain sends `success(pkg)` — the bare row — while `rest`'s
-     * `GET {base}/packages/:id` sends `sendOk(res, { package: { ...pkg,
-     * source } })`, and the REST routes "shadow live dispatcher twins" only
-     * where a `package` service is registered. Binding the member here would
-     * harden a claim that is already false on one of the two.
+     * ⛔ [#11925 / #12034] STILL NOT bound, and the `{ package }` envelope is
+     * left exactly as it was. #12034 shipped its `install` / `enable` /
+     * `disable` neighbours (one producer each) and deliberately did NOT ship
+     * this one, because this route is a REAL fork with no single true type.
+     * Both bodies below were MEASURED by driving each registrar, not read off
+     * the source:
+     *
+     *     dispatcher  handlePackages('/<id>', 'GET')
+     *       -> { success: true, data: { id, manifest, enabled, status } }
+     *     rest        GET /api/v1/packages/:id
+     *       -> { success: true, data: { package: { …row, source } } }
+     *
+     * `unwrapResponse` strips one envelope, so the post-unwrap value is the
+     * BARE row on the dispatcher and `{ package }` on REST. Binding either
+     * member here hardens a claim that is false on the other surface. Making
+     * it bindable means converging the two PRODUCERS — a wire-behaviour change
+     * to two mounted surfaces, above this card's authority, with a clause-②
+     * narrowing analysis of its own. The measured convergence cost is recorded
+     * on #12034 for that ruling.
      *
      * Its SCOPED twin `ScopedEnvironmentClient.packages.get` IS bound, because
      * only the REST registrar serves the scoped mount — one surface, one
@@ -1543,14 +1764,25 @@ export class ObjectStackClient {
     /**
      * Install a new package from its manifest.
      *
-     * ⛔ [#11925] NOT bound. This method and its `enable` / `disable`
-     * neighbours declare `{ package; message? }`, and the ONLY surface that
-     * serves them — `runtime`'s `/packages` domain; `rest` mounts no twin for
-     * any of the three — answers `success(pkg)`, the bare row (#12034). The
-     * declared envelope is not merely erased, it is false, and the `any`
-     * member is what keeps that invisible. Correcting it is a response-shape
-     * decision with its own clause-② analysis, not the `any`-binding this card
-     * carries, so the shape is left untouched here.
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope.
+     *
+     * What this REPLACED was not an erasure but a FALSEHOOD: the declaration
+     * read `{ package: any; message?: string }`, a shape no surface has ever
+     * sent, and the `any` member is what kept that invisible —
+     * `(await client.packages.install(m)).package` compiled and was
+     * `undefined` at runtime. There is exactly ONE serving surface, so there
+     * was never a "which surface do we match" question: `rest`'s registrar
+     * mounts only `POST /packages/publish`, `GET /packages`,
+     * `GET /packages/:id` and `DELETE /packages/:id` (measured by driving
+     * `registerPackageRoutes` and enumerating what it mounted — this route is
+     * `NO_HANDLER` there), leaving `runtime`'s `/packages` domain alone to
+     * answer, and it answers `success(pkg)`: `{ success: true, data: <row> }`,
+     * status 201. `message` is gone with the wrapper — no surface sends one.
+     *
+     * The wire fact is pinned end-to-end in
+     * `packages-write-envelope.test.ts` (the real dispatcher answering a real
+     * client call), and the DECLARATION in `return-type-precision.test.ts` —
+     * a runtime test cannot observe a return-type narrowing at all.
      *
      * By default the server rejects a manifest whose `id` is already
      * installed with **409 Conflict** (duplicate-id guard) instead of
@@ -1560,7 +1792,7 @@ export class ObjectStackClient {
     install: async (
         manifest: any,
         options?: { settings?: Record<string, any>; enableOnInstall?: boolean; overwrite?: boolean },
-    ) => {
+    ): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}`, {
             method: 'POST',
@@ -1571,7 +1803,7 @@ export class ObjectStackClient {
                 ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
             }),
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
@@ -1587,24 +1819,38 @@ export class ObjectStackClient {
 
     /**
      * Enable a disabled package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, for
+     * the reason spelled out on `install` above: one serving surface
+     * (`PATCH /packages/:id/enable` is `NO_HANDLER` on the REST registrar),
+     * and it answers `success(registry.enablePackage(id))`. The
+     * `{ package: any; message?: string }` this replaces was never emitted by
+     * anything.
      */
-    enable: async (id: string) => {
+    enable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/enable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
      * Disable an installed package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, same
+     * single-producer argument as `install` / `enable` above
+     * (`PATCH /packages/:id/disable` is `NO_HANDLER` on the REST registrar).
+     * The dispatcher answers `success(registry.disablePackage(id))`, so the
+     * row comes back with `enabled: false` — the caller reads the row itself,
+     * never a `.package` member.
      */
-    disable: async (id: string) => {
+    disable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/disable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /* [#3563 PR-4] Lifecycle beyond install/enable — these eleven routes
@@ -3552,8 +3798,24 @@ export class ObjectStackClient {
        * | `422` | `FLOW_NO_START_NODE` | the stored definition has no `start` node | fix the flow; retrying cannot help |
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
        * | `404` | — | no such flow in this deployment | check the name |
+       *
+       * [#12104] ⚠️ **This method resolves to the ENVELOPE — read `.data`.** It
+       * ends `return res.json()`, which strips nothing, so the value is the
+       * dispatcher's `{ success, data }` body; its sibling
+       * `automation.execute` calls the SAME door through `unwrapResponse` and
+       * therefore resolves to the `AutomationResult` alone. The two differ in
+       * the wrapper only, which is why the payload type is the same one.
+       *
+       * ⛔ NOT bound to `TriggerFlowResponse` (`@objectstack/spec/api`), which
+       * looks like this route's response type: its `data` declares
+       * `{ success, output?, error?, durationMs? }`, and the door also serves
+       * `status` / `runId` / `screen` (a paused run — see the row above),
+       * `code`, `successMessage` / `errorMessage` and `summary`. Measured
+       * against the real `AutomationEngine` in
+       * `analytics-automation-json-erasure.test.ts`. Binding the narrower
+       * schema would refuse the very reads this docblock tells callers to make.
        */
-      trigger: async (triggerName: string, payload: any) => {
+      trigger: async (triggerName: string, payload: any): Promise<BaseResponse & { data: AutomationResult }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/trigger/${triggerName}`, {
               method: 'POST',
@@ -5729,9 +5991,31 @@ export class ScopedEnvironmentClient {
       });
       return this.parent._unwrap<SaveMetaItemResponse>(res);
     },
-    deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}`), {
+    /**
+     * Reset a metadata item to its artifact default, scoped to this
+     * environment.
+     *
+     * `options` is the SAME {@link DeleteMetaItemOptions} bag the unscoped
+     * twin takes, and reaches the SAME handler: the scoped mount is not a
+     * second implementation, it is one `registerForBase` call replayed
+     * against `/environments/:environmentId` (see `RestServer`), so this door
+     * reads `?state=` — and the `If-Match` header — byte-identically. A bag
+     * on only one of the two clients would be a fresh divergence of the kind
+     * #7019 rules against, not half a fix.
+     */
+    deleteItem: async (
+      type: string,
+      name: string,
+      options?: DeleteMetaItemOptions,
+    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaDeleteQuery(options);
+      // Header half of the same bag, through the same one builder the twin
+      // calls — see {@link metaDeleteHeaders}.
+      const headers = metaDeleteHeaders(options);
+      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
+        ...(headers ? { headers } : {}),
       });
       return this.parent._unwrap(res);
     },

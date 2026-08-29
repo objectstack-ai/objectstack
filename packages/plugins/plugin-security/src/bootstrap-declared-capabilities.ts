@@ -75,6 +75,11 @@ import {
   tryUpdate,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import {
+  createSeedWriteRefusals,
+  reportSeedWriteRefusals,
+  type SeedWriteRefusals,
+} from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
@@ -264,6 +269,11 @@ async function upsertPackageCapability(
    */
   existingByName: ExistingByNameIndex,
   logger?: ProjectionLogger,
+  /**
+   * Collects writes the database REFUSED, so the pass reports them once
+   * instead of returning a zero that reads as "nothing to do".
+   */
+  refusals?: SeedWriteRefusals,
 ): Promise<boolean> {
   if (!cap?.name) return false;
 
@@ -314,7 +324,7 @@ async function upsertPackageCapability(
       package_id: packageId,
       active: true,
     };
-    const created = await tryInsert(ql, 'sys_capability', row);
+    const created = await tryInsert(ql, 'sys_capability', row, undefined, refusals);
     if (created) {
       out.seeded += 1;
       // [#11096] The oracle is a SNAPSHOT taken before the loop, so it cannot
@@ -348,7 +358,7 @@ async function upsertPackageCapability(
       // `bootstrap-seed-round-trips.test.ts` exist to make impossible.
       if (!capabilityRecordDiffers(existing, fields)) {
         out.unchanged += 1;
-      } else if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields })) {
+      } else if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields }, undefined, refusals)) {
         out.updated += 1;
       }
     } else {
@@ -365,7 +375,7 @@ async function upsertPackageCapability(
     // Non-curated (curated excluded above) platform row = a derived-from-
     // systemPermissions placeholder. The explicit declaration CLAIMS it:
     // upgrade to package provenance with the authored label/description/scope.
-    if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields, managed_by: 'package', package_id: packageId })) {
+    if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields, managed_by: 'package', package_id: packageId }, undefined, refusals)) {
       out.claimed += 1;
     }
     return true;
@@ -399,6 +409,10 @@ export async function bootstrapDeclaredCapabilities(
 
   const grantorsByCapability = indexGrantors(options.permissionSets);
 
+  // One log per pass, not per refused row: a legacy platform-wide unique index
+  // refuses EVERY declared capability, and a line each would bury the remedy.
+  const refusals = createSeedWriteRefusals();
+
   // [#11096] ONE existence read for the whole declaration, hoisted out of the
   // loop below. Each declared capability used to cost its own sequential
   // `SELECT … WHERE name = ? LIMIT 1` — invisible on a local file database, one
@@ -426,13 +440,17 @@ export async function bootstrapDeclaredCapabilities(
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = cap._packageId ?? cap.packageId ?? undefined;
     const grantors = grantorsByCapability.get(cap.name) ?? [];
-    const materialized = await upsertPackageCapability(ql, cap, packageId, out, grantors, existingByName, options.logger);
+    const materialized = await upsertPackageCapability(ql, cap, packageId, out, grantors, existingByName, options.logger, refusals);
     // [#4967 Part 1] Report the name ONLY once this pass knows a row exists for
     // it. Reporting it before the upsert decided anything is what let a refused
     // declaration suppress the derivation it needed.
     if (materialized) out.materializedNames.push(cap.name);
   }
 
+  // Before the counts, so an operator reads WHY the count is zero beside it.
+  // This seeder is organization-less today (see the lookup note above), so the
+  // report carries no organization either.
+  reportSeedWriteRefusals(options.logger, refusals);
   if (out.unreadable > 0) {
     // [#11096] Said ONCE with the count, like the sibling seeders: a per-name
     // warn on a database that is down is a log flood that buries its own

@@ -2509,9 +2509,15 @@ describe('HTTP error shaping — envelope normalisation', () => {
 
 describe('packages.install', () => {
     const MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
+    // [#12034] The body the ONLY serving surface actually sends: `success(pkg)`,
+    // i.e. the bare `InstalledPackage` row under `data`. These two cases assert
+    // the REQUEST and never read the response, so the fixture is inert either
+    // way — but it used to spell `data: { package: … }`, a body nothing emits,
+    // and a decoy fixture is how the next sweep concludes the envelope is real.
+    const INSTALLED_ROW = { manifest: MANIFEST, status: 'installed', enabled: true };
 
     it('POSTs the manifest and omits `overwrite` unless requested', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        const { client, fetchMock } = createMockClient({ success: true, data: INSTALLED_ROW });
         await client.packages.install(MANIFEST, { enableOnInstall: true });
 
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/packages', expect.any(Object));
@@ -2524,7 +2530,7 @@ describe('packages.install', () => {
     });
 
     it('passes `overwrite: true` through for intentional upgrade / re-install', async () => {
-        const { client, fetchMock } = createMockClient({ success: true, data: { package: { manifest: MANIFEST } } });
+        const { client, fetchMock } = createMockClient({ success: true, data: INSTALLED_ROW });
         await client.packages.install(MANIFEST, { overwrite: true });
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);

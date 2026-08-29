@@ -238,7 +238,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type (Standard enum or custom string) |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'user:profile' \| 'ai:chat_window' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec's own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`). |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
@@ -337,7 +337,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string` | ✅ | Component Type (Standard enum or custom string) |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string` | ✅ | Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec's own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`). |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |

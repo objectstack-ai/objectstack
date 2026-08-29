@@ -41,11 +41,15 @@
 // (see proof-registry.mts), a `live` classification MUST carry a valid proof —
 // the file must exist and declare the `@proof: <id>` tag. CI fails otherwise.
 //
-// EVIDENCE POINTERS (ADR-0087): a `live` verdict IS its evidence pointer — "this
-// property has a runtime consumer, here it is". A cited path that is repo-rooted
+// EVIDENCE POINTERS (ADR-0087): a verdict IS its evidence pointer — "this
+// property has a runtime consumer, here it is", and for a refusal, "here is the
+// code that rejects it". A cited path that is repo-rooted
 // and attributed to THIS repo must resolve against this checkout, or CI fails:
 // an unresolvable pointer makes the claim unfalsifiable, and a directory move or
-// a rename is all it takes (see evidence.mts). Cross-repo attribution
+// a rename is all it takes (see evidence.mts). Which STATUSES get scanned is a
+// population decision with its own history — see EVIDENCE_SCANNED_STATUSES
+// below, where the `planned`/`experimental` widening and the `dead` exclusion
+// are argued from measurements. Cross-repo attribution
 // (`objectui: …`, `cloud: …`, `packages/services/service-ai/…`) is counted, not
 // resolved — those files are legitimately absent here. This was a ⚠ until #5623,
 // for one historical reason: the pre-#3857 `evidence.split(':')[0]` parser
@@ -182,9 +186,12 @@ import {
   STATE_COUNTS_FILE,
   STATE_COUNTS_GUIDANCE,
   STATE_COUNTS_PATH,
+  STATE_COUNTS_TOTALS_GUIDANCE,
+  STATUS_COLUMNS,
   foldStateCounts,
   parseStateTable,
   reconcileReadmeTable,
+  reconcileStateCountTotals,
   reconcileStateCounts,
   renderStateCounts,
 } from './readme-table.mts';
@@ -332,6 +339,99 @@ function markerStatus(d: string): string | null {
   return null;
 }
 
+// ── WHICH STATUSES' `evidence` IS SCANNED (#13041) ──
+//
+// The four evidence checks — existence, line bound, symbol anchor, key mention —
+// ran only when `status === 'live'`, on the reading that a `live` verdict IS its
+// evidence pointer. `producer` was already scanned at ANY status, and that
+// asymmetry is what made this visible: an entry whose whole content is a REFUSAL
+// carried evidence the census COUNTED and no check READ.
+//
+// The measured instance. `api.json`'s `inputMapping.transform` and
+// `outputMapping.transform` are `planned` — parsed, then loudly rejected — and
+// #13039 migrated both citations to `path#symbol` anchors precisely because the
+// refusal disappearing is what should go red. Under the `live`-only population
+// those anchors were verified by NOTHING: renaming or deleting
+// `mappingDeclarationRejection` changed no check's verdict, while the summary
+// line still counted the pointers. "Counted" and "verified" had come apart,
+// which is the whole failure this ledger exists to remove.
+//
+// So the scan reads every status whose evidence is a POINTER AT CODE, whatever
+// verdict that pointer supports: `live` (a consumer reads the key), `planned`
+// (a refuser rejects it), `experimental` (declared, not enforced).
+const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental']);
+
+// `dead` is OUT, and this is that boundary written into the code rather than
+// left in a PR residual — the half of #13041 that is worth doing whichever way
+// the population question went.
+//
+// A dead row's pointer does not live in `evidence`. Measured across every ledger
+// on the commit that widened this scan: all 80 `dead` entries carry a `note`,
+// and only 6 carry an `evidence` string at all — the retirement story (which
+// sweep, which ADR, which tombstone rejects the key now) is prose in `note`,
+// which no check scans, by design. Scanning `dead.evidence` would therefore hold
+// 6 rows to a standard while reading nothing of the other 74 and publishing the
+// result as coverage of the class: the same shape as the defect above, one
+// status over. If dead rows ever cite code as a convention rather than as a
+// remnant, move `dead` across this line — and give `note` a scan of its own,
+// because that is the check this class actually needs.
+const EVIDENCE_UNSCANNED_STATUSES = new Set<string>(['dead']);
+
+// A status in NEITHER set is #13041 re-armed: its evidence would be counted by
+// the census and read by nothing, silently, exactly as `planned`'s was. So the
+// partition is held to the published vocabulary rather than to a reader's
+// memory — a fifth status forces the decision instead of defaulting it to
+// unread. (`STATUS_COLUMNS` is that vocabulary: the columns the generated count
+// artifact publishes.)
+for (const s of STATUS_COLUMNS) {
+  const scanned = EVIDENCE_SCANNED_STATUSES.has(s);
+  const unscanned = EVIDENCE_UNSCANNED_STATUSES.has(s);
+  if (scanned === unscanned) {
+    throw new Error(
+      `liveness status '${s}' is in ${scanned ? 'BOTH' : 'NEITHER'} evidence-scan set — every status in ` +
+      'STATUS_COLUMNS must be declared scanned or explicitly unscanned (#13041: a status in neither ' +
+      'has its evidence counted by the census and verified by nothing).',
+    );
+  }
+}
+
+// ── THE SAME PARTITION, ASKED OF THE DATA (#13083) ──
+//
+// The loop above holds the CODE to the published vocabulary. Nothing held the
+// LEDGERS to it. `classify()` accepts any truthy string and counts it, so a row
+// written `"status": "planed"` is classified (the forward pass is satisfied, no
+// UNCLASSIFIED finding), counted into a `byStatus` bucket named after the typo,
+// and then dropped by `foldStateCounts` — which reads four names and nothing
+// else. The artifact publishes a `classified` total short by exactly the typo'd
+// population, and every reconciliation in this gate compares that number against
+// itself, so it stays green.
+//
+// After #13041 the same unvalidated string carries a second consequence: a
+// status in neither evidence-scan set has its `evidence` pointer counted by the
+// census and read by no check. A typo lands in neither set BY CONSTRUCTION,
+// which is the defect that loop exists to prevent — reachable through the data
+// instead of through the code.
+//
+// So the vocabulary is read from `STATUS_COLUMNS` rather than written out again:
+// the guard and the fold that drops the value must not be able to disagree about
+// what the four names are. That is the same reason `EVIDENCE_SCANNED_LABEL`
+// below is derived from its set rather than restated.
+//
+// Population measured before switching this on, across all 31 ledgers on this
+// commit: live 819, planned 10, dead 80, experimental 5 — 914 classified, no
+// fifth value. So it starts GREEN and only a NEW typo can red it, which is the
+// zero-census argument the orphan-proof and key-mention flips were switched on
+// under. A check that starts at zero can be red; that is why the census came
+// first.
+const KNOWN_STATUSES = new Set<string>(STATUS_COLUMNS);
+
+/**
+ * The scanned population, rendered for the gate's own output. Derived from the
+ * set rather than written out again, so the numbers and the population they
+ * describe cannot drift apart — which is the class of bug this whole file is.
+ */
+const EVIDENCE_SCANNED_LABEL = [...EVIDENCE_SCANNED_STATUSES].map((s) => `'${s}'`).join(' / ');
+
 // ---- Zod schema walking (version-tolerant: prefer _zod.def, fall back to _def) ----
 function defOf(s: any): any {
   return s && (s._zod?.def ?? s._def);
@@ -455,12 +555,16 @@ const report: any = {
   countsArtifactErrors: [] as string[], // state-counts.md is missing, or its bytes are not what the gate measures (#7377)
   countsRowSetErrors: [] as string[], // the README's row set and the artifact's disagree
   countsHandEdited: [] as string[], // a count column is back in the README — a hand-maintained number in the merge path
+  countsTotalErrors: [] as string[], // the four columns and the walk's own `classified` disagree — the fold dropped a status (#13083)
+  unknownStatus: [] as string[], // a ledger `status` outside STATUS_COLUMNS — counted by the walk, dropped by the fold (#13083)
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
   producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
   // The three evidence counters, and the distinction between the first two is
-  // the whole point: `evidenceLocal` is how many repo-rooted paths `live` entries
-  // DECLARE, `evidenceMissing` is how many of those do not exist here. The
+  // the whole point: `evidenceLocal` is how many repo-rooted paths the SCANNED
+  // statuses DECLARE (EVIDENCE_SCANNED_STATUSES — see there for why `planned`
+  // and `experimental` joined `live` and why `dead` did not), `evidenceMissing`
+  // is how many of those do not exist here. The
   // summary line used to print `evidenceLocal` under the word "resolved", so
   // breaking five pointers left the count at 330 and the run still said
   // "330 resolved" (#5623). Count and word now agree.
@@ -478,7 +582,7 @@ const report: any = {
   // moves WITHIN the cited file satisfies both while pointing at nothing. This
   // asks the complementary question: does the cited file name the property at
   // all, in any of its camelCase/snake_case spellings?
-  keyMentionsChecked: 0, // resolvable (live entry, cited local file) pairs asked
+  keyMentionsChecked: 0, // resolvable (scanned-status entry, cited local file) pairs asked
   keyMentionExempt: 0, // ...of which this many are recorded in the shrink-only baseline
   keyMentionUnanchored: [] as string[], // ...and this many are NOT — FAILS the gate
   keyMentionStale: [] as string[], // a baseline row whose pair now anchors — also FAILS
@@ -565,6 +669,13 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   cat.classified++;
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
   report.totals.byStatus[status] = (report.totals.byStatus[status] || 0) + 1;
+  // #13083 — an unrecognized value is still COUNTED here, deliberately. Dropping
+  // it would keep `cat.classified` and the `byStatus` buckets in agreement and
+  // hide the row from the totals reconciliation downstream, which is the very
+  // silence this names. It is counted, and it is reported.
+  if (!KNOWN_STATUSES.has(status)) {
+    report.unknownStatus.push(`${type}/${path} → "${status}"`);
+  }
   // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
   if (led !== null) {
     verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
@@ -585,7 +696,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     collectOutOfRange(pv, `${type}/${path} [producer]`);
     collectAnchorFindings(pv, `${type}/${path} [producer]`);
   }
-  if (status === 'live' && led?.evidence) {
+  if (EVIDENCE_SCANNED_STATUSES.has(status) && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
     // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
     // counted, not resolved — see evidence.mts for why the old
@@ -827,6 +938,19 @@ if (!existsSync(readmeFile)) {
   report.countsHandEdited = counts.handCountErrors;
 }
 
+// ── the fold's arithmetic (#13083) ──
+// Outside the README block above on purpose: the three legs there all read the
+// README or the artifact, and every one of them is satisfied by a fold that
+// silently dropped a status. This one reads the WALK — `types.<type>.classified`,
+// counted by its own `++` and never through `byStatus` — so it is the only
+// comparison here whose two sides are not the same measurement twice. It must
+// therefore run even when the README is gone, which is why it is not nested.
+report.countsTotalErrors = reconcileStateCountTotals({
+  governed: GOVERNED,
+  byStatus: Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
+  classified: Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.classified])),
+});
+
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
 // A MALFORMED value does fail: it silently disables the staleness check for
@@ -865,7 +989,7 @@ const totalProofFailures = report.proofErrors.length + report.proofMissing.lengt
 const failed =
   totalUnclassified > 0 ||
   totalProofFailures > 0 ||
-  // A `live` entry whose repo-local evidence path is gone. Red since #5623 — the
+  // A scanned-status entry whose repo-local evidence path is gone. Red since #5623 — the
   // ⚠ it replaces was calibrated for the false-positive era, not for the parser
   // that now resolves 330 paths and reports zero. Cross-repo attribution never
   // reaches this list: checkEvidence only resolves the LOCAL bucket.
@@ -911,7 +1035,14 @@ const failed =
   report.readmeMalformedRows.length > 0 ||
   report.countsArtifactErrors.length > 0 ||
   report.countsRowSetErrors.length > 0 ||
-  report.countsHandEdited.length > 0;
+  report.countsHandEdited.length > 0 ||
+  // A ledger `status` outside the published vocabulary, and the arithmetic that
+  // proves the artifact under-counted because of it (#13083). Red rather than ⚠
+  // on the zero-census argument stated at KNOWN_STATUSES: measured across all 31
+  // ledgers on the commit that switched this on, every value was one of the
+  // four, so the gate starts green and only a NEW typo can red it.
+  report.unknownStatus.length > 0 ||
+  report.countsTotalErrors.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -927,7 +1058,7 @@ if (asJson) {
   // "extracts nothing"); "resolved" is the verdict. They are equal on a green
   // run, which is exactly why printing only the first read as a pass.
   console.log(
-    `\nevidence paths: ${report.evidenceLocal} repo-local path(s) declared by 'live' entries, ` +
+    `\nevidence paths: ${report.evidenceLocal} repo-local path(s) declared by ${EVIDENCE_SCANNED_LABEL} entries, ` +
     `${report.evidenceLocal - report.evidenceMissing} resolved against this checkout` +
     (report.evidenceMissing ? `, ${report.evidenceMissing} MISSING` : '') +
     `; ${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
@@ -1019,7 +1150,7 @@ if (asJson) {
     (report.keyMentionUnanchored.length ? `, ${report.keyMentionUnanchored.length} UNANCHORED` : '') + '.',
   );
   if (report.keyMentionUnanchored.length) {
-    console.log(`\n✗ ${report.keyMentionUnanchored.length} 'live' citation(s) name a file that never names the property:`);
+    console.log(`\n✗ ${report.keyMentionUnanchored.length} ${EVIDENCE_SCANNED_LABEL} citation(s) name a file that never names the property:`);
     report.keyMentionUnanchored.forEach((s: string) => console.log(`    ${s}`));
     console.log('\n' + KEY_MENTION_GUIDANCE.split('\n').map((l) => (l ? `   ${l}` : '')).join('\n'));
   }
@@ -1034,21 +1165,26 @@ if (asJson) {
     );
   }
   if (report.staleEvidence.length) {
-    console.log(`\n✗ ${report.staleEvidence.length} 'live' entr(ies) cite a file that is missing from THIS repo:`);
+    console.log(`\n✗ ${report.staleEvidence.length} ${EVIDENCE_SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));
     console.log(
-      '\n   A `live` verdict IS its evidence pointer — "this property has a runtime consumer,\n' +
-      '   here it is". When the cited file is gone from this checkout the claim is no longer\n' +
-      '   falsifiable: declared, but nothing enforces that anything still reads the property,\n' +
+      '\n   A verdict IS its evidence pointer — "this property has a runtime consumer,\n' +
+      '   here it is", or for a refusal ("planned" / "experimental") "here is the code that\n' +
+      '   rejects it". When the cited file is gone from this checkout the claim is no longer\n' +
+      '   falsifiable: declared, but nothing enforces that anything still reads the property\n' +
+      '   — or still refuses it —\n' +
       '   and a directory move or a rename is the whole cost of getting there.\n\n' +
       '   Three repairs, and picking the right one is the work:\n' +
-      '     • the consumer MOVED inside this repo → repoint the path, and stamp `verifiedAt`\n' +
-      '       while you have the call graph open;\n' +
-      '     • the consumer moved to ANOTHER repo → say so with a realm marker\n' +
+      '     • the consumer (or the refuser) MOVED inside this repo → repoint the path, and\n' +
+      '       stamp `verifiedAt` while you have the call graph open;\n' +
+      '     • it moved to ANOTHER repo → say so with a realm marker\n' +
       '       (`objectui: packages/app-shell/…`, `cloud: …`). Attributed paths are counted,\n' +
       '       never resolved, and never fail here — that boundary is deliberate;\n' +
-      '     • the consumer is GONE → the verdict is not `live` any more. Re-classify under\n' +
-      '       ADR-0049 enforce-or-remove instead of repointing at a plausible survivor.\n\n' +
+      '     • it is GONE → the verdict no longer holds. A `live` entry whose consumer left\n' +
+      '       re-classifies under ADR-0049 enforce-or-remove; a `planned` / `experimental`\n' +
+      '       entry whose REFUSER left is the louder case — the key is now accepted in\n' +
+      '       silence, and the entry is either wrong or the refusal needs restoring. Either\n' +
+      '       way, do not repoint at a plausible survivor.\n\n' +
       '   This was a ⚠ until #5623 for one reason: the pre-#3857 parser took\n' +
       '   `evidence.split(":")[0]` as the filename, flagged 48 of 227 entries and every one\n' +
       '   was a false positive — so it could not fail the build, and the one real rot it was\n' +
@@ -1093,6 +1229,29 @@ if (asJson) {
   if (totalUnclassified) {
     console.log(`\n✗ ${totalUnclassified} UNCLASSIFIED — classify in packages/spec/liveness/<type>.json:`);
     report.unclassified.forEach((s: string) => console.log(`    ${s}`));
+  }
+  if (report.unknownStatus.length) {
+    console.log(
+      `\n✗ ${report.unknownStatus.length} ledger row(s) whose \`status\` is not one of ` +
+      `${STATUS_COLUMNS.join(' / ')}:`,
+    );
+    report.unknownStatus.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   This is the shape UNCLASSIFIED above cannot catch, and it is worse than\n' +
+      '   UNCLASSIFIED because it looks DONE: the row has a verdict, the forward pass is\n' +
+      `   satisfied, the walk counts it — and then ${STATE_COUNTS_FILE} drops it, because\n` +
+      `   the fold reads ${STATUS_COLUMNS.join(' / ')} and nothing else. The published\n` +
+      '   total comes out short by exactly these rows, and every other check in this gate\n' +
+      '   compares that total against itself and agrees (#13083).\n\n' +
+      '   Since #13041 the same value costs a second check: the evidence scan reads a\n' +
+      '   declared population, and a status in neither the scanned nor the unscanned set\n' +
+      "   has its `evidence` pointer counted by the census and READ BY NOTHING. A typo is\n" +
+      '   in neither set by construction.\n\n' +
+      '   Fix the VALUE in packages/spec/liveness/<type>.json — it is almost always a\n' +
+      "   misspelling of the verdict the author meant. ⛔ Never widen STATUS_COLUMNS to\n" +
+      '   accept it: that vocabulary is what the generated artifact publishes as columns,\n' +
+      '   and a fifth name there changes the artifact (see the totals failure below).',
+    );
   }
   if (report.ungoverned.length) {
     console.log(`\n✗ ${report.ungoverned.length} REGISTERED metadata type(s) governed by nothing:`);
@@ -1213,6 +1372,15 @@ if (asJson) {
       '   cell; the Notes prose is what this table is for.',
     );
   }
+  if (report.countsTotalErrors.length) {
+    console.log(
+      `\n✗ ${report.countsTotalErrors.length} governed type(s) where ${STATE_COUNTS_FILE}'s columns ` +
+      "do not add up to the walk's own count:",
+    );
+    report.countsTotalErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    STATE_COUNTS_TOTALS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
   // ── re-verification clock ──
   // Annotated at the boundary: `report` is deliberately `any` (see its
   // declaration), so without this every `v.*` below is `any` too — which is how
@@ -1307,7 +1475,7 @@ if (asJson) {
     console.log(
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
-      'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
+      `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +
       'file names the property it is evidence for (or is a recorded exemption), all bound ' +

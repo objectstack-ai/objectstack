@@ -437,6 +437,142 @@ export function mapCollection(
 }
 
 /**
+ * Which view family one payload belongs to — the `viewKind` discriminator, and
+ * for a container the slot the payload sits in.
+ *
+ * Load-bearing rather than informational: the view conversions are
+ * SHAPE-SCOPED, and two of them strip a key that is inert on one family and
+ * LIVE on the other (`aria` is retired on a form and live on a list, `data` the
+ * reverse). A walker that handed every payload to every conversion would delete
+ * live keys, so every payload arrives labelled.
+ */
+export type ViewPayloadKind = 'list' | 'form';
+
+/**
+ * The container slots a `view` body aggregates its payloads under — the four
+ * `ViewSchema` keys, paired with the family each holds.
+ *
+ * Also the container DISCRIMINATOR: `containerHasAView` (`ui/view.zod.ts`) asks
+ * exactly "is at least one of these present?", and `ViewMetadataSchema`'s two
+ * flattened-overlay arms guard all four to `undefined` for the same reason.
+ */
+const VIEW_CONTAINER_SLOTS = [
+  { key: 'list', named: false, kind: 'list' },
+  { key: 'form', named: false, kind: 'form' },
+  { key: 'listViews', named: true, kind: 'list' },
+  { key: 'formViews', named: true, kind: 'form' },
+] as const;
+
+/**
+ * Immutably map every list/form view payload in `stack.views[]`, in **all three
+ * persisted spellings** of a `view` metadata body.
+ *
+ * `mapper` receives one payload dict, the family it belongs to, and its path,
+ * and returns the same reference (no change) or a new dict. Every container on
+ * the way — the stack, `views`, an item, its `listViews`/`formViews` record —
+ * is copied only when a descendant actually changed: {@link mapCollection}'s
+ * contract, one level further in.
+ *
+ * **Why this is centralized (#13031).** `ViewMetadataSchema` accepts three body
+ * shapes and all three land in `sys_metadata` rows, but every view-family
+ * conversion was written against the container alone — so for a stored ViewItem
+ * record or a flattened overlay the whole chain was a no-op, while
+ * `applyConversionsToStoredItem`'s documented policy (data at rest is "the
+ * perpetual consumer arriving late") promised it had run. A row written under an
+ * old protocol therefore kept its historical shape and the rehydration parse
+ * then refused exactly what was never rewritten: the "row that once worked
+ * breaks with no author in the loop" case the stored pass exists to prevent.
+ * Same structural gap the LINT walk closed one layer over — a standalone
+ * ViewItem's nested `config.*` judged by neither list-view field rule — and the
+ * same remedy `region-slots.ts` applied to flow regions: one table, one walk,
+ * so the reach cannot differ per conversion.
+ *
+ * **The three spellings, discriminated by the schema's own discriminators** —
+ * never by heuristics, and in `ViewMetadataSchema`'s own member order, so the
+ * walk and the parse cannot disagree about what a body is:
+ *
+ *   1. **ViewItem record** — `viewKind` names the family and `config` holds the
+ *      payload (`{ name, object, viewKind, config }`). This is member 1's
+ *      discriminated union: `viewKind` picks the arm, `config` is validated
+ *      against ListView/FormView. Requiring `config` to be a dict is that arm's
+ *      own requirement: a body with a non-object `config` matches no member at
+ *      all (the record arm needs an object, both overlay arms guard
+ *      `config: undefined`), so it is malformed and gets no rewrite rather than
+ *      being re-read as some other spelling.
+ *   2. **Container** — at least one of {@link VIEW_CONTAINER_SLOTS}, the payload
+ *      in each present slot. Member 2, whose `containerHasAView` refinement is
+ *      that same test.
+ *   3. **Flattened overlay** — the payload IS the top-level body, with
+ *      `viewKind` naming the family alongside the `object` binding. Members 3
+ *      and 4 are `ListViewSchema`/`FormViewSchema` extended with those identity
+ *      fields, so "the top level is the payload" is what the schema declares,
+ *      not an inference: which family it is comes from `viewKind`, which #7741
+ *      made REQUIRED on both arms precisely because the object-bound read paths
+ *      match on `object` + `viewKind`. The mapper therefore sees a dict that
+ *      also carries the row's identity keys; no key any view conversion strips
+ *      collides with that set, and `view-spelling-walk.test.ts` pins it so a
+ *      later conversion whose key DOES collide fails loudly instead of deleting
+ *      a row's binding.
+ *
+ * A body matching none of the three passes through untouched — this walker
+ * never manufactures shape, the same discipline `applyConversions` states for
+ * the table as a whole.
+ */
+export function mapViewPayloads(
+  stack: Dict,
+  mapper: (payload: Dict, kind: ViewPayloadKind, path: string) => Dict,
+): Dict {
+  return mapCollection(stack, 'views', (view, path) => {
+    const kind = view.viewKind;
+    const isKind = kind === 'list' || kind === 'form';
+
+    // 1. ViewItem record — the payload hangs off `config`, family from `viewKind`.
+    if (isKind && isDict(view.config)) {
+      const mapped = mapper(view.config, kind, `${path}.config`);
+      return mapped === view.config ? view : { ...view, config: mapped };
+    }
+
+    // 2. Container — a payload per present slot, family from the slot itself.
+    //    Selected by the PRESENCE of a slot, not by whether one converted: a
+    //    container in which nothing changed is still a container, and must not
+    //    fall through to have its top level walked as an overlay as well.
+    if (VIEW_CONTAINER_SLOTS.some(({ key }) => view[key] !== undefined)) {
+      let next = view;
+      for (const { key, named, kind: slotKind } of VIEW_CONTAINER_SLOTS) {
+        const slot = next[key];
+        if (!isDict(slot)) continue;
+        if (!named) {
+          const mapped = mapper(slot, slotKind, `${path}.${key}`);
+          if (mapped !== slot) next = { ...next, [key]: mapped };
+          continue;
+        }
+        let namedChanged = false;
+        const rebuilt: Dict = { ...slot };
+        for (const [name, entry] of Object.entries(slot)) {
+          if (!isDict(entry)) continue;
+          const mapped = mapper(entry, slotKind, `${path}.${key}.${name}`);
+          if (mapped === entry) continue;
+          rebuilt[name] = mapped;
+          namedChanged = true;
+        }
+        if (namedChanged) next = { ...next, [key]: rebuilt };
+      }
+      return next;
+    }
+
+    // 3. Flattened overlay — the body IS the payload. Reached only once the
+    //    container slots are known absent (the guard those two arms declare),
+    //    and only when `config` is absent too: a present-but-malformed `config`
+    //    is case 1's business, not a licence to strip this row's top level.
+    if (isKind && view.config === undefined) {
+      return mapper(view, kind, path);
+    }
+
+    return view;
+  });
+}
+
+/**
  * Rename `dict[from]` → `dict[to]`, immutably. Returns `null` when there is
  * nothing to do — the caller keeps the original reference and emits no notice.
  *

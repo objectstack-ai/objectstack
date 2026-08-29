@@ -45,6 +45,11 @@ export const NotificationSubscription = ObjectSchema.create({
             label: 'Topic',
             required: true,
             searchable: true,
+            // [#12978] Sibling-declaration bound (#11374 route A): subscribed
+            // topics are matched against the event's `sys_notification.topic`
+            // (maxLength: 200 there), so a longer stored topic could never
+            // match an event the platform can store.
+            maxLength: 200,
             description: 'Notification topic this principal subscribes to.',
         }),
 
@@ -57,6 +62,15 @@ export const NotificationSubscription = ObjectSchema.create({
             // expansion above is wired: an email-shaped value is matched against
             // `sys_user` (kept verbatim when no user matches), and anything otherwise
             // unrecognized falls through as a bare user id.
+            // [#12978] Derived bound (#11374 route A) over the declared
+            // selector grammar: the widest arm is `owner_of:object:id` =
+            // 'owner_of:' (9) + object API name (≤ 255 — storage-owned by
+            // `sys_metadata.name`, maxLength: 255, #12144) + ':' (1) + record
+            // id (≤ 255 — the physical id column, varchar(255)) = 520. Every
+            // other arm is narrower: an email ≤ 254 (RFC 5321) and
+            // `sys_user.email` is a string-family varchar(255); 'user:' + id
+            // = 260; 'role:'/'team:' + a per-org name.
+            maxLength: 520,
             description:
                 "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | an email | a bare user id.",
         }),

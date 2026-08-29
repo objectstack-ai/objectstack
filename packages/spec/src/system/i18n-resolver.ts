@@ -923,6 +923,32 @@ function lookupPageComponentCopy(
 }
 
 /**
+ * How many levels of `properties.children` nesting `translatePage` descends
+ * below region level (#12961). Authored page trees run three or four deep in
+ * practice, so the cap is not a limit any real document meets — it exists
+ * because `children` is authored data, and a resolver that never throws must
+ * still be finite on a pathological one.
+ *
+ * Paired with, not a substitute for, the ancestor-path cycle guard in
+ * {@link translatePage}: the cycle guard catches a subtree that contains
+ * itself, the cap catches one that is merely absurd. Deliberately NOT
+ * exported — the guard is a safety property of the walk, not a contract
+ * consumers address, and this card widens the resolver without widening any
+ * published face. The pin lives in `i18n-resolver.test.ts`, which restates
+ * this number so raising it here reds there.
+ */
+const MAX_NESTED_COMPONENT_DEPTH = 32;
+
+/**
+ * The id a component is addressed by, or `undefined` when it carries none.
+ * Tolerates non-object entries because `children` is `z.array(z.unknown())`.
+ */
+function pageComponentId(component: PageComponentLike | undefined): string | undefined {
+  if (!component || typeof component !== 'object') return undefined;
+  return typeof component.id === 'string' && component.id.length > 0 ? component.id : undefined;
+}
+
+/**
  * Apply the active locale to a page metadata document — translates the page's
  * own `label` / `description` and the `properties.title` / `properties.subtitle`
  * of every `page:header` component in its regions, against
@@ -941,9 +967,35 @@ function lookupPageComponentCopy(
  * two, it wins wherever both could apply (a `page:header` that does carry an
  * id).
  *
- * Only region-level components are visited: `page:header` is a top-level
- * layout block by convention, and components nested inside another component's
- * `properties` (tabs, sections) are untyped free-form props.
+ * Components nested in a container's declared `properties.children` array are
+ * visited too, recursively (#12961, ruled 2026-08-29). This REVERSES the
+ * region-only boundary that stood here — "components nested inside another
+ * component's `properties` are untyped free-form props" — which had made the
+ * resolver narrower than the face it serves: `pages.<name>.components.<id>`
+ * has always PARSED copy for a nested id, so an author could write copy that
+ * nothing would ever apply (measured: hotCRM's four KPI labels, nested in a
+ * `page:card`'s children, stayed English on a fully translated page). The
+ * ruling widens the resolver to the published face rather than narrowing a
+ * released face.
+ *
+ * `children` is the ONLY slot descended — it is the one composition key
+ * (#5775). `body` is a renderer-side back-compat fallback for stored
+ * documents, not an authorable spelling, so descending it would resurrect a
+ * second spelling; `properties.items[].children` (`page:tabs`,
+ * `page:accordion`) sits one level deeper than the slot the ruling names and
+ * is left for its own contract call.
+ *
+ * Nested components are reached by the **id route only**. The page-name header
+ * route addresses THE page's header, and a `page:header` nested inside a
+ * container is not it.
+ *
+ * When one id appears more than once, the ruling fixes the winner: a
+ * region-level component carrying it WINS outright, and among nested
+ * components the document-order (depth-first) FIRST match takes it — one
+ * bundle entry, one component. The descent is depth-capped
+ * ({@link MAX_NESTED_COMPONENT_DEPTH}) and cycle-safe, because `children` is
+ * authored data and a resolver must not hang or blow the stack on a document
+ * that contains itself.
  *
  * A list page's filter-preset tab bar
  * (`interfaceConfig.userFilters.tabs[].label`) is translated too, against
@@ -966,16 +1018,59 @@ export function translatePage<T extends PageLike>(
     ?? lookupPageAttr(bundle, name, 'label', opts);
   const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
 
-  const translateComponent = (component: PageComponentLike): PageComponentLike => {
-    if (!component || typeof component !== 'object') return component;
+  // Collision arbitration, pass 1 (#12961): every id carried by a REGION-LEVEL
+  // component. The ruling makes region level the outright winner when an id
+  // repeats across levels, so the whole set has to be known before the descent
+  // visits its first nested component — a region-level namesake in a LATER
+  // region still beats a nested match seen earlier.
+  const regionLevelIds = new Set<string>();
+  if (Array.isArray(doc.regions)) {
+    for (const region of doc.regions) {
+      if (!region || typeof region !== 'object' || !Array.isArray(region.components)) continue;
+      for (const component of region.components) {
+        const id = pageComponentId(component);
+        if (id !== undefined) regionLevelIds.add(id);
+      }
+    }
+  }
+
+  // Pass 2's ledger: ids already taken by an earlier nested component, so the
+  // document-order first match keeps the entry. Claimed on first SIGHTING
+  // rather than on a resolved lookup — within one call `lookupPageComponentCopy`
+  // is a pure function of the id (bundle, page name and options are fixed), so
+  // "first nested match" and "first nested sighting" select the same component
+  // and the cheaper test is the honest one.
+  const claimedNestedIds = new Set<string>();
+
+  // The current descent path, for the cycle guard. Ancestors only — a subtree
+  // referenced twice as a SIBLING is two legitimate components, not a cycle,
+  // and the collision ledger above is what decides between them.
+  const ancestors = new Set<PageComponentLike>();
+
+  const translateComponent = (component: PageComponentLike, depth: number): PageComponentLike => {
+    // `children` is declared `z.array(z.unknown())`: bare component-id strings
+    // and other non-component values are legal entries, and an array is not a
+    // component — spreading one would rewrite it into an object.
+    if (!component || typeof component !== 'object' || Array.isArray(component)) return component;
+    // Cycle guard: this node is already an ancestor of itself.
+    if (ancestors.has(component)) return component;
+
+    const nested = depth > 0;
+    const id = pageComponentId(component);
 
     // Per-component copy (#6080) — addressed by the component's own id, so it
     // is strictly more specific than the page-name route below and is applied
     // first. A `page:header` that DOES carry an id can therefore be translated
     // either way, and the id wins.
-    const copy = typeof component.id === 'string' && component.id.length > 0
-      ? lookupPageComponentCopy(bundle, name, component.id, opts)
-      : undefined;
+    //
+    // At nesting level the ruled collision rule (#12961) arbitrates first: a
+    // region-level component holding this id takes the entry outright, and
+    // among nested components the first in document order takes it.
+    let copy: Partial<Record<PageComponentCopyKey, string>> | undefined;
+    if (id !== undefined && (!nested || (!regionLevelIds.has(id) && !claimedNestedIds.has(id)))) {
+      if (nested) claimedNestedIds.add(id);
+      copy = lookupPageComponentCopy(bundle, name, id, opts);
+    }
 
     let next = component;
     if (copy) {
@@ -997,6 +1092,17 @@ export function translatePage<T extends PageLike>(
       };
     }
 
+    // Descend into the declared composition slot (#12961). Applied AFTER the
+    // copy overlay so the translated children survive the props spread above;
+    // the two never contend for a key, since `children` is not a copy key.
+    const children = translateChildren(component, depth);
+    if (children !== undefined) {
+      next = { ...next, properties: { ...next.properties, children } };
+    }
+
+    // The page-name header route addresses THE page's header, so it stops at
+    // region level — nested components are reached by the id route only.
+    if (nested) return next;
     if (next.type !== PAGE_HEADER_COMPONENT) return next;
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
@@ -1011,10 +1117,29 @@ export function translatePage<T extends PageLike>(
     };
   };
 
+  /**
+   * The component's translated `properties.children`, or `undefined` when
+   * there is nothing to descend into — so a component without the slot is
+   * returned untouched rather than gaining an invented `properties` bag.
+   */
+  const translateChildren = (component: PageComponentLike, depth: number): unknown[] | undefined => {
+    if (depth >= MAX_NESTED_COMPONENT_DEPTH) return undefined;
+    const props = component.properties;
+    if (!props || typeof props !== 'object' || Array.isArray(props)) return undefined;
+    const children = (props as Record<string, unknown>).children;
+    if (!Array.isArray(children)) return undefined;
+    ancestors.add(component);
+    try {
+      return children.map((child) => translateComponent(child as PageComponentLike, depth + 1));
+    } finally {
+      ancestors.delete(component);
+    }
+  };
+
   const regions = Array.isArray(doc.regions)
     ? doc.regions.map((region) => {
         if (!region || typeof region !== 'object' || !Array.isArray(region.components)) return region;
-        return { ...region, components: region.components.map(translateComponent) };
+        return { ...region, components: region.components.map((c) => translateComponent(c, 0)) };
       })
     : doc.regions;
 

@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "build": "tsup && node ../../../scripts/check-dts-emitted.mjs",
+    "build": "rm -rf dist && tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run"
   },
   "dependencies": {

@@ -132,13 +132,13 @@ export const SELECT_OPTION_EDITABILITY_GUIDANCE: KeySetGuidance = {
   keys: EDITABILITY_BOUNDARY_KEYS,
   prescription:
     'Editability is not a per-OPTION concern — a deliberate boundary, not a missing '
-    + 'key (#8201): an option declares WHICH value may be picked and WHEN it is offered, '
+    + 'key: an option declares WHICH value may be picked and WHEN it is offered, '
     + 'and nothing in the field pipeline reads a per-option enabled/disabled flag today '
     + '(the select and radio widgets treat the FIELD-level state as the single '
     + 'authority), so a key here would be metadata the renderer never honours '
     + '(ADR-0049). To withdraw ONE option, give it the per-option `visibleWhen` '
-    + 'predicate — the one `*When` surface that also binds `current_user` (ADR-0068), '
-    + 'so an option can be withheld per record or per role, and the rule validator '
+    + 'predicate — it binds `current_user` (ADR-0068), so an option can be withheld '
+    + 'per record or per role, and the rule validator '
     + 'refuses a write of a value whose predicate is false. To freeze the WHOLE picker, '
     + 'write `readonly: true` (or the conditional `readonlyWhen` predicate) on the field '
     + 'that owns these options. If a shown-but-unselectable option ever earns a reader, '

@@ -289,8 +289,10 @@ describe('countLines — what a citation can address', () => {
 // inputs, and @objectstack/spec's globs cover neither package — so naming them
 // reds that gate, and the only way to satisfy it would be to declare an input
 // this file does not have. The counts below come from a stub, not from those
-// files: a citation whose real line count matters is asserted against the real
-// ledgers in the contract test at the bottom of this file.
+// files. Until 2026-08-29 (#13043) the shipped ledgers were re-checked against
+// their real line counts by a contract test at the bottom of this file; that
+// population is now zero and the test is gone (see the note where it stood), so
+// these unit tests are the whole of the bound's coverage.
 describe('checkCitationLines', () => {
   const lines = (n: number) => () => n;
 
@@ -322,13 +324,22 @@ describe('checkCitationLines', () => {
 // Contract test against the REAL ledgers: the gate reports these, so a rotted
 // pointer committed to a ledger fails here too.
 describe('shipped ledgers', () => {
+  // The statuses whose `evidence` the gate scans (#13041), mirrored from
+  // `EVIDENCE_SCANNED_STATUSES` in check-liveness.mts. This filter used to read
+  // `live` alone, which is what the gate itself read — and when the gate widened
+  // to the refusal statuses this contract test would have stayed on the narrower
+  // population, re-creating one layer down the exact split the card is about:
+  // pointers the census counts and nothing verifies. `dead` stays out here for
+  // the reason the gate states there: a dead row's pointer lives in `note`.
+  const SCANNED_STATUSES = new Set(['live', 'planned', 'experimental']);
+
   it('every local evidence path resolves', () => {
     const missing: string[] = [];
     let local = 0;
     for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
       const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
       const visit = (key: string, entry: any) => {
-        if (entry?.status !== 'live' || typeof entry?.evidence !== 'string') return;
+        if (!SCANNED_STATUSES.has(entry?.status) || typeof entry?.evidence !== 'string') return;
         const r = checkEvidence(entry.evidence, (p) => existsSync(join(repoRoot, p)));
         local += r.local.length;
         r.missing.forEach((m) => missing.push(`${ledger.type}/${key} → ${m}`));
@@ -344,53 +355,21 @@ describe('shipped ledgers', () => {
     expect(local).toBeGreaterThan(100);
   });
 
-  it('every local `path:NNN` citation names a line that file has', () => {
-    const outOfRange: string[] = [];
-    let citations = 0;
-    const lineCount = (p: string): number | null => {
-      const f = join(repoRoot, p);
-      if (!existsSync(f)) return null;
-      return countLines(readFileSync(f, 'utf8'));
-    };
-    for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
-      const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
-      const visit = (key: string, entry: any) => {
-        if (entry?.status !== 'live' || typeof entry?.evidence !== 'string') return;
-        const scan = checkEvidence(entry.evidence, () => true);
-        citations += scan.localCitations.length;
-        for (const c of checkCitationLines(scan, lineCount)) {
-          outOfRange.push(`${ledger.type}/${key} → ${c.path}:${c.line} (file has ${c.lines})`);
-        }
-      };
-      for (const [key, entry] of Object.entries<any>(ledger.props || {})) {
-        visit(key, entry);
-        for (const [ck, centry] of Object.entries<any>(entry?.children || {})) visit(`${key}.${ck}`, centry);
-      }
-    }
-    expect(outOfRange).toEqual([]);
-    // Same non-vacuity guard as above, one level down: a parser that stopped
-    // retaining lines would satisfy the assertion above by extracting nothing
-    // (the #5623 lesson — "all in range" over zero citations is what a degraded
-    // parser prints too). The GUARDED FAILURE MODE IS EXACTLY ZERO, so zero is
-    // exactly what the floor tests, and the sibling floor above keeps its own
-    // number because the `local` PATH population it guards is not draining.
-    //
-    // Why not a bigger number here, when this one used to be 100 (#13003): the
-    // symbol-anchor migration (#12516's grammar, adopted batch by batch under
-    // #13003) RETIRES line citations by design — 300 at that card's filing, 175
-    // after batch 2, 82 after batch 3 — so any floor above zero reds on
-    // legitimate drainage and re-opens the same escalation one batch later.
-    // Ruled 2026-08-28 on #13003 (comment 5458356183): lower to `> 0`, the only
-    // floor that never lies during the migration while still catching
-    // extracts-nothing at full strength.
-    //
-    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
-    // retired — DELETE this assertion AND this comment IN THE SAME PR that
-    // retires it, together with the `outOfRange` assertion above, which has
-    // nothing left to check. That is the conscious decision at zero the `> 0`
-    // floor exists to force. Never let it pass silently on an empty population.
-    expect(citations).toBeGreaterThan(0);
-  });
+  // The `path:NNN` contract test stood here until 2026-08-29 (#13043), when the
+  // standing instruction in its own guard comment came due: #13003 retired the
+  // last line citation (`field.conditionalRequired` re-classified `dead`, so its
+  // `evidence` string and the citation in it are gone) and the gate now prints
+  // `line citations: 0 pointer(s) written`. The `> 0` floor ruled on 2026-08-28
+  // (#13003, comment 5458356183) reds at exactly that moment BY DESIGN, to force
+  // a conscious decision rather than a silent pass on an empty population; the
+  // `outOfRange` assertion it named as its companion had nothing left to check.
+  // The `it` went with its two assertions because nothing else was in it, and a
+  // body that walks every ledger and asserts nothing is the vacuous shape this
+  // file exists to refuse (#5623). No coverage is lost: the ARITHMETIC of the
+  // line bound stays unit-tested in `checkCitationLines` above, and the gate's
+  // two-number line stays pinned in check-liveness.test.ts. If a `path:NNN`
+  // citation is ever written again the ledger has a new population — restore a
+  // contract test here rather than trusting the unit tests to cover shipped data.
 
   it('every local `path#symbol` anchor names a symbol its file contains (#12516)', () => {
     const bad: string[] = [];

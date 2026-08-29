@@ -36,6 +36,13 @@ import { ObjectStackClient, ScopedEnvironmentClient } from './index';
 import type { CloneDataResult } from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
+    AnalyticsMetadataResponse,
+    AnalyticsSqlResponse,
+    BaseResponse,
+    TriggerFlowResponse,
+} from '@objectstack/spec/api';
+import type {
+    AnalyticsResult,
     AutomationResult,
     DelegableScope,
     ImportObjectResult,
@@ -363,6 +370,135 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
 }
 
 /**
+ * [#12034 — shipping half] The three `packages` WRITE verbs, bound to the bare
+ * `InstalledPackage` row.
+ *
+ * These did not carry an ERASED type, they carried a FALSE one:
+ * `{ package: any; message?: string }`, a body no surface has ever emitted.
+ * The only serving surface is `runtime`'s `/packages` domain — the REST
+ * registrar mounts no twin for `POST /packages`,
+ * `PATCH /packages/:id/enable` or `PATCH /packages/:id/disable`, measured by
+ * driving `registerPackageRoutes` and enumerating what it mounted — and it
+ * answers `success(pkg)`. That the WIRE says so is pinned against the real
+ * dispatcher in `packages-write-envelope.test.ts`; that the DECLARATION says
+ * so can only be pinned here, for this file's standing reason.
+ *
+ * ⛔ `packages.get` is deliberately ABSENT from this list. It is the half of
+ * #12034 that was NOT shipped: its two mounted surfaces answer different
+ * envelopes (dispatcher `success(pkg)`, REST `sendOk(res, { package })`), so
+ * no declaration is true on both and binding either member would harden a
+ * falsehood — the very defect this function closes for its neighbours. Making
+ * it bindable requires converging the PRODUCERS, which is a wire-behaviour
+ * ruling of its own.
+ */
+export async function returnTypePrecisionPins12034(): Promise<void> {
+    // ── direction 1: the bare row, on all three ──────────────────────────
+    expectTypeOf(await client.packages.install({ id: 'com.acme.crm', version: '1.0.0' }))
+        .toEqualTypeOf<InstalledPackage>();
+    expectTypeOf(await client.packages.enable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    expectTypeOf(await client.packages.disable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+
+    // ── direction 2: the read the false declaration invited must now FAIL ─
+    // ⚠️ RED BEFORE, all three: while the member was `any`, `.package` was a
+    // legal read, so each suppression below went UNUSED and tsc reported
+    // TS2578. That unused-suppression signal IS the defect stated as a
+    // compile error — the whole point of the card is that
+    // `(await client.packages.enable(id)).package` compiled and was
+    // `undefined` at runtime. After the binding the row has no `package` key,
+    // the suppressions are used, and the reads are refused at the call site
+    // where a consumer would have written them.
+    // @ts-expect-error the install route answers the row; there is no `.package`
+    void (await client.packages.install({ id: 'com.acme.crm', version: '1.0.0' })).package;
+    // @ts-expect-error the enable route answers the row; there is no `.package`
+    void (await client.packages.enable('com.acme.crm')).package;
+    // @ts-expect-error the disable route answers the row; there is no `.package`
+    void (await client.packages.disable('com.acme.crm')).package;
+
+    // Same direction for the `message` sibling the old envelope also promised
+    // and no surface sends.
+    // @ts-expect-error no surface sends a `message` alongside the row
+    void (await client.packages.enable('com.acme.crm')).message;
+
+    // ── the UNSHIPPED half, pinned as unchanged ──────────────────────────
+    // Not evidence for this card — a guard that `get` is not "tidied up" into
+    // one of the two shapes while the fork is still open.
+    expectTypeOf(await client.packages.get('com.acme.crm')).toEqualTypeOf<{ package: any }>();
+}
+
+/**
+ * [#12104 — the in-repo half] The SIXTH erasure spelling: no return annotation
+ * and `return res.json()`, whose published type came from `lib.dom`'s
+ * `Response.json(): Promise< any >`. The method names neither `any` nor
+ * `Promise` nor `unwrapResponse`, which is how the class survived two censuses.
+ *
+ * Five of the card's 43 are bound here — the families whose producers are IN
+ * THIS REPO, so the true type is measurable by DRIVING them
+ * (`analytics-automation-json-erasure.test.ts`: a real `AnalyticsService`, a
+ * real `AutomationEngine`, the real `HttpDispatcher` and the real `RestServer`,
+ * with only the socket stood in for). The other 38 are the better-auth-backed
+ * `auth.*` / `organizations.*` / `oauth.*` families and are NOT touched here.
+ *
+ * ## What makes these five different from every binding above
+ *
+ * `unwrapResponse` strips the `{ success, data }` envelope; `res.json()` does
+ * not. So four of the five resolve to the ENVELOPE and the annotation says so;
+ * the fifth is served by `@objectstack/rest` with no envelope at all and binds
+ * the bare payload. Getting that split wrong in either direction typechecks
+ * against `any` and ships a false declaration — the census's highest-risk band.
+ *
+ * Type-level for the reason this file's header gives: a runtime test cannot
+ * observe a return-type narrowing at all.
+ */
+export async function returnTypePrecisionPins12104(): Promise<void> {
+    // ── the three dispatcher-served analytics reads: the ENVELOPE ─────────
+    // `data` is the producer's declared return, relayed by `deps.success(v)`.
+    expectTypeOf(await client.analytics.query({ cube: 'crm_account', measures: ['n'] }))
+        .toEqualTypeOf<BaseResponse & { data: AnalyticsResult }>();
+    expectTypeOf(await client.analytics.meta()).toEqualTypeOf<AnalyticsMetadataResponse>();
+    expectTypeOf(await client.analytics.explain({ cube: 'crm_account', measures: ['n'] }))
+        .toEqualTypeOf<AnalyticsSqlResponse>();
+
+    // ── the trigger door: the ENVELOPE over the same payload its sibling
+    //    `automation.execute` unwraps ─────────────────────────────────────
+    expectTypeOf(await client.automation.trigger('approve_account', {}))
+        .toEqualTypeOf<BaseResponse & { data: AutomationResult }>();
+
+    // ── the one REST-served method: the BARE payload ──────────────────────
+    expectTypeOf(await client.analytics.queryDataset({ selection: { measures: ['n'] } }))
+        .toEqualTypeOf<AnalyticsResult>();
+
+    // ── direction 2: the reads the erasure allowed must now FAIL ──────────
+    // Each suppression is unused — a TS2578 error — while the method still
+    // returns `any`, because `any` satisfies every one of these.
+
+    // The envelope/payload confusion, in the direction a caller writes it:
+    // reading a payload key off the enveloped value.
+    // @ts-expect-error `analytics.query` answers the envelope; the rows are under `.data`
+    void (await client.analytics.query({ cube: 'crm_account', measures: ['n'] })).rows;
+    // @ts-expect-error `analytics.meta` answers the envelope; the cubes are under `.data`
+    void (await client.analytics.meta()).length;
+    // @ts-expect-error `analytics.explain` answers the envelope; the statement is under `.data`
+    void (await client.analytics.explain({ cube: 'crm_account', measures: ['n'] })).sql;
+    // @ts-expect-error `automation.trigger` answers the envelope; the run is under `.data`
+    void (await client.automation.trigger('approve_account', {})).runId;
+
+    // …and the SAME confusion in the opposite direction on the one method that
+    // really is bare. This is the half that makes the split load-bearing rather
+    // than a family-wide guess.
+    // @ts-expect-error `queryDataset` is served bare by @objectstack/rest — there is no envelope
+    void (await client.analytics.queryDataset({ selection: { measures: ['n'] } })).data;
+
+    // The two spec response types that LOOK like the right binding and are
+    // narrower than the contract their route relays. Pinned at the binding so a
+    // future sweep cannot "tidy" either annotation onto them: the keys below are
+    // served by the real producers and neither schema declares them.
+    // @ts-expect-error `TriggerFlowResponse.data` declares no `runId` — a paused run carries one
+    void (undefined as unknown as TriggerFlowResponse).data.runId;
+    // @ts-expect-error `TriggerFlowResponse.data` declares no `screen` — a screen-flow pause carries one
+    void (undefined as unknown as TriggerFlowResponse).data.screen;
+}
+
+/**
  * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
  * counted as evidence that this card's change was needed. Each pins a
  * near-miss trap the next sweep would otherwise reach for.
@@ -406,6 +542,8 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof searchResultIsNotTheGlobalSearchShape).toBe('function');
         expect(typeof returnTypePrecisionPins11925).toBe('function');
         expect(typeof returnTypePrecisionPins12038).toBe('function');
+        expect(typeof returnTypePrecisionPins12034).toBe('function');
+        expect(typeof returnTypePrecisionPins12104).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });

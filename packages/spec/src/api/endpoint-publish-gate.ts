@@ -28,7 +28,7 @@
  * |---|---|
  * | unsupported target (`script` / `proxy` / incomplete `object_operation` / empty flow `target`) | `planEndpointTarget` — `packages/runtime/src/endpoint-executor.ts` |
  * | mapping (`transform`, unusable path, colliding `target`) | `mappingDeclarationRejection` — `packages/runtime/src/api-mapping.ts` |
- * | policy (armed-but-unusable `rateLimit`, negative `cacheTtl`, `cacheTtl` off GET) | `endpointRateLimiterRegistry` / `cacheControlHeader` — `packages/runtime/src/endpoint-policy.ts` |
+ * | policy (armed-but-unusable `rateLimit`, negative `cacheTtl`, `cacheTtl` off GET) | `createEndpointRateLimiterRegistry` / `computeCacheControl` — `packages/runtime/src/endpoint-policy.ts` |
  * | namespace + uniqueness | ADR-0121 D1/D2, and `normalizeEndpointPath` (`packages/metadata/src/endpoint-matcher.ts`) for the path form |
  *
  * The runtime keeps its refusals: a declaration can still reach the store

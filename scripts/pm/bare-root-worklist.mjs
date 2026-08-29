@@ -291,6 +291,25 @@ const TRIAGE = new Map([
     why: 'the literal is a join() component; the real population is the driver subtree, declared '
       + 'there at 259 of 291 files (89%) instead of 259 of 4903 (5.3%) at the bare root',
   }],
+  ['check:logger-receiver-detach SCAN_ROOTS packages', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'the population is the non-test TypeScript source under the root, declared beside the '
+      + 'constant at the three live extensions (4968 of 5485 tracked files, 90.6%) instead of '
+      + 'the bare root. The remainder is manifests, JSON, markdown and fixtures the gate never '
+      + 'opens, and the test files it deliberately does not read',
+  }],
+  ['check:logger-receiver-detach SCAN_ROOTS examples', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'same declaration, same gate: the TypeScript source under the examples root, 204 of 241 '
+      + 'tracked files (84.6%), rather than the bare word. The uncovered remainder carries no '
+      + 'TypeScript for this gate to read',
+  }],
+  ['check:logger-receiver-detach SCAN_ROOTS apps', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'same declaration, same gate: 28 of 40 tracked files (70.0%) under the apps root, at the '
+      + 'two extensions that exist there. The lowest ratio of the three and still a real '
+      + 'narrowing — the uncovered dozen are config and content files, none of them TypeScript',
+  }],
   ['check:objectql-double-limit SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'package test files',

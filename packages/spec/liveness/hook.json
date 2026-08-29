@@ -1,21 +1,24 @@
 {
   "type": "hook",
-  "_note": "HookSchema. Seeded from docs/audits/2026-06-hookschema-property-liveness.md — a model-healthy schema (near-total liveness). Consumers: objectql hook-binder/engine + runtime sandbox. PREVIEW LOOKUP RECORDED 2026-08-10 (#7427): the two `dead` rows here (`label`, `description`) are the docs-shaped precedent the rest of this ledger cites, so the maintainer's 2026-08-10 previews ruling (#7131 — see README, 'Designer previews count as consumers') was applied to them mechanically, and the answer is an ABSENCE. There is NO registered metadata-admin preview for `hook` at objectui @e9ab52f9: packages/app-shell/src/views/metadata-admin/previews/index.ts registers 22 types and `hook` is not among them. Recorded rather than skipped, because 'the type has no registered preview' is the sentence the README asks for and the one `translation.label`'s superseded note was missing. Both verdicts stand unchanged; the ruling gives them nothing to re-litigate.",
+  "_note": "HookSchema. Seeded from docs/audits/2026-06-hookschema-property-liveness.md — a model-healthy schema (near-total liveness). Consumers: objectql hook-binder/engine + runtime sandbox. PREVIEW LOOKUP RECORDED 2026-08-10 (#7427): the two `dead` rows here (`label`, `description`) are the docs-shaped precedent the rest of this ledger cites, so the maintainer's 2026-08-10 previews ruling (#7131 — see README, 'Designer previews count as consumers') was applied to them mechanically, and the answer is an ABSENCE. There is NO registered metadata-admin preview for `hook` at objectui @e9ab52f9: packages/app-shell/src/views/metadata-admin/previews/index.ts registers 22 types and `hook` is not among them. Recorded rather than skipped, because 'the type has no registered preview' is the sentence the README asks for and the one `translation.label`'s superseded note was missing. Both verdicts stand unchanged; the ruling gives them nothing to re-litigate. 2026-08-28 (#13003): all eight `path:NNN` citations in this file were re-anchored. The five `evidence` pointers into `hook-binder.ts` were all wrong and all IN RANGE — two keys even shared one wrong line — while the three `producer` pointers at `:221` were accurate and are a straight grammar migration. The declarative trio's `evidence` was a bare path with no line, which no line bound can falsify; those are anchors now.",
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/objectql/src/hook-binder.ts:182",
-      "note": "registration key + log identity."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (`hook: hook.name` on every skip and error record, `hookName: hook.name` on the registration itself — the binding key and the log identity)",
+      "note": "registration key + log identity. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:182` landed on the string literal `'no handler';`. That is INSIDE the right function, but it names a fragment of a diagnostic rather than any read of this key, so the pointer was true about the file and false about the code. Re-closed by hand against 8cb96ec41."
     },
     "object": {
       "status": "live",
-      "evidence": "packages/objectql/src/hook-binder.ts:171",
-      "note": "single/array/'*' wildcard honored."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (`const objects = normalizeObjects(hook.object)`, then one engine registration per object × event); packages/objectql/src/hook-binder.ts#normalizeObjects (single name, array, or the `*` wildcard)",
+      "note": "single/array/'*' wildcard honored. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:171` had rotted onto a bare closing brace above the binder's main loop, and it was the SAME line `events` cited, so two keys shared one wrong pointer. Re-closed by hand against 8cb96ec41."
     },
     "events": {
       "status": "live",
-      "evidence": "packages/objectql/src/hook-binder.ts:171",
-      "note": "per-event registration."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (`const events = Array.isArray(hook.events) ? hook.events : []`, then one engine registration per event)",
+      "note": "per-event registration. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:171` had rotted onto a bare closing brace; see `object`, which cited the same line. Re-closed by hand against 8cb96ec41."
     },
     "body": {
       "status": "live",
@@ -24,13 +27,15 @@
     },
     "handler": {
       "status": "live",
-      "evidence": "packages/objectql/src/hook-binder.ts:237",
-      "note": "deprecated but fully wired; body takes precedence."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/hook-binder.ts#resolveHandler (`const h = hook.handler` — resolved against the engine's registered functions); packages/objectql/src/hook-binder.ts#bindHooksToEngine (the legacy-handler warning, emitted when a hook declares a handler string and no `body`)",
+      "note": "deprecated but fully wired; body takes precedence. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:237` had rotted onto a closing brace at the end of the per-event registration loop, ~76 lines above `resolveHandler`. Re-closed by hand against 8cb96ec41."
     },
     "priority": {
       "status": "live",
-      "evidence": "packages/objectql/src/hook-binder.ts:177",
-      "note": "genuinely orders hooks (lower first)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (`priority: typeof hook.priority === 'number' ? hook.priority : 100` — handed to the engine registration, lower first)",
+      "note": "genuinely orders hooks (lower first). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:177` had rotted onto `result.skipped += 1;`, the unresolved-handler counter. Re-closed by hand against 8cb96ec41."
     },
     "async": {
       "status": "live",
@@ -44,27 +49,27 @@
     },
     "retryPolicy": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "evidence": "packages/objectql/src/hook-wrappers.ts",
-      "producer": "packages/objectql/src/hook-binder.ts:221 — the binder hands the AUTHORED hook to wrapDeclarativeHook, so the wrapper reads the author's block rather than a caller-built options object",
-      "note": "{maxRetries,backoffMs} linear backoff. Producer-side re-verified 2026-08-09 (#4837 slice): the whole declarative group (condition / async / retryPolicy / timeout / onError) is fed from one call site, so one producer pointer covers it — this is the shape `Seed.env` failed, checked and passing here."
+      "evidence": "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (`meta.retryPolicy?.maxRetries` / `?.backoffMs`, with `retryPolicyDefaults()` supplying the schema's own numbers when the block is present but partial — the absence of the block is not the same as an empty one)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (`wrapDeclarativeHook(hook, resolved, { logger, metrics })` — the binder hands the AUTHORED hook to the wrapper, so the wrapper reads the author's block rather than a caller-built options object)",
+      "note": "{maxRetries,backoffMs} linear backoff. Producer-side re-verified 2026-08-09 (#4837 slice): the whole declarative group (condition / async / retryPolicy / timeout / onError) is fed from one call site, so one producer pointer covers it — this is the shape `Seed.env` failed, checked and passing here. 2026-08-28: RE-ANCHORED (#13003) — the PRODUCER citation was ACCURATE (`:221` is still the `wrapDeclarativeHook` call), so that half is the grammar migration. What this pass repairs is the EVIDENCE half, which was a bare path with no line at all and therefore unfalsifiable by the line bound BY CONSTRUCTION — the same silent class `hook.timeout` and `hook.onError` carried. Re-closed by hand against 8cb96ec41."
     },
     "timeout": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "evidence": "packages/objectql/src/hook-wrappers.ts",
-      "producer": "packages/objectql/src/hook-binder.ts:221 (same wrapDeclarativeHook call as retryPolicy)",
-      "note": "wall-clock abort, independent of body.timeoutMs."
+      "evidence": "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (step 4 of the wrapper's ladder — a wall-clock abort around the handler, independent of `body.timeoutMs`)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (the same `wrapDeclarativeHook` call as retryPolicy)",
+      "note": "wall-clock abort, independent of body.timeoutMs. 2026-08-28: RE-ANCHORED (#13003) — accurate producer line migrated; the path-only evidence pointer is now an anchor (see `retryPolicy`). Re-closed by hand against 8cb96ec41."
     },
     "onError": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "evidence": "packages/objectql/src/hook-wrappers.ts",
-      "producer": "packages/objectql/src/hook-binder.ts:221 (same wrapDeclarativeHook call as retryPolicy)",
-      "note": "'log' suppresses+continues; 'abort' rethrows."
+      "evidence": "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (step 5 of the wrapper's ladder — `log` swallows and continues, `abort` rethrows; a `HookConditionError` deliberately does NOT reach it, since the condition decides whether there is a handler run at all)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (the same `wrapDeclarativeHook` call as retryPolicy)",
+      "note": "'log' suppresses+continues; 'abort' rethrows. 2026-08-28: RE-ANCHORED (#13003) — accurate producer line migrated; the path-only evidence pointer is now an anchor (see `retryPolicy`). Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "dead",

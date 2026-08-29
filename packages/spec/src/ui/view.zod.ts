@@ -2251,13 +2251,48 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * Conditional-visibility predicate (CEL) — the whole section is shown only
    * when TRUE (ADR-0089, canonical `*When` name). Same per-layer binding root as
    * {@link FormFieldSchema.visibleWhen}: `record` (+ `previous`, `parent`) in
-   * runtime forms, `data` in metadata-editing forms — and, as there, **no
-   * `current_user`**: it is unbound at this level, so such a predicate faults
-   * and falls back to visible (#6146). ⛔ No `features.*` either — that one is
+   * runtime forms, `data` in metadata-editing forms.
+   *
+   * ## `current_user` DOES bind here — client-side, and only under a host that
+   * publishes a scope (objectui#6110 + #6111)
+   *
+   * This block said "no `current_user` at section level" (#6146) for as long as
+   * that held, and it held for TWO reasons, both since discharged. The console
+   * form renderer now reads the host shell's predicate scope and threads it into
+   * `isSectionVisible` (objectui#6110), where it used to pass `undefined`; and
+   * the object-view chain no longer drops the key before a renderer sees it —
+   * `ObjectForm` / `SplitForm` / `ModalForm` / `DrawerForm` copy the authored
+   * `visibleWhen` onto the `section-divider` pseudo-field and the SDUI form
+   * renderer evaluates that pseudo-field's predicate with the same scope bound
+   * (objectui#6111). So a section predicate resolves `current_user` and its
+   * ADR-0068 D1 aliases (`user`, `ctx.user`, `os.user`) alongside `record` +
+   * `previous` + `parent`. The text above is a re-measurement of a claim that
+   * was true when it was written, not a relaxation of anything.
+   *
+   * The two limits {@link FormFieldSchema.visibleWhen} records apply here
+   * verbatim — both fail in the direction an author will not notice:
+   *
+   * 1. ⚠️ **This is a rendering rule, never authorization.** Nothing
+   *    server-side evaluates a form-view section `visibleWhen` — nor a field
+   *    one: the write path evaluates field `readonlyWhen` / `requiredWhen` and
+   *    per-option `visibleWhen`, and that is the whole list. A role test written
+   *    here hides a group of controls and protects no data — the record still
+   *    carries every value in the section and every other read surface still
+   *    returns them. To withhold a field by role, declare field-level security
+   *    on a permission set, which the server enforces.
+   * 2. ⚠️ **The scope belongs to the HOST, so it is empty wherever no host
+   *    publishes one.** The console's public form route (`/f/:slug`) is mounted
+   *    outside any provider deliberately — an anonymous visitor has no
+   *    principal — so `current_user` is unbound there, the predicate faults,
+   *    and visibility's fallback is `true`: the section the test was meant to
+   *    hide is shown to everyone. The authed standalone route (`/forms/:name`)
+   *    publishes the session principal and binds normally.
+   *
+   * ⛔ No `features.*` either — that one is
    * refused at parse (ruled 2026-08-27, objectui#6262; see
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
+  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([

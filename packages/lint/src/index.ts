@@ -412,6 +412,12 @@ export {
 export type { ComponentPropsFinding, ComponentPropsSeverity } from './validate-component-props.js';
 
 export {
+  validateComponentTypes,
+  COMPONENT_TYPE_UNKNOWN,
+} from './validate-component-types.js';
+export type { ComponentTypeFinding } from './validate-component-types.js';
+
+export {
   validateChartBindings,
   CHART_DIMENSION_UNKNOWN,
   CHART_MEASURE_UNKNOWN,

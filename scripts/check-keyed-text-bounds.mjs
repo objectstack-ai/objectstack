@@ -224,40 +224,13 @@ const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
  * whatever the ledger holds, which is the property that makes it safe to land
  * with rows in it.
  *
- * `unboundable` is empty today, and empty is a RESULT: every keyed text column
- * in the tree either declares a bound or is one of the 15 `pending` rows below.
+ * The ledger is EMPTY today, and empty is a RESULT: every keyed text column in
+ * the tree declares a bound (#12978 retired the 15 `pending` rows the sweep
+ * landed with).
  *
  * @type {ReadonlyArray<{ pkg: string, column: string, kind: 'unboundable' | 'pending', why: string, issue?: string }>}
  */
 const ALLOWLIST = [
-  // ── #12978 ───────────────────────────────────────────────────────────────
-  // `packages/services/service-messaging` has never had a keyed-text-bounds pin
-  // -- the three that exist are scoped to `platform-objects`, `plugin-audit`
-  // and `plugin-security` -- so these 15 columns are the class's live members
-  // that no boundary-scoped pin could see. They are ledgered rather than fixed
-  // here because each bound needs a NAMED producer (route A's shape) and
-  // because declaring one moves the column TEXT -> varchar(n), a drift op that
-  // belongs to the services lane with a changeset. The full evidence, including
-  // which index each column keys, is on #12978.
-  //
-  // ⚠️ The sharpest of them: `sys_notification_delivery`'s
-  // `(notification_id, recipient_id, channel)` UNIQUE index is the outbox's
-  // dedup constraint, and on MySQL it does not exist at all today.
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_delivery.notification_id', kind: 'pending', issue: '#12978', why: 'FK to sys_notification.id; keys the UNIQUE dedup index' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_delivery.recipient_id', kind: 'pending', issue: '#12978', why: 'FK to sys_user.id; keys the UNIQUE dedup index' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_delivery.channel', kind: 'pending', issue: '#12978', why: 'open channel-id vocabulary; keys the UNIQUE dedup index' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_delivery.digest_key', kind: 'pending', issue: '#12978', why: 'derived recipient|channel|window key; bound follows its three parts' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_preference.user_id', kind: 'pending', issue: '#12978', why: 'FK to sys_user.id, or the literal * global default' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_preference.topic', kind: 'pending', issue: '#12978', why: 'open topic vocabulary, or the literal *' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_preference.channel', kind: 'pending', issue: '#12978', why: 'open channel-id vocabulary, or the literal *' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_receipt.notification_id', kind: 'pending', issue: '#12978', why: 'FK to sys_notification.id' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_receipt.user_id', kind: 'pending', issue: '#12978', why: 'FK to sys_user.id' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_receipt.channel', kind: 'pending', issue: '#12978', why: 'open channel-id vocabulary' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_subscription.topic', kind: 'pending', issue: '#12978', why: 'open topic vocabulary' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_subscription.principal', kind: 'pending', issue: '#12978', why: 'RecipientResolver.resolveOne() accepts an email-shaped value as well as a bare user id (#9807)' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_template.topic', kind: 'pending', issue: '#12978', why: 'open topic vocabulary' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_template.channel', kind: 'pending', issue: '#12978', why: 'open channel-id vocabulary' },
-  { pkg: 'packages/services/service-messaging', column: 'sys_notification_template.locale', kind: 'pending', issue: '#12978', why: 'BCP-47 tag; sys_email_template.locale is bounded at 16' },
 ];
 
 const ALLOWLIST_KINDS = new Set(['unboundable', 'pending']);
