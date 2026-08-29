@@ -153,6 +153,20 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
+    "@objectstack/plugin-email#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/platform-objects#test": {
       "dependsOn": ["^build"],
       "outputs": [],

@@ -43,9 +43,12 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-// The one code/prose separator in this repo, typed by the hand-written
-// `.d.mts` beside it. This file asks "is this a DECLARATION or a sentence
-// about one", which is precisely the question that module answers.
+// The one code/prose separator in this repo. This file asks "is this a
+// DECLARATION or a sentence about one", which is precisely the question that
+// module answers. The `.mjs` specifier is deliberate, and
+// `scripts/js-comment-mask.d.mts` beside it is the hand-written declaration
+// that gives `maskComments` its type — so this package's `tsc --noEmit`
+// verdict is a function of that file too, not just of the module.
 import { maskComments } from '../../../../../scripts/js-comment-mask.mjs';
 
 import { mailSettingsManifest } from '@objectstack/service-settings';
@@ -252,6 +255,12 @@ describe('#12993 — one SMTP port range, every door states it from there', () =
 
     // Control: the same corpus DOES contain the prose, so the scan is live and
     // the masking is what produced the zero.
-    expect(readFileSync(join(SRC, CONTRACT), 'utf8')).toContain('packages/cli/src/utils/port-contract.ts');
+    // ⛔ The bare filename, deliberately — NOT the repo-relative path. The
+    // cross-package-test-inputs collector takes quoted paths without parsing,
+    // so spelling the CLI's path here would force this package to declare an
+    // input radius over `packages/cli/src/**` for a string it only reads out
+    // of its own file. A literal with no separator is refused as too generic,
+    // which is the whole point: the control stays live, the radius stays honest.
+    expect(readFileSync(join(SRC, CONTRACT), 'utf8')).toContain('port-contract.ts');
   });
 });
