@@ -227,20 +227,24 @@ instance goes through `@objectstack/cloud-connection` (`os package install`).
 A still-configured `artifact-api` source fails loudly at `start()` rather
 than silently falling back to the filesystem scan.
 
-### 2. Persistence Write Gates
+### 2. Persistence Write Gate
 
-`MetadataManagerConfigSchema.persistence` is a two-axis runtime freeze. Both flags default to `true`.
+`MetadataManagerConfigSchema.persistence` is a runtime freeze. The flag defaults to `true`.
 
 | Flag | Effect when `false` |
 | :--- | :--- |
 | `persistence.writable` | `register()` becomes a no-op (or throws when `validation.throwOnError`). |
-| `persistence.overlayWritable` | `saveOverlay()` is rejected. Disables Studio overlays in sealed deployments. |
 
 ```typescript
 new MetadataManager({
-  persistence: { writable: false, overlayWritable: false },
+  persistence: { writable: false },
 });
 ```
+
+(`persistence.overlayWritable` was removed in #13135 with the paper
+metadata-customization protocol — the `saveOverlay()` it gated was never
+reachable from any served surface. Authoring it is now a compile-time and
+parse-time error carrying the prescription.)
 
 ### 3. DatabaseLoader Read-Through Cache
 

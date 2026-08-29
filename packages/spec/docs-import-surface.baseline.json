@@ -8,7 +8,6 @@
     "api/HttpFindQueryParams — no type export",
     "api/MetadataExportRequest — no type export",
     "api/MetadataImportRequest — no type export",
-    "api/MetadataOverlaySaveRequest — no type export",
     "api/MetadataQueryRequest — no type export",
     "automation/FlowVariable — no type export",
     "automation/StateMachine — no type export",

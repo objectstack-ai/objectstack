@@ -1323,8 +1323,8 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 // hook-body precedent's placement note applies here too: build-docs takes a
 // file's first JSDoc per exported symbol, and this constant needs no doc page.
 const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 (#8010; "
-  + 'PDF export itself was declined as #1301 NOT_PLANNED) — no renderer has ever produced a PDF '
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
+  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
   + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
   + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
   + "formats are 'csv', 'xlsx' and 'json'. "

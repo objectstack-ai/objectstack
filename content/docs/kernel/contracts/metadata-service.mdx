@@ -1,6 +1,6 @@
 ---
 title: IMetadataService Contract
-description: Reference for the Metadata Service contract — CRUD operations for object and field definitions, schema registry, overlay management, and import/export
+description: Reference for the Metadata Service contract — CRUD operations for object and field definitions, schema registry, and import/export
 ---
 
 The Metadata Service manages all object and field definitions at runtime. It serves as the **schema registry** — plugins, the Kernel, and the API layer all query this service to discover what objects exist and what fields they contain.
@@ -60,12 +60,6 @@ export interface IMetadataService {
   query?(query: MetadataQuery): Promise<MetadataQueryResult>;
   bulkRegister?(items: Array<{ type: string; name: string; data: unknown }>, options?: { continueOnError?: boolean; validate?: boolean }): Promise<MetadataBulkResult>;
   bulkUnregister?(items: Array<{ type: string; name: string }>): Promise<MetadataBulkResult>;
-
-  // Overlay / customization (optional)
-  getOverlay?(type: string, name: string, scope?: 'platform' | 'user'): Promise<MetadataOverlay | undefined>;
-  saveOverlay?(overlay: MetadataOverlay): Promise<void>;
-  removeOverlay?(type: string, name: string, scope?: 'platform' | 'user'): Promise<void>;
-  getEffective?(type: string, name: string, context?: { userId?: string; tenantId?: string; positions?: string[]; permissions?: string[] }): Promise<unknown | undefined>;
 
   // Watch / subscribe (optional)
   watch?(type: string, callback: MetadataWatchCallback): MetadataWatchHandle;
@@ -206,35 +200,16 @@ const validation = await metadataService.validate('object', definition);
 
 ---
 
-## Overlay Management
+## Overlay Management — removed
 
-Overlays customize a metadata item without modifying the base (system) definition.
-A `MetadataOverlay` references the target by `baseType` + `baseName`, carries a JSON
-Merge Patch in `patch`, and resolves in the order **system ← platform ← user**.
-
-```typescript
-// Save a platform-scope overlay
-await metadataService.saveOverlay({
-  id: 'overlay-platform-1',
-  baseType: 'object',
-  baseName: 'task',
-  scope: 'platform',
-  patch: { label: 'Work Item' },
-});
-
-// Read the merged (effective) definition with overlays applied
-const effective = await metadataService.getEffective('object', 'task', {
-  userId: 'user-123',
-});
-```
-
-| Property | Type | Description |
-|:---|:---|:---|
-| `baseType` | `string` | Metadata type being customized |
-| `baseName` | `string` | Metadata name being customized |
-| `scope` | `'platform' \| 'user'` | Customization scope (default `platform`) |
-| `owner` | `string` | Owner user ID, for `user`-scope overlays |
-| `patch` | `object` | JSON Merge Patch (changed fields only) |
+The optional `getOverlay` / `saveOverlay` / `removeOverlay` / `getEffective`
+members and their `MetadataOverlay` record were removed in #13135 (ADR-0049
+enforce-or-remove): they belonged to a paper customization protocol no route
+ever served, and ADR-0126 supersedes it on the record. Org-scoped
+customization is [ADR-0005's metadata overlay](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0005-metadata-customization-overlay.md)
+— opt-in per type via `allowOrgOverride`, written through the REST meta write
+doors, and read back through the layered read (`code` / `overlay` /
+`effective`).
 
 ---
 
@@ -293,7 +268,6 @@ console.log(result.failed);    // failed
 | Type | Description |
 |:---|:---|
 | `MetadataQuery` / `MetadataQueryResult` | Query parameters and paginated result for `query()` |
-| `MetadataOverlay` | Runtime customization layer (`baseType`, `baseName`, `scope`, `patch`) |
 | `MetadataExportOptions` | `{ types?, namespaces?, format? }` for `exportMetadata` |
 | `MetadataImportOptions` | `{ conflictResolution?, validate?, dryRun? }` for `importMetadata` |
 | `MetadataImportResult` | `{ total, imported, skipped, failed, errors? }` |
@@ -321,36 +295,14 @@ const views = await metadataService.listViews('account');
 const dashboard = await metadataService.get('dashboard', 'sales_overview');
 ```
 
-### User-Level Customization
+### Org-Level Customization
 
-Users can customize views via the overlay system:
-
-```typescript
-// Admin customizes a view for all users
-await metadataService.saveOverlay({
-  id: 'overlay-platform-1',
-  baseType: 'view',
-  baseName: 'account.default',
-  scope: 'platform',
-  patch: { columns: ['name', 'email', 'status', 'created_at'] },
-});
-
-// A specific user saves personal column preferences
-await metadataService.saveOverlay({
-  id: 'overlay-user-123',
-  baseType: 'view',
-  baseName: 'account.default',
-  scope: 'user',
-  owner: 'user-123',
-  patch: { columns: ['name', 'status'] },  // user only wants 2 columns
-});
-
-// Resolve effective view for a specific user
-const effectiveView = await metadataService.getEffective('view', 'account.default', {
-  userId: 'user-123',
-});
-// Result: base view ← platform overlay ← user-123 overlay
-```
+Per-org view customization rides ADR-0005's metadata overlay (opt-in per type
+via `allowOrgOverride`, `view` among the overlay types): an org-scoped write
+through the REST meta doors stores a `sys_metadata` row, and the layered read
+returns `code` / `overlay` / `effective` for it. The per-user, per-field patch
+overlay a previous revision of this page taught here was removed in #13135 —
+it was never served by any route.
 
 ### Permission-Based UI Filtering
 

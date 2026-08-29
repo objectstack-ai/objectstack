@@ -1472,7 +1472,8 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
       // and closes with the house `os migrate meta` sentence (#6856 route D).
       const prescribes = (fn: () => unknown) => {
         expect(fn).toThrow(/`global_nav` was removed from `ACTION_LOCATIONS`/s);
-        expect(fn).toThrow(/#6888/s);
+        expect(fn).toThrow(/ADR-0049 enforce-or-remove/s);
+        expect(fn).not.toThrow(/#\d{3,5}\b/);
         expect(fn).toThrow(/locations: \[\]/s);
         expect(fn).toThrow(/os migrate meta --from 16/s);
       };

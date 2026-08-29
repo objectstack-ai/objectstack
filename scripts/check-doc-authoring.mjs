@@ -405,6 +405,56 @@ const INTERNAL_ID = new RegExp(INTERNAL_ID_SOURCE, 'g');
 // rule meant widening the RECOGNISED POSITIONS below, exactly as this comment
 // used to prescribe.
 //
+// ## The FOURTH population: text BUILT INSIDE A FUNCTION
+//
+// The three buckets above are positions a literal is WRITTEN at. A share of
+// this tree's refusal prose is instead RETURNED BY A FUNCTION that occupies one
+// of those positions — `error: (iss) => '…'` on a zod schema's options, a
+// hoisted `const X = (key: string): string => '…'` referenced from `message:`
+// or `retiredKey(X(…))`, a `$ZodErrorMap` const referenced from `error:`, a
+// `(v): StrictObjectOptions => ({ history: '…' })` options factory. The climb
+// terminated at `ArrowFunction` / `ReturnStatement` and returned `undefined`,
+// so 28 literals carrying 32 tracker ids across 8 files sat outside every
+// bucket while this rule reported `0 violations` over four populated ones. The
+// gate was not wrong, it was SCOPED — and the scope boundary was invisible from
+// its output.
+//
+// Maintainer ruling 2026-08-29, verbatim: 「同意」 — the inheritance REACHES
+// refusal prose built inside `error: () =>` callbacks: same audience, same
+// moment; the ban follows the audience, not the spelling.
+//
+// ⛔ The climb is NOT unconditional through function bodies. That version
+// sweeps every string a helper happens to build, VALUES included, and a rule
+// that reports values as prose is one authors get disabled. The rule here is
+// exactly one sentence wide:
+//
+//   **A function is transparent to the climb only when the FUNCTION ITSELF
+//   sits in a recognised customer-facing position.**
+//
+// which is decided by asking {@link customerTextPosition} the same question
+// about the function node that it was asked about the literal. So:
+//
+//   - `error: (iss) => '…'`             — the function IS the `error` option.
+//   - `const X = (k) => '…'` where `X`  — the function IS a text-sink const,
+//     is a {@link collectTextSinkConsts}   the same fixed point the hoisted
+//     sink                                 VALUE spelling already rides on.
+//   - `(v): StrictObjectOptions => …`   — the function IS declared, by its own
+//     with a STRICT_OPTION_KEYS key        return-type annotation, to build a
+//     latched on the way up                strictObject options record.
+//   - `const helper = () => 'x'` that   — NOT transparent. Its body stays
+//     no recognised position consumes      unreachable, which is the whole
+//                                          point of the three clauses above.
+//
+// Their literals are bucketed `functionBuilt` rather than folded into the
+// bucket of the position the function occupies, and that is deliberate: the
+// blindness floor is PER BUCKET, so folding them into `message` / `tombstone`
+// would let this clause rot back to `undefined` while those buckets' DIRECT
+// members held the floor up — the exact silence this population was found by.
+//
+// `error:` is also recognised as a position in its own right (zod 4 renamed the
+// error-map option away from `message`); a plain string there is a `message`,
+// since nothing was built in a function.
+//
 // ## Why the positions alone are not enough: the hoisted-const spelling
 //
 // A position-only matcher reads `guidance: { where: '…' }` and stops at the
@@ -666,6 +716,43 @@ function calleeName(call, ts) {
   return ts.isPropertyAccessExpression(callee) ? callee.name.getText() : callee.getText();
 }
 
+/** Is this node a function whose body could hold customer-facing prose? */
+function isFunctionLike(n, ts) {
+  return ts.isArrowFunction(n) || ts.isFunctionExpression(n)
+    || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
+}
+
+/**
+ * The function a `return` belongs to, or `undefined` at module scope.
+ *
+ * Stops at a class or the source file rather than walking forever: a `return`
+ * with no enclosing function is not a shape this tree has, and treating one as
+ * transparent would be a climb with no boundary at all.
+ */
+function enclosingFunction(node, ts) {
+  for (let cur = node.parent; cur; cur = cur.parent) {
+    if (isFunctionLike(cur, ts)) return cur;
+    if (ts.isSourceFile(cur) || ts.isClassDeclaration(cur)) return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Does this function DECLARE, by its own return-type annotation, that it builds
+ * a `StrictObjectOptions` record?
+ *
+ * The same anchor {@link inStrictOptions} already trusts on a const
+ * (`const X: StrictObjectOptions = …`), one indirection over: the shared
+ * per-variant option factories in `ui/app.zod.ts` are written
+ * `(variant): StrictObjectOptions => ({ surface, aliases, history })`, and
+ * without this their `history` prose is written at a recognised KEY inside a
+ * function nothing else identifies. Annotation-driven, never name-driven: a
+ * factory that does not say what it returns is not taken at its word.
+ */
+function buildsStrictObjectOptions(fn, ts) {
+  return !!fn && /\bStrictObjectOptions\b/.test(fn.type ? fn.type.getText() : '');
+}
+
 /**
  * Is this property assignment a `StrictObjectOptions` key, in a position where
  * the value is really printed at the author?
@@ -707,7 +794,11 @@ function inStrictOptions(prop, ts) {
       const nm = p.name.getText();
       return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(declaredTypeText(p, ts));
     }
-    if (ts.isReturnStatement(p) || ts.isArrowFunction(p) || ts.isFunctionDeclaration(p)) return false;
+    // A function boundary. Transparent ONLY when the function declares itself
+    // an options factory by its return-type annotation — the fourth-population
+    // clause, kept as narrow here as it is in `customerTextPosition`.
+    if (isFunctionLike(p, ts)) return buildsStrictObjectOptions(p, ts);
+    if (ts.isReturnStatement(p)) return buildsStrictObjectOptions(enclosingFunction(p, ts), ts);
     cur = p;
   }
   return false;
@@ -822,7 +913,12 @@ function collectTextSinkConsts(sf, ts) {
     }
     if (ts.isPropertyAssignment(n)) {
       const name = n.name.getText();
-      if (name === 'message') seed(n.initializer, 'message');
+      // `error:` is zod 4's spelling of the error-map option and seeds exactly
+      // like `message:`. It is load-bearing rather than tidy: the credential
+      // refusals in `data/driver/common.zod.ts` reach their sink ONLY through
+      // `z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) })`, so without
+      // this line that const is not a sink and its whole body stays invisible.
+      if (name === 'message' || name === 'error') seed(n.initializer, 'message');
       else if (STRICT_OPTION_KEYS.has(name) && inStrictOptions(n, ts)) seed(n.initializer, 'strictObject');
     }
     if (ts.isCallExpression(n)) {
@@ -866,11 +962,37 @@ function collectTextSinkConsts(sf, ts) {
  * written in, so a nested prescription is reached rather than abandoned at its
  * own key.
  *
+ * A function boundary is crossed only when the FUNCTION ITSELF sits in a
+ * recognised position — decided by asking this same question about the function
+ * node (see the "fourth population" section of the Rule 3 header). ⛔ Never an
+ * unconditional climb through function bodies: that reports values as prose.
+ *
+ * @param {number} [fnDepth] how many function boundaries have been crossed
+ *   already. A bound, not a belief: the deepest real chain in this tree is one
+ *   (a literal in a const arrow referenced from a `message:`), and an
+ *   unbounded recursion over a self-referential const would not terminate.
  * @returns {{where: string, bucket: string}|undefined}
  */
-function customerTextPosition(node, ts, sinkConsts = new Map()) {
+function customerTextPosition(node, ts, sinkConsts = new Map(), fnDepth = 0) {
   let cur = node;
   let strictKey;
+  /**
+   * The fourth population's clause: `fn` encloses the literal and the climb
+   * wants to leave through it. Transparent only if `fn` is itself somewhere
+   * customer-facing.
+   */
+  const throughFunction = (fn) => {
+    if (!fn || fnDepth >= 4) return undefined;
+    // An options FACTORY, declared as such by its own return type, once a
+    // STRICT_OPTION_KEYS key has been latched on the way up.
+    if (strictKey && buildsStrictObjectOptions(fn, ts)) {
+      return { where: `strictObject ${strictKey} (built in a function)`, bucket: 'functionBuilt' };
+    }
+    const outer = customerTextPosition(fn, ts, sinkConsts, fnDepth + 1);
+    return outer
+      ? { where: `${outer.where} (built in a function)`, bucket: 'functionBuilt' }
+      : undefined;
+  };
   // A bound, not a belief: refusal prose in this tree reaches ~14 concatenated
   // operands, and an unbounded climb would walk to the SourceFile and start
   // reporting whole modules as messages. Raised from 60 with the structural
@@ -890,6 +1012,10 @@ function customerTextPosition(node, ts, sinkConsts = new Map()) {
     if (ts.isPropertyAssignment(p) && p.initializer === cur) {
       const name = p.name.getText();
       if (name === 'message') return { where: 'message:', bucket: 'message' };
+      // zod 4's spelling of the same option, printed at the same author in the
+      // same breath. A plain string here IS a message; only text a FUNCTION
+      // built gets the fourth population's own bucket, above.
+      if (name === 'error') return { where: 'error:', bucket: 'message' };
       if (!strictKey && STRICT_OPTION_KEYS.has(name) && inStrictOptions(p, ts)) strictKey = name;
       cur = p; continue;
     }
@@ -924,7 +1050,8 @@ function customerTextPosition(node, ts, sinkConsts = new Map()) {
         bucket: strictKey ? 'strictObject' : sinkConsts.get(nm),
       };
     }
-    if (ts.isReturnStatement(p) || ts.isArrowFunction(p)) return undefined;
+    if (ts.isReturnStatement(p)) return throughFunction(enclosingFunction(p, ts));
+    if (isFunctionLike(p, ts)) return throughFunction(p);
     cur = p;
   }
   return undefined;
@@ -948,7 +1075,7 @@ function customerTextPosition(node, ts, sinkConsts = new Map()) {
  */
 function findCustomerTextIdViolations(source, file, ts) {
   const out = [];
-  const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
+  const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
   const sf = parseSourceFile(file, source);
   const sinkConsts = collectTextSinkConsts(sf, ts);
   const visit = (node) => {
@@ -1345,7 +1472,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1377,10 +1504,13 @@ function selfTestRule3(expect) {
     // A test body carrying an id: in the tree, out of the population.
     write('packages/spec/src/ui/pin.test.ts',
       "expect(issue.message).toContain('400 INVALID_FILTER, #5869');");
-    // A clean member of each of the three folded-in buckets, so every bucket's
+    // A clean member of each of the FOUR folded-in buckets, so every bucket's
     // `seen` floor is satisfied on the green tree and the per-bucket blindness
-    // assertion below has something to go blind ABOUT.
-    write('packages/spec/src/data/doc.ts', [
+    // assertion below has something to go blind ABOUT. Held as ONE const with
+    // the fourth-population member last, so the two blindness cases below can
+    // each drop exactly one bucket from the same baseline rather than each
+    // carrying a hand-copied variant that drifts.
+    const DOC_CLEAN_BASE = [
       "import { z } from 'zod';",
       "import { strictObject } from '../shared/strict-object';",
       "import { retiredKey } from '../shared/retired-key';",
@@ -1393,12 +1523,21 @@ function selfTestRule3(expect) {
       '}, {',
       "  cursor: retiredKey('`cursor` was removed in protocol 17 (ADR-0049). Use `after`.'),",
       '});',
-    ].join('\n'));
+    ];
+    // The fourth population, clean: prose BUILT INSIDE a function that itself
+    // sits in a recognised position.
+    const DOC_FUNCTION_BUILT = [
+      'export const E = z.string({',
+      "  error: () => 'a machine name is a string — quote it.',",
+      '});',
+    ];
+    const DOC_CLEAN = [...DOC_CLEAN_BASE, ...DOC_FUNCTION_BUILT].join('\n');
+    write('packages/spec/src/data/doc.ts', DOC_CLEAN);
     const target = write('packages/spec/src/ui/action.zod.ts', CLEAN);
 
     const scan = () => {
       let out = [];
-      const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
+      const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
       for (const f of collectSpecSourceFiles()) {
         const r = findCustomerTextIdViolations(readFileSync(f, 'utf8'), f, ts);
         out = out.concat(r.violations);
@@ -1418,6 +1557,7 @@ function selfTestRule3(expect) {
     expect('the detector recognised a message string', r.seen.message >= 1, true);
     expect('the detector recognised a strictObject option string', r.seen.strictObject >= 1, true);
     expect('the detector recognised a tombstone prescription', r.seen.tombstone >= 1, true);
+    expect('the detector recognised text built inside a function', r.seen.functionBuilt >= 1, true);
     expect('the detector recognised a `.describe()` string', r.seen.describe >= 1, true);
 
     // Scope: a test body is out, an ordinary source is in. Asserted as a pair
@@ -1742,7 +1882,183 @@ function selfTestRule3(expect) {
         declaredTypeText(decl, ts), '');
     }
 
+    // ── The FOURTH population: text BUILT INSIDE A FUNCTION ─────────────────
+    //
+    // Ruled 2026-08-29, verbatim 「同意」 — the inheritance reaches refusal prose
+    // built inside `error: () =>` callbacks: same audience, same moment. Each
+    // case below is the pair, and the negative cases at the end are the reason
+    // the clause is written as "the FUNCTION must sit in a recognised position"
+    // rather than "climb through function bodies".
+
+    // RED #14 — the founding shape of this population: an `error:` error map
+    // written inline as an arrow function, its prose in a `+` chain.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'export const S = z.array(ParamSchema, {',
+      '  error: (iss) => (',
+      '    isObjectInput(iss)',
+      "      ? '`params` is the parameter DEFINITION array, not a values map. '",
+      "        + 'Use `bodyExtra: { … }` for a static request body (#5777). '",
+      "        + 'Expected an array of ActionParam, received an object.'",
+      '      : undefined',
+      '  ),',
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in an `error: () =>` callback is RED', r.violations.length, 1);
+    expect('the error-callback red names the position', r.violations[0]?.where, 'error: (built in a function)');
+    expect('the error-callback red gets its OWN bucket, not `message`',
+      r.violations[0]?.bucket, 'functionBuilt');
+
+    // RED #15 — the HOISTED spelling of the same thing, which is how most of
+    // this tree writes it: the prose lives in a module const and the `error`
+    // callback only DISPATCHES to it, so the literal is not lexically inside
+    // any function at all. Without `error:` seeding the sink pass, this const
+    // is not a sink and its whole body is silently clean.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'const PREVIEW_RETIRED =',
+      "  '`preview` was removed in @objectstack/spec 17.0.0 (#11846, ADR-0049) — '",
+      "  + 'use `dev` for the same behaviour.';",
+      "export const S = z.enum(['dev', 'prod'], {",
+      "  error: (issue) => (issue.input === 'preview' ? PREVIEW_RETIRED : undefined),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a const DISPATCHED from an `error:` callback is RED', r.violations.length, 1);
+    expect('the hoisted error-map red names its const', r.violations[0]?.where, 'via PREVIEW_RETIRED');
+
+    // RED #16 — a message BUILDER function referenced from `message:`. The
+    // literal sits in a function; the function is a text-sink const.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'const INLINE_CREDENTIAL_REFUSED = (key: string): string =>',
+      "  `\\`${key}\\` is a credential and is not accepted inline (#7990): bind a secret `",
+      "  + 'with `credentialsRef` instead.';",
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      "  message: INLINE_CREDENTIAL_REFUSED('password'),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id inside a message-BUILDER function is RED', r.violations.length, 1);
+    expect('the builder red names the const it travelled through',
+      r.violations[0]?.where, 'via INLINE_CREDENTIAL_REFUSED (built in a function)');
+
+    // RED #17 — a builder whose result is a `retiredKey()` argument, and one
+    // whose body ends in a `return` rather than a concise arrow body. The
+    // `return` leg is a separate clause in the climb and was measured live.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { retiredKey } from '../shared/retired-key';",
+      'const capRemoved = (key: string) => {',
+      "  return `\\`DriverCapabilities.${key}\\` was removed in 17.0.0 (#4634, ADR-0049).`;",
+      '};',
+      'export const S = z.object({',
+      "  joins: retiredKey(capRemoved('joins')),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id RETURNED from a tombstone-prescription builder is RED', r.violations.length, 1);
+    expect('the return-leg red names the const it travelled through',
+      r.violations[0]?.where, 'via capRemoved (built in a function)');
+
+    // RED #18 — an options FACTORY declared by its return-type annotation. The
+    // literal sits at a recognised strictObject key inside a function nothing
+    // else identifies, so only the annotation makes it reachable.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'const navItemSurface = (variant: string): StrictObjectOptions => ({',
+      '  surface: `this \\`${variant}\\` navigation item`,',
+      "  history: 'Until #4001 these were dropped silently — the entry still parsed.',",
+      '});',
+      "export const S = strictObject(navItemSurface('object'), { name: z.string() });",
+    ].join('\n'));
+    r = scan();
+    expect('an id in a `: StrictObjectOptions` options FACTORY is RED', r.violations.length, 1);
+    expect('the options-factory red names the position',
+      r.violations[0]?.where, 'strictObject history (built in a function)');
+
+    // RED #19 — a plain STRING at `error:`, zod 4's spelling of `message:`.
+    // Nothing was built in a function, so it is bucketed `message`.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "export const S = z.string({ error: 'a machine name is a string — quote it (#4286).' });",
+    ].join('\n'));
+    r = scan();
+    expect('an id in a plain `error:` string is RED', r.violations.length, 1);
+    expect('the plain `error:` red names the position', r.violations[0]?.where, 'error:');
+    expect('a plain `error:` string is a MESSAGE, not function-built',
+      r.violations[0]?.bucket, 'message');
+
     // ── Precision: what must NEVER fire ─────────────────────────────────────
+    //
+    // ⛔ The clause is NOT "climb through function bodies". These three are the
+    // difference, and each is the shape an unconditional climb would sweep:
+    // a helper building a VALUE, a plain local, and a comparison operand inside
+    // a function that IS recognised. A rule that reports values as prose is one
+    // authors get disabled (the false-positive lesson this file's Rule 3 header
+    // carries), so these are pinned as hard as the reds above.
+
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      '// An ordinary helper. Nothing customer-facing consumes it, so its body',
+      '// must stay unreachable — this is the whole boundary.',
+      "const slugFor = (kind: string) => `${kind}-#4286`;",
+      "const legacyToken = () => 'tag#4286';",
+      'export const S = z.object({ a: z.string().default(slugFor("x")) });',
+      'export const T = legacyToken;',
+    ].join('\n'));
+    expect('precision — an ordinary helper\'s body is NOT swept', scan().violations.length, 0);
+
+    // A function that IS recognised still only yields its recognised POSITIONS.
+    // A local inside the factory, and a key that is not a STRICT_OPTION_KEY,
+    // stay unreachable — crossing the function boundary does not turn the body
+    // into one big text position.
+    //
+    // ⚠️ Deliberately NOT asserted here: a conditional or comparison operand
+    // sitting UNDER a recognised key. The climb has passed through
+    // `ConditionalExpression` since the rule was written, and this file errs
+    // toward INCLUSION at a recognised position on purpose — the failure mode
+    // it guards is silence. That is the pre-existing rule, unchanged by the
+    // function clause, and pinning the opposite here would be pinning a claim
+    // the rule does not make.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'const navItemSurface = (variant: string): StrictObjectOptions => {',
+      "  const telemetryTag = `nav-${variant}-#4286`;",
+      '  void telemetryTag;',
+      '  return {',
+      '    surface: `this \\`${variant}\\` navigation item`,',
+      "    history: 'an unknown key here was dropped silently.',",
+      "    extraKeys: ['legacyTag4286'],",
+      '  };',
+      '};',
+      "export const S = strictObject(navItemSurface('object'), { name: z.string() });",
+    ].join('\n'));
+    expect('precision — a LOCAL inside a recognised options factory is not prose',
+      scan().violations.length, 0);
+
+    // ⭐ The self-test the ruling required IN THE SAME EDIT: an UNRECOGNISED
+    // spelling produces NO FLAG, SILENTLY — so the only thing that can speak
+    // for this population is its own `seen` floor. Prove that floor can fire
+    // while every other bucket stays populated. Without this, a future edit
+    // that returns `undefined` at the function boundary again reads as a clean
+    // tree, which is exactly how these 28 literals went unseen.
+    writeFileSync(target, CLEAN);
+    // The same baseline MINUS its one function-built member — the tree an
+    // unrecognised spelling leaves behind.
+    write('packages/spec/src/data/doc.ts', DOC_CLEAN_BASE.join('\n'));
+    r = scan();
+    expect('the function-built bucket can go blind on its own (main reds on it)',
+      r.seen.functionBuilt, 0);
+    expect('...while the other four stay populated, so the zero above is about THAT clause',
+      r.seen.message >= 1 && r.seen.strictObject >= 1
+      && r.seen.tombstone >= 1 && r.seen.describe >= 1, true);
+    write('packages/spec/src/data/doc.ts', DOC_CLEAN);   // restore the baseline
 
     // A validator's VALUE argument is not prose. `.min(3, …)` takes a message;
     // `.default('#4286')` does not, and an open "any string after position 0"
@@ -1818,23 +2134,14 @@ function selfTestRule3(expect) {
     // the case a total floor cannot see: three buckets still populated, one
     // gone silent. Emptying only the `.describe()` bucket must still register
     // as blindness in that bucket while the others stay positive.
-    write('packages/spec/src/data/doc.ts', [
-      "import { z } from 'zod';",
-      "import { strictObject } from '../shared/strict-object';",
-      "import { retiredKey } from '../shared/retired-key';",
-      'export const T = strictObject({',
-      "  surface: 'this doc',",
-      "  history: 'an unknown key here was dropped silently.',",
-      "  guidance: { where: 'not a doc key — delete it.' },",
-      '}, {',
-      "  cursor: retiredKey('`cursor` was removed in protocol 17 (ADR-0049). Use `after`.'),",
-      '});',
-    ].join('\n'));
+    write('packages/spec/src/data/doc.ts',
+      [...DOC_CLEAN_BASE.filter((l) => !l.includes('.describe(')), ...DOC_FUNCTION_BUILT].join('\n'));
     r = scan();
     expect('one bucket can go blind while the others stay populated — describe', r.seen.describe, 0);
     expect('...and the surviving buckets really did stay positive (so the zero above is about '
       + 'that bucket, not an emptied tree)',
-      r.seen.message >= 1 && r.seen.strictObject >= 1 && r.seen.tombstone >= 1, true);
+      r.seen.message >= 1 && r.seen.strictObject >= 1 && r.seen.tombstone >= 1
+      && r.seen.functionBuilt >= 1, true);
 
     // ...and the whole-population version: no recognised string of any kind.
     writeFileSync(target, "export const S = 1;\n");
@@ -1927,7 +2234,7 @@ function main() {
     return;
   }
   const messageIdViolations = [];
-  const seenByBucket = { message: 0, strictObject: 0, tombstone: 0, describe: 0 };
+  const seenByBucket = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
   for (const file of specSources) {
     const r = findCustomerTextIdViolations(readFileSync(file, 'utf8'), file, ts);
     messageIdViolations.push(...r.violations);
@@ -1983,11 +2290,12 @@ function main() {
       + `\n\n  ${blindBuckets.join(', ')}`
       + `\n\nso "no violations" below would be a verdict on a population this run never located.`
       + `\n\nThat is the dormant-gate shape, not a clean tree: the spec really does declare refusal`
-      + `\nprose, unknown-key guidance, tombstone prescriptions and \`.describe()\` docs, so a zero`
-      + `\nhere means the DETECTOR stopped matching how one of them is spelled — an options-object`
-      + `\nkey renamed away from \`message\`, a new validator helper, a \`strictObject\` wrapper under`
-      + `\na new name, a guidance table moved behind a helper \`customerTextPosition()\` does not`
-      + `\nclimb through.`
+      + `\nprose, unknown-key guidance, tombstone prescriptions, \`.describe()\` docs AND prose built`
+      + `\ninside \`error: () =>\` callbacks and message-builder functions, so a zero here means the`
+      + `\nDETECTOR stopped matching how one of them is spelled — an options-object key renamed away`
+      + `\nfrom \`message\`, a new validator helper, a \`strictObject\` wrapper under a new name, a`
+      + `\nguidance table moved behind a helper \`customerTextPosition()\` does not climb through, or`
+      + `\n— for \`functionBuilt\` — the function-boundary clause silently back to \`undefined\`.`
       + `\n\nThe floor is PER BUCKET and not on the total, deliberately: \`.describe()\` alone would`
       + `\nhold a total positive forever while the \`guidance\` matcher rotted unseen.`
       + `\n\nFix \`customerTextPosition()\` / \`collectTextSinkConsts()\` / STRICT_OPTION_KEYS /`
@@ -2041,7 +2349,8 @@ function main() {
     `✓ doc authoring guard: ${totalTextSeen} customer-facing string(s) across `
     + `${specSources.length} spec sources clean — no internal issue-id references `
     + `(message ${seenByBucket.message} · strictObject ${seenByBucket.strictObject} · `
-    + `tombstone ${seenByBucket.tombstone} · describe ${seenByBucket.describe}).`,
+    + `tombstone ${seenByBucket.tombstone} · describe ${seenByBucket.describe} · `
+    + `functionBuilt ${seenByBucket.functionBuilt}).`,
   );
 }
 

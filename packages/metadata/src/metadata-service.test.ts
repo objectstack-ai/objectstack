@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MetadataManager } from './metadata-manager';
 import { MemoryLoader } from './loaders/memory-loader';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
-import type { MetadataOverlay } from '@objectstack/spec/kernel';
 
 // Suppress logger output during tests
 vi.mock('@objectstack/core', async (orig) => ({
@@ -298,126 +297,12 @@ describe('MetadataManager — IMetadataService Contract', () => {
   });
 
   // ==========================================
-  // Overlay / Customization
+  // Overlay / Customization — REMOVED (#13135, ADR-0049)
   // ==========================================
-
-  describe('overlay management', () => {
-    const testOverlay: MetadataOverlay = {
-      id: 'overlay-1',
-      baseType: 'object',
-      baseName: 'account',
-      scope: 'platform',
-      patch: { label: 'Custom Account' },
-      active: true,
-    };
-
-    it('should save and retrieve an overlay', async () => {
-      await manager.saveOverlay(testOverlay);
-      const result = await manager.getOverlay('object', 'account', 'platform');
-      expect(result).toEqual(testOverlay);
-    });
-
-    it('should return undefined for missing overlay', async () => {
-      const result = await manager.getOverlay('object', 'nonexistent');
-      expect(result).toBeUndefined();
-    });
-
-    it('should remove an overlay', async () => {
-      await manager.saveOverlay(testOverlay);
-      await manager.removeOverlay('object', 'account', 'platform');
-      const result = await manager.getOverlay('object', 'account', 'platform');
-      expect(result).toBeUndefined();
-    });
-
-    it('should get effective metadata with overlays applied', async () => {
-      await manager.register('object', 'account', { name: 'account', label: 'Account', type: 'object' });
-      await manager.saveOverlay(testOverlay);
-
-      const effective = await manager.getEffective('object', 'account') as any;
-      expect(effective.label).toBe('Custom Account');
-      expect(effective.name).toBe('account');
-      expect(effective.type).toBe('object');
-    });
-
-    it('should apply user overlay on top of platform overlay', async () => {
-      await manager.register('object', 'account', { name: 'account', label: 'Account' });
-
-      await manager.saveOverlay({
-        id: 'platform-1',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'platform',
-        patch: { label: 'Platform Label', description: 'Platform Desc' },
-        active: true,
-      });
-
-      await manager.saveOverlay({
-        id: 'user-1',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'user',
-        patch: { label: 'User Label' },
-        active: true,
-      });
-
-      const effective = await manager.getEffective('object', 'account') as any;
-      expect(effective.label).toBe('User Label');
-      expect(effective.description).toBe('Platform Desc');
-    });
-
-    it('should not apply inactive overlays', async () => {
-      await manager.register('object', 'account', { name: 'account', label: 'Original' });
-      await manager.saveOverlay({
-        id: 'inactive-1',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'platform',
-        patch: { label: 'Should Not Apply' },
-        active: false,
-      });
-
-      const effective = await manager.getEffective('object', 'account') as any;
-      expect(effective.label).toBe('Original');
-    });
-
-    it('should apply user overlay scoped to specific userId via getEffective context', async () => {
-      await manager.register('view', 'account_list', { 
-        name: 'account_list', 
-        columns: ['name', 'email', 'status'] 
-      });
-
-      // Platform overlay
-      await manager.saveOverlay({
-        id: 'platform-view-1',
-        baseType: 'view',
-        baseName: 'account_list',
-        scope: 'platform',
-        patch: { columns: ['name', 'email', 'status', 'created_at'] },
-        active: true,
-      });
-
-      // User-specific overlay
-      await manager.saveOverlay({
-        id: 'user-view-1',
-        baseType: 'view',
-        baseName: 'account_list',
-        scope: 'user',
-        owner: 'user-456',
-        patch: { columns: ['name', 'status'] },
-        active: true,
-      });
-
-      // Without context — should apply platform but not user overlay (no owner match)
-      const general = await manager.getEffective('view', 'account_list') as any;
-      expect(general.columns).toEqual(['name', 'email', 'status', 'created_at']);
-
-      // With userId context — should apply user overlay
-      const forUser = await manager.getEffective('view', 'account_list', { 
-        userId: 'user-456' 
-      }) as any;
-      expect(forUser.columns).toEqual(['name', 'status']);
-    });
-  });
+  //
+  // The `overlay management` cases left with the manager's paper-protocol
+  // limb: these tests were the limb's ONLY callers (no route or UI ever
+  // reached it), so they pinned an API nothing served.
 
   // ==========================================
   // Watch / Subscribe (IMetadataService)

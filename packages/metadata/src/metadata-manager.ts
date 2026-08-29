@@ -42,7 +42,6 @@ import type {
   MetadataDependency,
   MetadataTypeRegistryEntryParsed,
 } from '@objectstack/spec/kernel';
-import type { MetadataOverlay } from '@objectstack/spec/kernel';
 import { getMetadataTypeActions } from '@objectstack/spec/kernel';
 import {
   MetadataEventType,
@@ -311,9 +310,6 @@ export class MetadataManager implements IMetadataService {
 
   // In-memory metadata registry: type -> name -> data
   private registry = new Map<string, Map<string, unknown>>();
-
-  // Overlay storage: "type:name:scope" -> MetadataOverlay
-  private overlays = new Map<string, MetadataOverlay>();
 
   // Type registry for metadata type info
   private typeRegistry: MetadataTypeRegistryEntryParsed[] = [];
@@ -2163,90 +2159,18 @@ export class MetadataManager implements IMetadataService {
   }
 
   // ==========================================
-  // Overlay / Customization Management
+  // Overlay / Customization Management — REMOVED (#13135, ADR-0049)
   // ==========================================
-
-  private overlayKey(type: string, name: string, scope: string = 'platform'): string {
-    return `${encodeURIComponent(type)}:${encodeURIComponent(name)}:${scope}`;
-  }
-
-  /**
-   * Get the active overlay for a metadata item
-   */
-  async getOverlay(type: string, name: string, scope?: 'platform' | 'user'): Promise<MetadataOverlay | undefined> {
-    return this.overlays.get(this.overlayKey(type, name, scope ?? 'platform'));
-  }
-
-  /**
-   * Save/update an overlay for a metadata item
-   */
-  async saveOverlay(overlay: MetadataOverlay): Promise<void> {
-    // Overlay write gate — independent from base writability so deployments
-    // can freeze Studio overlays while still permitting base register().
-    if (this.config.persistence?.overlayWritable === false) {
-      const msg = `MetadataManager overlays are read-only (persistence.overlayWritable=false); refusing to save overlay for ${overlay.baseType}/${overlay.baseName}`;
-      if (this.config.validation?.throwOnError) {
-        throw new Error(msg);
-      }
-      this.logger.warn(msg);
-      return;
-    }
-    const key = this.overlayKey(overlay.baseType, overlay.baseName, overlay.scope);
-    this.overlays.set(key, overlay);
-  }
-
-  /**
-   * Remove an overlay, reverting to the base definition
-   */
-  async removeOverlay(type: string, name: string, scope?: 'platform' | 'user'): Promise<void> {
-    this.overlays.delete(this.overlayKey(type, name, scope ?? 'platform'));
-  }
-
-  /**
-   * Get the effective (merged) metadata after applying all overlays.
-   * Resolution order: system ← merge(platform) ← merge(user)
-   */
-  async getEffective(type: string, name: string, context?: {
-    userId?: string;
-    tenantId?: string;
-    roles?: string[];
-    permissions?: string[];
-  }): Promise<unknown | undefined> {
-    const base = await this.get(type, name);
-    if (!base) return undefined;
-
-    let effective = { ...(base as Record<string, unknown>) };
-
-    // Apply platform overlay
-    const platformOverlay = await this.getOverlay(type, name, 'platform');
-    if (platformOverlay?.active && platformOverlay.patch) {
-      effective = { ...effective, ...platformOverlay.patch };
-    }
-
-    // Apply user overlay (scoped to specific user if context provided)
-    if (context?.userId) {
-      // Try user-specific key first, then fall back to generic user overlay.
-      // The owner check below ensures we never apply another user's overlay.
-      const userOverlayKey = this.overlayKey(type, name, 'user') + `:${context.userId}`;
-      const userOverlay = this.overlays.get(userOverlayKey) 
-        ?? await this.getOverlay(type, name, 'user');
-      if (userOverlay?.active && userOverlay.patch) {
-        // Apply if: overlay has no owner (generic user-level), or owner matches current user
-        if (!userOverlay.owner || userOverlay.owner === context.userId) {
-          effective = { ...effective, ...userOverlay.patch };
-        }
-      }
-    } else {
-      // No user context — only apply user overlays without an owner restriction
-      // (owner-scoped overlays require a userId to resolve)
-      const userOverlay = await this.getOverlay(type, name, 'user');
-      if (userOverlay?.active && userOverlay.patch && !userOverlay.owner) {
-        effective = { ...effective, ...userOverlay.patch };
-      }
-    }
-
-    return effective;
-  }
+  //
+  // The in-memory overlay limb (`getOverlay` / `saveOverlay` / `removeOverlay`
+  // / `getEffective`, keyed `type:name:scope`) implemented the paper
+  // metadata-customization protocol removed from `@objectstack/spec` in the
+  // same change: no route ever served the paper `.../overlay` or
+  // `.../effective` endpoints, and the only callers of these methods were this
+  // package's own unit tests. ADR-0126 supersedes the protocol on the record.
+  // The org-scoped customization that actually ships is ADR-0005's
+  // `sys_metadata` overlay (`getMetaItemLayered` in metadata-protocol), which
+  // never lived here.
 
   // ==========================================
   // Watch / Subscribe (IMetadataService)

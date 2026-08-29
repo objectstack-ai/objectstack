@@ -644,8 +644,12 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
     const at = result.error!.issues.filter((i) => i.path.join('.') === 'options.auth.password');
     expect(at.length).toBe(2);
     const texts = at.map((i) => i.message).join('\n');
-    expect(texts).toContain('#9040');
-    expect(texts).toContain('#8336');
+    // Pinned on what each refusal SAYS, not on a tracker id: the ids were
+    // stripped from customer-facing refusal prose, so a text pin on them would
+    // pin the thing that must not be there.
+    expect(texts).toContain('is a credential and is not accepted in the driver-options passthrough');
+    expect(texts).toContain('placeholder');
+    expect(texts).not.toMatch(/#\d{3,5}\b/);
   });
 
   it('re-paths the refusal under `config.options.auth.password` on the authored artefact', () => {
@@ -889,7 +893,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(paths).toContain('config.url');
     expect(paths).toContain('config.options.auth.password');
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('not accepted in the driver-options passthrough'))).toBe(true);
   });
 
   it('an empty `config.url` is the COMPOSED branch, not this one — a live discrete username is not refused', () => {
@@ -919,7 +923,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
       external: { ...BOUND },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.message.includes('#8082'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('embeds a password in its userinfo'))).toBe(true);
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 });
@@ -1120,6 +1124,6 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(paths).toContain('config.username');
     expect(paths).toContain('config.options.auth.password');
     expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('not accepted in the driver-options passthrough'))).toBe(true);
   });
 });
