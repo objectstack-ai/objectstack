@@ -61,9 +61,14 @@ const SERVE_RAW = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
  * A kernel whose transport reports `reported` from `getPort()`.
  *
  * ⚠️ The miss path THROWS rather than returning `undefined`, because that is
- * what `ObjectKernel.getService` really does (`packages/core/src/kernel.ts` —
- * a miss is a composition fault it refuses to answer silently). A fake that
- * returned `undefined` would leave the production `try` untested and green.
+ * what `ObjectKernel.getService` really does — a miss is a composition fault
+ * that `@objectstack/core` refuses to answer silently. A fake that returned
+ * `undefined` would leave the production `try` untested and green.
+ *
+ * ⛔ That kernel is named by PACKAGE, never as a repo-relative path: this file
+ * does not read it, and `check:cross-package-test-inputs` is a source scan that
+ * cannot tell a path in prose from one this test really opens (measured — the
+ * first draft of this comment failed that gate).
  */
 function kernelReporting(
   reported: unknown,
