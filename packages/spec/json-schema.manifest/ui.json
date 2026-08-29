@@ -60,6 +60,7 @@
     "ui/FormField",
     "ui/FormFieldPublicPicker",
     "ui/FormSection",
+    "ui/FormSelectOption",
     "ui/FormView",
     "ui/GalleryConfig",
     "ui/GanttConfig",

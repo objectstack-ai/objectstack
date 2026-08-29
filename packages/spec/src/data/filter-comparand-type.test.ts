@@ -194,7 +194,7 @@ describe('bigint — accepted, and NARROWED copy-on-write (#7872; the memory cra
 });
 
 describe('boundaries the door deliberately does not cross', () => {
-  it('leaves a FieldReference alone at every position — #5222/#7596/#7597 own its fate', () => {
+  it('leaves a FieldReference alone at every position — #5222/scalar comparison/#7597 own its fate', () => {
     for (const filter of [
       { amount: { $gt: { $field: 'budget' } } },
       { amount: { $eq: { $field: 'budget' } } },

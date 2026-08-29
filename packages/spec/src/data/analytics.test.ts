@@ -93,7 +93,7 @@ describe('MetricSchema', () => {
       type: 'avg',
       sql: 'order_total',
       filters: [{ sql: "status = 'completed'" }],
-    })).toThrow(/`measures\.<metric>\.filters`.*removed in @objectstack\/spec 17 \(#10414.*os migrate meta --from 17/s);
+    })).toThrow(/`measures\.<metric>\.filters`.*removed in @objectstack\/spec 17 \(.*os migrate meta --from 17/s);
   });
 
   it('should apply defaults for optional fields', () => {

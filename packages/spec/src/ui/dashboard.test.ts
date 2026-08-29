@@ -544,7 +544,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     // the fully-qualified key, the version, the issue, and the fix.
     expect(message).toMatch(/dashboard\.widgets\[\]\.responsive/);
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/#4876/);
+    expect(message).toMatch(/ADR-0049 D2/);
     expect(message).toMatch(/Delete the key/);
     // The redirect correction (#11027): this message used to prescribe
     // `page.components[].responsive` as the live home of the shared shape;
@@ -552,7 +552,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     // must (a) say so rather than silently dropping the old promise — an
     // author who followed it needs the correction — and (b) point at the
     // channel that IS applied.
-    expect(message).toMatch(/page\.components\[\]\.responsive[\s\S]*#11027/);
+    expect(message).toMatch(/page\.components\[\]\.responsive[\s\S]*/);
     expect(message).toMatch(/responsiveStyles/);
     // `.strict()` on this schema would answer a DELETED key with a generic
     // unrecognized-key error. The tombstone is what makes it a prescription —
@@ -637,7 +637,7 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
 
     expect(message).toMatch(/dashboard\.widgets\[\]\.aria/);
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/#5010/);
+    expect(message).toMatch(/ADR-0049 D2/);
     expect(message).toMatch(/Delete the key/);
     // The shared shape survives elsewhere. Without this, the message reads as
     // "AriaProps is gone", which would send an author deleting live metadata.

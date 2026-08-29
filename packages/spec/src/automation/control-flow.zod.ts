@@ -80,7 +80,7 @@ import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
  * description of it, so the five rejections cannot drift apart.
  */
 const CONTROL_FLOW_STRIP_HISTORY =
-  'Until #4001 an undeclared key here was dropped silently — the container still parsed, registered and ran, with the author\'s configuration simply absent.';
+  'Until this shape was closed, an undeclared key here was dropped silently — the container still parsed, registered and ran, with the author\'s configuration simply absent.';
 
 /**
  * ADR-0031 §Decision 2, stated once per spelling a BPMN-trained author reaches

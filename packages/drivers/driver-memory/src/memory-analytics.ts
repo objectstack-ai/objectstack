@@ -482,7 +482,9 @@ function sizeDistinctSet(values: readonly unknown[]): number {
 
 /**
  * [#11065] `path`, with a BOOLEAN rendered as the number it is worth — the
- * aggregand expression `$sum` and `$avg` consume on this face.
+ * aggregand expression `$sum` and `$avg` consume on this face, and, since the
+ * #11152 ruling (maintainer 2026-08-28: booleans aggregate as numbers on every
+ * face, no per-aggregate exception), `$min` and `$max` as well.
  *
  * ## What it is for
  *
@@ -1241,10 +1243,20 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         return { $sum: numericAggregandExpr(`$${fieldPath}`) };
       case 'avg':
         return { $avg: numericAggregandExpr(`$${fieldPath}`) };
+      // [#11152] `min`/`max` take the SAME boolean coercion as `sum`/`avg` —
+      // maintainer ruling 2026-08-28 (superseding #11249's `false`/`true`):
+      // booleans aggregate as NUMBERS on every face, no per-aggregate
+      // exception, so a boolean measure's order statistics answer 0/1. mingo's
+      // `$min`/`$max` rank whatever the expression yields, so the coerced
+      // number is what gets ranked; every non-boolean value passes through the
+      // `$cond` untouched and is ranked exactly as before. The data face
+      // carries the identical rule in JavaScript (`memory-driver.ts`,
+      // `computeAggregate`) — one face aligned alone is how this package's
+      // faces come to disagree.
       case 'min':
-        return { $min: `$${fieldPath}` };
+        return { $min: numericAggregandExpr(`$${fieldPath}`) };
       case 'max':
-        return { $max: `$${fieldPath}` };
+        return { $max: numericAggregandExpr(`$${fieldPath}`) };
       case 'count_distinct':
         // Collects the distinct values; {@link sizeDistinctSet} turns the array
         // into the NUMBER, excluding null — see the note there for why the

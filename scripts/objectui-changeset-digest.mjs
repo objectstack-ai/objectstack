@@ -2033,9 +2033,17 @@ function selfTest() {
       'scripts/check-adr-0087-registration.mjs',
       readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
     );
-    // That gate imports its entry guard from `scripts/invoked-as.mjs`; the
-    // sibling travels with it or the copy dies on ERR_MODULE_NOT_FOUND.
-    gw('scripts/invoked-as.mjs', readFileSync(join(__dirname, 'invoked-as.mjs'), 'utf8'));
+    // EVERY `./`-relative sibling that gate imports travels with the copy, or it
+    // dies on ERR_MODULE_NOT_FOUND — and the two cases below then read as "the
+    // ROUND TRIP assertion broke" when nothing about the round trip moved. This
+    // is a MANIFEST, so adding an import over there means adding a row here;
+    // `js-comment-mask.mjs` (#12881) is the case that proved it has to be a list
+    // rather than the one hard-coded `invoked-as.mjs` line it replaced. It is the
+    // second staging site of this same gate to learn that (the gate's own I1/I2
+    // fixture is the first), which is why both now spell it the same way.
+    for (const sibling of ['invoked-as.mjs', 'js-comment-mask.mjs']) {
+      gw(`scripts/${sibling}`, readFileSync(join(__dirname, sibling), 'utf8'));
+    }
     gg('add', '-A');
     gg('commit', '-q', '-m', 'base');
     const gateBase = gg('rev-parse', 'HEAD').trim();

@@ -149,8 +149,9 @@
 //   runtime-interface-only
 //                         -- every named `<path>#<Symbol>` must resolve to an
 //                            exported TS declaration at HEAD that is NOT itself a
-//                            metadata surface and is referenced by none, so
-//                            `objectstack migrate meta` provably has nothing to
+//                            metadata surface and is referenced IN CODE by none
+//                            (comment spans are masked; string literals are not),
+//                            so `objectstack migrate meta` provably has nothing to
 //                            rewrite. It ALSO inherits the prescription refusal
 //                            above; it is a narrowing of it, never an escape from
 //                            it. See the next section (#8299).
@@ -218,9 +219,10 @@
 //   3. its declaration is not a PROJECTION of a Zod schema (`z.input<typeof X>` and
 //      friends) -- Prime Directive #1 makes that the normal spelling of "this type
 //      IS metadata", and it lives in ordinary `.ts` files as well as `*.zod.ts`.
-//   4. NO metadata surface REFERENCES it. Steps 2-3 only say where the symbol was
-//      born; a plain runtime interface pulled into a schema (`z.custom<Iface>()`)
-//      or into an object definition has a metadata surface anyway.
+//   4. NO metadata surface REFERENCES it, IN CODE. Steps 2-3 only say where the
+//      symbol was born; a plain runtime interface pulled into a schema
+//      (`z.custom<Iface>()`) or into an object definition has a metadata surface
+//      anyway. Comment spans are masked before this scan -- see the next section.
 //
 // It ALSO inherits the `no-migration-prescription` refusal, so it is a strict
 // NARROWING of that catch-all rather than a fifth way around it: everything the
@@ -255,6 +257,52 @@
 //   packages/services/service-package/src/index.ts#PackagePublishResult   ACCEPTED
 //   packages/spec/src/system/metadata-persistence.zod.ts#PackagePublishResult
 //                                                                        REFUSED
+//
+// ### Step 4 reads CODE, not prose -- and what that costs in each direction
+//
+// Step 4's scan is a text scan over whole metadata-surface files, so for a while
+// it counted any occurrence of the name, a DOCBLOCK SENTENCE included. Measured
+// on `cae0e248c`: `packages/spec/src/api/contract.zod.ts` line 164 explains what
+// `ObjectStackClient.unwrapResponse` keys on, in one sentence inside
+// `BaseResponseSchema`'s docblock. `ObjectStackClient` is not imported there, is
+// in no schema, and `objectstack migrate meta` has nothing to reach through a
+// sentence -- yet the file was the sole `.zod.ts` in the tree naming it
+// (`git grep -ln ObjectStackClient -- '*.zod.ts'`), so a genuine, steps-1-to-3
+// clean `runtime-interface-only` claim on `packages/client/src/index.ts` was
+// refused as UNRESOLVABLE.
+//
+// Read what that refusal does to an author. The remaining categories are
+// `unpublished`, `already-registered` and `no-migration-prescription`; for a
+// published rename carrying a real before/after table the first two are false and
+// the third is a self-contradiction that would pass only through a detector miss.
+// So the blind spot's effect is to push an honest disposition out and a dishonest
+// one in -- the #8299 anti-pattern this very block was written to close, arriving
+// through the door #8299 built. Prose is therefore masked
+// (`scripts/js-comment-mask.mjs`, the one answer in this tree to "comment or
+// code?"; a private stripper here would be the drift `check:comment-mask-adoption`
+// exists to refuse).
+//
+// STRING LITERALS ARE NOT MASKED, on purpose. `maskComments` leaves them standing,
+// so a symbol named inside a `.describe()` string still refuses this category. It
+// is prose to a reader, but the conservative direction here is to REFUSE (#4690)
+// and a string is where an authorable value lives -- a name in one may be doing
+// work. That boundary is pinned in the self-test, in both directions, so a future
+// widening to `comment || literal` has to be argued rather than slipped in.
+//
+// The teeth are unchanged, and the self-test pins each half: a `*.zod.ts` that
+// IMPORTS the symbol still refuses, one that MENTIONS it in code still refuses,
+// and a file whose only code-level hit sits beside a prose mention still refuses
+// on the code hit. What stops refusing is prose alone.
+//
+// The rule applies to the OTHER three reads in the same step too, because a
+// commented-out line is not a declaration and not an import. Both directions of
+// that follow, and both are right: a file carrying a live code mention plus a
+// commented-out `interface Sym` used to be waved through as a HOMONYM and is now
+// refused on the code mention (a tightening); a file whose only import of the
+// symbol is commented out used to be refused as an IMPORT and is now not a
+// reference at all (a loosening -- a commented-out import puts nothing in a
+// schema). Scanning masked text in one place and raw text in another is how a
+// checker ends up asserting two different things about one file.
 //
 // ### What it deliberately does NOT check
 //
@@ -306,6 +354,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskComments } from './js-comment-mask.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -1890,8 +1939,18 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
     // (4) no metadata surface references it
     const word = new RegExp(`\\b${symbol}\\b`);
     let refused = false;
-    for (const [hitPath, hitText] of surfaces()) {
-      if (hitPath === path || !word.test(hitText)) continue;
+    for (const [hitPath, rawText] of surfaces()) {
+      if (hitPath === path || !word.test(rawText)) continue;
+      // PROSE IS NOT A REFERENCE. The raw hit above is the cheap filter; the
+      // question this step actually asks is about CODE, so every decision below
+      // reads the file with its comment spans blanked. `maskComments` (never
+      // `stripComments`) because this branch REPORTS a line back to the author, and
+      // blanking is the projection that keeps line numbers and offsets aligned with
+      // the file on disk. A docblock that NAMES a runtime type is documentation --
+      // it puts nothing in a schema and gives `objectstack migrate meta` nothing to
+      // reach. Strings are deliberately left standing: see the header.
+      const hitText = maskComments(rawText);
+      if (!word.test(hitText)) continue;
       // A file that declares the name itself is a HOMONYM, not a reference -- the
       // measured `PackagePublishResult` pair in the header is exactly this case.
       if (declaresLocally(hitText, symbol)) continue;
@@ -1911,10 +1970,12 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
       const line = (hitText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim();
       problems.push(
         `\`runtime-interface-only ${ref}\` cannot be verified: ${hitPath} (${metadataSurfaceKind(hitPath)})\n` +
-        `      mentions \`${symbol}\` while neither declaring nor importing it:\n` +
+        `      mentions \`${symbol}\` IN CODE while neither declaring nor importing it:\n` +
         `        ${line.slice(0, 140)}\n` +
         '      Unresolvable, so refused rather than assumed unrelated (#4690). If it truly is a\n' +
-        '      different symbol, the honest disposition is one that can be checked.',
+        '      different symbol, the honest disposition is one that can be checked.\n' +
+        '      Comment spans were already excluded before this scan, so the line above is not a\n' +
+        '      docblock naming the type in prose -- that alone never refuses this category.',
       );
       refused = true;
       break;
@@ -2905,18 +2966,137 @@ function selfTest() {
     },
   })), [/is false/, /IMPORTS `StoragePort`/, /storage\.zod\.ts/]);
 
-  // RIO-R3: an object definition MENTIONS it, neither declaring nor importing it.
-  // Unresolvable, so refused rather than assumed unrelated (#4690).
-  red('RIO-R3 an unresolvable mention in an object definition is refused', run(mk({
+  // RIO-R3: an object definition MENTIONS it IN CODE, neither declaring nor
+  // importing it. Unresolvable, so refused rather than assumed unrelated (#4690).
+  //
+  // The mention is a bare identifier in the object literal on purpose. This case
+  // was written with the name in a `//` comment, which made it a fixture for TWO
+  // rules at once -- "an unresolvable mention refuses" and "a comment is a
+  // mention" -- and #12881 retired the second. Pinning them in one case would have
+  // meant deleting the first to fix the second; RIO-G2/G3 below now carry the
+  // comment half, and this one keeps the rule it was written for.
+  const PORTS_TS = 'export interface StoragePort { read(): Promise<string> }\n';
+  red('RIO-R3 an unresolvable CODE mention in an object definition is refused', run(mk({
     pkgs: RIO_PKGS,
     files: {
       ...RIO_FILES,
-      'packages/core/src/ports.ts': 'export interface StoragePort { read(): Promise<string> }\n',
+      'packages/core/src/ports.ts': PORTS_TS,
+      'examples/app-crm/src/objects/account.object.ts':
+        'export const account = {\n  name: "account",\n  shape: StoragePort,\n};\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/cannot be verified/, /account\.object\.ts/, /neither declaring nor importing/]);
+
+  // ---- #12881: a metadata surface that names the symbol only in PROSE ---------
+  //
+  // Every case below is driven off ONE fixture pair -- `StoragePort` declared in
+  // an ordinary runtime module, and a metadata surface that names it -- with only
+  // WHERE the name sits changing between them. That is the whole content of the
+  // rule, so a case that passed for any other reason would not discriminate.
+
+  // RIO-G2: THE #12881 CASE. A `*.zod.ts` docblock explains what the runtime type
+  // keys on. It is a sentence: nothing is declared, nothing is imported, and
+  // `objectstack migrate meta` has nothing to reach through it. The fixture is the
+  // real one in miniature -- `packages/spec/src/api/contract.zod.ts` line 164,
+  // which was the ONLY `.zod.ts` in the tree naming `ObjectStackClient` and
+  // single-handedly refused a steps-1-to-3-clean claim on `packages/client`.
+  green('RIO-G2 #12881: a docblock sentence in a *.zod.ts is not a reference', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
+      'packages/spec/src/api/contract.zod.ts':
+        "import { z } from 'zod';\n\n" +
+        '/**\n' +
+        ' * The envelope SKELETON.\n' +
+        ' *\n' +
+        ' * It catches the big one -- a missing `success`, which is what\n' +
+        ' * `StoragePort.unwrapResponse` keys on -- but it accepts an empty payload.\n' +
+        ' */\n' +
+        'export const BaseResponseSchema = z.object({ success: z.boolean() });\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })));
+
+  // RIO-G3: the same rule for a `//` line comment in an object definition -- the
+  // exact text RIO-R3 used to carry, asserted the other way round now.
+  green('RIO-G3 a line comment in an object definition is not a reference', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
       'examples/app-crm/src/objects/account.object.ts':
         'export const account = {\n  name: "account",\n  // shaped by StoragePort at publish time\n};\n',
       '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
     },
-  })), [/cannot be verified/, /account\.object\.ts/, /neither declaring nor importing/]);
+  })));
+
+  // RIO-R10: THE HALF THAT MUST NOT MOVE. Same docblock sentence, and a real code
+  // reference in the same file. Masking must not blind the code half -- without
+  // this, a surface could buy the exemption by wrapping its live reference in
+  // enough prose, which is the mirror image of the bug being fixed.
+  red('RIO-R10 prose does not launder a CODE reference in the same file', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
+      'packages/spec/src/api/contract.zod.ts':
+        "import { z } from 'zod';\n\n" +
+        '/** `StoragePort` is what `unwrapResponse` keys on. */\n' +
+        'export const BaseResponseSchema = z.object({ port: StoragePort });\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/cannot be verified/, /contract\.zod\.ts/, /IN CODE/, /z\.object\(\{ port: StoragePort \}\)/]);
+
+  // RIO-R11: the same, with a REAL IMPORT beside the prose. The import branch is
+  // the category's sharpest tooth (a runtime interface pulled into a schema HAS a
+  // metadata surface), so it gets its own case rather than riding on R10's.
+  red('RIO-R11 prose beside a real import still refuses on the import', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
+      'packages/spec/src/data/storage.zod.ts':
+        "import { z } from 'zod';\nimport type { StoragePort } from '@objectstack/core';\n\n" +
+        '/** Prose that also names `StoragePort`, for good measure. */\n' +
+        'export const StorageSchema = z.object({ port: z.custom<StoragePort>() });\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/is false/, /IMPORTS `StoragePort`/, /storage\.zod\.ts/]);
+
+  // RIO-R12: THE DELIBERATE BOUNDARY. `maskComments` leaves STRING LITERALS
+  // standing, so a name inside a `.describe()` still refuses. It reads as prose to
+  // a human, and that is exactly why the case is here: the conservative direction
+  // is to refuse (#4690), a string is where an authorable value lives, and the
+  // difference between masking comments and masking `comment || literal` is one
+  // word in one call. This pins which one was chosen.
+  red('RIO-R12 a mention inside a STRING literal is still a reference', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
+      'packages/spec/src/data/storage.zod.ts':
+        "import { z } from 'zod';\n\n" +
+        "export const StorageSchema = z.object({ port: z.string().describe('as StoragePort declares') });\n",
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/cannot be verified/, /storage\.zod\.ts/, /as StoragePort declares/]);
+
+  // RIO-G4: the rule applied to the OTHER reads in step 4. A commented-out import
+  // is not an import -- it puts nothing in a schema -- so it cannot be the thing
+  // that refuses. Without this the masking would be half-applied: prose excluded
+  // from the mention scan, prose still believed by the import scan.
+  green('RIO-G4 a commented-out import is not an import', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': PORTS_TS,
+      'packages/spec/src/data/storage.zod.ts':
+        "import { z } from 'zod';\n// import type { StoragePort } from '@objectstack/core';\n\n" +
+        'export const StorageSchema = z.object({ port: z.unknown() });\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })));
 
   // RIO-R4: a BARE NAME is refused. This is the predicate #8299 proposed, and it is
   // refused precisely because it cannot tell RIO-G1 from RIO-R1.
@@ -3641,9 +3821,15 @@ function selfTest() {
     };
     const copy = 'scripts/check-adr-0087-registration.mjs';
     w(copy, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
-    // The entry guard is imported from `scripts/invoked-as.mjs`, so the sibling
-    // travels with the copy or the fixture dies on ERR_MODULE_NOT_FOUND.
-    w('scripts/invoked-as.mjs', readFileSync(new URL('./invoked-as.mjs', import.meta.url), 'utf8'));
+    // EVERY `./`-relative sibling this file imports travels with the copy, or the
+    // fixture dies on ERR_MODULE_NOT_FOUND -- which reads as "I1 is broken" rather
+    // than "the fixture is incomplete". Adding an import to this gate means adding
+    // it here, and `js-comment-mask.mjs` (#12881) is the case that proved the list
+    // has to be a list: it arrived after `invoked-as.mjs` and took both I-cases red
+    // on a fixture problem that had nothing to do with what they assert.
+    for (const sibling of ['invoked-as.mjs', 'js-comment-mask.mjs']) {
+      w(`scripts/${sibling}`, readFileSync(new URL(`./${sibling}`, import.meta.url), 'utf8'));
+    }
     w(
       'importer.mjs',
       "import { readDisposition } from './scripts/check-adr-0087-registration.mjs';\n" +

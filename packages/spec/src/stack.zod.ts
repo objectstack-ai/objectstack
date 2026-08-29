@@ -200,7 +200,7 @@ function applyApiEndpointGates(
 export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   surface: 'this stack definition',
   history:
-    'Until #8687 closed this surface (the outermost #4001 door), an unknown top-level stack '
+    'Until this surface was closed (the outermost door), an unknown top-level stack '
     + 'key parsed green and its value was silently dropped — a one-character typo could ship '
     + 'an artifact missing a whole metadata family while `os validate` exited 0. The declared '
     + 'keys are enumerated by `ObjectStackDefinitionSchema` (@objectstack/spec, stack.zod.ts) '
@@ -221,18 +221,18 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
       'there is no top-level `workflows` collection (ADR-0020): a record state machine is a '
       + '`state_machine` validation rule on the object it governs.',
     portals:
-      'the top-level `portals` collection was removed (#3464) — nothing ever consumed it. '
+      'the top-level `portals` collection was removed — nothing ever consumed it. '
       + 'Author external-user UI with `apps`/`views` plus positions and permission sets.',
     themes:
-      '`themes` was removed in @objectstack/spec 17.1 (#10485, ADR-0049) — authored themes '
+      '`themes` was removed in @objectstack/spec 17.1 (ADR-0049) — authored themes '
       + 'were parsed and stored, but no framework package ever read them back, no first-party '
       + 'app mounted the spec-aware theme provider, and nothing selected an active theme, so '
       + 'a declared theme changed nothing on screen. Delete the key. To colour the shipped '
       + 'console, set `app.branding.primaryColor` / `accentColor` — the one live colour '
       + 'surface (it drives `--primary`, `--accent` and their derived variables).',
     onDisable:
-      'no kernel, runtime or service ever called `onDisable` (#4212 retired the uninvoked '
-      + 'lifecycle family), so a value written here goes nowhere. Do teardown inside the '
+      'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
+      + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
       + 'resources `onEnable` acquires.',
   },
 }, {
@@ -335,7 +335,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   }).optional().describe(
     '[MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest '
     + '(standalone ViewItems, flattened overlays) — written by package export and artifact '
-    + 'factories, refused in authored stack sources (#5320).',
+    + 'factories, refused in authored stack sources.',
   ),
   pages: z.array(PageSchema).optional().describe('Custom Pages'),
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
@@ -425,7 +425,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
    */
   apis: z.array(ApiEndpointSchema)
     .optional()
-    .describe('API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121, #5040)'),
+    .describe('API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121)'),
   webhooks: z.array(WebhookSchema).optional().describe('Outbound Webhooks'),
 
   /**
@@ -443,7 +443,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
      * silently strip it and the author's intent would vanish without a word.
      */
     requireAuth: retiredKey(
-      '`api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data '
+      '`api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data '
       + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
       + 'fails at boot rather than silently serving object data to anonymous callers. '
@@ -593,7 +593,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
    * (#4095, `GRAFTABLE_RUNTIME_MEMBERS`, derived from
    * `STACK_RUNTIME_MEMBERS`).
    */
-  onEnable: z.function().optional().describe('App lifecycle hook invoked by AppPlugin at start() with the host context (ctx.ql) — register action handlers and drivers here. Executed off the authored bundle; never serialized into the JSON artifact (#4095 grafts it back on artifact boot).'),
+  onEnable: z.function().optional().describe('App lifecycle hook invoked by AppPlugin at start() with the host context (ctx.ql) — register action handlers and drivers here. Executed off the authored bundle; never serialized into the JSON artifact (grafts it back on artifact boot).'),
   mappings: z.array(MappingSchema).optional().describe('Data Import/Export Mappings'),
   analyticsCubes: z.array(CubeSchema).optional().describe('Analytics Semantic Layer Cubes'),
 
@@ -626,7 +626,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     'External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a ' +
     'live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` ' +
     'references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set ' +
-    '`enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097, #2977).',
+    '`enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097).',
   ),
 
   /**

@@ -365,7 +365,7 @@ describe('FlowSchema', () => {
         message = String((e as Error).message);
       }
       expect(message).toMatch(/status/);
-      expect(message).toMatch(/#3896/);
+      expect(message).toMatch(/audit close-out/);
     });
 
     it('should default runAs to user', () => {
@@ -1288,7 +1288,7 @@ describe('BPMN — Wait Event Configuration', () => {
       const key = Object.keys(retired)[0];
       expect(result.success, `${key} must be rejected, not silently dropped`).toBe(false);
       // The prescription names the issue and the replacement (or its absence).
-      expect(JSON.stringify(result.error?.issues), `${key} guidance`).toMatch(/4158/);
+      expect(JSON.stringify(result.error?.issues), `${key} guidance`).toMatch(/was removed in @objectstack\/spec 17/);
     }
   });
 

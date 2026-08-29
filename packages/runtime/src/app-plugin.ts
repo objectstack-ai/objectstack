@@ -633,10 +633,10 @@ export class AppPlugin implements Plugin {
         }
 
         // [ADR-0057 / #2077] Surface stack-declared SECURITY metadata
-        // (positions, permission sets, sharing rules, policies) in the
+        // (positions, permission sets, capabilities, sharing rules) in the
         // metadata registry so the boot seeders (plugin-security /
         // plugin-sharing) and runtime resolvers can read them via
-        // `list('position'|'permission'|'sharing_rule')`.
+        // `list('position'|'permission'|'capability'|'sharing_rule')`.
         // Without this, bootStack's metadata service holds only objects (the
         // artifact loader that registers these runs only in compiled serve.ts),
         // leaving the declarations decorative.
@@ -699,7 +699,19 @@ export class AppPlugin implements Plugin {
                     // sys_capability with package provenance.
                     ['capabilities', 'capability'],
                     ['sharingRules', 'sharing_rule'],
-                    ['policies', 'policy'],
+                    // `['policies', 'policy']` removed at #12894, together with
+                    // its twin in the artifact door's `ARTIFACT_FIELD_TO_TYPE`
+                    // (`packages/metadata/src/plugin.ts`). It could never match:
+                    // `ObjectStackDefinitionSchema` is a `strictObject` declaring
+                    // no top-level `policies` key, so the door refuses such a
+                    // definition outright and this loop reads `undefined`. The
+                    // word belongs one level down — on a permission set it is an
+                    // alias for `rowLevelSecurity` (`PERMISSION_SET_KEY_ALIASES`,
+                    // packages/spec/src/security/permission.zod.ts) — so a
+                    // top-level collection of that name never existed to register.
+                    // `check:stack-collection-maps` now pins this list, so a
+                    // fourth attempt at a key the schema does not declare fails
+                    // in CI instead of sitting here inert.
                 ];
                 let count = 0;
                 for (const [field, type] of SECURITY_FIELDS) {

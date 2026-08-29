@@ -110,7 +110,7 @@ export const ExpressionBodySchema = strictObject(
       timeoutMs: `\`timeoutMs\` ${L2_ONLY_ON_L1}`,
       memoryMb: `\`memoryMb\` ${L2_ONLY_ON_L1}`,
     },
-    history: 'Until #4001 these were dropped silently.',
+    history: 'Until this shape was closed, these were dropped silently.',
   },
   {
   language: z.literal('expression'),
@@ -190,7 +190,7 @@ export const ScriptBodySchema = strictObject(
       body: 'source',
     },
     history:
-      'Until #4001 these were dropped silently — the body still ran, just not under the '
+      'Until this shape was closed, these were dropped silently — the body still ran, just not under the '
       + 'limits or grants that were written.',
   },
   {

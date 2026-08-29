@@ -221,13 +221,23 @@ function aggregateBucket(allRows: any[], aggregations: AggregationNode[]): Recor
         out[alias] = nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0) / nums.length;
         break;
       }
+      // [#11152] `min`/`max` read a BOOLEAN as the number it is worth (0/1) —
+      // maintainer ruling 2026-08-28 (superseding #11249's `false`/`true`):
+      // booleans aggregate as NUMBERS on every face, with no per-aggregate
+      // exception, so the order statistics answer in the same numeric domain
+      // `sum`/`avg` already answer in (`toNumber`, `Number(true) === 1`). The
+      // coercion is BOOLEAN-ONLY, exactly like driver-memory's (#11065):
+      // strings, dates and numbers reach the same raw comparison they always
+      // did — widening it would change `min` over a text column.
       case 'min': {
-        const defined = values.filter((v) => v != null);
+        const defined = values.filter((v) => v != null)
+          .map((v) => (typeof v === 'boolean' ? Number(v) : v));
         out[alias] = defined.length === 0 ? null : defined.reduce((a, b) => (a < b ? a : b));
         break;
       }
       case 'max': {
-        const defined = values.filter((v) => v != null);
+        const defined = values.filter((v) => v != null)
+          .map((v) => (typeof v === 'boolean' ? Number(v) : v));
         out[alias] = defined.length === 0 ? null : defined.reduce((a, b) => (a > b ? a : b));
         break;
       }

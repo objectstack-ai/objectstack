@@ -1,24 +1,24 @@
 {
   "type": "app",
-  "_note": "AppSchema — the navigation shell, the densest hand-authored surface on the platform. Consumers: the REST read layer's filterAppForUser (packages/rest/src/rest-server.ts:2651-2740 — the SERVER-side authority for app/nav permission + capability gating and the ADR-0045 publish gate, which judges `_unpublished` and NOT `hidden` since #4829), the spec i18n translateApp (i18n-resolver.ts:472), and objectui's shell (@940ba24: app-shell AppSidebar/ConsoleLayout/ContextSelectors, layout NavigationRenderer, console RootLandingRedirect). The #4001/#4142 app step already retired seven dead keys as retiredKey tombstones — they stay in the walked shape, so their rows stay here (tombstone rule, orphans.mts). WALK BOUNDARY (#3095 union rule): `navigation` drills into the union's FIRST member (the `object` variant + base keys); the other variants' payload keys sit outside the walk and were verified by hand — dashboardName (NavigationRenderer.tsx:433), pageName (:435-442), url/target (:462), reportName (:460), componentRef (:464,:644), group `expanded` (:856) all live. The one GAP found there is now CLOSED (#4509, objectui @e8bec83): an `action` item's click dispatches through a host-supplied `onAction` prop that no shipped shell passed, so `actionDef.actionName` reached no dispatcher and every such item dead-clicked. objectui's `useNavActionDispatch` (objectui: packages/app-shell/src/hooks/useNavActionDispatch.ts) resolves the name against `action` metadata and dispatches through the console action runtime, and UnifiedSidebar passes it (objectui: packages/app-shell/src/layout/UnifiedSidebar.tsx:473). A shell that still passes no handler now HIDES action items rather than rendering them dead (objectui: packages/layout/src/NavigationRenderer.tsx:971) — the renderer stops manufacturing the trap. Also note that filterAppForUser USED to walk only the top-level `navigation` tree — it never read `item.areas` at all (it returned early when `navigation` was absent), while the client area switcher renders every area. That made area-level `visible` / `requiredPermissions` FAIL-OPEN gates, not merely unread: a \"hidden\" or permission-gated area showed to everyone. Closed in #4722 for the layer that survived the retirement — the server now runs the same filterNav over every `areas[].navigation` — see the `areas.navigation` row below. AREA GATES, 17.0.0 (#4651): both keys REMOVED and their rows DELETED — NavigationAreaSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Route B (remove) over route A (enforce) was the maintainer's call: enforcing needs semantics decided first (does filtering an area remove its items everywhere? does the server bind `user` for area CEL?), which the 17.0.0 window could not hold, and a gate that never gated is strictly safer removed than shipped for a whole major. The strict rejection carries the prescription (ui/app.zod.ts AREA_VISIBLE_RETIRED / AREA_REQUIRED_PERMISSIONS_RETIRED) and names the layers that DO enforce. The boundary those prescriptions pointed at — per-item gating inside an area being shell-side only — was the real gap #4651 left behind, and #4722 closed it: item-level `requiredPermissions` / `requiresService` are now stripped server-side inside `areas[]` too, `visible` (CEL) deliberately not. Recorded on `areas.navigation` below. The area-LEVEL keys remain retired; they were not revived. Seeded 2026-08-01 (#4488). CONTEXT SELECTORS, 17.0.0 (#4509): `includeAll` and `placement` rows DELETED — AppContextSelectorSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Both were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied), which made removal the only channel that could reach an author. `includeAll` was the sharp one: not unread but deliberately DISOBEYED — selectors are mandatory-scope, and an All row would clear the scope, which on Studio's package selector means listing the platform's own system/cloud kernel packages. STUDIO_APP authored `includeAll: true` against a renderer that ignored it, and that authoring site went with the key.",
+  "_note": "AppSchema — the navigation shell, the densest hand-authored surface on the platform. Consumers: the REST read layer's filterAppForUser (packages/rest/src/rest-server.ts:2651-2740 — the SERVER-side authority for app/nav permission + capability gating and the ADR-0045 publish gate, which judges `_unpublished` and NOT `hidden` since #4829), the spec i18n translateApp (i18n-resolver.ts:472), and objectui's shell (@940ba24: app-shell AppSidebar/ConsoleLayout/ContextSelectors, layout NavigationRenderer, console RootLandingRedirect). The #4001/#4142 app step already retired seven dead keys as retiredKey tombstones — they stay in the walked shape, so their rows stay here (tombstone rule, orphans.mts). WALK BOUNDARY (#3095 union rule): `navigation` drills into the union's FIRST member (the `object` variant + base keys); the other variants' payload keys sit outside the walk and were verified by hand — dashboardName (NavigationRenderer.tsx:433), pageName (:435-442), url/target (:462), reportName (:460), componentRef (:464,:644), group `expanded` (:856) all live. The one GAP found there is now CLOSED (#4509, objectui @e8bec83): an `action` item's click dispatches through a host-supplied `onAction` prop that no shipped shell passed, so `actionDef.actionName` reached no dispatcher and every such item dead-clicked. objectui's `useNavActionDispatch` (objectui: packages/app-shell/src/hooks/useNavActionDispatch.ts) resolves the name against `action` metadata and dispatches through the console action runtime, and UnifiedSidebar passes it (objectui: packages/app-shell/src/layout/UnifiedSidebar.tsx:473). A shell that still passes no handler now HIDES action items rather than rendering them dead (objectui: packages/layout/src/NavigationRenderer.tsx:971) — the renderer stops manufacturing the trap. Also note that filterAppForUser USED to walk only the top-level `navigation` tree — it never read `item.areas` at all (it returned early when `navigation` was absent), while the client area switcher renders every area. That made area-level `visible` / `requiredPermissions` FAIL-OPEN gates, not merely unread: a \"hidden\" or permission-gated area showed to everyone. Closed in #4722 for the layer that survived the retirement — the server now runs the same filterNav over every `areas[].navigation` — see the `areas.navigation` row below. AREA GATES, 17.0.0 (#4651): both keys REMOVED and their rows DELETED — NavigationAreaSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Route B (remove) over route A (enforce) was the maintainer's call: enforcing needs semantics decided first (does filtering an area remove its items everywhere? does the server bind `user` for area CEL?), which the 17.0.0 window could not hold, and a gate that never gated is strictly safer removed than shipped for a whole major. The strict rejection carries the prescription (ui/app.zod.ts AREA_VISIBLE_RETIRED / AREA_REQUIRED_PERMISSIONS_RETIRED) and names the layers that DO enforce. The boundary those prescriptions pointed at — per-item gating inside an area being shell-side only — was the real gap #4651 left behind, and #4722 closed it: item-level `requiredPermissions` / `requiresService` are now stripped server-side inside `areas[]` too, `visible` (CEL) deliberately not. Recorded on `areas.navigation` below. The area-LEVEL keys remain retired; they were not revived. Seeded 2026-08-01 (#4488). CONTEXT SELECTORS, 17.0.0 (#4509): `includeAll` and `placement` rows DELETED — AppContextSelectorSchema is strict, so the keys left the walked shape and retained rows would report ORPHAN. Both were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied), which made removal the only channel that could reach an author. `includeAll` was the sharp one: not unread but deliberately DISOBEYED — selectors are mandatory-scope, and an All row would clear the scope, which on Studio's package selector means listing the platform's own system/cloud kernel packages. STUDIO_APP authored `includeAll: true` against a renderer that ignored it, and that authoring site went with the key. 2026-08-28 (#13003): every `path:NNN` citation in this file was re-anchored to its consuming symbol; nine of the ten were wrong, all of them IN RANGE. Two of this note's own pointers rotted the same way and are corrected here: `filterAppForUser` is a thin delegate today and the gate lives in `packages/rest/src/rest-server.ts#filterAppForUserWithReason`, and the spec i18n entry point is `packages/spec/src/system/i18n-resolver.ts#translateApp`.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:478",
-      "note": "routing identity (`/apps/<name>`) and the translation-bundle key (`apps.<name>.*`); objectui RootLandingRedirect routes by it."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateApp (`const appName = doc.name` — the routing identity is also the translation-bundle key, so every `apps.<name>.*` lookup in this file is addressed by it and a renamed app loses its whole bundle at once rather than half of it)",
+      "note": "routing identity (`/apps/<name>`) and the translation-bundle key (`apps.<name>.*`); objectui RootLandingRedirect routes by it. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `i18n-resolver.ts:478` had rotted onto `opts?: ResolveOptions`, a PARAMETER in `resolveActionResultDialog`'s signature ~195 lines above the app resolvers. Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:481; objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:327-355 (switcher/header)",
-      "note": "localized on serve by translateApp, rendered by the app switcher and shell header."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.label` down the locale chain); packages/spec/src/system/i18n-resolver.ts#translateApp (applies it over the authored value on every /meta app read); objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:327-355 (switcher/header)",
+      "note": "localized on serve by translateApp, rendered by the app switcher and shell header. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:481` had rotted onto `if (!spec) return spec;`, a guard on the ACTION result-dialog path. Re-closed by hand against 8cb96ec41."
     },
     "description": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:333; framework packages/spec/src/system/i18n-resolver.ts:482",
-      "note": "rendered under the active app's title; localized by translateApp."
+      "verifiedAt": "2026-08-28",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:333; framework packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (reads `apps.<name>.description`); packages/spec/src/system/i18n-resolver.ts#translateApp",
+      "note": "rendered under the active app's title; localized by translateApp. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:482` had rotted onto the `title` lookup inside `resolveActionResultDialog`; it, `:481` (label) and `:478` (name) were three consecutive lines of ONE unrelated function, which is what a block of pointers looks like after the file above them grows. Re-closed by hand against 8cb96ec41."
     },
     "icon": {
       "status": "live",
@@ -46,9 +46,9 @@
     },
     "hidden": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
-      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:178; packages/platform-objects/src/apps/account.app.ts:40",
-      "note": "NAVIGATION PRESENTATION ONLY, and re-verified as such at #4829: keep the app out of the App Switcher; the shell surfaces it from the avatar menu (the built-in Account app is the canonical author). It is NOT an access gate — a hidden app stays fully routable and permission-checked for every user, which is its birth contract in app.zod.ts. Between ADR-0045 (2026-06-12) and its 2026-08-09 amendment the REST gate ALSO read this key as \"unpublished\", which erased the Account app from GET /meta/app for every non-builder; that reading now lives on `_unpublished`. The consumer is therefore the client switcher alone."
+      "verifiedAt": "2026-08-28",
+      "evidence": "objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:178; packages/platform-objects/src/apps/account.app.ts#ACCOUNT_APP (the canonical author — `hidden: true` under the comment that states why: surface via the avatar dropdown, not the App Switcher)",
+      "note": "NAVIGATION PRESENTATION ONLY, and re-verified as such at #4829: keep the app out of the App Switcher; the shell surfaces it from the avatar menu (the built-in Account app is the canonical author). It is NOT an access gate — a hidden app stays fully routable and permission-checked for every user, which is its birth contract in app.zod.ts. Between ADR-0045 (2026-06-12) and its 2026-08-09 amendment the REST gate ALSO read this key as \"unpublished\", which erased the Account app from GET /meta/app for every non-builder; that reading now lives on `_unpublished`. The consumer is therefore the client switcher alone. 2026-08-28: RE-ANCHORED (#13003) — the framework pointer was ACCURATE (`account.app.ts:40` is still `hidden: true`), so this leg is the grammar migration and not a repair. What the anchor buys is that it survives the file growing above it, which is exactly how this ledger's sibling citations rotted. Re-closed by hand against 8cb96ec41."
     },
     "navigation": {
       "children": {
@@ -60,9 +60,9 @@
         },
         "label": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/spec/src/system/i18n-resolver.ts:456; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:284-316 (resolveNavItemLabel)",
-          "note": "rendered everywhere; translateApp swaps in the per-locale label by node id."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupNavLabel (reads `apps.<app>.navigation.<id>.label` — keyed by the node id, one flat keyspace regardless of tree depth); packages/spec/src/system/i18n-resolver.ts#translateApp (walks the tree and swaps the label in); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:284-316 (resolveNavItemLabel)",
+          "note": "rendered everywhere; translateApp swaps in the per-locale label by node id. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:456` had rotted onto `opts?: ResolveOptions` in `lookupActionResultDialogText`'s signature, ~195 lines above `lookupNavLabel`. Re-closed by hand against 8cb96ec41."
         },
         "icon": {
           "status": "live",
@@ -95,9 +95,9 @@
         },
         "requiredPermissions": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/rest/src/rest-server.ts:1844; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:894",
-          "note": "enforced in BOTH layers: the server strips unsatisfied entries before serving — from the top-level navigation tree AND, since #4722, from every `areas[].navigation` tree through the same filterNav — and the client re-gates per item."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/rest/src/rest-server.ts#filterNav (the server strips an entry whose `requiredPermissions` are not a subset of the caller's system permissions — from the top-level tree AND, since #4722, from every `areas[].navigation` tree through this same closure); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:894",
+          "note": "enforced in BOTH layers: the server strips unsatisfied entries before serving — from the top-level navigation tree AND, since #4722, from every `areas[].navigation` tree through the same filterNav — and the client re-gates per item. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1844` had rotted onto a bare `try {` inside `computeExecCtx`'s auth-service lookup, ~320 lines above the gate. Re-closed by hand against 8cb96ec41."
         },
         "requiresObject": {
           "status": "live",
@@ -107,9 +107,9 @@
         },
         "requiresService": {
           "status": "live",
-          "verifiedAt": "2026-08-01",
-          "evidence": "packages/rest/src/rest-server.ts:1832; objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:900-902",
-          "note": "ADR-0057 D10 capability gate, server + client."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/rest/src/rest-server.ts#filterNav (ADR-0057 D10 — an entry naming a service the kernel has not registered is dropped before the tree is served; fail-open when the kernel cannot be probed); objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:900-902",
+          "note": "ADR-0057 D10 capability gate, server + client. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1832` had rotted onto `environmentId = await this.resolveRequestEnvironmentId(environmentId, req)` in `computeExecCtx`, its sibling `requiredPermissions` twelve lines below it in the same unrelated block. Re-closed by hand against 8cb96ec41."
         },
         "type": {
           "status": "live",
@@ -241,9 +241,9 @@
     },
     "requiredPermissions": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/rest-server.ts:1814",
-      "note": "SERVER-enforced: an app whose required permissions are not a subset of the caller's system permissions is dropped from /meta entirely (and the single-item GET re-checks at rest-server.ts:3298)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/rest-server.ts#filterAppForUserWithReason (`const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : []` — an app whose required permissions are not a subset of the caller's is dropped from /meta entirely, and the single-item GET re-checks through this same function)",
+      "note": "SERVER-enforced: an app whose required permissions are not a subset of the caller's system permissions is dropped from /meta entirely (and the single-item GET re-checks at rest-server.ts:3298). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1814` had rotted onto the closing `};` of a `booksRequest` literal in an unrelated metadata read, ~340 lines above the gate; the note's own \"single-item GET re-checks at rest-server.ts:3298\" had rotted with it, and that re-check now runs through `filterAppForUserWithReason` from the single-item branch ~2,000 lines further down. Re-closed by hand against 8cb96ec41."
     },
     "defaultAgent": {
       "status": "live",
@@ -288,9 +288,9 @@
     },
     "_unpublished": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
-      "evidence": "packages/rest/src/rest-server.ts:2669; packages/runtime/src/domains/packages.ts:245",
-      "note": "MACHINE-MANAGED publish gate (ADR-0045 §3, amended 2026-08-09 / #4829) — never authored: written by the AI additive-materialization path (cloud) and cleared by POST /packages/:id/publish-drafts. SERVER-enforced: filterAppForUser withholds an unpublished app from every metadata response except a builder's (studio/setup access), for direct-URL preview. Declared on AppSchema rather than omitted because the write path validates against that schema (saveMetaItem → 422; Registry.validate('app') → AppSchema.parse), so the flip itself would be unwritable otherwise. Stored pre-amendment rows carrying `hidden: true` are rewritten here by the ADR-0087 conversion `app-hidden-to-unpublished`."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/rest-server.ts#filterAppForUserWithReason (`if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access'))` — the ADR-0045 publish gate, which judges THIS key and deliberately not `hidden`); packages/runtime/src/domains/packages.ts#handlePackagesRequest (POST /packages/:id/publish-drafts flips it to `false` — never deletes it, because ADR-0045 §3 keeps publish and unpublish symmetric)",
+      "note": "MACHINE-MANAGED publish gate (ADR-0045 §3, amended 2026-08-09 / #4829) — never authored: written by the AI additive-materialization path (cloud) and cleared by POST /packages/:id/publish-drafts. SERVER-enforced: filterAppForUser withholds an unpublished app from every metadata response except a builder's (studio/setup access), for direct-URL preview. Declared on AppSchema rather than omitted because the write path validates against that schema (saveMetaItem → 422; Registry.validate('app') → AppSchema.parse), so the flip itself would be unwritable otherwise. Stored pre-amendment rows carrying `hidden: true` are rewritten here by the ADR-0087 conversion `app-hidden-to-unpublished`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, both legs — `rest-server.ts:2669` had rotted onto a docblock about a diagnostic view being neither translated nor cached, ~480 lines below the gate, and `packages.ts:245` onto the domain-wide anonymous-deny floor, ~270 lines above the flip. Re-closed by hand against 8cb96ec41."
     }
   }
 }

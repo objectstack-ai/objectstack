@@ -268,7 +268,7 @@ export function scan(program: ts.Program, entryFile: string): ScanResult {
   // global visited set. A global one is the obvious spelling and it silently
   // DROPS population: two paths onto the same type — the shape this SDK produces
   // whenever a namespace object is shared between `ObjectStackClient` and
-  // `ScopedProjectClient` — would census the type once, under whichever path the
+  // `ScopedEnvironmentClient` — would census the type once, under whichever path the
   // walk happened to reach first, so the second path's sites are invisible to the
   // ratchet and the ledger keys silently depend on walk order. A per-branch set
   // still terminates (a cycle must revisit an ancestor) and reports every path.

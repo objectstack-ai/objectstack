@@ -9,12 +9,18 @@
  * A form-view predicate binds a fixed scope: `record` (plus `previous`, the
  * saved record, and `parent` for master-detail line items) in runtime record
  * forms, and `data` — the row under edit, at every depth, repeater rows
- * included — in metadata-editing forms. The contract states the failure mode
- * beside the vocabulary (`packages/spec/src/ui/view.zod.ts`,
+ * included — in metadata-editing forms. A FIELD-level predicate additionally
+ * binds `current_user` and its ADR-0068 aliases (objectui#6010); a
+ * SECTION-level one does not. The contract states the failure mode beside the
+ * vocabulary (`packages/spec/src/ui/view.zod.ts`,
  * `FormFieldSchema.visibleWhen` / `FormSectionSchema.visibleWhen`): **a bare
  * identifier is UNBOUND, the predicate faults, and `visibleWhen`'s fault
  * fallback is `true`** — so a field the predicate was authored to hide renders
  * for everyone.
+ *
+ * ⚠️ That per-surface split is load-bearing, not a detail: see
+ * {@link BOUND_FORM_FIELD_PREDICATE_ROOTS} for why this module quoted the
+ * contract correctly and was still wrong within a day of landing.
  *
  * That is quiet on its own, and lethal in combination with the authoring
  * pattern it exists to serve. Measured on a real deployment: an artifact built
@@ -72,10 +78,13 @@
  * - **An AST-only envelope passes.** `{ dialect: 'cel', ast }` with no
  *   `source` is opaque at this layer — the same posture the spec's own
  *   `features.*` root scanner takes.
+ * - **The vocabulary is per surface, because the contract is** — see
+ *   {@link BOUND_FORM_FIELD_PREDICATE_ROOTS}. Judging a field predicate by the
+ *   section vocabulary false-flags a legitimate `current_user` test.
  * - **Per-option `visibleWhen` is out of scope**, deliberately: options are
- *   evaluated by a *different* evaluator (`resolveCascadingOptions`, ADR-0068)
- *   which binds `current_user` as well, so this vocabulary would be the wrong
- *   yardstick there.
+ *   evaluated by a *different* evaluator (`resolveCascadingOptions`, ADR-0068),
+ *   and — unlike either surface scanned here — the write-path rule validator
+ *   enforces that one server-side, so it is a different question entirely.
  *
  * A tokenizer rather than a CEL parse is the established shape for exactly
  * this question in this codebase: the spec's own enforced
@@ -87,20 +96,21 @@
  */
 
 /**
- * The identifiers a form-view predicate may name in ROOT position.
+ * Roots bound on EVERY form-view predicate surface — and therefore exactly the
+ * SECTION-level vocabulary.
  *
- * Sourced from the contract prose on `FormFieldSchema.visibleWhen` and
- * `FormSectionSchema.visibleWhen` (`packages/spec/src/ui/view.zod.ts`):
- * `record` + `previous` + `parent` in runtime record forms, `data` in
- * metadata-editing forms (and inside a repeater, where `data` is the ROW but
- * is still spelled `data`). The union of both surfaces is used because an
- * artifact's `views` collection carries both kinds and the definition does not
- * say which renderer will read a given form — the union is the direction that
- * stays silent on a healthy artifact.
+ * Sourced from the contract prose on `FormSectionSchema.visibleWhen`
+ * (`packages/spec/src/ui/view.zod.ts`): `record` + `previous` + `parent` in
+ * runtime record forms, `data` in metadata-editing forms (and inside a
+ * repeater, where `data` is the ROW but is still spelled `data`). Both kinds
+ * are admitted together because an artifact's `views` collection carries both
+ * and the definition does not say which renderer will read a given form — the
+ * union is the direction that stays silent on a healthy artifact.
  *
- * ⚠️ `current_user` is deliberately ABSENT: the contract states it is unbound
- * at field and section level and that such a predicate faults open. It is
- * bound only for per-option `visibleWhen`, which this scan does not visit.
+ * `current_user` is absent here and that is CORRECT for a section: the section
+ * docblock states it is unbound at that level and the predicate faults open.
+ * ⚠️ It is NOT correct for a field — see
+ * {@link BOUND_FORM_FIELD_PREDICATE_ROOTS}.
  */
 export const BOUND_FORM_VIEW_PREDICATE_ROOTS: readonly string[] = [
   'record',
@@ -108,6 +118,57 @@ export const BOUND_FORM_VIEW_PREDICATE_ROOTS: readonly string[] = [
   'parent',
   'data',
 ];
+
+/**
+ * Roots bound ONLY on a field-level predicate: the canonical `current_user`
+ * and its ADR-0068 D1 alias roots.
+ *
+ * The aliases are spelled `user`, `ctx.user` and `os.user`, so as ROOT
+ * identifiers they are `user`, `ctx` and `os`. Admitting the bare `ctx` / `os`
+ * roots rather than only the two-segment alias is the deliberate silent
+ * direction: this detector reports fault-open risk, and a predicate reaching
+ * into the host context under either namespace is not the class it is hunting.
+ */
+export const FIELD_ONLY_BOUND_PREDICATE_ROOTS: readonly string[] = [
+  'current_user',
+  'user',
+  'ctx',
+  'os',
+];
+
+/**
+ * The FIELD-level vocabulary: the shared base plus the `current_user` family.
+ *
+ * ⚠️ **This is a re-measurement, and the reason this module needed a same-day
+ * correction.** `current_user` was unbound at field level (#6146) and the first
+ * version of this policy said so, quoting the contract prose faithfully. It was
+ * bound by objectui#6010, and three spec text sites still said otherwise until
+ * #12930 re-measured them — one of those stale sites was the sentence this
+ * module was written against, and it landed on `main` while the policy's own PR
+ * was in flight. Judging a field predicate by the section vocabulary
+ * false-flags a legitimate `current_user.role == 'admin'` test on a legacy
+ * artifact, which is precisely the cry-wolf failure the module doc forbids.
+ *
+ * Two limits the binding does NOT remove, per the corrected prose — neither
+ * changes this detector's answer, and it is worth saying why:
+ *
+ * - It is a **rendering rule, never authorization** (nothing server-side
+ *   evaluates a field `visibleWhen`). That is an authoring hazard, not a
+ *   version-drift hazard, so it is not this boot notice's business.
+ * - The scope belongs to the HOST, so on the console's public form route
+ *   (`/f/:slug`) no principal is published, the root is unbound, and the
+ *   predicate faults open there. This notice stays silent on that: it reports
+ *   what faults on the primary hosted routes, and a route-specific unboundness
+ *   that is equally true of a freshly-built current artifact says nothing about
+ *   the artifact's ERA — which is the only thing this notice claims to detect.
+ */
+export const BOUND_FORM_FIELD_PREDICATE_ROOTS: readonly string[] = [
+  ...BOUND_FORM_VIEW_PREDICATE_ROOTS,
+  ...FIELD_ONLY_BOUND_PREDICATE_ROOTS,
+];
+
+/** Which form-view slot a predicate sits in — the two have different vocabularies. */
+export type FormPredicateSurface = 'field' | 'section';
 
 /** One form-view predicate naming a root that is not bound where it evaluates. */
 export interface UnboundFormPredicateRoot {
@@ -119,6 +180,8 @@ export interface UnboundFormPredicateRoot {
   root: string;
   /** The predicate's CEL source, verbatim. */
   source: string;
+  /** The slot it sits in, which is what decided the vocabulary it was judged against. */
+  surface: FormPredicateSurface;
 }
 
 /** CEL string literals (both quote styles, with escapes) — stripped before the root scan. */
@@ -148,10 +211,20 @@ const FORM_PREDICATE_KEYS: readonly string[] = ['visibleWhen', 'visibleOn'];
  * Root identifiers named by one CEL source, minus every bound root, reserved
  * word and call target. Order-preserving and de-duplicated.
  *
+ * `boundRoots` is the vocabulary to judge against, because the two form-view
+ * slots do not share one — pass {@link BOUND_FORM_FIELD_PREDICATE_ROOTS} for a
+ * field and {@link BOUND_FORM_VIEW_PREDICATE_ROOTS} for a section. The default
+ * is the section (base) vocabulary: it is the stricter of the two, so a caller
+ * that forgets to say gets a false POSITIVE rather than a missed detection —
+ * loud and findable, instead of silent. The traversal below never relies on it.
+ *
  * Exported for the pinned false-positive cases in this module's test — the
  * traversal below is the product surface, this is the judgement under it.
  */
-export function unboundRootsInCelSource(source: string): string[] {
+export function unboundRootsInCelSource(
+  source: string,
+  boundRoots: readonly string[] = BOUND_FORM_VIEW_PREDICATE_ROOTS,
+): string[] {
   const stripped = source.replace(CEL_STRING_LITERAL_RE, '');
   if (CEL_COMPREHENSION_MACRO_RE.test(stripped)) return [];
 
@@ -170,7 +243,7 @@ export function unboundRootsInCelSource(source: string): string[] {
     while (after < stripped.length && /\s/.test(stripped[after]!)) after += 1;
     if (stripped[after] === '(') continue;
     if (CEL_RESERVED_WORDS.has(identifier)) continue;
-    if (BOUND_FORM_VIEW_PREDICATE_ROOTS.includes(identifier)) continue;
+    if (boundRoots.includes(identifier)) continue;
     if (seen.has(identifier)) continue;
     seen.add(identifier);
     roots.push(identifier);
@@ -195,16 +268,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Judge one predicate slot against the vocabulary of the surface it sits in —
+ * the two differ, so the surface is passed explicitly rather than defaulted.
+ */
 function scanPredicateSlot(
   predicate: unknown,
   path: string,
   view: string,
+  surface: FormPredicateSurface,
   out: UnboundFormPredicateRoot[],
 ): void {
   const source = readCelSource(predicate);
   if (source === null) return;
-  for (const root of unboundRootsInCelSource(source)) {
-    out.push({ path, view, root, source });
+  const boundRoots =
+    surface === 'field' ? BOUND_FORM_FIELD_PREDICATE_ROOTS : BOUND_FORM_VIEW_PREDICATE_ROOTS;
+  for (const root of unboundRootsInCelSource(source, boundRoots)) {
+    out.push({ path, view, root, source, surface });
   }
 }
 
@@ -221,7 +301,7 @@ function scanFormField(
 ): void {
   if (!isPlainObject(field)) return;
   for (const key of FORM_PREDICATE_KEYS) {
-    scanPredicateSlot(field[key], `${path}.${key}`, view, out);
+    scanPredicateSlot(field[key], `${path}.${key}`, view, 'field', out);
   }
   const subFields = field.fields;
   if (Array.isArray(subFields)) {
@@ -237,7 +317,7 @@ function scanFormSection(
 ): void {
   if (!isPlainObject(section)) return;
   for (const key of FORM_PREDICATE_KEYS) {
-    scanPredicateSlot(section[key], `${path}.${key}`, view, out);
+    scanPredicateSlot(section[key], `${path}.${key}`, view, 'section', out);
   }
   const fields = section.fields;
   if (Array.isArray(fields)) {

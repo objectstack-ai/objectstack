@@ -201,7 +201,7 @@ describe('DataEngineUpdateOptionsSchema', () => {
       DataEngineUpdateOptionsSchema.parse({
         upsert: true,
       }),
-    ).toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*Delete the key/s);
+    ).toThrow(/`update\.options\.upsert` was removed .*ADR-0049.*Delete the key/s);
   });
 
   it('parses cleanly without the retired flag, and never produces the key', () => {
@@ -465,7 +465,7 @@ describe('EngineUpdateOptionsSchema', () => {
         where: { status: 'inactive' },
         upsert: true,
       }),
-    ).toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*Delete the key/s);
+    ).toThrow(/`update\.options\.upsert` was removed .*ADR-0049.*Delete the key/s);
   });
 
   it('never produces the retired key on a clean parse', () => {

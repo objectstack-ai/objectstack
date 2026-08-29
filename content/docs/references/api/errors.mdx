@@ -42,7 +42,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution (#3821). |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
 | **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
@@ -50,7 +50,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
 | **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
-| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
 | **traceId** | `string` | optional | Distributed trace ID |
@@ -157,7 +157,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution (#3821). |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
 | **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
@@ -165,7 +165,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
 | **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
-| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
 | **traceId** | `string` | optional | Distributed trace ID |

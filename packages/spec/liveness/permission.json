@@ -48,43 +48,43 @@
       "children": {
         "allowCreate": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION insert→allowCreate)",
-          "note": "Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the persona × CRUD matrix runs the create verb over real HTTP for every showcase permission set, in BOTH directions per cell — an allowed create returns an id and the row is really there, a denied one is 403 PERMISSION_DENIED and persisted nothing. Cells are judged as a UNION with the everyone-baseline set (ADR-0090 D5). One proof binds all four allow* verbs; multi-entry binding has precedent in `semantic-roles`."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION (the map row: insert→allowCreate); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`const permKey = OPERATION_TO_PERMISSION[operation]` in `checkObjectPermission` — the gate that reads the bit); packages/plugins/plugin-security/src/permission-evaluator.ts#crudBucketForOperation (the same map switched into the object-capability buckets)",
+          "note": "Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the persona × CRUD matrix runs the create verb over real HTTP for every showcase permission set, in BOTH directions per cell — an allowed create returns an id and the row is really there, a denied one is 403 PERMISSION_DENIED and persisted nothing. Cells are judged as a UNION with the everyone-baseline set (ADR-0090 D5). One proof binds all four allow* verbs; multi-entry binding has precedent in `semantic-roles`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:15` had rotted onto a docblock line about the 2026-08-26 ruling that retired `allowRestore`/`allowPurge`; the map itself begins at ~:23. All five `:15` citations in this file rotted together, which is what a shared constant does when its file gets a new header: one edit above it invalidates every entry that cites it, and none of them can notice. Anchored to the constant instead, plus the two verbs that consume it. Re-closed by hand against c459da6bc."
         },
         "allowRead": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION find/findOne/count/aggregate→allowRead)",
-          "note": "Proof-bound 2026-08-23 (#10959) — the read verb of the same persona × CRUD matrix, both directions per cell (a readable list answers 200 with rows; a denied one is 403 PERMISSION_DENIED). See `allowCreate` for the binding rationale."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION (the map row: find/findOne/count/aggregate→allowRead); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`const permKey = OPERATION_TO_PERMISSION[operation]` in `checkObjectPermission` — the gate that reads the bit); packages/plugins/plugin-security/src/permission-evaluator.ts#crudBucketForOperation (the same map switched into the object-capability buckets)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the read verb of the same persona × CRUD matrix, both directions per cell (a readable list answers 200 with rows; a denied one is 403 PERMISSION_DENIED). See `allowCreate` for the binding rationale. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:15` had rotted onto a docblock line about the 2026-08-26 ruling that retired `allowRestore`/`allowPurge`; the map itself begins at ~:23. All five `:15` citations in this file rotted together, which is what a shared constant does when its file gets a new header: one edit above it invalidates every entry that cites it, and none of them can notice. Anchored to the constant instead, plus the two verbs that consume it. Re-closed by hand against c459da6bc."
         },
         "allowEdit": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION update→allowEdit)",
-          "note": "Proof-bound 2026-08-23 (#10959) — the edit verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the allowed edit persisted; the denied edit changed nothing). See `allowCreate` for the binding rationale."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION (the map row: update→allowEdit); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`const permKey = OPERATION_TO_PERMISSION[operation]` in `checkObjectPermission` — the gate that reads the bit); packages/plugins/plugin-security/src/permission-evaluator.ts#crudBucketForOperation (the same map switched into the object-capability buckets)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the edit verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the allowed edit persisted; the denied edit changed nothing). See `allowCreate` for the binding rationale. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:15` had rotted onto a docblock line about the 2026-08-26 ruling that retired `allowRestore`/`allowPurge`; the map itself begins at ~:23. All five `:15` citations in this file rotted together, which is what a shared constant does when its file gets a new header: one edit above it invalidates every entry that cites it, and none of them can notice. Anchored to the constant instead, plus the two verbs that consume it. Re-closed by hand against c459da6bc."
         },
         "allowDelete": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION delete→allowDelete)",
-          "note": "Proof-bound 2026-08-23 (#10959) — the delete verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the deleted row is gone; the denied delete left the row standing). See `allowCreate` for the binding rationale."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION (the map row: delete→allowDelete); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`const permKey = OPERATION_TO_PERMISSION[operation]` in `checkObjectPermission` — the gate that reads the bit); packages/plugins/plugin-security/src/permission-evaluator.ts#crudBucketForOperation (the same map switched into the object-capability buckets)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the delete verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the deleted row is gone; the denied delete left the row standing). See `allowCreate` for the binding rationale. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:15` had rotted onto a docblock line about the 2026-08-26 ruling that retired `allowRestore`/`allowPurge`; the map itself begins at ~:23. All five `:15` citations in this file rotted together, which is what a shared constant does when its file gets a new header: one edit above it invalidates every entry that cites it, and none of them can notice. Anchored to the constant instead, plus the two verbs that consume it. Re-closed by hand against c459da6bc."
         },
         "allowExport": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/rest/src/rest-server.ts (enforceExportPermission — caller-level 403 gate on the bulk-egress route, fail-closed when the security service cannot answer) + packages/plugins/plugin-security/src/security-plugin.ts (canExport → checkObjectPermission('export'), posture-unresolvable → deny) + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:493-502 (annotateEffectiveApiOperations reads the per-object allowExport bit and the `'*'` wildcard for the /me/permissions projection the frontend renders)",
-          "note": "#3544 — user-level export axis over read. Re-verified 2026-07-30: enforcement is SERVER-side, not only the projection — the export route calls enforceExportPermission (403), separate from the object-level 405; the annotate path is the display half. Optional/no-default = backward-compatible opt-out (unset inherits read); `false` denies export while keeping read. 2026-08-25: the annotate pointer was REPOINTED — `annotateEffectiveApiOperations` moved out of hono-plugin.ts into current-user-endpoints.ts, the same repos-internal code movement that rotted systemPermissions and tabPermissions. The old citation carried no line, so the #11210 line bound could not see it; the key-mention signal is what found it."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/rest/src/rest-server.ts#enforceExportPermission (caller-level 403 gate on the bulk-egress route, fail-closed when the security service cannot answer); packages/plugins/plugin-security/src/security-plugin.ts#canExport (→ checkObjectPermission('export'), posture-unresolvable → deny); packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#annotateEffectiveApiOperations (`const exportBit = acc.allowExport ?? wildExport` — the per-object bit and the `'*'` wildcard, for the /me/permissions projection the frontend renders)",
+          "note": "#3544 — user-level export axis over read. Re-verified 2026-07-30: enforcement is SERVER-side, not only the projection — the export route calls enforceExportPermission (403), separate from the object-level 405; the annotate path is the display half. Optional/no-default = backward-compatible opt-out (unset inherits read); `false` denies export while keeping read. 2026-08-25: the annotate pointer was REPOINTED — `annotateEffectiveApiOperations` moved out of hono-plugin.ts into current-user-endpoints.ts, the same repos-internal code movement that rotted systemPermissions and tabPermissions. The old citation carried no line, so the #11210 line bound could not see it; the key-mention signal is what found it. 2026-08-28: RE-ANCHORED (#13003) — the `:493-502` half was still ACCURATE (`:502` names the read), so this leg is a grammar migration; the two path-only legs are upgraded to anchors in the same pass, which is what the 2026-08-25 repoint recorded as impossible to falsify (\"the old citation carried no line, so the #11210 line bound could not see it\"). Re-closed by hand against c459da6bc."
         },
         "allowTransfer": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION transfer→allowTransfer; DESTRUCTIVE_OPERATIONS fail-closed backstop) + modifyAllRecords bypass via MODIFY_ALL_WRITE_KEYS",
-          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships. Re-verified 2026-07-30: M2 still unshipped (no transfer/restore/purge operations in packages/objectql), the gate mapping stands."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION (the map row transfer→allowTransfer); packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS (the fail-closed backstop — an operation in this set is denied when the map yields no bit); packages/plugins/plugin-security/src/permission-evaluator.ts#MODIFY_ALL_WRITE_KEYS (the modifyAllRecords bypass, which folds the destructive class in)",
+          "note": "#1883 — RBAC gate pre-mapped, deny unless granted; the `transfer` ObjectQL operation is pending M2, so granting delivers nothing until it ships. Re-verified 2026-07-30: M2 still unshipped (no transfer/restore/purge operations in packages/objectql), the gate mapping stands. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:15` had rotted onto a docblock line about the 2026-08-26 ruling that retired `allowRestore`/`allowPurge`; the map itself begins at ~:23. All five `:15` citations in this file rotted together, which is what a shared constant does when its file gets a new header: one edit above it invalidates every entry that cites it, and none of them can notice. Anchored to the constant instead, plus the two verbs that consume it. Re-closed by hand against c459da6bc."
         },
         "allowRestore": {
           "status": "dead",
@@ -100,28 +100,30 @@
         },
         "viewAllRecords": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (read bypass at the allowRead check; getEffectiveScope read→'org'; hasViewAllData)"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`checkObjectPermission`: `permKey === 'allowRead' && (objPerm.viewAllRecords || objPerm.modifyAllRecords)` — the read bypass); packages/plugins/plugin-security/src/permission-evaluator.ts#getEffectiveScope (read → 'org' when either super-user bit is held); packages/plugins/plugin-security/src/permission-evaluator.ts#superuserBypassSets (the sets whose bypass a caller actually holds)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and PROSE CORRECTED — this citation carried no line at all, so nothing could ever falsify it; re-closing it by hand found the evidence naming `hasViewAllData`, a symbol that no longer exists anywhere in `packages/**` (the reader is `superuserBypassSets`, with `hasSuperuserReadBypass` / `hasSuperuserWriteBypass` beside it). A path-only citation is the weakest form in this ledger: it passes the existence check by naming a file, and the line bound has nothing to bound. Re-closed by hand against c459da6bc."
         },
         "modifyAllRecords": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts#owner-anchor-and-bulk-writes",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (MODIFY_ALL_WRITE_KEYS bypass over edit/delete + destructive class; getEffectiveScope write→'org')"
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#MODIFY_ALL_WRITE_KEYS (the bypass key set over edit/delete plus the destructive class); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`MODIFY_ALL_WRITE_KEYS.has(permKey) && objPerm.modifyAllRecords` in `checkObjectPermission`); packages/plugins/plugin-security/src/permission-evaluator.ts#getEffectiveScope (write → 'org')",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to anchors; the two consumers its prose already named are now separately falsifiable. Re-closed by hand against c459da6bc."
         },
         "readScope": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts#showcase-scope-depth",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts (getEffectiveScope) + packages/plugins/plugin-sharing/src/sharing-service.ts (owner-match widened by readScope; hierarchy values delegated to IHierarchyScopeResolver)",
-          "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getEffectiveScope (the read branch — ranks the caller's sets and takes the widest); packages/plugins/plugin-sharing/src/sharing-service.ts#buildReadFilter (owner-match widened by the stamped `__readScope`; hierarchy values delegated to IHierarchyScopeResolver)",
+          "note": "ADR-0057 D1 — read access DEPTH (own/own_and_reports/unit/unit_and_below/org). own/org enforced in open edition; hierarchy values via the enterprise hierarchy-scope-resolver (fail-closed to owner-only when absent; defineStack requires 'hierarchy-security'). Proven: packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts. 2026-08-28: RE-ANCHORED (#13003) — path-only citations upgraded to anchors. Re-closed by hand against c459da6bc."
         },
         "writeScope": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts#showcase-scope-depth-write",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:224 (getEffectiveScope write branch; absent → 'own') + packages/plugins/plugin-sharing/src/sharing-service.ts:230 (canEdit owner-set widened by __writeScope; 'org' short-circuits to unrestricted)",
-          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30 and proof-bound the same day: the proof asserts POST-STATE in three postures — 'unit' edits a BU co-member's row and does NOT descend into a child BU; an ABSENT writeScope stays owner-only even under a 'unit' readScope (the axes gate independently); and the hierarchy seam fails CLOSED without the enterprise resolver."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getEffectiveScope (the write branch; absent → 'own'); packages/plugins/plugin-sharing/src/sharing-service.ts#buildWriteFilter (`const writeScope = (context as any).__writeScope`; 'org' short-circuits to unrestricted); packages/plugins/plugin-sharing/src/sharing-service.ts#matchesOwnerScope (the by-id write leg behind `canEdit` / `canDelete`, same short-circuit, otherwise the owner-id set is resolved at that depth)",
+          "note": "ADR-0057 D1 — write access DEPTH (same enum as readScope). Re-verified 2026-07-30 and proof-bound the same day: the proof asserts POST-STATE in three postures — 'unit' edits a BU co-member's row and does NOT descend into a child BU; an ABSENT writeScope stays owner-only even under a 'unit' readScope (the axes gate independently); and the hierarchy seam fails CLOSED without the enterprise resolver. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — both citations had rotted in range. `permission-evaluator.ts:224` landed on the `MODIFY_ALL_WRITE_KEYS` bypass inside `checkObjectPermission` — a DIFFERENT key's enforcement, which is the most misleading rot in this file because it still reads as permission-evaluation code; `sharing-service.ts:230` landed on `noun: 'share'`, ~240 lines above the read. The entry also gains the second sharing consumer its prose named as `canEdit`: the read is in `matchesOwnerScope`, the fast path `canEdit` and `canDelete` share. Re-closed by hand against c459da6bc."
         }
       }
     },
@@ -129,39 +131,40 @@
       "children": {
         "readable": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts#showcase-fls-read-mask-strip",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:301",
-          "note": "FLS read-mask. Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the proof AUTHORS a scratch permission set carrying `readable: false` and asserts the runtime outcome both ways on the same field, row and request — the key is ABSENT from the wire (`'budget' in record` is false, which `toBeUndefined()` cannot distinguish from a mask), while the entitled caller gets the real value. The sibling `editable` is deliberately NOT bound to this proof: that file authors the key but asserts its refusal as a consequence of unreadability, not as the write-deny axis (`showcase-permission-zoo` pins that half)."
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getFieldPermissions (`if (perm.readable) result[fieldName].readable = true` — the most-permissive merge across the caller's sets, keyed `object.field`)",
+          "note": "FLS read-mask. Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the proof AUTHORS a scratch permission set carrying `readable: false` and asserts the runtime outcome both ways on the same field, row and request — the key is ABSENT from the wire (`'budget' in record` is false, which `toBeUndefined()` cannot distinguish from a mask), while the entitled caller gets the real value. The sibling `editable` is deliberately NOT bound to this proof: that file authors the key but asserts its refusal as a consequence of unreadability, not as the write-deny axis (`showcase-permission-zoo` pins that half). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:301` had rotted onto a blank docblock line (the `explain-engine.ts` bypass table), ~78 lines above the merge. Re-closed by hand against c459da6bc."
         },
         "editable": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:302",
-          "note": "FLS write-deny."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getFieldPermissions (`if (perm.editable) result[fieldName].editable = true` — the same merge, write half)",
+          "note": "FLS write-deny. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `permission-evaluator.ts:302` had rotted onto a docblock line naming the `vama_bypass` explain section. The two FLS keys are merged one line apart inside one function, so both entries now share one anchor and the pair can no longer drift independently. Re-closed by hand against c459da6bc."
         }
       }
     },
     "systemPermissions": {
       "status": "live",
-      "verifiedAt": "2026-08-23",
+      "verifiedAt": "2026-08-28",
       "proof": "packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts#sharing-rule-org-less-caller",
-      "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:267 (getSystemPermissions — ADR-0066 D3 union of the capabilities a caller's permission sets grant, into ExecutionContext.systemPermissions) + packages/plugins/plugin-sharing/src/sharing-rule-service.ts:136 (assertCanManageRules — ADR-0111 D6: every sharing-rule verb, list and get included, refuses PERMISSION_DENIED unless the caller holds `manage_sharing` OR the legacy `manage_platform_settings` admin override, with system contexts bypassing; enforced in the SERVICE so non-REST callers are covered) + packages/plugins/plugin-sharing/src/sharing-plugin.ts:993 + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:897 (/auth/me/apps — `AppSchema.requiredPermissions ⊆ ctx.systemPermissions`, the app-entry/nav half)",
-      "note": "Re-verified 2026-08-23 (#10959) and the note CORRECTED — the previous text (\"PARTIAL — app-entry/nav visibility only, not a general capability gate\") was stale in both halves. (a) Its evidence pointer `plugin-hono-server/src/hono-plugin.ts:1222` no longer exists: that file is 717 lines and contains no `systemPermissions` reference at all — the app-entry consumer moved to `current-user-endpoints.ts`. (b) The scoping claim is falsified by ADR-0111 D6 (Accepted 2026-07-30, P0 implemented): `SharingRuleService.assertCanManageRules` reads `context.systemPermissions` and refuses the whole sharing-rule surface unless the caller holds `manage_sharing` or the legacy `manage_platform_settings` admin override (system contexts bypass), which is a DATA-LAYER authorization gate, not nav visibility — the admit set is wider than one capability, but every member of it is read from `systemPermissions`, which is what this entry classifies. The bound proof measures exactly that: it authors `system_permissions: ['manage_sharing']` on a permission set and asserts the refusal it gets back is the ORG-scope refusal and explicitly NOT `/requires the manage_sharing capability/` — i.e. the authored capability really did clear the service gate — with the org-bound holder of the same grant reading its own tenant (200) as the entitled contrast, over two organizations so a single-tenant fixture cannot pass on the broken build."
+      "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#getSystemPermissions (ADR-0066 D3 union of the capabilities a caller's permission sets grant, into ExecutionContext.systemPermissions); packages/plugins/plugin-sharing/src/sharing-rule-service.ts#assertCanManageRules (ADR-0111 D6: every sharing-rule verb, list and get included, refuses PERMISSION_DENIED unless the caller holds `manage_sharing` OR the legacy `manage_platform_settings` admin override, with system contexts bypassing; enforced in the SERVICE so non-REST callers are covered); packages/plugins/plugin-sharing/src/sharing-plugin.ts#buildSharingMiddleware (the same capability read on the middleware path); packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#registerCurrentUserEndpoints (/auth/me/apps — `AppSchema.requiredPermissions ⊆ ctx.systemPermissions`, the app-entry/nav half)",
+      "note": "Re-verified 2026-08-23 (#10959) and the note CORRECTED — the previous text (\"PARTIAL — app-entry/nav visibility only, not a general capability gate\") was stale in both halves. (a) Its evidence pointer `plugin-hono-server/src/hono-plugin.ts:1222` no longer exists: that file is 717 lines and contains no `systemPermissions` reference at all — the app-entry consumer moved to `current-user-endpoints.ts`. (b) The scoping claim is falsified by ADR-0111 D6 (Accepted 2026-07-30, P0 implemented): `SharingRuleService.assertCanManageRules` reads `context.systemPermissions` and refuses the whole sharing-rule surface unless the caller holds `manage_sharing` or the legacy `manage_platform_settings` admin override (system contexts bypass), which is a DATA-LAYER authorization gate, not nav visibility — the admit set is wider than one capability, but every member of it is read from `systemPermissions`, which is what this entry classifies. The bound proof measures exactly that: it authors `system_permissions: ['manage_sharing']` on a permission set and asserts the refusal it gets back is the ORG-scope refusal and explicitly NOT `/requires the manage_sharing capability/` — i.e. the authored capability really did clear the service gate — with the org-bound holder of the same grant reading its own tenant (200) as the entitled contrast, over two organizations so a single-tenant fixture cannot pass on the broken build. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — ALL FOUR citations had rotted in range, five days after the 2026-08-23 by-hand re-verification that set them: `permission-evaluator.ts:267` landed inside `getEffectiveScope`'s rank lookup (the reader is `getSystemPermissions` at ~:279), `sharing-rule-service.ts:136` on `private readonly inertRuleSeen = new Set<string>()` (~20 lines above the gate), and `sharing-plugin.ts:993` in a docblock about the i18n service being contributed by another plugin (~80 lines above the read). The fourth, `current-user-endpoints.ts:897`, had rotted too — onto the `/me/apps` handler's own header comment, five lines above the `1. AppSchema.requiredPermissions ⊆ ctx.systemPermissions` line it was clearly meant to name and ~31 above the `const sysPerms = new Set<string>(execCtx.systemPermissions ?? [])` that does it; a near-miss onto prose that DESCRIBES the read is the single most convincing form of this rot, because anyone who opens the file to check finds the right words there. So all four were wrong, and this entry's own note already records the file-move that killed their predecessors. Five days from a by-hand re-verification to four dead pointers is the measurement this card was filed on. Re-closed by hand against c459da6bc."
     },
     "tabPermissions": {
       "status": "live",
-      "verifiedAt": "2026-08-23",
+      "verifiedAt": "2026-08-28",
       "proof": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts#me-apps-and-everyone-baseline",
-      "evidence": "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:947 (tabRank ranks all four values — hidden 0 < default_off 1 < default_on 2 < visible 3) + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:952-958 (the merge across the caller's resolved permission sets, most-visible wins; an unrecognised value is skipped rather than defaulted) + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:963 (the /me/apps drop — tabs[app.name] === 'hidden' ⇒ the app is not returned, and this filter runs BEFORE the fail-open branch, so it survives a missing SecurityPlugin) + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:772 (the same rank table for the /auth/me/permissions half) + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:862 (projected onto that response) + packages/plugins/plugin-security/src/permission-set-projection.ts:287 (the sys_permission_set.tab_permissions column parsed onto the resolved set) + packages/core/src/security/assemble-execution-context.ts:328 (onto ExecutionContext.tabPermissions)",
-      "note": "Re-verified 2026-08-23 (#11210) and every pointer REPLACED — all three of the previous ones were dead, in two different ways, and the gate could see neither. (a) `plugin-hono-server/src/hono-plugin.ts:1200` was past EOF: that file is 717 lines and contains no `tabPermissions` reference at all — the same code movement that killed this entry's sibling `systemPermissions` pointer (#10959/#11209) moved /me/apps and /auth/me/permissions into `current-user-endpoints.ts`. (b) `runtime/src/security/resolve-execution-context.ts:205` and `rest/src/rest-server.ts:1551` were dead WITHIN bounds — both files are long enough for the cited line, and neither mentions `tabPermissions` anywhere (0 occurrences, measured); the handler's own comment at current-user-endpoints.ts:922-926 records why, namely that resolveCtx() carries neither systemPermissions nor tabPermissions, so /me/apps re-resolves the sets itself. THE VERDICT IS UNCHANGED and was never in question — `live` with a bound dogfood proof, and the behaviour still ships; what was dead is the citation, which is exactly the rot #11210's line bound now makes impossible to leave behind silently. The 2026-07-30 reading survives the re-measurement verbatim: the rank merge reads all four values, not only 'hidden'. Two consumers, deliberately both cited: /me/apps ENFORCES (a hidden app is dropped), /auth/me/permissions PROJECTS the merged map for the renderer."
+      "evidence": "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#registerCurrentUserEndpoints (both consumers live in this registrar's route closures: /auth/me/permissions builds the rank table and the most-visible merge across the caller's resolved sets and projects the map onto the response, and /me/apps applies the same merge and DROPS an app whose merged value is 'hidden' — a filter that runs before the fail-open branch, so it survives a missing SecurityPlugin); packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#tabRank (the four-value rank table itself — hidden 0 < default_off 1 < default_on 2 < visible 3, built once per handler; an unrecognised value is skipped rather than defaulted); packages/plugins/plugin-security/src/permission-set-projection.ts#permissionSetBodyFromRow (the sys_permission_set.tab_permissions column parsed onto the resolved set, with `permissionSetRowFields` writing it back and `mergeRowPatchIntoBody` patching it); packages/core/src/security/assemble-execution-context.ts#entryFields (`tabPermissions: authz.tabPermissions` onto ExecutionContext)",
+      "note": "Re-verified 2026-08-23 (#11210) and every pointer REPLACED — all three of the previous ones were dead, in two different ways, and the gate could see neither. (a) `plugin-hono-server/src/hono-plugin.ts:1200` was past EOF: that file is 717 lines and contains no `tabPermissions` reference at all — the same code movement that killed this entry's sibling `systemPermissions` pointer (#10959/#11209) moved /me/apps and /auth/me/permissions into `current-user-endpoints.ts`. (b) `runtime/src/security/resolve-execution-context.ts:205` and `rest/src/rest-server.ts:1551` were dead WITHIN bounds — both files are long enough for the cited line, and neither mentions `tabPermissions` anywhere (0 occurrences, measured); the handler's own comment at current-user-endpoints.ts:922-926 records why, namely that resolveCtx() carries neither systemPermissions nor tabPermissions, so /me/apps re-resolves the sets itself. THE VERDICT IS UNCHANGED and was never in question — `live` with a bound dogfood proof, and the behaviour still ships; what was dead is the citation, which is exactly the rot #11210's line bound now makes impossible to leave behind silently. The 2026-07-30 reading survives the re-measurement verbatim: the rank merge reads all four values, not only 'hidden'. Two consumers, deliberately both cited: /me/apps ENFORCES (a hidden app is dropped), /auth/me/permissions PROJECTS the merged map for the renderer. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED. This entry had SEVEN line citations, more than any other in the batch, and the re-closure is a study in how that ages: `assemble-execution-context.ts:328` was still exact; the five hono lines had all slid a few lines each (`:947` onto `await resolvePermissionSets(...)`, `:963` onto the `const apps = [...]` filter head, `:772` onto the `systemPermissions` set one line above the rank table) — near-misses that read as right to anyone who opens the file; and `permission-set-projection.ts:287` had rotted 30 lines onto `cachedSpecBodyKeys`, a different mechanism entirely. ANCHOR RESIDUAL, stated because it is the batch's weakest: both hono consumers are anonymous route closures inside ONE exported registrar, so the distinction the seven lines carried survives only in this prose. `tabRank` is cited beside the registrar for that reason — it is specific to the tab machinery, so deleting the merge reds the anchor even though the registrar would survive. Re-closed by hand against c459da6bc."
     },
     "rowLevelSecurity": {
       "children": {
         "name": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:203 (skip-diagnostics name the operator sees)"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (the skip diagnostic the operator sees — `policy '${name ?? '(unnamed)'}' on '${object}'` in the warn line for an uncompilable predicate)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `rls-compiler.ts:203` had rotted onto a comment about failing closed when every applicable policy depended on an unpopulated `current_user.*` variable; the only read of this key is the warn line ~11 lines above it. Re-closed by hand against c459da6bc."
         },
         "label": {
           "status": "dead",
@@ -177,38 +180,41 @@
         },
         "object": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:289 (applicability: exact object or '*')"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`policy.object !== objectName && policy.object !== '*'` — the applicability test)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — the citation was still ACCURATE; grammar migration only. Re-closed by hand against c459da6bc."
         },
         "operation": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:304 (applicability: 'all' or the mapped RLS op)"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`policy.operation === 'all'`, else compared against the mapped RLS op from `mapOperationToRLS`)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — the citation was still ACCURATE; grammar migration only. Re-closed by hand against c459da6bc."
         },
         "using": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts",
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policy.using` is the predicate on the read pass, and the fallback when a `check` pass finds no `check`)",
           "proof": "packages/qa/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write",
-          "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate."
+          "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate. 2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc."
         },
         "check": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
+          "verifiedAt": "2026-08-28",
           "proof": "packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts"
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`(policy as { check?: string }).check ?? policy.using` — the post-image pass prefers `check` and falls back to `using`)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc."
         },
         "positions": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts:297 (applicability domain vs caller's held positions)",
-          "note": "flat match — no subordinate rollup (ADR-0090 D3 rename)."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`const domain = (policy as { positions?: string[] }).positions` — the applicability domain, matched flat against the caller's held positions)",
+          "note": "flat match — no subordinate rollup (ADR-0090 D3 rename). 2026-08-28: RE-ANCHORED (#13003) — the citation was still ACCURATE; grammar migration only. Re-closed by hand against c459da6bc."
         },
         "enabled": {
           "status": "live",
-          "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts (getApplicablePolicies: `enabled === false` excluded before object/positions/operation matching; absent = active per the schema default) — pinned by the enabled-gate cases in packages/plugins/plugin-security/src/security-plugin.test.ts",
-          "note": "ENFORCED 2026-07-30, by the security-subset re-verification this stamp records. Until then the entry claimed live citing rls-compiler.ts, and NOTHING read the property: policies OR-combine (any match allows access), so a policy an admin disabled kept CONTRIBUTING ITS GRANT — the schema's own describe ('Disabled policies are not evaluated') was false in the over-share direction, the #3896 shape. Same enforce-or-remove resolution as `positions` (ADR-0049)."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`(policy as { enabled?: boolean }).enabled === false` excluded BEFORE object / positions / operation matching; absent = active per the schema default) — pinned by the enabled-gate cases in packages/plugins/plugin-security/src/security-plugin.test.ts",
+          "note": "ENFORCED 2026-07-30, by the security-subset re-verification this stamp records. Until then the entry claimed live citing rls-compiler.ts, and NOTHING read the property: policies OR-combine (any match allows access), so a policy an admin disabled kept CONTRIBUTING ITS GRANT — the schema's own describe ('Disabled policies are not evaluated') was false in the over-share direction, the #3896 shape. Same enforce-or-remove resolution as `positions` (ADR-0049). 2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor, on the entry whose whole history is that its citation once named a file nothing in it read. Re-closed by hand against c459da6bc."
         },
         "priority": {
           "status": "dead",

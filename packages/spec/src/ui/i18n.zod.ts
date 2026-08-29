@@ -260,7 +260,7 @@ export type I18nLabel = z.input<typeof I18nLabelSchema>;
 // (it reaches `arialabel`, `ariaLabell`, `ariadescribedby`, `aria-label`,
 // `roles`; it does NOT reach any of the four aliases here).
 const ARIA_HISTORY =
-  'Until #4001 closed this shape an unknown key was dropped silently — the component still '
+  'Until this shape was closed an unknown key was dropped silently — the component still '
   + 'rendered, with no accessible name and nothing to say the one you wrote had been discarded.';
 
 /**
@@ -308,16 +308,16 @@ export const AriaPropsSchema = lazySchema(() => strictObject({
       + '`AriaPropsSchema.extend({ live })` and read by `ListView` alone — this shared shape is '
       + 'carried by ~30 renderers and only one of them applies `aria-live`, so declaring it here '
       + 'would advertise a capability the other 29 do not deliver. On an objectui list view the key '
-      + 'is valid as-is; anywhere else, drop it. Promoting it into the protocol is #5058.',
+      + 'is valid as-is; anywhere else, drop it. Promoting it into the protocol is not yet decided.',
     // `aria-labelledby` REFERENCES another element's id; `ariaLabel` is a literal
     // string. Renaming between them would be a wrong prescription, so this names
     // the gap instead of pretending there is a target.
     ariaLabelledBy: '`aria-labelledby` has no counterpart in this protocol — it references another '
       + 'element\'s id, which is not the same thing as `ariaLabel` (a literal accessible name), so '
       + 'there is nothing to rename it to. Use `ariaLabel` only if a literal string is what you meant. '
-      + 'Declaring the referencing form is #5058.',
+      + 'Declaring the referencing form remains an open gap in this protocol.',
     labelledBy: '`aria-labelledby` has no counterpart in this protocol — see `ariaLabelledBy`. '
-      + 'Use `ariaLabel` only if a literal accessible name is what you meant; #5058 tracks the gap.',
+      + 'Use `ariaLabel` only if a literal accessible name is what you meant; the referencing form is an open gap.',
   },
 }, {
   /**

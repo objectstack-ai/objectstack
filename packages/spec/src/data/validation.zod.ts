@@ -145,7 +145,7 @@ const BASE_VALIDATION_SHAPE = {
 export const ScriptValidationSchema = lazySchema(() => strictObject({
   surface: 'this script validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { formula: 'condition', expression: 'condition', predicate: 'condition', rule: 'condition' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -160,14 +160,14 @@ export const ScriptValidationSchema = lazySchema(() => strictObject({
 export const StateMachineValidationSchema = lazySchema(() => strictObject({
   surface: 'this state-machine validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { states: 'transitions', statefield: 'field', from: 'transitions', initial: 'initialStates', initialstate: 'initialStates' },
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('state_machine'),
   field: z.string().describe('State field (e.g. status)'),
   transitions: z.record(z.string(), z.array(z.string())).describe('Map of { OldState: [AllowedNewStates] }'),
-  initialStates: z.array(z.string()).optional().describe('States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert). #3165.'),
+  initialStates: z.array(z.string()).optional().describe('States a record may be CREATED in. When set, an INSERT whose state field carries a value outside this list is rejected (server-enforced) — the FSM entry point. `transitions` only governs UPDATE, and a `select` field permits ANY declared option as an initial value, so without this a record could be born mid-flow (e.g. created already `approved`). Omit to keep the legacy behavior (no initial-state check on insert).'),
 }));
 
 /**
@@ -177,7 +177,7 @@ export const StateMachineValidationSchema = lazySchema(() => strictObject({
 export const FormatValidationSchema = lazySchema(() => strictObject({
   surface: 'this format validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { pattern: 'regex', fieldname: 'field' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -259,7 +259,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
 export const CrossFieldValidationSchema = lazySchema(() => strictObject({
   surface: 'this cross-field validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { formula: 'condition', expression: 'condition' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -280,7 +280,7 @@ export const CrossFieldValidationSchema = lazySchema(() => strictObject({
 export const JSONValidationSchema = lazySchema(() => strictObject({
   surface: 'this JSON-schema validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { jsonschema: 'schema', fieldname: 'field' },
 }, {
   ...BASE_VALIDATION_SHAPE,
@@ -511,7 +511,7 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
 export const ConditionalValidationSchema = lazySchema(() => strictObject({
   surface: 'this conditional validation rule',
   history:
-    'Until #4001 closed this shape these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the rule still registered and ran, minus whatever the key was meant to configure.',
   aliases: { if: 'when', condition: 'when', match: 'when', else: 'otherwise' },
 }, {
   ...BASE_VALIDATION_SHAPE,

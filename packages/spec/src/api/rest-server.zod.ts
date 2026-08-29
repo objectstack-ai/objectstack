@@ -138,7 +138,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * Which is the exact failure mode this key's removal is about.
    */
   requireAuth: retiredKey(
-    '`api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data '
+    '`api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data '
     + 'is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. '
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "
@@ -529,7 +529,7 @@ export const RestServerConfigSchema = lazySchema(() => z.object({
    * (see the section comment above).
    */
   openApi31: retiredKey(
-    '`RestServerConfig.openApi31` was removed in @objectstack/spec 17 (#4579, ADR-0049) — no '
+    '`RestServerConfig.openApi31` was removed in @objectstack/spec 17 (ADR-0049) — no '
     + 'runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, '
     + 'and the served /openapi.json is the pre-generated contract enriched with the live server URL '
     + 'and the registered objects, so webhook/callback definitions declared here never appeared in '

@@ -60,9 +60,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -85,10 +85,10 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
 | **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
-| **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
 | **objects** | `never` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **apis** | `never` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Delete the key and declare the endpoint one level up, on the STACK: `defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between #4936 and the executor landing it was refused wholesale — nothing mounted a declared path, so every key including `authRequired` parsed and gated nothing — and that blanket refusal is now narrowed to five per-endpoint publish gates (namespace, supported target, mapping, policy, uniqueness): an endpoint that passes them is mounted and serves traffic as soon as the stack is published. Two things to get right when you move it: the path must sit inside your own carve-out, `/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` (ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the only thing that opens anonymous access, and ADR-0121 D6 then requires an armed `rateLimit: { enabled: true, windowMs, maxRequests }`. Read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a security review, not a rename. A route that genuinely needs handler CODE is mounted imperatively instead: resolve the `http.server` service from your plugin context and register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — removed in @objectstack/spec 17, #10726: nothing ever read it, and authoring it is now rejected with its own prescription). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **apis** | `never` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Delete the key and declare the endpoint one level up, on the STACK: `defineStack({ apis })`. That surface EXECUTES from protocol 17. Before the executor landed it was refused wholesale — nothing mounted a declared path, so every key including `authRequired` parsed and gated nothing — and that blanket refusal is now narrowed to five per-endpoint publish gates (namespace, supported target, mapping, policy, uniqueness): an endpoint that passes them is mounted and serves traffic as soon as the stack is published. Two things to get right when you move it: the path must sit inside your own carve-out, `/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` (ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the only thing that opens anonymous access, and ADR-0121 D6 then requires an armed `rateLimit: { enabled: true, windowMs, maxRequests }`. Read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a security review, not a rename. A route that genuinely needs handler CODE is mounted imperatively instead: resolve the `http.server` service from your plugin context and register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — removed in @objectstack/spec 17: nothing ever read it, and authoring it is now rejected with its own prescription). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **sharing** | `never` | optional | [REMOVED] `App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared sharing that did not exist. Public access is granted per FORM VIEW (`FormView.sharing`, the public-data-collection surface). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **embed** | `never` | optional | [REMOVED] `App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **mobileNavigation** | `never` | optional | [REMOVED] `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — fully unimplemented; no renderer, including packages/mobile, ever read it). Delete the key; the block returns if/when a real mobile navigation ships. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
@@ -122,9 +122,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -170,9 +170,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -224,9 +224,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -258,9 +258,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -295,9 +295,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -332,9 +332,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -359,9 +359,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -405,9 +405,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -446,9 +446,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -473,9 +473,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -508,9 +508,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -535,9 +535,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -562,9 +562,9 @@ const result = AppDefinitionResponseSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -669,9 +669,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -749,9 +749,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -788,9 +788,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -827,9 +827,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -862,9 +862,9 @@ Metadata query with filtering, sorting, and pagination
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -901,9 +901,9 @@ Metadata query with filtering, sorting, and pagination
 | **titleFormat** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. |
 | **highlightFields** | `string[]` | optional | [ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default columns, cards, previews, detail highlight strip. Renamed from compactLayout. |
 | **stageField** | `string \| false` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. |
-| **editMode** | `Enum<'modal' \| 'page'>` | optional | Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (#11408, #10144 family). |
+| **editMode** | `Enum<'modal' \| 'page'>` | optional | Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (family). |
 | **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
-| **searchableFields** | `string[]` | optional | Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused (#6674) — mirror the value onto a stored text field and declare that. |
+| **searchableFields** | `string[]` | optional | Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused — mirror the value onto a stored text field and declare that. |
 | **enable** | `{ trackHistory?: boolean; searchable?: boolean; apiEnabled?: boolean; apiMethods?: Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]; … }` | optional | Enabled system features modules |
 | **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1). |
 | **externalSharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | [ADR-0090 D11] OWD for external (portal/partner) principals. Defaults to private; must be &lt;= sharingModel in openness. |

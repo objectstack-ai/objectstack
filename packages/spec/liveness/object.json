@@ -65,8 +65,9 @@
     },
     "datasource": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:1147",
-      "note": "driver routing."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#resolveDatasourceBinding (limb 1 of the routing precedence — `object?.datasource && object.datasource !== 'default'` returns `{ datasource, via: 'explicit' }`, which getDriver then resolves to a driver); packages/objectql/src/engine.ts#assertWriteAllowed (reads the same key to find the datasource DEFINITION whose `external.allowWrites` gates the write)",
+      "note": "driver routing. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED in the same pass — the citation was `engine.ts:1147`, which is IN RANGE of this 13593-line file and lands in a docblock about `assertWriteAllowed`'s placement, not on any read of this key. That is the #12516 class exactly: file present, line inside it, and the file names `datasource` on dozens of lines that all mean the engine's own DatasourceDef/driver registry rather than the object key. Re-closed by hand against c459da6bc."
     },
     "lifecycle": {
       "status": "live",
@@ -81,14 +82,15 @@
     },
     "indexes": {
       "status": "live",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1181",
-      "verifiedAt": "2026-08-06",
-      "note": "DDL — but only through `name`/`fields`/`unique`. `syncDeclaredIndexes` creates every declared index via knex's `table.index()` / `table.unique()`, and the differ's `DeclaredIndexInput` carries `name`/`fields`/`unique`/`nullSafeColumns`. The other two child keys were RETIRED 2026-08-06 (#5248, #4943, ADR-0049): `indexes[].type` selected no access method (and its `.default('btree')` materialized an inert knob into every parse output) and `indexes[].partial` produced a FULL index with the predicate discarded. Both are `retiredKey()` tombstones at `IndexSchema` and are stripped from sources by the protocol-17 conversion `object-index-type-partial-removed`. The container stays `live` because the surviving keys drive real DDL. ⚠ Not to be confused with driver-sql's own `partial: boolean`, which is parsed back out of the database's own CREATE INDEX DDL for drift detection and is unrelated to the declaration surface."
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#syncTableIndexes (takes the object's declared indexes, unions them with the field-derived uniques and hands the result to the DDL writer); packages/drivers/driver-sql/src/sql-driver.ts#syncDeclaredIndexes (the DDL writer named in this note — knex `table.index()` / `table.unique()` per declared entry); packages/drivers/driver-sql/src/sql-driver.ts#initObjects (registration-time read of `(obj as any).indexes`)",
+      "verifiedAt": "2026-08-28",
+      "note": "DDL — but only through `name`/`fields`/`unique`. `syncDeclaredIndexes` creates every declared index via knex's `table.index()` / `table.unique()`, and the differ's `DeclaredIndexInput` carries `name`/`fields`/`unique`/`nullSafeColumns`. The other two child keys were RETIRED 2026-08-06 (#5248, #4943, ADR-0049): `indexes[].type` selected no access method (and its `.default('btree')` materialized an inert knob into every parse output) and `indexes[].partial` produced a FULL index with the predicate discarded. Both are `retiredKey()` tombstones at `IndexSchema` and are stripped from sources by the protocol-17 conversion `object-index-type-partial-removed`. The container stays `live` because the surviving keys drive real DDL. ⚠ Not to be confused with driver-sql's own `partial: boolean`, which is parsed back out of the database's own CREATE INDEX DDL for drift detection and is unrelated to the declaration surface. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `sql-driver.ts:1181`, in range of this 16289-line file but landing in a docblock about aggregate-function lowering (`count_distinct`), nowhere near an index read. The note already named `syncDeclaredIndexes` in prose and that pointer stayed true the whole time while the evidence line rotted — the same note-survives/evidence-rots split recorded on action.requiredPermissions. Re-closed by hand against c459da6bc."
     },
     "validations": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:154",
-      "note": "incl. state_machine."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`const rules = objectSchema?.validations` — the write-path evaluator); packages/objectql/src/validation/rule-validator.ts#legalNextStates (the same read, for the `state_machine` member this note names); packages/objectql/src/validation/rule-validator.ts#needsPriorRecord (reads the rule list to decide whether the prior record must be loaded)",
+      "note": "incl. state_machine. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `rule-validator.ts:154`, in range of this 2228-line file and landing inside a docblock about `requiredWhen` root binding; the three real reads of `objectSchema.validations` are at the symbols above. Re-closed by hand against c459da6bc."
     },
     "activityMilestones": {
       "status": "live",
@@ -97,19 +99,21 @@
     },
     "actions": {
       "status": "live",
-      "evidence": "packages/runtime/src/app-plugin.ts:929",
-      "note": "served on /meta/object/:name."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/runtime/src/app-plugin.ts#collectBundleActions (walks `bundle.objects[*].actions` and `bundle.manifest.objects[*].actions`, stamping each entry with its parent object name — the list the action body-runner binding and the /meta surface are both built from)",
+      "note": "served on /meta/object/:name. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `app-plugin.ts:929`, in range of this 1840-line file but landing in the JOB scheduling block (`svc.schedule(...)`), which reads nothing of this key. The file mentions `actions` on plenty of lines, so the #11457 key-mention check anchors and passes; only a hand read separates the per-object action walk from the unrelated `bundle.actions` and job paths. Re-closed by hand against c459da6bc."
     },
     "managedBy": {
       "status": "live",
-      "evidence": "packages/objectql/src/registry.ts:208",
-      "note": "default perms; ui crudAffordances."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/data/object.zod.ts#resolveCrudAffordances (`obj?.managedBy ?? 'platform'` selects the bucket's default CRUD affordance row — the `ui crudAffordances` half of this note); packages/plugins/plugin-security/src/system-write-guard.ts#assertEngineOwnedWriteAllowed (`const bucket = schema?.managedBy` — engine-owned buckets refuse user-context writes the bucket's affordances forbid); packages/spec/src/data/injected-system-columns.ts#resolveInjectedSystemColumns (a set `managedBy` withholds the ownership anchors, and `'better-auth'` withholds every injected column); packages/objectql/src/secret-fields.ts#collectMaskedReadFields (a `'better-auth'` table's own columns are exempted from password/secret masking, sibling `collectMaskedPasswordFields` the same)",
+      "note": "default perms; ui crudAffordances. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `registry.ts:208`, in range of that 3921-line file and landing on `merged.indexes = [...]`, the INDEX merge of a sibling key. registry.ts names `managedBy` on ten lines so the key-mention check passes, but nine of them are prose in comments and the tenth (:986) interpolates the value into a WARNING string — a diagnostic, not a decision. The decisions moved into @objectstack/spec (`resolveCrudAffordances`, `resolveInjectedSystemColumns`) and plugin-security: the consumer-promoted-into-another-package shape the gate's own guidance names. Re-closed by hand against c459da6bc."
     },
     "ownership": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/objectql/src/registry.ts:292 (applySystemFields reads schema.ownership)",
-      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out of BOTH ownership anchors (Dataverse-style catalog/junction tables); ADR-0117 D1's 'business_unit' tier (engine #5677, enum member #5678) takes owning_business_unit_id and deliberately no owner_id. Per-tier authority is resolveInjectedSystemColumns (spec/data). Proven in objectql/src/registry.test.ts. Evidence line refreshed 2026-07-30 (was :272, drifted)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/data/injected-system-columns.ts#resolveInjectedSystemColumns (`typeof obj.ownership === 'string'` then the POSITIVE per-tier list — `'user'`/omitted takes both anchors, `'business_unit'` takes only `owning_business_unit_id`, `'org'`/`'none'` take neither); packages/objectql/src/registry.ts#applySystemFields (materializes that plan's columns onto the schema — it consults the plan and does NOT read the key itself)",
+      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out of BOTH ownership anchors (Dataverse-style catalog/junction tables); ADR-0117 D1's 'business_unit' tier (engine #5677, enum member #5678) takes owning_business_unit_id and deliberately no owner_id. Per-tier authority is resolveInjectedSystemColumns (spec/data). Proven in objectql/src/registry.test.ts. Evidence line refreshed 2026-07-30 (was :272, drifted). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `registry.ts:292` had drifted again (it now lands in a docblock about the `multiTenant` env var), and the re-closure falsified the parenthetical as well: `applySystemFields` reads `ownership` NOWHERE in code. Its nine occurrences in that function are all comments explaining a decision it delegates; the read is `resolveInjectedSystemColumns` in @objectstack/spec, which this note already named as \"per-tier authority\". So the entry stays `live` on stronger evidence, and the drift it demonstrates is the one the line bound cannot see twice over — a line refreshed 2026-07-30 rotting again inside the same file, with the prose beside it pointing at a reader that had already moved packages. Re-closed by hand against c459da6bc."
     },
     "access": {
       "status": "live",
@@ -118,9 +122,9 @@
     },
     "requiredPermissions": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts:132 (NormalizedRequiredPermissions — per-CRUD buckets) + packages/plugins/plugin-security/src/permission-evaluator.ts (crudBucketForOperation keeps the buckets in lockstep with OPERATION_TO_PERMISSION)",
-      "note": "ADR-0066 D3 object capability contract — the security middleware denies unless the caller's systemPermissions union covers it (AND-gate, before the CRUD grant). Mirrors App.requiredPermissions. Unit + full-middleware proven in plugin-security/security-plugin.test.ts."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts#getObjectSecurityMeta (the read — `normalizeRequiredPermissions((obj as any)?.requiredPermissions)` onto the cached per-object posture); packages/plugins/plugin-security/src/security-plugin.ts#normalizeRequiredPermissions (folds the `string[] | per-op map` authoring shape into per-CRUD buckets); packages/plugins/plugin-security/src/security-plugin.ts#requiredCapsForOperation (the AND-gate lookup the middleware denies on); packages/plugins/plugin-security/src/permission-evaluator.ts#crudBucketForOperation (keeps the buckets in lockstep with OPERATION_TO_PERMISSION)",
+      "note": "ADR-0066 D3 object capability contract — the security middleware denies unless the caller's systemPermissions union covers it (AND-gate, before the CRUD grant). Mirrors App.requiredPermissions. Unit + full-middleware proven in plugin-security/security-plugin.test.ts. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `security-plugin.ts:132` is in range of this 6862-line file but lands in a docblock about platform-admin-EXCLUSIVE capabilities; the type it claimed to name (`NormalizedRequiredPermissions`) is declared at :190 and the actual key read is ~6400 lines further down, in `getObjectSecurityMeta`. Re-closed by hand against c459da6bc."
     },
     "userActions": {
       "status": "live",
@@ -128,27 +132,30 @@
     },
     "systemFields": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/objectql/src/registry.ts (column injection) + packages/plugins/plugin-security/src/security-plugin.ts:3281 (systemFields.tenant === false read as the tenancy opt-out)",
-      "note": "organization_id auto-inject gate."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/data/injected-system-columns.ts#resolveInjectedSystemColumns (`sf?.tenant !== false` decides the organization_id column and `sf?.audit !== false` the audit family — the injection authority); packages/objectql/src/registry.ts#applySystemFields (materializes that plan); packages/plugins/plugin-security/src/security-plugin.ts#getObjectSecurityMeta (`systemFields?.tenant === false` read as the tenancy opt-out on the per-object posture); packages/plugins/plugin-security/src/security-plugin.ts#loadObjectFieldNames (the same opt-out, cached for the RLS wildcard-policy applicability decision)",
+      "note": "organization_id auto-inject gate. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `security-plugin.ts:3281` had rotted in range onto a bootstrap `catalogSeedPasses()` call; both real reads live ~3200 lines later. The `registry.ts (column injection)` half was a citation with no line at all, which no line bound could ever falsify: the injection DECISION is `resolveInjectedSystemColumns` in @objectstack/spec and registry only applies it, so the plan is now cited beside the applier. Re-closed by hand against c459da6bc."
     },
     "sharingModel": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
+      "verifiedAt": "2026-08-28",
       "proof": "packages/qa/dogfood/test/controlled-by-parent.dogfood.test.ts#cbp-controlled-by-parent",
-      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:54",
-      "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own."
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts#effectiveSharingModel (`schema?.sharingModel ?? schema?.security?.sharingModel`, collapsed onto the three behaviours the service enforces; `controlled_by_parent` folds to the master-derived branch and an unrecognised stored value fails CLOSED to `private`)",
+      "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sharing-service.ts:54` had rotted onto a blank line between an interface and a `makeShareId` docblock. Re-closed by hand against c459da6bc."
     },
     "publicSharing": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts:48 (policy extraction) — share-link creation on an object without publicSharing.enabled=true is rejected 422 (share-link-service.ts:170)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-sharing/src/share-link-service.ts#getPolicy (`const raw = schema?.publicSharing` — the policy extraction: enabled, allowedAudiences, allowedPermissions, maxExpiryDays, redactFields, eligibility); packages/plugins/plugin-sharing/src/share-link-service.ts#createLink (mint authority — an object that has not enabled publicSharing is rejected 422)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — BOTH line citations had rotted in range. `:48` landed in a docblock about `sys_share_link` being `managedBy: 'engine-owned'` (the extraction is at ~:97), and the `:170` the prose gave for the 422 is now inside `createLink` ~250 lines further down. Re-closed by hand against c459da6bc."
     },
     "tenancy": {
       "children": {
         "enabled": {
           "status": "live",
-          "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1081"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/data/object.zod.ts#isTenancyDisabled (the predicate itself — `tenancy?.enabled === false`); packages/drivers/driver-sql/src/sql-driver.ts#computeTenantField (calls it as the explicit opt-out that wins over any column-presence heuristic, returning `null` so no driver-level org scope is applied); packages/plugins/plugin-security/src/security-plugin.ts#getObjectSecurityMeta (reads `tenancy?.enabled === false` directly onto the posture's `tenancyDisabled`); packages/spec/src/data/injected-system-columns.ts#resolveInjectedSystemColumns (the same predicate withholds the organization_id column)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1081` is in range of this 16289-line file and lands in a docblock about withheld cross-field filter diagnostics, unrelated to tenancy. The predicate itself has since been promoted into @objectstack/spec (`isTenancyDisabled`), which the driver imports; citing only the driver left the actual read uncited. Re-closed by hand against c459da6bc."
         },
         "tenantField": {
           "status": "live",
@@ -157,9 +164,9 @@
         },
         "organizationField": {
           "status": "live",
-          "evidence": "packages/metadata-core/src/record-organization.ts:177-180 (resolveRecordOrganizationField reads `tenancy.organizationField` as limb 0 of the precedence, and falls through when the object has no such column)",
-          "note": "STAMP-ONLY by the #8778 maintainer ruling (option A): consulted exclusively by resolveRecordOrganizationField when audit rows are stamped, so a credential table can stay unwalled while its trail follows the record's own organization (sys_api_key.active_organization_id, #8707/#8287). Deliberately read by NO tenant-scoping path; read-neutrality is pinned by tests beside applyTenantScope/injectTenantOnInsert (driver-sql), computeTenantLayer0Filter (plugin-security) and resolveInjectedSystemColumns (spec). 2026-08-25: REPOINTED — the evidence cited plugin-audit/src/audit-writers.ts, which has read the key through `createRecordOrganizationResolver` ever since #10101 promoted the resolver into @objectstack/metadata-core; audit-writers.ts:220 says so in its own re-export comment. The cited file still existed and the citation carried no line, so neither the existence check nor the #11210 line bound could see it. The stamping CALL SITE is audit-writers.ts:863 — kept here in prose rather than as a citation, because a call site that never names the key belongs in `producer`, not in `evidence`.",
-          "verifiedAt": "2026-08-15"
+          "evidence": "packages/metadata-core/src/record-organization.ts#resolveRecordOrganizationField (reads `tenancy.organizationField` as limb 0 of the precedence, and falls through when the object has no such column)",
+          "note": "STAMP-ONLY by the #8778 maintainer ruling (option A): consulted exclusively by resolveRecordOrganizationField when audit rows are stamped, so a credential table can stay unwalled while its trail follows the record's own organization (sys_api_key.active_organization_id, #8707/#8287). Deliberately read by NO tenant-scoping path; read-neutrality is pinned by tests beside applyTenantScope/injectTenantOnInsert (driver-sql), computeTenantLayer0Filter (plugin-security) and resolveInjectedSystemColumns (spec). 2026-08-25: REPOINTED — the evidence cited plugin-audit/src/audit-writers.ts, which has read the key through `createRecordOrganizationResolver` ever since #10101 promoted the resolver into @objectstack/metadata-core; audit-writers.ts:220 says so in its own re-export comment. The cited file still existed and the citation carried no line, so neither the existence check nor the #11210 line bound could see it. The stamping CALL SITE is audit-writers.ts:863 — kept here in prose rather than as a citation, because a call site that never names the key belongs in `producer`, not in `evidence`. 2026-08-28: RE-ANCHORED (#13003) — the ONLY entry in this batch whose citation was still accurate: `:177-180` still bracket the limb-0 read, so the range was correct and the migration is pure grammar. Worth recording as the control case — it is a 248-line file, and the batch's fourteen rotted siblings were all in files of 700 to 20255 lines.",
+          "verifiedAt": "2026-08-28"
         }
       }
     },
@@ -181,8 +188,9 @@
         },
         "searchable": {
           "status": "live",
-          "evidence": "packages/metadata-protocol/src/protocol.ts:2967",
-          "note": "Global Search (searchAll, M10.5): `enable.searchable === false` opts the object out of cross-object search. Behavior-changing reader — the 2026-06 audit mis-classified as dead (search executor not re-verified). default(true), so still not authorWarn'd."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/metadata-protocol/src/protocol.ts#searchAll (`const enable = obj.enable ?? {}` then `if (enable.searchable === false) continue` — the object is skipped for cross-object search)",
+          "note": "Global Search (searchAll, M10.5): `enable.searchable === false` opts the object out of cross-object search. Behavior-changing reader — the 2026-06 audit mis-classified as dead (search executor not re-verified). default(true), so still not authorWarn'd. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `protocol.ts:2967` is in range of this 20255-line file and lands inside `normalizeSortNodes`, ~7100 lines from the read; the note already named `searchAll` in prose. Note what the key-mention check sees here: the file's `searchable` hits are almost all `searchableFields`, a DIFFERENT object key, which `\\bsearchable\\b` does not match — the check passes on standalone `searchable` in comment prose instead. Re-closed by hand against c459da6bc."
         },
         "files": {
           "status": "live",
@@ -199,17 +207,17 @@
         },
         "clone": {
           "status": "live",
-          "verifiedAt": "2026-07-28",
-          "evidence": "packages/metadata-protocol/src/protocol.ts:2938",
-          "note": "cloneData() gates on schema.enable.clone (explicit false ⇒ 403 CLONE_DISABLED); exposed at POST /data/:object/:id/clone (rest-server.ts registerDataActionEndpoints). POINTER REPAIRED 2026-07 — cited packages/objectql/src/protocol.ts:2259 until the protocol moved to @objectstack/metadata-protocol. The claim never stopped being true, but the stale-evidence check could not surface the rot: 47 parse-artefact false positives were burying it (fixed in the same pass). Behaviour guarded by packages/objectql/src/protocol-clone-real-engine.test.ts."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/metadata-protocol/src/protocol.ts#cloneData (`if (schema?.enable?.clone === false)` ⇒ 403 CLONE_DISABLED; an absent block or absent flag stays enabled, matching the spec default)",
+          "note": "cloneData() gates on schema.enable.clone (explicit false ⇒ 403 CLONE_DISABLED); exposed at POST /data/:object/:id/clone (rest-server.ts registerDataActionEndpoints). POINTER REPAIRED 2026-07 — cited packages/objectql/src/protocol.ts:2259 until the protocol moved to @objectstack/metadata-protocol. The claim never stopped being true, but the stale-evidence check could not surface the rot: 47 parse-artefact false positives were burying it (fixed in the same pass). Behaviour guarded by packages/objectql/src/protocol-clone-real-engine.test.ts. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED AGAIN — the 2026-07 repair moved the citation to the right FILE and it has been wrong ever since inside it: `:2938` lands in `normalizeSortNodes` while `cloneData` is at ~:9648, a 6700-line in-range drift. This entry is therefore the worked example of why the anchor exists — its pointer has now been repaired twice, once for a cross-package move that the existence check could see, and once for an in-file move that nothing in the gate could. Re-closed by hand against c459da6bc."
         }
       }
     },
     "isSystem": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts:75",
-      "note": "effectiveSharingModel: an object with no sharingModel and isSystem===true defaults to 'public' (else 'private') — fail-closed org-wide-default posture; ORed with the sys_ name-prefix fallback. Also read by lint/src/validate-security-posture.ts:98 (isSystemObject exempts system objects from the master-detail CRUD-grant lint) and mirrored in metadata-protocol/src/protocol.ts:106. The 2026-06 audit mis-classified as dead (sharing/lint readers not re-verified)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-sharing/src/sharing-service.ts#effectiveSharingModel (`schema?.isSystem === true || String(schema?.name ?? '').startsWith('sys_')` on the no-declared-model branch)",
+      "note": "effectiveSharingModel: an object with no sharingModel and isSystem===true defaults to 'public' (else 'private') — fail-closed org-wide-default posture; ORed with the sys_ name-prefix fallback. Also read by lint/src/validate-security-posture.ts:98 (isSystemObject exempts system objects from the master-detail CRUD-grant lint) and mirrored in metadata-protocol/src/protocol.ts:106. The 2026-06 audit mis-classified as dead (sharing/lint readers not re-verified). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sharing-service.ts:75` had rotted onto `const OWNER_FIELD = 'owner_id'`, a neighbouring constant. Both this entry and `sharingModel` cite the same symbol because one function reads both keys, which the two rotted lines (:54 and :75) obscured by pointing at different unrelated places. Re-closed by hand against c459da6bc."
     },
     "searchableFields": {
       "status": "live",

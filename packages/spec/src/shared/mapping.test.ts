@@ -85,7 +85,7 @@ describe('[#5552] FieldMapping.transform is retired, and says so', () => {
     expect(result.success).toBe(false);
     // The `s` flag: the guidance spans lines once a reporter wraps it.
     expect(result.error!.issues[0]!.message).toMatch(
-      /`FieldMapping\.transform`.*removed.*17\.0\.0.*#5552/s,
+      /`FieldMapping\.transform`.*removed.*17\.0\.0/s,
     );
     // It must name the live mechanism, not merely refuse: an author who wrote a
     // transform wants to know where transforms actually run.

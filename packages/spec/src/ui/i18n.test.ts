@@ -334,8 +334,10 @@ describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => 
     // of pointing at a declared key that means something else.
     const msg = reject(AriaPropsSchema as never, { live: 'polite' });
     expect(msg).toContain('objectui');
-    expect(msg).toContain('#5058');
+    expect(msg).toContain('not yet decided');
     expect(msg, 'must not suggest a rename for a key with no correct target').not.toContain('`live` →');
+    expect(msg, 'the prescription names the gap in words, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
   });
 
   it('never offers `live` as a suggestion for a NEIGHBOURING typo either', () => {
@@ -350,8 +352,10 @@ describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => 
   it('`aria-labelledby` names the gap instead of renaming to a different concept', () => {
     for (const key of ['ariaLabelledBy', 'labelledBy']) {
       const msg = reject(AriaPropsSchema as never, { [key]: 'other-element' });
-      expect(msg).toContain('#5058');
+      expect(msg).toContain('open gap');
       expect(msg, 'labelledby references an id; ariaLabel is a literal string').not.toContain(`\`${key}\` → \`ariaLabel\``);
+      expect(msg, 'the prescription names the gap in words, never a tracker id')
+        .not.toMatch(/#\d{3,5}/);
     }
   });
 

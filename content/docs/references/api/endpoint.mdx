@@ -35,8 +35,8 @@ const result = ApiEndpointSchema.parse(data);
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP Method |
 | **summary** | `string` | optional |  |
 | **description** | `string` | optional |  |
-| **type** | `Enum<'flow' \| 'script' \| 'object_operation' \| 'proxy'>` | ✅ | Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary (#5040) and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector |
-| **target** | `string` | optional | Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (#10338 made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'` |
+| **type** | `Enum<'flow' \| 'script' \| 'object_operation' \| 'proxy'>` | ✅ | Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector |
+| **target** | `string` | optional | Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'` |
 | **objectParams** | `{ object?: string; operation?: Enum<'find' \| 'get' \| 'create' \| 'update' \| 'delete'> }` | optional | For object_operation type |
 | **inputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Request Body to Internal Params |
 | **outputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Internal Result to Response Body |
@@ -57,7 +57,7 @@ const result = ApiEndpointSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field/path |
 | **target** | `string` | ✅ | Target field/path |
-| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
+| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
 
 ### Nested Shape: `ApiEndpoint.outputMapping[number]`
 
@@ -65,7 +65,7 @@ const result = ApiEndpointSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field/path |
 | **target** | `string` | ✅ | Target field/path |
-| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
+| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
 
 ### Nested Shape: `ApiEndpoint.rateLimit`
 
@@ -86,7 +86,7 @@ const result = ApiEndpointSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field/path |
 | **target** | `string` | ✅ | Target field/path |
-| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
+| **transform** | `string` | optional | Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object) |
 
 
 ---

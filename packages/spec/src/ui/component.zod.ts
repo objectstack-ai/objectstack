@@ -235,7 +235,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
  * walker's reconstruction of it.
  */
 const PROPS_HISTORY =
-  'Until #4001 batch A an undeclared prop was dropped in silence: the props schema stripped it '
+  'Until this shape was closed, an undeclared prop was dropped in silence: the props schema stripped it '
   + 'and `PageComponent.properties` is an open bag, so the key reached objectui\'s renderer, was '
   + 'not read there, and the author got a success receipt for configuration that did nothing.';
 
@@ -276,7 +276,7 @@ const COMPONENT_NODE_VISIBILITY_GUIDANCE: KeySetGuidance =
       'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '
       + 'component node\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '
       + '`id` — one canonical spelling per layer, not because the props-level form is inert. '
-      + 'Since objectui#5505 (`c86185eb5`, merged 2026-08-21) the hoisted form IS evaluated by '
+      + 'Since the console release of 2026-08-21 (`c86185eb5`) the hoisted form IS evaluated by '
       + 'the node-level gate: the two gates evaluate the same value and compose as an '
       + 'idempotent AND, so leaving it in `properties` duplicates the canonical key rather '
       + 'than silently failing to gate.',
@@ -378,8 +378,8 @@ export const PageContainerProps = strictObject(
       // schedule rather than an authorable key. Closing the shape is what makes
       // that distinction reach the author.
       body: '`body` is not an authorable spelling of the composition slot — write `children`. '
-        + 'The renderers still read `body` as a back-compat fallback for documents stored before '
-        + '#5775, but one composition key is the contract (Prime Directive #12).',
+        + 'The renderers still read `body` as a back-compat fallback for documents stored under '
+        + 'the older spelling, but one composition key is the contract (Prime Directive #12).',
     },
   },
   {
@@ -454,7 +454,7 @@ export const PageHeaderProps = strictObject({
    * buttons beside it.
    */
   icon: retiredKey(
-    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
     + 'never off the header\'s own props bag, and the component registry never published it as an '
     + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
@@ -566,7 +566,7 @@ export const PageTabsProps = strictObject({
    * called `type`. The live mechanism is `tabStyle`.
    */
   type: retiredKey(
-    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — '
+    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
@@ -746,7 +746,7 @@ export const PageCardProps = strictObject({
    * `children` or `footer` (`element:button`, `record:quick_actions`).
    */
   actions: retiredKey(
-    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
     + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
     + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
@@ -772,7 +772,7 @@ export const PageCardProps = strictObject({
    * already reads both. The live mechanism is `children`.
    */
   body: retiredKey(
-    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
+    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
     + 'components) is unchanged. '
@@ -817,7 +817,7 @@ export const RecordDetailsProps = strictObject({
    * dead branch on the next pin bump.
    */
   layout: retiredKey(
-    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
     + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
     + 'values took the same branch and the key selected nothing. Delete the key — the body is '
@@ -1119,7 +1119,7 @@ export const RecordHighlightsField = z.union([
       // no `retiredKey` tombstone — the key is out of the walked shape
       // entirely, and the refusal is the arm's own named `unrecognized_keys`).
       icon:
-        '`record:highlights` field `icon` was removed in @objectstack/spec 17 (#10054, ADR-0049) — '
+        '`record:highlights` field `icon` was removed in @objectstack/spec 17 (ADR-0049) — '
         + 'no render path ever read it: the renderer normalized the authored object and passed '
         + '`icon` to a highlight chip with no icon slot, and the key could travel nowhere else '
         + '(`useRegisterHighlightFields` registers field NAMES only; the Studio designer publishes '
@@ -1371,7 +1371,7 @@ export const ReferenceRailEntrySchema = strictObject({
      */
     filter: 'The rail honours no per-entry `filter`: it issues one fixed query per entry '
       + '(`{ [relationshipField]: parentId }`, `$top` = `limit`) and reads nothing else — before '
-      + 'this shape existed the key parsed, shipped, and silently filtered nothing (#8691). '
+      + 'this shape existed the key parsed, shipped, and silently filtered nothing. '
       + '`record:related_list` is the component whose `filter` is real; if the rail is ever '
       + 'granted one, this entry shape is where it gets declared and enforced.',
     icon: '`icon` is read by nothing: the rail renderer declares it in its TS interface and the '
@@ -2064,7 +2064,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   targetVariable: retiredKey(
     '`element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 '
-    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + '(ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
     + "runs the other direction, resolved from the page variable whose `source` names this "
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the picked record id, declare it on the variable — '
@@ -2080,7 +2080,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   displayField: retiredKey(
     '`element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
+    + '(ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -2091,7 +2091,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   searchFields: retiredKey(
     '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
+    + '(ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
     + 'query path does apply. '
@@ -2103,7 +2103,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    */
   multiple: retiredKey(
     '`element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 '
-    + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
+    + '(ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
@@ -2148,7 +2148,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
    */
   targetVariable: retiredKey(
     '`element:text_input` property `targetVariable` was removed in @objectstack/spec 17 '
-    + '(#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
+    + '(ADR-0049) — it was a declarative hint no renderer ever read: the live binding '
     + "runs the other direction, resolved from the page variable whose `source` names this "
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the typed value, declare it on the variable — '
@@ -2262,7 +2262,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   label: I18nLabelSchema.optional().describe('Grid label — used as the table caption and export file title'),
   title: I18nLabelSchema.optional().describe('Fallback for `label` (the renderer reads `label || title`)'),
   columns: z.array(z.unknown()).optional()
@@ -2270,7 +2270,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   fields: z.array(z.unknown()).optional()
     .describe('Field list fallback used when `columns` is absent'),
   filter: z.unknown().optional()
-    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural'),
+    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
   sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
@@ -2297,7 +2297,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * delete when `sort` is present, since the fallback was never read then).
    */
   defaultSort: retiredKey(
-    '`object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — '
+    '`object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — '
     + 'it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when '
     + '`sort` was absent, so one intent had two spellings and a grid authoring both silently ignored '
     + 'this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` '
@@ -2376,7 +2376,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead'),
   label: I18nLabelSchema.optional().describe('Metric label'),
   description: I18nLabelSchema.optional().describe('Helper text under the value'),
   title: I18nLabelSchema.optional().describe('Drill-down panel title; defaults to the metric label'),
@@ -2462,7 +2462,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   },
 }, {
   objectName: z.string().optional()
-    .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   groupBy: z.string().optional().describe('Field whose values become the board columns'),
   columns: z.array(z.unknown()).optional()
     .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
@@ -2517,7 +2517,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   calendar: z.unknown().optional()
     .describe('Calendar field config: { startDateField, endDateField?, titleField?, colorField?, allDayField? }'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
@@ -2548,7 +2548,7 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   objectName: z.string().optional()
-    .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+    .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Record to load (edit/view modes)'),
   mode: z.enum(['create', 'edit', 'view']).optional().describe('Form mode'),
   formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
@@ -2661,13 +2661,13 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   objectName: z.string().optional()
-    .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121)'),
+    .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Parent record to load (edit mode)'),
   mode: z.enum(['create', 'edit']).optional().describe('Form mode'),
   formType: z.enum(['simple', 'tabbed'], {
     error: (issue) =>
       typeof issue.input === 'string' ? MASTER_DETAIL_FORM_TYPE_RETIRED.get(issue.input) : undefined,
-  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939)"),
+  }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
   details: z.array(z.unknown()).optional()

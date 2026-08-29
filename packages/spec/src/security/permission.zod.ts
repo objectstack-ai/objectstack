@@ -100,7 +100,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
     aliases: OBJECT_PERMISSION_KEY_ALIASES,
     guidance: {
       apiOperations:
-        '`apiOperations` is the server-resolved effective operation set (#3391) — it exists ' +
+        '`apiOperations` is the server-resolved effective operation set — it exists ' +
         'only on the RESPONSE surface (`/me/permissions`) and is never authored. Grant ' +
         'capability with the `allow*` bits here; tighten an object\'s exposure with ' +
         '`apiMethods` on the object schema.',
@@ -111,21 +111,21 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
       //    prescription directly.
       restore:
         '`restore` was the alias of `objects.<object>.allowRestore`, which was removed in ' +
-        '@objectstack/spec 17 (#12497, ADR-0049) — the `restore` ObjectQL operation it claimed ' +
+        '@objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed ' +
         'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
         'the key — a dispatched `restore` stays denied fail-closed by the permission ' +
         'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative (#1883) alongside the operation it gates.',
+        'lifecycle initiative alongside the operation it gates.',
       purge:
         '`purge` was the alias of `objects.<object>.allowPurge`, which was removed in ' +
-        '@objectstack/spec 17 (#12497, ADR-0049) — the `purge` ObjectQL operation it claimed ' +
+        '@objectstack/spec 17 (ADR-0049) — the `purge` ObjectQL operation it claimed ' +
         'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
         'the key — a dispatched `purge` stays denied fail-closed by the permission ' +
         'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative (#1883) alongside the operation it gates.',
+        'lifecycle initiative alongside the operation it gates.',
     },
     history:
-      'Until #4001 these were dropped silently — the permission set still parsed, so the ' +
+      'Until this shape was closed, these were dropped silently — the permission set still parsed, so the ' +
       'author believed a grant or restriction was in place that the runtime never saw.',
   },
   {
@@ -172,7 +172,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * (`GET /data/:object/export` → 403 `EXPORT_NOT_PERMITTED`); the frontend
    * renders that set and never reads this bit directly.
    */
-  allowExport: z.boolean().optional().describe('[#3544] User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords.'),
+  allowExport: z.boolean().optional().describe('User-level export axis over read (opt-in grant). true = export granted (still bounded by read); unset/false = no export. Merged most-permissively like the CRUD bits; NOT implied by viewAllRecords/modifyAllRecords.'),
 
   /**
    * Lifecycle Operations.
@@ -189,7 +189,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * grants the ownership-write capability now; the dedicated M2 `transfer`
    * operation will reuse the same bit.
    */
-  allowTransfer: z.boolean().default(false).describe('[RBAC-gated; ENFORCED now via insert/update owner_id guard, #3004] Change record ownership (assign/reassign/disown owner_id)'),
+  allowTransfer: z.boolean().default(false).describe('[RBAC-gated; ENFORCED via the insert/update owner_id guard] Change record ownership (assign/reassign/disown owner_id)'),
 
   /**
    * REMOVED — `allowRestore` / `allowPurge` claimed to gate `restore` /
@@ -218,21 +218,21 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * it. Every other value still lands here, prescription intact.
    */
   allowRestore: retiredKey(
-    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (#12497, ADR-0049) — ' +
+    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — ' +
     'the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
     'granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied ' +
     'fail-closed by the permission evaluator\'s destructive-operation backstop, and the bit ' +
-    'returns with the M2 lifecycle initiative (#1883) alongside the operation it gates. ' +
+    'returns with the M2 lifecycle initiative alongside the operation it gates. ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   allowPurge: retiredKey(
-    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (#12497, ADR-0049) — ' +
+    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — ' +
     'the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
     'granting the bit delivered nothing (a compliance/GDPR erase the author believed was ' +
     'permission-locked was not — the operation itself does not exist). Delete the key — a ' +
     'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
-    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative ' +
-    '(#1883) alongside the operation it gates. ' +
+    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative' +
+    ' alongside the operation it gates. ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
@@ -264,7 +264,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * not taken — what moved here is only the declaration, so that it stops
    * over-claiming (ADR-0049 `declared ≠ enforced`).
    */
-  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698).'),
+  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies.'),
 
   /**
    * [ADR-0057 D1] Read access DEPTH (Dataverse-style access level), layered on
@@ -324,7 +324,7 @@ export const EffectiveObjectPermissionSchema = lazySchema(() =>
   acceptRetiredDefaultResidue(
     (ObjectPermissionBaseSchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
       apiOperations: z.array(ApiOperationSchema).optional().describe(
-        'Server-resolved effective API operations for this object (#3391). Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs, #3543), not the authored six-value ApiMethod enum.',
+        'Server-resolved effective API operations for this object. Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs), not the authored six-value ApiMethod enum.',
       ),
       // WIRE shape: `.extend()` inherits the authoring schema's `.strict()`, and a
       // strict response parser is forward-incompatible — a newer server adding a
@@ -358,7 +358,7 @@ export const AdminScopeSchema = lazySchema(() => strictObject(
   {
     surface: 'this admin scope',
     history:
-      'Until #4001 these were dropped silently — the scope still parsed, so a delegation ' +
+      'Until this shape was closed, these were dropped silently — the scope still parsed, so a delegation ' +
       'boundary the author intended was never enforced.',
   },
   {
@@ -404,7 +404,7 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
         '`readable: false` to hide the field.',
     },
     history:
-      'Until #4001 these were dropped silently — the entry still parsed, so field-level ' +
+      'Until this shape was closed, these were dropped silently — the entry still parsed, so field-level ' +
       'security the author intended was never applied.',
   },
   {
@@ -483,7 +483,7 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
         '(`sys_user_permission_set` / positions), never authored on the set (ADR-0090).',
     },
     history:
-      'Until #4001 these were dropped silently — the set still parsed, so the author ' +
+      'Until this shape was closed, these were dropped silently — the set still parsed, so the author ' +
       'believed a capability boundary was declared that the runtime never saw.',
   },
   {

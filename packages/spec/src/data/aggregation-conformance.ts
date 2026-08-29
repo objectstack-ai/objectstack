@@ -52,9 +52,16 @@
  *   and checked by `date-bucket-parity.test.ts`; folding it in would make the
  *   table unpassable for a face that legitimately buckets nothing.
  * - **Presentation.** `min`/`max` hand back a value OF the column and the SQL
- *   driver re-presents it; the fixture's aggregated column is a plain number so
- *   that path is not exercised here. `sql-driver-aggregate-temporal-output.test.ts`
- *   owns it.
+ *   driver re-presents it; the fixture's numeric aggregated column (`score`)
+ *   does not exercise that path. `sql-driver-aggregate-temporal-output.test.ts`
+ *   owns the temporal half. The BOOLEAN column below is the ruled exception to
+ *   "a member of the input domain": #11152 (maintainer 2026-08-28, ruling
+ *   verbatim 「12745 A回，其他同意。」, superseding #11249's `false`/`true`)
+ *   pins that **booleans aggregate as numbers on every face, with no
+ *   per-aggregate exception** — `min(flag)`/`max(flag)` answer `0`/`1`, the
+ *   same numeric domain `sum`/`avg` already answer in (#11065). So a boolean
+ *   aggregand takes NO boolean read-presentation on any face, and
+ *   {@link AggregationExpectation.value} stays a `number` for every case.
  *
  * ## NULL is IN, and it is the point of the table
  *
@@ -191,6 +198,27 @@ export interface AggregationRow {
    * where dedup and nulls both bite, one where neither does.
    */
   score: number;
+  /**
+   * [#11152] The non-null BOOLEAN aggregand — 3 true / 3 false, so `sum` and
+   * `avg` cannot agree with a face that dropped the booleans (`0` / `null`,
+   * the #11065/#11151 defect) or that counted rows instead of trues.
+   *
+   * The distribution is the `FLAG_BY_ID` the #11635 suite landed, adopted here
+   * verbatim so the two never disagree on grouped values: `west` holds
+   * `[T,F,F,F]` and `east` `[T,T]`. The asymmetry is load-bearing — `east` is
+   * all-true, so its grouped `min(flag)` is `1`, and a face that computed the
+   * aggregate over the whole table (or answered a sticky per-column constant)
+   * fails on that cell rather than passing by symmetry.
+   *
+   * Harnesses MUST declare it `type: 'boolean'` — the driver-boundary read
+   * presentation keys off the declared type, and the ruled point of this
+   * column is that aggregation deliberately BYPASSES it: #11152 (maintainer
+   * 2026-08-28, superseding #11249) rules that booleans aggregate as numbers
+   * on every face — `sum`=3, `avg`=0.5, `min`=0, `max`=1 — with no
+   * per-aggregate exception. A harness that stored the flags as strings, or a
+   * face that answered `false`/`true`, is answering outside the ruled domain.
+   */
+  flag: boolean;
 }
 
 /**
@@ -199,12 +227,12 @@ export interface AggregationRow {
  * exclusion while only one exercises dedup.
  */
 export const AGGREGATION_ROWS: readonly AggregationRow[] = [
-  { id: '1', region: 'west', stage: 'won',  score: 10 },
-  { id: '2', region: 'west', stage: 'won',  score: 20 },
-  { id: '3', region: 'west', stage: 'lost', score: 30 },
-  { id: '4', region: 'west', stage: null,   score: 40 },
-  { id: '5', region: 'east', stage: 'won',  score: 50 },
-  { id: '6', region: 'east', stage: null,   score: 60 },
+  { id: '1', region: 'west', stage: 'won',  score: 10, flag: true },
+  { id: '2', region: 'west', stage: 'won',  score: 20, flag: false },
+  { id: '3', region: 'west', stage: 'lost', score: 30, flag: false },
+  { id: '4', region: 'west', stage: null,   score: 40, flag: false },
+  { id: '5', region: 'east', stage: 'won',  score: 50, flag: true },
+  { id: '6', region: 'east', stage: null,   score: 60, flag: true },
 ] as const;
 
 /**
@@ -325,6 +353,86 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
     function: 'max',
     field: 'score',
     expected: [{ group: null, value: 60 }],
+  },
+
+  // ── [#11152] the boolean aggregand: numbers on every face, by ruling ──────
+  //
+  // The whole vocabulary over `flag` (3 true / 3 false). Two rulings pin the
+  // values: #11065 settled `sum`/`avg` (a boolean is an aggregand worth 1 or
+  // 0 — driver-memory answered `0`/`null` while SQLite answered `2`/`0.4`,
+  // found from an application because no conformance cell could see it), and
+  // #11152 (maintainer 2026-08-28, superseding #11249's `false`/`true`)
+  // settled `min`/`max` the same way: booleans aggregate as NUMBERS on every
+  // face, no per-aggregate exception.
+  {
+    name: 'sum(flag) counts the true rows',
+    function: 'sum',
+    field: 'flag',
+    expected: [{ group: null, value: 3 }],
+    note:
+      '#11065/#11151: an arithmetic accumulator that drops booleans answers its '
+      + 'identity 0 here — a plausible number, which is why this case exists.',
+  },
+  {
+    name: 'avg(flag) is the true-rate',
+    function: 'avg',
+    field: 'flag',
+    expected: [{ group: null, value: 0.5 }],
+    note:
+      '#11065: the rate-over-a-flag-column shape (an SLA-violation rate, a win '
+      + 'rate). A face that drops booleans answers null — a blank tile, '
+      + 'indistinguishable from "no matching rows".',
+  },
+  {
+    name: 'min(flag) answers the NUMBER 0',
+    function: 'min',
+    field: 'flag',
+    expected: [{ group: null, value: 0 }],
+    note:
+      '#11152 ruling (2026-08-28): booleans aggregate as numbers with no '
+      + 'per-aggregate exception, so the order statistics answer 0/1 in the '
+      + 'same domain sum/avg answer in — not false/true (#11249, superseded).',
+  },
+  {
+    name: 'max(flag) answers the NUMBER 1',
+    function: 'max',
+    field: 'flag',
+    expected: [{ group: null, value: 1 }],
+    note: 'The twin of min(flag) — see its note.',
+  },
+  {
+    name: 'count(flag) counts all six — the column is non-null',
+    function: 'count',
+    field: 'flag',
+    expected: [{ group: null, value: 6 }],
+    note:
+      'Control: count is defined over booleans on every backend and must not '
+      + 'move under any boolean coercion — 6, not the 3 a lowering that '
+      + 'counted trues would answer.',
+  },
+  {
+    name: 'count_distinct(flag) is 2 — false and true',
+    function: 'count_distinct',
+    field: 'flag',
+    expected: [{ group: null, value: 2 }],
+    note:
+      'The dedup control on the boolean axis: 2 whatever the row count, so a '
+      + 'face that folded the column to one storage value (or dropped it) '
+      + 'cannot agree by coincidence.',
+  },
+  {
+    name: 'min(flag) grouped by region — east is all-true',
+    function: 'min',
+    field: 'flag',
+    groupBy: 'region',
+    expected: [
+      { group: 'east', value: 1 },
+      { group: 'west', value: 0 },
+    ],
+    note:
+      'east [T,T] / west [T,F,F,F]: the asymmetric cell. A face computing the '
+      + 'minimum over the whole table and repeating it per group answers 0/0, '
+      + 'and the ungrouped case above cannot see that.',
   },
 
   // ── grouped: the aggregate is computed PER GROUP ──────────────────────────

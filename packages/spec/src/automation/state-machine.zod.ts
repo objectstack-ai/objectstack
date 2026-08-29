@@ -69,7 +69,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
  * description of it, so the rejections cannot drift apart.
  */
 const STATE_MACHINE_STRIP_HISTORY =
-  'Until #4001 an undeclared key here was dropped silently — the machine still parsed, so a mistyped `on`/`entry`/`cond` produced a machine missing the very transition it was written to declare, reported as valid.';
+  'Until this shape was closed, an undeclared key here was dropped silently — the machine still parsed, so a mistyped `on`/`entry`/`cond` produced a machine missing the very transition it was written to declare, reported as valid.';
 
 // --- Primitives ---
 

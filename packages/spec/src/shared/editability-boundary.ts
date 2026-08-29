@@ -102,7 +102,7 @@ const EDITABILITY_BOUNDARY_GUIDANCE: KeySetGuidance = {
   keys: EDITABILITY_BOUNDARY_KEYS,
   prescription:
     'Editability is a FIELD-level concern. This shape gates VISIBILITY only — a '
-    + 'deliberate boundary, not a missing key (#7887): a section / page component has '
+    + 'deliberate boundary, not a missing key: a section / page component has '
     + 'no read-only semantics of its own to enforce. Write `readonly: true` (or the '
     + 'conditional `readonlyWhen` predicate) on the form field(s) inside it instead; to '
     + 'hide the whole section or component, use `visibleWhen`.',

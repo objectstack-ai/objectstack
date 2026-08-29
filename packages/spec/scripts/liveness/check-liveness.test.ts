@@ -186,12 +186,29 @@ describe('check:liveness — evidence pointers (#5623)', () => {
   it('prints the citation count and how many are in range, equal on a green run', () => {
     // The #5623 lesson applied to the new counter: printing only "in range"
     // would read as a pass on a run where the parser extracted no citations.
+    // Hence two numbers, and a floor under the first — see the floor's own note
+    // at the assertion below for why that floor is `> 0` and when to delete it.
     const { status, output } = runGate(path.join(tmp, 'liveness'));
     expect(status, output).toBe(0);
     const line = output.split('\n').find((l) => l.startsWith('line citations:')) ?? '';
     const m = /line citations: (\d+) pointer\(s\) written .*?, (\d+) inside the cited file/.exec(line);
     expect(m, line).not.toBeNull();
-    expect(Number(m![1])).toBeGreaterThan(100);
+    // Non-vacuity. The failure mode this guards is the parser silently
+    // extracting NOTHING (#5623), and that failure mode is exactly zero — so
+    // zero is exactly what the floor tests. It was 100 until #13003, which is
+    // the migration adopting #12516's `path#symbol` grammar and therefore
+    // RETIRING line citations by design (300 at that card's filing, 175 after
+    // batch 2, 82 after batch 3). Any floor above zero reds on legitimate
+    // drainage and re-opens the same escalation one batch later; `> 0` never
+    // lies during the migration and still catches extracts-nothing at full
+    // strength. Ruled 2026-08-28 on #13003, comment 5458356183.
+    //
+    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
+    // retired — DELETE this assertion AND this comment IN THE SAME PR that
+    // retires it, along with the equality check below, which then compares two
+    // zeroes and asserts nothing. A conscious decision at zero, never a silent
+    // one; that is the whole reason the floor sits at `> 0` rather than gone.
+    expect(Number(m![1])).toBeGreaterThan(0);
     expect(m![2]).toBe(m![1]);
     expect(line).not.toContain('PAST EOF');
   });
@@ -207,6 +224,93 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
     expect(output).toContain(`query/limit → ${ROTTED}`);
+  });
+});
+
+// #12516 — the SYMBOL half of a citation. A line citation rots IN RANGE: the
+// consumer moves within its file, the file exists, every cited line is inside
+// it, the file still names the key — all three earlier checks stay green and
+// the pointer is wrong (measured: both `action.json` entries repointed with
+// fresh lines on 2026-08-25 had drifted by 2026-08-26). A `path#symbol` anchor
+// moves WITH the consumer; the rot that remains — the symbol renamed, deleted,
+// or promoted out of the file — is exactly what these cases replay, against the
+// REAL gate via `--ledger-root`, for the #5623 reason: the grading lives in
+// check-liveness.mts and a helper test cannot pin it.
+describe('check:liveness — symbol anchors (#12516)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-anchor-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it('FAILS when an anchored symbol is gone from a file that still exists and still names the key', () => {
+    // The measured rot event replayed at anchor granularity: the consumer
+    // (dispatchFlowAction) moves out / is renamed. Exactly one cause: the file
+    // resolves, the citation names no line, and action-execution.ts genuinely
+    // names `target` — so neither the existence check, the line bound, nor the
+    // key-mention check can be the reason for the exit code.
+    const root = path.join(tmp, 'symbol-gone');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'action', 'target', 'packages/runtime/src/action-execution.ts#dispatchFlowActionMovedAway');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('anchored citation(s) name a symbol the cited file does not contain');
+    expect(output).toContain('action/target → packages/runtime/src/action-execution.ts#dispatchFlowActionMovedAway');
+    // ✗, not ⚠ — same grading argument as every citation check before it.
+    expect(output).toMatch(/✗ 1 anchored citation\(s\)/);
+  });
+
+  it('FAILS on a malformed anchor instead of silently dropping the standard', () => {
+    const root = path.join(tmp, 'malformed');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'action', 'target', 'packages/runtime/src/action-execution.ts#dispatch-flow (prose naming target)');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('malformed anchor(s) — not one identifier');
+    expect(output).toContain('action/target → packages/runtime/src/action-execution.ts#dispatch-flow');
+  });
+
+  it('stays GREEN on the drifted BEFORE-state — the honest residual this grammar exists to retire', () => {
+    // The exact evidence string `action.target` carried between 2026-08-25 and
+    // this change: every cited line is in range, the file names the key, and
+    // the lines hold the wrong code. The gate cannot see that, BY CONSTRUCTION
+    // — text cannot tell "the consumer" from "plausible code at the address" —
+    // which is why the repair is anchor ADOPTION, not a smarter line check
+    // (the #12516 census measured 117-173 of 298 line citations failing a
+    // key-proximity window — indistinguishable from matcher noise without
+    // re-measuring every entry, i.e. the 48-of-227 era again). This case pins
+    // the boundary so the red case above stays attributable to the anchor.
+    const root = path.join(tmp, 'before-state');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(
+      root,
+      'action',
+      'target',
+      "packages/runtime/src/action-execution.ts:725 (type:'flow' server dispatch — automation.execute(action.target, …), with :718 rejecting an unknown flow name by that same value); packages/runtime/src/action-execution.ts:472 (headlessActionTypeError names the target the client-dispatched types go to instead)",
+    );
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+  });
+
+  it('prints the anchor count and how many resolve, equal on a green run', () => {
+    // The #5623 two-number discipline, fourth application: "all resolved" over
+    // zero anchors is what a degraded parser prints too.
+    const root = path.join(tmp, 'green');
+    cpSync(LEDGERS, root, { recursive: true });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('symbol anchors:')) ?? '';
+    const m = /symbol anchors: (\d+) pointer\(s\) written .*?, (\d+) naming a symbol the cited file contains/.exec(line);
+    expect(m, line).not.toBeNull();
+    // The two #12516 repoints are the day-one anchored population.
+    expect(Number(m![1])).toBeGreaterThanOrEqual(2);
+    expect(m![2]).toBe(m![1]);
+    expect(line).not.toContain('UNRESOLVED');
+    expect(line).not.toContain('MALFORMED');
   });
 });
 

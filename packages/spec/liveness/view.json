@@ -1,6 +1,6 @@
 {
   "type": "view",
-  "_note": "ViewSchema (object view container: list/form/listViews/formViews). Seeded from docs/audits/2026-06-viewschema-property-liveness.md (objectui consumer cross-reference) and re-verified against objectui@fb35e48 (2026-07-16) — several audit-era DEAD findings have since gone LIVE (submitBehavior, sharing.lockedBy, ViewData providers on the list path) and are classified from the current reads, not the stale audit lines. objectui paths cited as 'objectui: <path>' prose (not resolved against this repo). Sub-sub-key divergences (userActions.buttons, addRecord.mode/formView, tabs[].order) can't be drilled (one level only) — captured in the parent entry's note and tracked in the enforce-or-remove worklist (#2998 Track B / ADR-0049). 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. widget.performance (no ledger file of its own) was verified dead the corrected way — zero readers in either repo; objectui virtual scrolling reads the LIVE top-level virtualScroll — and removed with them.",
+  "_note": "ViewSchema (object view container: list/form/listViews/formViews). Seeded from docs/audits/2026-06-viewschema-property-liveness.md (objectui consumer cross-reference) and re-verified against objectui@fb35e48 (2026-07-16) — several audit-era DEAD findings have since gone LIVE (submitBehavior, sharing.lockedBy, ViewData providers on the list path) and are classified from the current reads, not the stale audit lines. objectui paths cited as 'objectui: <path>' prose (not resolved against this repo). Sub-sub-key divergences (userActions.buttons, addRecord.mode/formView, tabs[].order) can't be drilled (one level only) — captured in the parent entry's note and tracked in the enforce-or-remove worklist (#2998 Track B / ADR-0049). 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. widget.performance (no ledger file of its own) was verified dead the corrected way — zero readers in either repo; objectui virtual scrolling reads the LIVE top-level virtualScroll — and removed with them. 2026-08-28 (#13003): all five `path:NNN` citations in this file were re-anchored to their consuming symbols, and all five were wrong. Two pairs shared one wrong line each — `list.name`/`listViews` on a schema declaration, `form.sharing`/`formViews` on a comment about API routes — and `object` was falsified in PROSE as well as position, naming a function that lives in another package.",
   "props": {
     "name": {
       "status": "dead",
@@ -16,16 +16,17 @@
     },
     "object": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/engine.ts:1653 (getViewsByObject() / GET /meta/view?object=)",
-      "note": "How a stack-level `views: [...]` entry says which object its views belong to — the container is 'view definitions for a specific object' (this file's own note on ObjectListViewSchema), and the object index is what reads the binding. Declared in #4001 batch 6e: it was undeclared and therefore stripped, so a container's object binding was dropped on every parse. Found by the CLI's migrate e2e, whose fixture carries it."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#resolveMetadataItemName (`return item?.object || item?.list?.data?.object || item?.form?.data?.object` — a stack-level `views:` container has no top-level name, so this key IS its registry key and therefore the object every expanded ViewItem is stamped with); packages/metadata/src/metadata-manager.ts#getViewsByObject (`v.object === object` — the index `GET /meta/view?object=` answers from)",
+      "note": "How a stack-level `views: [...]` entry says which object its views belong to — the container is 'view definitions for a specific object' (this file's own note on ObjectListViewSchema), and the object index is what reads the binding. Declared in #4001 batch 6e: it was undeclared and therefore stripped, so a container's object binding was dropped on every parse. Found by the CLI's migrate e2e, whose fixture carries it. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, position AND prose — `engine.ts:1653` had rotted onto a hook `excludeObjects` guard ~361 lines below the resolver, and the parenthetical credited `getViewsByObject()` to THAT file, where it does not exist: it lives in `packages/metadata/src/metadata-manager.ts`. Both halves of a citation can be wrong at once, and the prose half is the one a reader trusts when the line still looks plausible. Re-closed by hand against 8cb96ec41."
     },
     "list": {
       "children": {
         "name": {
           "status": "live",
-          "evidence": "packages/spec/src/ui/view.zod.ts:1432",
-          "note": "view identity — expandViewContainer key; objectui ListView/ViewTabBar."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/spec/src/ui/view.zod.ts#expandViewContainerWithDiagnostics (`const key = typeof defaultList.name === 'string' && defaultList.name ? defaultList.name : 'default'` — the default list view's own name becomes its `<object>.<key>` identity, and a collision with a `listViews` key is renamed and diagnosed)",
+          "note": "view identity — expandViewContainer key; objectui ListView/ViewTabBar. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1432` had rotted onto `}, {`, a shape-boundary line of the view-config schema ~2,974 lines above the expander. It was a DECLARATION site rather than a consumer even when it was right; the key's liveness rests on the expander reading it, which is what the anchor names. Re-closed by hand against 8cb96ec41."
         },
         "label": {
           "status": "live",
@@ -335,8 +336,9 @@
         },
         "sharing": {
           "status": "live",
-          "evidence": "packages/rest/src/rest-server.ts:4384",
-          "note": "Framework-side consumer: public (anonymous) form endpoints opt in via FormView.sharing — /forms/:slug resolves sharing.publicLink across form + formViews (rest-server.ts:1716, :4366-4405) and grants publicFormGrant. Renderer-side the config is not read (audit L20) — the public form is served, not re-parsed client-side."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/rest/src/rest-server.ts#findPublicFormView (`slugMatchesPublicLink(sharing.publicLink, slug)` — scanned across `form` and every `formViews` entry); packages/rest/src/rest-server.ts#resolveFormBySlug (grants `publicFormGrant` for the matched form's object)",
+          "note": "Framework-side consumer: public (anonymous) form endpoints opt in via FormView.sharing — /forms/:slug resolves sharing.publicLink across form + formViews (rest-server.ts:1716, :4366-4405) and grants publicFormGrant. Renderer-side the config is not read (audit L20) — the public form is served, not re-parsed client-side. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:4384` had rotted onto a comment about `api`-only route enumeration, ~4,020 lines above the form endpoints; the note's own inline pointers (`:1716`, `:4366-4405`) had gone with it and are superseded by the anchors. Re-closed by hand against 8cb96ec41."
         },
         "submitBehavior": {
           "status": "live",
@@ -364,13 +366,15 @@
     },
     "listViews": {
       "status": "live",
-      "evidence": "packages/spec/src/ui/view.zod.ts:1432",
-      "note": "Named list views. Framework: expandViewContainer flattens container views into per-object view items (collision diagnostics via expandViewContainerWithDiagnostics). objectui: MetadataProvider.tsx:118-146 merges view metadata into objectDef.listViews — the saved-view switcher (ViewTabBar) reads only listViews (ADR-0047 'views' mode). Same inner shape as `list`; per-key classification lives under list.children."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/ui/view.zod.ts#expandViewContainerWithDiagnostics (`container.listViews` — each entry becomes an independent ViewItem named `<object>.<key>`, with collisions renamed and reported)",
+      "note": "Named list views. Framework: expandViewContainer flattens container views into per-object view items (collision diagnostics via expandViewContainerWithDiagnostics). objectui: MetadataProvider.tsx:118-146 merges view metadata into objectDef.listViews — the saved-view switcher (ViewTabBar) reads only listViews (ADR-0047 'views' mode). Same inner shape as `list`; per-key classification lives under list.children. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1432` had rotted onto the same schema-declaration line its sibling `list.name` carried; two keys shared one wrong pointer. Re-closed by hand against 8cb96ec41."
     },
     "formViews": {
       "status": "live",
-      "evidence": "packages/rest/src/rest-server.ts:4384",
-      "note": "Named form views. Framework: public-form slug resolution scans form + every formViews entry (rest-server.ts:4384-4405); expandViewContainer flattens them. objectui: MetadataProvider routes viewKind:'form' items into objectDef.formViews (never into the list switcher). Same inner shape as `form`; per-key classification lives under form.children."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/rest-server.ts#findPublicFormView (`const formViews = view.formViews` — every named form view is a public-link candidate); packages/spec/src/ui/view.zod.ts#expandViewContainerWithDiagnostics (flattens them into independent ViewItems)",
+      "note": "Named form views. Framework: public-form slug resolution scans form + every formViews entry (rest-server.ts:4384-4405); expandViewContainer flattens them. objectui: MetadataProvider routes viewKind:'form' items into objectDef.formViews (never into the list switcher). Same inner shape as `form`; per-key classification lives under form.children. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:4384` had rotted onto the same `api`-only comment its sibling `form.sharing` cited; the note's `rest-server.ts:4384-4405` range went with it. Re-closed by hand against 8cb96ec41."
     }
   }
 }

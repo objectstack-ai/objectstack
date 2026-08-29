@@ -356,7 +356,7 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
     expect(result.success).toBe(false);
     const issues = result.error!.issues;
     expect(issues[0]!.code).toBe('unrecognized_keys');
-    expect(issues[0]!.message).toContain('#3494');
+    expect(issues[0]!.message).toContain('`retryPolicy` was removed');
     expect(issues[0]!.message).toContain('There is no replacement');
   });
 
@@ -399,7 +399,7 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
       expect(result.success).toBe(false);
       const issue = result.error!.issues.find((i) => i.path.join('.') === 'transform');
       expect(issue).toBeDefined();
-      expect(issue!.message).toMatch(/`FieldMapping\.transform`.*removed.*#5552/s);
+      expect(issue!.message).toMatch(/`FieldMapping\.transform`.*removed/s);
       // It must point at the transform pipeline that DOES run, not just refuse.
       expect(issue!.message).toMatch(/mapping\.fieldMapping\[\]\.transform/s);
     }

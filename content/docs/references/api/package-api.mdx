@@ -66,9 +66,9 @@ Get installed package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -128,9 +128,9 @@ List installed packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -205,7 +205,7 @@ Install package request
 | **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |
 | **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
-| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
@@ -243,9 +243,9 @@ Install package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -327,7 +327,7 @@ Upgrade package request
 | **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |
 | **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
-| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
@@ -355,9 +355,9 @@ Upgrade package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -411,7 +411,7 @@ Resolve dependencies request
 | **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |
 | **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
-| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
 | **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier (ADR-0025 §3.6) |
@@ -439,9 +439,9 @@ Resolve dependencies response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -489,9 +489,9 @@ Uninstall package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -558,9 +558,9 @@ Upload artifact response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |

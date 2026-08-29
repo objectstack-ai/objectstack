@@ -4,13 +4,15 @@
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:178",
-      "note": "registry key + compiled Cube name."
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`name: dataset.name` on the emitted Cube; the same value names the dataset in every join-validation diagnostic)",
+      "note": "registry key + compiled Cube name. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:178` had rotted onto a bare `);` inside `aggregateToMetricType`'s throw, ~290 lines from the read. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+      "verifiedAt": "2026-08-28"
     },
     "label": {
       "status": "live",
-      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:179",
-      "note": "compiled into Cube title for presentations."
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`title: resolveI18nLabel(dataset.label, REGISTRY_LOCALE)` — the Cube's display title, #6761 inline-locale-map aware)",
+      "note": "compiled into Cube title for presentations. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:179` had rotted onto a bare `}`. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+      "verifiedAt": "2026-08-28"
     },
     "description": {
       "status": "live",
@@ -18,46 +20,54 @@
     },
     "object": {
       "status": "live",
-      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:180",
-      "note": "base table — Cube sql + join resolution + draft-rows resolver."
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (three reads: `declaredDatasource(dataset.object)` and `isExternal(dataset.object)` for the same-datasource join gate, and `fromObject = dataset.object` as the join walk's root)",
+      "note": "base table — Cube sql + join resolution + draft-rows resolver. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:180` had rotted onto `return m.aggregate as Metric['type']`, a DIFFERENT key's read, which is the rot shape hardest to catch by eye because it is still plausible compiler code. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+      "verifiedAt": "2026-08-28"
     },
     "include": {
       "status": "live",
-      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:92",
-      "note": "compiled into Cube joins + the NativeSQLStrategy join allowlist (ADR-0021)."
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`const include = dataset.include ?? []`, walked into Cube joins and the NativeSQLStrategy join allowlist)",
+      "note": "compiled into Cube joins + the NativeSQLStrategy join allowlist (ADR-0021). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:92` had rotted onto a BLANK LINE. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+      "verifiedAt": "2026-08-28"
     },
     "filter": {
       "status": "live",
-      "evidence": "packages/services/service-analytics/src/dataset-executor.ts:205",
-      "note": "dataset-level WHERE, ANDed with runtime + measure-scoped filters."
+      "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`filter: dataset.filter` — where the authored key is actually read, onto the compiled artifact); packages/services/service-analytics/src/dataset-executor.ts#DatasetExecutor (`combineFilters(compiled.filter, selection.runtimeFilter)` — where the compiled form is ANDed at query time)",
+      "note": "dataset-level WHERE, ANDed with runtime + measure-scoped filters. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, and the entry gains its missing half. `:205` had rotted onto a docblock sentence about a missing operand spreading a blank. More to the point, the executor only ever sees `compiled.filter`: the read of the AUTHORED key is in the compiler, and this entry cited only the downstream consumer — so a change that dropped `dataset.filter` from the compiler would have left this citation resolving happily against code that reads a name the author never writes. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+      "verifiedAt": "2026-08-28"
     },
     "dimensions": {
       "children": {
         "name": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:141",
-          "note": "dimension identifier (Cube dimension key)."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`name: d.name`, the `dimensions[d.name]` key, the `?? d.name` label fallback, and the `assertDeclared(..., d.name)` diagnostic)",
+          "note": "dimension identifier (Cube dimension key). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:141` had rotted into a docblock about a query-time diagnostic boundary (#5288), ~280 lines above the read. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "label": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:142",
-          "note": "compiled into Cube dimension for presentations."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`label: resolveI18nLabel(d.label, REGISTRY_LOCALE) ?? d.name` — #6761: an inline locale map is a label, not a missing one)",
+          "note": "compiled into Cube dimension for presentations. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:142` had rotted into the same docblock as its sibling. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "field": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:144",
-          "note": "emitted as the dimension's SQL column reference (relationship-validated)."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`sql: d.field`, guarded by `assertDeclared(d.field, 'dimension', d.name)` — the relationship-path validation)",
+          "note": "emitted as the dimension's SQL column reference (relationship-validated). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:144` had rotted onto a docblock terminator `*/`. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "type": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:143",
-          "note": "dimensionType() maps to Cube time/number/boolean/string; drives grouping."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#dimensionType (`switch (d.type)` → Cube time/number/boolean/string); packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`type: dimensionType(d)`, and the `dim.type === 'time'` branch that granularity depends on)",
+          "note": "dimensionType() maps to Cube time/number/boolean/string; drives grouping. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:143` had rotted onto a `{@link compileDataset}` docblock line, which is a near-miss of the funniest kind: the citation landed on a cross-reference to its own real consumer. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "dateGranularity": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:146",
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`dim.granularities = d.dateGranularity ? [d.dateGranularity] : ['day','week','month','quarter','year']` — a declared granularity narrows the Cube dimension to exactly one); packages/services/service-analytics/src/dataset-executor.ts#resolveDimensionGranularity (`selection.dateGranularity ?? datasetDefault` — the dataset's own value is limb 3 of the query-time precedence)",
           "proof": "packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing",
-          "note": "ADR-0054 high-risk class (analytics): a time dimension's single granularity auto-buckets at query time (dataset-executor.ts:272-287); the proof asserts the day bucket SHIFTS with the org timezone (2024-03-01T03:00Z buckets to 2024-02-29 in America/Los_Angeles) — guarding the analytics-strategy ↔ in-memory count ↔ REST exec-context integration that #2018 fixed."
+          "note": "ADR-0054 high-risk class (analytics): a time dimension's single granularity auto-buckets at query time (dataset-executor.ts:272-287); the proof asserts the day bucket SHIFTS with the org timezone (2024-03-01T03:00Z buckets to 2024-02-29 in America/Los_Angeles) — guarding the analytics-strategy ↔ in-memory count ↔ REST exec-context integration that #2018 fixed. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:146` had rotted onto a docblock opener `/**`, and the note's `dataset-executor.ts:272-287` onto a closing brace and a comment line about the PRESENTATION's choice; the precedence resolver is at ~:315. On a row that carries an ADR-0054 high-risk proof, both pointers were wrong. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         }
       }
     },
@@ -65,43 +75,51 @@
       "children": {
         "name": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:166",
-          "note": "measure identifier + derived-measure reference."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`name: m.name`, the `measures[m.name]` / `measureFilters[m.name]` keys, and the derived spec's own `name`); packages/services/service-analytics/src/dataset-compiler.ts#aggregateToMetricType (names the measure in both refusals)",
+          "note": "measure identifier + derived-measure reference. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:166` had rotted onto a `[#5367]` comment about the DATASET_INVALID refusal, ~280 lines above the read. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "label": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/analytics-service.ts:479",
-          "note": "compiled into Cube metric + enriched onto result fields."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`label: resolveI18nLabel(m.label, REGISTRY_LOCALE) ?? m.name` — compiled into the Cube metric); packages/services/service-analytics/src/analytics-service.ts#AnalyticsService (`queryDataset` re-resolves `m.label` in the REQUEST locale and enriches it onto the result field, which is why the compile-time and request-time resolutions are two reads and not one)",
+          "note": "compiled into Cube metric + enriched onto result fields. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `analytics-service.ts:479` had rotted onto a blank docblock line in this 2338-line file; the enrichment is at ~:1345. The compiler half was never cited at all. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "aggregate": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:60",
-          "note": "aggregateToMetricType() → Cube metric type (sum/count/avg/…); unsupported aggregates throw."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#aggregateToMetricType (`if (!m.aggregate)` refuses a non-derived measure without one, `UNSUPPORTED_AGGREGATES.has(m.aggregate)` refuses the rest by name, and the value otherwise becomes the Cube metric type)",
+          "note": "aggregateToMetricType() → Cube metric type (sum/count/avg/…); unsupported aggregates throw. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:60` had rotted onto `export interface DerivedMeasureSpec {`, ~100 lines above the function. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "field": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts:170",
-          "note": "SQL aggregate operand (count omits field → '*'); relationship-validated."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`sql: m.field ?? '*'` — `count` with no field aggregates over rows — guarded by `assertDeclared(m.field, 'measure', m.name)`)",
+          "note": "SQL aggregate operand (count omits field → '*'); relationship-validated. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:170` had rotted into a comment about members the spec now refuses at parse. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "filter": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-executor.ts:225",
-          "note": "measure-scoped WHERE, applied via a supplementary per-measure query."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`if (m.filter) measureFilters[m.name] = m.filter` — the read of the authored key); packages/services/service-analytics/src/dataset-executor.ts#splitMeasuresByFilter (splits the selection into the unfiltered batch and the per-measure supplementary queries `DatasetExecutor` then runs)",
+          "note": "measure-scoped WHERE, applied via a supplementary per-measure query. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, and the entry gains its missing half — `:225` had rotted onto a docblock sentence about not writing `?? 0` in the widget, and, as with the dataset-level `filter`, the executor reads only the COMPILED `measureFilters`, never this key. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "format": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/analytics-service.ts:480",
-          "note": "compiled into Cube metric + enriched onto result fields for the renderer."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`if (typeof m.format === 'string') metric.format = m.format`); packages/services/service-analytics/src/analytics-service.ts#AnalyticsService (`queryDataset`: `if (f.format == null && m.format) f.format = m.format` — enriched onto the result field for the renderer)",
+          "note": "compiled into Cube metric + enriched onto result fields for the renderer. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `analytics-service.ts:480` had rotted onto a docblock sentence about driver selection. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "currency": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/analytics-service.ts:531",
-          "note": "measure-declared currency (ISO 4217) enriched onto result fields alongside label/format, so the renderer formats the amount with a locale-correct Intl symbol rather than a '$' baked into format."
+          "evidence": "packages/services/service-analytics/src/analytics-service.ts#AnalyticsService (`queryDataset`: the ADR-0053 chain — a measure is monetary if `mc.currency` is set OR it aggregates a `currency`-type field, and the display code resolves explicit measure `currency` → the source field's `defaultCurrency` → the tenant default `context.currency`)",
+          "note": "measure-declared currency (ISO 4217) enriched onto result fields alongside label/format, so the renderer formats the amount with a locale-correct Intl symbol rather than a '$' baked into format. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `analytics-service.ts:531` had rotted onto a comment about a `400 INVALID_FIELD` refusal, ~830 lines above the chain. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         },
         "derived": {
           "status": "live",
-          "evidence": "packages/services/service-analytics/src/dataset-executor.ts:247",
-          "note": "post-aggregation arithmetic (ratio/sum/difference/product) over base measures; {op, of} both consumed."
+          "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`derived.push({ name: m.name, op: m.derived.op, of: m.derived.of })` — both members read here, and a derived measure is deliberately NOT compiled into a Cube metric); packages/services/service-analytics/src/dataset-executor.ts#evaluateDerivedMeasures (post-aggregation arithmetic row by row, driven from `compiled.derived`)",
+          "note": "post-aggregation arithmetic (ratio/sum/difference/product) over base measures; {op, of} both consumed. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:247` had rotted onto a BLANK LINE, and the compiler leg (where `{op, of}` are actually read off the authored key) was uncited. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the #13003 ACCEPT ruling sorts as OLDEST).",
+          "verifiedAt": "2026-08-28"
         }
       }
     }

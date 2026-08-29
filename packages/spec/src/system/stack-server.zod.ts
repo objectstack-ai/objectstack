@@ -82,7 +82,7 @@ export const ServerRateLimitConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'server.security.rateLimit',
     history:
-      'This key is new in v17 (#4910) and strict from birth — an unknown key here was never accepted.',
+      'This key is new in v17 and strict from birth — an unknown key here was never accepted.',
     aliases: {
       window: 'windowMs',
       windowSeconds: 'windowMs',
@@ -142,7 +142,7 @@ export const StackServerSecuritySchema = lazySchema(() => strictObject(
   {
     surface: 'server.security',
     history:
-      'This key is new in v17 (#4910) and strict from birth — an unknown key here was never accepted.',
+      'This key is new in v17 and strict from birth — an unknown key here was never accepted.',
     guidance: {
       helmet:
         'Not authorable here. Response hardening headers are configured on the dispatcher plugin '
@@ -180,31 +180,31 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'the stack `server` block',
     history:
-      'This key is new in v17 (#4910) and strict from birth — an unknown key here was never accepted.',
+      'This key is new in v17 and strict from birth — an unknown key here was never accepted.',
     guidance: {
       port:
         'Not authorable. The listening port belongs to the deployment, not the stack — pass '
-        + '`objectstack serve -p <port>` or set PORT. (`HttpServerConfig.port` was retired in v17, #4938.)',
+        + '`objectstack serve -p <port>` or set PORT. (`HttpServerConfig.port` was retired in v17,.)',
       host:
         'Not authorable. The bind address belongs to the deployment, not the stack — pass it to '
-        + '`objectstack serve`. (`HttpServerConfig.host` was retired in v17, #4938.)',
+        + '`objectstack serve`. (`HttpServerConfig.host` was retired in v17,.)',
       cors:
         'Not authorable here. CORS is owned by the transport adapter and configured by '
         + 'OS_CORS_ORIGIN / OS_CORS_CREDENTIALS / OS_CORS_MAX_AGE. (`HttpServerConfig.cors` was retired in '
-        + 'v17, #4938; it is the registered first candidate for a `server.cors` key, which will arrive with '
+        + 'v17; it is the registered first candidate for a `server.cors` key, which will arrive with '
         + 'its executor.)',
       compression:
-        'Not authorable — nothing reads it. `HttpServerConfig.compression` was retired in v17 (#4938) '
+        'Not authorable — nothing reads it. `HttpServerConfig.compression` was retired in v17 '
         + 'rather than mounted here; response compression is the transport adapter\'s concern.',
       requestTimeout:
-        'Not authorable — nothing reads it. `HttpServerConfig.requestTimeout` was retired in v17 (#4938) '
+        'Not authorable — nothing reads it. `HttpServerConfig.requestTimeout` was retired in v17 '
         + 'rather than mounted here.',
       bodyLimit:
-        'Not authorable — nothing reads it. `HttpServerConfig.bodyLimit` was retired in v17 (#4938) '
+        'Not authorable — nothing reads it. `HttpServerConfig.bodyLimit` was retired in v17 '
         + 'rather than mounted here.',
       static:
         'Not authorable. Static mounts are configured on the transport plugin (`staticMounts`). '
-        + '(`HttpServerConfig.static` was retired in v17, #4938.)',
+        + '(`HttpServerConfig.static` was retired in v17,.)',
     },
   },
   {

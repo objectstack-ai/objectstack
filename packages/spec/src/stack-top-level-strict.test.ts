@@ -99,12 +99,12 @@ describe('#8687 — unknown top-level stack keys are refused at parse', () => {
       // ADR-0020: record state machines are a validation rule.
       ['workflows', 'state_machine'],
       // #3464: the collection was removed outright.
-      ['portals', '#3464'],
+      ['portals', 'nothing ever consumed it'],
       // #10485 (ADR-0049): the themes carrier retired; app.branding is the
       // one colour surface.
       ['themes', 'app.branding'],
       // #4212: the uninvoked lifecycle family.
-      ['onDisable', '#4212'],
+      ['onDisable', 'uninvoked lifecycle'],
     ];
     for (const [key, mustContain] of cases) {
       const result = parseTopLevel({ [key]: [] });
@@ -141,7 +141,7 @@ describe('#10485 — the `themes` carrier is retired (ADR-0049; ruled 退役授�
     expect(issue.path).toEqual([]);
     expect((issue as unknown as { keys: string[] }).keys).toContain('themes');
     // The prescription itself — removal citation, and where colour lives now.
-    expect(issue.message).toContain('#10485');
+    expect(issue.message).toContain('authored themes');
     expect(issue.message).toContain('app.branding');
     expect(issue.message).toContain('primaryColor');
     // A retirement is a prescription, never a rename suggestion (finding 7).

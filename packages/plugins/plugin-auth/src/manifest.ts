@@ -25,7 +25,6 @@ import {
   SysOrganization,
   SysSession,
   SysSsoProvider,
-  SysScimProvider,
   SysScimConnectionBinding,
   SysScimConnectionCredential,
   SysScimGroup,
@@ -70,10 +69,10 @@ export const authIdentityObjects: any[] = [
   SysJwks,
   SysDeviceCode,
   SysSsoProvider,
-  SysScimProvider,
   // Stable @better-auth/scim 1.7.x model set (#3653): seven library-managed
   // tables plus the ObjectStack-owned credential store for the app-owned
-  // verifyBearerToken route. SysScimProvider above retires under #11757.
+  // verifyBearerToken route. The rc.1-era SysScimProvider retired under
+  // #11757.
   SysScimConnectionBinding,
   SysScimConnectionCredential,
   SysScimGroup,

@@ -43,7 +43,7 @@ import { AggregationFunction, DateGranularity } from '../data/query.zod';
  * closed surface (the nested-hole shape 批 13 found on `page.components[]`).
  */
 const DATASET_HISTORY =
-  'Until #4001 批 14 closed this shape these were dropped silently — the dataset still '
+  'Until this shape was closed these were dropped silently — the dataset still '
   + 'compiled and every report and widget bound to it still rendered, computing something '
   + 'other than what was declared.';
 
@@ -248,7 +248,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
 export const DatasetSchema = lazySchema(() => strictObject({
   surface: 'this dataset',
   history:
-    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   // #5013 — `measures` and `filter` are both DECLARED here (the aggregatable
   // values and the intrinsic scope filter), so neither entry could ever run: an
   // alias is consulted only from the `unrecognized_keys` path, and a declared

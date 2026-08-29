@@ -191,7 +191,7 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
         + 'the whole selection in `params._selectedIds` instead of a single record id.',
     },
     history:
-      'Until #4457 the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
+      'Until this shape was closed, the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
       + 'so a mis-spelled one shipped as a button that silently ran the DEFAULT behaviour (or none '
       + 'at all).',
   },
@@ -201,12 +201,12 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
   icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash-2").'),
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'outline']).optional().describe('Visual treatment of the button.'),
   operation: BulkActionOperationSchema.describe("What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`)."),
-  execution: BulkActionExecutionSchema.optional().describe("For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds` (objectui#3139). Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead."),
+  execution: BulkActionExecutionSchema.optional().describe("For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead."),
   patch: z.record(z.string(), z.unknown()).optional().describe("For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog."),
   params: z.array(BulkActionParamSchema).optional().describe('Inputs collected once before the run. Omit to skip the params step and go straight to confirm.'),
   confirmText: z.string().optional().describe('Confirmation text shown above the affected-record summary.'),
   confirmLabel: z.string().optional().describe('Custom Confirm button label (default: "Run").'),
-  visible: ExpressionInputSchema.optional().describe('Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm (#5970): a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record.'),
+  visible: ExpressionInputSchema.optional().describe('Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record.'),
   requiredPermissions: z.array(z.string()).optional().describe("[ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks."),
   maxRecords: z.number().int().positive().optional().describe('Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request.'),
   batchSize: z.number().int().positive().optional().describe('Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition.'),

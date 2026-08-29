@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { checkCitationLines, checkEvidence, countLines, scanEvidence } from './evidence.mts';
+import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, isSymbolNamed, scanEvidence } from './evidence.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..');
@@ -96,7 +96,7 @@ describe('checkEvidence', () => {
   });
 
   it('tolerates a non-string evidence value', () => {
-    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], localCitations: [], missing: [] });
+    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], localCitations: [], localAnchors: [], missing: [] });
     expect(checkEvidence(42, none).missing).toEqual([]);
   });
 });
@@ -164,6 +164,104 @@ describe('scanEvidence — line citations', () => {
     expect(scanEvidence('(packages/a/src/x.ts:44)').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
     expect(scanEvidence('packages/a/src/x.ts:44,').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
     expect(scanEvidence('packages/a/src/x.ts:44.').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
+  });
+});
+
+// #12516: a line citation rots IN RANGE — the consumer moves within its file and
+// every check stays green. A `path#symbol` anchor moves WITH the consumer; these
+// pin its extraction, and the resolution check is below.
+describe('scanEvidence — symbol anchors (#12516)', () => {
+  it('retains the anchor of a `path#symbol` pointer, and the path stays local', () => {
+    const r = scanEvidence('packages/runtime/src/action-execution.ts#dispatchFlowAction (flow dispatch)');
+    expect(r.local).toEqual(['packages/runtime/src/action-execution.ts']);
+    expect(r.localAnchors).toEqual([{ path: 'packages/runtime/src/action-execution.ts', symbol: 'dispatchFlowAction' }]);
+  });
+
+  it('parses an anchor and a line together, in EITHER order', () => {
+    // An order the parser refused would not fail — the token would quietly stop
+    // matching PATH_RE and become prose, taking the existence check with it.
+    for (const token of ['packages/a/src/x.ts#dispatch:120', 'packages/a/src/x.ts:120#dispatch']) {
+      const r = scanEvidence(token);
+      expect(r.local, token).toEqual(['packages/a/src/x.ts']);
+      expect(r.localCitations, token).toEqual([{ path: 'packages/a/src/x.ts', line: 120 }]);
+      expect(r.localAnchors, token).toEqual([{ path: 'packages/a/src/x.ts', symbol: 'dispatch' }]);
+    }
+  });
+
+  it('records several anchors of ONE file separately, deduped on path#symbol', () => {
+    const r = scanEvidence(
+      'packages/a/src/x.ts#alpha (reads it) + packages/a/src/x.ts#beta (writes it) + packages/a/src/x.ts#alpha (again)',
+    );
+    expect(r.localAnchors.map((a) => a.symbol)).toEqual(['alpha', 'beta']);
+  });
+
+  it('never collects a FOREIGN anchor — the file is legitimately absent here', () => {
+    const r = scanEvidence('objectui: packages/app-shell/src/x.tsx#RecordDetailView');
+    expect(r.foreign).toEqual(['packages/app-shell/src/x.tsx']);
+    expect(r.localAnchors).toEqual([]);
+  });
+
+  it('does not read an issue reference as an anchor', () => {
+    // `(#4352` is a house-style token in evidence prose; its "path" half is
+    // empty, so it is prose, exactly as before the anchor grammar existed.
+    const r = scanEvidence('packages/a/src/x.ts:385 (the #4352 gate decides)');
+    expect(r.local).toEqual(['packages/a/src/x.ts']);
+    expect(r.localAnchors).toEqual([]);
+  });
+
+  it('retains a malformed anchor for the checker to fail, rather than dropping it', () => {
+    // A dropped anchor is a silently-unheld standard — the checker must SEE it
+    // to fail it (the `verifiedAt` malformed-date asymmetry).
+    const r = scanEvidence('packages/a/src/x.ts#not-an-identifier');
+    expect(r.localAnchors).toEqual([{ path: 'packages/a/src/x.ts', symbol: 'not-an-identifier' }]);
+  });
+});
+
+describe('isSymbolNamed', () => {
+  it('matches an identifier as a whole word', () => {
+    expect(isSymbolNamed('await dispatchFlowAction(deps)', 'dispatchFlowAction')).toBe(true);
+  });
+
+  it('rejects a prefix of a longer identifier — identifier-bounded, not substring', () => {
+    expect(isSymbolNamed('await dispatchFlowAction(deps)', 'dispatch')).toBe(false);
+  });
+
+  it('treats `$` as an identifier character, which `\\b` does not', () => {
+    expect(isSymbolNamed('const foo$bar = 1', 'foo')).toBe(false);
+    expect(isSymbolNamed('const foo$bar = 1', 'foo$bar')).toBe(true);
+  });
+});
+
+describe('checkEvidenceAnchors', () => {
+  const content = (s: string) => () => s;
+
+  it('resolves an anchor whose symbol the cited file names', () => {
+    const scan = scanEvidence('packages/a/src/x.ts#alpha');
+    const r = checkEvidenceAnchors(scan, content('export function alpha() {}'));
+    expect(r.checked).toHaveLength(1);
+    expect(r.unresolved).toEqual([]);
+    expect(r.malformed).toEqual([]);
+  });
+
+  it('flags an anchor whose symbol left the file — the rot a line bound cannot see', () => {
+    // The #12516 shape replayed: the consumer moved/renamed, the file still
+    // exists, every line is still in range, the file may still name the key —
+    // and the symbol is gone.
+    const scan = scanEvidence('packages/a/src/x.ts#dispatchFlowAction');
+    const r = checkEvidenceAnchors(scan, content('export function dispatchFlowActionMoved() {}'));
+    expect(r.unresolved).toEqual([{ path: 'packages/a/src/x.ts', symbol: 'dispatchFlowAction' }]);
+  });
+
+  it('reports a malformed anchor instead of judging it', () => {
+    const scan = scanEvidence('packages/a/src/x.ts#not-an-identifier packages/a/src/y.ts#');
+    const r = checkEvidenceAnchors(scan, content('anything'));
+    expect(r.malformed.map((a) => a.symbol)).toEqual(['not-an-identifier', '']);
+    expect(r.checked).toEqual([]);
+  });
+
+  it('says nothing about a file it cannot read — that verdict belongs to the existence check', () => {
+    const scan = scanEvidence('packages/a/src/gone.ts#alpha');
+    expect(checkEvidenceAnchors(scan, () => null)).toEqual({ checked: [], unresolved: [], malformed: [] });
   });
 });
 
@@ -271,7 +369,57 @@ describe('shipped ledgers', () => {
     }
     expect(outOfRange).toEqual([]);
     // Same non-vacuity guard as above, one level down: a parser that stopped
-    // retaining lines would satisfy the assertion above by extracting nothing.
-    expect(citations).toBeGreaterThan(100);
+    // retaining lines would satisfy the assertion above by extracting nothing
+    // (the #5623 lesson — "all in range" over zero citations is what a degraded
+    // parser prints too). The GUARDED FAILURE MODE IS EXACTLY ZERO, so zero is
+    // exactly what the floor tests, and the sibling floor above keeps its own
+    // number because the `local` PATH population it guards is not draining.
+    //
+    // Why not a bigger number here, when this one used to be 100 (#13003): the
+    // symbol-anchor migration (#12516's grammar, adopted batch by batch under
+    // #13003) RETIRES line citations by design — 300 at that card's filing, 175
+    // after batch 2, 82 after batch 3 — so any floor above zero reds on
+    // legitimate drainage and re-opens the same escalation one batch later.
+    // Ruled 2026-08-28 on #13003 (comment 5458356183): lower to `> 0`, the only
+    // floor that never lies during the migration while still catching
+    // extracts-nothing at full strength.
+    //
+    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
+    // retired — DELETE this assertion AND this comment IN THE SAME PR that
+    // retires it, together with the `outOfRange` assertion above, which has
+    // nothing left to check. That is the conscious decision at zero the `> 0`
+    // floor exists to force. Never let it pass silently on an empty population.
+    expect(citations).toBeGreaterThan(0);
+  });
+
+  it('every local `path#symbol` anchor names a symbol its file contains (#12516)', () => {
+    const bad: string[] = [];
+    let anchors = 0;
+    const readFile = (p: string): string | null => {
+      const f = join(repoRoot, p);
+      return existsSync(f) ? readFileSync(f, 'utf8') : null;
+    };
+    for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
+      const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
+      const visit = (key: string, entry: any) => {
+        for (const field of ['evidence', 'producer']) {
+          if (typeof entry?.[field] !== 'string') continue;
+          const scan = checkEvidence(entry[field], () => true);
+          const r = checkEvidenceAnchors(scan, readFile);
+          anchors += r.checked.length;
+          r.unresolved.forEach((a) => bad.push(`${ledger.type}/${key} → ${a.path}#${a.symbol} (symbol gone)`));
+          r.malformed.forEach((a) => bad.push(`${ledger.type}/${key} → ${a.path}#${a.symbol} (malformed)`));
+        }
+      };
+      for (const [key, entry] of Object.entries<any>(ledger.props || {})) {
+        visit(key, entry);
+        for (const [ck, centry] of Object.entries<any>(entry?.children || {})) visit(`${key}.${ck}`, centry);
+      }
+    }
+    expect(bad).toEqual([]);
+    // Non-vacuity: the two #12516 repoints are the day-one anchored population;
+    // a parser that stopped extracting anchors would pass the line above by
+    // asking nothing.
+    expect(anchors).toBeGreaterThanOrEqual(2);
   });
 });

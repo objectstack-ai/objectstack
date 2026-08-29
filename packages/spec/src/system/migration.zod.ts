@@ -203,7 +203,7 @@ export const DataMigrationFlagSchema = lazySchema(() => z.object({
   details: z.string().optional()
     .describe('JSON-encoded counts from the last run, for diagnostics'),
   deviation_observed_at: z.string().datetime().nullable().optional()
-    .describe('When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises (#4797)'),
+    .describe('When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises'),
   deviation_detail: z.string().nullable().optional()
     .describe('JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), for diagnostics'),
 }).describe('Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version'));

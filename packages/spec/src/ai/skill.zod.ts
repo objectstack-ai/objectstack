@@ -266,7 +266,7 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
 export const SkillSchema = lazySchema(() => strictObject({
   surface: 'this skill',
   history:
-    'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
+    'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   aliases: { prompt: 'instructions', content: 'instructions', body: 'instructions', tool: 'tools' },
   guidance: {
     // #5013 — `trigger` used to be an ALIAS pointing at `triggers`, a key this
@@ -291,7 +291,7 @@ export const SkillSchema = lazySchema(() => strictObject({
     permissions:
       '`permissions` is not a skill key — skill invocation was never permission-gated, '
       + 'so this was stripped in silence and the author believed they had a gate. Gate at '
-      + 'the AGENT instead (`access` / `permissions` on the agent, enforced since #1884), '
+      + 'the AGENT instead, '
       + "or on the underlying tools' actions.",
   },
 }, {
@@ -340,7 +340,7 @@ export const SkillSchema = lazySchema(() => strictObject({
    * text. A skill with no `instructions` has nothing to project and is not
    * listed as a prompt at all.
    */
-  instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt (#3905)'),
+  instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt'),
 
   /**
    * References to tool names that belong to this skill.
@@ -384,7 +384,7 @@ export const SkillSchema = lazySchema(() => strictObject({
   // cloud API served the field back to clients, a dead-end projection that
   // made the false capability look extra real.
   triggerPhrases: retiredKey(
-    '`skill.triggerPhrases` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) ' +
+    '`skill.triggerPhrases` was removed in @objectstack/spec 17.0.0 (audit close-out) ' +
     "— phrases were never matched against the user's message; skill activation is " +
     "`triggerConditions` (AND of context field/operator/value) intersected with the agent's " +
     '`skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in ' +

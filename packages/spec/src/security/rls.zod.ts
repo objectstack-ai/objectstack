@@ -233,7 +233,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
       where: 'using',
     },
     history:
-      'Until #4001 these were dropped silently — the policy still parsed, so a ' +
+      'Until this shape was closed, these were dropped silently — the policy still parsed, so a ' +
       'row-level restriction the author wrote was never compiled into the filter.',
   },
   {
@@ -460,7 +460,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * strip.
    */
   priority: retiredKey(
-    '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). ' +
+    '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0. ' +
     'It never had an effect and could not: applicable policies OR-combine (most permissive wins), ' +
     'so there is no conflict to order. Delete the key — policy outcomes are unchanged. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',

@@ -1,6 +1,6 @@
 {
   "type": "translation",
-  "_note": "TranslationItemSchema (#3778 — one locale's translations, the SAME groups the file-authored bundles use). NO LONGER A PIPE: the schema was a z.preprocess wrapping the retired object-first-dialect guard, which the gate's walker could not see through until #4488 fixed unwrap() to take the OUT side of a transform-input pipe — `translation` was literally unwalkable before this ledger. #4001 closed the shape with `.strict()` and folded the guard's ten prescriptions into the unknown-key `guidance`, so the preprocess is gone and the registered schema is a plain strict object. Consumer chain: runtime-authored items sync into the i18n adapter's authored layer (packages/core/src/fallbacks/authored-translation-sync.ts — at kernel:ready, on metadata:reloaded, and on translation mutations; #2591 closed the publish dead-end), file bundles load via service-i18n; both merge into ONE tree read by the spec resolvers (packages/spec/src/system/i18n-resolver.ts), the REST localization layer (translateMetaItem/translateMetaTypes), objectui's client resolvers (useObjectLabel/useSettingsLabel), and plugin-audit's summary localizer. WALK BOUNDARY: every group is a z.record keyed by target names — the drill sees each record's VALUE shape one level; the deeper per-key conventions (objects.<n>.fields.<f>.label, settings.<ns>.keys.<k>.options.<v>, …) are governed by the resolvers cited per row, not by ledger rows. Note also the sync merges the RAW stored payload (authored-translation-sync.ts:155, not a schema re-parse), so the declared groups below are the CONTRACT while undeclared keys technically flow through on rows already stored — the resolvers read only the declared conventions. Since #4001 no NEW row can acquire one: the metadata door rejects an undeclared key instead of stripping it, so that residue is a finite set that only shrinks. 10 of 11 groups live; the one dead group (`validationMessages`) is pointed at by #3778's own legacy-key migration table, making it a shipped false signpost. Seeded 2026-08-01 (#4488).",
+  "_note": "TranslationItemSchema (#3778 — one locale's translations, the SAME groups the file-authored bundles use). NO LONGER A PIPE: the schema was a z.preprocess wrapping the retired object-first-dialect guard, which the gate's walker could not see through until #4488 fixed unwrap() to take the OUT side of a transform-input pipe — `translation` was literally unwalkable before this ledger. #4001 closed the shape with `.strict()` and folded the guard's ten prescriptions into the unknown-key `guidance`, so the preprocess is gone and the registered schema is a plain strict object. Consumer chain: runtime-authored items sync into the i18n adapter's authored layer (packages/core/src/fallbacks/authored-translation-sync.ts — at kernel:ready, on metadata:reloaded, and on translation mutations; #2591 closed the publish dead-end), file bundles load via service-i18n; both merge into ONE tree read by the spec resolvers (packages/spec/src/system/i18n-resolver.ts), the REST localization layer (translateMetaItem/translateMetaTypes), objectui's client resolvers (useObjectLabel/useSettingsLabel), and plugin-audit's summary localizer. WALK BOUNDARY: every group is a z.record keyed by target names — the drill sees each record's VALUE shape one level; the deeper per-key conventions (objects.<n>.fields.<f>.label, settings.<ns>.keys.<k>.options.<v>, …) are governed by the resolvers cited per row, not by ledger rows. Note also the sync merges the RAW stored payload (authored-translation-sync.ts:155, not a schema re-parse), so the declared groups below are the CONTRACT while undeclared keys technically flow through on rows already stored — the resolvers read only the declared conventions. Since #4001 no NEW row can acquire one: the metadata door rejects an undeclared key instead of stripping it, so that residue is a finite set that only shrinks. 10 of 11 groups live; the one dead group (`validationMessages`) is pointed at by #3778's own legacy-key migration table, making it a shipped false signpost. Seeded 2026-08-01 (#4488). 2026-08-28 (#13003): all nine `path:NNN` citations in this file were re-anchored to their consuming symbols; EIGHT of the nine were wrong and every one of those was IN RANGE (the exception is `locale`, whose range still lands inside its reader). This ledger carried the batch's heaviest load of the OTHER silent class as well — nine further positions written as bare `:NNN` suffixes with no path in front of them, which `PATH_RE` never matches, so they degraded to prose that no check has ever resolved, bounded or key-checked.",
   "props": {
     "name": {
       "status": "live",
@@ -20,45 +20,45 @@
     },
     "locale": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/core/src/fallbacks/authored-translation-sync.ts:140-148",
-      "note": "which bundle entry the item fills. Required for a reason the schema states: the sync SKIPS an item whose locale it cannot resolve — loudly (warn log), with a name-derived fallback for pre-#3778 rows."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/core/src/fallbacks/authored-translation-sync.ts#readAuthoredTranslationLayer (`const locale = (typeof data?.locale === 'string' && data.locale) || …`, then `byLocale[locale] = deepMerge(...)`; an item whose locale cannot be resolved is SKIPPED, loudly)",
+      "note": "which bundle entry the item fills. Required for a reason the schema states: the sync SKIPS an item whose locale it cannot resolve — loudly (warn log), with a name-derived fallback for pre-#3778 rows. 2026-08-28: RE-ANCHORED (#13003) — the cited range lands inside `readAuthoredTranslationLayer` (its endpoint `:148` is the closing `);` of the warn call), so this leg is the grammar migration rather than a repair. Re-closed by hand against 8cb96ec41."
     },
     "objects": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:735, :751, :159, :197, :873, :900; objectui @940ba24: packages/i18n/src/useObjectLabel.ts:397-400",
-      "note": "the largest group, fully live: label/pluralLabel/description (translateObject), fields.{label,help,placeholder,options}, _views (resolveViewLabel + empty-state copy), _actions (label/confirmText/successMessage/params/resultDialog — object-scoped first, then globalActions fallback), _sections (objectui record:details section labels). Served through REST translateMetaItem(s) and the /api/v1/i18n endpoints; objectui re-resolves client-side via the spec-translations transform."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupObjectField (`objects.<name>.label` / `pluralLabel` / `description`); packages/spec/src/system/i18n-resolver.ts#lookupObjectFieldAttr (`objects.<name>.fields.<field>.<attr>`); packages/spec/src/system/i18n-resolver.ts#resolveViewLabel (`objects.<name>._views.<view>.label`); packages/spec/src/system/i18n-resolver.ts#lookupActionField (`objects.<name>._actions`, checked BEFORE globalActions); packages/spec/src/system/i18n-resolver.ts#lookupTabLabel (`objects.<name>._tabs`); objectui @940ba24: packages/i18n/src/useObjectLabel.ts:397-400",
+      "note": "the largest group, fully live: label/pluralLabel/description (translateObject), fields.{label,help,placeholder,options}, _views (resolveViewLabel + empty-state copy), _actions (label/confirmText/successMessage/params/resultDialog — object-scoped first, then globalActions fallback), _sections (objectui record:details section labels). Served through REST translateMetaItem(s) and the /api/v1/i18n endpoints; objectui re-resolves client-side via the spec-translations transform. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — this entry named SIX positions in i18n-resolver.ts and only the first, `:735`, was parsable as a citation at all; it had rotted onto `widgets?: WidgetLike[]` in the `DashboardLike` INTERFACE. The other five (`:751`, `:159`, `:197`, `:873`, `:900`) were bare line suffixes with no path in front of them, so they were never resolved, bounded or key-checked by anything — the largest instance in this batch of the class `flow.status` and `dashboard.widgets.suppressWarnings` also carried. The five anchors above are the five distinct group readers, named. Re-closed by hand against 8cb96ec41."
     },
     "apps": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:442, :456; packages/rest/src/rest-server.ts:2001",
-      "note": "translateApp swaps app label/description and walks the navigation tree replacing node labels by id — applied on every /meta app read."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupAppAttr (`apps.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupNavLabel (`apps.<name>.navigation.<id>.label`); packages/rest/src/rest-server.ts#translateMetaItem (the /meta read path that applies it — dispatches through `translateMetadataDocument` to `translateApp`)",
+      "note": "translateApp swaps app label/description and walks the navigation tree replacing node labels by id — applied on every /meta app read. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, both legs — `i18n-resolver.ts:442` had rotted onto a PARAMETER in `lookupActionResultDialogNode`'s signature, and `rest-server.ts:2001` onto a blank line in the Server-Timing disclosure gate ~570 lines from the translate seam. The rest leg is also named more honestly than the note was: this repo has NO `translateApp` call site — the REST layer calls `translateMetaItem`, which reaches `translateApp` through the per-type translator map in `translateMetadataDocument`. Re-closed by hand against 8cb96ec41."
     },
     "messages": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts:562-579, :744-745",
-      "note": "consumed via II18nService.t: plugin-audit localizes activity-feed summaries (messages.activityCreated/Updated/Deleted, framework#3039) and collaboration notifications (messages.mentionedYou). Easy to mis-verify — no resolver in i18n-resolver.ts reads it; the consumer is a t() caller with composed keys, which a literal grep for the group name never finds."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts#writeAudit (`translate('messages.activityCreated' | 'messages.activityUpdated' | 'messages.activityDeleted', …)`); packages/plugins/plugin-audit/src/audit-writers.ts#writeCommentMentions (`messages.mentionedYou` / `messages.mentionedYouAnonymous`); packages/plugins/plugin-audit/src/audit-writers.ts#translateWith (`i18n.t(key, locale, params)` — the one seam every composed key goes through)",
+      "note": "consumed via II18nService.t: plugin-audit localizes activity-feed summaries (messages.activityCreated/Updated/Deleted, framework#3039) and collaboration notifications (messages.mentionedYou). Easy to mis-verify — no resolver in i18n-resolver.ts reads it; the consumer is a t() caller with composed keys, which a literal grep for the group name never finds. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:562-579`'s endpoint had rotted onto the activity-milestone guard, and `:744-745` was a bare line suffix with no path. The note's own warning now holds of the citation as well as of the code: the consumer is a `t()` caller with COMPOSED keys, so the anchors name the three functions that compose them instead of lines a grep for the group name would never have produced in the first place. Re-closed by hand against 8cb96ec41."
     },
     "globalActions": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:200, :249",
-      "note": "the object-less fallback for action label/confirmText/successMessage/params/resultDialog — resolveAction* checks objects.<obj>._actions first, then here."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupActionField (`data.globalActions?.[action.name]?.[field]` — consulted after `objects.<obj>._actions`); packages/spec/src/system/i18n-resolver.ts#lookupActionResultDialogNode (the same object-first, global-fallback order for the result-dialog copy)",
+      "note": "the object-less fallback for action label/confirmText/successMessage/params/resultDialog — resolveAction* checks objects.<obj>._actions first, then here. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:200` had rotted onto the return-type line of `pickData`, the bundle/locale picker ~186 lines above the first `globalActions` read; `:249` was a bare line suffix with no path. Re-closed by hand against 8cb96ec41."
     },
     "dashboards": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:538, :554",
-      "note": "translateDashboard: label/description plus per-widget title/description/subCaption by widget id; header action labels. `subCaption` (#7862, #5428 item 4) overlays the metric widget's `options.description` — a different authored field from `widget.description`, each on its own key — live through the same translateDashboard REST path; objectui's client-side renderer half is the downstream follow-up."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDashboardAttr (`dashboards.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupWidgetAttr (`dashboards.<name>.widgets.<id>.<attr>`, `subCaption` included); packages/spec/src/system/i18n-resolver.ts#translateDashboard",
+      "note": "translateDashboard: label/description plus per-widget title/description/subCaption by widget id; header action labels. `subCaption` (#7862, #5428 item 4) overlays the metric widget's `options.description` — a different authored field from `widget.description`, each on its own key — live through the same translateDashboard REST path; objectui's client-side renderer half is the downstream follow-up. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:538` had rotted onto the opening line of `translateAction`'s docblock, an ACTION resolver ~244 lines above the dashboard ones; the second position `:554` was a bare line suffix with no path and resolved to nothing. Re-closed by hand against 8cb96ec41."
     },
     "pages": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts:636",
-      "note": "translatePage: label/description/title/subtitle (title falls back to label; header copy keyed by page name because page:header instances carry no stable id)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupPageAttr (`pages.<name>.<attr>` — label/description/title/subtitle, title falling back to label); packages/spec/src/system/i18n-resolver.ts#lookupPageComponentCopy (`pages.<name>.components.<id>` — header copy keyed by page name because page:header instances carry no stable id)",
+      "note": "translatePage: label/description/title/subtitle (title falls back to label; header copy keyed by page name because page:header instances carry no stable id). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:636` had rotted onto `function lookupAppAttr`, the APP group's reader, ~226 lines above the page ones. Re-closed by hand against 8cb96ec41."
     },
     "flows": {
       "status": "planned",
@@ -87,9 +87,9 @@
     },
     "metadataForms": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/rest/src/rest-server.ts:2058, :2062",
-      "note": "translateMetaTypes decorates GET /meta types with resolveMetadataTypeLabel and localizes every form schema through resolveMetadataFormLabels (labels/sections/fields by dotted path) — the Studio metadata-editor localization path."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/rest/src/rest-server.ts#translateMetaTypesResponse (`resolveMetadataTypeLabel(...)` and `resolveMetadataFormLabels(...)` applied to every GET /meta types entry); packages/spec/src/system/i18n-resolver.ts#lookupMetadataForm (`metadataForms.<type>`); packages/spec/src/system/i18n-resolver.ts#lookupMetadataFormField (`metadataForms.<type>.fields.<dotted path>`)",
+      "note": "translateMetaTypes decorates GET /meta types with resolveMetadataTypeLabel and localizes every form schema through resolveMetadataFormLabels (labels/sections/fields by dotted path) — the Studio metadata-editor localization path. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, position AND prose — `:2058` had rotted into a docblock about `requiresObject` pruning ~815 lines above the seam (`:2062` was a bare line suffix), and the note called the function `translateMetaTypes`, which is no symbol in this repo; it is `translateMetaTypesResponse`. Re-closed by hand against 8cb96ec41."
     },
     "settingsCommon": {
       "status": "live",

@@ -14,6 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   BOUND_FORM_VIEW_PREDICATE_ROOTS,
+  BOUND_FORM_FIELD_PREDICATE_ROOTS,
+  FIELD_ONLY_BOUND_PREDICATE_ROOTS,
   detectUnboundFormViewPredicateRoots,
   unboundRootsInCelSource,
 } from './form-predicate-root-policy.js';
@@ -45,16 +47,41 @@ function definitionWithFieldPredicate(predicate: unknown, object = 'crm_lead'): 
 const CEL = (source: string) => ({ dialect: 'cel', source });
 
 describe('the bound vocabulary comes from the contract, not from this module', () => {
-  it('is exactly record / previous / parent / data', () => {
-    // `packages/spec/src/ui/view.zod.ts`, `FormFieldSchema.visibleWhen` and
-    // `FormSectionSchema.visibleWhen`: "Root: `record` (+ `previous`,
-    // `parent`) in runtime forms, or `data` in metadata forms."
+  it('the shared base — and therefore the SECTION vocabulary — is record / previous / parent / data', () => {
+    // `packages/spec/src/ui/view.zod.ts`, `FormSectionSchema.visibleWhen`:
+    // "Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in
+    // metadata forms. No `current_user` at section level — it is unbound here
+    // and the predicate would fault open."
     expect([...BOUND_FORM_VIEW_PREDICATE_ROOTS]).toEqual(['record', 'previous', 'parent', 'data']);
+    expect(BOUND_FORM_VIEW_PREDICATE_ROOTS).not.toContain('current_user');
   });
 
-  it('excludes `current_user`, which the same prose calls unbound at field level', () => {
-    expect(BOUND_FORM_VIEW_PREDICATE_ROOTS).not.toContain('current_user');
-    expect(unboundRootsInCelSource("current_user.id == record.owner")).toEqual(['current_user']);
+  it('the FIELD vocabulary adds the current_user family (objectui#6010, re-measured by #12930)', () => {
+    // `FormFieldSchema.visibleWhen`: "`current_user` (and the ADR-0068 aliases
+    // `user` / `ctx.user` / `os.user`) resolves here since objectui#6010".
+    // This is the correction: the first version of this policy judged a field
+    // by the section vocabulary and false-flagged a legitimate predicate.
+    expect([...BOUND_FORM_FIELD_PREDICATE_ROOTS]).toEqual([
+      'record', 'previous', 'parent', 'data',
+      'current_user', 'user', 'ctx', 'os',
+    ]);
+    // The field vocabulary is a strict superset — the base can never drift out
+    // from under it.
+    for (const root of BOUND_FORM_VIEW_PREDICATE_ROOTS) {
+      expect(BOUND_FORM_FIELD_PREDICATE_ROOTS, root).toContain(root);
+    }
+  });
+
+  it('judges the SAME predicate differently per surface — the whole point of the split', () => {
+    const source = 'current_user.id == record.owner';
+    expect(unboundRootsInCelSource(source, BOUND_FORM_FIELD_PREDICATE_ROOTS)).toEqual([]);
+    expect(unboundRootsInCelSource(source, BOUND_FORM_VIEW_PREDICATE_ROOTS)).toEqual(['current_user']);
+  });
+
+  it('defaults to the stricter (section) vocabulary, so a forgetful caller fails loudly', () => {
+    // A missed detection is silent; a false positive is findable. The default
+    // is chosen to fail in the findable direction — the traversal never uses it.
+    expect(unboundRootsInCelSource('current_user.id == record.owner')).toEqual(['current_user']);
   });
 });
 
@@ -139,8 +166,66 @@ describe('detectUnboundFormViewPredicateRoots — traversal', () => {
         view: 'crm_lead',
         root: 'status',
         source: 'status == "unqualified"',
+        surface: 'field',
       },
     ]);
+  });
+
+  it('stays SILENT on a field predicate rooted at the current_user family', () => {
+    // The regression this patch exists for: each of these resolves at field
+    // level (objectui#6010), so flagging one is crying wolf on a legitimate,
+    // correctly-authored predicate.
+    for (const root of FIELD_ONLY_BOUND_PREDICATE_ROOTS) {
+      const source = root === 'ctx' || root === 'os'
+        ? `${root}.user.role == "admin"`
+        : `${root}.role == "admin"`;
+      expect(
+        detectUnboundFormViewPredicateRoots(definitionWithFieldPredicate(CEL(source))),
+        source,
+      ).toEqual([]);
+    }
+  });
+
+  it('still FLAGS the same root at SECTION level, where the contract says it is unbound', () => {
+    const findings = detectUnboundFormViewPredicateRoots({
+      views: [
+        {
+          form: {
+            data: { object: 'crm_lead' },
+            sections: [
+              {
+                visibleWhen: CEL('current_user.role == "admin"'),
+                fields: [{ field: 'a', visibleWhen: CEL('current_user.role == "admin"') }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    // Exactly one: the section slot. The identical field predicate is silent.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.surface).toBe('section');
+    expect(findings[0]!.root).toBe('current_user');
+    expect(findings[0]!.path).toBe('views[0].form.sections[0].visibleWhen');
+  });
+
+  it('tags every finding with the surface that decided its vocabulary', () => {
+    const findings = detectUnboundFormViewPredicateRoots({
+      views: [
+        {
+          form: {
+            data: { object: 'crm_lead' },
+            sections: [
+              {
+                visibleWhen: CEL('stage == "closed"'),
+                fields: [{ field: 'a', visibleWhen: CEL('status == "x"') }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(findings.map((f) => f.surface)).toEqual(['section', 'field']);
   });
 
   it('reports nothing for the same artifact spelled with the `record.` root', () => {

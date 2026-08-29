@@ -103,9 +103,9 @@ export default class EnvironmentsBind extends Command {
       requireAuth(token);
 
       // Fetch existing metadata so we don't blow it away.
-      const current = await client.projects.get(args.environmentId);
-      const existingMeta: Record<string, unknown> = (current?.project?.metadata && typeof current.project.metadata === 'object')
-        ? { ...current.project.metadata as Record<string, unknown> }
+      const current = await client.environments.get(args.environmentId);
+      const existingMeta: Record<string, unknown> = (current?.environment?.metadata && typeof current.environment.metadata === 'object')
+        ? { ...current.environment.metadata as Record<string, unknown> }
         : {};
       // Drop the prior bind error so the UI doesn't show a stale failure.
       delete existingMeta.artifactBindError;
@@ -114,7 +114,7 @@ export default class EnvironmentsBind extends Command {
       printKV('Environment', args.environmentId, '🎯');
       printKV('Artifact', artifactAbs, '📦');
 
-      const res = await client.projects.update(args.environmentId, {
+      const res = await client.environments.update(args.environmentId, {
         metadata: existingMeta,
       });
 

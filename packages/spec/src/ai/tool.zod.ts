@@ -35,30 +35,30 @@ import { strictObject } from '../shared/strict-object';
  */
 const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   permissions:
-    '`tool.permissions` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it ' +
+    '`tool.permissions` was removed in @objectstack/spec 17.0.0 (audit close-out) — it ' +
     'promised a capability gate on tool invocation that nothing ever enforced: the key is not ' +
     'part of AIToolDefinition and no execution path read it, so a tool "requiring" capabilities ' +
     'ran for everyone. Delete the key. To gate what a tool can DO, gate the underlying action ' +
     '(`action.requiredPermissions`, ADR-0066) or the object it touches (permission sets) — those ' +
     'are the checks the middleware actually runs.',
   active:
-    '`tool.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
+    '`tool.active` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     '`active: false` read as "withdrawn" but withdrew nothing: AIToolDefinition has no such ' +
     'field, ToolRegistry.getAll() returns everything, and the tool kept reaching the LLM tool ' +
     'set and `POST /ai/tools/:name/execute` kept running it (unlike agent.active / skill.active, ' +
     'which ARE enforced). Delete the key. To withdraw a tool, remove it from the skills/agents ' +
     'that reference it.',
   category:
-    '`tool.category` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing ' +
+    '`tool.category` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing ' +
     'groups, filters or routes tools by it; the only reader was a serializer pass-through. ' +
     'Delete the key. Organizational grouping belongs in the skill that carries the tool.',
   builtIn:
-    '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
+    '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (audit close-out) — no ' +
     'runtime branches on it; it never affected registration, selection or execution. Delete ' +
     'the key.',
   requiresConfirmation:
     '`tool.requiresConfirmation` was removed from @objectstack/spec in the 16.x line ' +
-    '(#3715, ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
+    '(ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
     'accepted is false compliance: authors set it on destructive tools believing the ' +
     'call would pause, and nothing ever did. No execution path read it — not the LLM ' +
     'tool set (a tool reaches the model as name/description/parameters only), not ' +
@@ -98,7 +98,7 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 const TOOL_STRICT_HISTORY =
   'Until this shape was closed an undeclared key was dropped without a word — the tool '
   + 'still registered and still reached the LLM tool set, minus whatever the key was meant '
-  + 'to do (the #1535 silent-strip class).';
+  + 'to do (the silent-strip class).';
 
 /**
  * Tool Schema
@@ -158,7 +158,7 @@ export const ToolSchema = lazySchema(() => strictObject({
    * (service-ai action-tools) but performs NO output validation against this
    * schema, and downstream tool chaining does not consume it either.
    */
-  outputSchema: z.record(z.string(), z.unknown()).optional().describe('[EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated (liveness #1878/#1893).'),
+  outputSchema: z.record(z.string(), z.unknown()).optional().describe('[EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated.'),
 
   /**
    * Associated object name (when the tool operates on a specific data object).
@@ -189,7 +189,7 @@ export const ToolSchema = lazySchema(() => strictObject({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}).describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
+}).describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition.'));
 
 export type Tool = z.input<typeof ToolSchema>;
 

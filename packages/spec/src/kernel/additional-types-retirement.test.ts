@@ -56,7 +56,7 @@ describe('[#8586] MetadataPluginConfig.additionalTypes retirement', () => {
     expect(issue!.path).toEqual(['additionalTypes']);
     // The prescription itself — this string IS the migration doc for whoever
     // hits it, so it is contract, not commentary.
-    expect(issue!.message).toMatch(/`config\.additionalTypes`.*removed.*17.*#8586/s);
+    expect(issue!.message).toMatch(/`config\.additionalTypes`.*removed.*17/s);
     expect(issue!.message).toMatch(/Delete the key/s);
     // The live mechanism must be named: how a kind ACTUALLY enters the set.
     expect(issue!.message).toMatch(/registering an ITEM/s);
