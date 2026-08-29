@@ -167,7 +167,7 @@ describe('ObjectStackClient (with Hono Server)', () => {
         expect(endpoints?.metadata).toContain('/api/v1/meta');
 
         // Enforced, not just declared — the pairing #4018 exists to hold.
-        expect((await fetch(`${baseUrl}/api/v1/meta/objects`)).status).not.toBe(404);
+        expect((await fetch(`${baseUrl}/api/v1/meta/object`)).status).not.toBe(404);
     });
 
     it('should create and retrieve data via hono', async () => {

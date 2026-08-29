@@ -1,6 +1,6 @@
 {
   "type": "flow",
-  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). CORRECTED 2026-07: the previous note claimed 'status/active gate nothing' — that was true when the audit ran but became FALSE with commit 497bda853 (2026-07-05, 'honor flow status for enable/disable'). `status` now gates binding AND execution; `active` remains a deprecated no-op. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
+  "_note": "FlowSchema. Seeded from docs/audits/2026-06-flowschema-property-liveness.md. Consumers: service-automation engine + node executors. runAs is marker-driven experimental (spec). CORRECTED 2026-07: the previous note claimed 'status/active gate nothing' — that was true when the audit ran but became FALSE with commit 497bda853 (2026-07-05, 'honor flow status for enable/disable'). `status` now gates binding AND execution; `active` remains a deprecated no-op. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. 2026-08-28 (#13003): the four `path:NNN` citations in this file were re-anchored to their consuming symbols. All four were wrong, all four IN RANGE, and `status` also carried three bare line suffixes with no path that no check has ever resolved.",
   "props": {
     "name": {
       "status": "live",
@@ -8,11 +8,15 @@
     },
     "successMessage": {
       "status": "live",
-      "evidence": "packages/services/service-automation/src/engine.ts:1292"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/services/service-automation/src/engine.ts#executeWithoutRetry (`successMessage: flow.successMessage` on the terminal success envelope — deliberately not a per-attempt value); packages/services/service-automation/src/engine.ts#resumeInternal (the resumed run returns the same authored string)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1292` had rotted onto a docblock sentence about `'runtime'` package provenance, ~2,450 lines above the readers. The wrapping `execute` path returns the same field and is named here as prose rather than anchored, because `execute` is too common a word in this file for an anchor to falsify anything. Re-closed by hand against 8cb96ec41."
     },
     "errorMessage": {
       "status": "live",
-      "evidence": "packages/services/service-automation/src/engine.ts:1348"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/services/service-automation/src/engine.ts#retryExecution (carries the authored text onto the last attempt's failure); packages/services/service-automation/src/engine.ts#resumeInternal (`errorMessage: flow.errorMessage` on the resumed run's failure envelope)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1348` had rotted onto a docblock heading (\"⛔ This is NOT the retired `flowEnabled` map under a new name\"), ~2,480 lines above the readers. As with `successMessage`, the top-level `execute` path reads the same field and is left as prose for the same reason. Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "live",
@@ -29,8 +33,9 @@
     },
     "status": {
       "status": "live",
-      "evidence": "packages/services/service-automation/src/engine.ts:1374-1382 (obsolete/invalid -> flowEnabled=false), :1387 (gates activateFlowTrigger), :1704 + :3097 (execute-time 'Flow is disabled' guard)",
-      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands, evidence replaced: it is genuinely engine-consumed since 497bda853. The previously cited FlowPreview line number did not even contain a status read."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/services/service-automation/src/engine.ts#registerFlow (`this.flowStatusDisabled.set(name, flowStatus === 'obsolete' || flowStatus === 'invalid')` — the authoring state is read ONCE, at registration); packages/services/service-automation/src/engine.ts#isFlowEnabled (composes that bit with the durable ledger bit; every trigger and execute path asks this one predicate)",
+      "note": "RE-VERIFIED 2026-07 (#3686 preview-claim sweep): the prior `live` verdict cited only a metadata-admin PREVIEW panel, which echoes what the author typed. Verdict stands, evidence replaced: it is genuinely engine-consumed since 497bda853. The previously cited FlowPreview line number did not even contain a status read. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the sharpest in-range rot in this batch. The parsable half of the citation, `:1382`, had come to rest on `private flowLedgerDisabled = new Set<string>();` — the ADJACENT map, not this key's — while #10243 had meanwhile SPLIT the single `flowEnabled` map into `flowStatusDisabled` (this key) and `flowLedgerDisabled` (the durable toggle), composed by `isFlowEnabled`. A pointer landing on a plausible line in the right class is the failure mode a line bound cannot reach. The other three positions (`:1387`, `:1704`, `:3097`) were bare line suffixes with no path and resolved to nothing at all. Re-closed by hand against 8cb96ec41."
     },
     "runAs": {
       "status": "live",
@@ -40,8 +45,9 @@
     },
     "type": {
       "status": "live",
-      "evidence": "packages/services/service-automation/src/engine.ts:637",
-      "note": "flow.type==='schedule'/'api' drives trigger dispatch."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/services/service-automation/src/engine.ts#resolveTriggerBinding (`flow.type === 'schedule'` and `flow.type === 'api'` decide which trigger the flow is bound to)",
+      "note": "flow.type==='schedule'/'api' drives trigger dispatch. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:637` had rotted onto a docblock about the unknown-node-type audit being structured rather than logged, ~1,430 lines above the dispatch. Re-closed by hand against 8cb96ec41."
     },
     "variables": {
       "status": "live",

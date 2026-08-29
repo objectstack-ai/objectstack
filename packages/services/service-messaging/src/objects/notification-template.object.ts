@@ -34,12 +34,25 @@ export const NotificationTemplate = ObjectSchema.create({
     fields: {
         id: Field.text({ label: 'Template ID', required: true, readonly: true }),
 
-        topic: Field.text({ label: 'Topic', required: true, searchable: true }),
+        topic: Field.text({
+            label: 'Topic',
+            required: true,
+            searchable: true,
+            // [#12978] Sibling-declaration bound (#11374 route A): template
+            // topics are matched against the event's `sys_notification.topic`
+            // (maxLength: 200 there).
+            maxLength: 200,
+        }),
 
         channel: Field.text({
             label: 'Channel',
             required: true,
             defaultValue: 'email',
+            // [#12978] Machine channel-id vocabulary (#11374 route A), same
+            // sourcing as `sys_notification_delivery.channel`: registered
+            // `MessagingChannel.id`s, 64 per the landed machine-vocabulary
+            // precedent (sys_session.revoke_reason, maxLength: 64).
+            maxLength: 64,
             description: 'Channel id this template renders for (email/inbox/push/…).',
         }),
 
@@ -47,6 +60,10 @@ export const NotificationTemplate = ObjectSchema.create({
             label: 'Locale',
             required: true,
             defaultValue: 'en',
+            // [#12978] Sibling-declaration bound (#11374 route A): the same
+            // BCP-47 tag family `sys_email_template.locale` stores, bounded 16
+            // there; both resolve a template by best-matching locale.
+            maxLength: 16,
             description: "BCP-47 locale, e.g. 'en' / 'en-US' / 'zh-CN'.",
         }),
 

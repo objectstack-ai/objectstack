@@ -67,6 +67,7 @@ import {
   resolveTenancyPosture,
 } from '@objectstack/types';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
+import { matchesDeclaredOwnerEmail } from './platform-owner-wall-bypass.js';
 
 interface BootstrapOptions {
   /** Logger from PluginContext. */
@@ -439,8 +440,11 @@ export async function bootstrapPlatformAdmin(
         if (u?.id) byId.set(u.id, u);
       }
     }
+    // [#12974] The email comparison is the SHARED canonical one — the same
+    // predicate the Layer 0 owner wall bypass keys on (see
+    // `platform-owner-wall-bypass.ts`, which names this gate as its twin).
     const owners = [...byId.values()].filter(
-      (u) => isHumanUser(u) && String(u.email ?? '').trim().toLowerCase() === wanted,
+      (u) => isHumanUser(u) && matchesDeclaredOwnerEmail(u, declaredOwnerEmail!),
     );
     if (owners.length === 0) {
       logger?.info?.(

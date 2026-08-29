@@ -340,3 +340,157 @@ describe('an artifact-less, config-less project is unchanged (#12938 baseline pi
     }
   }, 60_000);
 });
+
+/**
+ * #13028 — the shape that measured 8 tables out of ~80, reproduced.
+ *
+ * ## What the earlier fixture could not see
+ *
+ * The `SecurityPlugin`-only fixture above composes a host plugin next to the
+ * standalone stack's OWN `ObjectQLPlugin`, and that plugin's `start()` runs
+ * normally — so the pass that hands registered objects to their driver
+ * (`installRegisteredSchemas` → `registerObjectMetadata`, the one thing that
+ * fills the `managedObjectFields` map `detectManagedDrift()` diffs) happens by
+ * itself, and the composition looks complete.
+ *
+ * A real control plane does not have that shape. ObjectStack Cloud's config
+ * brings its own `ObjectQLPlugin`, behind a lazy wrapper, under the FRAMEWORK'S
+ * OWN plugin name — deliberately, so the CLI's capability injector de-dups
+ * against it. Duplicate registration OVERWRITES by name
+ * (`packages/core/src/plugin-registration.ts`), so the host's wrapper DISPLACES
+ * the standalone plugin, and `composeForDeclarations` then suppresses the
+ * wrapper's `start()`. The result is a boot in which NO `ObjectQLPlugin.start()`
+ * runs at all: every host plugin's `init()` declared its objects, and not one
+ * of them was ever handed to a driver.
+ *
+ * Measured consequence, staging control plane, framework `15d55fb2430f`:
+ * 36 plugins composed, ~80 `sys_*` tables declared, **8** examined — and all
+ * eight belonged to `service-messaging`, the one service that provisions its
+ * own tables from a `kernel:ready` hook instead of relying on that pass.
+ *
+ * ⚠️ The plugin NAMES in the fixture below are load-bearing, not decoration.
+ * Rename `com.objectstack.engine.objectql` to anything else and the two
+ * plugins coexist, both `init()`s run, and the boot dies on
+ * `Service 'objectql' already registered` — a different defect, and the
+ * fixture would stop reproducing this one.
+ */
+describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measured shape)', () => {
+  let dir: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-13028-'));
+    mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+    symlinkSync(
+      securityPackageRoot(),
+      join(dir, 'node_modules', '@objectstack', 'plugin-security'),
+      'dir',
+    );
+    symlinkSync(
+      resolve(dirname(require_.resolve('@objectstack/objectql')), '..'),
+      join(dir, 'node_modules', '@objectstack', 'objectql'),
+      'dir',
+    );
+
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "import { ObjectQLPlugin } from '@objectstack/objectql';",
+        "import { SecurityPlugin } from '@objectstack/plugin-security';",
+        '',
+        '// `lazyPlugin` from ObjectStack Cloud\'s control-plane preset, in shape:',
+        '// construction deferred to init(), start()/stop() forwarded, and NO',
+        '// `destroy` — which is the other half of this seam (#13027).',
+        'function lazyPlugin(name: string, factory: () => Promise<any>): any {',
+        '  let impl: any = null;',
+        '  return {',
+        '    name,',
+        '    async init(ctx: any) { impl = await factory(); if (impl?.init) await impl.init(ctx); },',
+        '    async start(ctx: any) { if (impl?.start) await impl.start(ctx); },',
+        '    async stop(ctx: any) { if (impl?.stop) await impl.stop(ctx); },',
+        '  };',
+        '}',
+        '',
+        'export default {',
+        '  plugins: [',
+        "    lazyPlugin('com.objectstack.engine.objectql', async () => new ObjectQLPlugin({ registerProtocol: false })),",
+        "    lazyPlugin('com.objectstack.security', async () => new SecurityPlugin()),",
+        '  ],',
+        '};',
+        '',
+      ].join('\n'),
+    );
+
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = 'production';
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+  });
+
+  afterAll(() => {
+    if (savedEnv.NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedEnv.NODE_ENV;
+    if (savedEnv.OS_ARTIFACT_PATH === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('examines the objects its host DECLARED, and says so in the coverage payload', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${join(dir, 'own-engine.db')}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      expect(stack.composition.hostConfigLoaded).toBe(true);
+
+      const coverage = stack.composition.coverage;
+      expect(coverage, 'a composed boot must report its own boundary').not.toBeNull();
+      // The declared set is real — the security family plus the platform floor
+      // plus the data stack — and every one of them is in the diffed set.
+      expect(coverage!.registeredObjects).toBeGreaterThan(ARTIFACTLESS_BASELINE_TABLES.length);
+      expect(coverage!.examinedObjects).toBe(coverage!.registeredObjects);
+      expect(coverage!.unexaminedObjects).toBe(0);
+
+      // …and the count the consumer gate reads agrees with it, rather than
+      // being a second, differently-derived number.
+      expect(stack.managedTableCount).toBe(coverage!.examinedObjects);
+
+      // The two tables #12938 named by hand as the proof the five-table set was
+      // wrong. Pre-#13028 this shape reached NEITHER.
+      const pending = stack.pendingSchemaWork.map((p) => p.table);
+      expect(pending).toContain('sys_position');
+      expect(pending).toContain('sys_permission_set');
+
+      // Full coverage means SILENCE about coverage: the honesty note exists to
+      // mark a shortfall, and one that printed anyway would train readers to
+      // skip the line that matters.
+      expect(stack.composition.notes.join(' ')).not.toContain('PARTIAL');
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('still writes NOTHING — the declaration-phase suppression is intact', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${join(dir, 'own-engine-writes.db')}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      await stack.driver!.detectManagedDrift();
+      // The binding this card adds is `registerObjectMetadata` — in-memory
+      // assignment on the driver. If it had reached `initObjects` instead, the
+      // table would exist here.
+      const k = (stack.driver as any).knex;
+      const exists = await k.schema.hasTable('sys_permission_set');
+      expect(exists, 'a plan must not create a table on its way to a coverage number').toBe(false);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+});

@@ -36,10 +36,18 @@
  * ## What is deliberately not here
  *
  * A blanket `unmeasuredEffect` on every `script` step (the escape hatch #4354
- * gave `connector_action`) was rejected: it would suppress the broken-sweep
- * signal on every flow that calls any function, in order to accommodate the
- * flows that break the rule — paying for a rule-breaker with everyone else's
- * signal, and fossilizing the violation as supported behaviour.
+ * gave `connector_action`) was rejected: it would drop every flow that calls
+ * any function out of the broken-sweep FIRST FILTER
+ * (`selected > 0 AND acted = 0 AND unmeasured = 0`), in order to accommodate
+ * the flows that break the rule — paying for a rule-breaker with everyone
+ * else's measurement, and fossilizing the violation as supported behaviour.
+ * That predicate is a first filter and not a verdict (#12685: a healthy
+ * idempotent sweep that re-selects the same records and gates each one on
+ * "already handled" matches it on every run too, and what discriminates is the
+ * per-node fold in `FlowRunSummary.nodes[]` / `gates[]`). Dropping out of it is
+ * still costly even so: a run the filter never selects is never folded over
+ * either, so the escape hatch is declared per function rather than granted to
+ * every `script` step.
  *
  * Nor is this *enforcement*. The runtime hands a function no data reach —
  * {@link FlowFunctionContext} in `@objectstack/service-automation` carries
@@ -62,12 +70,25 @@ import { strictObject } from '../shared/strict-object';
  *  - `'writes'` — it performs writes, or dispatches effects, that the platform
  *    cannot see or count. The step reports
  *    `ExecutionStepMetrics.unmeasuredEffect`, so the run's `unmeasured` tally
- *    keeps the broken-sweep query
+ *    keeps the broken-sweep FIRST FILTER
  *    (`selected > 0 AND acted = 0 AND unmeasured = 0`) off it — and only off
- *    the flows that actually call such a function.
+ *    the flows that actually call such a function. The third clause earns its
+ *    place for the reason it always did: such a run has an INCOMPLETE `acted`
+ *    count, not a zero one.
+ *
+ * A filter, not a verdict (#12685). Even with all three clauses the predicate
+ * cannot separate a broken sweep from a healthy idempotent one: a sweep that
+ * re-selects the same records and gates each one on "already handled" matches
+ * it on every run while that work stands, so "over N consecutive runs" does
+ * not separate the two either — consecutiveness filters flapping, which is a
+ * different failure. What separates them is the per-node fold on
+ * `FlowRunSummary` (`nodes[]` / `gates[]`): a healthy skip is accounted for by
+ * a read the run performed, while a dead gate skips just as often with nothing
+ * behind it. Declaring `'writes'` decides which runs enter that first filter;
+ * it does not make the filter a detector.
  *
  * There is deliberately no `'reads'` member: an under-reported `selected` can
- * only make the broken-sweep alert quieter, never wrong, so declaring it would
+ * only make the broken-sweep filter quieter, never wrong, so declaring it would
  * buy nothing the runtime acts on.
  */
 export const FlowFunctionEffectSchema = lazySchema(() => z.enum([
@@ -120,7 +141,7 @@ export const DEFAULT_FLOW_FUNCTION_EFFECT: FlowFunctionEffect = 'pure';
  * construction, so before this change a misspelled `effect` was dropped at the
  * schema and then *not looked for* by the reader — and the failure is the quiet
  * direction: the function is registered, it runs, and its writes are counted as
- * none, so #4354's broken-sweep query stays silent on the one flow that needed
+ * none, so #4354's broken-sweep filter stays silent on the one flow that needed
  * it. (A misspelled `effect` VALUE — `'write'` — already fails loudly-ish:
  * `normalizeFlowFunctionEntry` degrades it to `'writes'` and surfaces the raw
  * string. A misspelled KEY had no such backstop.)
@@ -152,7 +173,7 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
     'Until this shape was closed, these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
     '`handler`/`effect` by construction, so a misspelled `effect` was discarded twice over: ' +
     'the function still registered, still ran, and its writes were still counted as none, ' +
-    'which is what keeps the broken-sweep alert quiet on the run that needed it.',
+    'which is what keeps the broken-sweep filter quiet on the run that needed it.',
 }, {
   handler: z.function().describe('The function invoked by name (a `script` node, a string-named Hook/Action handler)'),
   effect: FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)

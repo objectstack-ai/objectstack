@@ -631,6 +631,12 @@ importers:
       '@objectstack/hono':
         specifier: workspace:*
         version: link:../adapters/hono
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../metadata-protocol
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql

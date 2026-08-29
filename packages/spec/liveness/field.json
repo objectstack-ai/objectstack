@@ -1,6 +1,6 @@
 {
   "type": "field",
-  "_note": "FieldSchema (flat — all field-type configs are top-level optional props). Seeded from docs/audits/2026-06-fieldschema-property-liveness.md. The wholly-dead nested config objects (vectorConfig/fileAttachmentConfig/encryptionConfig/maskingRule/cached/dataQuality) were removed (#2377 + earlier pruning); currencyConfig is LIVE via the objectui renderer. Naming-drift props are server-live but client-snake. Framework evidence cited with paths; objectui-renderer evidence as prose.",
+  "_note": "FieldSchema (flat — all field-type configs are top-level optional props). Seeded from docs/audits/2026-06-fieldschema-property-liveness.md. The wholly-dead nested config objects (vectorConfig/fileAttachmentConfig/encryptionConfig/maskingRule/cached/dataQuality) were removed (#2377 + earlier pruning); currencyConfig is LIVE via the objectui renderer. Naming-drift props are server-live but client-snake. Framework evidence cited with paths; objectui-renderer evidence as prose. 2026-08-28 (#13003): seven of this file's eight `path:NNN` citations were re-anchored to their consuming symbols. The eighth — `conditionalRequired` — is deliberately NOT re-anchored and NOT re-stamped: its cited `.transform` lowering was removed in protocol 17 (#3855), the key is now a `retiredKey` tombstone, and the fallback this row's note credits `rule-validator.ts` with keeping is gone too (that module documents this alias as retired and pins the absence with a test). The `live` verdict is therefore falsified, which is an ADR-0049 re-classification with its own card shape — the `action.execute` / #13036 precedent — and is reported on #13003 rather than executed here.",
   "props": {
     "name": {
       "status": "live",
@@ -77,9 +77,9 @@
     },
     "requiredWhen": {
       "status": "live",
-      "verifiedAt": "2026-08-25",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:1792-1810 (evaluates the field's requiredWhen predicate on the write path and reports the unevaluable/unbound cases by name); packages/objectql/src/validation/rule-validator.ts:762-763 (fieldRequiresParentRoot — a parent-scoped predicate widens the binding, #4977)",
-      "note": "CEL. 2026-08-25: REPOINTED — the evidence cited its SIBLING packages/objectql/src/validation/record-validator.ts, which has 0 occurrences of `requiredWhen`: that module enforces the static ADR-0113 `required` contract, while the CEL predicate is evaluated one file over in rule-validator.ts. Both files exist and neither citation carried a line, so this was invisible to every check the gate had — the plausible-neighbour shape of citation rot rather than a code movement."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`const pred = def?.requiredWhen` — evaluates the field predicate on the write path and reports the unevaluable and unbound cases by name); packages/objectql/src/validation/rule-validator.ts#hasParentScopedRequiredWhen (`readsParentRoot(def.requiredWhen)` — a parent-scoped predicate widens the binding, #4977)",
+      "note": "CEL. 2026-08-25: REPOINTED — the evidence cited its SIBLING packages/objectql/src/validation/record-validator.ts, which has 0 occurrences of `requiredWhen`: that module enforces the static ADR-0113 `required` contract, while the CEL predicate is evaluated one file over in rule-validator.ts. Both files exist and neither citation carried a line, so this was invisible to every check the gate had — the plausible-neighbour shape of citation rot rather than a code movement. 2026-08-28: RE-ANCHORED (#13003), and REPOINTED IN PROSE — both cited ranges still land inside their functions, so the LINES had not rotted; what had rotted is the second one's parenthetical, which named `fieldRequiresParentRoot`. That is no symbol in this repo (0 occurrences); the function is `hasParentScopedRequiredWhen`. A name written beside a line is exactly what a reader trusts when the line looks right, so it is corrected with it. Re-closed by hand against 8cb96ec41."
     },
     "readonlyWhen": {
       "status": "live",
@@ -91,9 +91,9 @@
       "note": "renderer CEL."
     },
     "conditionalRequired": {
-      "status": "live",
-      "evidence": "packages/spec/src/data/field.zod.ts:639 — the FieldSchema .transform lowers conditionalRequired -> requiredWhen and DROPS the alias, so authoring it changes what the validator enforces",
-      "note": "#3754: folded at parse time and removed from the parsed output (same shape as action.execute -> target in #3742, agent.knowledge.topics -> sources in #1891). Previously BOTH keys stayed live in the output with no canonicalization, so each consumer re-derived the precedence — the condition that produced the #3713 divergence. objectql rule-validator.ts keeps its `requiredWhen ?? conditionalRequired` fallback on purpose: raw (unparsed) metadata still reaches evaluateValidationRules. Removal of the input key is still the endgame."
+      "status": "dead",
+      "verifiedAt": "2026-08-29",
+      "note": "REMOVED 2026-07-28 in protocol 17 (#3855, PR #3883 — the commit that retired the last three deprecated authorable aliases) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and renamed out of sources by the protocol-17 conversion `field-conditionalRequired-to-requiredWhen`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); use `requiredWhen`, the only predicate slot — rename the key, the value (a CEL predicate) is unchanged, and `os migrate meta --from 16` lists the mechanical edits. The tombstone is packages/spec/src/data/field.zod.ts#conditionalRequired. The consumer-side refusal is packages/objectql/src/validation/rule-validator.ts#ConditionalFieldDef, which declares `requiredWhen` THE ONLY predicate slot and states PD #12 — no consumer-side dialect fallback returns here; that absence is PINNED by the case named `does NOT read the retired conditionalRequired alias (PD #12 — no dialect fallback)` in packages/objectql/src/validation/rule-validator.test.ts, which sits beside a positive case asserting the rule DOES fire once the stored-conversion chain has lowered the alias. LEDGER CORRECTED 2026-08-29 (#13043) — the VERDICT was falsified, not the citation, and in BOTH halves of its evidence. (a) This row read `live` on the claim that the FieldSchema .transform lowers conditionalRequired -> requiredWhen and DROPS the alias. No such transform exists: field.zod.ts contains ZERO .transform calls, its only two occurrences of that token are comments recording that `.overwrite()` was chosen over `.transform()` per the measured #6926 precedent, and the describe() on `requiredWhen` says out loud that the alias was removed in protocol 17. (b) The note's own stated reason for the verdict — that objectql rule-validator.ts keeps its `requiredWhen ?? conditionalRequired` fallback on purpose because raw (unparsed) metadata still reaches evaluateValidationRules — was retired by #3903: every path that hands the validator a STORED field definition now replays the ADR-0087 conversion chain at rehydration (applyConversionsToStoredItem), so a pre-17 row arrives with the alias already lowered, and a caller handing raw unconverted legacy input is off-contract. WHY NOTHING SAW THE ROT: the old pointer packages/spec/src/data/field.zod.ts:639 was IN RANGE in a 2,132-line file that names the key five times, so the existence check, the line bound and the key-mention check were all green on it — what :639 holds today is the tail of FieldMaskingRuleSchema, unrelated in every respect — and the entry carried no verifiedAt, so the re-verification clock never asked (the #12516 class). It was also the LAST `path:NNN` citation left in any ledger, which is why retiring it here closes #13003's anchor-adoption worklist. HISTORY PRESERVED, because it is the argument for `requiredWhen` being the single slot: #3754 folded the alias at parse time and removed it from the parsed output (same shape as action.execute -> target in #3742, agent.knowledge.topics -> sources in #1891); before that fix BOTH keys stayed live in the output with no canonicalization, so each consumer re-derived the precedence — the condition that produced the #3713 divergence. That note called removal of the input key the endgame, and protocol 17 is where the endgame landed. RETIREMENT CHAIN, COMPLETE — the close-out machinery is what remains, and it is not a consumer: the ADR-0087 conversion `field-conditionalRequired-to-requiredWhen` in packages/spec/src/conversions/registry.ts, its `RETIRED_KEYS_BY_MAJOR` entry and D3 chain step in packages/spec/src/migrations/registry.ts, and the explicit `NOTE: no entry for conditionalRequired` in packages/spec/src/data/authoring-key-lint.ts. Two INERT survivors are recorded so the next reader does not mistake either for a reader that gives the key meaning: packages/lint/src/validate-expressions.ts still walks the key, and its own docblock calls that branch inert on the parsed compile path because strict FieldSchema rejects the key by name (it gets a slot-agnostic consequence clause rather than a fabricated fourth measurement); packages/drivers/driver-sql/src/builtin-column-collision.ts lists it in a key-classification map as `presentation`, which classifies a name, not a value anyone reads. Re-closed by hand against cae2169cf."
     },
     "readonly": {
       "status": "live",
@@ -172,8 +172,9 @@
     },
     "unique": {
       "status": "live",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1853",
-      "note": "CAVEAT — DDL-only; NOT validated on the write path (violations surface as raw driver errors)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#registerManagedObjectMetadata (`isUniqueScopeDeclared(f?.unique)` — a declared unique is what makes the index sync run at all); packages/drivers/driver-sql/src/sql-driver.ts#uniqueIndexesFromFields (turns the declaration into index DDL, tenant-composite where an organization key applies)",
+      "note": "CAVEAT — DDL-only; NOT validated on the write path (violations surface as raw driver errors). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1853` had rotted onto `filterArrayReachedDriverError`, a query-filter error helper ~7,650 lines above the first reader, in a 16,290-line file. A line citation into a file that size ages out of usefulness long before it ages out of RANGE, which is why no check could see it. Recorded with the repoint: field-level `unique` is no longer emitted inline by `createColumn` — a composite needs the tenant column to exist first — so the DDL leg genuinely moved, it was not merely displaced. Re-closed by hand against 8cb96ec41."
     },
     "precision": {
       "status": "live",
@@ -192,8 +193,9 @@
     },
     "reference": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:1672",
-      "note": "CAVEAT — $expand/cascade/seed live. There is no FK DDL: #11567 retired `createColumn`'s FOREIGN KEY emission, which was gated on the REJECTED alias `reference_to` and so could never fire for a spec-conformant lookup (measured: 0 FK constraints across all 44 exported platform objects on live PG 16.13 + MySQL 8.0.46). Referential integrity is the engine's, via deleteBehavior."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#cascadeDeleteRelations (`const ref = fdef.reference` — the delete-time traversal that IS this platform's referential integrity, per the note below); packages/objectql/src/engine.ts#planCascadeAtomicity (the same read one phase earlier, to plan the cascade); packages/objectql/src/engine.ts#expandRelatedRecords ($expand — asks `referenceTargetOf` rather than reading the key raw, so a type-fixed target such as `user` is not treated as targetless, cloud#983)",
+      "note": "CAVEAT — $expand/cascade/seed live. There is no FK DDL: #11567 retired `createColumn`'s FOREIGN KEY emission, which was gated on the REJECTED alias `reference_to` and so could never fire for a spec-conformant lookup (measured: 0 FK constraints across all 44 exported platform objects on live PG 16.13 + MySQL 8.0.46). Referential integrity is the engine's, via deleteBehavior. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:1672` had rotted onto the closing `);` of a hook-registration error message about `excludeObjects`, ~9,250 lines above the cascade readers. Recorded with the anchors because it changes what the row claims: `$expand` no longer reads this key RAW, it goes through `referenceTargetOf`, so the anchor names the consuming function and the indirection is stated here instead of being implied by a line number. Re-closed by hand against 8cb96ec41."
     },
     "referenceVia": {
       "status": "live",
@@ -203,18 +205,21 @@
     },
     "autonumberFormat": {
       "status": "live",
-      "evidence": "packages/objectql/src/engine.ts:765",
-      "note": "CAVEAT — runtime sequence formatting live; UI AutoNumberField ignores it."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#applyAutonumbers (`const fmt = resolveAutonumberFormat(def as never)` — canonical `autonumberFormat`, then the `format` shorthand (#1603), then the declared default `{0000}`; one resolver shared with the SQL driver so a format-less field cannot render two shapes, #6555)",
+      "note": "CAVEAT — runtime sequence formatting live; UI AutoNumberField ignores it. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:765` had rotted onto a `// [#8690]` comment about temporal-filter materializability, ~3,495 lines above the autonumber path. Re-closed by hand against 8cb96ec41."
     },
     "maxLength": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/record-validator.ts:127",
-      "note": "CAVEAT — server validation honors camelCase, but the client form reads snake_case max_length."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/record-validator.ts#validateOne (`if (def.maxLength !== undefined && s.length > def.maxLength) return fail('max_length', { maxLength: def.maxLength, actual: s.length })` — the write-path seam that makes the declared bound bind)",
+      "note": "CAVEAT — server validation honors camelCase, but the client form reads snake_case max_length. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:127` had rotted onto `options?: string[]` in the `FieldValidationError` interface, ~443 lines above the check. Re-closed by hand against 8cb96ec41."
     },
     "minLength": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/record-validator.ts:130",
-      "note": "CAVEAT — server camel; client form reads min_length."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/record-validator.ts#validateOne (`if (def.minLength !== undefined && s.length < def.minLength) return fail('min_length', { minLength: def.minLength, actual: s.length })`)",
+      "note": "CAVEAT — server camel; client form reads min_length. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:130` had rotted onto `export class ValidationError extends Error`, the error class rather than any check; its sibling `maxLength` cited `:127` three lines above, so the pair had drifted together. Re-closed by hand against 8cb96ec41."
     },
     "displayField": {
       "status": "live",

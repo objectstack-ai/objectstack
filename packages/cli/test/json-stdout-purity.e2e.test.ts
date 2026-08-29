@@ -15,16 +15,16 @@
  *
  * ## Why the whole family, from one expectation
  *
- * The contract has one implementation face per command, and there are ten of
- * them. A file that pinned `migrate recorded-by` alone would go green while the
- * other nine stayed broken, and would say nothing at all about the eleventh. So
- * the family is DISCOVERED from the source tree — every command that calls
- * `bootSchemaStack` and declares a `--json` flag — and the discovered set is
- * reconciled against {@link FAMILY} below. Add a member and this file goes red
- * until it is listed here and passes; drop one and it goes red until it is
- * removed. The seam itself (`bootSchemaStack`'s required `jsonOutput` option)
- * makes the mistake a compile error first; this is the runtime proof that the
- * seam actually delivers the invariant.
+ * The contract has one implementation face per command. A file that pinned
+ * `migrate recorded-by` alone would go green while the others stayed broken,
+ * and would say nothing at all about a new one. So the family is DISCOVERED
+ * from the source tree — every command that calls `bootSchemaStack` and
+ * declares a `--json` flag — and the discovered set is reconciled against
+ * {@link FAMILY} below. Add a member and this file goes red until it is listed
+ * here and passes; drop one and it goes red until it is removed. The seam
+ * itself (`bootSchemaStack`'s required `jsonOutput` option) makes the mistake a
+ * compile error first; this is the runtime proof that the seam actually
+ * delivers the invariant.
  *
  * ## Deliberately an UNCOMPILED fixture
  *
@@ -186,7 +186,7 @@ beforeAll(async () => {
   // Sequential, each on its own database file: several members create tables,
   // and a shared SQLite file would make one member's run depend on the order
   // the others happened to run in. Sequential also keeps peak memory at one
-  // booted kernel rather than nine.
+  // booted kernel rather than one per member.
   runs = [];
   for (const [id, extra] of Object.entries(FAMILY)) {
     const slug = id.replace(/[^a-z0-9]+/gi, '-');
