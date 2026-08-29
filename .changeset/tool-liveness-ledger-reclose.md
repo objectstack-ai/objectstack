@@ -12,9 +12,9 @@ and `packages/service-ai-studio/…`. Six pointers into thin air, green for as
 long as they existed because `scripts/liveness/evidence.mts` hardcodes exactly
 the wrong spelling in `FOREIGN_PATH_PREFIXES` and so never resolved them.
 
-Re-closed against cloud `origin/main@15f55df` — the first pass run from a
-container with a cloud checkout in reach, which is the executor constraint that
-parked this card.
+Re-closed against cloud `origin/main@15f55df` and objectui `origin/main@26896c6`
+— the first pass run from a container with both checkouts in reach, which is the
+executor constraint that parked this card. All six entries are now dated.
 
 - `name`, `description` — confirmed `live`, and both now carry **framework-local
   anchored** evidence (`packages/mcp/…#registerToolFromDefinition`, the MCP
@@ -30,15 +30,24 @@ parked this card.
 - `outputSchema` — stays `experimental`, with the negative half now measured
   rather than asserted: the key occurs on exactly four non-test lines in the
   whole cloud repo, and none of them validates anything.
-- `objectName` — **left `live` and deliberately UNDATED.** The cloud walk
-  falsified its stated basis (both cited sites read `action.objectName`, and
-  `action.json` carries the identical citation verbatim; the same-named
-  `AIToolDefinition.objectName` is written and read by nothing). It is not
-  re-graded here because the only remaining candidate reader is an objectui
-  read-back, and no objectui checkout was reachable — publishing `dead` on that
-  search is the `app.homePageId` failure shape. Staying undated keeps it on the
-  `--stale-verification` worklist, which is the honest place for a claim that
-  could not be closed.
+- `objectName` — stays `live`, but **on a completely different basis**, and the
+  row now says so. Its stated basis is falsified: both cited sites read
+  `action.objectName` (`action.json` carries the identical citation verbatim),
+  and the same-named `AIToolDefinition.objectName` is written and read by
+  nothing, so the key gates, binds and routes nothing. The consumer that does
+  exist is objectui's registered metadata-admin preview, which reads it off the
+  persisted record and renders it as the header's object pill — the #7131
+  display-key rule, and pinned in `ToolPreview.test.tsx` over a comment reading
+  "`objectName` is NOT residue". So: `live` as a **display** key, never as a
+  binding, and explicitly not an ADR-0049 retirement candidate — retiring it
+  would delete a key the renderer deliberately renders and tests.
+
+The `_note`'s fourth false claim is corrected in the same pass: "tool metadata
+is WRITE-ONLY … not metadata read-back" is simply untrue, and it is the reason
+nobody had looked at the renderer. `ToolPreview` reads **all six** props off the
+stored record. The type therefore has two live bases — the `AIToolDefinition`
+surface (behavioural) and the metadata read-back (display) — and each row now
+names which one carries it.
 
 Data-only: no schema, no runtime, no authoring surface changes, and no verdict
 moved, so `state-counts.md` is untouched and still current. `liveness/` is in
