@@ -7730,6 +7730,57 @@ function selfTest() {
   const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
 
+  // A THIRD shape of the same class, and the one with the worst failure
+  // direction (#13207): a gate whose declared population was its OWN GUARDED
+  // ARTIFACT. `check:llms-txt` re-derives the claims of `packages/spec/llms.txt`
+  // against trees elsewhere — the `*.zod.ts` counts under `packages/spec/src`,
+  // the `api-surface/` shards, the manifest `exports` keys, and the non-private
+  // `@objectstack/*` workspace set — but reached every one of them through
+  // `join(PKG, ...)`, so the only literal it spelled was `llms.txt` itself.
+  //
+  // The derivation could therefore name the gate only AFTER the artifact had
+  // been edited, while the edits that FALSIFY it land in those other trees.
+  // Measured on PR #13186 across two rounds of one branch: deleting a `src/`
+  // schema module moved `src/kernel/` 32 -> 31 and the summed total 208 -> 207,
+  // the derived family did not contain the gate, and the red reached CI. That
+  // is UNDER-matching — silent, and invisible in the tool's own output, where an
+  // omitted gate looks exactly like a gate that does not apply.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration. If this gate stops reading one of these trees,
+  // delete the case together with the literal — never keep it green by
+  // re-pointing it at a tree the gate never reads.
+  const llmsHints = extractWatchHints(
+    readFileSync(join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
+    'packages/spec/scripts/check-llms-txt.ts',
+  );
+  const llmsReaches = (f) => llmsHints.some((h) => hintCovers(h, f));
+  // The reproduction, as a case: the falsifying edit alone names the gate.
+  t('check:llms-txt reaches the schema tree its counts are derived from', llmsReaches('packages/spec/src/kernel/cluster.zod.ts'));
+  // …and by a route that is NOT the artifact hint. This is the reproduction
+  // itself: before this declaration the only hint covering anything was
+  // `packages/spec/llms.txt`, so a src-only diff derived nothing.
+  t('and by a route that is not the guarded artifact — the #13207 reproduction', llmsHints.some((h) => h !== 'packages/spec/llms.txt' && hintCovers(h, 'packages/spec/src/kernel/cluster.zod.ts')));
+  t('it still reaches the artifact it guards', llmsReaches('packages/spec/llms.txt'));
+  t('it reaches the api-surface shards every NAMED claim resolves against', llmsReaches('packages/spec/api-surface/data.json'));
+  t('it reaches the manifest whose exports keys the SUBPATH claims resolve against', llmsReaches('packages/spec/package.json'));
+  t('it reaches the repo-root workspace file it opens', llmsReaches('pnpm-workspace.yaml'));
+  t('and the workspace manifests whose set is the package-ecosystem denominator', llmsReaches('packages/drivers/driver-mongodb/package.json'));
+  // The negative half, and the load-bearing one. A population this broad is
+  // one respelling away from the "22 leads is the same as none" failure the
+  // header prices: `packages/spec` or `packages/**` would have bought the flip
+  // too, and named this gate on nearly every card in the repo. These pin that
+  // it bought the four trees it reads and NOTHING else — including the sibling
+  // directories inside its own package.
+  t('but claims no other file in its own package', !llmsReaches('packages/spec/docs/anything.md'));
+  t('nor a sibling package source', !llmsReaches('packages/rest/src/analytics-dataset-dimension-gate.test.ts'));
+  t('nor a content page', !llmsReaches('content/docs/deployment/cli.mdx'));
+  t('nor an app source', !llmsReaches('apps/docs/components/ui/card.tsx'));
+  t('nor an example', !llmsReaches('examples/app-crm/src/objects/lead.object.ts'));
+  // A workspace manifest is reached; a workspace SOURCE file is not. This is
+  // the pair that separates `packages/**\/package.json` from `packages/**`.
+  t('and a package manifest is reached where its source is not', llmsReaches('packages/qa/dogfood/package.json') && !llmsReaches('packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts'));
+
   // The DIRECTORY half of the same class (#10107). A gate whose population is a
   // top-level DIRECTORY spelled as a bare word is invisible for the same reason
   // a root file is — `looksPathy` finds no separator, so the extractor builds no
