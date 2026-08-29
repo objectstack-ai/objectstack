@@ -253,9 +253,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // adopting #9367's conversion) and
     // src/commands/serve-audit-registration.contract.test.ts (#9863) both import
     // `maskComments` from it to separate code from prose in the boot paths they
-    // scan. This gate did NOT demand the declaration -- its literal collector
-    // recognises path-shaped reads, and a relative import specifier that escapes
-    // the package is not one of the spellings it knows. Declared by hand because
+    // scan. This gate did NOT demand the declaration WHEN THIS ENTRY WAS
+    // WRITTEN -- its literal collector recognised path-shaped reads, and a
+    // relative import specifier that escapes the package was not one of the
+    // spellings it knew. It IS one now: #10452 taught the collector to read
+    // escaping relative specifiers and to RESOLVE them, so this pair is a
+    // declaration the gate DEMANDS, not a hand-maintained courtesy. Measured on
+    // the four entries #12932 added below -- one escaping import each and
+    // nothing else that escapes -- this gate went red on every one of them
+    // until the pair was declared, naming the repo-relative path the specifier
+    // resolves to and the test that imports it. Declared by hand FIRST because
     // the coupling is real whatever the collector saw: those scans' verdicts are
     // a function of this module's masking behaviour, so a change to it has to
     // re-run cli's suite. The undetected-import spelling is filed separately as
