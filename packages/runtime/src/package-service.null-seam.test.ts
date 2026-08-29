@@ -17,9 +17,11 @@
  * ## Why the driver here is a LOCAL DOUBLE, not `@objectstack/driver-memory`
  *
  * The first version of this file booted the real `InMemoryDriver`. That made it
- * a THIRD consumer of a package whose investment is frozen (#5499), arriving
- * after #5704 migrated the test backends and #6664 replaced the prose census
- * with a ledger — and `check:driver-memory-census` refused it, correctly.
+ * a THIRD consumer of a package whose investment was frozen at the time (#5499,
+ * lifted 2026-08-11), arriving after #5704 migrated the test backends and #6664
+ * replaced the prose census with a ledger — and `check:driver-memory-census`
+ * refused it, correctly. That gate is what still refuses it: the census is
+ * #5704/#6664's and it outlived the freeze.
  *
  * The disposition taken was MIGRATE, not ledger. The two consumers a maintainer
  * ruled permanent are both kept because nothing can stand in for them: one needs

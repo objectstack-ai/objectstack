@@ -46,9 +46,13 @@
  * Multi-tenant deployments use `@objectstack/driver-sql`, which implements
  * driver-level tenant scoping. When real demand for in-memory multi-tenancy
  * appears, the fix is to implement the isolation (option A in #6915) — not to
- * weaken this gate. Route A stays behind the #5499 investment freeze; a startup
- * refusal is not an investment in this driver's capabilities, it is the removal
- * of a silent failure mode (maintainer ruling, 2026-08-12).
+ * weaken this gate. Route A sat behind the #5499 investment freeze; that freeze
+ * dissolved 2026-08-11 (head note of `@objectstack/spec`'s
+ * `aggregation-conformance.ts`), so Route A is now unbuilt and owned by #6915
+ * rather than blocked by a freeze. The ruling this guard rests on is untouched
+ * by the dissolution — it POSTDATES it: a startup refusal is not an investment
+ * in this driver's capabilities, it is the removal of a silent failure mode
+ * (maintainer ruling, 2026-08-12).
  */
 
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -140,10 +144,13 @@ export function assertSingleTenantPosture(): void {
  * This driver has no `syncSchemasBatch()` (it does not advertise
  * `supports.batchSchemaSync`, so the engine syncs one object per call), which
  * means the batch shape is reached one object at a time in practice. The
- * array-taking signature is kept anyway: it is the precedent's shape, it is
- * what makes the all-offenders-in-one-message property directly testable, and
- * adding a batch path here would be capability investment in a driver whose
- * capabilities are frozen (#5499).
+ * array-taking signature is kept anyway: it is the precedent's shape, and it is
+ * what makes the all-offenders-in-one-message property directly testable.
+ * Adding a batch path here would be capability investment, which the #5499
+ * freeze ruled out while it stood; that freeze dissolved 2026-08-11 (head note
+ * of `@objectstack/spec`'s `aggregation-conformance.ts`), so the batch path is
+ * now merely unasked-for — this driver still advertises no
+ * `supports.batchSchemaSync`.
  */
 export function assertObjectsNotTenantScoped(
   schemas: Array<{ object: string; schema: unknown }>,

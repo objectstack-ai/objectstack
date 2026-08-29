@@ -220,13 +220,16 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * once the reversal's cross-backend cost had been measured, and the include
    * direction was re-affirmed — which leaves the split above.
    *
-   * ⛔ Nothing is flipped in either direction: this package is inside the #5499
-   * investment freeze. What the round trip confirmed is exactly why this pin
-   * exists — this package answers with two different faces, so a statement like
-   * "driver-memory already reads has-value" is true of the reference matcher and
-   * FALSE of the live query path users actually reach.
+   * ⛔ Nothing is flipped in either direction. The #5499 investment freeze was
+   * the reason while it stood; it dissolved 2026-08-11 (head note of
+   * `@objectstack/spec`'s `aggregation-conformance.ts`), so that excuse has
+   * lapsed and the direction is now #13166's and #13195's to settle — ⛔ not
+   * this pin's, and ⛔ not a sweep's. What the round trip confirmed is exactly
+   * why this pin exists — this package answers with two different faces, so a
+   * statement like "driver-memory already reads has-value" is true of the
+   * reference matcher and FALSE of the live query path users actually reach.
    */
-  describe('[#5299] the settled cells, live vs reference — behaviour frozen (#5499)', () => {
+  describe('[#5299] the settled cells, live vs reference — divergence pinned, disposition open (#13166/#13195)', () => {
     const liveVsReference = async (where: unknown) => ({
       live: await idsFrom(nulled, where),
       reference: NULLED.filter((r) => match(r, where)).map((r) => r.id),

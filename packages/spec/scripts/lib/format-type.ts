@@ -547,6 +547,20 @@ function formatEnum(values: unknown[], budget: number | null): string {
  * element/value/one-variant vocabulary — so a bullet list under the table would
  * state something the schema does not. They keep their full spelling, exactly
  * as #5340 left them.
+ *
+ * ## Two `### Allowed Values` renderings, only one of them addressable (#12862)
+ *
+ * The relocation this function decides is printed by `schema-section.ts` under a
+ * QUALIFIED heading — `### Allowed Values: \`Owner.key\`` — which is unique on its
+ * page by construction, and that qualifier is the point of it (#12590). The BARE
+ * `### Allowed Values` this file's prose above keeps naming is the other one: the
+ * whole-schema `type: 'string'` + `enum` branch, one of the four section-grammar
+ * headings that repeat by design. Those are de-duplicated by the docs site's
+ * slugger into positional `-1` / `-2` suffixes and are **not stable anchors**;
+ * nothing should link to one. The measurements and the decision behind accepting
+ * that live on `renderSchemaSection` in `schema-section.ts` — this note exists so
+ * a reader weighing the relocation budget here does not go looking for a defect
+ * that was decided rather than overlooked.
  */
 export function formatPropertyType(prop: any, ctx?: TypeContext): RenderedProperty {
   if (prop && prop.type === 'string' && Array.isArray(prop.enum)) {

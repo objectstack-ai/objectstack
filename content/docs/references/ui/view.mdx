@@ -235,7 +235,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
 | **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
-| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the field definition (`referenceTo`). |
+| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the `reference` key on the field definition. |
 
 ### Nested Shape: `FormField.keyField`
 
@@ -262,7 +262,7 @@ Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on a
 | **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
 | **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
-| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the field definition (`referenceTo`). |
+| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the `reference` key on the field definition. |
 
 ### Nested Shape: `FormFieldPublicPicker.filter[number]`
 

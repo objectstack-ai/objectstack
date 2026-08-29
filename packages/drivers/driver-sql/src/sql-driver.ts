@@ -8521,7 +8521,8 @@ export class SqlDriver implements IDataDriver {
    *   {@link assertCompilableComparand}, because the envelope's `where` value
    *   is an object and no comparand may be. `driver-memory`'s half of that
    *   asymmetry (a bare filter there returns the unfiltered set in silence)
-   *   stays open under the #5499 freeze; this driver's half never was silent.
+   *   stays open; the #5499 freeze that explained it dissolved 2026-08-11 and
+   *   nothing has claimed it since. This driver's half never was silent.
    *
    * Held by `sql-driver-distinct-filter-narrowing.test.ts`.
    */

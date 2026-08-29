@@ -37,6 +37,8 @@
     "AnalyticsProtocol (interface)",
     "AnalyticsQueryRequest (type)",
     "AnalyticsQueryRequestSchema (const)",
+    "AnalyticsResultResponse (type)",
+    "AnalyticsResultResponseParsed (type)",
     "AnalyticsResultResponseSchema (const)",
     "AnalyticsSqlResponse (type)",
     "AnalyticsSqlResponseParsed (type)",

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { AggregationFunction } from '@objectstack/spec/data';
 import { buildAggregationPipeline, postProcessAggregation } from './mongodb-aggregation.js';
 
 /**
@@ -118,12 +119,21 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
       expect(processed[1].unique_customers).toBe(2);
     });
 
-    it('converts string_agg arrays to joined strings', () => {
+    // [#13075] INVERTED IN PLACE. This case read `converts string_agg arrays to
+    // joined strings` and asserted `'Alice, Bob, Charlie'`. That assertion is
+    // FALSIFIED, not re-baselined: `string_agg` left `AggregationFunction` at
+    // #6188 (ADR-0049 enforce-or-remove), `buildAccumulator` now refuses the
+    // name outright, and the join limb in `postProcessAggregation` went with
+    // it. What the case pins now is the OTHER half of that deletion — the limb
+    // is gone, so an array reaching this function under a `string_agg` alias is
+    // handed back untouched rather than quietly reshaped. The refusal itself is
+    // pinned below, at the door that can still be reached.
+    it('no longer joins a string_agg array — the limb went with the retired name', () => {
       const results = [{ names: ['Alice', 'Bob', 'Charlie'] }];
       const processed = postProcessAggregation(results, [
         { function: 'string_agg', field: 'name', alias: 'names' },
       ]);
-      expect(processed[0].names).toBe('Alice, Bob, Charlie');
+      expect(processed[0].names).toEqual(['Alice', 'Bob', 'Charlie']);
     });
 
     it('passes through results with no special processing needed', () => {
@@ -132,6 +142,58 @@ describe('MongoDB Aggregation Pipeline Builder', () => {
         { function: 'count', alias: 'total' },
       ]);
       expect(processed).toEqual(results);
+    });
+  });
+
+  /**
+   * [#13075] `array_agg` / `string_agg` are REFUSED, where this face lowered
+   * both until now — the divergence this card closed. `AggregationFunction`
+   * declares six functions; #6188 removed these two under ADR-0049
+   * enforce-or-remove, and `driver-sql` and `driver-turso` have refused them as
+   * class-1 undeclared names ever since. This face kept answering them, so ONE
+   * query got a 400 on two backends and a `$push` array on the third.
+   *
+   * The envelope is asserted, not the throw: `code` and `status` are the
+   * contract (ADR-0112), and a bare `toThrow()` would pass just as well against
+   * a driver throwing a naked `Error` — which is precisely the #1116/#1117 gap
+   * the two-class refusal (#5907) exists to close.
+   */
+  describe('[#13075] retired aggregate functions', () => {
+    for (const func of ['array_agg', 'string_agg'] as const) {
+      it(`refuses ${func} with INVALID_QUERY/400, the class-1 answer both SQL faces give`, () => {
+        let thrown: (Error & { code?: string; status?: number }) | undefined;
+        try {
+          buildAggregationPipeline({
+            aggregations: [{ function: func, field: 'name', alias: 'out' }],
+          });
+        } catch (e) {
+          thrown = e as Error & { code?: string; status?: number };
+        }
+        expect(thrown, `${func} must be refused, not lowered`).toBeDefined();
+        // Class 1 (#5907): the protocol no longer HAS this name. Distinct from
+        // NOT_IMPLEMENTED/501, which says the backend cannot lower a name the
+        // spec still declares.
+        expect(thrown!.code).toBe('INVALID_QUERY');
+        expect(thrown!.status).toBe(400);
+        // The wording IS the contract here: a caller who bypassed the parse
+        // door has no other way to learn the name was RETIRED rather than
+        // merely misspelled.
+        expect(thrown!.message).toContain('was REMOVED');
+        expect(thrown!.message).toContain('#6188');
+      });
+    }
+
+    it('still lowers every function AggregationFunction declares', () => {
+      // The other half of the narrowing: exactly the declared six survive, so a
+      // refusal that grew too wide fails here rather than in a dashboard.
+      for (const func of AggregationFunction.options) {
+        expect(
+          () => buildAggregationPipeline({
+            aggregations: [{ function: func, field: 'amount', alias: 'out' }],
+          }),
+          `${func} is declared and must still lower`,
+        ).not.toThrow();
+      }
     });
   });
 });

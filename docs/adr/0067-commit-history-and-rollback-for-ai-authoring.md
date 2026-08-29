@@ -1,6 +1,6 @@
 # ADR-0067: Commit history and rollback for AI authoring — turns become atomic, revertible commits
 
-**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`.
+**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on / amends**: [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) (**amended**: ADR-0045 keeps a *draft + human-confirm* gate on mutations as the safety mechanism; this ADR replaces *confirm-before* with *revert-after* for everything except irreversible data loss, and unifies the two authoring regimes under one primitive — the commit), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft workspace — retained as a *review affordance*, demoted from *safety mechanism*), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) ("AI never publishes — it drafts" → **AI commits; commits are revertible**), [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (per-write transaction — **extended to span a whole turn**), [ADR-0038](./0038-build-verification-loop.md) (machine gate — runs per commit, before it lands)
 **Consumers**: `@objectstack/objectql` (commit grouping, atomic turn-apply, `revertCommit`, history query — built on the existing `sys_metadata_history` + `restoreVersion`), `@objectstack/runtime` + `@objectstack/rest` (commit/revert routes), `../cloud/service-ai-studio` (turn = commit; auto-commit policy; data-loss confirmation), `../objectui` (commit timeline + "revert to here")
@@ -64,7 +64,7 @@ ADR-0045's own "Consequences/Costs" lists the two regimes ("materialize vs. draf
 
 ## Decision
 
-### 1. A turn is a commit
+### D1 — A turn is a commit
 
 A **commit** is the atomic set of metadata events produced by one apply/turn, identified by a `commit_id` and recorded as a group over `sys_metadata_history`. Minimal mechanism: a `commit_id` column on the history event (plus a thin `sys_metadata_commit` row carrying `{ commit_id, package_id, organization_id, message, actor, ai_model?, event_seq_range, parent_commit_id }`). No new snapshot store — the bodies are already in `sys_metadata_history.metadata`.
 
@@ -72,19 +72,19 @@ The commit's **message is the user's prompt**; its **actor** is the AI principal
 
 The server owns commit assembly — the model never constructs it. `apply_blueprint` and the per-item authoring tools (`add_field`, `create_metadata`, …) run inside a turn context that opens a commit, writes through it, and seals it.
 
-### 2. Commits are atomic
+### D2 — Commits are atomic
 
 All metadata writes in a turn execute inside **one `engine.transaction()`**; any failure rolls the whole commit back — no half-built app, no orphan rows, no partial visibility flip. This replaces `publishPackageDrafts`'s per-item best-effort loop with a turn-spanning transaction (the per-item `withTxn` composes into it). The visibility flip (ADR-0045 `hidden:false`) is part of the same transaction — never "some apps visible, some not."
 
 *Driver caveat*: in-memory drivers have no real transaction (`withTxn` no-ops); atomicity is a SQL-driver guarantee. Production is SQL; document the gap, don't paper over it.
 
-### 3. Rollback is first-class and append-only
+### D3 — Rollback is first-class and append-only
 
 - `revertCommit(commitId)` — restore every item the commit touched to its **pre-commit** body, atomically (reuse `restoreVersion` per item inside one transaction). Recorded as a **new forward commit** (`operation_type='revert'`), so history is never rewritten and a revert is itself revertible.
 - `rollbackToPackageCommit(commitId)` — revert the package's HEAD back through every commit after the target, as one transaction. This is the "一层一层回退" the founder described — **commit-granular, not per-artifact** (§Resolved-1).
 - Revert restores **metadata** deterministically. Its effect on **data** is governed by §5.
 
-### 4. The confirm gate, relocated
+### D4 — The confirm gate, relocated
 
 ADR-0045 gated *publish* (a human confirms before anything visible changes). This ADR relocates the gate to the only place revert can't save you:
 
@@ -93,7 +93,7 @@ ADR-0045 gated *publish* (a human confirms before anything visible changes). Thi
 
 The ADR-0027 **draft workspace + `?preview=draft` diff review** is retained as a *review affordance* (a reviewer may still preview a pending change), but it is **no longer the safety mechanism** — revertibility is. Drafts stop being mandatory for mutations in the default path.
 
-### 5. Metadata reverts cleanly; data is made reversible (the crux)
+### D5 — Metadata reverts cleanly; data is made reversible (the crux)
 
 Metadata is declarative and snapshotted, so it reverts exactly. Data does not: reverting "create object *X*" or "drop field *f*" touches real tables and real rows — including rows a user typed in after publish. The rule that keeps revert safe:
 
@@ -103,7 +103,7 @@ Metadata is declarative and snapshotted, so it reverts exactly. Data does not: r
   - the new object holds **user-entered rows beyond the seed** → revert requires a **typed confirmation that names the impact** ("revert will remove object *X* and its **N** rows, **M** of them entered after publish") **and auto-cuts a `sys_package_version` named restore point first** (the escape hatch — the revert is itself undoable).
 - This is the precise boundary of the §4 confirm gate: a human confirms **iff** the operation would destroy real user data that revert cannot resurrect.
 
-### 6. Substrate and restore points
+### D6 — Substrate and restore points
 
 - **Commit log = `sys_metadata_history`** (framework, per-event, reuse). This is the per-turn substrate. No full-bundle copy per turn.
 - **`sys_package_version` = named restore points** (cloud, full-bundle, heavy), cut only on: the §5 pre-destructive-revert escape hatch; a user-initiated "name a checkpoint" ("before I let the AI go wide"); and marketplace release. *Not* per turn.

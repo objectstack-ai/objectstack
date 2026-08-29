@@ -205,7 +205,11 @@ export const CEILINGS = new Map([
   // to the reference file below (lowering is always legitimate).
   // Lowered 243 → 242 by the restructuring round: the stale hourly-fire
   // rationale clause collapsed into a pointer at contract-review.md.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 274],
+  // 274 -> 278 (maintainer ruling, 2026-08-29, PM chat, verbatim: 「12813 同意」 — option A):
+  // one ruling sized to the merged end-state of the three stacked PRs on this file. The +4 is
+  // the measured residual of the ⑦-method section after compression to its reasoned floor and
+  // real-deletion cuts were exhausted; re-wrap funding was refused per the 2026-08-17 rule.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 278],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail

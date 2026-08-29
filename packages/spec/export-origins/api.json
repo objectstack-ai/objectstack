@@ -37,6 +37,8 @@
     "AnalyticsProtocol": "src/api/protocol.zod.ts#AnalyticsProtocol (interface)",
     "AnalyticsQueryRequest": "src/api/analytics.zod.ts#AnalyticsQueryRequest (type)",
     "AnalyticsQueryRequestSchema": "src/api/analytics.zod.ts#AnalyticsQueryRequestSchema (const)",
+    "AnalyticsResultResponse": "src/api/analytics.zod.ts#AnalyticsResultResponse (type)",
+    "AnalyticsResultResponseParsed": "src/api/analytics.zod.ts#AnalyticsResultResponseParsed (type)",
     "AnalyticsResultResponseSchema": "src/api/analytics.zod.ts#AnalyticsResultResponseSchema (const)",
     "AnalyticsSqlResponse": "src/api/analytics.zod.ts#AnalyticsSqlResponse (type)",
     "AnalyticsSqlResponseParsed": "src/api/analytics.zod.ts#AnalyticsSqlResponseParsed (type)",

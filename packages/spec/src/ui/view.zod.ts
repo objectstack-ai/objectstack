@@ -1907,12 +1907,17 @@ export const FormFieldPublicPickerSchema = lazySchema(() => strictObject({
   ),
   /**
    * Referenced-object override. Omitted, the route resolves the target from
-   * the field definition on the parent object (`referenceTo`); set it only
-   * when that resolution is wrong for this form.
+   * the field definition on the parent object (`reference`); set it only when
+   * that resolution is wrong for this form.
+   *
+   * `reference` is the key `FieldSchema` accepts — `referenceTo` is only a
+   * rejected alias it lists so a failed parse can offer a rename hint, so an
+   * author following the old spelling of this sentence had their whole object
+   * metadata refused at parse.
    */
   object: z.string().optional().describe(
-    'Referenced-object override for the picker search; omitted → resolved from the field '
-    + 'definition (`referenceTo`).',
+    'Referenced-object override for the picker search; omitted → resolved from the `reference` '
+    + 'key on the field definition.',
   ),
 }).describe('Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).'));
 
