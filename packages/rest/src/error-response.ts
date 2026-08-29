@@ -430,6 +430,54 @@ function thrownCodeFields(error: any, status: number): { code?: string; declared
 }
 
 /**
+ * [#12975] The caller-facing half of an ADR-0111 `CODE: message` throw — the
+ * message with the leading restatement of the producer's OWN declared `code`
+ * removed, or the message unchanged when it carries no such restatement.
+ *
+ * ## The rule, and why it is anchored to the declared code
+ *
+ * Maintainer ruling, 2026-08-29, on the `/data` door shipping `FORBIDDEN:` in
+ * front of a localized refusal: ONE envelope semantics — `error` is HUMAN
+ * LANGUAGE and `code` is the MACHINE TOKEN, and the token is already carried
+ * separately by {@link thrownCodeFields} above. The prefix is therefore removed
+ * *because* the same fact rides the `code` axis, and that is exactly the
+ * condition this function tests: the message opens with the producer's own
+ * `code`, followed by a colon.
+ *
+ * ⛔ NOT a blanket SCREAMING_SNAKE-then-colon strip, and the difference is the
+ * whole safety argument. The broader shape removes a token the wire may carry
+ * NOWHERE else — a 4xx that declared a `status` but no `code` gets `{}` from
+ * {@link thrownCodeFields} (ADR-0112's own rule: nothing is invented for the
+ * half the producer did not name), so a blind strip would delete the token
+ * outright rather than move it to its axis. It also eats any sentence that
+ * merely opens with a capitalised word and a colon — driver prose such as a
+ * SQLite "no such table" line included. Anchored to the declared code, the
+ * strip can only ever remove a DUPLICATE of something already on the wire.
+ *
+ * ⚠️ The anchor is the PRODUCER's spelling (`error.code`), not the narrowed
+ * wire `code`. An unregistered spelling is demoted to a `declaredCode` sibling
+ * by {@link thrownCodeFields} (#9232) while the prefix restates the spelling
+ * the producer actually wrote, so comparing against the narrowed value would
+ * miss precisely the idiom this reads. Either way the token still reaches the
+ * wire — as `code`, or as the `declaredCode` beside it.
+ *
+ * This is the shape `respondSharingError`'s ADR-0111 prefix arm already applies
+ * in `rest-server.ts` (it strips the prefix naming the code it just answered),
+ * rather than a third local rule: strip the prefix that names the code being
+ * answered, never an arbitrary one.
+ */
+function withoutDeclaredCodePrefix(message: string, error: any): string {
+    const declared = typeof error?.code === 'string' && error.code.length > 0
+        ? error.code
+        : undefined;
+    if (declared === undefined || !message.startsWith(declared)) return message;
+    const separator = /^:\s*/.exec(message.slice(declared.length));
+    return separator === null
+        ? message
+        : message.slice(declared.length + separator[0].length);
+}
+
+/**
  * [#11718] The DECLARED-SERVER-FAULT relay, as one definition instead of a
  * shape each door re-derives: a producer that declared a 5xx keeps its
  * `status` and its ADR-0112 `code`, and loses only its prose.
@@ -1016,8 +1064,32 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // An over-long message is TRUNCATED, not swapped for generic text
         // (#5423) — see {@link truncateClientMessage}. A missing or empty one
         // still degrades to `'Request failed'`: there is nothing to truncate.
-        const msg = typeof error?.message === 'string' && error.message.length > 0
-            ? truncateClientMessage(error.message)
+        //
+        // [#12975] …and the sentence it keeps is the HUMAN half only. A
+        // producer using the ADR-0111 `CODE: message` idiom restates on the
+        // MESSAGE axis a token this body already carries on the `code` axis
+        // ({@link thrownCodeFields}, three lines down), and that restatement
+        // was reaching Console's toast in front of a localized sentence —
+        // `FORBIDDEN: 您无权修改或删除这条记录…` — where it was the only
+        // non-human fragment left in the user's face. Maintainer ruling,
+        // 2026-08-29: one envelope semantics, `error` = human language,
+        // `code` = the machine token. {@link withoutDeclaredCodePrefix} carries
+        // why the strip is anchored to the producer's declared code rather than
+        // to a SCREAMING_SNAKE shape.
+        //
+        // ⛔ The strip runs BEFORE the bound, not after: #5423's budget belongs
+        // to the text addressed to the caller and the prefix is not that text,
+        // so truncating first would spend part of the caller's 500 characters
+        // on a token they must not read.
+        //
+        // A message that is NOTHING BUT the prefix degrades to 'Request failed'
+        // through the same limb an absent or empty one takes — there is no
+        // human half to ship, and the token rides `code` regardless.
+        const authored = typeof error?.message === 'string'
+            ? withoutDeclaredCodePrefix(error.message, error)
+            : '';
+        const msg = authored.length > 0
+            ? truncateClientMessage(authored)
             : 'Request failed';
         // [#9232] Same narrowing as the 5xx arm above. The gate this replaces
         // (`typeof error?.code === 'string' && error.code`) is exactly the

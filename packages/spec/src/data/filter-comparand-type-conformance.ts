@@ -26,8 +26,11 @@
  * - `door-refusal` cases: assert `parseFilterAST(filter)` throws the envelope
  *   (`code` AND `status`, plus {@link ComparandTypeRefusalCase.mustMention}) —
  *   proving the input can never reach this driver through a platform door.
- *   This is how the frozen drivers (#5499) inherit the policy without a
- *   driver-local patch.
+ *   This is how a driver that carries no comparand-type policy of its own
+ *   inherits this one without a driver-local patch. The property was argued
+ *   for while `driver-memory` and `driver-mongodb` were frozen (#5499, lifted
+ *   2026-08-11) and does not depend on that: the door sits upstream of every
+ *   driver, so no driver has to hold a second copy of the rule.
  * - `matches` / `compiles` cases: hand `parseFilterAST(filter)` — the
  *   door-validated, bigint-narrowed condition — to the driver's own execution
  *   path and assert the row ids (`matches`) or merely that execution succeeds

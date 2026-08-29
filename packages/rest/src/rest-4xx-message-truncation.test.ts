@@ -120,11 +120,25 @@ describe('mapDataError: 4xx passthrough truncates an over-long message (#5423)',
 
 describe('mapDataError: short 4xx messages are byte-for-byte unchanged (#5423)', () => {
     it('a normal-length message passes through with no ellipsis and no slicing', () => {
+        // [#12975] PIN MOVED, with the ruled behaviour change in the same PR
+        // (maintainer, 2026-08-29). This case pins the BOUND — no ellipsis, no
+        // slicing — and its fixture happens to use the ADR-0111 `CODE: message`
+        // idiom, so the declared-4xx arm now hands the caller the HUMAN half
+        // alone. The subject of the case is unchanged: what comes back is the
+        // authored sentence entire, not a truncation of it.
+        //
+        // ⛔ Both halves are asserted deliberately. Reading only `error` would
+        // pass just as well for the OTHER way of getting this wrong — dropping
+        // the machine token along with the prefix — so `code` is pinned beside
+        // it. The token moves axis; it does not leave the body.
         const msg = 'FORBIDDEN: insufficient privileges to update showcase_inquiry rec1';
+        const human = 'insufficient privileges to update showcase_inquiry rec1';
         const r = mapDataError(Object.assign(new Error(msg), { code: 'FORBIDDEN', status: 403 }));
 
         expect(r.status).toBe(403);
-        expect(r.body.error).toBe(msg);
+        expect(r.body.error).toBe(human);
+        expect(r.body.code).toBe('FORBIDDEN');
+        expect(String(r.body.error).endsWith('…')).toBe(false);
     });
 
     it('exactly 499 characters is still verbatim; exactly 500 is the first truncated length', () => {

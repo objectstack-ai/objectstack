@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
 import { FlowSchema } from '../automation/flow.zod';
-import { ExecutionLogSchema, ExecutionStatus } from '../automation/execution.zod';
+import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../automation/execution.zod';
 
 /**
  * Automation API Protocol
@@ -219,7 +219,85 @@ export const TriggerFlowRequestSchema = lazySchema(() => AutomationFlowPathParam
 export type TriggerFlowRequest = z.input<typeof TriggerFlowRequestSchema>;
 
 /**
+ * One input field rendered by a paused `screen` node, as the trigger route
+ * serves it — the wire spelling of `ScreenFieldSpec`
+ * (`contracts/automation-service.ts`), which is THE name for this shape: a
+ * second exported name here would be the permanent synonym ADR-0122 D3
+ * forbids and a new dual-source export, so this stays module-local (the
+ * `cubeMetaMemberShape` treatment, `analytics.zod.ts`).
+ * `automation-api.zod.test.ts` binds the two at compile time.
+ */
+const screenFieldSpecShape = () => z.object({
+  name: z.string(),
+  label: z.string().optional(),
+  type: z.string().optional()
+    .describe('Widget hint (text/select/boolean/number/date/...); the client maps it to a field widget'),
+  required: z.boolean().optional(),
+  options: z.array(z.object({
+    value: z.unknown(),
+    label: z.string(),
+  })).optional().describe('Closed-enum options for select-style fields'),
+  defaultValue: z.unknown().optional(),
+  placeholder: z.string().optional(),
+  visibleWhen: z.string().optional().describe(
+    'Conditional-visibility predicate, evaluated by the CLIENT against the '
+    + 'screen\'s live collected values - bare CEL over the screen\'s own field '
+    + 'names. Omit = always visible. A hidden field is not collected, so its '
+    + '`required` never fires.',
+  ),
+});
+
+/**
+ * The screen a paused `screen` node wants the client to render — the wire
+ * spelling of `ScreenSpec` (`contracts/automation-service.ts`), module-local
+ * for the reason on {@link screenFieldSpecShape}.
+ */
+const screenSpecShape = () => z.object({
+  nodeId: z.string()
+    .describe('The screen node\'s id (correlates the resume back to this pause point)'),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  fields: z.array(screenFieldSpecShape()),
+  kind: z.enum(['fields', 'object-form']).optional().describe(
+    'Rendering kind. `fields` (default) renders the flat field list; '
+    + '`object-form` renders an object\'s full create/edit form.',
+  ),
+  objectName: z.string().optional().describe('Object whose form to render (object-form screens)'),
+  mode: z.enum(['create', 'edit']).optional()
+    .describe('Form mode for an object-form screen - defaults to `create`'),
+  recordId: z.string().optional().describe('Record id to edit (object-form screens in `edit` mode)'),
+  defaults: z.record(z.string(), z.unknown()).optional()
+    .describe('Prefilled field values for the object form (already interpolated)'),
+  idVariable: z.string().optional().describe(
+    'Flow variable that receives the saved record\'s id when the client '
+    + 'resumes the run, so a later step can reference it',
+  ),
+});
+
+/**
  * Response after triggering a flow execution.
+ *
+ * `data` IS the producer's declared return: `POST /automation/:name/trigger`
+ * (and the legacy `POST /automation/trigger/:name`) end
+ * `deps.success(result)` where `result` is `IAutomationService.execute`'s
+ * `AutomationResult` (`contracts/automation-service.ts`), relayed verbatim —
+ * member for member. #13078 restored the parity: this schema used to declare
+ * only `success` / `output?` / `error?` / `durationMs?`, a strict subset of
+ * what the route relays. The missing members were not decoration:
+ * `status: 'paused'` + `runId` + `screen` is the whole third state of the
+ * #9378 / #9510 trigger contract — the payload a caller resumes a screen
+ * flow with — and the SDK's own docblock on `automation.trigger` tells
+ * callers to read exactly those.
+ *
+ * The reasoning is #6442's (recorded on `AnalyticsMetadataResponseSchema`,
+ * `analytics.zod.ts`): when the TS contract and the runtime already agree,
+ * the schema is the lone outlier and the SCHEMA moves. Zero runtime change:
+ * only the declaration moves.
+ *
+ * Drift guard: `automation-api.zod.test.ts` binds
+ * `TriggerFlowResponse['data']` to `AutomationResult` at compile time —
+ * narrow either side alone and it goes red. Keep new `AutomationResult`
+ * members mirrored here (and vice versa).
  */
 export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: z.object({
@@ -227,6 +305,46 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     output: z.unknown().optional().describe('Output data from the automation'),
     error: z.string().optional().describe('Error message if execution failed'),
     durationMs: z.number().optional().describe('Execution duration in milliseconds'),
+    code: z.enum([
+      'PERMISSION_DENIED',
+      'INVALID_SIGNAL',
+      'RUN_NOT_FOUND',
+      'STORE_UNAVAILABLE',
+      'RESUME_IN_PROGRESS',
+      'INVALID_SCREEN_INPUT',
+      'FLOW_DISABLED',
+      'FLOW_NO_START_NODE',
+      'FLOW_INPUT_SCHEMA_INVALID',
+    ]).optional().describe(
+      'Machine-readable failure classification, set alongside `error` when the '
+      + 'caller must distinguish WHY it failed. A closed union - the members and '
+      + 'their transport mappings are documented on the contract '
+      + '(`AutomationResult.code`, contracts/automation-service.ts).',
+    ),
+    status: z.enum(['completed', 'paused', 'failed']).optional().describe(
+      'Lifecycle status. `paused` means the run suspended at a node and can be '
+      + 'continued with the resume route. Absent or `completed`/`failed` means '
+      + 'the run reached a terminal state.',
+    ),
+    runId: z.string().optional()
+      .describe('Run id - set when `status` is `paused`, so callers can resume it'),
+    screen: screenSpecShape().optional().describe(
+      'The screen to render - set when the run paused at a `screen` node '
+      + 'awaiting user input. The client collects values for `screen.fields` '
+      + 'and resumes the run with them.',
+    ),
+    successMessage: z.string().optional().describe(
+      'Friendly terminal message copied from the flow definition on terminal '
+      + 'success, so a screen-flow runner can show a meaningful toast',
+    ),
+    errorMessage: z.string().optional().describe(
+      'Friendly terminal message copied from the flow definition on failure',
+    ),
+    summary: FlowRunSummarySchema.optional().describe(
+      'What the run did - records selected / acted on, gate skips, per-node '
+      + 'status. Set on a TERMINAL result (a paused run has not finished doing '
+      + 'it yet).',
+    ),
   }),
 }));
 export type TriggerFlowResponse = z.input<typeof TriggerFlowResponseSchema>;

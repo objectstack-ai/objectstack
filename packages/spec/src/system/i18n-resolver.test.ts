@@ -1225,6 +1225,386 @@ describe('translatePage', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// #12961 — the descent into a container's declared `properties.children`
+//
+// Ruled 2026-08-29 (maintainer, verbatim 「同意」, option A): `translatePage`
+// descends into DECLARED `properties.children` arrays, so copy authored for a
+// nested component id is resolved; the region-only boundary that stood at
+// `i18n-resolver.ts:944-946` is deliberately reversed. Collision rule fixed at
+// the ruling: region-level id WINS; among nested matches, document-order first.
+// Recursion depth-guarded and cycle-safe — `children` is authored data. The
+// published face does not move: `pages.<name>.components.<id>` has ALWAYS
+// parsed copy for a nested id, so this widens the resolver to the face.
+//
+// Shape is the measured hotCRM one: `sales_home_page`'s `key_metrics` card
+// holds the four `object-metric` KPI blocks in its `properties.children`, and
+// their labels stayed English while the header and card titles translated.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('translatePage — nested `properties.children` descent (#12961)', () => {
+  /**
+   * Fixtures are typed through these open shapes instead of being left to
+   * literal inference. `translatePage<T extends PageLike>` returns `T`, so an
+   * inferred literal type carries only the keys the LITERAL spells — reading
+   * back a key the overlay ADDS, or a `children` array a sibling branch of the
+   * union does not declare, is then a type error rather than a test. Same
+   * widening the #6080 block does inline (`as Record<string, string>`), hoisted
+   * because this block builds a dozen fixtures. Written as type ALIASES so they
+   * keep the implicit index signature `PageLike` needs.
+   */
+  type FixtureComponent = { type?: string; id?: string; label?: string; properties: Record<string, any> };
+  type FixturePage = {
+    name: string;
+    label?: string;
+    regions: Array<{ name: string; components: FixtureComponent[] }>;
+  };
+
+  const kpiBundle: TranslationBundle = {
+    'zh-CN': {
+      pages: {
+        sales_home_page: {
+          label: '销售看板',
+          components: {
+            key_metrics: { title: '关键指标' },
+            kpi_revenue_won: { label: '已赢收入' },
+            kpi_deals_won: { label: '赢单数' },
+            kpi_pipeline_value: { label: '管道金额' },
+            kpi_open_leads: { label: '未处理线索' },
+          },
+        },
+      },
+    },
+  };
+
+  /** The hotCRM `sales_home_page` shape: KPI blocks nested in a card. */
+  const kpiPage = (): FixturePage => ({
+    name: 'sales_home_page',
+    label: 'Sales Home',
+    regions: [{
+      name: 'main',
+      components: [
+        {
+          type: 'page:card',
+          id: 'key_metrics',
+          properties: {
+            title: 'Key Metrics',
+            children: [
+              { type: 'object-metric', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)' } },
+              { type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } },
+              { type: 'object-metric', id: 'kpi_pipeline_value', properties: { label: 'Pipeline Value' } },
+              { type: 'object-metric', id: 'kpi_open_leads', properties: { label: 'Open Leads' } },
+            ],
+          },
+        },
+      ],
+    }],
+  });
+
+  const card = (doc: any) => doc.regions[0].components[0];
+  const kid = (doc: any, id: string) =>
+    card(doc).properties.children.find((c: any) => c?.id === id);
+
+  it('resolves copy for every KPI block nested in the card (the measured residual)', () => {
+    const out = translatePage(kpiPage(), kpiBundle, { locale: 'zh-CN' });
+    expect(kid(out, 'kpi_revenue_won').properties.label).toBe('已赢收入');
+    expect(kid(out, 'kpi_deals_won').properties.label).toBe('赢单数');
+    expect(kid(out, 'kpi_pipeline_value').properties.label).toBe('管道金额');
+    expect(kid(out, 'kpi_open_leads').properties.label).toBe('未处理线索');
+  });
+
+  it('still translates the containing card and the page itself', () => {
+    const out = translatePage(kpiPage(), kpiBundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('销售看板');
+    expect(card(out).properties.title).toBe('关键指标');
+  });
+
+  it('descends recursively, not one level', () => {
+    const doc: FixturePage = {
+      name: 'sales_home_page',
+      regions: [{
+        name: 'main',
+        components: [{
+          type: 'page:section',
+          properties: {
+            children: [{
+              type: 'page:card',
+              id: 'key_metrics',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] },
+            }],
+          },
+        }],
+      }],
+    };
+    const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+    const section = out.regions[0].components[0];
+    expect(section.properties.children[0].properties.title).toBe('关键指标');
+    expect(section.properties.children[0].properties.children[0].properties.label).toBe('赢单数');
+  });
+
+  it('does not mutate the input page', () => {
+    const doc = kpiPage();
+    const snapshot = JSON.parse(JSON.stringify(doc));
+    translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+    expect(doc).toEqual(snapshot);
+  });
+
+  it('leaves non-component `children` entries — bare id strings — as they are', () => {
+    // `children` is declared `z.array(z.unknown())`; a bare component-id string
+    // is a legal entry and must ride through untouched, not be spread into an
+    // object.
+    const doc = {
+      name: 'sales_home_page',
+      regions: [{
+        name: 'main',
+        components: [{
+          type: 'page:card',
+          id: 'key_metrics',
+          properties: { children: ['kpi_revenue_won', null, 42, { type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] },
+        }],
+      }],
+    };
+    const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+    expect(card(out).properties.children.slice(0, 3)).toEqual(['kpi_revenue_won', null, 42]);
+    expect(card(out).properties.children[3].properties.label).toBe('赢单数');
+  });
+
+  // ── The boundary the ruling drew: `children`, and only `children` ────────
+  describe('the descended slot', () => {
+    const nestedUnder = (slotProps: Record<string, unknown>): FixturePage => ({
+      name: 'sales_home_page',
+      regions: [{
+        name: 'main',
+        components: [{ type: 'page:card', id: 'key_metrics', properties: slotProps }],
+      }],
+    });
+
+    it('does not descend into `body` — the back-compat spelling is not authorable (#5775)', () => {
+      // The renderers read `schema.children || schema.body` for STORED
+      // documents, but `body` is deliberately NOT a declared authoring key.
+      // Descending into it would resurrect a second composition spelling.
+      const out = translatePage(
+        nestedUnder({ body: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }),
+        kpiBundle,
+        { locale: 'zh-CN' },
+      );
+      expect((card(out).properties.body as any[])[0].properties.label).toBe('Deals Won');
+    });
+
+    it('does not descend into `items[].children` — outside the ruled `properties.children` face', () => {
+      // `page:tabs` / `page:accordion` nest their children one level deeper,
+      // under `properties.items[].children`. The ruling names
+      // `properties.children`; widening further is its own contract call, so
+      // this records where the line is rather than silently crossing it.
+      const out = translatePage(
+        nestedUnder({ items: [{ label: 'Details', children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }] }),
+        kpiBundle,
+        { locale: 'zh-CN' },
+      );
+      expect((card(out).properties.items as any[])[0].children[0].properties.label).toBe('Deals Won');
+    });
+
+    it('keeps the page-name header route region-level', () => {
+      // `pages.<name>.{title,subtitle}` addresses THE page header. A
+      // `page:header` nested inside a container is not it — nested components
+      // are reached by the id route only.
+      const out = translatePage(
+        nestedUnder({ children: [{ type: 'page:header', properties: { title: 'Sales Home' } }] }),
+        kpiBundle,
+        { locale: 'zh-CN' },
+      );
+      expect((card(out).properties.children as any[])[0].properties.title).toBe('Sales Home');
+    });
+  });
+
+  // ── The ruled collision rule, both directions ───────────────────────────
+  describe('id collisions across nesting levels', () => {
+    it('gives the entry to the REGION-LEVEL component when a nested id repeats it', () => {
+      const doc: FixturePage = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'main',
+          components: [
+            {
+              type: 'page:card',
+              id: 'shell',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Nested Deals Won' } }] },
+            },
+            { type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Region Deals Won' } },
+          ],
+        }],
+      };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      const [shell, regionLevel] = out.regions[0].components;
+      expect(regionLevel.properties.label).toBe('赢单数');
+      // …and the nested namesake keeps its literal — one entry, one winner.
+      expect(shell.properties.children[0].properties.label).toBe('Nested Deals Won');
+    });
+
+    it('wins region-level even when the region-level namesake comes LAST in a later region', () => {
+      // The rule is level-priority, not document order: a nested component
+      // that appears first in the document still loses to a region-level id.
+      const doc: FixturePage = {
+        name: 'sales_home_page',
+        regions: [
+          {
+            name: 'main',
+            components: [{
+              type: 'page:card',
+              id: 'shell',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Nested Deals Won' } }] },
+            }],
+          },
+          { name: 'aside', components: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Region Deals Won' } }] },
+        ],
+      };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      expect(out.regions[1].components[0].properties.label).toBe('赢单数');
+      expect(out.regions[0].components[0].properties.children[0].properties.label).toBe('Nested Deals Won');
+    });
+
+    it('gives it to the DOCUMENT-ORDER FIRST nested match when no region-level id claims it', () => {
+      const doc: FixturePage = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'main',
+          components: [
+            {
+              type: 'page:card',
+              id: 'first_shell',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'First Deals Won' } }] },
+            },
+            {
+              type: 'page:card',
+              id: 'second_shell',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Second Deals Won' } }] },
+            },
+          ],
+        }],
+      };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      const [first, second] = out.regions[0].components;
+      expect(first.properties.children[0].properties.label).toBe('赢单数');
+      expect(second.properties.children[0].properties.label).toBe('Second Deals Won');
+    });
+
+    it('reads document order depth-first — a deeper earlier match beats a shallower later one', () => {
+      const doc: FixturePage = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'main',
+          components: [
+            {
+              type: 'page:card',
+              id: 'first_shell',
+              properties: {
+                children: [{
+                  type: 'page:section',
+                  properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deep First' } }] },
+                }],
+              },
+            },
+            {
+              type: 'page:card',
+              id: 'second_shell',
+              properties: { children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Shallow Second' } }] },
+            },
+          ],
+        }],
+      };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      const [first, second] = out.regions[0].components;
+      expect(first.properties.children[0].properties.children[0].properties.label).toBe('赢单数');
+      expect(second.properties.children[0].properties.label).toBe('Shallow Second');
+    });
+  });
+
+  // ── Depth guard / cycle safety — `children` is authored data ─────────────
+  describe('depth guard and cycle safety', () => {
+    /**
+     * The resolver descends at most this many levels below region level.
+     * Module-private in `i18n-resolver.ts` (`MAX_NESTED_COMPONENT_DEPTH`) so
+     * the guard adds no public API; this literal is the PIN — raise the cap
+     * there and this test reds, which is the point.
+     */
+    const CAP = 32;
+
+    /**
+     * A leaf carrying `leafId` wrapped in `depth` containers — so the leaf
+     * sits exactly `depth` levels BELOW region level (`depth: 0` would make
+     * the leaf itself the region-level component).
+     */
+    const chain = (depth: number, leafId: string): FixturePage => {
+      let node: any = { type: 'object-metric', id: leafId, properties: { label: 'Deals Won' } };
+      for (let i = 0; i < depth; i++) {
+        node = { type: 'page:section', properties: { children: [node] } };
+      }
+      return {
+        name: 'sales_home_page',
+        regions: [{ name: 'main', components: [node] }],
+      };
+    };
+
+    const leafOf = (doc: any) => {
+      let node = doc.regions[0].components[0];
+      while (node?.properties?.children) node = node.properties.children[0];
+      return node;
+    };
+
+    it(`translates a component nested exactly ${CAP} levels below region level`, () => {
+      const out = translatePage(chain(CAP, 'kpi_deals_won'), kpiBundle, { locale: 'zh-CN' });
+      expect(leafOf(out).properties.label).toBe('赢单数');
+    });
+
+    it(`stops at the cap — a component ${CAP + 1} levels down keeps its literal`, () => {
+      const out = translatePage(chain(CAP + 1, 'kpi_deals_won'), kpiBundle, { locale: 'zh-CN' });
+      expect(leafOf(out).properties.label).toBe('Deals Won');
+    });
+
+    it('returns rather than recursing forever on an absurdly deep tree', () => {
+      // Deep enough that an unguarded walk is a stack-overflow risk; the guard
+      // makes the call finite whatever the document does.
+      const out = translatePage(chain(200_000, 'kpi_deals_won'), kpiBundle, { locale: 'zh-CN' });
+      expect(out.label).toBe('销售看板');
+    });
+
+    it('survives a component whose `children` contains itself', () => {
+      const selfRef: any = { type: 'page:card', id: 'key_metrics', properties: { title: 'Key Metrics', children: [] as unknown[] } };
+      selfRef.properties.children.push(selfRef);
+      const doc = { name: 'sales_home_page', regions: [{ name: 'main', components: [selfRef] }] };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      expect(out.regions[0].components[0].properties.title).toBe('关键指标');
+    });
+
+    it('survives a two-node cycle', () => {
+      const a: any = { type: 'page:card', id: 'key_metrics', properties: { title: 'Key Metrics', children: [] as unknown[] } };
+      const b: any = { type: 'page:section', properties: { children: [a] } };
+      a.properties.children.push(b);
+      const doc = { name: 'sales_home_page', regions: [{ name: 'main', components: [a] }] };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      expect(out.regions[0].components[0].properties.title).toBe('关键指标');
+    });
+
+    it('translates a subtree that is REFERENCED twice without treating it as a cycle', () => {
+      // Shared references are not cycles: the second sighting is a legitimate
+      // second component, and the collision rule (not the cycle guard) decides
+      // that only the first gets the entry.
+      const shared: any = { type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } };
+      const doc = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'main',
+          components: [{ type: 'page:card', id: 'key_metrics', properties: { children: [shared, shared] } }],
+        }],
+      };
+      const out = translatePage(doc, kpiBundle, { locale: 'zh-CN' });
+      const children = card(out).properties.children;
+      expect(children[0].properties.label).toBe('赢单数');
+      expect(children[1].properties.label).toBe('Deals Won');
+    });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // #5377 — filter-preset tab labels (`objects.<o>._tabs.<tab>.label`)
 // ────────────────────────────────────────────────────────────────────────────
 

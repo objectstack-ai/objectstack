@@ -253,9 +253,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // adopting #9367's conversion) and
     // src/commands/serve-audit-registration.contract.test.ts (#9863) both import
     // `maskComments` from it to separate code from prose in the boot paths they
-    // scan. This gate did NOT demand the declaration -- its literal collector
-    // recognises path-shaped reads, and a relative import specifier that escapes
-    // the package is not one of the spellings it knows. Declared by hand because
+    // scan. This gate did NOT demand the declaration WHEN THIS ENTRY WAS
+    // WRITTEN -- its literal collector recognised path-shaped reads, and a
+    // relative import specifier that escapes the package was not one of the
+    // spellings it knew. It IS one now: #10452 taught the collector to read
+    // escaping relative specifiers and to RESOLVE them, so this pair is a
+    // declaration the gate DEMANDS, not a hand-maintained courtesy. Measured on
+    // the four entries #12932 added below -- one escaping import each and
+    // nothing else that escapes -- this gate went red on every one of them
+    // until the pair was declared, naming the repo-relative path the specifier
+    // resolves to and the test that imports it. Declared by hand FIRST because
     // the coupling is real whatever the collector saw: those scans' verdicts are
     // a function of this module's masking behaviour, so a change to it has to
     // re-run cli's suite. The undetected-import spelling is filed separately as
@@ -453,6 +460,25 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // it is what gives `maskComments` its type, so this package's typecheck
     // verdict is a function of it too — the reason the `@objectstack/cli` entry
     // above declares the pair rather than the module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/plugin-email': {
+    // src/transports/smtp-port-contract.test.ts (#12993) imports `maskComments`
+    // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
+    // a comment and which is a DECLARATION of the SMTP port bound — the single
+    // question that gate exists to answer, since the whole point of the card is
+    // that `smtp.ts` still explains the range in prose while declaring it
+    // nowhere. The coupling is real: that guard's zero, and the masking control
+    // that makes the zero a measurement rather than a grep that ran, are both a
+    // function of the module's masking behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is declared alongside it
+    // because it is what gives `maskComments` its type, so this package's
+    // typecheck verdict is a function of it too — the reason the
+    // `@objectstack/cli` entry above declares the pair rather than the module
+    // alone.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',

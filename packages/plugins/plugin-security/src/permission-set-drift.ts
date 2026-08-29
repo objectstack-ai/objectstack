@@ -62,6 +62,10 @@ import {
   tryUpdate,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import {
+  createSeedWriteRefusals,
+  logSeedDurabilityFailure,
+} from './per-organization-catalog.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
 import { buildExistingByName } from './seed-name-lookup.js';
 
@@ -190,6 +194,75 @@ export async function computePermissionSetDriftDiagnostics(
 }
 
 /**
+ * Report, ONCE per pass, the drift-diagnostic writes the store refused.
+ *
+ * ## Why this is not {@link reportSeedWriteRefusals}
+ *
+ * The shared ACCUMULATOR (`createSeedWriteRefusals`) is reused as-is — it
+ * carries the shipped `isUniqueViolationError` classification and the
+ * value-free `code`/`errno` channel, and re-deriving either here is exactly
+ * the local-regex defect that module was written to retire. The shared
+ * REPORTER is not, and deliberately: every sentence it prints is about
+ * seeding the RBAC catalog — "the catalog is INCOMPLETE", "this pass's
+ * 'seeded' count", and a remedy naming the legacy PLATFORM-WIDE unique index
+ * on the catalog name column. None of that is true here. This pass seeds
+ * nothing; it writes two diagnostic columns onto rows that already exist, by
+ * id. Printing that text over this failure would send an operator to
+ * `os migrate` for a defect that is not there — the same "a confident wrong
+ * answer is worse than no answer" reasoning that makes `other` its own class
+ * in `reportSeedWriteRefusals` rather than a relabelled unique violation.
+ *
+ * ## Why ONE line and not one per class
+ *
+ * `reportSeedWriteRefusals` splits its classes because their REMEDIES differ.
+ * Here they do not: an update-by-id of two nullable diagnostic columns has no
+ * unique constraint to violate, so the class is a fact for `meta` (it travels
+ * there, per (object, class), with the driver codes) and not a reason to print
+ * a second sentence.
+ *
+ * ## Why the durability channel
+ *
+ * AGENTS.md "Degradation log levels", one question — after the degradation,
+ * does the system still look normal while something it claims is persisted
+ * has not landed? Yes, precisely: `drift_status` / `drift_detail` are what
+ * Setup's "Needs Attention" surface reads, so a refused write leaves that
+ * screen showing a CLEAN environment over sets that are still drifted.
+ * ⚠️ `check:durability-log-level` does not vouch for this choice — `ql.update`
+ * is not in its `DURABILITY_CRITICAL_CALLEES` vocabulary, so its green here
+ * means the site is outside the gate's reach (NOT MEASURED), never approval.
+ */
+function reportDriftWriteRefusals(
+  logger: ProjectionLogger | undefined,
+  refusals: ReturnType<typeof createSeedWriteRefusals>,
+  organizationId?: string,
+): void {
+  const entries = refusals.report();
+  if (entries.length === 0) return;
+  logSeedDurabilityFailure(
+    logger,
+    `[security] ${refusals.total} package-declared permission set drift diagnostic(s) were REFUSED by the ` +
+      `store — the "declared ≠ enforced" verdict this pass computed did NOT persist, so those rows keep ` +
+      `their PREVIOUS drift_status/drift_detail (usually none at all), Setup's "Needs Attention" surface goes ` +
+      `on showing them as CLEAN, and THE DEPLOYMENT WILL GO ON LOOKING HEALTHY while those sets keep ` +
+      `enforcing grants that differ from the shipped artifact. The drifted set NAMES are not lost with the ` +
+      `write: the "[security] package-declared permission set(s) enforcing grants that differ from the ` +
+      `shipped artifact" line is logged alongside this one and names every one of them — it is no longer ` +
+      `gated behind the count of writes that landed. What the store actually said is in the query engine's ` +
+      `"Update operation failed" entries logged just before this one, which keep the driver's own identifier ` +
+      `with the bound statement and its values cut. Remedy: read those entries — a sys_permission_set ` +
+      `missing its drift_status/drift_detail columns is a deployment SCHEMA defect, reported by ` +
+      `"os migrate plan" and fixed by "os migrate apply"; anything else is a store outage, which this pass ` +
+      `re-computes and re-attempts on the next boot. Either way nothing is lost, and nothing is recorded ` +
+      `either until a write lands.`,
+    {
+      refused: refusals.total,
+      refusals: entries,
+      ...(organizationId ? { organization: organizationId } : {}),
+    },
+  );
+}
+
+/**
  * Write the computed diagnostics onto their `sys_permission_set` rows.
  * EQUALITY-GATED (#10946 discipline): a row whose stored `drift_status` /
  * `drift_detail` already match is left untouched — a steady-state boot pays
@@ -200,40 +273,66 @@ export async function computePermissionSetDriftDiagnostics(
  * fact, not merely a filtered view: a quiet set carries no `drift_status`
  * value at all, so a client reading the raw record (not only the Setup
  * "Needs Attention" view) sees nothing to worry about either.
+ *
+ * Answers `refused` alongside `updated`. ⚠️ They are not two spellings of the
+ * same pass: `updated` counts the verdicts that LANDED and `refused` counts
+ * the ones the store rejected, and a caller asking "was there drift?" while
+ * reading only `updated` reads a wholly refused pass as a clean one — the
+ * defect {@link reportDriftWriteRefusals} and the gate in
+ * {@link runPermissionSetDriftDiagnostics} exist to close.
  */
 export async function persistPermissionSetDriftDiagnostics(
   ql: any,
   diagnostics: readonly PermissionSetDriftDiagnostic[],
   opts: DriftDiagnosticsOptions = {},
-): Promise<{ updated: number }> {
+): Promise<{ updated: number; refused: number }> {
+  // ⛔ The refusal LOG is what makes a refused write distinguishable from
+  // "nothing to write". `tryUpdate` answers `false` for both, and this
+  // function's only output used to be a count of the writes that LANDED — so
+  // a pass whose every write was refused returned `{ updated: 0 }`, which is
+  // byte-identical to the steady-state boot the equality gate above is built
+  // to produce. See the report below for what that silence cost.
+  const refusals = createSeedWriteRefusals();
   let updated = 0;
   for (const d of diagnostics) {
     const status: string | null = d.status === 'in_sync' ? null : d.status;
     const detail: string | null = d.status === 'in_sync' ? null : d.detail;
     if (d.priorStatus === status && d.priorDetail === detail) continue;
-    if (await tryUpdate(ql, 'sys_permission_set', { id: d.id, drift_status: status, drift_detail: detail }, opts.organizationId)) {
+    if (await tryUpdate(ql, 'sys_permission_set', { id: d.id, drift_status: status, drift_detail: detail }, opts.organizationId, refusals)) {
       updated += 1;
     }
   }
-  return { updated };
+  reportDriftWriteRefusals(opts.logger, refusals, opts.organizationId);
+  return { updated, refused: refusals.total };
 }
 
 /** Compute + persist in one call — what boot wiring uses. */
 export async function runPermissionSetDriftDiagnostics(
   ql: any,
   opts: DriftDiagnosticsOptions = {},
-): Promise<{ diagnostics: PermissionSetDriftDiagnostic[]; updated: number }> {
+): Promise<{ diagnostics: PermissionSetDriftDiagnostic[]; updated: number; refused: number }> {
   const diagnostics = await computePermissionSetDriftDiagnostics(ql, opts);
-  const { updated } = await persistPermissionSetDriftDiagnostics(ql, diagnostics, opts);
-  if (updated > 0) {
+  const { updated, refused } = await persistPermissionSetDriftDiagnostics(ql, diagnostics, opts);
+  // ⛔ `updated > 0` ALONE was the suppressor. A boot on which every drift
+  // write is refused computes the drift correctly, persists none of it, and —
+  // under the old gate — printed nothing at all, which is byte-identical to a
+  // deployment with no drift. `refused > 0` re-opens exactly that case and
+  // nothing else: a steady-state boot (equality-gated, nothing to write,
+  // nothing refused) stays as quiet as it was.
+  if (updated > 0 || refused > 0) {
     opts.logger?.warn?.(
       '[security] package-declared permission set(s) enforcing grants that differ from the shipped artifact',
       {
         updated,
+        // Present ONLY when non-zero, so the steady-state line is unchanged
+        // byte-for-byte for anything reading it. Read it together with
+        // `updated`: `updated` counts the verdicts that LANDED, never the
+        // verdicts that were reached.
+        ...(refused > 0 ? { refused } : {}),
         drifted: diagnostics.filter((d) => d.status !== 'in_sync').map((d) => ({ name: d.name, status: d.status })),
         ...(opts.organizationId ? { organization: opts.organizationId } : {}),
       },
     );
   }
-  return { diagnostics, updated };
+  return { diagnostics, updated, refused };
 }

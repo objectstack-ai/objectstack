@@ -22,6 +22,10 @@ import {
   groupByCategory,
 } from '../../utils/schema-migrate.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
+import {
+  refuseWhenHostConfigUnloadable,
+  type SchemaMigrationComposition,
+} from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
@@ -90,8 +94,20 @@ export default class MigrateApply extends Command {
    */
   async run(): Promise<void> {
     await this.apply();
+    // [#12953] Same refusal as `migrate plan`, through the same choke point —
+    // the ruling (2026-08-29, verbatim 「同意」) named BOTH commands, and the
+    // reconcile an operator confirms has to be judged the same way as the plan
+    // they read. Applied after `apply()` for the same reason it is there: the
+    // report is already written and must survive the non-zero exit.
+    if (this.composition) refuseWhenHostConfigUnloadable(this.composition);
     await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
   }
+
+  /**
+   * What {@link apply} composed, read by {@link run} after it returns (#12953).
+   * `null` until the stack has booted, and on every path where it never did.
+   */
+  private composition: SchemaMigrationComposition | null = null;
 
   private async apply(): Promise<void> {
     const { flags } = await this.parse(MigrateApply);
@@ -154,6 +170,7 @@ export default class MigrateApply extends Command {
       this.exit(1);
       return;
     }
+    this.composition = stack.composition;
 
     try {
       if (!stack.driver) {

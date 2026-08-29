@@ -371,3 +371,123 @@ describe('check:react-declaration-parity — SDUI object-* blocks (#7751)', () =
     expect(status, output).toBe(0);
   });
 });
+
+/**
+ * THE ACCEPTED SET IS THE FULL NODE CONTRACT — AND STAYS CALIBRATED (#13192).
+ *
+ * The gate used to judge a registry input against `ComponentPropsMap[type]`
+ * alone: the PER-BLOCK half of what a page node may carry. The other half is
+ * declared once on `PageComponentSchema` and applies to every component, so a
+ * NODE-LEVEL key read to this gate as an invented input and the complaint was
+ * FALSE — not merely noisy. Measured on the ref that fixed it:
+ *
+ *   PageComponentSchema.safeParse({ type: 'list-view', dataSource: {…} })
+ *     → success: true, output KEEPS `dataSource`
+ *   ComponentPropsMap['object-grid'] → 37 keys, none of them `dataSource`
+ *
+ * objectui PR #6767 landed 17 renderers across 12 packages that declare
+ * `dataSource` at the `ElementDataSourceGate` wrapping seam, so this was the
+ * INVERSE of the usual gate defect: not "should be red and isn't" but
+ * "shouldn't be red and is about to be", which blocks a correct change with a
+ * false reason.
+ *
+ * ⭐ THE HALF THAT MATTERS MOST HERE IS THE NEGATIVE ONE. Widening an accepted
+ * set is one edit away from making a gate vacuous, and a vacuous gate is worse
+ * than the false failure it replaced because nothing ever says so again. These
+ * pins therefore assert BOTH directions in the same shape of run: `dataSource`
+ * and `className` accepted, while `viewName`, a retired node-level key, and an
+ * invented name still go red and NAME themselves.
+ */
+describe('check:react-declaration-parity — the node contract, and its calibration (#13192)', () => {
+  const CLEAN: BaselineFile = { blocks: { 'object-grid': { registryOnly: [], missing: false } } };
+  /** A real `object-grid` prop, so every fixture below also exercises the props half. */
+  const BLOCK_PROP = 'objectName';
+
+  /**
+   * The derived set itself, read off the report.
+   *
+   * It is printed on every run for the same reason the scope note is (#4472): a
+   * widening nobody can see in the CI log cannot be audited. Pinning the printed
+   * line is what makes "derived, not listed" checkable — the set must come from
+   * `PageComponentSchema`'s key shape, and a future node-level key must appear
+   * here the day it lands without anyone editing this file.
+   */
+  it('prints the node-level accepted set it derived, and derives it from the schema shape', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const out = run(manifestFor('object-grid', [BLOCK_PROP]));
+    expect(out).toMatch(/DERIVED from PageComponentSchema's own key shape/);
+    const line = out.split('\n').find((l) => l.includes('aria, className')) ?? '';
+    const derived = line.trim().split(/,\s*/);
+    // ⭐ ACCEPTED — the two keys the card names.
+    expect(derived).toContain('dataSource');
+    expect(derived).toContain('className');
+    // ⭐ REFUSED — `objectName` and `viewName` are NOT node-level. `objectName` gets
+    // no behavioural leg below because it is accepted on every block for a
+    // legitimate PER-BLOCK reason (measured: it is a prop of all six `object-*`
+    // schemas and an overlay prop of all three react blocks), so the discrimination
+    // that can actually go wrong — it being swept in as node-level — is exactly this.
+    expect(derived).not.toContain('objectName');
+    expect(derived).not.toContain('viewName');
+    // ⭐ REFUSED — a `retiredKey()` tombstone is IN the shape but accepts nothing.
+    expect(derived).not.toContain('responsive');
+  });
+
+  it('accepts a node-level key the block\'s own props schema does not declare (dataSource)', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: manifestFor('object-grid', [BLOCK_PROP, 'dataSource']),
+      baseline: CLEAN,
+      args: ['--strict'],
+    });
+    // Accepted, and SAID SO rather than silently dropped.
+    expect(output).toMatch(/spec accepts at NODE level \(not a per-block prop\): dataSource/);
+    expect(output).not.toMatch(/registry declares, spec does not: .*dataSource/);
+    expect(output).toMatch(/no new DECLARATION divergence/);
+    expect(status, output).toBe(0);
+  });
+
+  it('accepts the other node-level key the card checked (className)', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: manifestFor('object-grid', [BLOCK_PROP, 'className']),
+      baseline: CLEAN,
+      args: ['--strict'],
+    });
+    expect(output).toMatch(/spec accepts at NODE level \(not a per-block prop\): className/);
+    expect(status, output).toBe(0);
+  });
+
+  /**
+   * The calibration proper: a key that is neither a node-level key nor a prop of
+   * this block must still go red — IN THE SAME RUN in which a node-level key is
+   * accepted, so the two cannot be confused for one lenient mode.
+   */
+  it.each([
+    ['viewName', 'a plausible-looking key that is on no half of the contract'],
+    ['responsive', 'a node-level key the shape RETIRES — the tombstone must not be swept in'],
+    ['zzzInventedRegistryInput', 'an outright invented input'],
+  ])('still refuses %s (%s) while accepting dataSource in the same run', (key, _why) => {
+    const { status, output } = runExit({
+      manifest: manifestFor('object-grid', [BLOCK_PROP, 'dataSource', key]),
+      baseline: CLEAN,
+      args: ['--strict'],
+    });
+    expect(output).toContain(`new registry-only input(s) not in baseline: ${key}`);
+    // The accept and the refusal are simultaneous — this is the discrimination.
+    expect(output).toMatch(/spec accepts at NODE level \(not a per-block prop\): dataSource/);
+    expect(status, output).toBe(1);
+  }, SPAWN_TIMEOUT_MS);
+
+  /**
+   * The react-block half of the gate takes the same fix. `list-view`'s schema
+   * declares 49 props and `dataSource` is not among them, so before #13192 a
+   * `<ListView>` declaring it was reported as a new registry-only input.
+   */
+  it('applies to the react-block half too, not only the SDUI object-* half', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: manifestFor('list-view', ['dataSource']),
+      baseline: { blocks: { ListView: { registryOnly: [], missing: false } } },
+      args: ['--strict'],
+    });
+    expect(output).toMatch(/<ListView> \(list-view\):.*node-level/);
+    expect(output).toMatch(/spec accepts at NODE level \(not a per-block prop\): dataSource/);
+    expect(status, output).toBe(0);
+  });
+});

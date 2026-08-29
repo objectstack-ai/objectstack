@@ -156,37 +156,10 @@ describe('Metadata Service Contract', () => {
     expect(result.succeeded).toBe(2);
   });
 
-  it('should allow implementation with overlay management', async () => {
-    const overlayStore = new Map<string, unknown>();
-
-    const service: IMetadataService = {
-      register: async () => {},
-      get: async () => undefined,
-      list: async () => [],
-      unregister: async () => {},
-      exists: async () => false,
-      listNames: async () => [],
-      getObject: async () => undefined,
-      listObjects: async () => [],
-      getOverlay: async (type, name) => {
-        const key = `${type}:${name}`;
-        return overlayStore.get(key) as any;
-      },
-      saveOverlay: async (overlay) => {
-        const key = `${overlay.baseType}:${overlay.baseName}`;
-        overlayStore.set(key, overlay);
-      },
-      removeOverlay: async (type, name) => {
-        overlayStore.delete(`${type}:${name}`);
-      },
-      getEffective: async () => undefined,
-    };
-
-    expect(service.getOverlay).toBeDefined();
-    expect(service.saveOverlay).toBeDefined();
-    expect(service.removeOverlay).toBeDefined();
-    expect(service.getEffective).toBeDefined();
-  });
+  // (The `overlay management` implementation case left with the optional
+  // `getOverlay` / `saveOverlay` / `removeOverlay` / `getEffective` members —
+  // #13135, ADR-0049: they belonged to the paper customization protocol no
+  // route ever served.)
 
   it('should allow implementation with watch support', () => {
     const callbacks: MetadataWatchCallback[] = [];
@@ -358,11 +331,6 @@ describe('Metadata Service Contract', () => {
       // Bulk
       bulkRegister: async () => ({ total: 0, succeeded: 0, failed: 0 }),
       bulkUnregister: async () => ({ total: 0, succeeded: 0, failed: 0 }),
-      // Overlay
-      getOverlay: async () => undefined,
-      saveOverlay: async () => {},
-      removeOverlay: async () => {},
-      getEffective: async () => undefined,
       // Watch
       watch: () => ({ unsubscribe: () => {} }),
       // Import/Export
@@ -382,7 +350,6 @@ describe('Metadata Service Contract', () => {
     expect(typeof service.register).toBe('function');
     expect(typeof service.query).toBe('function');
     expect(typeof service.bulkRegister).toBe('function');
-    expect(typeof service.getOverlay).toBe('function');
     expect(typeof service.watch).toBe('function');
     expect(typeof service.exportMetadata).toBe('function');
     expect(typeof service.validate).toBe('function');

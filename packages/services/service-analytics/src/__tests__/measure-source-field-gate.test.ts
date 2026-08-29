@@ -36,6 +36,27 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
 import { AnalyticsService } from '../analytics-service.js';
 
+/**
+ * The refusal a query produced, typed as the Error it actually is.
+ *
+ * `promise.catch(fn)` does NOT drop the resolved branch from the type, so
+ * `service.query(...).catch((e) => e as Error)` is `AnalyticsResult | Error`
+ * and every `err.message` / `err.field` read below was a TS2339 against
+ * `AnalyticsResult` -- 7 of the 10 errors this package's unwired `typecheck`
+ * script hid. Narrowing once here rather than casting at each read also gives
+ * the resolved branch an honest failure: a query that is NOT refused now says
+ * so by name, instead of surfacing later as `expect(undefined).toMatch(...)`.
+ */
+type Refusal = Error & { code?: string; field?: string; member?: string; param?: string };
+
+const refusalOf = (query: Promise<unknown>): Promise<Refusal> =>
+    query.then<never, Refusal>(
+        () => {
+            throw new Error('expected the query to be refused, but it resolved');
+        },
+        (e) => e as Refusal,
+    );
+
 const silentLogger = {
     info: vi.fn(),
     debug: vi.fn(),
@@ -107,9 +128,9 @@ describe('#4437 — measure source-field gate', () => {
         // alternative guaranteed not to work.
         const { service } = makeService();
 
-        const err = await service
-            .query({ cube: 'showcase_invoice', measures: ['ghost_sum'] } as any)
-            .catch((e) => e as Error);
+        const err = await refusalOf(
+            service.query({ cube: 'showcase_invoice', measures: ['ghost_sum'] } as any),
+        );
 
         expect(err.message).toMatch(/Valid measures: count\./);
         expect(err.message).not.toMatch(/Valid measures:[^.]*ghost_sum/);
@@ -268,9 +289,9 @@ describe('#4437 — measure source-field gate', () => {
         };
         const { service } = makeService({ cubes: [joined] });
 
-        const err = await service
-            .query({ cube: 'joined_cube', measures: ['remote_sum'] } as any)
-            .catch((e) => e as Error & { code?: string; field?: string; member?: string; param?: string });
+        const err = await refusalOf(
+            service.query({ cube: 'joined_cube', measures: ['remote_sum'] } as any),
+        );
 
         expect(err).toBeInstanceOf(Error);
         // It got as far as the strategy — i.e. past this gate — and was declined

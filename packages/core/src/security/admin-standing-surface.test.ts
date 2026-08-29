@@ -43,6 +43,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { ADMIN_STANDING_SURFACE, adminStandingTables } from './admin-standing-surface.js';
+import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveAuthzContext } from './resolve-authz-context.js';
 
 /** table -> every column name the resolver touched on it. */
@@ -129,7 +130,24 @@ const NOW = Date.parse('2026-08-15T00:00:00.000Z');
  * Fixture variants, each reaching the platform-admin derivation and each
  * deliberately taking a different side of the resolver's conditional reads.
  */
-const VARIANTS: Record<string, { tables: Record<string, Array<Record<string, unknown>>>; org?: string }> = {
+const VARIANTS: Record<
+  string,
+  {
+    tables: Record<string, Array<Record<string, unknown>>>;
+    org?: string;
+    /**
+     * [#11663 L2] `OS_PLATFORM_OWNER_EMAIL` for this variant. The config anchor
+     * reads `sys_user.email` and `sys_user.email_verified` ONLY when the
+     * deployment declared administrators (pin P2 — an empty list answers
+     * "not an admin" before touching any row), so those two columns are
+     * invisible to every fixture that leaves the variable unset. That is
+     * exactly the "a conditional read is invisible in a fixture that never
+     * takes the branch" hazard this file's header names, so the branch gets a
+     * variant of its own.
+     */
+    platformAdminEmails?: string;
+  }
+> = {
   // Snake_case rows, unscoped in-window grant, active set: the happy platform-admin path.
   'snake-case rows, standing intact': {
     org: 'org_1',
@@ -241,17 +259,64 @@ const VARIANTS: Record<string, { tables: Record<string, Array<Record<string, unk
       ],
     },
   },
+
+  // [#11663 L2] The CONFIG anchor. No grant row anywhere: standing comes from
+  // the declared administrator list matched against this row's own `email`,
+  // gated on `email_verified`. This is the only variant in which those two
+  // columns are read at all, which is why the union needs it — without it the
+  // declaration below would have to omit them and the correspondence gate in
+  // plugin-auth would stop demanding a disposition for the very columns a
+  // write can revoke standing through.
+  'config-anchored platform admin': {
+    platformAdminEmails: 'ada@example.com',
+    tables: {
+      sys_user: [
+        { id: 'usr_1', email: 'ada@example.com', email_verified: true, ai_access: 0 },
+      ],
+      sys_member: [],
+      sys_user_position: [],
+      sys_position: [],
+      sys_position_permission_set: [],
+      sys_user_permission_set: [],
+      sys_permission_set: [],
+    },
+  },
 };
+
+/**
+ * Run `body` with `OS_PLATFORM_OWNER_EMAIL` set to exactly `value` (deleted when
+ * `undefined`), and the config memo dropped on BOTH sides.
+ *
+ * The memo is keyed on the raw string, so a worker that has already resolved
+ * one value would otherwise answer the next variant from the previous one's
+ * parse. Restoring the ambient value matters too: this suite must not decide
+ * what the rest of the worker's tests see.
+ */
+async function withPlatformAdminEmails<T>(value: string | undefined, body: () => Promise<T>): Promise<T> {
+  const prev = process.env.OS_PLATFORM_OWNER_EMAIL;
+  if (value === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+  else process.env.OS_PLATFORM_OWNER_EMAIL = value;
+  resetPlatformAdminEmailMemo();
+  try {
+    return await body();
+  } finally {
+    if (prev === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+    else process.env.OS_PLATFORM_OWNER_EMAIL = prev;
+    resetPlatformAdminEmailMemo();
+  }
+}
 
 async function observe(variant: keyof typeof VARIANTS): Promise<Observation> {
   const seen: Observation = new Map();
-  const { tables, org } = VARIANTS[variant];
-  await resolveAuthzContext({
-    ql: makeRecordingQl(tables, seen),
-    headers: headers(),
-    getSession: sessionFor('usr_1', org),
-    nowMs: NOW,
-  });
+  const { tables, org, platformAdminEmails } = VARIANTS[variant]!;
+  await withPlatformAdminEmails(platformAdminEmails, () =>
+    resolveAuthzContext({
+      ql: makeRecordingQl(tables, seen),
+      headers: headers(),
+      getSession: sessionFor('usr_1', org),
+      nowMs: NOW,
+    }),
+  );
   return seen;
 }
 
@@ -291,12 +356,14 @@ describe('[#8734] ADMIN_STANDING_SURFACE is what resolveAuthzContext actually re
   );
 
   it('reaches the platform-admin derivation — otherwise the observation proves nothing', async () => {
-    const ctx = await resolveAuthzContext({
-      ql: makeRecordingQl(VARIANTS['snake-case rows, standing intact']!.tables, new Map()),
-      headers: headers(),
-      getSession: sessionFor('usr_1', 'org_1'),
-      nowMs: NOW,
-    });
+    const ctx = await withPlatformAdminEmails(undefined, () =>
+      resolveAuthzContext({
+        ql: makeRecordingQl(VARIANTS['snake-case rows, standing intact']!.tables, new Map()),
+        headers: headers(),
+        getSession: sessionFor('usr_1', 'org_1'),
+        nowMs: NOW,
+      }),
+    );
     // A positive control on the fixture itself: if the happy variant ever stops
     // resolving a platform admin, every column below it goes unobserved and the
     // equality above starts passing over a path nothing walked.
@@ -314,6 +381,26 @@ describe('[#8734] ADMIN_STANDING_SURFACE is what resolveAuthzContext actually re
       perVariant.set(name, signature);
     }
     expect(new Set(perVariant.values()).size).toBe(perVariant.size);
+  });
+
+  it('[#11663 L2] the config variant reaches the CONFIG anchor, not a grant', async () => {
+    // The second positive control, for the second anchor. Without it the two
+    // new sys_user columns could go unobserved (the branch never taken) and the
+    // equality above would start passing over a path nothing walked — the exact
+    // shape the fixture-variant note at the top of this file warns about.
+    const v = VARIANTS['config-anchored platform admin']!;
+    const ctx = await withPlatformAdminEmails(v.platformAdminEmails, () =>
+      resolveAuthzContext({
+        ql: makeRecordingQl(v.tables, new Map()),
+        headers: headers(),
+        getSession: sessionFor('usr_1', v.org),
+        nowMs: NOW,
+      }),
+    );
+    expect(ctx.posture).toBe('PLATFORM_ADMIN');
+    expect(ctx.positions).toContain('platform_admin');
+    // …and it really is the config route: there is no grant row in the fixture.
+    expect(v.tables.sys_user_permission_set).toEqual([]);
   });
 
   it('every declared table carries a reason, and only deriving tables carry columns', () => {

@@ -101,7 +101,9 @@ And one **paper** mechanism: `packages/spec/src/kernel/metadata-customization.zo
 three-layer (system/platform/user) overlay protocol with field-level change tracking — exported,
 published in the reference docs, and consumed by **zero** runtime packages
 ([#12057](https://github.com/objectstack-ai/objectstack/issues/12057)). §6.4 records its
-disposition so it cannot be mistaken for this model.
+disposition so it cannot be mistaken for this model — and ⚠️ **corrects that consumer count there**
+(#13136, 2026-08-29: one unreachable build-against consumer in `packages/metadata`, zero
+served-surface consumers; the disposition is unchanged).
 
 ### 1.2 Why per-type invention had to stop
 
@@ -269,6 +271,23 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
    retirement (ADR-0049 remove side) or re-scoping to what ADR-0005 actually implements is
    chartered as an implementation card. Until that card lands, the reference page it generates
    must not be cited as the customization architecture.
+
+   ⚠️ **Correction (#13136, 2026-08-29):** the parenthetical above records "zero consumers". That
+   predicate was **instrument blindness at measurement time, not later drift**. The #12057
+   instrument grepped the module's **schema** names, and that set genuinely does read zero outside
+   `packages/spec`, positive controls included — but it was blind to the module's exported **type**
+   names, and one of those has a real build-against consumer: `packages/metadata`'s
+   `metadata-manager.ts:45` imports `type MetadataOverlay` from `@objectstack/spec/kernel` and
+   backs a working three-layer overlay limb (in-memory map at 315-316; `getOverlay` /
+   `saveOverlay` / `removeOverlay` / `getEffective` at 2166-2249). The corrected predicate is
+   **one unreachable build-against consumer, zero served-surface consumers**: no route serves the
+   paper endpoints, and the limb's only callers are that package's own unit tests. It is verified
+   present at this ADR's own evidence ref `0b048393f`, so the zero-consumer reading was already
+   wrong when it was recorded and §6.4 inherited it. ⛔ **The decision above is unaffected** — the
+   maintainer's 2026-08-29 ruling adopts retirement on this widened evidence; the supersession and
+   the enforce-or-remove charter stand, and "nothing may build against it" is now known to name one
+   existing consumer that has to stop. Measurement:
+   [#12057 comment 5451357017](https://github.com/objectstack-ai/objectstack/issues/12057#issuecomment-5451357017).
 
 ---
 

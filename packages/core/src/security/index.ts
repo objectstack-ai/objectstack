@@ -155,10 +155,32 @@ export { isRowActive, type ActivatableRow } from './row-active.js';
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.
 export {
   ADMIN_STANDING_SURFACE,
+  ADMIN_STANDING_NON_TABLE_INPUTS,
   adminStandingTables,
   adminStandingColumns,
   type AdminStandingTable,
+  type AdminStandingNonTableInput,
 } from './admin-standing-surface.js';
+
+// [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN — parse,
+// normalization and match predicate for `OS_PLATFORM_OWNER_EMAIL`, consumed by
+// `resolve-authz-context.ts` §6b-config. Exported so the sibling legs
+// (plugin-auth's break-glass guard, plugin-security's bootstrap, the audit
+// surface) ask the SAME question instead of re-implementing the parse — which
+// is the whole reason the config read has exactly one home.
+export {
+  PLATFORM_ADMIN_EMAIL_SEPARATOR,
+  normalizePlatformAdminEmail,
+  parsePlatformAdminEmails,
+  resolvePlatformAdminEmails,
+  resetPlatformAdminEmailMemo,
+  matchesConfiguredPlatformAdmin,
+  reportLegacyPlatformAdminGrant,
+  resetLegacyPlatformAdminGrantReport,
+  setPlatformAdminConfigSink,
+  type PlatformAdminEmailConfig,
+  type PlatformAdminConfigSink,
+} from './platform-admin.js';
 
 // [#7678] ADR-0090 D5/D9 — the audience-binding suggestion `?status=` vocabulary,
 // shared by the runtime dispatcher's `/security` domain and the live REST route.

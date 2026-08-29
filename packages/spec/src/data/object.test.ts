@@ -1557,7 +1557,7 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
 });
 
 // ============================================================================
-// Namespace removal (D4) — Object identity is single-sourced on `name`.
+// Namespace removal (ADR-0129 D3) — Object identity is single-sourced on `name`.
 // ============================================================================
 
 describe('ObjectSchema name-as-identity', () => {
@@ -1572,7 +1572,7 @@ describe('ObjectSchema name-as-identity', () => {
     }
   });
 
-  it('REJECTS legacy `namespace` with the prefix-embedding fix (ADR-0006 D4)', () => {
+  it('REJECTS legacy `namespace` with the prefix-embedding fix (ADR-0129 D3)', () => {
     // Until #4001 closed this shape on the parse path, this key was stripped in
     // silence — so an object written as `{ namespace: 'sys', name: 'user' }`
     // shipped as plain `user`, under a name its author never intended. The test

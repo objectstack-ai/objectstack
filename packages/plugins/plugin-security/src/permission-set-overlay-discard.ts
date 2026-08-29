@@ -51,6 +51,21 @@
  * environment-authored and refused — the maintainer's cited hazard verbatim:
  * "a name collision with a genuinely env-authored set would be destroyed
  * without a trace".
+ *
+ * ## The audit entry may never be optimistic
+ *
+ * This action's whole point is that it is AUDITED, so the one thing its log
+ * entry may not do is assert an action that did not fully land. The
+ * degraded-kernel branch below discarded its `tryUpdate` result, and on a
+ * refused resync every field of the success entry stayed individually true —
+ * the overlay count was right, `objectGrantsBefore`/`objectGrantsAfter` were
+ * both read off real rows — while the entry as a whole claimed a completed
+ * sanctioned operator action over a write the store had rejected. The result
+ * is now read, and a refused resync gets its own entry stating the failure
+ * INSTEAD of the success line (never alongside it): the overlay deletion DID
+ * land and must stay on the record, and the un-healed grant count must stop
+ * being reported as a healed one. What the CALLER is told is deliberately
+ * unchanged — see {@link PermissionSetOverlayDiscardResult}.
  */
 
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -63,6 +78,10 @@ import {
   type ProjectionDeps,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import {
+  createSeedWriteRefusals,
+  logSeedDurabilityFailure,
+} from './per-organization-catalog.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
 import { PermissionDeniedError } from './errors.js';
 import { isTenantAdmin } from './delegated-admin-gate.js';
@@ -99,7 +118,17 @@ export interface PermissionSetOverlayDiscardDeps {
 
 export interface PermissionSetOverlayDiscardResult {
   permissionSet: any;
-  /** Object grants the row now carries (post-reconcile) — the "healed" number, for callers to assert on. */
+  /**
+   * Object grants the row now carries (post-reconcile) — the "healed" number,
+   * for callers to assert on.
+   *
+   * ⚠️ Literally "what the row carries NOW", which is not always a healed
+   * count: on the degraded-kernel branch a REFUSED resync write leaves this
+   * equal to the pre-discard count. That case is reported on the audit
+   * channel (an entry naming the refusal replaces the success line) and
+   * deliberately NOT on this contract — propagating it to the caller would
+   * widen a declared surface and is out of scope here.
+   */
   healedObjectGrantCount: number;
   overlaysDiscarded: number;
 }
@@ -208,7 +237,9 @@ export async function discardPermissionSetOverlay(
   // registry echo (`syncEvaluatorRegistry`'s "overlay gone" branch).
   const protocol = deps.getProtocol?.();
   const projectionDeps: ProjectionDeps = { ql, metadata: deps.metadata, logger };
+  const refusals = createSeedWriteRefusals();
   let healedRow: any;
+  let resyncRefused = false;
   if (protocol && typeof protocol.getMetaItemLayered === 'function') {
     await projectPermissionMutation(protocol, projectionDeps, {
       type: 'permission', name: String(row.name), state: 'active', organizationId: organizationId ?? null,
@@ -218,23 +249,69 @@ export async function discardPermissionSetOverlay(
     // Degraded kernel with no metadata protocol: project the declared
     // artifact's facets directly, same shape `upsertEnvPermissionSet` writes,
     // clearing `customized` (there is no overlay left to badge).
-    await tryUpdate(
+    //
+    // ⛔ The result is READ. Discarding it is what let the audit line below
+    // assert a completed operator action over a write the store refused: on
+    // refusal `healedRow` is re-read as the UNCHANGED row, `objectGrantsAfter`
+    // equals `objectGrantsBefore`, and every field of the entry stays
+    // individually true while the entry as a whole is false. An audit record
+    // of a sanctioned action is the one record that may not be optimistic.
+    resyncRefused = !(await tryUpdate(
       ql,
       'sys_permission_set',
       { id, ...permissionSetRowFields(declaredItem), customized: false },
       organizationId,
-    );
+      refusals,
+    ));
     healedRow = (await tryFind(ql, 'sys_permission_set', { id }, 1, organizationId))[0] ?? row;
   }
 
   const afterCount = countGrantedObjects(healedRow);
   // Audited: who, what, before/after — the "supported, audited action" ask.
-  logger?.info?.('[security] package-declared permission set overlay discarded (sanctioned operator action)', {
+  const audit = {
     id, name: row.name, packageId: declaredItem._packageId ?? declaredItem.packageId,
     by: callerCtx?.userId, organization: organizationId,
     overlaysDiscarded: overlays.length,
     objectGrantsBefore: beforeCount, objectGrantsAfter: afterCount,
-  });
+  };
+  if (resyncRefused) {
+    // ⛔ EXACTLY ONE audit entry per action, and when the resync was refused
+    // it is THIS one — the success line above is withheld, never emitted
+    // alongside. Two entries for one action would leave a reader to decide
+    // which is authoritative, and the optimistic one is the one that reads
+    // like the rest of the ledger.
+    //
+    // Emitted-with-the-failure-stated rather than withheld outright, because
+    // the destructive HALF of this operator action DID land: the sys_metadata
+    // overlay row is deleted and gone (that leg rethrows, so reaching here
+    // means it succeeded). Withholding the entry would erase the record of a
+    // deletion that actually happened — a worse audit defect than the
+    // optimistic one this repairs.
+    //
+    // Durability channel (AGENTS.md "Degradation log levels"): the caller is
+    // answered normally by ruling, the API returns 200, and the row silently
+    // goes on enforcing its pre-discard grants — the "still looks normal from
+    // the outside" shape, which is `error` with the mandatory `warn` fallback
+    // for hosts that inject a sink without one.
+    logSeedDurabilityFailure(
+      logger,
+      `[security] package-declared permission set overlay discarded BUT THE RESYNC WRITE WAS REFUSED ` +
+        `(sanctioned operator action, PARTIALLY applied) — the stale sys_metadata overlay row(s) WERE ` +
+        `deleted and are gone, and the follow-up write that re-projects the declared artifact onto ` +
+        `sys_permission_set was refused by the store, so the row STILL ENFORCES ITS PRE-DISCARD GRANTS. ` +
+        `"objectGrantsAfter" below is therefore the UN-HEALED count, and the caller was answered with that ` +
+        `same number as "healedObjectGrantCount" and a 200 — NOTHING LOOKS BROKEN from the API. This entry ` +
+        `replaces the "overlay discarded" success line, which is NOT also emitted for this action. ` +
+        `Recovery: the overlay is gone, so the ADR-0094 env-door reconciler ` +
+        `("reconcilePermissionSetProjection") re-projects this row on its own on the NEXT BOOT — restart, ` +
+        `or re-run this action once the store accepts writes again, to converge sooner. What the store ` +
+        `actually said is in the query engine's "Update operation failed" entry logged just before this ` +
+        `one, which keeps the driver's own identifier with the bound statement and its values cut.`,
+      { ...audit, resyncWriteRefused: true, refusals: refusals.report() },
+    );
+  } else {
+    logger?.info?.('[security] package-declared permission set overlay discarded (sanctioned operator action)', audit);
+  }
 
   return { permissionSet: healedRow, healedObjectGrantCount: afterCount, overlaysDiscarded: overlays.length };
 }

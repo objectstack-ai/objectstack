@@ -588,16 +588,6 @@ const DEBT = {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
   },
-  '@objectstack/service-analytics': {
-    errors: 10,
-    note: 'code-tier 9 (TS2339 x7, TS7053 x2) + 1 noise (TS6133). Re-measured 10 at e8db1a230, up from 7 '
-      + 'at 5ab08428 and 3 before that. All 7 TS2339 sit in __tests__/measure-source-field-gate.test.ts, '
-      + 'the same file that carried 4 of them when this entry was last written; the +3 arrived with #5716 '
-      + '/ PR #5963 rewriting that gate\'s refusals -- no new file, no new error class. This entry is the '
-      + 'standing specimen for why the ERROR-COUNT layer needed a ratchet of its own: the PACKAGE layer '
-      + 'of this gate has been closed to new debt the whole time, and the count still walked 3 -> 7 -> 10 '
-      + 'unremarked (#5278).',
-  },
   '@objectstack/service-automation': {
     errors: 3,
     note: 'code-tier 3 (TS2341 x3), all in src/nested-region-parity.test.ts at 95/151/180, where the '

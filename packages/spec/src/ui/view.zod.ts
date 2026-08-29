@@ -1323,8 +1323,8 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 // hook-body precedent's placement note applies here too: build-docs takes a
 // file's first JSDoc per exported symbol, and this constant needs no doc page.
 const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 (#8010; "
-  + 'PDF export itself was declined as #1301 NOT_PLANNED) — no renderer has ever produced a PDF '
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
+  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
   + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
   + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
   + "formats are 'csv', 'xlsx' and 'json'. "
@@ -1907,12 +1907,17 @@ export const FormFieldPublicPickerSchema = lazySchema(() => strictObject({
   ),
   /**
    * Referenced-object override. Omitted, the route resolves the target from
-   * the field definition on the parent object (`referenceTo`); set it only
-   * when that resolution is wrong for this form.
+   * the field definition on the parent object (`reference`); set it only when
+   * that resolution is wrong for this form.
+   *
+   * `reference` is the key `FieldSchema` accepts — `referenceTo` is only a
+   * rejected alias it lists so a failed parse can offer a rename hint, so an
+   * author following the old spelling of this sentence had their whole object
+   * metadata refused at parse.
    */
   object: z.string().optional().describe(
-    'Referenced-object override for the picker search; omitted → resolved from the field '
-    + 'definition (`referenceTo`).',
+    'Referenced-object override for the picker search; omitted → resolved from the `reference` '
+    + 'key on the field definition.',
   ),
 }).describe('Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).'));
 

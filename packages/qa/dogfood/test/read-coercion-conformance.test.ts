@@ -8,7 +8,11 @@
 //
 // The `driver-memory` arm was removed in #5704 (batch 0): driver-memory is the
 // project's legacy test-convenience backend and its in-project test surface is
-// being replaced by sqlite `:memory:` (#5499). Nothing is lost here — SQLite is
+// being retired in favour of sqlite `:memory:` — by #5704, which migrated the
+// test backends, and #6664, which replaced the prose census with the ledger
+// `check:driver-memory-census` enforces. NOT by #5499: that was an INVESTMENT
+// freeze, a different proposition on the same anchor, and it was lifted on
+// 2026-08-11 while the retirement carried on. Nothing is lost here — SQLite is
 // the driver that actually stores booleans as integers, so it is the arm that
 // carries the invariant; a mingo store that never had to coerce anything could
 // only ever be green.

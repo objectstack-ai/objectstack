@@ -251,7 +251,12 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         const shared = [...bundle.keys()].filter((k) => door.has(k)).sort();
 
         // Guard the comparison against being vacuously green.
+        // `capability:crm.export` joined this list at #12892 step 1: the door's
+        // `ARTIFACT_FIELD_TO_TYPE` now maps `capabilities`, so that collection
+        // has TWO readers here for the first time. Measured, not predicted —
+        // and the only edit this list took.
         expect(shared).toEqual([
+            'capability:crm.export',
             'permission:support_agent',
             'position:sales_rep',
             'sharing_rule:share_open_deals',
@@ -336,23 +341,79 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         expect(typeof (bundleFirst.get('sharing_rule:share_open_deals') as any).condition).toBe('object');
     });
 
-    // ── The two collections that have no second copy to diverge ──────────
+    // ── `capabilities`: TWO readers since #12892 step 1 · `policies`: none ────
     //
-    // Recorded as measurements, not omissions: the card names five security
-    // collections, and two of them never travel this path in a way that could
-    // produce two copies. Neither is a reason to skip the collection — it is
-    // what "covered" means for them.
+    // Recorded as measurements, not omissions. `policies` still never travels
+    // this path in a way that could produce two copies. `capabilities` did not
+    // either until #12892 step 1 put it in the door's map — the case below used
+    // to assert that ABSENCE, and an assertion of an absence stops being a
+    // guard the moment the absence is deliberately removed. It is REWRITTEN
+    // here rather than relaxed, and rewritten UPWARD: it now pins the interim
+    // divergence key by key.
 
-    it('capabilities: only ONE reader exists — the door never registers them', async () => {
+    /**
+     * ⚠️ THIS CASE EXISTS TO GO RED WHEN STEP 2 LANDS. That is its job, not a
+     * regression.
+     *
+     * The maintainer's 2026-08-29 ruling on #12892 is two ordered steps:
+     *
+     *   step 1 (landed) — the door's `ARTIFACT_FIELD_TO_TYPE` maps
+     *     `capabilities`, so BOTH readers now register the collection. Two
+     *     writers on one route is the INTERIM state the ruling permits, and
+     *     what this case measures is exactly how the two copies differ while
+     *     it lasts.
+     *   step 2 (not landed) — `AppPlugin`'s ADR-0057 `SECURITY_FIELDS` block
+     *     stops registering these five on the ARTIFACT path (it must keep
+     *     registering on non-artifact boots), leaving the door's parsed,
+     *     defaulted, provenance-stamped copy as the only one.
+     *
+     * The day step 2 lands, `readerBundle()` stops producing
+     * `capability:crm.export`, and EVERY assertion below goes red — the
+     * membership pin, the key-by-key divergence set, and the four named-key
+     * pins alike. Whoever lands step 2 rewrites this case to assert the single
+     * remaining copy; ⛔ never by deleting, skipping or weakening it, which is
+     * the one repair that would let the route silently keep two writers.
+     *
+     * Two seams, two answers, both real — do not read one as refuting the other:
+     * HERE the two copies differ on FOUR keys, because `readerBundle()` drives
+     * `AppPlugin` against a bare `registerInMemory` capture. On a full kernel
+     * boot the ObjectQL SchemaRegistry stamps `_packageId` / `_provenance` onto
+     * that same object during package install, so the end-to-end divergence
+     * narrows to the TWO the registry cannot supply: `scope` (the schema
+     * default) and `_packageVersion`. Those two are the seam-invariant core and
+     * are pinned by name below in addition to the set.
+     */
+    it('capabilities: BOTH readers register them since #12892 step 1, and the two copies diverge on exactly four keys', async () => {
         const door = collapse(await readerDoor());
         const bundle = collapse(await readerBundle());
-        // `capabilities` is an authorable stack collection (ADR-0066 D1) that
-        // `ARTIFACT_FIELD_TO_TYPE` (`packages/metadata/src/plugin.ts`) does not
-        // map, so the artifact door registers nothing under `capability` and
-        // AppPlugin is the sole registrar. No divergence is constructible.
-        expect(bundle.get('capability:crm.export')).toBeDefined();
-        expect(door.has('capability:crm.export')).toBe(false);
-        expect([...door.keys()].filter((k) => k.startsWith('capability:'))).toEqual([]);
+
+        // Membership: two readers, not one. (Before step 1 the door registered
+        // nothing under `capability` and this collection had a single writer.)
+        expect(bundle.get('capability:crm.export'), 'AppPlugin must still register the capability').toBeDefined();
+        expect(door.get('capability:crm.export'), 'the door must now register it too').toBeDefined();
+        expect([...door.keys()].filter((k) => k.startsWith('capability:'))).toEqual(['capability:crm.export']);
+
+        // The divergence, key by key — the whole set, so a key that appears or
+        // disappears fails here rather than passing under a looser shape.
+        expect(diffPaths(door.get('capability:crm.export'), bundle.get('capability:crm.export')).sort())
+            .toEqual(['_packageId', '_packageVersion', '_provenance', 'scope']);
+
+        // …and the two that survive every seam, pinned BY NAME with the value
+        // each side actually carries. `scope` is the `CapabilitySchema`
+        // default, `_packageVersion` half of the ADR-0010 envelope; the authored
+        // bytes declare neither, so only the copy that met the schema has them.
+        const doorCopy = door.get('capability:crm.export') as any;
+        const bundleCopy = bundle.get('capability:crm.export') as any;
+        expect(doorCopy.scope).toBe('platform');
+        expect(bundleCopy.scope).toBeUndefined();
+        expect(doorCopy._packageVersion).toBe('1.0.0');
+        expect(bundleCopy._packageVersion).toBeUndefined();
+
+        // The authored fields agree — "they differ" must not be satisfiable by
+        // the two copies being different documents altogether.
+        for (const copy of [doorCopy, bundleCopy]) {
+            expect(copy).toMatchObject({ name: 'crm.export', label: 'Export CRM data' });
+        }
     });
 
     it('policies: not an authorable stack collection at all — neither reader can see one', async () => {

@@ -154,6 +154,13 @@ interface DatasourceDef {
   external?: {
     validation?: {
       onMismatch?: 'fail' | 'warn' | 'ignore';
+      /**
+       * [#13037] The BOOT gate's per-datasource opt-out — read by
+       * {@link bootCheckEnabled}, and by nothing else on purpose. The scope
+       * boundary the maintainer pinned when ruling this key ENFORCED (rather
+       * than retired) is stated at that function.
+       */
+      checkOnBoot?: boolean;
       checkIntervalMs?: number;
     };
   };
@@ -179,6 +186,12 @@ export interface ExternalSchemaDriftEvent {
  *   - `fail`   → throws `ExternalSchemaMismatchError` (aborts boot) — default,
  *   - `warn`   → logs the diff and continues,
  *   - `ignore` → does nothing.
+ *
+ * [#13037] A datasource that sets `external.validation.checkOnBoot: false` is
+ * skipped by this sweep entirely — no policy is applied to its rows, so no
+ * mismatch on it can abort boot. Its BACKGROUND drift checking is a separate
+ * policy and is unaffected; see {@link bootCheckEnabled} for the scope the
+ * maintainer pinned.
  *
  * `onMismatch` governs MEASURED mismatches only. A row whose diffs are
  * `kind: 'unreachable'` (the remote could not be read, so validation was
@@ -261,6 +274,9 @@ export class ExternalValidationPlugin implements Plugin {
     }
 
     const metadata = safeGet<MetadataServiceLike>(ctx, 'metadata');
+    // [#13037] One definition read per datasource per sweep, shared by the
+    // `checkOnBoot` gate below and the `onMismatch` resolution after it.
+    const loadDef = createDatasourceDefLoader(metadata);
     let report: Awaited<ReturnType<ExternalDatasourceServiceLike['validateAll']>>;
     try {
       report = await svc.validateAll();
@@ -269,12 +285,38 @@ export class ExternalValidationPlugin implements Plugin {
       return;
     }
 
-    const failures = report.results.filter((r) => !r.ok);
+    // [#13037] Honour each datasource's `external.validation.checkOnBoot`
+    // BEFORE any verdict is drawn from its rows. The sweep is whole-farm and
+    // the key is per-datasource, so the opt-out can only be applied here, row
+    // by row — a datasource that set `false` is dropped, and every other
+    // datasource in the same boot is judged exactly as it was before.
+    // ⭐ Boot step only: `scheduleDriftChecks()` below is untouched by this.
+    const gated: SchemaValidationReportLike['results'] = [];
+    const skipped = new Set<string>();
+    for (const r of report.results) {
+      if (await bootCheckEnabled(loadDef, r.datasource)) gated.push(r);
+      else skipped.add(r.datasource);
+    }
+    if (skipped.size > 0) {
+      ctx.logger?.info?.(
+        '[external-validation] boot schema validation SKIPPED for datasource(s) that set '
+          + '`external.validation.checkOnBoot: false` — their federated objects were NOT gated at '
+          + 'boot, and no mismatch on them can abort startup. Any verdict logged below covers the '
+          + 'REMAINING datasources only. Background drift checking is a separate policy '
+          + '(`external.validation.checkIntervalMs`) and is unaffected.',
+        {
+          datasources: [...skipped].sort(),
+          objectsSkipped: report.results.length - gated.length,
+        },
+      );
+    }
+
+    const failures = gated.filter((r) => !r.ok);
     if (failures.length === 0) {
       // [#6504] The all-clear is a UNIVERSAL claim, and this gate has no way to
       // make one when the object set it swept was itself known-partial. See
       // `announceAllClear`.
-      await announceAllClear(ctx, metadata, report.results.length);
+      await announceAllClear(ctx, metadata, gated.length);
       return;
     }
 
@@ -310,7 +352,7 @@ export class ExternalValidationPlugin implements Plugin {
       // judge on what is present rather than on the producer's current shape:
       // only MEASURED diffs reach the onMismatch policy.
       if (schemaDiffs.length === 0) continue;
-      const mode = await resolveOnMismatch(metadata, r.datasource);
+      const mode = await resolveOnMismatch(loadDef, r.datasource);
       if (mode === 'ignore') continue;
       if (mode === 'warn') {
         ctx.logger?.warn?.('[external-validation] external schema drift', {
@@ -334,6 +376,14 @@ export class ExternalValidationPlugin implements Plugin {
    * No-op when metadata can't be enumerated or no datasource opts in. Re-arming
    * (e.g. a second `kernel:ready`) first clears existing timers so intervals
    * don't accumulate.
+   *
+   * ⭐ [#13037] **`external.validation.checkOnBoot` does not reach here, by
+   * ruling.** The maintainer pinned that gate's scope to the BOOT STEP ONLY
+   * (2026-08-29): a datasource that set `checkOnBoot: false` still gets the
+   * background drift checker it asked for via `checkIntervalMs`, because the
+   * two keys answer different questions — "gate my startup on this" versus
+   * "watch this while I run". This read point was already independent and
+   * stays that way; ⛔ do not add a `checkOnBoot` condition below.
    */
   async scheduleDriftChecks(ctx: PluginContext): Promise<void> {
     // [#10772] The canonical hook, not the retained alias: `destroy()` is now
@@ -515,16 +565,107 @@ export function createExternalValidationPlugin(): ExternalValidationPlugin {
   return new ExternalValidationPlugin();
 }
 
-async function resolveOnMismatch(
+/**
+ * Reads one datasource definition per NAME per sweep, answering `undefined` for
+ * anything it could not read.
+ *
+ * [#13037] Introduced because the boot gate now asks the definition two
+ * questions — "does this datasource opt out of the boot check?" and, only for
+ * the rows that stayed, "what is its `onMismatch` policy?" — and asking twice
+ * would double the metadata reads for every mismatching row. Memoized per
+ * SWEEP, not per plugin instance: a second `kernel:ready` re-reads, so an
+ * operator who fixed a datasource between boots is not served a stale verdict.
+ *
+ * Swallowing the throw preserves `resolveOnMismatch`'s pre-existing contract
+ * (an unreadable definition falls back to the strict default) and gives the new
+ * gate the same safe direction: a definition nobody could read is validated,
+ * never silently skipped.
+ */
+function createDatasourceDefLoader(
   metadata: MetadataServiceLike | undefined,
+): (datasource: string) => Promise<DatasourceDef | undefined> {
+  const cache = new Map<string, Promise<DatasourceDef | undefined>>();
+  return (datasource: string) => {
+    let hit = cache.get(datasource);
+    if (!hit) {
+      hit = (async () => {
+        try {
+          return (await metadata?.get?.('datasource', datasource)) as DatasourceDef | undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+      cache.set(datasource, hit);
+    }
+    return hit;
+  };
+}
+
+/**
+ * [#13037] Does the BOOT sweep apply to this datasource?
+ *
+ * ## ⭐ Scope, pinned by the maintainer at the ruling (2026-08-29)
+ *
+ * **This gate covers the BOOT STEP ONLY.** `scheduleDriftChecks()` and its
+ * `external.validation.checkIntervalMs` read point stay INDEPENDENT of
+ * `checkOnBoot` — a datasource that opts out of the boot check keeps whatever
+ * background drift checking it armed, and arming one is not an opt back in.
+ * The two knobs sit in the same block and answer different questions: one is
+ * "gate my startup on this", the other is "watch this while I run". ⛔ Do not
+ * extend this predicate to `scheduleDriftChecks` / `runDriftCheck`.
+ *
+ * ## What `false` buys, stated precisely
+ *
+ * The datasource's rows are dropped before the boot gate looks at them, so for
+ * that datasource: no `onMismatch` policy is applied (a measured mismatch
+ * therefore CANNOT abort boot through it), no unreachable-remote warning is
+ * raised, and its objects are not counted in the all-clear.
+ *
+ * What it deliberately does NOT buy is the remote round-trip: `validateAll()`
+ * is the service's whole-farm entry and takes no datasource argument, so the
+ * introspection has already happened by the time this runs. Narrowing the work
+ * itself would mean composing the sweep out of the OPTIONAL scoped twin
+ * (`validateDatasource`), which changes what the sweep does when the twin is
+ * absent and changes the row set when it is present — and the ruling requires
+ * the `true`/default path to stay behaviourally identical. Recorded rather than
+ * quietly done.
+ *
+ * ## Why the test is `=== false` and not a truthiness check
+ *
+ * `checkOnBoot` is declared `z.boolean().default(true)`, so on a PARSED
+ * datasource the key is always materialized — `true` or an explicit `false`.
+ * Only that explicit `false` opts out. Everything else validates: an absent
+ * key, an unparsed or legacy stored row, a managed datasource with no
+ * `external` block at all, and a definition the metadata service could not
+ * hand back. Boot validation is the safe direction, so every uncertainty
+ * resolves towards running it.
+ *
+ * ⚠️ The value read here is the one the metadata service returns, i.e. the
+ * POST-parse definition — the same read point `resolveOnMismatch` has always
+ * used. It is deliberately not softened with a `??` alias chain: `checkonboot`
+ * and `validateonboot` are **not** accepted spellings that fold to this key,
+ * they are entries in `strictObject`'s `aliases` table, which runs only from
+ * the `unrecognized_keys` REJECTION path (measured: both spellings fail
+ * `DatasourceSchema.safeParse` with "Did you mean … → `checkOnBoot`?"). There
+ * is exactly one authorable spelling, so there is exactly one read. Pinned by
+ * `external-validation-checkonboot.test.ts`, which fails loudly if that ever
+ * stops being true — a real fold would need this read point revisited, not a
+ * consumer-side fallback (AGENTS.md Prime Directive #12).
+ */
+async function bootCheckEnabled(
+  loadDef: (datasource: string) => Promise<DatasourceDef | undefined>,
+  datasource: string,
+): Promise<boolean> {
+  const ds = await loadDef(datasource);
+  return ds?.external?.validation?.checkOnBoot !== false;
+}
+
+async function resolveOnMismatch(
+  loadDef: (datasource: string) => Promise<DatasourceDef | undefined>,
   datasource: string,
 ): Promise<'fail' | 'warn' | 'ignore'> {
-  try {
-    const ds = (await metadata?.get?.('datasource', datasource)) as DatasourceDef | undefined;
-    return ds?.external?.validation?.onMismatch ?? 'fail';
-  } catch {
-    return 'fail';
-  }
+  const ds = await loadDef(datasource);
+  return ds?.external?.validation?.onMismatch ?? 'fail';
 }
 
 function safeGet<T>(ctx: PluginContext, name: string): T | undefined {

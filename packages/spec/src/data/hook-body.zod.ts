@@ -8,8 +8,8 @@ import { strictObject } from '../shared/strict-object';
 // takes the file's FIRST JSDoc as the reference page's module blurb, so a doc
 // comment here would replace the whole capability-token table.
 const CRYPTO_HASH_RETIRED =
-  "`crypto.hash` was removed from `HookBodyCapability` in @objectstack/spec 17 (#4391, "
-  + 'ADR-0049 enforce-or-remove) — the sandbox never implemented it. `installCtx` wired only '
+  "`crypto.hash` was removed from `HookBodyCapability` in @objectstack/spec 17 "
+  + '(ADR-0049 enforce-or-remove) — the sandbox never implemented it. `installCtx` wired only '
   + '`ctx.crypto.randomUUID`, so `ctx.crypto.hash(...)` threw inside the VM on every call the '
   + 'token ever "granted", while the build-time extractor inferred the token from that very '
   + 'call and let `os build` pass. Delete the capability from `capabilities` AND delete the '

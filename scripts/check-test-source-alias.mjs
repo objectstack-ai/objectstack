@@ -368,7 +368,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   ],
   '@objectstack/core': ['@objectstack/metadata-core', '@objectstack/spec'],
   '@objectstack/dogfood': [
-    '@objectstack/cli', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
+    '@objectstack/connector-mcp', '@objectstack/connector-openapi',
     '@objectstack/connector-rest', '@objectstack/core', '@objectstack/driver-sql',
     '@objectstack/driver-sqlite-wasm', '@objectstack/mcp', '@objectstack/metadata', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/plugin-audit', '@objectstack/plugin-auth',

@@ -189,6 +189,19 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * covered. A withdrawn verdict that deleted the row would land it back as an
  * untriaged FRESH row on the next run, which is the assertion below saying so.
  *
+ * ⭐ An EIGHTEENTH row was re-decided on 2026-08-29 under that same authorisation
+ * sentence and no wider one: `check:where-matcher SCAN_ROOT packages`, whose refusal
+ * rested on the identical retired collapse and whose population is the identical
+ * `.test.ts` corpus as the `check:objectql-double-limit` row. It was left standing on
+ * 2026-08-26 because it had no recorded consumer, which is the criterion that split that
+ * class in two; #13163 is that consumer, and it is MEASURED rather than argued — the
+ * derivation reached this gate for 0 of the test corpus, so a dev adding a
+ * silently-wrong matcher ran a 30-of-30 green local union and lost a CI round anyway. So
+ * this row takes the DECLARED-NARROWER half of the split rather than
+ * SPELLABLE-UNDECLARED, and its gate now carries the declaration. ⛔ Its numbers are
+ * re-measured on the 2026-08-29 tree and NOT carried from its sibling, which this
+ * docblock forbids by name.
+ *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
  * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
@@ -291,6 +304,25 @@ const TRIAGE = new Map([
     why: 'the literal is a join() component; the real population is the driver subtree, declared '
       + 'there at 259 of 291 files (89%) instead of 259 of 4903 (5.3%) at the bare root',
   }],
+  ['check:logger-receiver-detach SCAN_ROOTS packages', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'the population is the non-test TypeScript source under the root, declared beside the '
+      + 'constant at the three live extensions (4968 of 5485 tracked files, 90.6%) instead of '
+      + 'the bare root. The remainder is manifests, JSON, markdown and fixtures the gate never '
+      + 'opens, and the test files it deliberately does not read',
+  }],
+  ['check:logger-receiver-detach SCAN_ROOTS examples', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'same declaration, same gate: the TypeScript source under the examples root, 204 of 241 '
+      + 'tracked files (84.6%), rather than the bare word. The uncovered remainder carries no '
+      + 'TypeScript for this gate to read',
+  }],
+  ['check:logger-receiver-detach SCAN_ROOTS apps', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'same declaration, same gate: 28 of 40 tracked files (70.0%) under the apps root, at the '
+      + 'two extensions that exist there. The lowest ratio of the three and still a real '
+      + 'narrowing — the uncovered dozen are config and content files, none of them TypeScript',
+  }],
   ['check:objectql-double-limit SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'package test files',
@@ -305,6 +337,27 @@ const TRIAGE = new Map([
       + 'double ran a green union with no local signal. The row STAYS in the sweep because the '
       + 'bare root is still not covered — the spelling reaches no arbitrary file at the top of '
       + 'the root — which is what this verdict says and is correct, not outstanding debt',
+  }],
+  ['check:where-matcher SCAN_ROOT packages', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'package test files',
+    why: 'REFUSED as unspellable on the reading that every glob form of this population '
+      + 'collapses to a malformed double-separator prefix reaching nothing. #12300 retired that '
+      + 'collapse — a glob in a non-final segment is MATCHED now — so the refusal was FALSE of '
+      + 'this tree, in the same way and for the same reason as its identically-populated sibling '
+      + 'check:objectql-double-limit above. Re-measured HERE rather than inherited from that row: '
+      + 'the recorded spelling reaches 2889 of the 2889 files this gate own testFilesUnder() walk '
+      + 'admits, SET-EQUAL in both directions — nothing walked left uncovered, nothing covered '
+      + 'left unwalked — so 100% precise and complete, against 5509 tracked files under the bare '
+      + 'root. Declared beside SCAN_ROOT under the ROOT_DIR_WATCH_HINTS idiom for consumer '
+      + '#13163, the measured downstream pull this row lacked when the seventeen were '
+      + 're-adjudicated: before it, extractWatchHints over the gate returned ONE hint, the gate '
+      + 'own baseline JSON, so the derivation could name this gate only for a change set editing '
+      + 'the files ALREADY KNOWN to be wrong and never for a NEW silently-wrong matcher — the '
+      + 'inverse of what it guards, paid as a CI round trip by a PR that derived 30 of 30 green '
+      + 'gates locally. The row STAYS in the sweep because the bare root is still not covered — '
+      + 'the spelling reaches no arbitrary file at the top of the root — which is what this '
+      + 'verdict says and is correct, not outstanding debt',
   }],
   ['check:skill-refs SKILLS_DIR skills', {
     verdict: 'DECLARED-NARROWER',
@@ -431,10 +484,6 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%) — and already refused in that gate own docblock, '
       + 'measured there at 76 real couplings out of 4861 (1.6%)',
-  }],
-  ['check:where-matcher SCAN_ROOT packages', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'test files only, 2510 of 4903 (51%)',
   }],
   ['check:runner-env-posture SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',

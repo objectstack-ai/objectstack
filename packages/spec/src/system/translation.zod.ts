@@ -359,7 +359,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + "itself (`object.validations[].message`); omit `errors`.",
   _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
   _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
-  namespace: '`namespace` is not part of the translation contract — omit it (ADR-0006 D4 retired namespaces platform-wide)',
+  namespace: '`namespace` is not part of the translation contract — omit it (ADR-0129 D3 retired the separate namespace declaration platform-wide)',
 };
 
 // ────────────────────────────────────────────────────────────────────────────

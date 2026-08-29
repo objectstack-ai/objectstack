@@ -3227,6 +3227,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-organization-stamping.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-upload-session-ttl-sweep.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-storage/src/tombstone-download-live-reference.test.ts",
       "verb": "findOne",
       "pinned": 1

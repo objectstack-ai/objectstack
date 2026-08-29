@@ -70,6 +70,14 @@
  * answers come from ONE function, which is what keeps agreement a construction
  * rather than two suites agreeing about literals.
  *
+ * [#12509] And the channel has a SCOPE, ruled 2026-08-27 (option D): on a 5xx
+ * the producer did not declare, the demoted spelling came off an undeclared
+ * producer and is withheld with the prose, while an author-declared code
+ * survives. The discriminator is {@link serverFaultProvenance} — one function,
+ * read by {@link demotedDeclaredCode}, which every door already calls, so no
+ * registrar carries a variant. Read that function's note for why the status
+ * channel is the only honest signal here.
+ *
  * ## What this deliberately does NOT decide
  *
  *  - **Message disclosure.** A 5xx message may name physical tables or carry a
@@ -131,6 +139,11 @@ export interface ThrownHttpError {
    * every door (#9106) — but for the wire's `declaredCode` channel when the
    * spelling is not a vocabulary member ({@link demotedDeclaredCode}). See the
    * module note on why there are two.
+   *
+   * ⚠️ This field records what the producer WROTE, not what a boundary may
+   * emit: since #12509 a demoted spelling is withheld on an undeclared 5xx.
+   * ⛔ Read {@link demotedDeclaredCode}, never this field, when deciding what
+   * goes on a wire.
    */
   declaredCode?: string;
   /** The thrown message, UNSANITISED — see the module note on disclosure. */
@@ -260,19 +273,84 @@ export function declaredUserMessage(error: unknown): string | undefined {
 }
 
 /**
+ * [#12509] WHO named this 5xx — the producer, or this resolver's fallback.
+ * `undefined` for anything below 500, where nothing is sanitised at all.
+ *
+ * This is the ONE definition of the distinction ADR-0112's 5xx-sanitisation
+ * scope turns on (maintainer ruling 2026-08-27, option D), and it exists as a
+ * named function rather than as an inline conjunction because TWO rules read
+ * it and they read opposite limbs:
+ *
+ *  - `'undeclared'` — the throw declared no HTTP answer, so
+ *    {@link ThrownHttpError.status} is the caller's `fallbackStatus` and
+ *    EVERYTHING this resolver picked up off that throw is the producer's
+ *    internals rather than an answer it composed. A driver errno
+ *    (`SQLITE_ERROR`, `42P01`) is the measured case, and it is why
+ *    {@link demotedDeclaredCode} withholds the code here: the spelling names
+ *    the backend, which is one of the two disclosures the 5xx message
+ *    withhold exists to prevent (`looksLikeInternalErrorLeak`; the other,
+ *    identifiers, is already covered).
+ *  - `'declared'` — the producer named a 5xx ITSELF, so its code is authored
+ *    and survives. #11718's `{ status: 503, code: 'SERVICE_UNAVAILABLE' }`
+ *    relay is this limb, and so is a metadata app's own 5xx refusal spelling
+ *    (#7867), which the ADR-0112 amendment wrote `declaredCode` for.
+ *
+ * ⚠️ The DISCRIMINATOR is the status channel, not the code's shape. There is
+ * no other structural signal: a driver errno and an app's own spelling both
+ * arrive on `.code` as a plain string, so anything that told them apart by
+ * LOOKING at the string would be a heuristic over an open channel — the
+ * consumer-side tolerance ADR-0112 exists to forbid, and unfalsifiable besides
+ * (nothing stops an app from spelling `SQLITE_ERROR`). The cost of the
+ * structural answer is stated rather than hidden: a producer that spells a
+ * code but declares NO status loses that code on a 5xx. It keeps it by
+ * declaring the status it means, which is the shape the ADR already asks for.
+ *
+ * ⛔ NOT gated on whether `looksLikeInternalErrorLeak` actually fired on the
+ * message. That predicate is a heuristic over a DIFFERENT channel, and gating
+ * here on it would leak the errno for exactly the dialects whose prose the
+ * heuristic misses — the ceiling `sendThrownError`'s note records. The 5xx
+ * sanitisation REGIME is the condition, not one of its two outcomes.
+ *
+ * ⭐ #12281 — the prose axis of the same 2026-08-27 ruling — is the
+ * `'declared'` limb of this same function: the dispatcher door withholds the
+ * message of EVERY declared 5xx, aligning to `/data`. It is a separate card
+ * with its own measurement-first step, so nothing here applies it; this
+ * function is the shape it will read rather than a second copy it would have
+ * to grow.
+ */
+export type ServerFaultProvenance = 'declared' | 'undeclared';
+
+/** See {@link ServerFaultProvenance}. */
+export function serverFaultProvenance(thrown: ThrownHttpError): ServerFaultProvenance | undefined {
+  if (thrown.status < 500) return undefined;
+  return thrown.declaredStatus === undefined ? 'undeclared' : 'declared';
+}
+
+/**
  * The producer's spelling a boundary should surface as the wire's
  * `declaredCode` beside the closed `code` — or `undefined` when there is
  * nothing to surface (#9106).
  *
  * Present exactly when the throw spelled a code that did NOT survive into
- * {@link ThrownHttpError.code} — i.e. the demote happened. A registered code
- * is already in `code`, so emitting it again would put two spellings of one
- * fact on every refusal; a throw with no code has nothing to declare. Spelled
- * once here rather than as three `!==` comparisons at three exits, so
- * "presence means demotion" (`ApiErrorSchema.declaredCode`'s documented
- * semantics) has one definition.
+ * {@link ThrownHttpError.code} — i.e. the demote happened — AND the answer is
+ * not an undeclared server fault. A registered code is already in `code`, so
+ * emitting it again would put two spellings of one fact on every refusal; a
+ * throw with no code has nothing to declare. Spelled once here rather than as
+ * three `!==` comparisons at three exits, so "presence means demotion"
+ * (`ApiErrorSchema.declaredCode`'s documented semantics) has one definition.
+ *
+ * [#12509] The withhold limb, ruled 2026-08-27 (option D): on a 5xx the
+ * producer did NOT declare, the spelling this resolver demoted came off an
+ * undeclared producer — a driver errno, measured on the wire at three of this
+ * repo's doors — and it is withheld along with the prose. An AUTHOR-declared
+ * code survives at every status. The judgement lives in
+ * {@link serverFaultProvenance}; it is applied HERE, in the one read every
+ * boundary already makes, so all of them inherit it without a door growing a
+ * rule of its own. ⛔ Do not re-derive the condition at a door: a per-door
+ * variant is the divergence this channel has now been repaired for twice.
  */
 export function demotedDeclaredCode(thrown: ThrownHttpError): string | undefined {
+  if (serverFaultProvenance(thrown) === 'undeclared') return undefined;
   return thrown.declaredCode !== undefined && thrown.declaredCode !== thrown.code
     ? thrown.declaredCode
     : undefined;

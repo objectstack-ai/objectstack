@@ -258,9 +258,11 @@ function truthy(v: unknown): boolean {
  * Evaluate an aggregation EXPRESSION against one document.
  *
  * Models only the operators this builder emits. `$$`-prefixed system variables
- * are refused rather than guessed at — `$$ROOT` reaches the `array_agg` arm, and
- * an evaluator that quietly resolved it would be asserting a semantics nobody
- * checked.
+ * are refused rather than guessed at: an evaluator that quietly resolved one
+ * would be asserting a semantics nobody checked. `$$ROOT` used to arrive here
+ * from the builder's fieldless `array_agg` arm, which #13075 deleted with the
+ * retired name; the refusal stays because it is about system variables in
+ * general, not about that one arm.
  */
 export function evalExpr(doc: Doc, expr: unknown): unknown {
   if (typeof expr === 'string' && expr.startsWith('$')) {
