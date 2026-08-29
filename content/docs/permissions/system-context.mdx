@@ -278,7 +278,7 @@ and the census is a committed instrument rather than someone's afternoon:
 
 ```bash
 node scripts/isystem-census.mjs          # the summary below
-node scripts/isystem-census.mjs --json   # every site, role and package
+node scripts/isystem-census.mjs --json   # every site, its kind and its package
 ```
 
 **⛔ Not a `grep`.** A text scan is where a census *starts* and it cannot be where
@@ -288,7 +288,7 @@ metadata fields, and the `isSystemObject` / `isSystemObjectName` /
 over this same corpus silently dropped **6** reads in
 `plugin-reports/src/report-service.ts` to a quoting desync and **11** more to
 `(ctx?.session as any)?.isSystem` casts. So the census walks the TypeScript AST
-and classifies each appearance of the identifier by its syntactic role:
+and classifies each appearance of the identifier by where the parser puts it:
 a **read** (a table row here), a **declaration**, an object-literal or type
 **key** (a producer, not a behaviour), or something else.
 
