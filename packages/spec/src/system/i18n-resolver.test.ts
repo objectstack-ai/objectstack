@@ -1242,6 +1242,23 @@ describe('translatePage', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('translatePage — nested `properties.children` descent (#12961)', () => {
+  /**
+   * Fixtures are typed through these open shapes instead of being left to
+   * literal inference. `translatePage<T extends PageLike>` returns `T`, so an
+   * inferred literal type carries only the keys the LITERAL spells — reading
+   * back a key the overlay ADDS, or a `children` array a sibling branch of the
+   * union does not declare, is then a type error rather than a test. Same
+   * widening the #6080 block does inline (`as Record<string, string>`), hoisted
+   * because this block builds a dozen fixtures. Written as type ALIASES so they
+   * keep the implicit index signature `PageLike` needs.
+   */
+  type FixtureComponent = { type?: string; id?: string; label?: string; properties: Record<string, any> };
+  type FixturePage = {
+    name: string;
+    label?: string;
+    regions: Array<{ name: string; components: FixtureComponent[] }>;
+  };
+
   const kpiBundle: TranslationBundle = {
     'zh-CN': {
       pages: {
@@ -1260,7 +1277,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
   };
 
   /** The hotCRM `sales_home_page` shape: KPI blocks nested in a card. */
-  const kpiPage = () => ({
+  const kpiPage = (): FixturePage => ({
     name: 'sales_home_page',
     label: 'Sales Home',
     regions: [{
@@ -1302,7 +1319,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
   });
 
   it('descends recursively, not one level', () => {
-    const doc = {
+    const doc: FixturePage = {
       name: 'sales_home_page',
       regions: [{
         name: 'main',
@@ -1353,7 +1370,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 
   // ── The boundary the ruling drew: `children`, and only `children` ────────
   describe('the descended slot', () => {
-    const nestedUnder = (slotProps: Record<string, unknown>) => ({
+    const nestedUnder = (slotProps: Record<string, unknown>): FixturePage => ({
       name: 'sales_home_page',
       regions: [{
         name: 'main',
@@ -1402,7 +1419,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
   // ── The ruled collision rule, both directions ───────────────────────────
   describe('id collisions across nesting levels', () => {
     it('gives the entry to the REGION-LEVEL component when a nested id repeats it', () => {
-      const doc = {
+      const doc: FixturePage = {
         name: 'sales_home_page',
         regions: [{
           name: 'main',
@@ -1426,7 +1443,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
     it('wins region-level even when the region-level namesake comes LAST in a later region', () => {
       // The rule is level-priority, not document order: a nested component
       // that appears first in the document still loses to a region-level id.
-      const doc = {
+      const doc: FixturePage = {
         name: 'sales_home_page',
         regions: [
           {
@@ -1446,7 +1463,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
     });
 
     it('gives it to the DOCUMENT-ORDER FIRST nested match when no region-level id claims it', () => {
-      const doc = {
+      const doc: FixturePage = {
         name: 'sales_home_page',
         regions: [{
           name: 'main',
@@ -1471,7 +1488,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
     });
 
     it('reads document order depth-first — a deeper earlier match beats a shallower later one', () => {
-      const doc = {
+      const doc: FixturePage = {
         name: 'sales_home_page',
         regions: [{
           name: 'main',
@@ -1516,7 +1533,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
      * sits exactly `depth` levels BELOW region level (`depth: 0` would make
      * the leaf itself the region-level component).
      */
-    const chain = (depth: number, leafId: string) => {
+    const chain = (depth: number, leafId: string): FixturePage => {
       let node: any = { type: 'object-metric', id: leafId, properties: { label: 'Deals Won' } };
       for (let i = 0; i < depth; i++) {
         node = { type: 'page:section', properties: { children: [node] } };
