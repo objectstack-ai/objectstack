@@ -37,7 +37,7 @@ job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhoo
 作。**零 `enqueued` 事件按序查:① `mergeable_state` 是否 `dirty`;② enable-auto-merge 调用根本没落
 地(重发与效果验证序列见平台读数);③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
 
-**确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡 GitHub 代关):`Part of` 卡开着不摘
+**确认 MERGED 的同一动作里给 `Part of` 卡收口**(`Fixes` 卡代关,标也须摘):`Part of` 卡开着不摘
 `pm:dispatched`,就把无在飞物的卡永远算在 `label:pm:dispatched is:open` 里。摘标(换回 `pm:queue` 或按
 剩余物定级)+ 一条评论(交付了什么、剩下归谁)与 MERGED 确认是一个动作,⛔ 不拆到下轮巡
 检;同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关(事实见平台读数)。
