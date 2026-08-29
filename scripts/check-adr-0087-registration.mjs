@@ -530,7 +530,8 @@ export function breakingDeclaration(parsed) {
 //   2. A FRAMING-ANCHORED REWRITE -- a REWRITE (`X → Y` where both sides are
 //      code-ish: a backticked span, or a dotted/slashed identifier path) that
 //      appears either ON a line carrying migration framing, or ANYWHERE UNDER a
-//      heading that carries it. This is the branch that catches
+//      heading that carries it -- including under that heading's own SUB-headings,
+//      which is #12996. This is the branch that catches
 //      `**迁移**:`aggregate:` → `aggregations:`` and every other honestly-written
 //      prescription in either language.
 //
@@ -637,6 +638,63 @@ export function breakingDeclaration(parsed) {
 // `unknown-key-strictness-ui-batch15.md`. Zero false positives, breaking or not.
 // That is not luck; it is what the framing anchor buys, and the two wider rules
 // measured alongside it (below) show what the same table rule costs without it.
+//
+// ## #12996, the FOURTH spelling -- a framed region that closed at ANY heading
+//
+// Branches 2 and 3 read a rewrite only INSIDE a framed region, and until #12996 a
+// region opened by a framing heading closed at the NEXT HEADING OF ANY LEVEL. So a
+// `## Migration` section that organises its rewrite tables under `###` sub-headings
+// -- the ordinary way to write a two-part rename -- lost its framing before the
+// first table row was read. Measured through the gate's own exported function; A
+// and B differ BY ONE LINE:
+//
+//   A  `## Migration` + a rewrite table                        -> framed-table
+//   B  `## Migration` + `### Method namespace` + the same table -> null
+//
+// The live instance is `.changeset/adr0006-d2-client-environments-namespace.md`,
+// which carries a `## Migration` section with two `| before | after |` rewrite
+// tables under `###` sub-headings and holds `not-required (runtime-interface-only
+// ...)`. Its disposition is honest on its own terms and it passes -- but it passed
+// WITHOUT THE PRESCRIPTION ARM EVER BEING CONSULTED, which is not the same as
+// passing it, and `runtime-interface-only` inheriting the prescription refusal is
+// the whole reason it is a NARROWING of `no-migration-prescription` rather than a
+// fifth way around it (#8299).
+//
+// The fix tracks heading DEPTH: a heading closes every region nested at or outside
+// its own level and opens one of its own if it carries framing, so regions
+// SHALLOWER than it survive. The superset property is STRUCTURAL rather than
+// measured, one level up from where #6497 and #6559 established it: the predicate
+// became "some heading on the current path carries framing", and the MOST RECENT
+// heading -- the whole of the old predicate -- is always on that path. No body the
+// old scan framed can stop being framed.
+//
+// Measured over the stock at `4d94823a36` (419 changesets, 53 declared-breaking):
+// 34 hits / 23 breaking -> 35 / 24. ONE changeset newly flagged, and it is the live
+// instance above; ZERO no longer flagged, ZERO changed branch or evidence line. The
+// gate is forward-only, so that row -- already on main and already breaking at any
+// future merge base -- is never re-judged; what changes is that the next changeset
+// written this way is asked the question instead of being waved through.
+//
+// ⚠️ The card's smaller alternative was measured and REJECTED, and the first half of
+// the measurement is the surprising one: widening `OLD_COLUMN_RE` to admit `before`
+// buys NOTHING ON ITS OWN (+0 changesets), because `after` is not a NEW column word
+// and the header-framed arm needs both. Admitting `after` as well takes it to +3 /
+// 2 breaking, and TWO of the three are behaviour comparisons rather than rewrites:
+// `compound-meta-door-mode-draft.md` (`| Request | Before | After |`, one request's
+// response before and after the change) and `oauth-resource-identifier-sourced-255.md`
+// (`| | before (1024) | after (255) |`, two `information_schema` readings) -- the
+// second DECLARES BREAKING and holds `not-required (no-migration-prescription)`, so
+// the false positive would hard-block an author entitled to their exemption. That
+// is exactly the trade #6559 measured and refused for `was`/`now`, which P33 pins;
+// `before`/`after` is named in that same paragraph as this repo's
+// behaviour-comparison header vocabulary. It also addresses nothing about nesting.
+//
+// None of the three earlier repairs is subsumed by this one and none is removed:
+// #6419 and #6497 added ARMS (a real rewrite under framing; a table with no arrow),
+// #6559 added an arm that needs no heading at all, and this changes only WHERE a
+// heading-opened region ends. The four are independent, and the recurrence is not
+// that the repairs were too small -- it is that framing has more spellings than any
+// one of them enumerated.
 //
 // ## Why anchored on framing rather than on the arrow alone (measured)
 //
@@ -769,6 +827,14 @@ export function breakingDeclaration(parsed) {
 // (the specimen) and `notification-retirement-evidence-corrected.md` (a docs-only
 // correction narrating which commits touched a published FROM → TO). The residue and
 // the `--audit-stock` `!` candidate list are UNCHANGED at 97 / 52.
+//
+// ⚠️ One more correction is owed to this list, in the same spirit as the one above:
+// it did NOT name the shape #12996 turned out to be, a rewrite table under a
+// SUB-heading of a framing heading. That shape was not a residue anyone had decided
+// to accept -- it was invisible, and the list read as though everything a heading
+// framed was seen. It is closed now (see the #12996 section), and the lesson for
+// whoever writes the next version of this paragraph is that the residue is only as
+// honest as the shapes someone thought to try.
 //
 // Anyone widening this later should start with the first two, with these numbers to
 // beat, and should re-measure the false-positive surface FIRST -- as #6419, #6497
@@ -945,6 +1011,19 @@ function headerFramesRewrite(line) {
   if (oldAt < 0) return false;
   return cells.slice(oldAt + 1).some((c) => NEW_COLUMN_RE.test(c));
 }
+
+/**
+ * An ATX heading, and its depth in capture group 1.
+ *
+ * The pattern is `check-adr-0087-registration`'s own, hoisted out of
+ * `findMigrationPrescription` unchanged so that what opens a framed region and what
+ * closes one are one definition rather than two that can drift. Up to three leading
+ * spaces is CommonMark's rule, and the required whitespace after the hashes is what
+ * keeps `#!/usr/bin/env` and `#12996` out. Seven hashes is not a heading, and
+ * `#{1,6}\s` refuses it for free: the seventh `#` is not the whitespace the pattern
+ * needs. Stateless (no `g`): it is used inside a loop.
+ */
+const HEADING_RE = /^\s{0,3}(#{1,6})\s/;
 
 /**
  * Migration framing, in the spellings THIS repo's changesets actually use.
@@ -1238,9 +1317,18 @@ export function findMigrationPrescription(body) {
   }
 
   // A heading carrying migration framing opens a framed region that runs to the
-  // next heading. Without it, the most natural way to write a prescription --
-  // `## 迁移` followed by a list of `old` → `new` lines -- would be invisible,
-  // which is the #6419 defect in a second spelling.
+  // next heading OF THE SAME OR A SHALLOWER LEVEL. Without it, the most natural way
+  // to write a prescription -- `## 迁移` followed by a list of `old` → `new` lines --
+  // would be invisible, which is the #6419 defect in a second spelling. The DEPTH
+  // half of that sentence is #12996: closing at the next heading of ANY level meant
+  // a `## Migration` section that organised its rewrite tables under `###`
+  // sub-headings -- the ordinary way to write a two-part rename -- lost its framing
+  // before the first table row was read.
+  // Framing is tracked PER HEADING DEPTH rather than as one boolean (#12996). A
+  // heading closes every region nested at or outside its own level and opens one of
+  // its own if it carries framing; regions SHALLOWER than it survive untouched.
+  // Indices are 1..6, so the slot at 0 is never read.
+  const framingAtDepth = [false, false, false, false, false, false, false];
   let framedSection = false;
   let inTable = false;
   // The table arm's first hit, held back rather than returned (#6497). The arrow
@@ -1260,8 +1348,12 @@ export function findMigrationPrescription(body) {
   let headerFramed = false;
   let prev = '';
   for (const line of lines) {
-    if (/^\s{0,3}#{1,6}\s/.test(line)) {
-      framedSection = MIGRATION_FRAMING_RE.test(line);
+    const heading = HEADING_RE.exec(line);
+    if (heading) {
+      const depth = heading[1].length;
+      for (let d = depth; d < framingAtDepth.length; d++) framingAtDepth[d] = false;
+      framingAtDepth[depth] = MIGRATION_FRAMING_RE.test(line);
+      framedSection = framingAtDepth.includes(true);
       inTable = false; // a table cannot span a heading
       headerFramed = false;
     }
@@ -1681,6 +1773,75 @@ export function assertInputs({ cwd, head }) {
         `    ${ADR_0087} describes it and CATEGORIES does not list it, so any author who follows the\n` +
         '    ADR is refused by this gate for writing exactly what the ADR told them to write.\n' +
         '    fix: implement its check here, or remove it from the ADR.',
+      );
+    }
+  }
+
+  // (6) FRAMING-SCAN ROT (#12996) -- the one part of the prescription detector
+  //     whose TOTAL FAILURE is indistinguishable from its success. Branches 2 and
+  //     3 read a rewrite only inside a framed region, and a region is opened and
+  //     closed by `HEADING_RE`. If that scan ever stops seeing headings -- a
+  //     rewritten pattern, a heading dialect it cannot read -- every region is
+  //     empty, no prescription is ever found, and `no-migration-prescription` and
+  //     `runtime-interface-only` become free for everyone, reported as a clean
+  //     run. "Zero framed sections" is exactly what a body with no migration
+  //     section legitimately produces, so the stock cannot tell the two apart;
+  //     synthetic controls can, and they run on every invocation for the #8658
+  //     reason (4) gives -- the live stock's prescription population is repo
+  //     phase, not detector health.
+  //
+  //     BOTH directions are controlled, because the cure has its own failure
+  //     mode: a framed region that never CLOSES frames the rest of the document,
+  //     which is the same over-matching #6559 rejected the label-framed arrow arm
+  //     for. The floors below are the half that says the scan is discriminating
+  //     rather than merely saying yes.
+  const MUST_FRAME = [
+    [
+      'a rewrite table under a `## Migration` heading',
+      '## Migration\n\n| Wrote | Write instead |\n| --- | --- |\n| `a.b` | `a.c` |\n',
+      'framed-table',
+    ],
+    [
+      'a rewrite table under a `###` SUB-heading of `## Migration` (#12996)',
+      '## Migration\n\n### Method namespace\n\n| before | after |\n| --- | --- |\n| `a.b` | `a.c` |\n',
+      'framed-table',
+    ],
+    ['an arrow rewrite under a `## 迁移` heading', '## 迁移\n\n- `a.b` → `a.c`\n', 'framed-section'],
+  ];
+  const MUST_NOT_FRAME = [
+    [
+      'a rewrite table under a heading carrying no framing at all',
+      '## What changed\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n',
+    ],
+    [
+      'a rewrite table under a SIBLING heading that closed the framed region above it',
+      '## Migration\n\n- see below\n\n## Notes\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n',
+    ],
+  ];
+  for (const [label, text, branch] of MUST_FRAME) {
+    const hit = findMigrationPrescription(text);
+    if (hit?.branch !== branch) {
+      problems.push(
+        `FRAMING-SCAN ROT: ${label} is no longer read as a prescription` +
+        `${hit ? ` (reported \`${hit.branch}\`, expected \`${branch}\`)` : ' (reported nothing at all)'}.\n` +
+        '    The framed region is what branches 2 and 3 read a rewrite inside. A scan that finds no\n' +
+        '    section finds no prescription either, and this gate would then hand out\n' +
+        '    `no-migration-prescription` and `runtime-interface-only` to every author while\n' +
+        '    reporting a clean run (#4690) -- the success condition and the total-failure condition\n' +
+        '    are the same observation. If the framing convention genuinely changed, change\n' +
+        '    HEADING_RE / MIGRATION_FRAMING_RE and these controls in one edit.',
+      );
+    }
+  }
+  for (const [label, text] of MUST_NOT_FRAME) {
+    const hit = findMigrationPrescription(text);
+    if (hit) {
+      problems.push(
+        `FRAMING-SCAN ROT (inverted): ${label} now reads as a prescription (\`${hit.branch}\`).\n` +
+        `      ${hit.line.slice(0, 120)}\n` +
+        '    A framed region that does not close frames the REST OF THE DOCUMENT, which refuses an\n' +
+        '    exemption to authors entitled to it and offers them nothing else -- the #6419 shape,\n' +
+        '    one category over. Narrow the scan and these controls together.',
       );
     }
   }
@@ -3618,6 +3779,45 @@ function selfTest() {
   assert(
     findMigrationPrescription('**Migration (FROM → TO).** Replace each legacy value with the primitive\n\nit is NOT a parse error: `stripLegacyApiMethods` strips it with a\nFROM→TO warning (canonicalize-and-warn)\n')?.line === '**Migration (FROM → TO).** Replace each legacy value with the primitive',
     'P61: a body holding a real label AND a wrapped mention keeps the LABEL as its evidence -- `apimethod-enum-shrink.md`, declared-breaking, the stock\'s own control for this arm',
+  );
+
+  // --- P62-P68: the framed region closes at the same or a SHALLOWER heading, not
+  // --- at ANY heading (#12996) -- the FOURTH spelling of the recurring shape whose
+  // --- first three repairs are #6419, #6497 and #6559.
+  //
+  // P62-P64 and P67 are the RED set under reverse verification: restore the
+  // `framedSection = MIGRATION_FRAMING_RE.test(line)` limb and all four go red.
+  // P65-P66 are false-positive floors -- green with the fix and green without it,
+  // which is said out loud rather than counted as coverage, because they pin where
+  // a framed region STOPS and a region that never stops frames the whole document.
+  const NESTED_TABLE = '## Migration\n\n### Method namespace\n\n| before | after |\n| --- | --- |\n| `client.projects.list()` | `client.environments.list()` |\n';
+  assert(
+    findMigrationPrescription(NESTED_TABLE)?.branch === 'framed-table',
+    'P62: THE #12996 SHAPE -- a `###` sub-heading inside `## Migration` does not close the section, so the rewrite table under it is still framed',
+  );
+  assert(
+    findMigrationPrescription('## Migration\n\n### Response keys\n\n- `res.project` → `res.environment`\n')?.branch === 'framed-section',
+    'P63: the same for the ARROW arm -- branches 2 and 3 read one framed region and both gain the nesting',
+  );
+  assert(
+    hasMigrationPrescription('# Release\n\n## Migration\n\n### Keys\n\n#### Response\n\n- `a.b` → `a.c`\n'),
+    'P64: nesting is by DEPTH, not by one level -- a `####` under a `###` under `## Migration` is still inside it',
+  );
+  assert(
+    !hasMigrationPrescription('## Migration\n\n- see below\n\n## Notes\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n'),
+    'P65: FLOOR -- a SIBLING heading still closes the region; the fix widens where a region ends, it does not remove the end',
+  );
+  assert(
+    !hasMigrationPrescription('## Migration\n\n- see below\n\n# Appendix\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n'),
+    'P66: FLOOR -- a SHALLOWER heading closes it too, so a migration section cannot frame the rest of the document',
+  );
+  assert(
+    hasMigrationPrescription('## Migration\n\n### Method namespace\n\n- prose\n\n### Response keys\n\n| before | after |\n| --- | --- |\n| `res.project` | `res.environment` |\n'),
+    'P67: framing is per-DEPTH, not one remembered level -- a second `###` sibling closes only its own level, and the `## Migration` region above it survives',
+  );
+  assert(
+    !hasMigrationPrescription('## Method namespace\n\n### Response keys\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n'),
+    'P68: FLOOR -- nesting propagates framing DOWNWARD only; an unframed outer heading frames nothing, whatever sits under it',
   );
 
   // ---- U1-U12 (#8299): unit pins on the runtime-interface-only primitives ----
