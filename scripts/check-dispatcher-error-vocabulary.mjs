@@ -216,6 +216,10 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
+// [#12925] The OTHER gate's detector, imported so the kebab declaration below is
+// pinned against its real recognizers rather than a paraphrase of them. That gate
+// imports nothing from here, so this is a one-way edge.
+import { findViolations } from './check-error-code-casing.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -321,6 +325,93 @@ export const SHAPES = [
   // of literals is reduced, and it reports under `assignconst`.
   { name: 'codehelper', re: /\.code\s*=\s*([A-Za-z_$][\w$]*)\s*[;,\n)]/g, resolve: 'helper', lowercase: 'here' },
 ];
+
+/**
+ * ## [#12925] Kebab-case DIAGNOSTIC codes are a SEPARATE VOCABULARY — declared
+ * ## out of BOTH gates' population, once, here
+ *
+ * This repo authors two families of code-shaped string. `error.code` is one:
+ * ADR-0112 D1 rules its value space `^[A-Z][A-Z0-9_]*$`, this gate reports what
+ * is outside the registered set, and `check:error-code-casing` owns the
+ * lowercase sweep. The other is the AUTHOR-TIME DIAGNOSTIC code — `{ severity,
+ * code, message, tag }` records that describe an ARTIFACT rather than a
+ * request, carry a severity that can be a warning, and never reach `error.code`.
+ * That is the D6c genre, and `@objectstack/sdui-parser` spells its whole
+ * diagnostic vocabulary in KEBAB: `unknown-component`, `forbidden-tag`,
+ * `missing-required-prop`, …
+ *
+ * Neither gate has ever covered that family, and until this declaration NOTHING
+ * said so. Not one of the published grammars admits a hyphen — `assign`,
+ * `classfield`, `objlit`, `literalCodeValues` and the template shape here, and
+ * every pattern in `check:error-code-casing`, whose grammar is `[a-z][a-z0-9_]*`
+ * — so a kebab literal matches NO pattern in EITHER gate. Both run green over
+ * the file, both count it in "files scanned", and neither has anything to say.
+ *
+ * ⭐ This declaration is NOT a weakening. Coverage of this family is already
+ * zero and this changes no verdict; what changes is that the silence is now
+ * DECLARED rather than accidental. The bound this gate states for itself — a
+ * value it cannot reduce is REPORTED, never dropped — was being honoured for
+ * the constant form and quietly violated for the literal form, because a value
+ * outside every grammar fires no pattern and so cannot report itself.
+ *
+ * ## Why the declaration is here and not in each gate
+ *
+ * Two gates each carrying half of a boundary is what produced the hole: this
+ * one delegates a lowercase literal in `objlit`/`assign` to that one, that one
+ * defers a value with no literal at the position back to this one, and a kebab
+ * literal is in the seam — it HAS a literal, and it is lowercase, and neither
+ * grammar spells it. So the boundary is stated ONCE, in the file that already
+ * documents the pair's division of labour, and `--self-test` below pins it
+ * against BOTH gates' recognizers by importing the other gate's detector rather
+ * than paraphrasing it.
+ *
+ * ## The measurement behind it (re-measured on this tree, not relayed)
+ *
+ *   packages/sdui-parser, non-test source, 7 files in this gate's population:
+ *     24 distinct diagnostic codes — 8 stamped as `code: '…'` directly,
+ *        16 through the code-carrying helper `Parser#error(code, …)`
+ *     24 of 24 kebab-shaped; 0 non-kebab code VALUES in the package
+ *     this gate's SHAPES: 0 hits   ·   check:error-code-casing: 0 findings
+ *   The zeros are readings, not dead instruments: on independent populations
+ *   the same two instruments return 6 and 6 (`metadata-protocol/build-probes.ts`,
+ *   snake_case diagnostics) and 25 and 0 (`runtime/dispatcher-error-vocabulary.ts`,
+ *   SCREAMING_SNAKE). And the subject file IS inside the scanned set — it is
+ *   read and matches nothing, which is the whole defect.
+ *
+ * ## ⛔ What this declaration deliberately does NOT do
+ *
+ * ⛔ It does not widen any grammar to admit a hyphen. Widening would newly
+ * resolve other constants across the repo into SITES, and every new site then
+ * needs a declaration row in the table this gate reconciles against. That blast
+ * radius is UNMEASURED. Measuring it is a gate-POPULATION change, which is a
+ * maintainer decision on its own card — never a rider on a declaration.
+ *
+ * ⛔ It does not rename the diagnostic family to SCREAMING_SNAKE so a regex can
+ * see it. Kebab is that vocabulary's established convention across all 24 of
+ * them; renaming bends a vocabulary to fit a pattern.
+ *
+ * ⛔ And it does not become a general licence: this covers the kebab DIAGNOSTIC
+ * shape only. A hyphen in a value that reaches `error.code` is still outside
+ * ADR-0112 D1 and still a defect — there is simply no gate that can see one, and
+ * that is now on the record instead of in the gap between two regexes.
+ */
+export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
+  /** The shape declared out of both gates' population. */
+  shape: /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/,
+  /** A member, used by `--self-test` as the probe. */
+  sample: 'unknown-component',
+  /**
+   * Its non-kebab TWIN — the same characters with the hyphens spelled `_`.
+   * `--self-test` runs both through every recognizer, so the pin isolates the
+   * HYPHEN as the only reason the sample is unseen, rather than asserting a
+   * zero that a broken harness would also produce.
+   */
+  twin: 'unknown_component',
+  /** The package that owns this vocabulary, and the witness for the pin. */
+  owner: 'packages/sdui-parser',
+  /** Governed by: NEITHER gate. Stated so a run can print it. */
+  governedBy: 'neither — an author-time diagnostic vocabulary, ADR-0112 D6c genre',
+});
 
 const isTestFile = (rel) =>
   /\.(test|spec)\.[cm]?tsx?$/.test(rel) || /(^|\/)(__tests__|__mocks__|fixtures)\//.test(rel);
@@ -2105,6 +2196,130 @@ function selfTest() {
     );
   }
 
+
+  // [#12925] The kebab-case DIAGNOSTIC vocabulary is declared OUT of BOTH
+  // gates' population — `KEBAB_DIAGNOSTIC_VOCABULARY` above. It is pinned HERE,
+  // in the one place the declaration lives, so a later widening of ANY grammar
+  // in EITHER gate cannot adopt that family silently: something fails, and what
+  // fails names the decision.
+  //
+  // ⚠️ Both gates are green over the kebab family TODAY, so "still green" would
+  // prove nothing. Nothing below asserts a bare zero: every case runs the kebab
+  // sample AND its non-kebab TWIN — the same characters, hyphens spelled `_` —
+  // through the same recognizer. A harness that stopped working fails on the
+  // twin instead of passing on the sample, which is what makes the zero a
+  // reading. The other gate's detector is IMPORTED rather than paraphrased, so
+  // widening `check:error-code-casing` trips this too.
+  {
+    const K = KEBAB_DIAGNOSTIC_VOCABULARY;
+    const DECISION =
+      'a grammar now admits a hyphen, so the kebab DIAGNOSTIC vocabulary that ' +
+      'KEBAB_DIAGNOSTIC_VOCABULARY (#12925) declares OUT of both gates is being adopted into a ' +
+      "gate's population. That is a gate-POPULATION change — measure the blast radius (how many " +
+      'constants repo-wide newly resolve into sites that then need declaration rows) and route it ' +
+      'to the maintainer on its own card. Do not widen quietly, and do not adjust this pin to match.';
+
+    const seen = (source) => {
+      const { sites, unresolved } = deriveSites({
+        registered,
+        files: [{ rel: 'packages/x/src/a.ts', source }],
+        readFile: () => '',
+      });
+      return {
+        vocab: sites.length + unresolved.length,
+        casing: findViolations(source, 'packages/x/src/a.ts').length,
+      };
+    };
+
+    // ① The declared shape discriminates: it admits the sample and refuses the twin.
+    ok(K.shape.test(K.sample), `KEBAB_DIAGNOSTIC_VOCABULARY.shape rejects its own sample — ${DECISION}`);
+    ok(!K.shape.test(K.twin), 'KEBAB_DIAGNOSTIC_VOCABULARY.shape admits its non-kebab twin — the pin below cannot isolate the hyphen');
+
+    // ② In each literal STAMP POSITION: the kebab value is seen by NEITHER gate,
+    //    and its twin is seen by ONE of them. Same text, same position, one byte
+    //    class apart — so the hyphen is the only thing that puts it outside.
+    const positions = {
+      objlit: `throw Object.assign(new Error('x'), { code: '%CODE%' });`,
+      assign: `const e = new Error('x'); e.code = '%CODE%'; throw e;`,
+      classfield: `class E extends Error { readonly code = '%CODE%' as const; }`,
+    };
+    for (const [name, tmpl] of Object.entries(positions)) {
+      const kebab = seen(tmpl.replace('%CODE%', K.sample));
+      const twin = seen(tmpl.replace('%CODE%', K.twin));
+      ok(
+        kebab.vocab === 0 && kebab.casing === 0,
+        `a kebab diagnostic code in the '${name}' position is now visible to a gate — ${DECISION}`,
+      );
+      ok(
+        twin.vocab + twin.casing > 0,
+        `the non-kebab twin in the '${name}' position is invisible too — the '${name}' probe measures ` +
+          'nothing, so the zero beside it is not a reading. Fix the probe before trusting either.',
+      );
+    }
+
+    // ③ The reducer itself: a kebab literal does not reduce, its twin does.
+    ok(
+      literalCodeValues(`'${K.sample}'`) === null,
+      `literalCodeValues now reduces a kebab literal — ${DECISION}`,
+    );
+    ok(
+      (literalCodeValues(`'${K.twin}'`) ?? []).includes(K.twin),
+      'literalCodeValues no longer reduces the non-kebab twin — the check above is vacuous',
+    );
+
+    // ④ The CONSTANT form is UNDISCHARGEABLE, which is why the inline literal
+    //    is the form this gate pair currently rewards. `objlitconst` matches the
+    //    constant NAME, the reducer refuses the kebab VALUE, and the resulting
+    //    `unresolved-constant` is pushed unconditionally — no declaration row
+    //    classifies it. Pinned because the declaration's argument rests on it.
+    {
+      const source =
+        `const SOME_DIAGNOSTIC = '${K.sample}';\n` +
+        `emit({ code: SOME_DIAGNOSTIC, message: 'x' });`;
+      const { sites, unresolved } = deriveSites({
+        registered,
+        files: [{ rel: 'packages/x/src/a.ts', source }],
+        readFile: () => '',
+      });
+      ok(sites.length === 0, `a kebab constant now resolves to a site — ${DECISION}`);
+      ok(unresolved.length === 1, 'a kebab code constant produced no unresolved finding — the bound this gate states for itself');
+      const undischarged = (declared) =>
+        reconcile({ sites, declared, registered, unresolved }).filter((f) => f.kind === 'unresolved-constant').length;
+      ok(undischarged([]) === 1, 'the unresolved kebab constant produced no finding');
+      ok(
+        undischarged([
+          { code: K.sample, file: 'packages/x/src/a.ts', shape: 'objlitconst', door: 'none', verdict: 'not-dispatcher-reachable', evidence: 'x' },
+        ]) === 1,
+        'a declaration row now discharges an unresolved kebab constant — the escape hatch this card ' +
+          'declared absent exists after all; the declaration above must be rewritten, not the pin',
+      );
+    }
+
+    // ⑤ The declared WITNESS is real and still homogeneous. This is what stops
+    //    the declaration outliving its subject: it fails if the owning package
+    //    moves, and it fails the moment that vocabulary stops being all-kebab —
+    //    at which point the family is no longer what was declared out.
+    {
+      const ownerDir = join(ROOT, K.owner);
+      ok(existsSync(ownerDir), `${K.owner} does not exist — KEBAB_DIAGNOSTIC_VOCABULARY.owner moved`);
+      let kebab = 0;
+      const foreign = [];
+      for (const f of walkSources(ownerDir, ROOT)) {
+        const src = maskComments(readFileSync(f.abs, 'utf8'));
+        for (const m of src.matchAll(/\bcode:\s*'([^']*)'/g)) {
+          if (K.shape.test(m[1])) kebab += 1;
+          else foreign.push(`${f.rel}: '${m[1]}'`);
+        }
+      }
+      ok(kebab > 0, `${K.owner} stamps no kebab diagnostic code at all — the declared witness is empty`);
+      ok(
+        foreign.length === 0,
+        `${K.owner} now stamps a NON-kebab code value (${foreign.join(', ')}) — the vocabulary declared ` +
+          'out of both gates is no longer homogeneous, so the declaration no longer describes it.',
+      );
+    }
+  }
+
   if (fail.length) {
     console.error('check-dispatcher-error-vocabulary --self-test FAILED:');
     for (const f of fail) console.error(`  - ${f}`);
@@ -2158,7 +2373,12 @@ function main() {
     `  door typing (#9098): ${REST_DOOR_FILE} checked for the typed author-side responder, the ` +
     `absence of a second \`sendError\`, and decided refusals bypassing it.\n` +
     `  the sandbox limb (author-thrown codes from metadata-app action code) is outside this scan ` +
-    `by construction — see SANDBOX_AUTHORED_LIMB in ${DECLARATION}.`;
+    `by construction — see SANDBOX_AUTHORED_LIMB in ${DECLARATION}.` +
+    `\n  kebab-case DIAGNOSTIC codes (e.g. '${KEBAB_DIAGNOSTIC_VOCABULARY.sample}', owned by `+
+    `${KEBAB_DIAGNOSTIC_VOCABULARY.owner}) are a SEPARATE vocabulary, governed by `+
+    `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
+    `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
+    `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');
