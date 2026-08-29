@@ -382,8 +382,21 @@ export const HASH_SHADOW_SUFFIX = '__hash';
  * Matched by SUFFIX rather than by a registry of known names, deliberately: the
  * differ runs against a database whose metadata it is comparing to, and a
  * shadow whose declared index has since been removed must still be recognised
- * as driver-owned (it is then cleaned up by the index's own removal path, not
- * by a blind column drop).
+ * as driver-owned (it is cleaned up by the index's own removal path, not by a
+ * blind column drop).
+ *
+ * ⚠️ That last clause was an ASSERTION about a path that did not exist, and it
+ * is the load-bearing half of this docblock: it is the whole reason this pass
+ * may decline to report the column. #13056 built the path it names —
+ * `SqlDriver.dropOrphanedHashShadowColumn`, run by the `drop_index` op after
+ * the index goes — because until then `dropIndexIfExists` issued one statement
+ * family and never touched a column. The shadow of a retired declaration
+ * therefore outlived it forever: a `VARBINARY(32)` STORED generated column,
+ * recomputed on every INSERT and on every UPDATE touching its sources, keyed by
+ * nothing and reported by no pass. Skipping the column here is only correct
+ * while some other path really does collect it — so if that method is ever
+ * removed or its call site moved, this `continue` becomes a leak again and the
+ * skip must go with it.
  */
 export function isHashShadowColumn(name: string): boolean {
   return name.endsWith(HASH_SHADOW_SUFFIX);
