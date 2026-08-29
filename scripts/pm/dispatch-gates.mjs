@@ -3476,9 +3476,24 @@ export function scratchDirSitesInSource(rel, source) {
 const SOURCE_READ_CALL = /\b(?:fs\.)?(?:readFileSync|copyFileSync)\s*\(/g;
 
 /** Program text, as opposed to data a gate parses — see the docblock above. */
-const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
+export const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
 
+/**
+ * The program files, of the tracked files a gate opens at an anchored path.
+ *
+ * Two functions rather than one, and the split is the DECISION: `anchoredReadTargets`
+ * answers what the scan can see, and this one applies the boundary this card
+ * drew. Kept apart so the self-test can price the refused half from the same
+ * primitive — a restriction measured only through itself reads 0 refusals
+ * whether it refuses much or nothing, which is how the first spelling of that
+ * case passed as a green over an instrument that could not return non-zero.
+ */
 export function readProgramTargetsInSource(rel, source, isTracked) {
+  return anchoredReadTargets(rel, source, isTracked).filter((t) => PROGRAM_TEXT_TARGET.test(t));
+}
+
+/** Every TRACKED file the source opens at a path anchored to its own location. */
+export function anchoredReadTargets(rel, source, isTracked) {
   const masked = maskComments(String(source));
   const { literal } = scanSource(masked);
   const ctx = {
@@ -3496,8 +3511,7 @@ export function readProgramTargetsInSource(rel, source, isTracked) {
     const at = resolvePathExpression(expr, ctx);
     if (at.kind !== 'in-tree' || at.segs.length === 0) continue;
     const path = at.segs.join('/');
-    if (path === rel || out.includes(path)) continue;
-    if (!PROGRAM_TEXT_TARGET.test(path) || !isTracked(path)) continue;
+    if (path === rel || out.includes(path) || !isTracked(path)) continue;
     out.push(path);
   }
   return out;
@@ -5703,7 +5717,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // The same tracked listing the reachability sweep walks, as a membership test
   // for `readProgramTargetsInSource`: a resolved path the repo does not track is
   // a sandbox destination or a build artifact, never an input a card can edit.
-  const trackedSet = tree.files ?? new Set(trackedFiles());
+  const trackedSet = tree?.files ?? new Set(trackedFiles());
   // A followed module is scanned once however many families import it —
   // invoked-as.mjs is imported by 79 of them.
   const moduleHints = new Map();
@@ -9595,6 +9609,131 @@ function selfTest() {
       coveringKey(entry, hint)?.via === `gate source via ${mod}`,
     );
   }
+
+  // ── The PROGRAM a gate opens by path (#13000) ─────────────────────────────
+  //
+  // The second undeclared dependency, beside the import above: a gate that
+  // opens another script's source at a path anchored to its own location. The
+  // card's instance is a STAGED COPY — the digest writes the ADR-0087 gate into
+  // a throwaway repo and runs it — and the three shapes (stage it, execute it,
+  // assert on it) are one dependency, so the recogniser reads the READ.
+  //
+  // The recogniser, on fixture source: one line per refusal, for the reason the
+  // import fixture above gives — a widening or a narrowing fails HERE with its
+  // reason named, rather than as a pair count nobody can attribute afterwards.
+  const readFixture = [
+    'const __dirname = dirname(fileURLToPath(import.meta.url));',
+    "const staged = readFileSync(join(__dirname, 'invoked-as.mjs'), 'utf8');", // followed
+    "copyFileSync(new URL('./js-comment-mask.mjs', import.meta.url), dest);", // copy, URL anchor
+    "const up = readFileSync(join(__dirname, '..', 'eslint.config.mjs'), 'utf8');", // climbs, still tracked
+    "const data = readFileSync(join(__dirname, '..', 'package.json'), 'utf8');", // DATA, not program text
+    "const gone = readFileSync(join(__dirname, 'does-not-exist.mjs'), 'utf8');", // resolves, untracked
+    "const self = readFileSync(join(__dirname, 'fixture.mjs'), 'utf8');", // itself: the identity key owns it
+    "const out = readFileSync(join(tmpdir(), 'x.mjs'), 'utf8');", // outside the tree
+    "const cwd = readFileSync('scripts/check-nul-bytes.mjs', 'utf8');", // bare literal, cwd unknown
+    "// readFileSync(join(__dirname, 'check-doc-anchors.mjs'), 'utf8');", // a comment
+    'const src = "readFileSync(join(__dirname, \'check-role-word.mjs\'), \'utf8\')";', // inside a string
+    "const loop = ['bump-objectui.sh'].map((f) => readFileSync(join(__dirname, f), 'utf8'));", // loop variable
+  ].join('\n');
+  const readFixtureOut = readProgramTargetsInSource('scripts/fixture.mjs', readFixture, (f) =>
+    liveTree.files.has(f),
+  );
+  t(
+    'the read scan follows a directory-anchored read and a URL-anchored copy, and refuses data, untracked, self,' +
+      ' out-of-tree, bare-literal, commented, string-literal and loop-variable spellings',
+    readFixtureOut.join(' · ') === 'scripts/invoked-as.mjs · scripts/js-comment-mask.mjs · eslint.config.mjs',
+    readFixtureOut.join(' · '),
+  );
+
+  // The live halves. Counts and names in every case, for the reason the import
+  // section states: a case that can only be read as "something was found" is
+  // the shape a pin fails in.
+  const readEdges = [...liveDiscovery.byCheck]
+    .flatMap(([check, e]) => (e.reads ?? []).map((r) => [check, r, e.readOrigin.get(r)]));
+  t(
+    `the live tree HAS a gate reading another script's source, so this key is not vacuous (${readEdges.length}:` +
+      ` ${readEdges.map(([c, r, by]) => `${c} <- ${r} via ${by}`).join(' · ') || 'none'})`,
+    readEdges.length > 0,
+  );
+
+  // The card's own specimen, end to end and by name. ⛔ Not "some family
+  // matches": the miss was THIS family scoring `silent` for THIS path.
+  const digestEntry = liveDiscovery.byCheck.get('check:objectui-changeset');
+  const STAGED_GATE = 'scripts/check-adr-0087-registration.mjs';
+  t(
+    `the staged gate reaches the family that runs a copy of it (${coveringKey(digestEntry, STAGED_GATE)?.via ?? 'no key'})`,
+    coveringKey(digestEntry, STAGED_GATE)?.key === STAGED_GATE &&
+      coveringKey(digestEntry, STAGED_GATE)?.via === 'program text read by scripts/objectui-changeset-digest.mjs',
+  );
+  // …and green for the RIGHT reason. `extractWatchHints` masks self-tests, so
+  // the staging literal is not a hint and cannot supply this lead — the case
+  // above would otherwise pass on a key it is not testing.
+  t(
+    'and no watch hint of that family covers it, which is why the key was needed',
+    !(digestEntry.hints ?? []).some((h) => hintCovers(h, STAGED_GATE)) &&
+      !(digestEntry.files ?? []).some((f) => hintCovers(f, STAGED_GATE)),
+  );
+
+  // Reconstruction: `entry.reads` is what the scan says over the family's own
+  // files, never a list kept here.
+  const offReads = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    const expected = [];
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const r of readProgramTargetsInSource(f, liveSource(f), (x) => liveTree.files.has(x))) {
+        if (!expected.includes(r)) expected.push(r);
+      }
+    }
+    if (expected.join(' · ') !== (entry.reads ?? []).join(' · ')) offReads.push(check);
+  }
+  t(
+    `a family's reads are exactly what the scan finds in the scripts its COMMAND names (off: ${offReads.join(', ') || 'none'})`,
+    offReads.length === 0,
+  );
+
+  // Additive BY CONSTRUCTION — the claim `coveringKey`'s comment makes. For
+  // every read target, the family either had no key at all before, or keeps the
+  // exact key and label it had: this one is consulted last and can only fill a
+  // hole.
+  const reattributed = [];
+  for (const [check, entry, target] of readEdges.map(([c, r]) => [c, liveDiscovery.byCheck.get(c), r])) {
+    const withKey = coveringKey(entry, target);
+    const saved = entry.reads;
+    entry.reads = [];
+    const without = coveringKey(entry, target);
+    entry.reads = saved;
+    // Both halves, because only the pair is the claim. Without the first, a
+    // derivation that answers NOTHING for every read edge satisfies "nothing
+    // was re-attributed" perfectly.
+    if (!withKey) reattributed.push(`${check} ${target}: no key at all`);
+    else if (without && (without.key !== withKey.key || without.via !== withKey.via)) {
+      reattributed.push(`${check} ${target}: ${without.via} -> ${withKey.via}`);
+    }
+  }
+  t(
+    `every read edge earns a key, and none is re-attributed — this key only fills a hole (${reattributed.join(' | ') || 'none'})`,
+    readEdges.length > 0 && reattributed.length === 0,
+  );
+
+  // The DATA refusal, priced rather than asserted: the live tree really does
+  // have gates reading tracked NON-program files at anchored paths, and none of
+  // them is here. That is the boundary this card declined to cross, and a
+  // future card widening it should red this case rather than discover it.
+  const dataReads = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const r of anchoredReadTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
+        if (!PROGRAM_TEXT_TARGET.test(r)) dataReads.push(`${check} <- ${r}`);
+      }
+    }
+  }
+  t(
+    `the program-text restriction is not vacuous: ${dataReads.length} anchored read(s) of tracked DATA are refused` +
+      ` (${dataReads.slice(0, 4).join(' · ')}${dataReads.length > 4 ? ` · +${dataReads.length - 4} more` : ''})`,
+    dataReads.length > 0 && dataReads.every((d) => !readEdges.some(([c, r]) => `${c} <- ${r}` === d)),
+  );
 
   // ── A followed module's JOIN BASE is not a population (#12500) ─────────────
   //
