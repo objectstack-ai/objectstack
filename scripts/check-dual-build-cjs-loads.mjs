@@ -258,12 +258,12 @@ const EXIT_PREREQ = 3;
 // free; LOWERING one to make a run pass is the move this block exists to make
 // visible in a diff.
 
-const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1, typedEntries: 102 });
+const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1, typedJudged: 102 });
 const MIN_ENTRIES = 90;
 const MIN_PACKAGES = 58;
 const MIN_CJS_FILES = 520;
 const MIN_PROBES = 1;
-const MIN_TYPED_ENTRIES = 88;
+const MIN_TYPED_JUDGED = 88;
 
 /**
  * Where each count was measured. Carried PER ROW rather than as one commit in
@@ -278,7 +278,7 @@ const MEASURED_AT = Object.freeze({
   // The manifest tree of #13112's fix. `dist/` is unaffected by that diff (an
   // `exports` map decides what a resolver READS, never what tsup EMITS), so
   // this count is the same one a clean build of that commit produces.
-  typedEntries: '196612a313',
+  typedJudged: '196612a313',
 });
 
 /**
@@ -302,9 +302,9 @@ export function floorProblem(counts) {
     [counts?.probes ?? 0, MIN_PROBES, MEASURED.probes, 'cross-format behaviour probe(s) run',
       'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.',
       MEASURED_AT.probes],
-    [counts?.typedEntries ?? 0, MIN_TYPED_ENTRIES, MEASURED.typedEntries, 'require entry point(s) with a CommonJS-flavoured `types`',
-      'This is the TYPED population. `resolveRequireTypes` returned nothing across the tree, so every entry took the "no types" branch or none was judged at all — and a defect that hands every CJS consumer an ESM declaration would read as a clean tree.',
-      MEASURED_AT.typedEntries],
+    [counts?.typedJudged ?? 0, MIN_TYPED_JUDGED, MEASURED.typedJudged, 'require entry point(s) JUDGED by TYPED',
+      'This is the TYPED population — entries reached and answered, clean or not. It does not move when packages are defective, only when the row loop stops asking, so a fall here means TYPED went silent rather than that the tree got worse.',
+      MEASURED_AT.typedJudged],
   ];
   for (const [got, min, measured, what, why, at] of rows) {
     if (got >= min) continue;
@@ -658,7 +658,7 @@ export function isParseFailure(stderr) {
 // ---------------------------------------------------------------------------
 
 /**
- * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, typedEntries: number, probesRun: number}>}
+ * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, typedEntries: number, typedJudged: number, probesRun: number}>}
  */
 export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) {
   const rows = collectEntries(root);
@@ -675,6 +675,15 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   // rather than interleaved with the per-row LOADS diagnostics.
   let typedEntries = 0;
   const typedFindings = [];
+  // ⚠️ The floor counts entries JUDGED, never entries CLEAN. Measured while
+  // ablating #13112's fix: with the floor on the clean count, restoring the 28
+  // defective manifests drove it from 102 to 67 and the gate REFUSED (exit 2,
+  // "nothing was read") instead of reporting its 35 findings — a real
+  // regression rendered as a broken instrument, which is the one reading a
+  // vacuity floor must never produce. A judged count is invariant to how many
+  // entries are defective and falls only when the walk or the resolver stops
+  // asking, which is the thing the floor is for.
+  let typedJudged = 0;
 
   for (const r of rows) {
     r.distDir = join(r.dir, 'dist');
@@ -690,6 +699,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
     // TYPED — see the header. Asked only of rows whose require target really
     // emitted, so a package that failed to build answers the LOADS question
     // first rather than collecting a second finding about the same absence.
+    typedJudged++;
     if (!r.typesTarget) {
       findings.push(
         `${r.id}: the require condition resolves NO \`types\` — a consumer reading this entry point gets whatever `
@@ -715,7 +725,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
     }
   }
   findings.push(...typedFindings);
-  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun: 0 };
+  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun: 0 };
 
   // PARSES — over the union of emitted CommonJS files, deduped across the
   // several entries a package may declare.
@@ -755,7 +765,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   const probeResults = await runBehaviourProbes(root, rows, probes);
   findings.push(...probeResults.findings);
 
-  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun: probeResults.ran };
+  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun: probeResults.ran };
 }
 
 /** Read the expectation a probe declares. Only `spec-version` exists today. */
@@ -818,7 +828,7 @@ function readLedger(root) {
 async function main(argv) {
   const root = REPO_ROOT;
   const ledger = readLedger(root);
-  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun } = await scan(root, ledger);
+  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun } = await scan(root, ledger);
 
   if (argv.includes('--list')) {
     for (const r of rows) console.log(`${r.id.padEnd(48)} ${String(r.target).padEnd(34)} types=${r.typesTarget ?? '(none)'}`);
@@ -842,7 +852,7 @@ async function main(argv) {
     packages: new Set(rows.map((r) => r.pkg)).size,
     cjsFiles: cjsFileCount,
     probes: probesRun,
-    typedEntries,
+    typedJudged,
   });
   if (floor !== null) {
     console.error(`check:dual-build-cjs-loads REFUSES — ${floor}`);
@@ -1095,8 +1105,9 @@ export async function selfTest() {
     // is the vacuity the floor above exists to catch, one layer up.
     const typedFindingCount = rTyped.findings.filter((f) => /resolves NO |is NOT emitted though|ESM-flavoured in a/.test(f)).length;
     t('every live entry is judged exactly once — counted clean OR reported',
-      rTyped.typedEntries + typedFindingCount === rTyped.rows.filter((r) => r.exists).length,
-      `typed=${rTyped.typedEntries} findings=${typedFindingCount} live=${rTyped.rows.filter((r) => r.exists).length}`);
+      rTyped.typedEntries + typedFindingCount === rTyped.typedJudged
+      && rTyped.typedJudged === rTyped.rows.filter((r) => r.exists).length,
+      `clean=${rTyped.typedEntries} findings=${typedFindingCount} judged=${rTyped.typedJudged} live=${rTyped.rows.filter((r) => r.exists).length}`);
     t('…and three of the fixtures are the reported ones', typedFindingCount === 3, String(typedFindingCount));
 
     // The shipped probe table must name entry points that really exist here.
@@ -1134,15 +1145,21 @@ export async function selfTest() {
   // driven down individually AND the measured tuple is asserted to clear them
   // all — a floor accidentally set above its own measurement would red every
   // real run, which is the opposite failure and just as invisible in review.
-  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedEntries: MEASURED.typedEntries };
+  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedJudged: MEASURED.typedJudged };
   t('FLOOR — the values measured on 8cb96ec41b clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
   t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
   t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
   t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', floorProblem({ ...full, probes: 0 }) !== null);
-  t('FLOOR — a dead types resolver refuses (TYPED judged nothing)', floorProblem({ ...full, typedEntries: 0 }) !== null);
+  t('FLOOR — a dead types resolver refuses (TYPED judged nothing)', floorProblem({ ...full, typedJudged: 0 }) !== null);
   t('FLOOR — the TYPED refusal cites the tree ITS number came from, not the older one',
-    /\(102 on 196612a313\)/.test(floorProblem({ ...full, typedEntries: 0 }) ?? ''), JSON.stringify(floorProblem({ ...full, typedEntries: 0 })));
+    /\(102 on 196612a313\)/.test(floorProblem({ ...full, typedJudged: 0 }) ?? ''), JSON.stringify(floorProblem({ ...full, typedJudged: 0 })));
+  // ⛔ The measured regression the floor must NOT produce: a tree where every
+  // one of the 35 defective entries is judged and reported still clears it,
+  // because judged does not fall when clean does. With the floor on the clean
+  // count this returned a refusal and the 35 findings were never printed.
+  t('FLOOR — a tree FULL of TYPED findings still reports them, never refuses',
+    floorProblem({ ...full, typedJudged: MEASURED.typedJudged }) === null);
   t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
   t('FLOOR — the refusal names the count, the floor and the measurement',
     /measured only 0 .* below the floor of \d+ \(613 on 8cb96ec41b\)/s.test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
@@ -1150,7 +1167,7 @@ export async function selfTest() {
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
     && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes
-    && MIN_TYPED_ENTRIES <= MEASURED.typedEntries);
+    && MIN_TYPED_JUDGED <= MEASURED.typedJudged);
   t('FLOOR — every count carries the tree it was measured on',
     Object.keys(MEASURED).every((k) => typeof MEASURED_AT[k] === 'string' && MEASURED_AT[k].length >= 10));
   t('FLOOR — the refusal code is distinct from findings and prerequisite',
