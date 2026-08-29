@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * # Metadata Manager Configuration
@@ -124,24 +125,36 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
   loaderOptions: z.record(z.string(), z.unknown()).optional().describe('Loader-specific configuration'),
 
   /**
-   * Persistence Write Gates
+   * Persistence Write Gate
    *
-   * Two-axis gate that controls whether the metadata layer accepts mutations
-   * at runtime. Read paths are always permitted.
+   * Controls whether the metadata layer accepts mutations at runtime. Read
+   * paths are always permitted.
    *
    * - `writable: false` — `MetadataManager.register()` becomes a no-op
    *   (or throws, depending on `validation.throwOnError`). Useful for
    *   read-only project kernels booted from a compiled artifact, where the
    *   running process must never write back to `sys_metadata`.
-   * - `overlayWritable: false` — `MetadataManager.saveOverlay()` is rejected.
-   *   Use this for fully-frozen production deployments where Studio overlays
-   *   are disabled.
    *
-   * Both default to `true` so existing dev / Studio flows are unaffected.
+   * Defaults to `true` so existing dev / Studio flows are unaffected.
+   *
+   * `overlayWritable` was REMOVED in v17 (#13135, ADR-0049 enforce-or-remove):
+   * the only thing it ever gated was `MetadataManager.saveOverlay()` — a
+   * method of the paper metadata-customization protocol, reachable only from
+   * its own unit tests (no route or UI ever called it) and removed with that
+   * protocol. Tombstoned rather than deleted because this nested object is
+   * not `.strict()` — a plain deletion would strip the key in silence.
    */
   persistence: z.object({
     writable: z.boolean().default(true).describe('Allow base metadata writes via register()'),
-    overlayWritable: z.boolean().default(true).describe('Allow overlay writes via saveOverlay()'),
+    overlayWritable: retiredKey(
+      '`persistence.overlayWritable` was removed from `MetadataManagerConfig` in ' +
+      '@objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — the only thing it gated was ' +
+      '`MetadataManager.saveOverlay()`, a paper-protocol method no route or UI ever called, ' +
+      'removed with the metadata-customization protocol (ADR-0126 supersedes it on the record). ' +
+      'Delete the key. The base write gate that remains is `persistence.writable`; the real ' +
+      "org-overlay writes (ADR-0005) ride the REST meta write doors' `manage_metadata` " +
+      'permission gate, not this flag.',
+    ),
   }).optional().describe('Persistence write gates'),
 }));
 

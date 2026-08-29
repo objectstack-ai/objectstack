@@ -363,7 +363,7 @@ export class MetadataPlugin implements Plugin {
 
         ctx.logger.info('MetadataPlugin providing metadata service (primary mode)', {
             mode: this.options.artifactSource?.mode ?? 'file-system',
-            features: ['watch', 'multi-format', 'query', 'overlay', 'type-registry']
+            features: ['watch', 'multi-format', 'query', 'type-registry']
         });
     }
 

@@ -161,7 +161,9 @@ import type * as M82 from './kernel/dependency-resolution.zod.js';
 import type * as M83 from './kernel/events/core.zod.js';
 import type * as M84 from './kernel/events/handlers.zod.js';
 import type * as M85 from './kernel/manifest.zod.js';
-import type * as M86 from './kernel/metadata-customization.zod.js';
+// (M86 was kernel/metadata-customization.zod.js, removed whole in #13135 —
+// ADR-0049 retirement of the paper customization protocol. The M number is
+// positional and stays vacant.)
 import type * as M87 from './kernel/metadata-loader.zod.js';
 import type * as M88 from './kernel/metadata-plugin.zod.js';
 import type * as M89 from './kernel/metadata-protection.zod.js';
@@ -886,10 +888,11 @@ export type Iso406 = Assert<Eq< z.input< typeof M85.PluginPackagingSchema >, z.i
 export type Iso407 = Assert<Eq< z.input< typeof M85.PluginIntegritySchema >, z.infer< typeof M85.PluginIntegritySchema > >>;
 
 // kernel/metadata-customization.zod.ts
-export type Iso408 = Assert<Eq< z.input< typeof M86.CustomizationOriginSchema >, z.infer< typeof M86.CustomizationOriginSchema > >>;
-export type Iso409 = Assert<Eq< z.input< typeof M86.FieldChangeSchema >, z.infer< typeof M86.FieldChangeSchema > >>;
-export type Iso410 = Assert<Eq< z.input< typeof M86.MergeConflictSchema >, z.infer< typeof M86.MergeConflictSchema > >>;
-export type Iso411 = Assert<Eq< z.input< typeof M86.MergeResultSchema >, z.infer< typeof M86.MergeResultSchema > >>;
+// (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
+// Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
+// their module — #13135's ADR-0049 retirement of the paper
+// metadata-customization protocol. The Iso numbers are positional and stay
+// vacant.)
 
 // kernel/metadata-loader.zod.ts
 export type Iso412 = Assert<Eq< z.input< typeof M87.MetadataFallbackStrategySchema >, z.infer< typeof M87.MetadataFallbackStrategySchema > >>;
@@ -2012,9 +2015,17 @@ describe('ADR-0122 type-alias convention', () => {
     // the alias no longer exists, so there is nothing to be isomorphic. -1
     // removed; the Iso number stays vacant (ids are claims about pins, not
     // positions).
+    //
+    // 837 -> 833 is #13135's ADR-0049 retirement of the paper
+    // metadata-customization protocol: `kernel/metadata-customization.zod.ts`
+    // removed whole, so its four pins `Iso408`-`Iso411`
+    // (`CustomizationOriginSchema` / `FieldChangeSchema` /
+    // `MergeConflictSchema` / `MergeResultSchema`) left with the module. -4
+    // removed; the Iso numbers and the `M86` module number stay vacant (ids
+    // are claims about pins, not positions).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(837);
+    expect(pins).toHaveLength(833);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

@@ -442,55 +442,18 @@ describe('MetadataManager', () => {
       );
     });
 
-    it('saveOverlay() is a no-op when persistence.overlayWritable is false', async () => {
-      const m = new MetadataManager({
-        formats: ['json'],
-        loaders: [new MemoryLoader()],
-        persistence: { overlayWritable: false },
-      });
-      await m.saveOverlay({
-        id: 'overlay-1',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'platform',
-        patch: { label: 'X' },
-      } as any);
-      expect(await m.getOverlay('object', 'account', 'platform')).toBeUndefined();
-    });
+    // (The `saveOverlay()` / `overlayWritable` cases left with the manager's
+    // paper-protocol overlay limb — #13135, ADR-0049. These tests were the
+    // limb's only callers; `persistence.overlayWritable` is a retiredKey
+    // tombstone on the spec side now.)
 
-    it('saveOverlay() throws when persistence.overlayWritable=false and validation.throwOnError', async () => {
-      const m = new MetadataManager({
-        formats: ['json'],
-        loaders: [new MemoryLoader()],
-        persistence: { overlayWritable: false },
-        validation: { throwOnError: true },
-      });
-      await expect(
-        m.saveOverlay({
-          id: 'overlay-1',
-          baseType: 'object',
-          baseName: 'account',
-          scope: 'platform',
-          patch: { label: 'X' },
-        } as any),
-      ).rejects.toThrow(/persistence\.overlayWritable=false/);
-    });
-
-    it('defaults preserve write behavior (writable=true, overlayWritable=true)', async () => {
+    it('defaults preserve write behavior (writable=true)', async () => {
       const m = new MetadataManager({
         formats: ['json'],
         loaders: [new MemoryLoader()],
       });
       await m.register('object', 'account', { name: 'account' });
       expect(await m.listNames('object')).toContain('account');
-      await m.saveOverlay({
-        id: 'overlay-1',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'platform',
-        patch: { label: 'X' },
-      } as any);
-      expect(await m.getOverlay('object', 'account', 'platform')).toBeDefined();
     });
   });
 });

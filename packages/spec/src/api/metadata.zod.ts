@@ -6,7 +6,6 @@ import { ObjectSchema } from '../data/object.zod';
 import { AppSchema } from '../ui/app.zod';
 import { MetadataTypeSchema, MetadataQuerySchema, MetadataQueryResultSchema, MetadataValidationResultSchema, MetadataBulkResultSchema, MetadataDependencySchema } from '../kernel/metadata-plugin.zod';
 import { ActionSchema } from '../ui/action.zod';
-import { MetadataOverlaySchema } from '../kernel/metadata-customization.zod';
 
 /**
  * Metadata Service Protocol
@@ -190,33 +189,20 @@ export const MetadataBulkResponseSchema = lazySchema(() => BaseResponseSchema.ex
 }));
 
 // ==========================================
-// 5. Overlay / Customization
+// 5. Overlay / Customization — REMOVED
 // ==========================================
-
-/**
- * Get Overlay Response
- * GET /api/meta/:type/:name/overlay
- */
-export const MetadataOverlayResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: MetadataOverlaySchema.optional().describe('Overlay definition, undefined if none'),
-}));
-
-/**
- * Save Overlay Request
- * PUT /api/meta/:type/:name/overlay
- */
-export const MetadataOverlaySaveRequestSchema = lazySchema(() => MetadataOverlaySchema.describe(
-  'Overlay to save',
-));
-
-/**
- * Get Effective (merged) Response
- * GET /api/meta/:type/:name/effective
- */
-export const MetadataEffectiveResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.record(z.string(), z.unknown()).optional()
-    .describe('Effective metadata with all overlays applied'),
-}));
+//
+// The section-5 contracts (`MetadataOverlayResponseSchema`,
+// `MetadataOverlaySaveRequestSchema`, `MetadataEffectiveResponseSchema`) were
+// REMOVED per ADR-0049 enforce-or-remove (#13135, re-charter of #12057):
+// they declared REST contracts for the paper metadata-customization protocol
+// — `GET/PUT …/overlay`, `GET …/effective` — endpoints NO adapter ever
+// served (measured: no route spelling exists in packages/rest or
+// packages/metadata). ADR-0126 §6 wall 4 supersedes the protocol on the
+// record. The layered read that actually ships is `getMetaItemLayered`
+// (ADR-0005 org overlay; `code` / `overlay` / `effective` layers) with its
+// own contracts. Section numbering is preserved — ids are claims, not
+// positions.
 
 // ==========================================
 // 6. Import / Export
@@ -386,12 +372,6 @@ export type MetadataBulkRegisterRequestParsed = z.infer<typeof MetadataBulkRegis
 export type MetadataBulkResponse = z.input<typeof MetadataBulkResponseSchema>;
 /** Post-parse shape of {@link MetadataBulkResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataBulkResponseParsed = z.infer<typeof MetadataBulkResponseSchema>;
-export type MetadataOverlayResponse = z.input<typeof MetadataOverlayResponseSchema>;
-/** Post-parse shape of {@link MetadataOverlayResponse} — defaults applied, transforms run (ADR-0122). */
-export type MetadataOverlayResponseParsed = z.infer<typeof MetadataOverlayResponseSchema>;
-export type MetadataEffectiveResponse = z.input<typeof MetadataEffectiveResponseSchema>;
-/** Post-parse shape of {@link MetadataEffectiveResponse} — defaults applied, transforms run (ADR-0122). */
-export type MetadataEffectiveResponseParsed = z.infer<typeof MetadataEffectiveResponseSchema>;
 export type MetadataExportResponse = z.input<typeof MetadataExportResponseSchema>;
 /** Post-parse shape of {@link MetadataExportResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataExportResponseParsed = z.infer<typeof MetadataExportResponseSchema>;

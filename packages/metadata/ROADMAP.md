@@ -166,14 +166,15 @@
 - [ ] Implement `rollback(type, name, version)` to restore a previous version
 - [ ] Add `checksum` field for change detection
 
-### 4b. Package Upgrade & Three-Way Merge
+### 4b. Package Upgrade & Three-Way Merge — RETIRED, not planned
 
-- [ ] Implement three-way merge when upgrading package-delivered metadata
-  - Base: previous package version
-  - Ours: current platform customizations (overlays)
-  - Theirs: new package version
-- [ ] Merge conflict detection and resolution UI support
-- [ ] Leverage `MergeStrategyConfigSchema` from spec (keep-custom, accept-incoming, three-way-merge)
+The three-way-merge plan (merge package updates into customization overlays,
+driven by `MergeStrategyConfigSchema`) left with the paper
+metadata-customization protocol (#13135, ADR-0049 remove). ADR-0126 rules the
+opposite model: package upgrades rewrite the packaged BASE and never touch the
+customer's recorded choices — upgrade and customization share no columns and
+never merge. Customization rides ADR-0005's org overlay and ADR-0126's
+clone + ledger-disable primitives.
 
 ### 4c. Metadata Sync & Distribution
 

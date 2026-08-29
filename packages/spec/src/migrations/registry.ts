@@ -5280,7 +5280,22 @@ const step18: MigrationStep = {
     'across the tree, the example apps and the published *.form.ts corpus). The FormView ' +
     'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses ' +
     'the key with the prescription; the mechanical conversion strips it from stored ' +
-    'sources (pure lossless delete — it never had an effect on this surface to lose).',
+    'sources (pure lossless delete — it never had an effect on this surface to lose). ' +
+    'It also retires the paper metadata-customization protocol whole (#13135, re-charter ' +
+    'of #12057; ADR-0049 enforce-or-remove, maintainer ruling 2026-08-29): ' +
+    '`kernel/metadata-customization.zod.ts` — the three-layer platform/user patch-overlay ' +
+    'model with field-level change tracking and a 3-way-merge story — was exported, ' +
+    'documented as the customization architecture, and implemented ONLY by an unreachable ' +
+    '`packages/metadata` limb (no route served the paper `…/overlay`/`…/effective` ' +
+    'endpoints; the four optional service members were called only by their own unit ' +
+    'tests). ADR-0126 §6 wall 4 supersedes it on the record ("nothing may build against ' +
+    'it"). The module\'s seven defs and the three section-5 API contracts leave via ' +
+    'RETIRED_DEFS_BY_MAJOR; the authorable carriers `MetadataPluginConfig.' +
+    'customizationPolicies` / `.mergeStrategy` and `MetadataManagerConfig.persistence.' +
+    'overlayWritable` are retiredKey tombstones (no D2 conversion — plugin/manager ' +
+    'configs are not stack collection members, the additionalTypes reasoning). The ' +
+    'customization that actually ships: ADR-0005\'s org overlay and ADR-0126\'s ' +
+    'packaged-metadata model.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
