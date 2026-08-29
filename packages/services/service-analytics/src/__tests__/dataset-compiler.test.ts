@@ -105,14 +105,27 @@ describe('compileDataset', () => {
   // carries a prescription instead of naming the supported list. Re-pointed
   // rather than deleted: the dataset measure is one of the retirement's two
   // authoring surfaces, and this is where that surface is exercised.
+  //
+  // ⚠️ Pinned on the CUSTOMER-RESOLVABLE anchors the prescription carries —
+  // the package version and the ADR — never on a tracker id. The id used to be
+  // in this message and is not any more: `check:doc-authoring` Rule 3 bans an
+  // internal `#NNNN` from prose printed at a refused author, and a consumer-side
+  // regex spelling one is a pin on the thing that must not be there.
   it('rejects a retired aggregate at the schema, with the retirement prescription', () => {
-    expect(() => DatasetSchema.parse({
+    const parse = () => DatasetSchema.parse({
       name: 'agg',
       label: 'Agg',
       object: 'opportunity',
       dimensions: [],
       measures: [{ name: 'tags', aggregate: 'array_agg', field: 'tag' }],
-    })).toThrowError(/`array_agg`.*was removed.*#6188/s);
+    });
+    expect(parse).toThrowError(/`array_agg`.*was removed.*ADR-0049 enforce-or-remove/s);
+    // It is a PRESCRIPTION, not a bare refusal: it must still say what to do.
+    expect(parse).toThrowError(/Delete the aggregation/s);
+    // ...and it must carry no tracker id, in either the bare or repo-qualified
+    // spelling. Negative pin, so a re-introduced id reds HERE too and not only
+    // at the gate.
+    expect(parse).not.toThrowError(/#\d{3,5}(?![0-9A-Za-z])/s);
   });
 
   it('still compiles the aggregate the ruling kept', () => {
