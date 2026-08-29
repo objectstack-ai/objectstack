@@ -340,12 +340,12 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * it took the remove leg of the same ruling rather than the enforce leg.
    */
   isAsync: retiredKey(
-    '`ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — ' +
+    '`ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (ADR-0049) — ' +
     'no execution path ever read it, so declaring it never made a node suspend and ' +
     'omitting it never stopped one. Delete the key. The live mechanism is two-part: an ' +
     'executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor ' +
     'must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or ' +
-    'the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside ' +
+    'the engine refuses that suspension. Declaring `isAsync: true` alongside ' +
     '`supportsPause: true` was always redundant; declaring it alone was always inert.',
   ),
 
@@ -432,7 +432,7 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * by the person who made it.
    */
   resumeAuthority: z.enum(['any', 'service']).optional()
-    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561)"),
+    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly"),
 
   /**
    * Runtime maturity of the capability behind this descriptor (ADR-0041 §4).

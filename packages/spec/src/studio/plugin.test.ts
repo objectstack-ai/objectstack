@@ -251,7 +251,7 @@ describe('StudioPluginManifestSchema', () => {
     expect(() => StudioPluginManifestSchema.parse({
       ...minimalManifest,
       activationEvents: [{ type: 'onMetadataType', pattern: 'object' }],
-    })).toThrow(/activationEvents.*removed.*17\.0\.0.*#4657.*Delete the key/s);
+    })).toThrow(/activationEvents.*removed.*17\.0\.0.*Delete the key/s);
   });
 
   it('rejects activationEvents with the retirement prescription — pre-v17 string form', () => {
@@ -260,7 +260,7 @@ describe('StudioPluginManifestSchema', () => {
     expect(() => StudioPluginManifestSchema.parse({
       ...minimalManifest,
       activationEvents: ['onMetadataType:object'],
-    })).toThrow(/activationEvents.*removed.*#4657/s);
+    })).toThrow(/activationEvents.*removed/s);
   });
 
   it('rejects the former VS Code-flavoured aliases with the same prescription', () => {
@@ -271,7 +271,7 @@ describe('StudioPluginManifestSchema', () => {
       expect(() => StudioPluginManifestSchema.parse({
         ...minimalManifest,
         [key]: ['*'],
-      })).toThrow(/activationEvents.*removed.*#4657/s);
+      })).toThrow(/activationEvents.*removed/s);
     }
   });
 

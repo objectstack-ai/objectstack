@@ -70,7 +70,7 @@ export type BookInclude = string | { tag: string };
  */
 const BOOK_TRANSLATIONS_RETIRED =
   'Inline `translations` on a book (and on a book group) was removed in @objectstack/spec '
-  + '17.0.0 (#4667, ADR-0049) — no resolver ever read it. The book tree endpoint and the '
+  + '17.0.0 (ADR-0049) — no resolver ever read it. The book tree endpoint and the '
   + 'docs portal render `label` / `description` verbatim in every locale, so a localized '
   + 'book shipped its authoring-locale strings to every reader. Delete the key. NOTE the '
   + 'near neighbour that DOES work: `doc.translations` is live and read on every doc render '
@@ -133,7 +133,7 @@ export const BookSchema = lazySchema(() =>
   strictObject({
     surface: 'this book',
     history:
-      'Until #4001 closed this shape these were dropped silently — the book still '
+      'Until this shape was closed these were dropped silently — the book still '
       + 'registered, minus whatever the key was meant to configure.',
     aliases: {
       title: 'label', sections: 'groups', chapters: 'groups', toc: 'groups',

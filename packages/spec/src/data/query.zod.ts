@@ -54,7 +54,7 @@ export const SortNodeSchema = lazySchema(() => strictObject(
   {
     surface: 'this sort node',
     history:
-      'Until #4721 an unknown key here was dropped silently and `order` fell back to its `asc` '
+      'Until this shape was closed, an unknown key here was dropped silently and `order` fell back to its `asc` '
       + 'default, so a descending request came back ascending — and with `limit`, a different '
       + 'set of rows under an ordinary 200.',
     aliases: { direction: 'order' },
@@ -215,7 +215,7 @@ export const GroupByNodeSchema = lazySchema(() => z.union([
  * protocol-17 semantic migration `aggregation-node-distinct-retired`.
  */
 const AGGREGATION_DISTINCT_REMOVED =
-  '`query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — '
+  '`query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049) — '
   + 'exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory '
   + 'fallback deduplicated the values before applying the function, while `driver-sql`, '
   + '`driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder '
@@ -224,7 +224,7 @@ const AGGREGATION_DISTINCT_REMOVED =
   + 'datasource: one query, two numbers, chosen by which backend happened to serve it. Both '
   + 'answers are plausible, so nothing surfaced the divergence. Delete the key. For a '
   + 'deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which '
-  + 'every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback '
+  + 'every SQL face compiles to `COUNT(DISTINCT field)` and the in-memory fallback '
   + 'computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no '
   + 'backend ever computed them here, and a per-row measure that needs deduplicating is a '
   + 'modelling problem to fix in the data, not a flag on the read.';
@@ -282,7 +282,7 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
    * Over a group whose rows the filter excludes entirely, count/sum answer 0
    * and avg/min/max answer null (`emptyGroupValueFor`, aggregation-policy.ts).
    */
-  filter: FilterConditionSchema.optional().describe('Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate (#10576): lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it.'),
+  filter: FilterConditionSchema.optional().describe('Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate: lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it.'),
 }));
 
 // ─── Joins: REMOVED (#4286, ADR-0049) ────────────────────────────────────────
@@ -375,7 +375,7 @@ export const FieldNodeSchema = z.string({
  * semantic migrations `query-joins-retired` / `query-window-functions-retired`).
  */
 const QUERY_JOINS_REMOVED =
-  '`query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver '
+  '`query.joins` was removed in @objectstack/spec 17 (ADR-0049) — no engine or driver '
   + 'ever read it: a query carrying `joins` behaved exactly as if the key were absent, while '
   + 'its name squatted on the reserved REST parameter set. Delete the key. Related records are '
   + "read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which "
@@ -383,7 +383,7 @@ const QUERY_JOINS_REMOVED =
   + "record's own columns. Keep the foreign key in your own projection (`fields: ['title', "
   + "'owner_id']`): the relation is carried by that column, so projecting it away leaves "
   + 'expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever '
-  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532).';
+  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`).';
 
 /**
  * Exported (unlike the two above) because `EngineQueryOptionsSchema`
@@ -391,7 +391,7 @@ const QUERY_JOINS_REMOVED =
  * same prescription — one string, two rejection sites.
  */
 export const QUERY_CURSOR_REMOVED =
-  '`query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever '
+  '`query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever '
   + 'implemented keyset pagination, so the cursor was accepted and ignored and every page came '
   + 'back identical (a caller looping "until hasMore is false" never terminates). Delete the '
   + 'key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary '
@@ -402,7 +402,7 @@ export const QUERY_CURSOR_REMOVED =
 
 /** See {@link QUERY_CURSOR_REMOVED} for why this one is exported. */
 export const QUERY_DISTINCT_REMOVED =
-  '`query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no '
+  '`query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no '
   + "driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: "
   + 'the REST list path treated a distinct query as not countable and silently degraded '
   + '`total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete '
@@ -412,7 +412,7 @@ export const QUERY_DISTINCT_REMOVED =
   + 'count, the `count_distinct` aggregation.';
 
 const QUERY_WINDOW_FUNCTIONS_REMOVED =
-  '`query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` '
+  '`query.windowFunctions` was removed in @objectstack/spec 17 (ADR-0049) — `find()` '
   + 'never applied it: no engine or driver read the key on the query path, so every OVER '
   + 'clause it declared was silently dropped. Delete the key. Window functions are a '
   + 'SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` '
@@ -439,12 +439,12 @@ const QUERY_WINDOW_FUNCTIONS_REMOVED =
 export const FullTextSearchSchema = lazySchema(() => z.object({
   query: z.string().describe('Search query text'),
   fields: z.array(z.string()).optional().describe('Fields to search in (if not specified, searches all text fields)'),
-  fuzzy: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag (#4286).'),
-  operator: z.enum(['and', 'or']).optional().default('or').describe('[EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag (#4286).'),
-  boost: z.record(z.string(), z.number()).optional().describe('[EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results (#4286).'),
-  minScore: z.number().optional().describe('[EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results (#4286).'),
-  language: z.string().optional().describe('[EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer (#4286).'),
-  highlight: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286).'),
+  fuzzy: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag.'),
+  operator: z.enum(['and', 'or']).optional().default('or').describe('[EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag.'),
+  boost: z.record(z.string(), z.number()).optional().describe('[EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results.'),
+  minScore: z.number().optional().describe('[EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results.'),
+  language: z.string().optional().describe('[EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer.'),
+  highlight: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights.'),
 }));
 
 export type FullTextSearch = z.input<typeof FullTextSearchSchema>;
@@ -506,7 +506,7 @@ const BaseQuerySchema = z.object({
   object: z.string().describe('Object name (e.g. account)'),
   
   /** Select Clause */
-  fields: z.array(FieldNodeSchema).optional().describe("Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD` (#7532). Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes (#6924)."),
+  fields: z.array(FieldNodeSchema).optional().describe("Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes."),
   
   /** Where Clause (Filtering) */
   where: FilterConditionSchema.optional().describe('Filtering criteria (WHERE)'),

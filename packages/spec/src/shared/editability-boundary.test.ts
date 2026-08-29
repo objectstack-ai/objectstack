@@ -364,7 +364,7 @@ describe('#8201 — an option is offered or withheld, never shown-but-unselectab
 
   it('the history sentence still comes last', () => {
     const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
-    expect(m.indexOf(OPTION_TEXT)).toBeLessThan(m.indexOf('Until #4001 closed this shape'));
+    expect(m.indexOf(OPTION_TEXT)).toBeLessThan(m.indexOf('Until this shape was closed'));
   });
 
   it('it is NOT the containers\' prescription — an option has no fields inside it', () => {

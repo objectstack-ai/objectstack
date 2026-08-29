@@ -50,7 +50,7 @@ import { strictObject } from '../shared/strict-object';
  * not in their spelling.
  */
 const FLOW_BUILDER_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the builder still '
+  'Until these shapes were closed an unknown key was dropped silently — the builder still '
   + 'rendered, without whatever the key was meant to configure.';
 
 export const FlowNodeShapeSchema = lazySchema(() => z.enum([

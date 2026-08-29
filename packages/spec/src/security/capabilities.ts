@@ -152,7 +152,7 @@ export const CapabilityDeclarationSchema = lazySchema(() => strictObject({
       'separate shapes, and only the requirement side carries arguments).',
   },
   history:
-    'Until #5961 `capability` resolved no registered schema at all, so `PUT ' +
+    'Until this shape was closed, `capability` resolved no registered schema at all, so `PUT ' +
     '/api/v1/meta/capability/:name` stored ANY JSON under an AUTHORIZATION type ' +
     'and stray keys on a declaration were dropped in silence.',
 }, {

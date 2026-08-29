@@ -68,7 +68,7 @@ export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 export const MetricSchema = lazySchema(() => strictObject(
   {
     surface: 'this metric',
-    history: 'Until #4001 batch D an undeclared metric key was silently dropped — the cube '
+    history: 'Until this shape was closed, an undeclared metric key was silently dropped — the cube '
       + 'registered and the metric computed as if the key had never been written.',
     // `title` is CORRECT one level up (`CubeSchema.title`); a metric spells it `label`.
     aliases: { title: 'label' },
@@ -84,7 +84,7 @@ export const MetricSchema = lazySchema(() => strictObject(
       // `strictObject` the key carried (closed by #4001 batch D) is gone with
       // it — strictness on a shape nothing reads was fake compliance either way.
       filters:
-        '`measures.<metric>.filters` was removed in @objectstack/spec 17 (#10414, ADR-0049) — '
+        '`measures.<metric>.filters` was removed in @objectstack/spec 17 (ADR-0049) — '
         + 'it never had an effect: no strategy read it (NativeSQLStrategy and ObjectQLStrategy '
         + 'both aggregate the metric\'s `sql` and ignore `filters`), so an authored '
         + '`filters: [{ sql: … }]` parsed clean and the query returned the UNFILTERED aggregate. '
@@ -125,7 +125,7 @@ export const MetricSchema = lazySchema(() => strictObject(
 export const DimensionSchema = lazySchema(() => strictObject(
   {
     surface: 'this dimension',
-    history: 'Until #4001 batch D an undeclared dimension key was silently dropped.',
+    history: 'Until this shape was closed, an undeclared dimension key was silently dropped.',
     aliases: {
       // `title` is CORRECT one level up (`CubeSchema.title`); a dimension spells it `label`.
       title: 'label',
@@ -160,7 +160,7 @@ export const DimensionSchema = lazySchema(() => strictObject(
 export const CubeJoinSchema = lazySchema(() => strictObject(
   {
     surface: 'this cube join',
-    history: 'Until #4001 batch D an undeclared join key was silently dropped — a typo\'d '
+    history: 'Until this shape was closed, an undeclared join key was silently dropped — a typo\'d '
       + '`relationship` fell back to the `many_to_one` default.',
     // The join condition is spelled `sql` here (its doc says "ON clause").
     aliases: { on: 'sql' },
@@ -197,7 +197,7 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
 export const CubeSchema = lazySchema(() => strictObject(
   {
     surface: 'this cube',
-    history: 'Until #4001 batch D an undeclared cube key was silently dropped — the cube '
+    history: 'Until this shape was closed, an undeclared cube key was silently dropped — the cube '
       + 'registered without it and the analytics service served whatever remained.',
     aliases: {
       // `label` is the metric/dimension spelling; the cube itself uses `title`.
@@ -226,7 +226,7 @@ export const CubeSchema = lazySchema(() => strictObject(
     refreshKey: strictObject(
       {
         surface: 'this cube refreshKey block',
-        history: 'Until #4001 batch D an undeclared refreshKey key was silently dropped — '
+        history: 'Until this shape was closed, an undeclared refreshKey key was silently dropped — '
           + 'a typo\'d `sql` probe left the cube refreshing on nothing.',
       },
       {
@@ -261,7 +261,7 @@ export const CubeSchema = lazySchema(() => strictObject(
 export const AnalyticsQuerySchema = lazySchema(() => strictObject(
   {
     surface: 'this analytics query',
-    history: 'Until #4001 batch D an undeclared key here was silently dropped at every door '
+    history: 'Until this shape was closed, an undeclared key here was silently dropped at every door '
       + 'except the strict `/analytics/query` wrapper.',
     // The sibling record dialect (`data/query.zod.ts` `BaseQuerySchema`) spells
     // sorting `orderBy`; the analytics dialect spells it `order`.
@@ -272,7 +272,7 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
       // the `triggerPhrase` lesson in strict-object.ts).
       filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
         + 'FilterCondition, the same shape find() takes). There is no per-metric filter key '
-        + 'either (#10414): fold the condition into the metric\'s own `sql` expression, or use '
+        + 'either: fold the condition into the metric\'s own `sql` expression, or use '
         + 'an ADR-0021 dataset measure\'s structured `filter`.',
     },
     // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds
@@ -309,7 +309,7 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
   timeDimensions: z.array(strictObject(
     {
       surface: 'this time dimension',
-      history: 'Until #4001 batch D an undeclared key here was silently stripped even at the '
+      history: 'Until this shape was closed, an undeclared key here was silently stripped even at the '
         + 'strict `/analytics/query` door — top-level strictness does not recurse.',
       // The plural is the cube DIMENSION's declaration key; a query's time
       // dimension takes exactly one `granularity`.

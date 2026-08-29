@@ -27,7 +27,7 @@ import { z } from 'zod';
  * applies only non-destructive alters (relax NOT NULL, widen varchar).
  */
 export const SqlAutoMigrateSchema = z.enum(['off', 'safe'])
-  .describe('Dev-only non-destructive schema self-heal (#2186)');
+  .describe('Dev-only non-destructive schema self-heal');
 
 export type SqlAutoMigrate = z.input<typeof SqlAutoMigrateSchema>;
 
@@ -690,7 +690,7 @@ export function refusedInlineCredentialKey(key: string, formTitle: string) {
   return z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) }).optional()
     .describe(
       "Set through the connection form's secret field or `external.credentialsRef` — "
-      + 'encrypted into `sys_secret`, never stored in `config` (#7990)',
+      + 'encrypted into `sys_secret`, never stored in `config`',
     )
     .meta({ title: formTitle, format: 'password' });
 }

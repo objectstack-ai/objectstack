@@ -116,7 +116,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
         + 'use `url: "file:./data/objectstack.db"`.',
     },
     history:
-      'Until #6345 a turso `config` was validated against nothing at all: the driver ships in an '
+      'Until this shape was closed, a turso `config` was validated against nothing at all: the driver ships in an '
       + 'optional package, so it was not a builtin and `validateDriverConfig` answered '
       + '"{ known: false }" for it. A misspelled `token:` was therefore accepted in silence and '
       + 'the connection was attempted unauthenticated.',

@@ -398,7 +398,7 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
       expandas: 'resolveAs',
     },
     history:
-      'Until #4001 these were dropped silently — the approver still parsed, so the ' +
+      'Until this shape was closed, these were dropped silently — the approver still parsed, so the ' +
       'request could route to the wrong slate without a diagnostic.',
   },
   {
@@ -529,7 +529,7 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
     surface: 'this decision-output declaration',
     aliases: { name: 'key', widget: 'type', many: 'multiple' },
     history:
-      'Until #4001 these were dropped silently — the declaration still parsed, so the ' +
+      'Until this shape was closed, these were dropped silently — the declaration still parsed, so the ' +
       'decision dialog rendered a different input than the author specified.',
   },
   {
@@ -609,7 +609,7 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
       target: 'escalateTo',
     },
     history:
-      'Until #4001 these were dropped silently — the escalation still parsed, so an SLA ' +
+      'Until this shape was closed, these were dropped silently — the escalation still parsed, so an SLA ' +
       'the author declared never fired the way they intended.',
   },
   {
@@ -688,7 +688,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
         'revise loop is the `revise` out-edge with `maxRevisions` bounding it.',
     },
     history:
-      'Until #4001 these were dropped silently — the node still parsed, so an approval ' +
+      'Until this shape was closed, these were dropped silently — the node still parsed, so an approval ' +
       'gate shipped that quietly ignored part of its declared behavior.',
   },
   {

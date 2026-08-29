@@ -40,7 +40,7 @@ const FILENAME_ALIASES = {
 } as const;
 
 const sqliteHistory =
-  'Until #4410 nothing validated `datasource.config` at all — a misspelled `filename` was '
+  'Until this shape was closed, nothing validated `datasource.config` at all — a misspelled `filename` was '
   + 'accepted in silence and the database silently became an ephemeral `:memory:` one, so the '
   + 'data was gone on the next boot with nothing having reported a problem.';
 

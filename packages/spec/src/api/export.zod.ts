@@ -337,7 +337,7 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe(
       'Validate + coerce every row without persisting. The verdict is the engine\'s own write-path ' +
       'validation, with one boundary an author should know: a preview runs NO automations. Hooks never ' +
-      'fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound ' +
+      'fire in a dry run — a preview that executed user-authored side effects (mail, outbound ' +
       'calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a ' +
       'dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would ' +
       'populate during the real import; for hook-derived fields the real write is authoritative.',
@@ -350,13 +350,13 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe(
       'Fire triggers/hooks for each imported row. ON by default, and opting out must be ' +
       'explicit: automations always ran on import historically (the engine ignored this flag ' +
-      'until #2922), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
+      'until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
       'omitting the key runs them. This matches platform convention (Salesforce fires triggers ' +
       'on import by default). One boundary: a `dryRun` preview runs NO automations whatever ' +
-      'this flag says (#6037).',
+      'this flag says.',
     ),
   treatAsHistorical: z.boolean().default(false)
-    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates (#3479); and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them (#3493). Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped (#3556).'),
+    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped.'),
   trimWhitespace: z.boolean().default(true)
     .describe('Trim leading/trailing whitespace from string cells'),
   nullValues: z.array(z.string()).optional()

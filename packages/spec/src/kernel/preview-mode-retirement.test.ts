@@ -71,7 +71,7 @@ describe("[#11846] RuntimeMode 'preview' retirement", () => {
     const message = JSON.stringify(result.error.issues);
     // The prescription itself, not a bare "invalid enum value": it must name
     // the value, say it was removed, and tell the author what to do instead.
-    expect(message).toMatch(/`context\.mode: 'preview'`.*was removed.*17.*#11846/s);
+    expect(message).toMatch(/`context\.mode: 'preview'`.*was removed.*17/s);
     expect(message).toMatch(/no layer of the platform ever branched on it/s);
     expect(message).toMatch(/Delete the value/s);
     // The live mechanism must be named: preview DEPLOYMENTS are the
@@ -94,7 +94,7 @@ describe("[#11846] RuntimeMode 'preview' retirement", () => {
 
     const issue = result.error.issues.find((i) => i.path[0] === 'mode');
     expect(issue, 'the refusal must land at `mode`').toBeDefined();
-    expect(issue!.message).toMatch(/`context\.mode: 'preview'`.*was removed.*#11846/s);
+    expect(issue!.message).toMatch(/`context\.mode: 'preview'`.*was removed/s);
   });
 
   it("gives an UNKNOWN mode zod's own message, not the retirement one", () => {
@@ -135,7 +135,7 @@ describe('[#11846] KernelContext.previewMode retirement', () => {
     expect(issue!.path).toEqual(['previewMode']);
     // The prescription IS the migration doc for whoever hits it — contract,
     // not commentary.
-    expect(issue!.message).toMatch(/`context\.previewMode`.*was removed.*17.*#11846/s);
+    expect(issue!.message).toMatch(/`context\.previewMode`.*was removed.*17/s);
     expect(issue!.message).toMatch(/nothing ever read the block/s);
     expect(issue!.message).toMatch(/Delete the key/s);
     // The live mechanism: the deployment layer owns preview deployments.

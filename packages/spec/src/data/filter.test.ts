@@ -195,7 +195,7 @@ describe('SetOperatorSchema', () => {
       expect(issue?.path).toEqual(['$in', 1]);
       expect(issue?.message).toContain('$in member at index 1');
       expect(issue?.message).toContain('$eq/$ne/$gt/$gte/$lt/$lte');
-      expect(issue?.message).toContain('#7596');
+      expect(issue?.message).toContain('scalar comparison');
     });
 
     it('refuses a $field member of $nin — the direction that WIDENS a scope', () => {
@@ -383,7 +383,7 @@ describe('RangeOperatorSchema', () => {
       expect(issue?.path).toEqual(['$between', 0]);
       expect(issue?.message).toContain('$between endpoint at index 0');
       expect(issue?.message).toContain('$eq/$ne/$gt/$gte/$lt/$lte');
-      expect(issue?.message).toContain('#7596');
+      expect(issue?.message).toContain('scalar comparison');
     });
 
     it('refuses a $field UPPER bound, naming index 1', () => {
@@ -413,13 +413,13 @@ describe('RangeOperatorSchema', () => {
       const boolMax = RangeOperatorSchema.safeParse({ $between: ['2026-01-01', true] });
       expect(boolMax.success).toBe(false);
       expect(boolMax.error?.issues[0]?.path).toEqual(['$between', 1]);
-      expect(boolMax.error?.issues[0]?.message).not.toContain('#7596');
+      expect(boolMax.error?.issues[0]?.message).not.toContain('scalar comparison');
 
       // An object that is NOT a reference is refused as it always was: this
       // check reads the SHAPE, and `{ nope: 1 }` never carried a `$field` key.
       const objectMin = RangeOperatorSchema.safeParse({ $between: [{ nope: 1 }, '2026-12-31'] });
       expect(objectMin.success).toBe(false);
-      expect(objectMin.error?.issues[0]?.message).not.toContain('#7596');
+      expect(objectMin.error?.issues[0]?.message).not.toContain('scalar comparison');
     });
 
     it('is matched by the enforced copy — FieldOperatorsSchema', () => {

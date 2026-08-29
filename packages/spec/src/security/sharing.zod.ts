@@ -138,7 +138,7 @@ const BaseSharingRuleSchema = strictObject(
         '(§7.3.1) or business-unit depth scopes (ADR-0057).',
     },
     history:
-      'Until #4001 these were dropped silently — the rule still parsed, so a share the ' +
+      'Until this shape was closed, these were dropped silently — the rule still parsed, so a share the ' +
       'author intended was never materialised (or a constraint never applied).',
   },
   {
@@ -160,7 +160,7 @@ const BaseSharingRuleSchema = strictObject(
     surface: 'this sharing-rule recipient',
     aliases: { id: 'value', target: 'value' },
     history:
-      'Until #4001 these were dropped silently — the recipient still parsed, so the ' +
+      'Until this shape was closed, these were dropped silently — the recipient still parsed, so the ' +
       'grant could land on the wrong principal without a diagnostic.',
   },
   {

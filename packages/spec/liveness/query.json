@@ -1,53 +1,60 @@
 {
   "type": "query",
-  "_note": "QuerySchema (BaseQuerySchema + expand) — packages/spec/src/data/query.zod.ts. NOT a registered metadata type: QueryAST is the REQUEST surface (the client SDK QueryBuilder's output; the POST /data/:object/query body), governed via the gate's SPEC_ONLY_SCHEMAS override like webhook (#4286). It is authorable by every API caller yet never stored as stack metadata, which is why no other gate reached it: this ledger read the metadata-type registry, check:authorable-surface walks the same registry, and check:exported-any is a type-resolution gate. Seeded 2026-07-31 from the #4286 sweep; closed out same day — joins/windowFunctions/cursor/distinct REMOVED (tombstoned; protocol-17 semantic migrations; the cursor/distinct SDK producers deleted with their keys), having ENFORCED engine-side, search sub-flags + aggregations.filter marked experimental at the schema. Re-opened 2026-08-09 for ONE key the #4286 sweep did not reach: `aggregations[].distinct` (#6815) — dispositioned REMOVED. #4286 swept the query's own members plus `aggregations.filter`; the per-aggregation `distinct` was neither a top-level key nor an unread one, so it passed both filters of that sweep while diverging by BACKEND rather than by declaration. The main executor evidence below: objectql engine find/aggregate and the drivers' find paths.",
+  "_note": "QuerySchema (BaseQuerySchema + expand) — packages/spec/src/data/query.zod.ts. NOT a registered metadata type: QueryAST is the REQUEST surface (the client SDK QueryBuilder's output; the POST /data/:object/query body), governed via the gate's SPEC_ONLY_SCHEMAS override like webhook (#4286). It is authorable by every API caller yet never stored as stack metadata, which is why no other gate reached it: this ledger read the metadata-type registry, check:authorable-surface walks the same registry, and check:exported-any is a type-resolution gate. Seeded 2026-07-31 from the #4286 sweep; closed out same day — joins/windowFunctions/cursor/distinct REMOVED (tombstoned; protocol-17 semantic migrations; the cursor/distinct SDK producers deleted with their keys), having ENFORCED engine-side, search sub-flags + aggregations.filter marked experimental at the schema. Re-opened 2026-08-09 for ONE key the #4286 sweep did not reach: `aggregations[].distinct` (#6815) — dispositioned REMOVED. #4286 swept the query's own members plus `aggregations.filter`; the per-aggregation `distinct` was neither a top-level key nor an unread one, so it passed both filters of that sweep while diverging by BACKEND rather than by declaration. The main executor evidence below: objectql engine find/aggregate and the drivers' find paths. 2026-08-28 (#13003): every citation in this file was re-anchored, and this file carried a second defect class besides drift — most of its `live` entries cited a path with NO line at all (unfalsifiable by the line bound by construction), and `expand`'s pointer was written `engine.ts:2519+`, whose trailing `+` stops the token matching PATH_RE entirely, so it degraded to PROSE and was never resolved, bounded or key-checked by anything. Both are now repo-rooted anchors.",
   "props": {
     "object": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/objectql/src/engine.ts (find/aggregate resolve the target object from ast.object); packages/metadata-protocol/src/protocol.ts:780 (QUERY_AST_KEYS reserves it at the REST boundary so a POST body's `object` is never read as a field filter)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#fillQueryAstDefaults (`const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object }` — the resolved name is spread LAST so a stray body `object` cannot split `ast.object` from the table actually read); packages/metadata-protocol/src/protocol.ts#QUERY_AST_KEYS (reserves it at the REST boundary so a POST body's `object` is never read as a field filter, and a body/route mismatch is refused rather than resolved by picking a winner)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `protocol.ts:780` had rotted onto `if (seen.has(key)) return;` in an unrelated walker; `QUERY_AST_KEYS` is at ~:2426 today, ~1,650 lines away, in a 20,255-line file. The engine leg was PATH-ONLY (`engine.ts` with no line), which the line bound cannot falsify at all — it is now the narrowest symbol that assembles the AST. Re-closed by hand against 93ea19bca."
     },
     "fields": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1353-1354 (select projection); driver-memory projectFields; objectql formula projection + known-field filters (closed end-to-end in the #4196 verification)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#findRows (`builder.select(query.fields.map(...))`, else `select('*')`, with the unknown-column ladder that retries all-columns rather than answering an empty page); packages/objectql/src/engine.ts#planFormulaProjection (rewrites `ast.fields` to drop virtual formula fields before the driver sees them, and adds back the stored fields they read)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1353-1354` had rotted onto `) as Error & { code?: string; status?: number };` inside an error-constructor helper, ~4,200 lines above the projection. sql-driver.ts is 16,289 lines; the whole find path moved into `findRows` under a citation nothing re-read. The `driver-memory projectFields` / `objectql formula projection` halves were prose with no path at all and are now a repo-rooted anchor on the formula side. Re-closed by hand against 93ea19bca."
     },
     "where": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1330-1331 (applyFilters); every driver's find() applies it"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#findRows (`if (query.where) this.applyFilters(b, query.where)` — re-applied on every rung of the recovery ladder, which is why the ladder can drop a projection or a sort but never the predicate); packages/drivers/driver-sql/src/sql-driver.ts#applyFilters (the compiler); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (`collectConditionFields(ast.where, out)` — the FLS guard walks it so a predicate cannot read a field the caller may not)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1330-1331` had rotted onto a docblock about `UNSUPPORTED_QUERY_PARAM` being a 400 on the client-mistake list. The parenthetical named `applyFilters`, which is real and ~11,250 lines from the cited position — the largest name-vs-position gap measured in this batch. Re-closed by hand against 93ea19bca."
     },
     "search": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "note": "Union since #3899's search-contract repair: the canonical bare query STRING (ADR-0061 D1 — what every surface sends and the dogfood HTTP proof pins) | the structured FullTextSearch form. A LEAF here, no longer a container: the walker does not descend into union members, so the object form's six engine-affordance flags (fuzzy/operator/boost/minScore/language/highlight) are audited where they are declared — FullTextSearchSchema's own `[EXPERIMENTAL — not enforced]` describe markers (#4286 step 1). The previously-listed children `query`/`fields` remain live at the same executor site.",
-      "evidence": "packages/objectql/src/engine.ts:2885-2911 (ADR-0061: string or object expanded into a server-resolved cross-field $or via expandSearchToFilter; object-form `fields` scopes the expansion); proof showcase-search.dogfood.test.ts"
+      "verifiedAt": "2026-08-28",
+      "note": "Union since #3899's search-contract repair: the canonical bare query STRING (ADR-0061 D1 — what every surface sends and the dogfood HTTP proof pins) | the structured FullTextSearch form. A LEAF here, no longer a container: the walker does not descend into union members, so the object form's six engine-affordance flags (fuzzy/operator/boost/minScore/language/highlight) are audited where they are declared — FullTextSearchSchema's own `[EXPERIMENTAL — not enforced]` describe markers (#4286 step 1). The previously-listed children `query`/`fields` remain live at the same executor site. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `engine.ts:2885-2911` had rotted onto the comment `// this row sees. Never a copy.`, ~5,650 lines above `expandSearchOnAst`. engine.ts is 13,593 lines and the cited range sat in the low 2,000s; a range citation into a file that size ages out of usefulness long before it ages out of RANGE, which is why nothing flagged it. Re-closed by hand against 93ea19bca.",
+      "evidence": "packages/objectql/src/engine.ts#expandSearchOnAst (ADR-0061: the string or object form is expanded on the AST before the driver sees it); packages/objectql/src/search-filter.ts#expandSearchToFilter (builds the server-resolved cross-field `$or`; the object form's `fields` scopes the expansion); proof showcase-search.dogfood.test.ts"
     },
     "searchFields": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "note": "Formally declared by #3899 (ADR-0061 P1, 'formalize $searchFields'): the per-query narrowing override the executor has served since the ADR landed — server-intersected with the object's allowed searchable set, can only narrow, never widen. The schema-side declaration caught up with the executor when #3899's entry validation started rejecting bodies the schema did not describe.",
-      "evidence": "packages/objectql/src/engine.ts:2893-2898 (requestedFields hand-off) → packages/objectql/src/search-filter.ts resolveSearchFields (intersection with the allowed set); proof showcase-search.dogfood.test.ts + search-conformance.ledger.ts row search-fields-override"
+      "verifiedAt": "2026-08-28",
+      "note": "Formally declared by #3899 (ADR-0061 P1, 'formalize $searchFields'): the per-query narrowing override the executor has served since the ADR landed — server-intersected with the object's allowed searchable set, can only narrow, never widen. The schema-side declaration caught up with the executor when #3899's entry validation started rejecting bodies the schema did not describe. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `engine.ts:2893-2898` had rotted onto `const row = rows[index];`, and the `search-filter.ts` leg was PATH-ONLY. Both halves of a two-hop claim (`requestedFields hand-off` → `resolveSearchFields`) were unfalsifiable in different ways: one bounded to a line that had stopped meaning anything, the other bounded to nothing. Re-closed by hand against 93ea19bca.",
+      "evidence": "packages/objectql/src/engine.ts#expandSearchOnAst (the hand-off — the requested fields ride into the expansion); packages/objectql/src/search-filter.ts#resolveSearchFields (the intersection with the object's allowed searchable set: narrows only, never widens); proof showcase-search.dogfood.test.ts + search-conformance.ledger.ts row search-fields-override"
     },
     "orderBy": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1335-1342; every driver's find() sorts by it"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#orderKeysFor (the whole ORDER BY decided once — the caller's keys plus what a deterministic paged read requires, #4363); packages/drivers/driver-sql/src/sql-driver.ts#findRows (`b.orderBy(this.remoteColumn(...), key.direction)`, droppable by the unknown-column ladder so an unsortable column returns rows unordered rather than none); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard walks each sort key's field)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1335-1342` had rotted onto a docblock sentence about a throw site's job, and `every driver's find() sorts by it` was prose naming no path. Re-closed by hand against 93ea19bca."
     },
     "limit": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1345"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#findRows (`if (query.limit !== undefined) b.limit(query.limit)` — inside `buildBase`, so every rung of the recovery ladder re-applies it)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1345` had rotted onto a bare `*/` closing a docblock. Re-closed by hand against 93ea19bca."
     },
     "offset": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1344"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts#findRows (`if (query.offset !== undefined) b.offset(query.offset)` — applied beside `limit` in the same pagination block)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `sql-driver.ts:1344` had rotted onto the docblock line `* log.`, one line above `limit`'s rotted `*/`. The pair moved together and landed together, which is what makes a whole-file drift read as coherent right up to the moment someone opens the file. Re-closed by hand against 93ea19bca."
     },
     "top": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/objectql/src/engine.ts:2850-2853 (top → limit normalization, OData compatibility); packages/metadata-protocol/src/protocol.ts:3484-3486 (same fold on the REST list path)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#ENGINE_QUERY_SLOTS (the engine's slot set — the `where` and `limit` canonicals, of which `top` is the OData alias); packages/objectql/src/engine.ts#foldEngineOptionAliases (applied on `find`/`findOne` before anything reads the AST, so the driver only ever sees `limit`); packages/metadata-protocol/src/protocol.ts#WIRE_DOLLAR_ALIASES (`['$top', 'top']` — the wire spelling folded on the REST list path)",
+      "note": "2026-08-28: RE-ANCHORED (#13003), REPOINTED, and the MECHANISM had moved too — this is the one entry in the batch where re-closing the call graph changed the story rather than just the coordinates. `engine.ts:2850-2853` claimed an inline `top → limit` normalization; both citations had rotted onto docblocks (`:2853` in engine.ts, `:3486` in protocol.ts), and the inline fold no longer exists: the alias now lives in the spec's ONE alias table (`RPC_QUERY_ALIAS_SLOTS`), filtered into `ENGINE_QUERY_SLOTS` and applied by `foldEngineOptionAliases` at every engine entry point (#4346/#4371). The verdict `live` was never in doubt; the pointer had stopped describing how. Re-closed by hand against 93ea19bca."
     },
     "cursor": {
       "status": "dead",
@@ -64,24 +71,27 @@
       "children": {
         "filter": {
           "status": "live",
-          "verifiedAt": "2026-08-21",
-          "evidence": "packages/objectql/src/in-memory-aggregation.ts aggregateBucket narrows the source rows per aggregation via matchesAggregationFilter (having-filter.ts); packages/objectql/src/engine.ts aggregate() forces the in-memory lowering when any aggregation carries a non-empty filter; the four native driver faces refuse the key NOT_IMPLEMENTED/501 when reached directly (driver-sql sql-driver.ts, driver-turso remote-transport.ts, driver-mongodb mongodb-aggregation.ts, driver-memory memory-driver.ts performAggregation); the FLS predicate guard walks it (plugin-security predicate-guard.ts:89); pinned by packages/objectql/src/engine-aggregate-filter.test.ts",
-          "note": "ENFORCED 2026-08-21 (#10576, the contract half of #10413's ruling — maintainer 「其他接受」 accepting option A 「给引擎聚合契约加逐聚合过滤,一次修对所有驱动」). SQL FILTER (WHERE …) semantics: the predicate narrows the SOURCE rows the one aggregation reads while siblings keep the full group. Engine-owned via the in-memory lowering (the dateGranularity/having correct-first two-tier shape — a driver that grows native conditional aggregation must advertise a capability flag); a driver face reached directly refuses rather than silently aggregating the unfiltered rows, which was #10413's measured defect on the ObjectQL analytics path."
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/objectql/src/in-memory-aggregation.ts#aggregateBucket (`const aggFilter = agg.filter` — a non-vacuous predicate narrows the rows THIS aggregation reads while its siblings keep the full bucket); packages/objectql/src/having-filter.ts#matchesAggregationFilter (the per-row evaluation); packages/objectql/src/engine.ts#aggregate (forces the in-memory lowering when any aggregation carries a non-empty filter); packages/drivers/driver-sql/src/sql-driver.ts#unsupportedAggregationFilterError, packages/drivers/driver-turso/src/remote-transport.ts#refusePerAggregationFilter, packages/drivers/driver-mongodb/src/mongodb-aggregation.ts#refusePerAggregationFilter and packages/drivers/driver-memory/src/memory-driver.ts#performAggregation (the four native faces REFUSE the key NOT_IMPLEMENTED/501 when reached directly, rather than silently aggregating the unfiltered rows); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard walks the predicate's fields); pinned by packages/objectql/src/engine-aggregate-filter.test.ts",
+          "note": "ENFORCED 2026-08-21 (#10576, the contract half of #10413's ruling — maintainer 「其他接受」 accepting option A 「给引擎聚合契约加逐聚合过滤,一次修对所有驱动」). SQL FILTER (WHERE …) semantics: the predicate narrows the SOURCE rows the one aggregation reads while siblings keep the full group. Engine-owned via the in-memory lowering (the dateGranularity/having correct-first two-tier shape — a driver that grows native conditional aggregation must advertise a capability flag); a driver face reached directly refuses rather than silently aggregating the unfiltered rows, which was #10413's measured defect on the ObjectQL analytics path. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — nothing here had ROTTED (this entry was re-verified 2026-08-21, the youngest in the file), but nothing here was CHECKABLE either: the three repo-rooted legs were path-only, and the four driver faces plus the FLS guard were written as bare package+filename prose (`driver-sql sql-driver.ts`, `plugin-security predicate-guard.ts:89`), which PATH_RE cannot parse — so the ledger contributed no resolvable pointer for five of this entry's eight consumers and the gate was never asked about them. That is the webhook.json class, on the file's best-verified entry. All eight are now repo-rooted anchors. Re-closed by hand against 93ea19bca."
         },
         "function": {
           "status": "live",
-          "verifiedAt": "2026-07-31",
-          "evidence": "packages/objectql/src/engine.ts aggregate() forwards aggregations to the driver or the fallback; packages/objectql/src/in-memory-aggregation.ts:167 applies each function"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/objectql/src/in-memory-aggregation.ts#aggregateBucket (`const fn = agg.function` then the count / count_distinct / sum / avg / min / max arms, each with the platform's ruled empty-group value); packages/objectql/src/engine.ts#aggregate (forwards the aggregations to the driver or to the in-memory fallback)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `in-memory-aggregation.ts:167` had rotted onto `return v ?? null;` inside `projectGroupValue`, a DIFFERENT function three lines above `aggregateBucket`, and the engine leg was path-only. Three lines is the smallest miss in this batch and it is still a miss: the function it landed in projects a GROUP value, not an aggregate. Re-closed by hand against 93ea19bca."
         },
         "field": {
           "status": "live",
-          "verifiedAt": "2026-07-31",
-          "evidence": "packages/objectql/src/in-memory-aggregation.ts:204-206 (collectValues reads rows[field]); SQL builders render FUNC(field)"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/objectql/src/in-memory-aggregation.ts#aggregateBucket (`const field = agg.field` → `collectValues(rows, field)`, with the `'*'` count-all sentinel handled before it); packages/objectql/src/in-memory-aggregation.ts#collectValues (the per-row read); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard adds each aggregation's field, skipping `'*'`)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `in-memory-aggregation.ts:204-206` had rotted onto `if (!field) {`, the fieldless guard rather than the read; `SQL builders render FUNC(field)` was prose naming no path. The near-miss here is instructive in the other direction from `function`'s: the cited line genuinely mentions `field`, in the right function, and still describes the branch taken when the key is ABSENT. Re-closed by hand against 93ea19bca."
         },
         "alias": {
           "status": "live",
-          "verifiedAt": "2026-07-31",
-          "evidence": "result column naming in both the SQL builders and packages/objectql/src/in-memory-aggregation.ts"
+          "verifiedAt": "2026-08-28",
+          "evidence": "packages/objectql/src/in-memory-aggregation.ts#aggregateBucket (`const alias = agg.alias` — every arm writes its result to `out[alias]`, so the alias IS the emitted column name); packages/objectql/src/in-memory-aggregation.ts#applyInMemoryAggregation (merges those aliased values onto each bucket's group key)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — the citation was PATH-ONLY (`result column naming in both the SQL builders and packages/…/in-memory-aggregation.ts`), so no line bound could ever apply to it and the only check it faced was that the file exists. Now anchored to the two symbols that name the column. The `SQL builders` half stays prose deliberately: it names no path today and inventing one would be a guess. Re-closed by hand against 93ea19bca."
         },
         "distinct": {
           "status": "dead",
@@ -92,14 +102,15 @@
     },
     "groupBy": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/objectql/src/engine.ts aggregate() forwards groupBy; packages/objectql/src/in-memory-aggregation.ts buckets by it (including dateGranularity fallback)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/in-memory-aggregation.ts#applyInMemoryAggregation (`const groupBy = (ast.groupBy ?? [])` then the bucketing loop — one bucket per type-preserving key tuple); packages/objectql/src/in-memory-aggregation.ts#projectGroupValue (each group key's value, including the dateGranularity lowering); packages/objectql/src/engine.ts#aggregate (forwards it to the driver or the fallback); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (the FLS guard walks the string and object group forms alike)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) — both citations were PATH-ONLY, so this entry has never faced any check but file existence. Re-closed by hand against 93ea19bca."
     },
     "having": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/objectql/src/having-filter.ts (the evaluator); packages/objectql/src/engine.ts aggregate() applies it after BOTH the native-driver path and the in-memory fallback; packages/metadata-protocol/src/protocol.ts findData aggregate branch forwards it; packages/spec/src/data/data-engine.zod.ts EngineAggregateOptionsSchema declares it",
-      "note": "ENFORCED 2026-07-31 (#4286 step 3, resolved to enforce): engine-owned, applied AFTER aggregation over the aggregated row's namespace (aggregation aliases + groupBy projections); an unknown operator rejects loudly instead of being ignored. Was #4286 finding 1 — aggregate() rebuilt the driver AST without it, so even a HAVING-implementing driver could never receive it. Native SQL pushdown can come later behind a driver capability flag (the dateGranularity two-tier pattern) without changing semantics. The FLS predicate guard walks it (predicate-guard.ts:64)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/having-filter.ts#applyHaving (the evaluator entry point) and packages/objectql/src/having-filter.ts#matchesHaving (the per-row predicate over the AGGREGATED row's namespace — aliases plus groupBy projections; an unknown operator throws rather than being ignored); packages/objectql/src/engine.ts#aggregate (applies it after BOTH the native-driver path and the in-memory fallback); packages/metadata-protocol/src/protocol.ts#findData (the aggregate branch forwards it, and strips it off the find-path bag because that path cannot serve it); packages/spec/src/data/data-engine.zod.ts#EngineAggregateOptionsSchema (the declaration leg — this one is the option's DECLARATION, not a consumer, and is cited as such); packages/plugins/plugin-security/src/predicate-guard.ts#collectQueryFields (`collectConditionFields(ast.having, out)` — the FLS guard walks it beside `where`)",
+      "note": "ENFORCED 2026-07-31 (#4286 step 3, resolved to enforce): engine-owned, applied AFTER aggregation over the aggregated row's namespace (aggregation aliases + groupBy projections); an unknown operator rejects loudly instead of being ignored. Was #4286 finding 1 — aggregate() rebuilt the driver AST without it, so even a HAVING-implementing driver could never receive it. Native SQL pushdown can come later behind a driver capability flag (the dateGranularity two-tier pattern) without changing semantics. The FLS predicate guard walks it. 2026-08-28: RE-ANCHORED (#13003) — all four citations were PATH-ONLY. This is the entry where that mattered most: `having`'s whole history is a key that was declared, forwarded and then dropped one layer before it could act, and four unbounded file pointers are exactly the evidence shape that could not have caught it. Re-closed by hand against 93ea19bca."
     },
     "windowFunctions": {
       "status": "dead",
@@ -113,8 +124,9 @@
     },
     "expand": {
       "status": "live",
-      "verifiedAt": "2026-07-31",
-      "evidence": "packages/objectql/src/engine.ts:2519+ (post-process: batch $in resolution of lookup/master_detail expands, default max depth 3)"
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/engine.ts#expandRelatedRecords (the post-process: batch `$in` resolution of lookup / master_detail expands, default max depth 3 — no driver reads `ast.expand`, the engine expands after the fetch)",
+      "note": "2026-08-28: RE-ANCHORED (#13003) and REPOINTED, and this pointer was WORSE than rotted — it was written `packages/objectql/src/engine.ts:2519+`, and the trailing `+` stops the token matching PATH_RE, so the scanner classified the whole thing as PROSE. The path was never resolved, the line never bounded, the key-mention never asked: `expand` contributed ZERO checkable pointers while looking like the most precise citation in the file. That is the webhook.json defect (batch 2) reproduced by a single character rather than by a missing prefix, and it argues the same way — a citation grammar that degrades silently to prose needs the anchor to be the load-bearing half. The consumer itself had also moved ~5,520 lines, to `expandRelatedRecords`. Re-closed by hand against 93ea19bca."
     }
   }
 }

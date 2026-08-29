@@ -83,7 +83,7 @@ describe('ScriptConfigSchema (#4343 — converged to a function call)', () => {
     // The tombstone's payload is the prescription, not "unrecognized key" —
     // this string IS the upgrade doc for whoever hits it (retired-key.ts).
     expect(message).toContain(`\`script.config.${key}\``);
-    expect(message).toMatch(/#4343/);
+    expect(message).toMatch(/was removed in @objectstack\/spec 17/);
     expect(message).toMatch(/os migrate meta --from 16/);
     expect(result.error!.issues[0]!.path).toEqual([key]);
   });
@@ -196,8 +196,10 @@ describe('unknown keys — closed at #4001 批 9, and this class had no other ga
     // suppresses the rename, so the assertion is as much about what is ABSENT.
     const message = unknownKeyMessage(DecisionConfigSchema, { condition: "amount > 100000" })!;
     expect(message).toContain('this decision node config');
-    expect(message).toContain('#4414');
+    expect(message).toContain('double-declaration');
     expect(message).toContain('OUT-EDGES');
+    expect(message, 'the prescription names the double declaration, never a tracker id')
+      .not.toMatch(/#\d{3,5}/);
     expect(message).not.toContain('`condition` → `conditions`');
   });
 

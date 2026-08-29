@@ -80,7 +80,7 @@ import { strictObject } from '../shared/strict-object';
  * looks like it is working.
  */
 const OBJECT_DESIGNER_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the designer still '
+  'Until these shapes were closed an unknown key was dropped silently — the designer still '
   + 'rendered, without whatever the key was meant to configure.';
 
 export const FieldPropertySectionSchema = lazySchema(() => strictObject({

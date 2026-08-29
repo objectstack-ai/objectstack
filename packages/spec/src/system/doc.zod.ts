@@ -31,7 +31,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const DocSchema = lazySchema(() => strictObject({
   surface: 'this doc',
   history:
-    'Until #4001 these were dropped silently — the doc still registered, just without '
+    'Until this shape was closed, these were dropped silently — the doc still registered, just without '
     + 'whatever the key was meant to configure.',
   aliases: {
     title: 'label',

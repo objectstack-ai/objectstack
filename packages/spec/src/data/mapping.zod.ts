@@ -17,7 +17,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * green run.
  */
 const MAPPING_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the mapping still ran to '
+  'Until this shape was closed these were dropped silently — the mapping still ran to '
   + 'completion and reported success, minus whatever the key was meant to control.';
 
 /**
@@ -39,7 +39,7 @@ const MAPPING_HISTORY =
  * which is the behaviour we want here.
  */
 const RETIRED_EXTRACT_QUERY =
-  '`mapping.extractQuery` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  '`mapping.extractQuery` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
   + 'exporter ever read a mapping artifact, so "Query to run for export only" promised an '
   + 'export path that does not exist. Delete the key. Exports run through the ordinary '
   + 'query API (`POST /api/v1/data/:object/query`); if a mapping-driven export is ever '
@@ -47,14 +47,14 @@ const RETIRED_EXTRACT_QUERY =
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_ERROR_POLICY =
-  '`mapping.errorPolicy` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  '`mapping.errorPolicy` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
   + 'import code ever read it, so `skip` / `abort` / `retry` selected between three '
   + 'behaviours that were all the same behaviour. Delete the key. Error handling on the '
   + 'import path belongs to the import REQUEST\'s own options, not to the stored mapping. '
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_BATCH_SIZE =
-  '`mapping.batchSize` was removed in @objectstack/spec 17.0.0 (#4509, ADR-0049) — no '
+  '`mapping.batchSize` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
   + 'import code ever batched by it; the write path sizes its own batches. Delete the key. '
   + 'CAREFUL — do NOT "fix" this by relocating the value to a neighbouring `batchSize`: '
   + '`bulkActionDef.batchSize`, `connector.batchSize`, `sync.batchSize`, `offline.batchSize`, '
@@ -101,7 +101,7 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  * key that is also gone.
  */
 const RETIRED_LOOKUP_OBJECT =
-  '`fieldMapping[].params.object` was removed in @objectstack/spec 17 (#10329, ADR-0049) — the '
+  '`fieldMapping[].params.object` was removed in @objectstack/spec 17 (ADR-0049) — the '
   + '`lookup` transform never read it: the cell is copied through unchanged and the import '
   + 'pipeline resolves references from the TARGET FIELD\'s own metadata (the field\'s declared '
   + '`reference` names the lookup object), so "Lookup Object" steered nothing. Delete the key; '
@@ -110,21 +110,21 @@ const RETIRED_LOOKUP_OBJECT =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_LOOKUP_FROM_FIELD =
-  '`fieldMapping[].params.fromField` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  '`fieldMapping[].params.fromField` was removed in @objectstack/spec 17 (ADR-0049) — '
   + 'the `lookup` transform never read it: the import pipeline matches the cell\'s display '
   + 'value (name / email / id) against the referenced object itself, not against a '
   + 'mapping-declared match field, so "Match on" steered nothing. Delete the key. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_LOOKUP_TO_FIELD =
-  '`fieldMapping[].params.toField` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  '`fieldMapping[].params.toField` was removed in @objectstack/spec 17 (ADR-0049) — '
   + 'the `lookup` transform never read it: reference resolution always writes the referenced '
   + 'record\'s id (what a reference column stores), so "Value to take" steered nothing. '
   + 'Delete the key. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const RETIRED_LOOKUP_AUTO_CREATE =
-  '`fieldMapping[].params.autoCreate` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  '`fieldMapping[].params.autoCreate` was removed in @objectstack/spec 17 (ADR-0049) — '
   + 'it read as "create the referenced record when nothing matches", and nothing was ever '
   + 'created: with or without this key, a cell that resolves to no record FAILS its row with an '
   + 'unresolved-reference error (`import_reference_not_found`). Delete the key; create or '

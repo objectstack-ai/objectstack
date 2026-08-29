@@ -48,7 +48,7 @@ import {
  * header, would have silently dropped this file's published description.
  */
 const PERSISTENCE_HISTORY =
-  "Until #4410 nothing parsed `datasource.config` at all, so an unrecognised key here was "
+  "Until this shape was closed, nothing parsed `datasource.config` at all, so an unrecognised key here was "
   + 'accepted in silence and the requested persistence mode came up on its defaults instead.';
 
 /**
@@ -279,7 +279,7 @@ export const MemoryConfigSchema = lazySchema(() => strictObject(
       readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
     },
     history:
-      'Until #4410 nothing validated `datasource.config` at all — an unrecognised key was accepted '
+      'Until this shape was closed, nothing validated `datasource.config` at all — an unrecognised key was accepted '
       + 'in silence and the store came up on the driver defaults instead.',
   },
   {

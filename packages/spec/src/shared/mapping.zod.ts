@@ -91,10 +91,10 @@ export const FieldMappingSchema = lazySchema(() => z.object({
   transform: retiredKey(
     '`FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and '
     + '`externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 '
-    + '(#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it '
+    + '(ADR-0049), and the whole `FieldMappingTransform` union went with it '
     + '(`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed '
     + 'any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect '
-    + 'retired in #3278. Delete the key. The transform pipeline that IS enforced is the '
+    + 'retired. Delete the key. The transform pipeline that IS enforced is the '
     + "import mapping's: `mapping.fieldMapping[].transform` (a string enum — "
     + '`none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), '
     + 'applied by the REST import path, which rejects `javascript` with a 400 rather than '
