@@ -267,9 +267,8 @@ os-dev 定义。
 
 ## security-object 无判决枚举(座位贴常设 ⑦)的方法与校准
 
-- **表面半边**:`git diff <基线ref> origin/main -- '<两插件>/src/objects/*.object.ts'` 过
-  `grep -E "^[+-]    [a-z_][a-z0-9_]*: Field\."`;零命中 = 成员级同一(强于总数相等);读数必记基线
-  ref(2026-08-26 = `b000ab59`)。
+- **表面半边(⛔ 不比总数)**:`git diff <基线ref> origin/main -- '<两插件>/src/objects/*.object.ts'` 过
+  `grep -E "^[+-]    [a-z_][a-z0-9_]*: Field\."`;零命中 = 成员级同一,必记基线 ref(2026-08-26 `b000ab59`)。
 - **读者半边**:`git grep -I -n -w "<键>" -- . ':(exclude)<声明该列的 *.object.ts>' ':(exclude).claude'`(⛔
   缺后者会命中本节),逐命中行计一次:① `*.generated.ts` 不是读者;② `packages/spec` 契约声
   明**算**读点;③ 裸字面量 `key:` 拼写**算**。
