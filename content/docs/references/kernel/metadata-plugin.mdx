@@ -37,7 +37,6 @@ cohesive plugin that "takes over" the entire platform's metadata management:
 
 ### References
 - [kernel/metadata-loader.zod.ts](/docs/references/kernel/metadata-loader) — MetadataManager wiring (datasource, cache, write gates)
-- [kernel/metadata-customization.zod.ts](/docs/references/kernel/metadata-customization) — Overlay/merge protocol
 - [system/metadata-persistence.zod.ts](/docs/references/system/metadata-persistence) — Database record format + loader/watch envelope types
 - contracts/metadata-service.ts — Service interface
 
@@ -101,8 +100,8 @@ const result = MetadataBulkResultSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
-| **customizationPolicies** | `{ metadataType: string; allowCustomization: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
-| **mergeStrategy** | `{ defaultStrategy: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting: boolean }` | optional | Merge strategy for package upgrades |
+| **customizationPolicies** | `never` | optional | [REMOVED] `config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a customization policy, and the overlay protocol it configured was itself unreachable from any served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write doors) and ADR-0126's packaged-metadata model (clone + ledger disable). |
+| **mergeStrategy** | `never` | optional | [REMOVED] `config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades rewrite the packaged base; customer choices live in the ledger and are never merged). Delete the key. There is no replacement — upgrade-vs-customization separation is the model, not a configurable strategy. |
 | **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
 | **enableEvents** | `boolean` | optional (default: `true`) | Emit metadata change events |
 | **validateOnWrite** | `boolean` | optional (default: `true`) | Validate metadata on write |
@@ -124,27 +123,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
 | **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
-| **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
-
-### Nested Shape: `MetadataPluginConfig.customizationPolicies[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **metadataType** | `string` | ✅ | Metadata type (e.g. "object", "view") |
-| **allowCustomization** | `boolean` | optional (default: `true`) |  |
-| **lockedFields** | `string[]` | optional | Field paths that cannot be customized |
-| **customizableFields** | `string[]` | optional | Field paths that can be customized (whitelist) |
-| **allowAddFields** | `boolean` | optional (default: `true`) | Whether admins can add new fields to package objects |
-| **allowDeleteFields** | `boolean` | optional (default: `false`) | Whether admins can delete package-delivered fields |
-
-### Nested Shape: `MetadataPluginConfig.mergeStrategy`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **defaultStrategy** | `Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>` | optional (default: `"three-way-merge"`) | Default merge strategy |
-| **alwaysAcceptIncoming** | `string[]` | optional | Field paths that always accept package updates |
-| **alwaysKeepCustom** | `string[]` | optional | Field paths where customer customizations always win |
-| **autoResolveNonConflicting** | `boolean` | optional (default: `true`) | Auto-resolve changes that do not conflict |
+| **persistence** | `{ writable: boolean }` | optional | Persistence write gates |
 
 
 ---
@@ -161,7 +140,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional (default: `"Core metadata management service for ObjectStack platform"`) | Plugin description |
 | **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |
-| **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; enableEvents: boolean; … }` | optional | Plugin configuration |
+| **config** | `{ storage: object; enableEvents: boolean; validateOnWrite: boolean; enableVersioning: boolean; … }` | optional | Plugin configuration |
 
 ### Nested Shape: `MetadataPluginManifest.capabilities`
 
@@ -181,8 +160,8 @@ const result = MetadataBulkResultSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
-| **customizationPolicies** | `{ metadataType: string; allowCustomization: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
-| **mergeStrategy** | `{ defaultStrategy: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting: boolean }` | optional | Merge strategy for package upgrades |
+| **customizationPolicies** | `never` | optional | [REMOVED] `config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a customization policy, and the overlay protocol it configured was itself unreachable from any served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via `allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write doors) and ADR-0126's packaged-metadata model (clone + ledger disable). |
+| **mergeStrategy** | `never` | optional | [REMOVED] `config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades rewrite the packaged base; customer choices live in the ledger and are never merged). Delete the key. There is no replacement — upgrade-vs-customization separation is the model, not a configurable strategy. |
 | **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
 | **enableEvents** | `boolean` | optional (default: `true`) | Emit metadata change events |
 | **validateOnWrite** | `boolean` | optional (default: `true`) | Validate metadata on write |

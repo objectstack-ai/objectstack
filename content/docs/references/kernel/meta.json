@@ -24,7 +24,6 @@
     "cluster",
     "context",
     "execution-context",
-    "metadata-customization",
     "metadata-loader",
     "metadata-plugin",
     "metadata-protection",
