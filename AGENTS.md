@@ -298,13 +298,18 @@ localStorage / auth gotchas.
     governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`,
     ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its
     description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to
-    land, split the governed files into their own PR. **Reviewed + approved + fully green does not override this.**
-    Under #13 an accepted ADR *is* the decision, so merging one is the act of adopting a governance position — the one
-    class of change about which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been
-    closed by the maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of
-    the same shape: the agent instruction tree and these two root files are the operating protocol every *later*
-    dispatch reads, and the published catalog lands in codebases this repo cannot see, so a bad merge propagates into
-    work nobody has started yet — and green says nothing about whether it should propagate.
+    land, split the governed files into their own PR. **Those four lift only for an authorized approval pinned to the
+    current head** (2026-08-27; guard 2026-08-28): APPROVED, by an account in `GOVERNED_APPROVERS`
+    (`scripts/pm/check-governed-queue-guard.mjs`), `commit_id` = that sha — then the queue lands it, re-validating as
+    it merges, and any later push expires it. Even a **pure-regeneration** PR requests its pinned approval proactively,
+    before queueing — the queue-time leg installs no dependencies and never evaluates the byte-equality lift
+    (2026-08-29). Unpinned, the maintainer's bypass direct merge (人工直合) is the only landing. ⛔ **No agent seat
+    submits an approving review on a governed-surface PR, under any account** — an authorized account is
+    agent-operated too. Nothing else substitutes: under #13 an accepted ADR *is* the decision, so merging one is the act
+    of adopting a governance position — the one class of change about which "CI is green" carries no information at
+    all (a thorough, fully-green ADR draft has been closed by the maintainer on demand grounds no gate could evaluate).
+    The other surfaces are reserved for a reason of the same shape, spelled out in the audit header below; the published
+    catalog also lands in codebases this repo cannot see.
 
     **Already armed or queued when you read this?** ⚠️ Converting the PR back to **draft** is the only action that
     reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue
@@ -313,17 +318,16 @@ localStorage / auth gotchas.
     drafted ADR PR has nevertheless been merged, twice, by two different AI seats within one hour of the first ruling
     above (both ratified retroactively, explicitly setting no precedent), and a skill PR whose own body said it was
     awaiting a human merge was flipped ready by an unidentified seat and landed by the merge queue with zero reviews of
-    any kind. **The barrier is this directive, and it is the only pre-merge barrier there is.** The per-PR approval
-    check that used to sit beside it retired under the maintainer's 2026-08-18 ruling that a human merge IS the review
-    record for a governed surface — 「人工合并即人工审核」 — because it was red on every governed PR by
-    design, sat outside the required-context set, and so never blocked anything. ⛔ Do not read that retirement as a
-    relaxation: it removed a check that was not holding, and left the discipline carrying the whole load. Behind the
-    directive sits **detection, not prevention**: `docs/adr/` in CODEOWNERS routes review requests — and it is the
-    *only* governed surface routed there, so on the other four nothing summons the maintainer automatically — while
-    the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`, whose header carries this rule's incident
-    history) lists every governed-surface merge for the PM round report. Every entry on that list should be a merge the
-    maintainer performed or ordered in person; one he does not recognise is a seat violation, filed and rolled back. A
-    seat that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
+    any kind. **The barrier is this directive.** The per-PR approval check beside it retired under 2026-08-18's ruling
+    that a human merge IS the review record — 「人工合并即人工审核」; why, and why its successor is the
+    queue guard rather than a per-PR gate, is in that guard's header. ⛔ Not a relaxation. Behind the directive sit
+    prevention and detection: that guard refuses an unpinned governed diff in the queue, `docs/adr/` in CODEOWNERS
+    routes review requests — and it is the *only* governed surface routed there, so on the other four nothing summons
+    the maintainer automatically — while the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`,
+    whose header carries this rule's incident history) lists every governed-surface merge for the PM round report. Every
+    entry should be a merge the maintainer performed or ordered in person, and the audit reads the approver as well as
+    the merger; one he does not recognise, or any agent approval, is a seat violation, filed and rolled back. A seat
+    that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release workflow, and none merges the Version Packages PR.** Maintainer ruling, 2026-08-07, verbatim and
@@ -832,8 +836,8 @@ such lists drifted stale as skills landed):
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
 
-⛔ **Both roots are governed surfaces** — human-merge only, never queued, armed or flipped
-out of draft, and no per-PR check holds it: **Prime Directive #14** is the whole barrier.
+⛔ **Both roots are governed surfaces** — human-merge only, or queued under **Prime Directive #14**'s pinned-approval
+path; no per-PR check holds it: the queue guard refuses an unpinned governed diff at queue time.
 
 ---
 

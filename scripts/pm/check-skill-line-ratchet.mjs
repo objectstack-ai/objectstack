@@ -364,7 +364,21 @@ export const CEILINGS = new Map([
   // Maintainer ruling 2026-08-25 (option C1), verbatim and untranslated:
   // 「我看到了,你分析过了,接受你的建议」 — recorded on PR #11908. Headroom is 0
   // again by construction.
-  ['AGENTS.md', 1158],
+  //
+  // 1158 → 1162 (#12756, folding #12896 + the #12874-A line): PD #14's editable
+  // prose amended to the 2026-08-27 approve-gated queue ruling — the superseded
+  // "Reviewed + approved + fully green does not override this" replaced by the
+  // GOVERNED_APPROVERS pinned-approval landing path, the agent-never-approves
+  // prohibition, and the pure-regeneration proactive-approval line (the queue
+  // leg installs no dependencies, so the byte-equality lift never evaluates at
+  // queue time); § Skills' twin sentence reconditioned in place at net 0. All
+  // three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
+  // and the card's seven-cut ledger was exhausted first: held draft +2, the
+  // proactive-approval rider +2 (a 161-byte minimal variant still wraps to +2;
+  // anything smaller drops ruled content), fold 0. Maintainer batch ruling
+  // 2026-08-29, verbatim and untranslated: 「执行，批 #1 其他卡同意」 — recorded
+  // on #12756 and quoted in the PR. Headroom is 0 again by construction.
+  ['AGENTS.md', 1162],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
