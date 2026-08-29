@@ -5042,12 +5042,26 @@ export function unreachableLines(unreachable, swept) {
         '(an empty listing and an empty sweep read alike without it — #4690)',
     );
   }
+  const scheduled = unreachable.filter((u) => (u.entry?.jobFilters?.length ?? 0) > 0).length;
   const lines = [
     `Unreachable — the ${unreachable.length} famil(ies) whose declared population matches NOTHING in this tree,` +
       ` swept over ${swept} tracked file(s).`,
-    '  ⛔ NOT a skip list: CI runs these on every pull request. This says only that no path derivation can name them,',
-    '    so they score the same quiet green for every card in the tree — yours included — whether they still work or not.',
+    '  ⛔ NOT a skip list. This says only that the family\'s OWN declared literals name nothing here, so its verdict',
+    '    is the same quiet green for every card in the tree — yours included — whether it still works or not.',
   ];
+  // Since #12956 the two facts can come apart, and saying otherwise would make
+  // this heading contradict the matched list two screens up: a family whose own
+  // literals reach nothing can still be SCHEDULED from a path population, when
+  // the job that runs it carries a resolvable paths-filter `if:`. The blanket
+  // "CI runs these on every pull request" was true of every entry before that
+  // and is not true of those, so it is stated per entry instead.
+  lines.push(
+    scheduled === 0
+      ? '  Every one of them also sits outside any path filter, so CI schedules it on EVERY pull request.'
+      : `  Nonetheless SCHEDULED from a path population: ${scheduled} of the ${unreachable.length} — the job running each` +
+        ' carries a resolvable paths-filter `if:`, so it IS named in the matched list above for the cards that job runs on,'
+        + ' and is marked below. The rest sit outside any path filter, so CI schedules those on EVERY pull request.',
+  );
   if (unreachable.length === 0) {
     lines.push('  (none — every declaring family reaches something in the tree.)');
     return lines;
@@ -5068,7 +5082,13 @@ export function unreachableLines(unreachable, swept) {
           ' to the gate or the tree makes it one:',
     );
     for (const { entry, dead } of items) {
-      lines.push(`    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}`);
+      const jf = entry.jobFilters ?? [];
+      const schedule = jf.length
+        ? `   ⇢ but SCHEDULED by ${jf.map((f) => `'${f.name}' in ${f.workflow}`).join(', ')} — reachable through that job's filter, not through its own literals`
+        : '';
+      lines.push(
+        `    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}${schedule}`,
+      );
     }
   }
   return lines;
@@ -9664,7 +9684,28 @@ function selfTest() {
   // unreachable when #12514 taught the matcher to follow a dropped extension.
   // The corpus size beside it is `treeFixture.length` and did not move.
   t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
-  t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
+  // Re-pointed by #12956, not weakened: the ⛔ correction is still asserted, and
+  // so is the sentence that used to carry it. What moved is that "CI runs these
+  // on every pull request" became a per-entry fact once a job filter could
+  // schedule an unreachable family — see the two cases below for the split.
+  t('⛔ and states plainly that this is not a skip list — the one wrong reading', /NOT a skip list/.test(listedText));
+  t('and that CI still schedules them on every PR, which is what makes the wrong reading wrong', /CI schedules (?:those|it) on EVERY pull request/.test(listedText));
+  t(
+    'with no job filter in the fixture, the listing says so of EVERY entry rather than counting exceptions',
+    /Every one of them also sits outside any path filter/.test(listedText)
+      && !/Nonetheless SCHEDULED/.test(listedText),
+  );
+  // The other branch: an unreachable family whose JOB carries a resolvable
+  // filter is scheduled from a path population, so the blanket claim above is
+  // false of it. Both halves are pinned — the count line and the per-entry mark
+  // — because a count with no marked entry sends a reader looking for one.
+  const scheduledSweep = sweep.map((u, i) => (i === 0
+    ? { ...u, entry: { ...u.entry, jobFilters: [{ workflow: 'ci.yml', job: 'test', name: 'Test Core', outputs: ['filter.core'], paths: ['packages/**'], dropped: 0 }] } }
+    : u));
+  const scheduledText = unreachableLines(scheduledSweep, treeFixture.length).join('\n');
+  t('a scheduled unreachable family is COUNTED as the exception it is', /Nonetheless SCHEDULED from a path population: 1 of the 3/.test(scheduledText));
+  t('and the entry itself says which job schedules it', /SCHEDULED by 'Test Core' in ci\.yml/.test(scheduledText));
+  t('while the blanket every-PR claim is withdrawn for the set that has one', !/Every one of them also sits outside any path filter/.test(scheduledText));
   t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
   t('the real miss sorts BEFORE the standing facts, never buried among them', listedText.indexOf('THE LAYOUT MOVED') < listedText.indexOf('BY CONSTRUCTION'));
@@ -10582,7 +10623,7 @@ function selfTest() {
     const plainOut = plainRun.stdout ?? '';
     t('the DEFAULT run answers at all', plainRun.status === 0 && plainOut.trim().length > 0);
     t('the DEFAULT run — no --residue — names the unreachable families itself', /^Unreachable — the \d+ famil\(ies\)/m.test(plainOut));
-    t('and carries the ⛔ correction into the default output, where the wrong reading would be made', /NOT a skip list: CI runs these on every pull request/.test(plainOut));
+    t('and carries the ⛔ correction into the default output, where the wrong reading would be made', /NOT a skip list/.test(plainOut) && /CI schedules (?:those|it) on EVERY pull request/.test(plainOut));
     t('and the default run stays free of the residue listings the flag owns', !/^Silent \(source names paths/m.test(plainOut));
     // The two repaired families must not be named as unreachable by a REAL run.
     const unreachableBlock = plainOut.slice(plainOut.indexOf('Unreachable — the'), plainOut.indexOf('Residue — all'));
