@@ -352,24 +352,39 @@ sections:
 
 ### Conditional Sections
 
-Show sections based on field values or permissions:
+Show sections based on field values. The key is **`visibleWhen`** and its value is a
+**CEL predicate string** — never a `{ field, value }` rule object:
 
 ```yaml
 sections:
   - label: Basic Info
     fields: [name, email]
-  
+
   - label: Billing Information
-    visible:
-      field: account_type
-      value: premium  # Only show for premium accounts
+    visibleWhen: "record.account_type == 'premium'"  # Only show for premium accounts
     fields: [payment_method, billing_address]
-  
-  - label: Admin Settings
-    visible:
-      permission: admin  # Only show to admins
-    fields: [api_key, rate_limit]
 ```
+
+<Callout type="warn">
+  **There is no section-level `visible` key — and no permission test belongs here.**
+  `FormSectionSchema` is `.strict()` and declares `visibleWhen` (plus the `@deprecated`
+  alias `visibleOn`); `visible` is refused *by name*, before any value shape is examined,
+  and the rejection points you back at `visibleWhen`. Neither a `{ field, value }` rule
+  object nor a `{ permission }` name is a value `visibleWhen` accepts either — it takes a
+  CEL predicate string, normalized to a `{ dialect: 'cel', source }` envelope at parse.
+
+  Earlier revisions of this page also showed an `Admin Settings` section gated on
+  `permission: admin`. It is **removed rather than translated**, because rewriting it as a
+  `visibleWhen` role test would teach the anti-pattern this page warns about further down
+  — twice over. Nothing server-side evaluates a form-view section predicate, so a role
+  test here hides the controls and protects no data: the record still carries every value
+  in the section, and every other read surface still returns them. Worse, on the console's
+  public form route (`/f/:slug`) no host publishes a predicate scope, so the root is
+  unbound, the predicate **faults open**, and the section it was meant to hide is shown to
+  everyone. To withhold fields by role, declare
+  [field-level security](/docs/permissions/field-level-security) on a permission set, or
+  [row-level security](/docs/permissions/rls) — both enforced on the server.
+</Callout>
 
 ### Section Variants
 
