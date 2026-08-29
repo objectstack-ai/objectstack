@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { PluginCapabilityManifestSchema } from './plugin-capability.zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { retiredKey } from '../shared/retired-key';
 import { SeedSchema } from '../data/seed.zod';
@@ -289,30 +288,32 @@ export const ManifestSchema = z.object({
   dependencies: z.record(z.string(), z.string()).optional().describe('Package dependencies'),
 
   /**
-   * Plugin Configuration Schema.
-   * Defines the settings this plugin exposes to the user via UI/ENV.
-   * Uses a simplified JSON Schema format.
-   * 
-   * @example
-   * {
-   *   "title": "Stripe Config",
-   *   "properties": {
-   *     "apiKey": { "type": "string", "secret": true },
-   *     "currency": { "type": "string", "default": "USD" }
-   *   }
-   * }
+   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   *
+   * `configuration` declared a per-plugin settings surface — `{ title,
+   * properties }`, a simplified JSON-Schema map — and NOTHING read the
+   * container anywhere: no settings UI rendered it, no loader resolved a
+   * setting from it. Its `properties.*.secret` flag is why this is a
+   * false-compliance finding rather than tidying: the describe() promised
+   * "value is encrypted/masked (e.g. API Keys)" while nothing encrypted,
+   * masked, resolved or even parsed the value — an author writing
+   * `secret: true` next to an API key got exactly the same handling as
+   * `secret: false`. Tombstoned rather than deleted because `ManifestSchema`
+   * is not `.strict()`: a plain deletion would silently strip the key (the
+   * `loading` precedent below).
    */
-  configuration: z.object({
-    title: z.string().optional(),
-    properties: z.record(z.string(), z.object({
-       type: z.enum(['string', 'number', 'boolean', 'array', 'object']).describe('Data type of the setting'),
-       default: z.unknown().optional().describe('Default value'),
-       description: z.string().optional().describe('Tooltip description'),
-       required: z.boolean().optional().describe('Is this setting required?'),
-       secret: z.boolean().optional().describe('If true, value is encrypted/masked (e.g. API Keys)'),
-       enum: z.array(z.string()).optional().describe('Allowed values for select inputs'),
-    })).describe('Map of configuration keys to their definitions')
-  }).optional().describe('Plugin configuration settings'),
+  configuration: retiredKey(
+    '`manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 ' +
+    'enforce-or-remove) — nothing ever read the block: no settings UI rendered it and ' +
+    'no loader resolved a setting from it, so authoring it configured nothing. Worse, ' +
+    '`properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while ' +
+    'nothing encrypted, masked or even parsed the flag — a false assurance about ' +
+    'credential handling. Delete the key. A plugin is configured by the host that ' +
+    'composes it: pass options to its constructor in ' +
+    '`defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. ' +
+    'A declarative settings surface must be designed with an enforcing reader first, ' +
+    'not revived here.',
+  ),
 
   /**
    * Contribution Points (VS Code Style).
@@ -482,18 +483,51 @@ export const ManifestSchema = z.object({
   data: z.array(SeedSchema).optional().describe('Initial seed data (prefer top-level data field)'),
 
   /**
-   * Plugin Capability Manifest.
-   * Declares protocols implemented, interfaces provided, dependencies, and extension points.
-   * This enables plugin interoperability and automatic discovery.
+   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   *
+   * `capabilities` carried the whole `PluginCapabilityManifestSchema` block —
+   * `implements`, `provides`, `requires`, `extensionPoints`, `extensions` —
+   * and NOTHING read the container anywhere, which settles every key beneath
+   * it at once. Its describe() sold "plugin interoperability and automatic
+   * discovery"; no discovery path ever consulted it, and real dependency
+   * resolution runs off top-level `manifest.dependencies`, not
+   * `capabilities.requires`. The bare `.capabilities` hits a re-measurement
+   * will find belong to other surfaces entirely (driver loader contracts,
+   * the QuickJS sandbox argument set, REST discovery, the ADR-0066
+   * stack-level `capabilities` collection) — none is reached from a
+   * manifest. `PluginCapabilityManifestSchema` itself stays exported: the
+   * plugin-registry surface (`plugin-registry.zod.ts`) still declares it.
+   * Tombstoned rather than deleted because `ManifestSchema` is not
+   * `.strict()` (the `loading` precedent below).
    */
-  capabilities: PluginCapabilityManifestSchema.optional()
-    .describe('Plugin capability declarations for interoperability'),
+  capabilities: retiredKey(
+    '`manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 ' +
+    'enforce-or-remove) — no discovery path ever consulted the block: nothing read ' +
+    '`implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the ' +
+    'declared "interoperability and automatic discovery" never happened. Delete the ' +
+    'key. Real dependency resolution runs off top-level `manifest.dependencies`, ' +
+    'which stays. Capability-based discovery must be designed with an enforcing ' +
+    'reader first, not revived here.',
+  ),
 
-  /** 
-   * Extension points contributed by this package.
-   * Allows packages to extend UI components, add functionality, etc.
+  /**
+   * REMOVED (#11332, ADR-0049 enforce-or-remove).
+   *
+   * `extensions` was an untyped escape hatch — `z.record(z.string(),
+   * z.unknown())` — with zero readers anywhere, so whatever an author parked
+   * here was stored and never consulted. Its emptiness in-repo was itself
+   * evidence: an untyped catch-all with no users is a cheaper removal than
+   * one with unknown users. Tombstoned rather than deleted because
+   * `ManifestSchema` is not `.strict()` (the `loading` precedent below).
    */
-  extensions: z.record(z.string(), z.unknown()).optional().describe('Extension points and contributions'),
+  extensions: retiredKey(
+    '`manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 ' +
+    'enforce-or-remove) — an untyped map with zero readers: whatever was parked here ' +
+    'was stored and never consulted. Delete the key. Extend the platform through the ' +
+    'enforced channels instead: `contributes.kinds` registers metadata kinds, ' +
+    '`navigationContributions` injects navigation into other packages\' apps, and ' +
+    'code-level extension happens in the plugin itself (`init`/`start`).',
+  ),
 
   /**
    * Navigation contributions (ADR-0029 D7).

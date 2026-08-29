@@ -6982,6 +6982,64 @@ const step18: MigrationStep = {
         + 'key from the source manifest and reinstalling.',
     },
     {
+      id: 'plugin-manifest-dead-containers-retired',
+      surface:
+        'manifest.capabilities / manifest.configuration / manifest.extensions (three top-level '
+        + 'containers; retiring the container settles every key beneath it — '
+        + '`capabilities.{implements,provides,requires,extensionPoints,extensions}` and '
+        + '`configuration.{title,properties}` — at once)',
+      replacement:
+        'delete the keys — each declared purpose either has its one enforced channel or never '
+        + 'existed: `configuration` (a `{ title, properties }` settings surface no UI rendered '
+        + 'and no loader resolved) → pass options to the plugin\'s constructor in '
+        + '`defineStack({ plugins: [new MyPlugin({ … })] })`, the channel hosts already use; '
+        + '`capabilities` (protocol/interface declarations sold as "interoperability and '
+        + 'automatic discovery") → nothing — no discovery path ever existed; real dependency '
+        + 'resolution runs off top-level `manifest.dependencies`, which stays; `extensions` (an '
+        + 'untyped `z.record(z.string(), z.unknown())` catch-all) → the enforced extension '
+        + 'channels: `contributes.kinds` registers metadata kinds, `navigationContributions` '
+        + '(ADR-0029 D7) injects navigation, and code-level extension lives in the plugin itself '
+        + '(`init`/`start`)',
+      reason:
+        'ADR-0049 enforce-or-remove; #11332 (triage graded 2026-08-23, cloud precondition '
+        + 'discharged 2026-08-29 on #12400). #11332 measured, monorepo-wide and non-test with '
+        + 'control probes, ZERO reads of each container itself, which settles all eight keys '
+        + 'beneath them — a key cannot be read if the object holding it never is. The census '
+        + 'stands on three repos: objectstack (re-verified on current main at claim time; every '
+        + 'bare `.capabilities` hit classifies to a different surface — driver loader contracts, '
+        + 'the QuickJS sandbox argument set, REST discovery, the ADR-0066 stack-level '
+        + '`capabilities` collection), objectui (0 container reads; control: `manifest.(id|name|'
+        + 'namespace|version)` reads findable), and cloud (measured clean 2026-08-29 at '
+        + '`15f55df`: zero reads of all three, controls positive). '
+        + '`configuration.properties.secret` made this false compliance rather than tidying: its '
+        + 'describe() promised "value is encrypted/masked (e.g. API Keys)" and nothing ever '
+        + 'encrypted, masked or parsed it, so the key\'s own text was an unkept assurance about '
+        + 'credential handling. '
+        + 'Why D3 semantic and not a D2 conversion: the conversion chain walks a normalized '
+        + 'STACK and `PLURAL_TO_SINGULAR` has no `packages` / `plugins` entry (re-verified — its '
+        + '`capabilities` entry is the unrelated ADR-0066 stack collection), so a manifest is '
+        + 'not a stack collection member and a conversion would be a transform with no seam that '
+        + 'ever runs (the `kernel/Manifest:loading` precedent, recorded verbatim in its '
+        + 'retired-key entry). `PluginCapabilityManifestSchema` stays published: the '
+        + 'plugin-registry surface (`plugin-registry.zod.ts`) still declares it, so this is a '
+        + 'carrier-key tombstone with no def removal.',
+      acceptanceCriteria:
+        'No `objectstack.config.ts` manifest and no packaged `manifest.json` authors any of the '
+        + 'three containers (the two in-repo authors — driver-memory and plugin-hono-server, '
+        + 'both writing `configuration` and `capabilities` blocks nothing read — were cleaned '
+        + 'with this retirement). The enforced channel is the one place a manifest is parsed '
+        + 'with an author present: `os plugin build` runs `ManifestSchema.safeParse` and exits '
+        + 'non-zero printing the per-key tombstone prescription; TypeScript authors fail earlier '
+        + 'still (each key is typed `never`). Live neighbours are untouched and must be verified '
+        + 'as such: `manifest.dependencies` keeps resolving dependencies, `contributes.kinds` '
+        + 'keeps registering, `navigationContributions` keeps merging. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED: nothing ever read the three containers, so removing them '
+        + 'removes no behaviour. A package ALREADY INSTALLED whose stored manifest carries one '
+        + 'degrades to a single `[metadata_spec_invalid]` log line at registration (the '
+        + 'registry\'s `validate()` is a diagnostic, not a gate) rather than a boot failure; '
+        + 'clear it by deleting the key from the source manifest and reinstalling.',
+    },
+    {
       id: 'plugin-manifest-kind-globs-retired',
       surface: 'manifest.contributes.kinds[].globs (the `kind` bucket itself and its `id` are untouched)',
       replacement:
@@ -7990,6 +8048,50 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     'kernel/KernelContext:previewMode',
+    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // top-level containers (triage graded 2026-08-23; cloud leg measured clean
+    // 2026-08-29 on #12400 with positive controls). The census found ZERO reads
+    // of the `capabilities` container itself in objectstack, objectui and cloud,
+    // which settles all five keys beneath it (`implements`, `provides`,
+    // `requires`, `extensionPoints`, `extensions`) at once — a key cannot be read
+    // if the object holding it never is. Its describe() sold "interoperability
+    // and automatic discovery"; no discovery path consulted it, and real
+    // dependency resolution runs off top-level `manifest.dependencies`. ONE
+    // tombstoned key, because `capabilities` was the single carrier (the
+    // `kernel/Manifest:loading` shape); `PluginCapabilityManifestSchema` itself
+    // stays published — the plugin-registry surface still declares it — so
+    // nothing lands in `RETIRED_DEFS_BY_MAJOR`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/Manifest:loading` gives: a package manifest is not a stack
+    // collection member (`PLURAL_TO_SINGULAR` has no `packages` / `plugins`
+    // entry — re-verified at claim; the map's `capabilities` entry is the
+    // unrelated ADR-0066 stack-level collection), so a D2 conversion would be a
+    // transform with no seam that ever runs. The prescription reaches authors
+    // through the tombstone at `os plugin build` → `ManifestSchema.safeParse`
+    // and through the D3 semantic entry
+    // `plugin-manifest-dead-containers-retired`.
+    'kernel/Manifest:capabilities',
+    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // top-level containers; census and registration major recorded once in the
+    // sibling entry `kernel/Manifest:capabilities`, the why-no-D2-conversion
+    // reasoning in `kernel/Manifest:loading` (the precedent); the D3 semantic
+    // entry is `plugin-manifest-dead-containers-retired`.
+    //
+    // `configuration` declared a per-plugin settings surface (`{ title,
+    // properties }`, a simplified JSON-Schema map) that no settings UI rendered
+    // and no loader resolved. Its `properties.*.secret` flag is the
+    // false-compliance shape ADR-0049 exists for: the describe() promised "value
+    // is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or
+    // even parsed the flag — `secret: true` next to an API key got exactly the
+    // same handling as `secret: false`. The enforced channel is host
+    // composition: the options object passed to the plugin's constructor in
+    // `defineStack({ plugins: [new MyPlugin({ … })] })`.
+    'kernel/Manifest:configuration',
     // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
@@ -8159,6 +8261,22 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `translations` collection (`defineTranslationBundle`), governed by
     // `packages/spec/liveness/translation.json`.
     'kernel/Manifest:contributes.translations',
+    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // top-level containers; census and registration major recorded once in the
+    // sibling entry `kernel/Manifest:capabilities`, the why-no-D2-conversion
+    // reasoning in `kernel/Manifest:loading` (the precedent); the D3 semantic
+    // entry is `plugin-manifest-dead-containers-retired`.
+    //
+    // `extensions` was an untyped escape hatch — `z.record(z.string(),
+    // z.unknown())` — with zero readers, so whatever an author parked here was
+    // stored and never consulted. Because the value type is `unknown`, this key
+    // is where anything the platform does not yet model would get parked; its
+    // measured emptiness is therefore its own evidence — authors are not parking
+    // things here either, making an untyped catch-all with no users the cheapest
+    // removal in the family. The enforced extension channels are
+    // `contributes.kinds` (metadata kinds), `navigationContributions`
+    // (ADR-0029 D7), and plugin code itself (`init`/`start`).
+    'kernel/Manifest:extensions',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057, adopting retirement; re-charter #13135 executes the widened
     // surface). `persistence.overlayWritable` gated exactly one method —
