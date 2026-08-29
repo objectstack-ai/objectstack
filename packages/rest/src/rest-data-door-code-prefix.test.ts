@@ -272,12 +272,16 @@ describe('[#12975] every branch that is not the declared-4xx idiom is untouched'
     });
 
     it('OBJECT_NOT_FOUND keeps its canonical 404 body', async () => {
+        // The arm ABOVE the passthrough, so the strip is never consulted. Its
+        // sentence is re-derived from the route's own object name rather than
+        // echoed from the throw, which is why the expectation names
+        // `showcase_inquiry` and not whatever the producer wrote.
         const answer = await patchWith(thrown("Object 'zz' is not registered", {
             code: 'OBJECT_NOT_FOUND', status: 404,
         }));
         expect(answer.status).toBe(404);
         expect(answer.body.code).toBe('OBJECT_NOT_FOUND');
-        expect(answer.body.error).toBe("Object 'zz' is not registered");
+        expect(answer.body.error).toBe("Object 'showcase_inquiry' is not registered");
     });
 });
 
