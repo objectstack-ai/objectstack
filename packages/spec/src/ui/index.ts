@@ -92,3 +92,9 @@ export * from './sharing.zod';
 // memo may evaluate at a node's top level, plus the per-component carriage
 // map the objectui memo consumes instead of hard-coding a twin list.
 export * from './expression-bindable-text-keys.zod';
+
+// [#12414] entry-nameability: factory return types expand to mention
+// `/data`'s `FilterCondition`, which `/ui` does not re-export. Same invariant
+// (maintainer ruling recorded on #11350), same repair: re-export from the
+// declaring module.
+export type { FilterCondition } from '../data/filter.zod';

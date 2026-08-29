@@ -151,10 +151,10 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
   // enforce-or-remove: no strategy ever read it), so the nested surface no
   // longer exists — the batch-D verdict for it is SUPERSEDED, not reopened.
   // The key itself now rejects with the retirement prescription:
-  it('`Metric.filters` — REMOVED (#10414); the key rejects with the prescription, not as a bare unknown', () => {
+  it('`Metric.filters` — REMOVED; the key rejects with the prescription, not as a bare unknown', () => {
     expect(
       reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
-    ).toContain('was removed in @objectstack/spec 17 (#10414');
+    ).toContain('was removed in @objectstack/spec 17 (ADR-0049)');
   });
 
   it('`Dimension` — through the cube `dimensions` record', () => {
@@ -245,8 +245,8 @@ describe('#4001 batch D — the strict base does not break the request wrapper',
   });
 
   it('the #3878 tombstones still fire — `query` and `format` carry their migration text', () => {
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('#3878');
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('#3878');
+    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('was removed from AnalyticsQueryRequest');
+    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('was removed from AnalyticsQueryRequest');
   });
 });
 

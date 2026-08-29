@@ -53,9 +53,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -88,8 +88,8 @@ const result = AnalyticsEndpoint.parse(data);
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
 | **timezone** | `string` | optional |  |
-| **query** | `never` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). The `{ cube, query: {...} }` envelope was the dialect of the retired degraded analytics shim (#3891) — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
-| **format** | `never` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
+| **query** | `never` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. The `{ cube, query: {...} }` envelope was the dialect of the retired degraded analytics shim — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
+| **format** | `never` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
 
 
 ---
@@ -110,9 +110,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -145,9 +145,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |

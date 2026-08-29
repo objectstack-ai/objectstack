@@ -41,7 +41,7 @@ import { resolveDriverId, validateDriverConfig } from './driver/config-registry.
  */
 
 const CAPABILITIES_REMOVED_PREFIX =
-  '`datasource.capabilities` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — '
+  '`datasource.capabilities` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
   + 'all eleven flags were declared, strict-guarded and read by nobody. ';
 
 /**
@@ -66,8 +66,8 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
     + 'so a datasource labelled a read replica accepted writes exactly like any other. The one '
     + 'enforced datasource-wide write gate is `external.allowWrites: false`, and it applies ONLY '
     + 'to a federated datasource (`schemaMode` other than `managed`) — for a managed datasource '
-    + 'there is no read-only gate at all, so delete the key rather than trusting it. #4584 '
-    + 'settled that this stays so ON PURPOSE: grant the connection SELECT-only at the database '
+    + 'there is no read-only gate at all, so delete the key rather than trusting it. This '
+    + 'stays so ON PURPOSE: grant the connection SELECT-only at the database '
     + '(`GRANT SELECT`), which no direct connection, migration or DDL can talk past — an '
     + 'application-layer flag holds in the ObjectQL path only, and one that looks like a boundary '
     + 'without being one is worse than none.',
@@ -84,7 +84,7 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
  */
 const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
   retryPolicy:
-    '`datasource.retryPolicy` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    '`datasource.retryPolicy` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'connect or query path ever retried on it. Connection failure is handled by the boot '
     + 'policy in the datasource connection service (degraded boot, or `bootCritical` fail-fast), '
     + 'which does not retry on a schedule. Delete the block. '
@@ -94,7 +94,7 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + 'actually want that hook or job retried. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   healthCheck:
-    '`datasource.healthCheck` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    '`datasource.healthCheck` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'health-check loop ever read it, so `enabled: true` scheduled nothing and the two timeouts '
     + 'bounded nothing. Connection liveness is probed ON DEMAND through the driver handle '
     + '(`ping()` / `checkHealth()`), which the datasource admin service calls for "Test '
@@ -102,12 +102,12 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + 'which checks SCHEMA DRIFT — a different concern, not a liveness probe. Delete the block. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   externalLabel:
-    '`external.label` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — nothing read '
+    '`external.label` was removed in @objectstack/spec 17.0.0 (ADR-0049) — nothing read '
     + "the federation block's own label. Use the datasource's TOP-LEVEL `label`, which is what "
     + 'Setup → Datasources actually renders. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   externalRequirePermission:
-    '`external.requirePermission` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — no '
+    '`external.requirePermission` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'authorization check ever consulted it, so a permission named here gated nothing. Access to '
     + "a federated datasource's data is governed by the ordinary object permission sets and RLS, "
     + 'exactly as for a managed datasource. Naming a permission that is never required is the '
@@ -165,7 +165,7 @@ const belongsInConfig = (key: string, canonical: string = key) =>
  * rename onto a key that is also gone.
  */
 const RETIRED_READ_REPLICAS =
-  '`datasource.readReplicas` was removed in @objectstack/spec 17.0.0 (#4468, ADR-0049) — '
+  '`datasource.readReplicas` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
   + 'it described replica connections nothing ever opened: no driver reads the key, and no '
   + 'query path separates reads from writes, so every statement always went to the primary. '
   + 'Delete the key. There is no read-replica routing to migrate to — if your database fronts '
@@ -195,7 +195,7 @@ export const DriverDefinitionSchema = lazySchema(() => strictObject(
       capabilities: RETIRED_CAPABILITIES.capabilities,
       capability: RETIRED_CAPABILITIES.capabilities,
     },
-    history: 'Until #4001 these were dropped silently — the driver still registered.',
+    history: 'Until this shape was closed, these were dropped silently — the driver still registered.',
   },
   {
   id: z.string().describe('Unique driver identifier (e.g. "postgres")'),
@@ -285,7 +285,7 @@ export const ExternalDatasourceSettingsSchema = strictObject(
         + 'enforced datasource-wide write gate (checked by the ObjectQL engine before any write '
         + 'to a federated datasource).',
     },
-    history: 'Until #4001 these were dropped silently — federation ran on the defaults instead.',
+    history: 'Until this shape was closed, these were dropped silently — federation ran on the defaults instead.',
   },
   {
   allowedSchemas: z.array(z.string()).optional()
@@ -304,7 +304,7 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       checkinterval: 'checkIntervalMs',
     },
     history:
-      'Until #4001 these were dropped silently — drift checking ran on the defaults '
+      'Until this shape was closed, these were dropped silently — drift checking ran on the defaults '
       + '(fail on mismatch, check at boot) regardless of what was written.',
   },
   {
@@ -318,7 +318,7 @@ export const ExternalDatasourceSettingsSchema = strictObject(
     .default({ onMismatch: 'fail', checkOnBoot: true }).describe('Boot/drift validation policy'),
   credentialsRef: z.string().optional()
     .describe('Reference into the secrets store; never inline credentials. '
-      + 'Valid in every schemaMode — the one `external` key a managed datasource may carry (#8153).'),
+      + 'Valid in every schemaMode — the one `external` key a managed datasource may carry.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
 })
@@ -377,7 +377,7 @@ export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasource
  */
 const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
   'this mongo `config.url` names no user in its userinfo while `external.credentialsRef` binds '
-  + 'a secret — a pair that cannot work as written (#9041). MongoClient credentials need a '
+  + 'a secret — a pair that cannot work as written. MongoClient credentials need a '
   + 'username as well as a password, and with `url` present the only place the username can '
   + 'come from is the URL\'s own userinfo (the discrete `username` field is superseded by '
   + '`url`), so the bound secret is injected only when the URL names a user — on this URL the '
@@ -386,7 +386,7 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
   + 'turns a connection that works anonymously today into a guaranteed handshake failure.) Two '
   + 'authoring fixes are valid, depending on what this datasource is meant to do: add the '
   + 'username to the URL\'s userinfo (`mongodb://user@host/db`) so the bound secret is '
-  + 'injected at connect (#8696) — or, if the datasource is genuinely meant to connect '
+  + 'injected at connect — or, if the datasource is genuinely meant to connect '
   + 'unauthenticated, remove the `external.credentialsRef` binding. Runtime-environment DSNs '
   + '(`OS_DATABASE_URL` and friends) do not pass through this publish door and are unaffected.';
 
@@ -456,7 +456,7 @@ const CREDENTIALS_REF_MONGO_URL_NO_USER_REFUSED =
  */
 const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
   'this mongo `config` authors no `url` and names no `username`, while `external.credentialsRef` '
-  + 'binds a secret — a pair that cannot work as written (#9147). With no `url` the connection '
+  + 'binds a secret — a pair that cannot work as written. With no `url` the connection '
   + 'URI is COMPOSED from the discrete fields, and the bound secret has exactly one route into '
   + 'it: the userinfo the composer writes beside a username. With `username` absent (or empty) '
   + 'no userinfo is written at all, so the bound secret is never used — the binding is a silent '
@@ -464,7 +464,7 @@ const CREDENTIALS_REF_MONGO_NO_USERNAME_REFUSED =
   + 'username to fabricate: a MongoDB handshake cannot authenticate from a password alone.) Two '
   + 'authoring fixes are valid, depending on what this datasource is meant to do: add `username` '
   + 'to `config` — the discrete field is live on this branch, and the bound secret is '
-  + 'interpolated beside it at connect (#8696) — or, if the datasource is genuinely meant to '
+  + 'interpolated beside it at connect — or, if the datasource is genuinely meant to '
   + 'connect unauthenticated, remove the `external.credentialsRef` binding. (Replacing the '
   + 'discrete fields with a `config.url` that names a user is a third valid shape; it is judged '
   + 'by the URL-branch refusal, not by this one.)';
@@ -535,7 +535,7 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       healthcheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
     },
     history:
-      'Until #4001 these were dropped silently — a connection key written one level too high '
+      'Until this shape was closed, these were dropped silently — a connection key written one level too high '
       + 'left the datasource connecting on driver defaults rather than failing.',
   },
   {
@@ -574,7 +574,7 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       acquiretimeoutmillis: 'connectionTimeoutMillis',
     },
     history:
-      'Until #4001 these were dropped silently — the pool ran on its defaults (min 0, max 10) '
+      'Until this shape was closed, these were dropped silently — the pool ran on its defaults (min 0, max 10) '
       + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
   },
   {
@@ -615,7 +615,7 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         + '`rejectUnauthorized: false` — deliberately, and never against a production database.',
     },
     history:
-      'Until #4001 these were dropped silently — which meant a TLS setting that never took '
+      'Until this shape was closed, these were dropped silently — which meant a TLS setting that never took '
       + 'effect looked identical to one that did.',
   },
   {

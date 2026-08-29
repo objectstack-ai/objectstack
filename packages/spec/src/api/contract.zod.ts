@@ -44,7 +44,7 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    * therefore MEANS demotion: a consumer that sees this field knows the
    * producer spelled a code the serving side's ledger does not know.
    */
-  declaredCode: z.string().optional().describe('The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106)'),
+  declaredCode: z.string().optional().describe('The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112)'),
   message: z.string().describe('Readable error message'),
   /**
    * The producer's user-facing refusal text, verbatim — the producer-side
@@ -85,9 +85,9 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    * for logs and developers.
    */
   userMessage: z.string().optional().describe(
-    'Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the '
+    'Producer-marked user-facing refusal text, verbatim. Present exactly when the '
     + 'producer opted in at throw time; consumers render it to end users and keep their '
-    + 'generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`.',
+    + 'generic substitution for anything unmarked. Status-agnostic; never replaces `message`.',
   ),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**

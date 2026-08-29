@@ -201,7 +201,7 @@ describe('#3896 close-out — retired `triggerPhrases`', () => {
       message = String((e as Error).message);
     }
     expect(message).toMatch(/triggerConditions/);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
 
   it('does not offer the retired key as the fix for a near-miss of it', () => {

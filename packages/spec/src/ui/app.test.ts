@@ -1126,7 +1126,7 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
       expect(messages).not.toContain('not executable in v17');
       expect(messages).not.toContain('until the endpoint executor ships');
       // The historical fact stays: #4936 happened, and the prescription says so.
-      expect(messages).toContain('#4936');
+      expect(messages).toContain('refused wholesale');
     });
   });
 });
@@ -1482,7 +1482,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       // false belief one step further from the evidence.
       expect(msg).toMatch(/BOTH trees/s);
       expect(msg).toMatch(/areas\[\]\.navigation/s);
-      expect(msg).toMatch(/#4722/s);
+      expect(msg).toMatch(/re-checked in the shell/s);
       // The asymmetry that SURVIVES #4722 — and the reason this is the layer
       // an author must reach for: `requiredPermissions` is enforced before the
       // body ships, `visible` is not evaluated until it is already in the
@@ -1512,7 +1512,7 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       // enumeration rather than merely the absence of the old one.
       expect(msg).toMatch(/either navigation tree/s);
       expect(msg).toMatch(/areas\[\]\.navigation/s);
-      expect(msg).toMatch(/#4722/s);
+      expect(msg).toMatch(/server-side\. The distinction survives/s);
       // …and do NOT let that drag `visible`'s own verdict along: #4722 changed
       // nothing about CEL, which is still evaluated in the browser at every
       // level. That asymmetry is the entire reason this prescription can send a

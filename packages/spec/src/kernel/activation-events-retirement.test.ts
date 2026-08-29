@@ -111,6 +111,6 @@ describe('[#4657] ActivationEventSchema removal — no entry exports the name', 
         ...manifest,
         activationEvents: [{ type: 'onStartup', pattern: '*' }],
       }),
-    ).toThrow(/activationEvents.*removed.*#4657/s);
+    ).toThrow(/activationEvents.*removed/s);
   });
 });

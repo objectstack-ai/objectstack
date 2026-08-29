@@ -3809,9 +3809,30 @@ export const PM_RESIDUE_LABELS = [
  * predicate cannot double-report the population every other item already reads.
  * That gate is the predicate's own, not the caller's, because it is the one
  * thing separating this row from a restatement of H3.
+ *
+ * `floor` is the optional dated closure floor (see `resolveClosureFloor`): a
+ * `Date` before which a closed card is out of scope, or null for "judge every
+ * card in the window", which is the default and this repo's own behaviour.
+ *
+ * ⚠️ A card whose `closed_at` cannot be read is judged, NOT skipped. The floor
+ * is a scope decision that needs a date to make; without one the card's
+ * position relative to the cutover is UNKNOWN, and silently dropping it would
+ * narrow the pass on unread data — #4690 in the direction this file refuses
+ * everywhere else. The listing endpoint always carries `closed_at` on a closed
+ * issue, so fail-open costs no noise in practice; it just keeps the one
+ * unreadable card visible instead of disappeared.
+ *
+ * @param {any} issue
+ * @param {Date | null} [floor]
  */
-export function h22ClosedCardPmResidue(issue) {
+export function h22ClosedCardPmResidue(issue, floor = null) {
   if (issue?.state !== 'closed') return null;
+  if (floor) {
+    const closedAt = Date.parse(issue.closed_at ?? '');
+    // Strictly BEFORE the floor is out of scope; a card closed ON the cutover
+    // date is the first day the convention applies and is judged.
+    if (!Number.isNaN(closedAt) && closedAt < floor.getTime()) return null;
+  }
   const residue = labelNames(issue ?? {}).filter((l) => PM_RESIDUE_LABELS.includes(l));
   if (residue.length === 0) return null;
   const list = residue.map((l) => `\`${l}\``).join(', ');
@@ -6692,7 +6713,7 @@ export const SWEEP_COUNT_KEYS = [
  *   blockerTargets?: number, crossRepoProbed?: number,
  *   crossRepoUnreadable?: number, seatMarkersRead?: number,
  *   seatCandidates?: number, commits?: number, commitBindings?: number,
- *   commitBindingMessages?: number }} counts
+ *   commitBindingMessages?: number, closedFloor?: string }} counts
  * @param {number} findingCount
  */
 
@@ -6772,7 +6793,9 @@ export function summaryLine(counts, findingCount) {
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
-    `older closed carriers are outside it by design). ` +
+    `older closed carriers are outside it by design` +
+    `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
+      'earlier closures predate the strip-on-close convention and are NOT a reading about them' : ''}). ` +
     `H23 read ${commits} squash commit message(s) from the default branch's recent window, carrying ` +
     `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s) ` +
     `(bounded window; a message that landed before it is invisible by design). ` +
@@ -7869,6 +7892,79 @@ async function listRecentlyMergedPullRequests() {
  */
 export const CLOSED_ISSUE_WINDOW_PAGES = 4;
 
+/**
+ * H22's DATED CLOSURE FLOOR — the cutover date at and after which a closed
+ * card's `pm:*` residue is judged (objectui#5985).
+ *
+ * ## The dilemma this dissolves
+ *
+ * The window above is bounded by UPDATE recency, which is the wrong axis for
+ * the one question a sibling install kept running into: "was this card closed
+ * under the convention, or before it existed?" Measured in objectui
+ * 2026-08-24, while porting this file: 815 closed cards there carry
+ * `pm:dispatched`, and ~347 of the 400 issues in the window above carry some
+ * `pm:*` residue (~87%, against the 26% this repo measured on its own board).
+ * At that density H22 reports the CONVENTION rather than a defect — ~347 rows
+ * that exhaust the anchor body budget and trim every other predicate's
+ * findings out of the report. That install therefore shipped with the closed
+ * reader switched off, and its card recorded the choice as a two-way one:
+ * either stripping is the rule (and ~815 cards need a BACKFILL before H22 can
+ * be honest) or it is not (and H22 is simply not a predicate that repo wants).
+ *
+ * The floor is the third option both readings omit. `pm:*` on a card closed
+ * before the convention was written is inert history: nothing queries it as a
+ * claim of in-flight-ness, because the loop reads state on OPEN cards only
+ * (`is:open` is in every one of its inventory queries). Judging only cards
+ * closed on/after a cutover date therefore buys the row's whole value — the
+ * residue produced from now on, while the paired write is still a live duty
+ * someone remembers — at zero backfill and zero historical noise. ⛔ The
+ * alternative this file must never grow is a bulk label rewrite of closed
+ * cards: 815 mutating writes to make a report quieter is machinery serving the
+ * instrument, and no code path here writes a label at all.
+ *
+ * ## Default: unset, which is exactly today's behaviour
+ *
+ * An install that wants every card in the window judged sets nothing, and this
+ * resolver returns a null floor that the predicate ignores. That keeps this
+ * repo's own patrol byte-identical across this change — it measured 26% and
+ * treats recent closed residue as a live duty — and makes the floor a
+ * per-install adaptation rather than a policy shipped to everyone.
+ *
+ * ## Malformed is REFUSED, never defaulted
+ *
+ * A typo'd floor that silently became "no floor" would restore the 87% flood
+ * on the one install that set it, four times a day, and the flood reads as a
+ * working patrol — the same trap `resolveSweepRepo` refuses by name. So an
+ * unparseable value is `valid: false` and the entrypoint exits 2 on it. Only
+ * the `YYYY-MM-DD` spelling is accepted: a bare `Date` parse would take
+ * "yesterday-ish" strings and timezone-bearing ones whose midnight is not the
+ * one the workflow author meant, and the value is written by hand in a
+ * workflow file exactly once.
+ */
+export function resolveClosureFloor(env = {}) {
+  const raw = String(env.PM_SWEEP_CLOSED_FLOOR ?? '').trim();
+  if (!raw) return { floor: null, source: 'default', valid: true, raw: '' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { floor: null, source: 'PM_SWEEP_CLOSED_FLOOR', valid: false, raw };
+  }
+  const at = Date.parse(`${raw}T00:00:00Z`);
+  if (Number.isNaN(at)) return { floor: null, source: 'PM_SWEEP_CLOSED_FLOOR', valid: false, raw };
+  // A shape-valid string can still name a date that does not EXIST, and
+  // `Date.parse` does not reject all of them: `2026-13-01` is NaN (the month
+  // is outside the ISO range) but `2026-02-31` silently ROLLS to 2026-03-03.
+  // So the parse is round-tripped rather than trusted. Letting a rolled date
+  // through would move the floor days past where its author wrote it and,
+  // worse, do it silently — the floor is the one input here whose whole job is
+  // to say which cards were judged.
+  const floor = new Date(at);
+  if (floor.toISOString().slice(0, 10) !== raw) {
+    return { floor: null, source: 'PM_SWEEP_CLOSED_FLOOR', valid: false, raw };
+  }
+  return { floor, source: 'PM_SWEEP_CLOSED_FLOOR', valid: true, raw };
+}
+
+const CLOSED_FLOOR = resolveClosureFloor(process.env);
+
 async function listRecentlyClosedIssues() {
   const out = [];
   for (let page = 1; page <= CLOSED_ISSUE_WINDOW_PAGES; page++) {
@@ -8351,9 +8447,10 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // line can say what this pass covered on its own terms.
   for (const issue of await listRecentlyClosedIssues()) {
     seenClosed.set(issue.number, issue);
-    const residue = h22ClosedCardPmResidue(issue);
+    const residue = h22ClosedCardPmResidue(issue, CLOSED_FLOOR.floor);
     if (residue) findings.push([issue, 'H22', residue]);
   }
+  stats.closedFloor = CLOSED_FLOOR.raw;
 
   // H23 — the commit-message surface (#10942). The counting is not incidental:
   // this row's measured yield is ~6 in 1,546, so a silent H23 is the normal
@@ -9557,10 +9654,75 @@ function selfTest() {
     t(`H22: \`${label}\` on a closed card is residue`, typeof h22ClosedCardPmResidue(closedCard([label])), 'string');
   }
 
+  // -- H22's DATED CLOSURE FLOOR (objectui#5985) ------------------------------
+  //
+  // The floor is what lets a sibling install re-enable this row without the
+  // backfill its own card thought was the only alternative: judge cards closed
+  // on/after a cutover date, leave the historical carriers unjudged, write no
+  // labels at all. The cases below pin the three properties that decision rests
+  // on — the floor is HONOURED, its absence changes nothing, and a malformed
+  // value is refused rather than silently becoming "no floor".
+  const FLOOR = new Date(Date.parse('2026-08-28T00:00:00Z'));
+  const closedOn = (labels, closed_at) => ({ ...closedCard(labels), closed_at });
+
+  // Honoured, both directions. The old card is the ~815-card backlog in
+  // miniature: it carries real residue and is deliberately NOT a finding.
+  t('H22 floor: a card closed BEFORE the floor is out of scope', h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-08-01T09:00:00Z'), FLOOR), null);
+  t('H22 floor: …however much residue it carries', h22ClosedCardPmResidue(closedOn(['pm:dispatched', 'pm:queue', 'pm:blocked'], '2026-01-01T00:00:00Z'), FLOOR), null);
+  t('H22 floor: a card closed AFTER the floor is judged', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-08-29T09:00:00Z'), FLOOR), 'string');
+  t('H22 floor: …and the row still names the residue label', h22row(closedOn(['pm:dispatched'], '2026-08-29T09:00:00Z'), FLOOR).includes('`pm:dispatched`'), true);
+  // The boundary is inclusive: the cutover date is the first day the convention
+  // applies, so a card closed within it is the convention's own population.
+  t('H22 floor: a card closed ON the floor date is judged', typeof h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-28T00:00:00Z'), FLOOR), 'string');
+  t('H22 floor: …and later the same day too', typeof h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-28T23:59:59Z'), FLOOR), 'string');
+  t('H22 floor: one second before the floor is out', h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-27T23:59:59Z'), FLOOR), null);
+  // The floor narrows scope; it never invents findings. A clean recent card is
+  // still clean, and an OPEN card is still not this row's.
+  t('H22 floor: a clean card after the floor is still clean', h22ClosedCardPmResidue(closedOn(['domain:cli'], '2026-08-29T09:00:00Z'), FLOOR), null);
+  t('H22 floor: the closed gate still outranks the floor', h22ClosedCardPmResidue({ ...issue(['pm:dispatched']), state: 'open', closed_at: null }, FLOOR), null);
+  // Fail-OPEN on an unreadable closure date: the floor cannot be applied, so
+  // the card stays visible rather than being dropped on unread data (#4690).
+  t('H22 floor: a card with no closed_at is judged, not dropped', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], null), FLOOR), 'string');
+  t('H22 floor: …and an unparseable one likewise', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], 'not-a-date'), FLOOR), 'string');
+
+  // Floor ABSENT — the default, and the property that makes this change a
+  // no-op for the install that wants every card in the window judged.
+  t('H22 floor: absent floor judges an old closed card exactly as before', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z')), 'string');
+  t('H22 floor: …an explicit null is the same as omitting it', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z'), null), 'string');
+  t('H22 floor: …and a clean old card is still clean', h22ClosedCardPmResidue(closedOn(['domain:cli'], '2026-01-01T00:00:00Z'), null), null);
+
+  // resolveClosureFloor — the env reading, including the loud refusal.
+  t('closure floor: unset means no floor', resolveClosureFloor({}).floor, null);
+  t('closure floor: …and that is a VALID reading, not an error', resolveClosureFloor({}).valid, true);
+  t('closure floor: …reported as the default source', resolveClosureFloor({}).source, 'default');
+  t('closure floor: whitespace is unset too', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '  ' }).floor, null);
+  t('closure floor: a YYYY-MM-DD date resolves to UTC midnight', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '2026-08-28' }).floor.toISOString(), '2026-08-28T00:00:00.000Z');
+  t('closure floor: …and is valid', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '2026-08-28' }).valid, true);
+  t('closure floor: …and names its source', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '2026-08-28' }).source, 'PM_SWEEP_CLOSED_FLOOR');
+  t('closure floor: surrounding whitespace is trimmed, not rejected', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: ' 2026-08-28 ' }).valid, true);
+  // Malformed is REFUSED. Each of these would otherwise become "no floor" and
+  // restore the flood on the one install that set the variable.
+  for (const bad of ['28-08-2026', '2026/08/28', 'yesterday', '2026-08-28T00:00:00Z', '2026-8-28', 'O', '0']) {
+    t(`closure floor: \`${bad}\` is refused, not defaulted`, resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: bad }).valid, false);
+  }
+  // …including a well-SHAPED date that does not exist — the case a bare regex
+  // would pass and whose floor would exclude every card, rendering an empty
+  // H22 as a clean closed surface.
+  t('closure floor: a shape-valid impossible date is refused', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '2026-02-31' }).valid, false);
+  t('closure floor: …and an impossible month likewise', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: '2026-13-01' }).valid, false);
+  t('closure floor: a refused value carries no floor to fall back on', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: 'yesterday' }).floor, null);
+  t('closure floor: …and is reported as itself for the error message', resolveClosureFloor({ PM_SWEEP_CLOSED_FLOOR: 'yesterday' }).raw, 'yesterday');
+
   // The summary line's H22 clause — a pass that read nothing must not read the
   // same as a board with no residue (#4690), so the count is always stated.
   t('summary: the H22 clause states what the closed pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('H22 read 200 recently-closed issue(s)'), true);
   t('summary: an absent closed count degrades to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H22 read 0 recently-closed'), true);
+  // …and when a floor is in force the line SAYS so: "read 200" with a floor
+  // silently applied would overstate what was judged, which is the same
+  // unread-reads-as-clean defect the count itself exists to prevent.
+  t('summary: a floored pass names the floor date', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('only cards closed on/after 2026-08-28 are judged'), true);
+  t('summary: …and says the earlier closures are not a reading about them', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('NOT a reading about them'), true);
+  t('summary: an unfloored pass adds no floor clause', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('are judged'), false);
 
   // -- H23: the COMMIT-MESSAGE surface (#10942) -------------------------------
   //
@@ -12079,12 +12241,30 @@ function selfTest() {
   const busy = { unclaimed: 15, inFlight: 7 };
   const idleLane = { unclaimed: 15, inFlight: 0 };
 
+  // The `@ <repo>` specimens below DERIVE both board names rather than spelling
+  // them, because `seatLane` judges an at-repo suffix against the LIVE resolved
+  // sweep repo — `SWEEP_REPO`, not a constant. A row that hard-codes `objectui`
+  // as the sibling and `objectstack` as the own board therefore asserts THIS
+  // BOARD instead of the property, and inverts wholesale wherever the file is
+  // installed next: run verbatim in objectui on 2026-08-28 the suite failed
+  // exactly the four rows those two names feed, which is the one thing a file
+  // adopted BY COPY (see `resolveSweepRepo`) may not do. `OWN_BOARD` is the
+  // resolved repo's name half — the same half the predicate compares, derived
+  // here rather than shared, so a predicate that switched to the OWNER half
+  // still goes red. `SIBLING_BOARD` is a real neighbouring board picked so the
+  // two can never coincide, which is what stops the FOREIGN rows going
+  // vacuously green on a board that happens to be named after the specimen.
+  const OWN_BOARD = SWEEP_REPO.repo.split('/')[1];
+  const SIBLING_BOARD = OWN_BOARD === 'objectui' ? 'objectstack' : 'objectui';
+  const ownLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${OWN_BOARD} — ${status}`);
+  const siblingLaneSeat = (status = '🟢 os-x') => seat(`[PM seat] domain:devx @ ${SIBLING_BOARD} — ${status}`);
+
   // The lane parse, across the three measured title shapes.
   t('H32 lane: a plain domain lane is own-board', seatLane(seat(HELD)).lane, 'domain:spec');
   t('H32 lane: …and not foreign', seatLane(seat(HELD)).foreign, false);
-  t('H32 lane: an `@ sibling` suffix is FOREIGN', seatLane(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')).foreign, true);
-  t('H32 lane: an `@ own-repo` suffix is NOT foreign', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).foreign, false);
-  t('H32 lane: …and keeps the bare lane label', seatLane(seat('[PM seat] domain:devx @ objectstack — 🟢 os-x')).lane, 'domain:devx');
+  t('H32 lane: an `@ sibling` suffix is FOREIGN', seatLane(siblingLaneSeat()).foreign, true);
+  t('H32 lane: an `@ own-repo` suffix is NOT foreign', seatLane(ownLaneSeat()).foreign, false);
+  t('H32 lane: …and keeps the bare lane label', seatLane(ownLaneSeat()).lane, 'domain:devx');
   t('H32 lane: a repo-scoped seat has no countable lane', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).lane, null);
   t('H32 lane: …and is foreign', seatLane(seat('[PM seat] repo:cloud — 🟢 os-x')).foreign, true);
   t('H32 lane: a lane-less seat (skills) is foreign', seatLane(seat('[PM seat] skills — 🟢 os-zhuang (session_x)')).foreign, true);
@@ -12093,7 +12273,7 @@ function selfTest() {
 
   // The held/vacant gate — an unheld seat is a ROUTING gap, never 怠工.
   t('H32 held: 🟢 with a holder', seatIsHeld(seat(HELD)), true);
-  t('H32 held: ⏳ vacant is NOT held', seatIsHeld(seat('[PM seat] domain:devx @ objectui — ⏳ vacant')), false);
+  t('H32 held: ⏳ vacant is NOT held', seatIsHeld(siblingLaneSeat('⏳ vacant')), false);
   t('H32 held: 🔴 收班 vacant is NOT held', seatIsHeld(seat('[PM seat] domain:spec — 🔴 收班 vacant · 上一班 os-warren')), false);
   t('H32 held: ⏸️ paused is NOT held', seatIsHeld(seat('[PM seat] domain:spec — ⏸️ paused')), false);
   t('H32 held: a Routine seat is excluded (no claim cadence of its own)', seatIsHeld(seat('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
@@ -12105,7 +12285,7 @@ function selfTest() {
   t('H32: work IN FLIGHT is a working seat -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), busy, NOW32), null);
   t('H32: an EMPTY queue is a finished lane -> clean', h32SeatIdleOverQueue(seat(HELD), marker('Round-start marker — R6.', 600), { unclaimed: 0, inFlight: 0 }, NOW32), null);
   t('H32: a vacant seat is out of scope however deep the queue', h32SeatIdleOverQueue(seat('[PM seat] domain:spec — ⏳ vacant'), marker('收班', 6000), idleLane, NOW32), null);
-  t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(seat('[PM seat] domain:devx @ objectui — 🟢 os-x'), marker('Round-start marker', 600), idleLane, NOW32), null);
+  t('H32: a FOREIGN lane is out of scope (its inventory is unreadable here)', h32SeatIdleOverQueue(siblingLaneSeat(), marker('Round-start marker', 600), idleLane, NOW32), null);
   t('H32: a non-seat card is out of scope', h32SeatIdleOverQueue({ ...issue(['pm:queue']), title: HELD }, marker('x', 600), idleLane, NOW32), null);
 
   // The threshold, at both edges of SEAT_IDLE_STALE_MINUTES.
@@ -12151,7 +12331,7 @@ function selfTest() {
 
   // The gathering gate buys a fetch only for seats the row can speak about.
   t('H32 gate: a held own-board seat is a candidate', h32NeedsSeatComments(seat(HELD)), true);
-  t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:devx @ objectui — 🟢 os-x')), false);
+  t('H32 gate: a foreign-lane seat buys no fetch', h32NeedsSeatComments(siblingLaneSeat()), false);
   t('H32 gate: a vacant seat buys no fetch', h32NeedsSeatComments(seat('[PM seat] domain:spec — ⏳ vacant')), false);
   t('H32 gate: a non-seat card buys no fetch', h32NeedsSeatComments(issue(['pm:queue'])), false);
 
@@ -12727,6 +12907,18 @@ if (isMain) {
       `check-half-states: ${SWEEP_REPO.source}=${JSON.stringify(SWEEP_REPO.repo)} is not an ` +
         '`owner/name` repository. Refusing to fall back to a different board — a report about ' +
         'the wrong repo reads exactly like a report about this one.',
+    );
+    process.exit(2);
+  }
+  // A malformed closure floor is the same class and gets the same answer. It
+  // must not degrade to "no floor": the install that sets one is the install
+  // whose closed surface is ~87% residue, so a silent default would flood the
+  // anchor body four times a day and the flood renders as a working patrol.
+  if (!process.argv.includes('--self-test') && !CLOSED_FLOOR.valid) {
+    console.error(
+      `check-half-states: ${CLOSED_FLOOR.source}=${JSON.stringify(CLOSED_FLOOR.raw)} is not a ` +
+        '`YYYY-MM-DD` date. Refusing to fall back to an unfloored closed pass — on the install ' +
+        'that needs a floor, no floor is a report about the convention rather than about defects.',
     );
     process.exit(2);
   }

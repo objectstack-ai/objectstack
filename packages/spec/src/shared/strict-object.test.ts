@@ -263,7 +263,7 @@ describe('message order — the fix comes before the history (#5955)', () => {
  *   4. a set speaks once per message, at the first key that matched it.
  */
 describe('strictObject guidanceSets — the set-keyed prescription channel (#6619)', () => {
-  const HISTORY = 'Until #4001 these were dropped silently.';
+  const HISTORY = 'Until this shape was closed, these were dropped silently.';
   const SetSchema = lazySchema(() =>
     strictObject(
       {
@@ -397,7 +397,7 @@ describe('strictObject × retiredKey — suggestions never point at a dead key',
     strictObject(
       {
         surface: 'this thing',
-        history: 'Until #4001 these were dropped silently.',
+        history: 'Until this shape was closed, these were dropped silently.',
       },
       {
         label: z.string(),

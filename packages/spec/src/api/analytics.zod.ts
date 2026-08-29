@@ -49,13 +49,13 @@ export const AnalyticsQueryRequestSchema = lazySchema(() =>
   AnalyticsQuerySchema.extend({
     cube: z.string().describe('Target cube name'),
     query: retiredKey(
-      '`query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). ' +
-      'The { cube, query: {...} } envelope was the dialect of the retired degraded analytics shim (#3891) — ' +
+      '`query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. ' +
+      'The { cube, query: {...} } envelope was the dialect of the retired degraded analytics shim — ' +
       'the real engine never understood it. Move the query.* fields to the body top level: ' +
       '{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }.',
     ),
     format: retiredKey(
-      '`format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0 (#3878). ' +
+      '`format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. ' +
       'It was never implemented — every response is the JSON envelope. Delete the key; ' +
       'for CSV/XLSX use the export surface instead.',
     ),

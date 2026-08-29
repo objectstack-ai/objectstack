@@ -35,3 +35,11 @@ export * from './mcp.zod';
 export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';
 export * from './solution-blueprint.zod';
+
+// [#12414] entry-nameability: these factories' return types expand to mention
+// `/data`'s `FilterCondition` and `/automation`'s `StateNodeConfig` — both
+// public on their own subpaths but not nameable from `/ai`. Same invariant
+// (maintainer ruling recorded on #11350), same repair: re-export from the
+// declaring module.
+export type { FilterCondition } from '../data/filter.zod';
+export type { StateNodeConfig } from '../automation/state-machine.zod';

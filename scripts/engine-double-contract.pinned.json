@@ -682,6 +682,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.marked-refusal-classification.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.marked-refusal-classification.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-list-runtime-baseline-dedup.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2642,6 +2652,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/write-denial-user-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3137,6 +3162,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/backfill-sys-file-organizations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-storage/src/file-reference-lifecycle.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3174,6 +3204,21 @@
     {
       "file": "packages/services/service-storage/src/stranded-orphan-inventory.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

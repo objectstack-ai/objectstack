@@ -1,0 +1,6 @@
+---
+'@objectstack/spec': minor
+'@objectstack/service-messaging': patch
+---
+
+`IDataEngine` declares the optional `syncObjectSchema?(objectName: string): Promise<void>` member (#12482) — on-demand single-object physical schema sync: create/alter the object's table, or for a federated (external) object register its DDL-free read metadata (ADR-0015 §18). Additive contract catch-up under the 2026-08-25 #11833 ruling's item-4 precedent as executed by #12248: the member #12010's inventory left "not verified" is verified — implemented on `ObjectQL`, consumed cross-package by two service packages, both until now through consumer-local structural recovery (`service-datasource`'s `ConnectionEngineLike.syncObjectSchema?`, called per bound external object after its driver connects; `service-messaging`'s system-table provisioning via an `as unknown as` cast whose own comment recorded the member "lives on the concrete ObjectQL engine, not the contract"). FROM undeclared (consumers cast or re-declare structurally) TO declared-optional on `IDataEngine` (consumers read `engine.syncObjectSchema` directly and keep their runtime probes). `service-messaging` drops the now-redundant cast (behaviour unchanged). Optional, so existing `IDataEngine` implementers and test doubles are unaffected. No runtime change.

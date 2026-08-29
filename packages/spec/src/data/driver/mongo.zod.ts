@@ -67,7 +67,7 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
         + '`url` (`?tls=true`) or in the `options` passthrough the Mongo client reads.',
     },
     history:
-      'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+      'Until this shape was closed, nothing validated `datasource.config` at all — an unrecognised connection key '
       + 'was accepted in silence and the datasource then connected to mongodb://localhost:27017 '
       + 'rather than failing.',
   },

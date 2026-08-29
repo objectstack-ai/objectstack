@@ -500,14 +500,21 @@ export function buildAggregationPipeline(opts: {
  * analytics query. Keeping the rule inside the `$group` expression leaves every
  * later stage looking at the number it expects.
  *
- * ## ⛔ Why it is NOT applied to `min` / `max`
+ * ## Why it IS applied to `min` / `max` as well — the #11152 ruling
  *
- * `$min` / `$max` are ORDER STATISTICS over BSON canonical comparison order,
- * not arithmetic accumulators: they rank booleans and return a MEMBER of the
- * input domain. #11249 ruled (maintainer 2026-08-23) that a boolean aggregand
- * answers `false` / `true` there — the JSON boolean, not `0` / `1` — so
- * wrapping those two arms in this coercion would break the ruled contract in
- * the opposite direction from the defect it fixes.
+ * `$min` / `$max` are ORDER STATISTICS over BSON canonical comparison order:
+ * bare, they rank booleans and return a MEMBER of the input domain
+ * (`false` / `true`), which is what #11249 ruled (maintainer 2026-08-23) and
+ * what this face answered between #11151's fix and #11152. **#11152 superseded
+ * that** (maintainer 2026-08-28, ruling verbatim on that card's record:
+ * 「12745 A回，其他同意。」): booleans aggregate as NUMBERS on every face,
+ * with NO per-aggregate exception — `min` / `max` over a boolean answer
+ * `0` / `1`, the same numeric domain `sum` / `avg` answer in, on this face
+ * and on every other. So the `min` / `max` arms wrap the same coercion:
+ * booleans rank as the numbers they are worth, and every other type reaches
+ * `$min` / `$max` exactly as before ($cond's else branch is the bare path).
+ * Null and missing still vanish under the accumulators' own rule, so the
+ * empty window still answers `null`, never a manufactured `0`.
  *
  * ## The narrowness is deliberate
  *
@@ -544,9 +551,10 @@ function buildAccumulator(agg: AggregationInput): Document {
         ? { $sum: 1 }
         : { $sum: { $cond: [{ $eq: [{ $ifNull: [fieldRef, null] }, null] }, 0, 1] } };
 
-    // [#11151] `sum` / `avg` coerce a BOOLEAN aggregand; see
-    // {@link numericAggregandExpr} for why, and for why `min` / `max` below
-    // deliberately do NOT.
+    // [#11151/#11152] All four arithmetic/order aggregates coerce a BOOLEAN
+    // aggregand; see {@link numericAggregandExpr} — `sum`/`avg` since #11151,
+    // `min`/`max` since the #11152 ruling (2026-08-28) pinned booleans as
+    // numbers on every face with no per-aggregate exception.
     case 'sum':
       return { $sum: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
@@ -554,10 +562,10 @@ function buildAccumulator(agg: AggregationInput): Document {
       return { $avg: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
     case 'min':
-      return { $min: fieldRef ?? 0 };
+      return { $min: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
     case 'max':
-      return { $max: fieldRef ?? 0 };
+      return { $max: fieldRef === null ? 0 : numericAggregandExpr(fieldRef) };
 
     case 'count_distinct':
       // Collect the distinct values here; {@link postProcessAggregation} sizes

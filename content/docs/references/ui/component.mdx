@@ -54,7 +54,7 @@ const result = AIChatWindowProps.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Button display label |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional (default: `"primary"`) | Button visual variant |
 | **size** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Button size |
-| **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
+| **icon** | `string` | optional | Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph. |
 | **iconPosition** | `Enum<'left' \| 'right'>` | optional (default: `"left"`) | Icon position relative to label |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the button |
 | **action** | `{ type?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; name?: string; label?: string \| Record<string, string>; target?: string; … }` | optional | Inline action executed on click |
@@ -72,7 +72,7 @@ const result = AIChatWindowProps.parse(data);
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
 | **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
-| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional (default: `false`) | Refresh view after execution |
@@ -207,12 +207,12 @@ const result = AIChatWindowProps.parse(data);
 | **filter** | `any` | optional | Filter criteria for available records |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
 | **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
-| **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
-| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `ElementRecordPickerProps.sort[number]`
@@ -248,7 +248,7 @@ Sort field and direction pair
 | **required** | `boolean` | optional (default: `false`) | Mark the field as required |
 | **disabled** | `boolean` | optional (default: `false`) | Disable the input |
 | **description** | `string \| Record<string, string>` | optional | Helper text shown below the input |
-| **targetVariable** | `never` | optional | [REMOVED] `element:text_input` property `targetVariable` was removed in @objectstack/spec 17 (#9198, ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the typed value, declare it on the variable — `variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **targetVariable** | `never` | optional | [REMOVED] `element:text_input` property `targetVariable` was removed in @objectstack/spec 17 (ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the typed value, declare it on the variable — `variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `ElementTextInputProps.aria`
@@ -290,7 +290,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **calendar** | `any` | optional | Calendar field config: `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` |
 | **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
 | **filter** | `any` | optional | Base query filter |
@@ -309,7 +309,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **objectName** | `string` | optional | Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead |
 | **recordId** | `string \| number` | optional | Record to load (edit/view modes) |
 | **mode** | `Enum<'create' \| 'edit' \| 'view'>` | optional | Form mode |
 | **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional | Form presentation |
@@ -358,15 +358,15 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **objectName** | `string` | optional | Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **label** | `string \| Record<string, string>` | optional | Grid label — used as the table caption and export file title |
 | **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
 | **columns** | `any[]` | optional | Columns: field names or column definition objects |
 | **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
-| **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural |
+| **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling |
 | **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
 | **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
-| **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (#11805, ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **pagination** | `any` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging |
 | **pageSize** | `number` | optional | Flat page-size shorthand; `pagination.pageSize` wins when both are set |
 | **showPagination** | `boolean` | optional | Show the pager (read only when `pagination` is absent) |
@@ -435,7 +435,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **groupBy** | `string` | optional | Field whose values become the board columns |
 | **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
 | **filter** | `any` | optional | Base query filter, handed to the wire `$filter` |
@@ -458,10 +458,10 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121) |
+| **objectName** | `string` | optional | PARENT object. Optional because the component-level `dataSource` binding can supply the object instead |
 | **recordId** | `string \| number` | optional | Parent record to load (edit mode) |
 | **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
-| **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half (#11873, objectui#5939) |
+| **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
 | **sections** | `any[]` | optional | Parent form sections |
 | **fields** | `any[]` | optional | Parent fields shown |
 | **details** | `any[]` | optional | Detail collections (`{ title, childObject, addLabel?, columns?, relationshipField? }` — FK and columns auto-derive from child metadata) |
@@ -482,7 +482,7 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **objectName** | `string` | optional | Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead |
 | **label** | `string \| Record<string, string>` | optional | Metric label |
 | **description** | `string \| Record<string, string>` | optional | Helper text under the value |
 | **title** | `string \| Record<string, string>` | optional | Drill-down panel title; defaults to the metric label |
@@ -543,9 +543,9 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **bordered** | `boolean` | optional (default: `true`) |  |
-| **actions** | `never` | optional | [REMOVED] `page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui's card renderer builds its `<Card>` from `title`, `bordered`, `children` and `footer` only, has no actions area, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key and author the buttons as components in the card's `children` or `footer` (`element:button`, `record:quick_actions`), which is what actually renders. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **actions** | `never` | optional | [REMOVED] `page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — no renderer ever read it: objectui's card renderer builds its `<Card>` from `title`, `bordered`, `children` and `footer` only, has no actions area, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key and author the buttons as components in the card's `children` or `footer` (`element:button`, `record:quick_actions`), which is what actually renders. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **children** | `any[]` | optional | Card content components, in order (the card body slot) |
-| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **footer** | `any[]` | optional | Card footer components (slot) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -579,7 +579,7 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from. |
 | **subtitle** | `string \| Record<string, string>` | optional | Page subtitle |
-| **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **breadcrumb** | `boolean` | optional (default: `true`) | Show breadcrumb |
 | **actions** | `string[]` | optional | Action IDs to show in header |
 | **recordChrome** | `boolean` | optional (default: `true`) | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
@@ -607,7 +607,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional (default: `"line"`) | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
-| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **position** | `Enum<'top' \| 'left'>` | optional (default: `"top"`) |  |
 | **alwaysShowStrip** | `boolean` | optional | Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden). |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
@@ -752,7 +752,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | optional (default: `"2"`) | Number of columns for field layout (1-4) |
-| **layout** | `never` | optional | [REMOVED] `record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — its declared `auto` \| `custom` semantics were never implemented: the renderer tests `layout` only against `inline` \| `compact`, two values the schema never permitted, so both legal values took the same branch and the key selected nothing. Delete the key — the body is already chosen by what you author: `sections` renders the explicit groups (the old `custom`), and omitting it falls back to the object's `highlightFields` (the old `auto`). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+| **layout** | `never` | optional | [REMOVED] `record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — its declared `auto` \| `custom` semantics were never implemented: the renderer tests `layout` only against `inline` \| `compact`, two values the schema never permitted, so both legal values took the same branch and the key selected nothing. Delete the key — the body is already chosen by what you author: `sections` renders the explicit groups (the old `custom`), and omitting it falls back to the object's `highlightFields` (the old `auto`). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; columns?: integer; fields: string[]; … }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }`. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
 | **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |

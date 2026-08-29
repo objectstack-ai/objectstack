@@ -24,7 +24,7 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
   'slack',
   'teams',
   'webhook',
-]).describe('Notification delivery channel (implemented today: inbox, email, sms — push/slack/teams/webhook are not yet implemented and dead-letter; see #3197)'));
+]).describe('Notification delivery channel '));
 
 // [#4610] `NotificationConfigSchema` / `NotificationConfig` were removed from
 // this module (dual-source cleanup, #4535 C3). The "unified notification

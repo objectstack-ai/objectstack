@@ -179,6 +179,11 @@ const CONFORMANCE_OBJECT = {
     // Nullable, and it must stay that way — see `AggregationRow.stage`.
     stage: { type: 'text', name: 'stage' },
     score: { type: 'number', name: 'score' },
+    // [#11152] Declared `type: 'boolean'` on purpose — see `AggregationRow.flag`:
+    // the ruled point of the boolean cases is that aggregation answers NUMBERS
+    // (min=0/max=1) even where the declared type would present a row read as a
+    // JSON boolean.
+    flag: { type: 'boolean', name: 'flag' },
   },
 };
 
@@ -249,6 +254,11 @@ describe(`[#6409] SqlDriver — aggregate vocabulary conformance (${cell.label})
     // in place of a null would keep every `count_distinct` case green at the
     // wrong number.
     expect((rows as any[]).filter((r) => r.stage === null)).toHaveLength(2);
+    // [#11152] The property the boolean cases hang off: 3 true / 3 false. A
+    // seed that folded the flags turns every boolean case into a test of the
+    // wrong table. `Boolean(...)` because the ROW read is presentation-shaped
+    // per dialect (a real boolean on pg, 0/1 presented on sqlite/mysql).
+    expect((rows as any[]).filter((r) => Boolean(r.flag)).length, 'true flags').toBe(3);
   });
 
   for (const c of AGGREGATION_CASES) {

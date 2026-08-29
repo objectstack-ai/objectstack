@@ -116,8 +116,11 @@ environments and are not themselves scoped data-plane requests.
 
 - Some docs and source comments still use historical `project` wording where
   current runtime identity is `environment`.
-- The SDK method name `client.project(id)` remains as a compatibility surface,
-  but it accepts an environment id and generates environment-scoped URLs.
+- The SDK client still exposes `setProjectId` / `getProjectId`, and the REST API
+  config still spells its keys `enableProjectScoping` / `projectResolution`.
+  `getProjectId` is the harder one: it is a cross-package protocol contract that
+  `packages/runtime` and `packages/metadata-protocol` both speak, so it is a
+  coordinated rename rather than a local one.
 - The notification framework pipeline is ahead of the objectui bell cut-over;
   read-state should move through `sys_notification_receipt`.
 - Some generated references need regeneration after Zod description updates.

@@ -590,7 +590,16 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  * the option's `visibleWhen`" answers a question nobody asked. Three tiers:
  *
  *  - **user roots** (`current_user` / `user` / `ctx` / `os`) keep the existing
- *    two user-specific prescriptions plus the `record` rewrite;
+ *    two user-specific prescriptions plus the `record` rewrite. What changed is
+ *    the GROUNDING of the first one, not the prescription: it used to read
+ *    "per-option is the one `*When` surface that binds `current_user`", and
+ *    since objectui#6010 a form VIEW's field predicate binds those roots too —
+ *    client-side only, because nothing on the write path evaluates a form-view
+ *    field `visibleWhen`. So per-option is recommended for the reason that
+ *    survives the change: the rule validator enforces it on write. The message
+ *    now says that, and names the view surface only to refuse it as a
+ *    destination for a server-enforced object rule (trading a loud lint error
+ *    for a silent enforcement gap is the one outcome worse than the error);
  *  - **`data`** gets the metadata-form-vs-runtime-form explanation, because
  *    that is what the mistake IS — the same key name, the other form kind's
  *    root;
@@ -676,11 +685,14 @@ export function fieldRuleRootIssue(
   const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
   const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
     ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
-      `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +
-      `surface that binds \`current_user\` and its ADR-0068 aliases. To hide the FIELD by role, ` +
-      `declare field-level security on a permission set ` +
-      `(\`fields: { '<object>.<field>': { readable: false } }\`), which the server enforces. ` +
-      `To gate on record state, rewrite the predicate against \`record\`.`
+      `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — the rule validator evaluates ` +
+      `that one against \`current_user\` and its ADR-0068 aliases on every write, so the gate ` +
+      `holds server-side. To hide the FIELD by role, declare field-level security on a ` +
+      `permission set (\`fields: { '<object>.<field>': { readable: false } }\`), which the ` +
+      `server enforces. To gate on record state, rewrite the predicate against \`record\`. ` +
+      `Note that a form VIEW's own field predicate HAS bound these roots since objectui#6010 — ` +
+      `but only in the renderer, so moving a server-enforced object rule there swaps a loud ` +
+      `error for a silent enforcement gap; it is not a fourth answer.`
     : root === 'data'
       // The `*.form` spelling is deliberately not `*.form.ts`: this is a
       // STRING literal, and #5017's receiver scan strips comments but not

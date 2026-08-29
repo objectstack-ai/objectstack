@@ -722,7 +722,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     const result = parse(ds);
     if (result.success) return undefined;
     return result.error.issues.find(
-      (i) => i.path.join('.') === 'config.url' && i.message.includes('#9041'),
+      (i) => i.path.join('.') === 'config.url' && i.message.includes("the URL's own userinfo"),
     );
   };
 
@@ -830,7 +830,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
       external: { ...BOUND },
     });
     expect(unnamed.success).toBe(false);
-    expect(unnamed.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+    expect(unnamed.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
     expect(unnamed.error!.issues.some((i) => i.path.join('.') === 'config.url')).toBe(false);
   });
 
@@ -868,7 +868,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     // The driver-config parse reports the type error at the same path; the
     // #9041 refusal stays silent rather than judging a value that has no
     // userinfo to read.
-    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 
   it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
@@ -888,7 +888,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     const paths = result.error!.issues.map((i) => i.path.join('.'));
     expect(paths).toContain('config.url');
     expect(paths).toContain('config.options.auth.password');
-    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(true);
     expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
   });
 
@@ -920,7 +920,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     });
     expect(result.success).toBe(false);
     expect(result.error!.issues.some((i) => i.message.includes('#8082'))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 });
 
@@ -955,7 +955,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     const result = parse(ds);
     if (result.success) return undefined;
     return result.error.issues.find(
-      (i) => i.path.join('.') === 'config.username' && i.message.includes('#9147'),
+      (i) => i.path.join('.') === 'config.username' && i.message.includes("add `username` to `config`"),
     );
   };
 
@@ -1016,8 +1016,8 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
       external: { ...BOUND },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 
   // ── the fence: each single condition absent is still ACCEPTED ─────────────
@@ -1045,8 +1045,8 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
       external: { ...BOUND },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.message.includes('#9041'))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(false);
   });
 
   it('near-miss ② a discrete `username` present — the branch where the bound secret is LIVE (#8696)', () => {
@@ -1105,7 +1105,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     // The driver-config parse reports the type error at the same path; this
     // refusal stays silent rather than judging a value with no branch to predict.
     expect(result.error!.issues.some((i) => i.path.join('.') === 'config.username')).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(false);
   });
 
   it('composes with the #9040 passthrough refusal — one artefact, both findings, own paths', () => {
@@ -1119,7 +1119,7 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     const paths = result.error!.issues.map((i) => i.path.join('.'));
     expect(paths).toContain('config.username');
     expect(paths).toContain('config.options.auth.password');
-    expect(result.error!.issues.some((i) => i.message.includes('#9147'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(true);
     expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
   });
 });

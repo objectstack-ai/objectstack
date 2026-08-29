@@ -1561,7 +1561,7 @@ describe('#3896 close-out — retired shortcut/bulkEnabled', () => {
       ActionSchema.parse({ name: 'save_now', label: 'Save', type: 'script', target: 'h', shortcut: 'Ctrl+S' });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/keyboard stack/);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
   it('REJECTS the retired `bulkEnabled` and points at the view bulkActions', () => {
     let message = '';
@@ -1569,7 +1569,7 @@ describe('#3896 close-out — retired shortcut/bulkEnabled', () => {
       ActionSchema.parse({ name: 'close_all', label: 'Close', type: 'script', target: 'h', bulkEnabled: true });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/bulkActions/);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
 });
 

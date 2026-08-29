@@ -59,7 +59,7 @@ describe('unknown keys are rejected, not stripped (#4001 batch 13)', () => {
       for (const key of ['columns', 'hiddenOn', 'order']) {
         const message = unknownKeyIssue(ResponsiveStylesSchema, { [key]: {} })!.message;
         expect(message, `\`${key}\` should name the retirement`).toContain('retired `responsive` layout block');
-        expect(message).toContain('#11027');
+        expect(message, 'the retirement is named in words, never by a tracker id').not.toMatch(/#\d{3,5}/);
         expect(message).toContain('per-breakpoint CSS');
       }
     });

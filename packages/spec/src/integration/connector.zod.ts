@@ -342,7 +342,7 @@ export const WebhookConfigSchema = lazySchema(() => WebhookSchema.extend({
    * Events to listen for
    * Connector-specific events like sync completion, auth expiry, etc.
    */
-  events: z.array(WebhookEventSchema).optional().describe('Connector events to subscribe to (not yet enforced — no runtime dispatches these; see #3197)'),
+  events: z.array(WebhookEventSchema).optional().describe('Connector events to subscribe to '),
   
   /**
    * Signature algorithm for webhook security
@@ -616,12 +616,15 @@ export type ConnectorStatus = z.input<typeof ConnectorStatusSchema>;
  *
  * `connector_action` dispatches to a handler that reaches an external system;
  * nothing on this side can see what happened there. #4354's per-run summary
- * reports `selected` / `acted` and the broken-sweep alert is
- * `selected > 0 AND acted = 0 AND unmeasured = 0`, so the two guesses are both
- * wrong in a costly direction: a blanket `acted: 0` trips the alert on every
- * healthy connector sweep until operators learn to ignore it, and a blanket
- * `acted: 1` makes a read-only sweep look busy forever so the alert never
- * fires. `http` gets to skip this question because the HTTP method answers it
+ * reports `selected` / `acted`, and a broken sweep is FIRST FILTERED by
+ * `selected > 0 AND acted = 0 AND unmeasured = 0` — a filter, not a verdict
+ * (#12685: a healthy idempotent sweep matches it on every run too, and what
+ * discriminates is the per-node fold in `FlowRunSummary.nodes[]` / `gates[]`).
+ * The two guesses are wrong in a costly direction even so: a blanket `acted: 0`
+ * puts every healthy connector sweep into that candidate set until operators
+ * learn to ignore it, and a blanket `acted: 1` makes a read-only sweep look
+ * busy forever so it never becomes a candidate at all. `http` gets to skip this
+ * question because the HTTP method answers it
  * (`GET` reads, anything else mutates); a connector action's key does not.
  *
  * ## Why the vocabulary differs from `FlowFunctionEffectSchema`
@@ -726,7 +729,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * because a published row lands whole in `sys_metadata`.
    */
   authentication: ConnectorAuthConfigSchema.optional().default({ type: 'none' }).describe(
-    'Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance.',
+    'Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets: use `auth.credentialRef` on a provider-bound instance.',
   ),
 
   /**
@@ -773,7 +776,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
 
   /** Zapier-style Capabilities */
   actions: z.array(ConnectorActionSchema).optional(),
-  triggers: z.array(ConnectorTriggerSchema).optional().describe('Trigger definitions (not yet enforced — never read at registration; see #3197)'),
+  triggers: z.array(ConnectorTriggerSchema).optional().describe('Trigger definitions '),
   
   /**
    * Data synchronization configuration
@@ -789,7 +792,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
   /**
    * Webhook configuration
    */
-  webhooks: z.array(WebhookConfigSchema).optional().describe('Webhook configurations (not yet enforced — never read at registration; see #3197)'),
+  webhooks: z.array(WebhookConfigSchema).optional().describe('Webhook configurations '),
   
   /**
    * REMOVED (#4911) — outbound rate limiting. See the block above
@@ -799,7 +802,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * two channels an upgrading author actually hits — `tsc` and the parse.
    */
   rateLimitConfig: retiredKey(
-    '`connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — ' +
+    '`connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — ' +
     'the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its ' +
     '`RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ' +
     'ever existed. The platform\'s only token bucket (runtime `security/rate-limit.ts`) throttles ' +
@@ -836,7 +839,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * the boot audit warning for declared-but-unregistered connectors (#2612).
    */
   enabled: z.boolean().optional().default(true).describe(
-    'Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612).',
+    'Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor.',
   ),
   
   /**

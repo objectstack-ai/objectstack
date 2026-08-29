@@ -441,6 +441,7 @@
     "UninstallPackageRequestSchema": "src/kernel/package-registry.zod.ts#UninstallPackageRequestSchema (const)",
     "UninstallPackageResponse": "src/kernel/package-registry.zod.ts#UninstallPackageResponse (type)",
     "UninstallPackageResponseSchema": "src/kernel/package-registry.zod.ts#UninstallPackageResponseSchema (const)",
+    "UnknownAuthoringKeyFinding": "src/data/authoring-key-lint.ts#UnknownAuthoringKeyFinding (interface)",
     "UpgradeImpactLevel": "src/kernel/package-upgrade.zod.ts#UpgradeImpactLevel (type)",
     "UpgradeImpactLevelSchema": "src/kernel/package-upgrade.zod.ts#UpgradeImpactLevelSchema (const)",
     "UpgradePackageRequest": "src/kernel/package-upgrade.zod.ts#UpgradePackageRequest (type)",

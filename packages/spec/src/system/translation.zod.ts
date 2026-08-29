@@ -23,7 +23,7 @@ export type Locale = z.input<typeof LocaleSchema>;
  * the bug looks like missing coverage forever.
  */
 const TRANSLATION_HISTORY =
-  'Until #4001 closed these shapes an unknown key was dropped silently — the bundle still '
+  'Until these shapes were closed an unknown key was dropped silently — the bundle still '
   + 'loaded, and whatever it was meant to translate rendered in the source language with no '
   + 'diagnostic, indistinguishable from a translation nobody had written yet.';
 
@@ -337,7 +337,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   // group no resolver read — objectui's spec-translations transform passed it
   // through to the client tree and nothing downstream consumed it.
   validationMessages:
-    '`validationMessages` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no '
+    '`validationMessages` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'resolver ever read it, so a translated rule message was stored and never shown. '
     + 'Validation messages are not translated through a translation group: author the '
     + 'message on the rule itself (`object.validations[].message`), which the engine '
@@ -621,16 +621,16 @@ const translationDataShape = () => ({
       aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText' },
       guidance: {
         submitLabel:
-          '`submitLabel` was removed in @objectstack/spec 17 (#10926, ADR-0049) — its only '
-          + 'spec-declared carrier, `element:form`, retired whole (#9249), so no component in '
+          '`submitLabel` was removed in @objectstack/spec 17 (ADR-0049) — its only '
+          + 'spec-declared carrier, `element:form`, retired whole, so no component in '
           + '`ComponentPropsMap` declares it and the resolver no longer overlays it. The live form '
           + "surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`), localizable "
           + 'at its own authoring site. Delete the key. '
           + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
         submit:
           '`submit` was the alias spelling of `submitLabel`, which was removed in '
-          + '@objectstack/spec 17 (#10926, ADR-0049) — no component in `ComponentPropsMap` '
-          + 'declares a submit label since `element:form` retired whole (#9249). Delete the key; '
+          + '@objectstack/spec 17 (ADR-0049) — no component in `ComponentPropsMap` '
+          + 'declares a submit label since `element:form` retired whole. Delete the key; '
           + "the live form surface's submit copy is `object-form`'s `submitText`.",
       },
     }, {
@@ -706,11 +706,11 @@ const translationDataShape = () => ({
     guidance: {
       successMessage:
         '`flow.successMessage` / `flow.errorMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings and per-screen field copy (#7646). The terminal '
+        + 'it carries the flow label, per-screen headings and per-screen field copy. The terminal '
         + 'toast renders the string authored on the flow.',
       errorMessage:
         '`flow.errorMessage` / `flow.successMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings and per-screen field copy (#7646). The terminal '
+        + 'it carries the flow label, per-screen headings and per-screen field copy. The terminal '
         + 'toast renders the string authored on the flow.',
     },
   }, {
@@ -726,7 +726,7 @@ const translationDataShape = () => ({
       guidance: {
         description:
           "`description` — a screen's body text (`config.description`) — is not part of the flows "
-          + 'translation surface, which carries the heading (`title`) and per-field copy (#7646).',
+          + 'translation surface, which carries the heading (`title`) and per-field copy.',
       },
     }, {
       // Overlays the screen node's `config.title`. A screen that declares no
@@ -966,7 +966,7 @@ export function defineTranslationBundle(config: z.input<typeof TranslationBundle
 export const TranslationConfigSchema = lazySchema(() => strictObject({
   surface: 'the i18n configuration',
   history:
-    'Until #4001 closed this shape an unknown key was dropped silently — the stack still '
+    'Until this shape was closed an unknown key was dropped silently — the stack still '
     + 'built, with the setting the author wrote never reaching any runtime.',
   aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale' },
   // #3494 removed these four. They were the exemplar the liveness audit
@@ -975,10 +975,10 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   // that was a silent no-op for a second reason. A tombstone is the only thing
   // that tells an author upgrading from <17 why their setting vanished.
   guidance: {
-    fileOrganization: '`fileOrganization` was removed in #3494 — no runtime ever read it; how you split bundle files is a convention of your source tree, and the loader reads whatever `translations` you hand `defineStack`',
-    messageFormat: '`messageFormat` was removed in #3494 — there is no ICU engine; interpolation is always simple `{variable}` substitution',
-    lazyLoad: '`lazyLoad` was removed in #3494 — no runtime ever read it, so setting it changed nothing',
-    cache: '`cache` was removed in #3494 — no runtime ever read it, so setting it changed nothing',
+    fileOrganization: '`fileOrganization` was removed — no runtime ever read it; how you split bundle files is a convention of your source tree, and the loader reads whatever `translations` you hand `defineStack`',
+    messageFormat: '`messageFormat` was removed — there is no ICU engine; interpolation is always simple `{variable}` substitution',
+    lazyLoad: '`lazyLoad` was removed — no runtime ever read it, so setting it changed nothing',
+    cache: '`cache` was removed — no runtime ever read it, so setting it changed nothing',
   },
 }, {
   /** Default locale for the application */

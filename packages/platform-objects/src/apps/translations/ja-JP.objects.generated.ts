@@ -1894,47 +1894,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_scim_provider: {
-    label: "SCIM プロバイダー",
-    pluralLabel: "SCIM プロバイダー",
-    description: "外部 IdP がこの環境のユーザーをプロビジョニング/デプロビジョニングするために使用する SCIM 2.0 接続（ベアラートークン）",
-    fields: {
-      id: {
-        label: "ID"
-      },
-      provider_id: {
-        label: "プロバイダー ID",
-        help: "安定した SCIM プロバイダー識別子（例: 「okta-scim」）"
-      },
-      provider_key: {
-        label: "Provider Key",
-        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
-      },
-      scim_token: {
-        label: "SCIM トークン（ハッシュ）",
-        help: "この SCIM 接続のハッシュ化されたベアラー資格情報——平文はトークン生成時に一度だけ表示されます。機密情報のため、公開しないでください。"
-      },
-      organization_id: {
-        label: "組織",
-        help: "このトークンの組織スコープ（組織スコープのトークンはプロビジョニングをその組織に限定します）"
-      },
-      user_id: {
-        label: "所有者",
-        help: "このトークンを生成したユーザー（プロバイダー所有権が有効な場合）"
-      },
-      created_at: {
-        label: "作成日時"
-      },
-      updated_at: {
-        label: "更新日時"
-      }
-    },
-    _views: {
-      all: {
-        label: "すべて"
-      }
-    }
-  },
   sys_scim_connection_binding: {
     label: "SCIM Connection Binding",
     pluralLabel: "SCIM Connection Bindings",

@@ -59,6 +59,32 @@ export interface EvidenceCitation {
   line: number;
 }
 
+/**
+ * A local path citation anchored to a SYMBOL: `packages/…/file.ts#dispatchFlowAction`.
+ *
+ * WHY A SYMBOL AND NOT (ONLY) A LINE (#12516). A line citation rots IN RANGE:
+ * the file exists, the line is inside it, the file names the key — and the
+ * consumer has moved to a different line of the same file, so every check
+ * passes and the pointer is still wrong. Measured on two entries `action.json`
+ * had repointed with fresh line numbers on 2026-08-25: both had drifted by
+ * 2026-08-26, because the cited file is 1600+ lines and actively edited — the
+ * more precisely a line is cited, the faster it rots. A symbol MOVES WITH the
+ * consumer, so the pointer survives exactly the movement that rots a line, and
+ * when the consumer is renamed or deleted the symbol is genuinely gone and the
+ * gate goes red — which is the direction a stale line can never produce.
+ *
+ * The `#` separator is the proof-ref convention (`<file>#<proof-id>`,
+ * ADR-0054) applied to the citation grammar. A line may ride along
+ * (`file.ts#symbol:150`, either order) — it stays a human convenience and is
+ * still bounded by `checkCitationLines`; the symbol is the load-bearing half.
+ */
+export interface EvidenceAnchor {
+  /** The path, exactly as it appears in `local`. */
+  path: string;
+  /** The anchored symbol text, exactly as written after `#` (validated later). */
+  symbol: string;
+}
+
 export interface EvidenceScan {
   /** Repo-rooted paths attributed to THIS repo — these must resolve. */
   local: string[];
@@ -71,32 +97,62 @@ export interface EvidenceScan {
    * and collapsing them would drop every citation but the first.
    */
   localCitations: EvidenceCitation[];
+  /**
+   * The subset of `local` whose citation anchors a symbol (`path#symbol`) —
+   * the only citations a symbol check can falsify. Deduped on `path#symbol`
+   * for the same reason `localCitations` dedupes on `path:line`. Foreign
+   * anchors are never collected, for the same reason foreign lines are not:
+   * the file is legitimately absent here, so every symbol in it would read as
+   * gone.
+   */
+  localAnchors: EvidenceAnchor[];
 }
 
 interface TokenParts {
-  /** The token with surrounding punctuation and any line suffix removed. */
+  /** The token with surrounding punctuation and any line/anchor suffix removed. */
   path: string;
   /** The line suffix's value, or `null` when the token carries none. */
   line: number | null;
+  /** The `#symbol` anchor's text, or `null` when the token carries none. */
+  anchor: string | null;
 }
 
 /**
- * Strip surrounding punctuation and split off any `:123` / `:12-34` line suffix.
- * The trailing class includes `:` so a realm marker written `objectui:` reduces
- * to `objectui`; a line suffix (`file.ts:150`) ends in a digit, so it survives
- * that pass and is split off by the line-number rule after it.
+ * Strip surrounding punctuation and split off any `:123` / `:12-34` line suffix
+ * and any `#symbol` anchor suffix. The trailing class includes `:` so a realm
+ * marker written `objectui:` reduces to `objectui`; a line suffix
+ * (`file.ts:150`) ends in a digit, so it survives that pass and is split off by
+ * the line-number rule after it.
  *
  * The line is RETURNED rather than discarded (it used to be dropped on the
  * floor here) — a citation's line is the half of it a moved consumer rots
  * first, and a parser that cannot see the line cannot let any gate bound it.
+ *
+ * The anchor is split off in EITHER order relative to the line
+ * (`file.ts#symbol:150` and `file.ts:150#symbol` both parse) on purpose: an
+ * order the parser did not accept would not fail — the token would just stop
+ * matching PATH_RE and quietly become prose, taking the existence check down
+ * with it. The anchor's TEXT is deliberately permissive here (anything but
+ * whitespace, `#`, `/`); whether it is a well-formed symbol is judged by
+ * `checkEvidenceAnchors`, so a typo'd anchor is a loud finding rather than a
+ * silently-ignored token — the same asymmetry `verifiedAt` applies to a
+ * malformed date.
  */
 function bareToken(raw: string): TokenParts {
-  const trimmed = raw
+  let t = raw
     .replace(/^[([{<"'`,;]+/, '')
     .replace(/[)\]}>"'`,;.:]+$/, '');
-  const m = /:(\d+)(?:-(\d+))?$/.exec(trimmed);
-  if (!m) return { path: trimmed, line: null };
-  return { path: trimmed.slice(0, m.index), line: Number(m[2] ?? m[1]) };
+  let line: number | null = null;
+  let anchor: string | null = null;
+  // Two suffixes at most, one strip per pass, order-independent.
+  for (let i = 0; i < 2; i++) {
+    const lm = /:(\d+)(?:-(\d+))?$/.exec(t);
+    if (line === null && lm) { line = Number(lm[2] ?? lm[1]); t = t.slice(0, lm.index); continue; }
+    const am = /#([^\s#/]*)$/.exec(t);
+    if (anchor === null && am) { anchor = am[1]; t = t.slice(0, am.index); continue; }
+    break;
+  }
+  return { path: t, line, anchor };
 }
 
 /**
@@ -113,10 +169,11 @@ export function scanEvidence(evidence: string): EvidenceScan {
   const local: string[] = [];
   const foreign: string[] = [];
   const citations: EvidenceCitation[] = [];
+  const anchors: EvidenceAnchor[] = [];
   let realm = LOCAL_REALM;
 
   for (const raw of String(evidence).split(/\s+/)) {
-    const { path: token, line } = bareToken(raw);
+    const { path: token, line, anchor } = bareToken(raw);
     const asRealm = token.toLowerCase();
 
     if (FOREIGN_REALMS.includes(asRealm)) { realm = asRealm; continue; }
@@ -133,6 +190,7 @@ export function scanEvidence(evidence: string): EvidenceScan {
         // several consumers, and seeing only its head would leave the rest of the
         // chain exactly as unfalsifiable as before.
         if (line !== null) citations.push({ path: token, line });
+        if (anchor !== null) anchors.push({ path: token, symbol: anchor });
       }
     }
 
@@ -140,7 +198,12 @@ export function scanEvidence(evidence: string): EvidenceScan {
     if (/[;)]/.test(raw)) realm = LOCAL_REALM;
   }
 
-  return { local: dedupe(local), foreign: dedupe(foreign), localCitations: dedupeCitations(citations) };
+  return {
+    local: dedupe(local),
+    foreign: dedupe(foreign),
+    localCitations: dedupeCitations(citations),
+    localAnchors: dedupeAnchors(anchors),
+  };
 }
 
 function dedupe(xs: string[]): string[] {
@@ -157,6 +220,16 @@ function dedupeCitations(cs: EvidenceCitation[]): EvidenceCitation[] {
   });
 }
 
+function dedupeAnchors(as: EvidenceAnchor[]): EvidenceAnchor[] {
+  const seen = new Set<string>();
+  return as.filter((a) => {
+    const k = `${a.path}#${a.symbol}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export interface EvidenceCheck extends EvidenceScan {
   /** Local paths that do not exist — genuinely rotted pointers. */
   missing: string[];
@@ -164,7 +237,7 @@ export interface EvidenceCheck extends EvidenceScan {
 
 /** Scan an evidence string and resolve its local paths against the filesystem. */
 export function checkEvidence(evidence: unknown, exists: (path: string) => boolean): EvidenceCheck {
-  if (typeof evidence !== 'string') return { local: [], foreign: [], localCitations: [], missing: [] };
+  if (typeof evidence !== 'string') return { local: [], foreign: [], localCitations: [], localAnchors: [], missing: [] };
   const scan = scanEvidence(evidence);
   return { ...scan, missing: scan.local.filter((p) => !exists(p)) };
 }
@@ -215,4 +288,72 @@ export function checkCitationLines(
     if (c.line > lines) out.push({ ...c, lines });
   }
   return out;
+}
+
+/**
+ * The symbol grammar an anchor must satisfy: one JS/TS identifier. Anything
+ * else — a hyphenated proof-id shape, a dotted member path, an empty suffix —
+ * is MALFORMED and fails loudly rather than parsing to nothing, because an
+ * anchor that quietly degrades to prose takes the whole citation's existence
+ * check down with it (the token stops matching PATH_RE), which is the silent
+ * no-op shape this ledger exists to catch.
+ */
+const SYMBOL_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Does `content` name this symbol as a WORD? Identifier-bounded rather than
+ * `\b`-bounded: `$` is a legal identifier character that `\b` treats as a
+ * boundary, so `\bfoo\b` would let `foo` satisfy an anchor at `foo$bar`.
+ */
+export function isSymbolNamed(content: string, symbol: string): boolean {
+  const esc = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![A-Za-z0-9_$])${esc}(?![A-Za-z0-9_$])`).test(content);
+}
+
+export interface AnchorCheck {
+  /** Well-formed local anchors that were resolvable and were asked. */
+  checked: EvidenceAnchor[];
+  /** ...of which these name a symbol the cited file does not contain — rot. */
+  unresolved: EvidenceAnchor[];
+  /** Anchors whose text is not one identifier — malformed, also a failure. */
+  malformed: EvidenceAnchor[];
+}
+
+/**
+ * Resolve each local `path#symbol` anchor against the cited file's text.
+ *
+ * SEPARATE from `checkEvidence` for exactly the reason `checkCitationLines`
+ * states: which surfaces hold their citations to which standard must stay
+ * readable at the call site, and `empty-state.mts` shares the scanner.
+ *
+ * WHAT THIS FALSIFIES — AND WHAT IT CANNOT (#12516). A line citation rots in
+ * range when the consumer moves within its file; an anchored citation cannot —
+ * the symbol moves with the consumer, and when the consumer is renamed or
+ * deleted the anchor goes RED, which the line bound never could (the stale
+ * line is still "a line the file has"). The honest residual: a symbol that
+ * SURVIVES while its body stops reading the key is out of reach at text level
+ * — locating a symbol's extent needs a parser, and the #11457 precedent is
+ * not to switch on a matcher whose false-positive class has not been measured.
+ * The file-level key-mention check remains that case's backstop.
+ *
+ * `readFile` returns `null` for a path it cannot read; those anchors are
+ * SKIPPED, not reported — the existence check already owns that path's
+ * verdict (the same contract `checkCitationLines` and `findUnanchoredCitations`
+ * state for their own `null` cases).
+ */
+export function checkEvidenceAnchors(
+  scan: EvidenceScan,
+  readFile: (path: string) => string | null,
+): AnchorCheck {
+  const checked: EvidenceAnchor[] = [];
+  const unresolved: EvidenceAnchor[] = [];
+  const malformed: EvidenceAnchor[] = [];
+  for (const a of scan.localAnchors) {
+    if (!SYMBOL_RE.test(a.symbol)) { malformed.push(a); continue; }
+    const content = readFile(a.path);
+    if (content === null) continue;
+    checked.push(a);
+    if (!isSymbolNamed(content, a.symbol)) unresolved.push(a);
+  }
+  return { checked, unresolved, malformed };
 }

@@ -105,7 +105,7 @@ const client = new ObjectStackClient({
   baseUrl: 'https://api.example.com',
 });
 
-const env = client.project('env_prod');
+const env = client.environment('env_prod');
 
 await env.data.find('customer', { top: 20 });
 await env.meta.getItems('object');
@@ -153,8 +153,9 @@ one, so they are intentionally excluded from data-plane resolution.
 2. Replace `X-Project-Id` with `X-Environment-Id`.
 3. Replace `OS_PROJECT_ID` with `OS_ENVIRONMENT_ID`.
 4. Store runtime rows under `environment_id`.
-5. Keep the SDK `client.project(id)` call only as a compatibility method name;
-   pass an environment id to it.
+5. Replace the SDK `client.project(id)` call with `client.environment(id)`. It
+   was a compatibility method name until ADR-0006 D2; there is no alias, so the
+   old spelling does not resolve.
 
 ---
 

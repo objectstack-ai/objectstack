@@ -16,6 +16,15 @@ import {
   // from one place. Re-exported below under its original name.
   ITEM_KEY_DISCRIMINATORS,
   readDiscriminatorValue as discriminatorValue,
+  // [#10062] The ADR-0029 D9.6 provenance pair, sunk into metadata-core for the
+  // same reason as the table above: `@objectstack/service-automation`'s flow
+  // precedence asks the same question ("does a code package ship this name?")
+  // and reached it by importing this package, which it does not declare — so
+  // the bundler inlined a copy of this implementation into ITS dist. Both names
+  // keep their original spelling here, and `isCodeArtifactBody` is re-exported
+  // below, so this package's public API is unchanged.
+  isCodeArtifactBody,
+  isTenantAuthored,
 } from '@objectstack/metadata-core';
 // [#8460] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -846,7 +855,7 @@ function provisionTenantScopeIndex(
  * (`sys_member`) is walled on that column and is now indexed on it. Re-adding
  * an exclusion the wall does not have is precisely the drift this rebinding
  * closes — and `declaresTenantIndex` already covers the tables that declare
- * their own tenant index (`sys_invitation`, `sys_team`, `sys_scim_provider`).
+ * their own tenant index (`sys_invitation`, `sys_team`).
  *
  * ⚠️ The clause-1 rows are NOT a leftover of the condition #8459 lifted: an
  * object that declares itself non-tenant-scoped is one the wall composes NO
@@ -1144,42 +1153,13 @@ export class NamespaceConflictError extends Error {
   }
 }
 
-/**
- * Is this registered item a TENANT-authored overlay rather than a code-shipped
- * artifact? (ADR-0010 `_provenance`: `'package'` for loader-introduced items,
- * `'org'` for tenant-authored.)
- *
- * `_packageId !== 'sys_metadata'` alone cannot answer it. That sentinel marks
- * one thing only — an overlay row bound to no package. A row that IS bound to
- * one is keyed by its real package id on BOTH sides that register it: the save
- * path (#4636 PR1) and the boot-time rehydration of `sys_metadata` (#4636 PR2).
- * Either way the key is `app.<slug>`, which is exactly what every code-shipped
- * item carries too, so the sentinel test cannot tell them apart. A tenant's own
- * overlay came back from a kernel rebuild looking like a code
- * artifact, and the protocol's overlay gate refused the next write to it with
- * `not_overridable` — an app the user had just built through Studio/AI became
- * permanently un-editable at the first kernel rebuild (cloud#970). Provenance is
- * the axis that actually distinguishes the two, so ask it.
- */
-function isTenantAuthored(item: unknown): boolean {
-  return (item as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
-}
-
-/**
- * [ADR-0029 D9.6] Is this registered body a CODE-shipped artifact?
- *
- * The exact test {@link SchemaRegistry.getArtifactItem} has always applied,
- * factored out so the object branch and the D9.8 hydration discriminator
- * ({@link SchemaRegistry.getPackagedObjectOwner}) cannot drift into two
- * different answers to one question — "does a code package ship this name?".
- * Truthy `_packageId`, not the `'sys_metadata'` rehydration sentinel, and not
- * tenant provenance.
- */
-export function isCodeArtifactBody(item: unknown): boolean {
-  const it = item as { _packageId?: unknown } | null | undefined;
-  if (!it || !it._packageId || it._packageId === 'sys_metadata') return false;
-  return !isTenantAuthored(it);
-}
+// [#10062] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
+// They now live in `@objectstack/metadata-core`
+// (`code-artifact-provenance.ts`), imported at the top of this file and
+// re-exported immediately below, so every caller's spelling — including
+// `@objectstack/objectql`'s own public export — is unchanged. Their full
+// rationale moved with them.
+export { isCodeArtifactBody };
 
 // ============================================================================
 // i18n bundles — metadata types whose identity is (name, <discriminator>)

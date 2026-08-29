@@ -42,6 +42,16 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+// The repo's ONE answer to "is this span a comment, or code?". The private
+// scanner this replaces tracked the three string forms but was REGEX-BLIND, so
+// the doubled slash closing a literal like `/^https?:\/\//i` read as a
+// line-comment opener and took the rest of the line -- `auth-manager.ts` in this
+// very package was losing that line. `stripComments` (not `maskComments`) is the
+// projection this file wants: every finding reports a package-relative FILE PATH
+// and a specifier, never a line or an offset into the original. The `.mjs`
+// specifier is deliberate; `scripts/js-comment-mask.d.mts` beside it is a
+// hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 
 /**
  * Seeded from `__dirname`, not from a `findUp` walk of `process.cwd()`, and not
@@ -108,51 +118,6 @@ const SRC = HERE;
  */
 const RUNTIME_SRC = resolve(REPO, 'packages/runtime/src');
 const SERVICE_SMS_SRC = resolve(REPO, 'packages/services/service-sms/src');
-
-/**
- * Strip comments before scanning. The distinction this file turns on — a
- * `import type` versus a value `import` of the same specifier — is invisible to
- * a raw-text regex the moment a doc comment quotes an import line, and this
- * module's own header quotes several. Handles `//`, block comments and the
- * three string forms so a `'http://…'` literal is not mistaken for a comment.
- */
-function stripComments(src: string): string {
-  let out = '';
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i]!;
-    const next = src[i + 1];
-    if (c === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      i += 2;
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      out += c;
-      i++;
-      while (i < src.length && src[i] !== c) {
-        if (src[i] === '\\') {
-          out += src[i]! + (src[i + 1] ?? '');
-          i += 2;
-          continue;
-        }
-        out += src[i];
-        i++;
-      }
-      out += c;
-      i++;
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return out;
-}
 
 interface Ref {
   spec: string;

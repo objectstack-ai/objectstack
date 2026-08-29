@@ -36,7 +36,7 @@ import { strictObject } from '../shared/strict-object';
  * Shared history for the authorable shapes in this file (#4001).
  */
 const SHARING_HISTORY =
-  'Until #4001 closed this shape these were dropped silently — the form still published, '
+  'Until this shape was closed these were dropped silently — the form still published, '
   + 'without whatever the key was meant to open up, gate or expire.';
 
 /**

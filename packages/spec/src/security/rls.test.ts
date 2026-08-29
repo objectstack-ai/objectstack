@@ -539,7 +539,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     const result = RowLevelSecurityPolicySchema.safeParse({ ...policy, priority: 10 });
     expect(result.success).toBe(false);
     const messages = result.error!.issues.map((i) => i.message).join('\n');
-    expect(messages).toContain('#3896');
+    expect(messages).toContain('`rowLevelSecurity[].priority` was removed');
     expect(messages).toContain('Delete the key');
   });
 });

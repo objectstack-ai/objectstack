@@ -109,8 +109,8 @@ import { strictObject } from '../shared/strict-object';
  * for `script` / `subflow` / `decision`, what NOTHING else was catching.
  */
 const SCHEMALESS_NODE_CONFIG_HISTORY =
-  'Until #4001 an undeclared key here was dropped in silence at every layer: these node types publish no '
-  + "descriptor `configSchema`, so `registerFlow()`'s undeclared-key rejection (#4277) structurally skips them, "
+  'Until this shape was closed, an undeclared key here was dropped in silence at every layer: these node types publish no '
+  + "descriptor `configSchema`, so `registerFlow()`'s undeclared-key rejection structurally skips them, "
   + 'and the execute-time parse checked only types and requiredness.';
 
 /**
@@ -132,15 +132,15 @@ const SCHEMALESS_NODE_CONFIG_HISTORY =
  */
 const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   functionName:
-    'The callable reference is `function` (#1870). `functionName` was the AI/template-emitted alias, rewritten at '
+    'The callable reference is `function`. `functionName` was the AI/template-emitted alias, rewritten at '
     + 'load by the ADR-0087 D2 conversion `flow-node-script-config-aliases`. If `function` is also present, the two '
-    + 'name DIFFERENT callables and the conversion kept both rather than picking which one runs (#4923) — decide '
+    + 'name DIFFERENT callables and the conversion kept both rather than picking which one runs — decide '
     + 'which it is, put it on `function`, and delete `functionName`.',
   input:
     'The input map on a `script` node is `inputs` (plural). The singular `input` leaked in from '
     + "`connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical surface — do not \"fix\" that "
     + 'one. `flow-node-script-config-aliases` rewrites this key at load; delete it once `inputs` carries the values. '
-    + 'If `inputs` is also present with DIFFERENT values, the conversion kept both rather than choosing (#4923) — '
+    + 'If `inputs` is also present with DIFFERENT values, the conversion kept both rather than choosing — '
     + 'reconcile them onto `inputs`.',
 };
 
@@ -148,9 +148,9 @@ const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   flow:
     'The invoked flow is named by `flowName`. `flow` was an undeclared executor fallback that no schema or form '
-    + 'ever described; it graduated into the ADR-0087 D2 conversion `flow-node-subflow-flow-alias` (#4278), which '
+    + 'ever described; it graduated into the ADR-0087 D2 conversion `flow-node-subflow-flow-alias`, which '
     + 'rewrites it at load. If `flowName` is also present, the two name DIFFERENT flows and the conversion kept '
-    + 'both rather than picking which one this step invokes (#4923) — decide which it is, put it on `flowName`, '
+    + 'both rather than picking which one this step invokes — decide which it is, put it on `flowName`, '
     + 'and delete `flow`.',
   timeoutMs:
     "A subflow step's timeout is the engine's per-node guard, so it belongs on the NODE, not in its config: "
@@ -177,11 +177,11 @@ const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 const DECISION_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   condition:
     'Nothing reads `config.condition` on a `decision`: the key is the trigger gate on a `start` node and is inert '
-    + 'on every other node type (#4414), so a predicate written here never gates anything — it is still '
+    + 'on every other node type, so a predicate written here never gates anything — it is still '
     + 'parse-validated at registration, which is why a malformed one is caught and an INERT one was not. Branching '
     + 'lives on the OUT-EDGES: give each branch its own `condition` and mark the fallback `isDefault: true`. Do not '
     + 'reach for the plural `conditions` here on the strength of the spelling — declaring branches here AND on the '
-    + 'edges is the double-declaration #4414 was filed for. If the edges already carry the predicate, delete this key.',
+    + 'edges is the double-declaration this guidance exists to stop. If the edges already carry the predicate, delete this key.',
 };
 
 // ─── script ──────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
   // one rename: real messaging is `notify`, Slack is a connector, and inline
   // logic belongs in a registered function.
   actionType: retiredKey(
-    '`script.config.actionType` was removed in @objectstack/spec 17 (#4343) — none of its values '
+    '`script.config.actionType` was removed in @objectstack/spec 17 — none of its values '
     + 'did what it said. The two built-ins were logger-backed stubs that recorded the intent and '
     + 'delivered nothing under any configuration, and every other value was a second spelling of '
     + '`config.function`. Replace it per branch: for `email` use a `notify` node (it delivers '
@@ -264,7 +264,7 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
     + 'case into `config.function`; the stub and marker values are removed.',
   ),
   template: retiredKey(
-    '`script.config.template` was removed in @objectstack/spec 17 (#4343) — it fed only the '
+    '`script.config.template` was removed in @objectstack/spec 17 — it fed only the '
     + 'logger-backed `email`/`slack` stubs, which never rendered or sent a message, so no template '
     + 'id was ever resolved. Delete the key. A `notify` node carries its own `title`/`message`, and '
     + 'stored templates live in the messaging service (`sys_notification_template`), not on the '
@@ -272,20 +272,20 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   recipients: retiredKey(
-    '`script.config.recipients` was removed in @objectstack/spec 17 (#4343) — the addresses were '
+    '`script.config.recipients` was removed in @objectstack/spec 17 — the addresses were '
     + 'logged, never messaged: the `email`/`slack` branches it fed delivered nothing. Use a '
     + '`notify` node, whose `recipients` (user ids, field refs or addresses) reach the messaging '
     + 'service for real. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   variables: retiredKey(
-    '`script.config.variables` was removed in @objectstack/spec 17 (#4343) — it injected values '
+    '`script.config.variables` was removed in @objectstack/spec 17 — it injected values '
     + 'into a template no side effect ever rendered. Delete the key. A `notify` node carries '
     + 'structured data in `payload`; a registered function takes it in `config.inputs`. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   script: retiredKey(
-    '`script.config.script` was removed in @objectstack/spec 17 (#4343) — the built-in runtime has '
+    '`script.config.script` was removed in @objectstack/spec 17 — the built-in runtime has '
     + 'no server-side JS sandbox, so an inline body was recognized and never executed: the node '
     + 'warned and completed as a no-op. Move the logic into a registered function '
     + '(`defineStack({ functions })`) and name it in `config.function`. '
@@ -363,7 +363,7 @@ export const DecisionConditionSchema = lazySchema(() => strictObject({
       + "projects it from the node's out-edges and applies edits back to them; it is never stored on the branch. "
       + "Route by making this branch's `label` match an out-edge's `label` exactly (a label nothing claims cannot "
       + 'route: traversal falls back to considering every out-edge, and `os validate` reports it as '
-      + '`flow-branch-label-unmatched`, #4414).',
+      + '`flow-branch-label-unmatched`).',
   },
 }, {
   /** Branch label — must match an out-edge's `label` to route anywhere. */

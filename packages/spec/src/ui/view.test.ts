@@ -1902,7 +1902,7 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
     expect(m.startsWith('Unrecognized key(s) on this map configuration: `titleFeld`.')).toBe(true);
     expect(m).toContain('`titleField`');
     expect(m.endsWith(
-      'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
+      'Until these shapes were closed an unknown key was dropped silently — the view still '
       + 'rendered, without whatever the key was meant to configure.',
     )).toBe(true);
   });
@@ -2363,7 +2363,7 @@ describe('FormViewSchema — retired defaultSort (#3896 close-out)', () => {
       });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/list view/);
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
   it('a form without it still parses', () => {
     expect(() => FormViewSchema.parse({ type: 'simple', sections: [{ fields: ['name'] }] })).not.toThrow();
@@ -3056,7 +3056,7 @@ describe('ListViewSchema — retired responsive/performance (#3896 close-out)', 
     try {
       ListViewSchema.parse({ type: 'grid', columns: ['name'], performance: { lazyLoad: true } });
     } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/#3896/);
+    expect(message).toMatch(/audit close-out/);
   });
 });
 
@@ -3088,7 +3088,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
       try {
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
-      expect(message).toMatch(/#7176/);
+      expect(message).toMatch(new RegExp(`view\\.${key}\` was removed`));
       expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
     }
   });

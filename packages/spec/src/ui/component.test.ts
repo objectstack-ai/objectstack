@@ -959,7 +959,7 @@ describe('RecordHighlightsProps', () => {
       // "drawn by nothing" story, and the no-replacement guidance. The `s`
       // flag is house style: the message spans lines.
       expect(armIssue!.message).toMatch(/this `record:highlights` field/);
-      expect(armIssue!.message).toMatch(/`record:highlights` field `icon` was removed .*#10054.*ADR-0049/s);
+      expect(armIssue!.message).toMatch(/`record:highlights` field `icon` was removed .*ADR-0049/s);
       expect(armIssue!.message).toMatch(/Delete the key — no replacement: the renderer never drew it/s);
       expect(armIssue!.message).toMatch(/os migrate meta --from 17/);
     });
@@ -2436,22 +2436,29 @@ describe('#7751 — object-* block props schemas', () => {
 // that sent #9397 on a full dispatch cycle re-deriving the accordion read point.
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
-// Both re-measured at the pin this repo builds against —
-// `.objectui-sha` = `190fbd01d`, re-derived there 2026-08-22 when the pin moved
-// off `9a3daf8d3`. All four records (these two plus #9881/#9972 above) were
-// re-counted at the new pin in the same pass and agree on it, as they did at
-// the previous two moves: #10137 moved the pin while #9881/#9972 still cited
-// `82a94170c`, and #10274 re-measured those four onto `9a3daf8d3`. The button
-// anchors have been unchanged across every one of those moves — `button.tsx`
-// is byte-identical at `9a3daf8d3` and `190fbd01d`.
+// The button record re-measured at the pin this repo builds against —
+// `.objectui-sha` = `9602dc820`, re-derived there 2026-08-28. This is the first
+// move that changed the button READ POINT and not merely its line numbers:
+// objectui#5993 deleted `button.tsx`'s file-local `toPascalCase` +
+// `iconNameMap` + `icons` index and routed the button through the SHARED
+// `resolveIcon` that every `action:*` site already used, so the resolution
+// anchor now hops into `renderers/action/resolve-icon.ts`. What an author sees
+// did not move with it: an unknown name still resolves to `null` and draws
+// nothing, which is still the `LazyIcon` contrast the third test below pins.
+// The earlier moves were line-number drift only — #10137 moved the pin while
+// #9881/#9972 still cited `82a94170c`, #10274 re-measured those four onto
+// `9a3daf8d3`, and `button.tsx` was byte-identical at `9a3daf8d3` and
+// `190fbd01d`.
 describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   const button = ComponentPropsMap['element:button'];
 
   it('accepts an icon on a button — the value objectui resolves through the lucide `icons` map', () => {
-    // objectui `packages/components/src/renderers/form/button.tsx:44-47`
-    // PascalCases the name, applies its own one-entry rename map, and looks it
-    // up in `icons` from `lucide-react`; `:69` / `:71` draw it either side of
-    // the label per `iconPosition`.
+    // objectui `packages/components/src/renderers/form/button.tsx:36` hands the
+    // name to the shared `resolveIcon`
+    // (`packages/components/src/renderers/action/resolve-icon.ts:30-35`), which
+    // PascalCases it and applies the one-entry rename map at `:14-24` before
+    // looking it up in `icons` from `lucide-react`; `button.tsx:57` / `:59`
+    // draw it either side of the label per `iconPosition`.
     const result = button.safeParse({ label: 'Save', icon: 'arrow-right' });
     expect(result.success).toBe(true);
     const parsed = (result.success ? result.data : undefined) as { icon?: string } | undefined;
@@ -2471,12 +2478,20 @@ describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   it('keeps a `.describe()` that names the consumer AND the non-LazyIcon path', () => {
     // The second half is load-bearing, not decoration: this slot is the one
     // authorable icon on the surface that does NOT go through `LazyIcon`, so an
-    // author who assumes the shared resolver gets silence instead of a glyph.
+    // author who assumes `LazyIcon`'s tolerant fallback gets silence instead of
+    // a glyph.
     const shape = (ElementButtonPropsSchema as unknown as {
       def: { shape: Record<string, { description?: string }> };
     }).def.shape;
     expect(shape.icon?.description).toContain('lucide-react');
     expect(shape.icon?.description).toContain('LazyIcon');
+    // And that the path is the SHARED one. Naming `resolveIcon` is what stops
+    // the describe drifting back to "its own normaliser": that sentence was
+    // true when the button carried a private copy of the algorithm, survived
+    // the copy's deletion unchanged, and shipped false to authors until this
+    // record was re-measured. The prose has to name the function, not just the
+    // library, for a reader to be able to check it.
+    expect(shape.icon?.description).toContain('resolveIcon');
   });
 });
 

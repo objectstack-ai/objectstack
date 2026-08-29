@@ -1894,47 +1894,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_scim_provider: {
-    label: "SCIM 提供方",
-    pluralLabel: "SCIM 提供方",
-    description: "外部 IdP 用于开通/停用本环境用户的 SCIM 2.0 连接（Bearer 令牌）",
-    fields: {
-      id: {
-        label: "ID"
-      },
-      provider_id: {
-        label: "提供方 ID",
-        help: "稳定的 SCIM 提供方标识符（如 “okta-scim”）"
-      },
-      provider_key: {
-        label: "Provider Key",
-        help: "Derived <organization>:<provider_id> uniqueness key maintained by @better-auth/scim; do not write directly."
-      },
-      scim_token: {
-        label: "SCIM 令牌（哈希）",
-        help: "该 SCIM 连接的哈希 Bearer 凭据——明文仅在生成令牌时显示一次。敏感信息，请勿泄露。"
-      },
-      organization_id: {
-        label: "组织",
-        help: "该令牌的组织范围（组织级令牌将开通限制在该组织内）"
-      },
-      user_id: {
-        label: "所有者",
-        help: "生成该令牌的用户（启用提供方归属时）"
-      },
-      created_at: {
-        label: "创建时间"
-      },
-      updated_at: {
-        label: "更新时间"
-      }
-    },
-    _views: {
-      all: {
-        label: "全部"
-      }
-    }
-  },
   sys_scim_connection_binding: {
     label: "SCIM Connection Binding",
     pluralLabel: "SCIM Connection Bindings",

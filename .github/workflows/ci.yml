@@ -1528,6 +1528,22 @@ jobs:
           if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "✓ all buildable capability packages ship a runtime JS entry"
 
+      # The sibling of the step above, one condition over: that step asks
+      # whether the declared entry EXISTS, this one whether it LOADS. #12971:
+      # one source line added `createRequire(import.meta.url)` to
+      # metadata-core, tsup emitted `import.meta` verbatim into
+      # `dist/index.cjs`, and outside an ES module that is a PARSE-time error
+      # — so the package's entire `require` condition was unloadable while
+      # every suite here stayed green (vitest resolves workspace packages
+      # through the `import` condition) and `pnpm build` stayed green too (the
+      # bytes emit fine; they just cannot be parsed by the runtime they are
+      # declared for). Downstream it refused to boot cloud's walled EE runtime.
+      # This lives in Build Core rather than the lint job because it reads a
+      # real dist/; with none it exits 3 (PREREQUISITE NOT MET), never a
+      # silent green. Its header is the authority on detail.
+      - name: Every published require entry point actually loads
+        run: pnpm check:dual-build-cjs-loads
+
       - name: Analyze bundle size
         run: pnpm --filter @objectstack/spec analyze
 

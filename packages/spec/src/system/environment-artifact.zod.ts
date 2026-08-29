@@ -125,21 +125,21 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
   // conversion chain — and no producer ever emitted these keys.
 
   functions: retiredKey(
-    '`environmentArtifact.functions` was removed in @objectstack/spec 17.0.0 (#4740, ADR-0049) — '
+    '`environmentArtifact.functions` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
     + 'the v0 inline-functions block never had a producer or reader: `objectstack compile` has always '
     + 'shipped function code as standalone runtime modules referenced from the compiled definition. '
     + 'Delete the key; function code travels inside `metadata` (the compiled ObjectStackDefinition).',
   ),
 
   manifest: retiredKey(
-    '`environmentArtifact.manifest` was removed in @objectstack/spec 17.0.0 (#4740, ADR-0049) — '
+    '`environmentArtifact.manifest` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
     + 'the v0 plugin/driver requirements block never had a producer or reader. Delete the key; '
     + 'package/plugin requirements live in the stack manifest inside `metadata` '
     + '(`metadata.manifest`, ManifestSchema).',
   ),
 
   payloadRef: retiredKey(
-    '`environmentArtifact.payloadRef` was removed in @objectstack/spec 17.0.0 (#4740, ADR-0049) — '
+    '`environmentArtifact.payloadRef` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
     + 'the reserved out-of-band payload indirection was never implemented; every artifact inlines '
     + '`metadata`. Delete the key.',
   ),

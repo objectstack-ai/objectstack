@@ -322,7 +322,7 @@ describe('ObjectStack Protocol', () => {
       expect(issue!.message).toMatch(/`cursor` was removed from GET \/api\/v1\/notifications/);
       expect(issue!.message).toMatch(/not paginated/i);
       expect(issue!.message).toMatch(/limit/);
-      expect(issue!.message).toMatch(/#6361/);
+      expect(issue!.message).toMatch(/declared on the request AND the response/);
     }
 
     // `tsc` is the first channel retiredKey buys — the input type is `never`.

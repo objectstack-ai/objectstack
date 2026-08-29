@@ -132,7 +132,7 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
       const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
       expect(r.success).toBe(false);
       const messages = r.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain('#12497');
+      expect(messages).toContain('ObjectQL operation it claimed');
       expect(messages).toContain('removed in @objectstack/spec 17');
       expect(messages).toContain('Delete the key');
       expect(messages).toContain('M2');
@@ -148,7 +148,7 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
     // so this pin proves refusal text === declared prescription, byte for byte.
     for (const key of ['allowRestore', 'allowPurge'] as const) {
       const declared = (ObjectPermissionSchema.shape[key].description ?? '').replace(/^\[REMOVED\] /, '');
-      expect(declared).toContain('#12497');
+      expect(declared).toContain('ObjectQL operation it claimed');
       const r = ObjectPermissionSchema.safeParse({ allowRead: true, [key]: true } as never);
       expect(r.success).toBe(false);
       const issue = r.error!.issues.find((i) => i.path[i.path.length - 1] === key)!;
@@ -167,7 +167,7 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
       const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
       expect(r.success).toBe(false);
       const messages = r.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain('#12497');
+      expect(messages).toContain('ObjectQL operation it claimed');
       expect(messages).not.toContain(`\`${key}\` → \``);
     }
   });
@@ -239,7 +239,7 @@ describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class
     for (const wrong of [true, 0, '', null, 'false'] as const) {
       const r = ObjectPermissionSchema.safeParse({ allowRestore: wrong } as never);
       expect(r.success, `value ${JSON.stringify(wrong)} must NOT be tolerated`).toBe(false);
-      expect(r.error!.issues.map((i) => i.message).join('\n')).toContain('#12497');
+      expect(r.error!.issues.map((i) => i.message).join('\n')).toContain('ObjectQL operation it claimed');
     }
   });
 

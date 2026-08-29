@@ -65,7 +65,7 @@ import { strictObject } from '../shared/strict-object';
  * minus whatever the key was meant to configure.
  */
 const IO_NODE_CONFIG_HISTORY =
-  'Until #4001 an undeclared key here was dropped at the execute-time parse — the step still ran and '
+  'Until this shape was closed, an undeclared key here was dropped at the execute-time parse — the step still ran and '
   + 'the run still reported success, minus whatever the key was meant to configure.';
 
 /**
@@ -88,28 +88,28 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   to:
     'The recipient slot is `recipients`. `to` is the pre-17 spelling, rewritten at load by the ADR-0087 D2 '
     + 'conversion `flow-node-notify-config-aliases` — so if `recipients` is also present, the two name DIFFERENT '
-    + 'recipients and the conversion kept both rather than choosing who gets notified (#4923). Decide the '
+    + 'recipients and the conversion kept both rather than choosing who gets notified. Decide the '
     + 'recipients, put them on `recipients`, and delete `to`.',
   subject:
     'The heading slot is `title`. `subject` is the pre-17 spelling rewritten at load by '
     + '`flow-node-notify-config-aliases`; delete it once `title` carries the text. If `title` is also present with '
-    + 'DIFFERENT text, the conversion kept both rather than choosing (#4923) — reconcile them onto `title`.',
+    + 'DIFFERENT text, the conversion kept both rather than choosing — reconcile them onto `title`.',
   body:
     'The body slot is `message`. `body` is the pre-17 spelling rewritten at load by '
     + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. If `message` is also present '
-    + 'with DIFFERENT text, the conversion kept both rather than choosing (#4923) — reconcile them onto `message`. '
+    + 'with DIFFERENT text, the conversion kept both rather than choosing — reconcile them onto `message`. '
     + '(`body` IS canonical on an `http` node — the key is wrong only here.)',
   url:
     'The click-through slot is `actionUrl`. It was renamed at 17 because `url` elsewhere on the platform means '
     + '"HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app click target. '
     + '`flow-node-notify-config-aliases` rewrites it at load; delete it once `actionUrl` carries the link. If '
     + '`actionUrl` is also present with a DIFFERENT link, the conversion kept both rather than choosing where the '
-    + 'notification points (#4923) — reconcile them onto `actionUrl`.',
+    + 'notification points — reconcile them onto `actionUrl`.',
   source:
     'The click-through target is the flat PAIR `sourceObject` + `sourceId`, never a nested `source: { object, id }`. '
     + '`flow-node-notify-config-aliases` lifts the nested shape at load and drops it once every part is accounted '
     + 'for, so a surviving `source` means a part of it holds a DIFFERENT value from the flat `sourceObject` / '
-    + '`sourceId` already in that slot, and the conversion declined to pick (#4923) — reconcile onto the flat pair '
+    + '`sourceId` already in that slot, and the conversion declined to pick — reconcile onto the flat pair '
     + 'and delete `source`. '
     + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
     + 'dead link.',
