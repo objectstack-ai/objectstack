@@ -254,9 +254,11 @@ export const CEILINGS = new Map([
   // covered: post-roll placement/latency reading with the waker-bias re-draw
   // physics, one real user-path probe, the tourniquet rule for replayed live
   // state, orphaned-loop resumption, and the honesty clause. Set at landed line
-  // count (headroom 0, same convention as the entries above). Its pointer from
-  // landing-operations.md rides existing slack on that file's last
-  // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
+  // count (headroom 0, same convention as the entries above). It is pointed at
+  // from landing-operations.md, whose ceiling is the entry directly above and is
+  // deliberately not restated here: a live number copied into a neighbour's
+  // comment goes stale the next time that file moves — which is what happened to
+  // the arithmetic this sentence replaces.
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
   // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
