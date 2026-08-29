@@ -510,7 +510,7 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
    */
   customizationPolicies: retiredKey(
     '`config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
-    '(#13135, ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a ' +
+    '(ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a ' +
     'customization policy, and the overlay protocol it configured was itself unreachable from any ' +
     'served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization ' +
     "may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via " +
@@ -530,7 +530,7 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
    */
   mergeStrategy: retiredKey(
     '`config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
-    '(#13135, ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever ' +
+    '(ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever ' +
     'existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades ' +
     'rewrite the packaged base; customer choices live in the ledger and are never merged). ' +
     'Delete the key. There is no replacement — upgrade-vs-customization separation is the ' +

@@ -148,7 +148,7 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
     writable: z.boolean().default(true).describe('Allow base metadata writes via register()'),
     overlayWritable: retiredKey(
       '`persistence.overlayWritable` was removed from `MetadataManagerConfig` in ' +
-      '@objectstack/spec 17 (#13135, ADR-0049 enforce-or-remove) — the only thing it gated was ' +
+      '@objectstack/spec 17 (ADR-0049 enforce-or-remove) — the only thing it gated was ' +
       '`MetadataManager.saveOverlay()`, a paper-protocol method no route or UI ever called, ' +
       'removed with the metadata-customization protocol (ADR-0126 supersedes it on the record). ' +
       'Delete the key. The base write gate that remains is `persistence.writable`; the real ' +
