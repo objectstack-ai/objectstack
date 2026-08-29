@@ -378,6 +378,14 @@ export const SHAPES = [
  *   SCREAMING_SNAKE). And the subject file IS inside the scanned set — it is
  *   read and matches nothing, which is the whole defect.
  *
+ * ⚠️ And matching is not the same as seeing. Ablated while pinning this:
+ * widening `objlit` alone to admit a hyphen makes the literal MATCH and still
+ * reports nothing, because `objlit` carries `lowercase: 'casing-gate'` and that
+ * delegation hands the value to the gate whose grammar excludes the hyphen —
+ * back into the same seam, one layer deeper. So the boundary this declares, and
+ * the boundary `--self-test` pins, is the RECOGNIZER population, not the finding
+ * list: a pin watching findings sits green through that widening.
+ *
  * ## ⛔ What this declaration deliberately does NOT do
  *
  * ⛔ It does not widen any grammar to admit a hyphen. Widening would newly
@@ -2219,16 +2227,18 @@ function selfTest() {
       'constants repo-wide newly resolve into sites that then need declaration rows) and route it ' +
       'to the maintainer on its own card. Do not widen quietly, and do not adjust this pin to match.';
 
-    const seen = (source) => {
-      const { sites, unresolved } = deriveSites({
-        registered,
-        files: [{ rel: 'packages/x/src/a.ts', source }],
-        readFile: () => '',
-      });
-      return {
-        vocab: sites.length + unresolved.length,
-        casing: findViolations(source, 'packages/x/src/a.ts').length,
-      };
+    // The population question is whether any published RECOGNIZER MATCHES the
+    // value — not whether a run ends up REPORTING it. ⚠️ Measured, not assumed:
+    // widening `objlit` alone makes a kebab literal match and still reports
+    // nothing, because `objlit` carries `lowercase: 'casing-gate'` and that
+    // delegation hands the value to a gate whose grammar still excludes the
+    // hyphen — straight back into the same seam, one layer deeper. A pin that
+    // watched FINDINGS sat green through exactly that widening when this was
+    // ablated. So both sides are counted by MATCHES.
+    const matched = (source) => {
+      let n = 0;
+      for (const shape of SHAPES) n += [...source.matchAll(new RegExp(shape.re.source, shape.re.flags))].length;
+      return n + findViolations(source, 'packages/x/src/a.ts').length;
     };
 
     // ① The declared shape discriminates: it admits the sample and refuses the twin.
@@ -2244,16 +2254,16 @@ function selfTest() {
       classfield: `class E extends Error { readonly code = '%CODE%' as const; }`,
     };
     for (const [name, tmpl] of Object.entries(positions)) {
-      const kebab = seen(tmpl.replace('%CODE%', K.sample));
-      const twin = seen(tmpl.replace('%CODE%', K.twin));
+      const kebab = matched(tmpl.replace('%CODE%', K.sample));
+      const twin = matched(tmpl.replace('%CODE%', K.twin));
       ok(
-        kebab.vocab === 0 && kebab.casing === 0,
-        `a kebab diagnostic code in the '${name}' position is now visible to a gate — ${DECISION}`,
+        kebab === 0,
+        `a kebab diagnostic code in the '${name}' position is now MATCHED by a recognizer — ${DECISION}`,
       );
       ok(
-        twin.vocab + twin.casing > 0,
-        `the non-kebab twin in the '${name}' position is invisible too — the '${name}' probe measures ` +
-          'nothing, so the zero beside it is not a reading. Fix the probe before trusting either.',
+        twin > 0,
+        `the non-kebab twin in the '${name}' position matches nothing either — the '${name}' probe ` +
+          'measures nothing, so the zero beside it is not a reading. Fix the probe before trusting either.',
       );
     }
 
