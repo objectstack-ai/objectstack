@@ -2085,7 +2085,9 @@ describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', (
     await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
       .rejects.toThrow(/^READ_BACK_FAILED: /);
     const acts = await svc.listActions(req.id, SYS);
-    expect(acts.at(-1)).toMatchObject({ action: 'comment', actor_id: 'u9' }); // the comment landed
+    // `[length - 1]`, not `.at(-1)`: this package's test layer type-checks under
+    // lib ES2021 in the TEST_DEBT re-measure, where `.at` is a TS2550 (#5278).
+    expect(acts[acts.length - 1]).toMatchObject({ action: 'comment', actor_id: 'u9' }); // the comment landed
   });
 
   it('control: an org-less caller (trigger/system context shape) reads back fine — no narrowing, no refusal', async () => {
