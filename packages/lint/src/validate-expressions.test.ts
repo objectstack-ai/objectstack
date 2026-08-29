@@ -1205,7 +1205,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         const m = messageFor('visibleWhen');
         // it RESOLVES rather than faulting, and the mechanism is named
         expect(m).toMatch(/RESOLVES/);
-        expect(m).toMatch(/sectionFields\.ts/);
+        // Spelled without the `.ts` extension on purpose — see the note at the
+        // cell: a `<name>.ts` inside a message string registers `<name>` as a
+        // read receiver in #5017's scan, and it went red on the first run.
+        expect(m).toMatch(/`sectionFields` copies this object rule/);
+        expect(m).not.toMatch(/sectionFields\.ts/);
         expect(m).toMatch(/objectui#6010/);
         // …and the consequence is stated as the gap, not as a fail-open
         expect(m).toMatch(/SILENT enforcement gap/);

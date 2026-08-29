@@ -644,7 +644,12 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   visibleWhen:
     'the predicate no longer merely faults — and BOTH of its outcomes are wrong, in opposite ' +
     'directions. Under a host that publishes a predicate scope the renderer RESOLVES it ' +
-    '(`sectionFields.ts` copies this object rule onto the runtime form field and ' +
+    // `sectionFields` is spelled WITHOUT its `.ts` extension for the same
+    // reason the `*.form` spelling below is: this is a STRING literal, and
+    // #5017's receiver scan strips comments but not strings, so `sectionFields.ts`
+    // inside the message registers `sectionFields` as a read receiver of this
+    // rule. Measured — it went red on the first run, exactly as the sibling did.
+    '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
     '`resolveFieldRuleState` evaluates it with the host scope bound, objectui#6010) — so the ' +
     'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
     '`visibleWhen` at all: the record still carries the value and every other reader still ' +
