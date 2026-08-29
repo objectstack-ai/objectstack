@@ -7,9 +7,11 @@ export * from './filter.zod';
 // of #7956's divergence matrix), the walk `parseFilterAST` and the engine's
 // lowering seam enforce it with, and the sentence the SQL family's refusals
 // quote instead of hand-copying. Everything outside the set is refused with
-// the `INVALID_FILTER` / 400 envelope at the compile face, so the frozen
-// drivers (#5499) inherit one answer instead of crashing (memory × BigInt) or
-// letting the BSON encoder edit the query (mongo × undefined → match-all).
+// the `INVALID_FILTER` / 400 envelope at the compile face, so the two drivers
+// that carry no comparand-type policy of their own inherit one answer instead
+// of crashing (memory × BigInt) or letting the BSON encoder edit the query
+// (mongo × undefined → match-all). Why the rule lives at this face rather than
+// in each driver is argued in `./filter-comparand-type`.
 export * from './filter-comparand-type';
 // The comparand-SHAPE door (#5869, moved here by #9228) — the one
 // implementation of "a list operator takes a list" (`$in` / `$nin` need an

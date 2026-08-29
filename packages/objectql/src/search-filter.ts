@@ -30,8 +30,9 @@
  * `$icontains` (#6520 / #6682): both `driver-sql` compilers (and
  * `driver-sqlite-wasm` / turso-local by inheritance), turso's independent
  * `RemoteTransport`, service-analytics' read-scope and cube lowerings,
- * `formula`'s RLS matcher, objectql's own HAVING evaluator, and the frozen
- * `driver-memory` / `driver-mongodb` (#5499).
+ * `formula`'s RLS matcher, objectql's own HAVING evaluator, and
+ * `driver-memory` / `driver-mongodb` — which got it as a sanctioned one-off
+ * while they were under the #5499 investment freeze, lifted 2026-08-11.
  *
  * Pinyin recall (#2486): when the object carries the hidden `__search`
  * companion column (provisioned by the SchemaRegistry when

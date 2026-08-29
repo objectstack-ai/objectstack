@@ -4462,8 +4462,10 @@ export class ObjectQL implements IObjectQLEngine {
    * driver, NOT a pre-issue existence probe here: a probe costs a query on every
    * insert (the cost this resync was designed to avoid) and is still racy, so it
    * would trade a silent duplicate for a rarer silent duplicate at double the
-   * read cost. `packages/drivers/**` is under the #5499 investment freeze, so
-   * that work is not this change's to do.
+   * read cost. `packages/drivers/**` was under the #5499 investment freeze when
+   * this was written, so that work was not this change's to do; the freeze was
+   * lifted on 2026-08-11 and the remedy is still the driver's, still not done
+   * here.
    *
    * # And when it does not converge
    *
