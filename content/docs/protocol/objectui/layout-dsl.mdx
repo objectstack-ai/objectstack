@@ -521,34 +521,47 @@ tab points at a named list view. See
 
 ## Responsive Layout Modifiers
 
-### Device-Specific Visibility
+**Responsive behaviour is not a form-field or form-section key.** A form field's
+only conditional-visibility key is `visibleWhen` — a CEL predicate over the
+record, so it varies per *record*, never per *viewport* — and a section's
+`columns` is a single scalar (`1`–`4`). Both shapes are strict, so a breakpoint
+or orientation map written on either is a **loud parse error** naming the key,
+not a layout that quietly does nothing.
+
+### Per-Breakpoint Styling
+
+Breakpoint-driven show/hide and per-breakpoint layout live one tier up, on a
+**page component**, and are expressed as scoped CSS through `responsiveStyles`
+([ADR-0065](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0065-sdui-styling-model.md)) — desktop-first buckets compiled to id-scoped CSS at
+render:
 
 ```yaml
-fields:
-  - name: detailed_description
-    span: 12
-    visible:
-      desktop: true   # Show on desktop
-      tablet: true    # Show on tablet
-      mobile: false   # Hide on mobile
-  
-  - name: short_summary
-    span: 12
-    visible:
-      desktop: false  # Hide on desktop
-      tablet: false   # Hide on tablet
-      mobile: true    # Show on mobile
+# On a page component (*.page.ts) — NOT on a form field or a form section
+responsiveStyles:
+  large:  { gridColumn: 'span 6' }   # unconditional base (desktop-first)
+  medium: { gridColumn: 'span 12' }  # applied at ≤ medium
+  xsmall: { display: 'none' }        # hidden at the smallest breakpoint
 ```
 
-### Orientation-Specific Layout
+The four buckets are `large` / `medium` / `small` / `xsmall`; values are a
+CSS-property map with camelCase keys. Prefer design tokens
+(`var(--space-6)`) over literals.
 
-```yaml
-section:
-  columns:
-    portrait: 1   # 1 column in portrait mode
-    landscape: 2  # 2 columns in landscape mode
-  fields: [field_a, field_b, field_c]
-```
+<Callout type="warn">
+  Earlier revisions of this page documented a field-level `visible:` breakpoint
+  map (`desktop` / `tablet` / `mobile`) and a section-level `columns:`
+  orientation map (`portrait` / `landscape`). **Neither existed on any schema.**
+  `visible` is not a form-field key at all — `FormFieldSchema` declares `hidden`
+  (static, and **inverted**: `visible: false` is `hidden: true`) and
+  `visibleWhen` (CEL predicate) — and `FormSection.columns` has always been a
+  scalar. Both are **removed rather than implemented**, because field-level
+  breakpoint visibility exists nowhere in the spec: there is no key to rename
+  them onto.
+
+  Nor is `responsive.hiddenOn` the answer. That layout block was retired in
+  v17.x under [ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md) D2 precisely because no renderer ever applied it;
+  `responsiveStyles` above is the only per-breakpoint channel that is.
+</Callout>
 
 ## Related Lists: Embedding Child Records
 
