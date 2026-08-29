@@ -47,10 +47,13 @@
  * ⛔ `@objectstack/formula` reads the same `undefined` as a THIRD semantics —
  * "the key is absent from the record" — which is a meaningful distinction and
  * the open question in #5299. It is deliberately untouched; changing it here
- * would settle #5299 as a side effect. ⛔ `driver-memory` / `driver-mongodb`
- * remain pin-only under the #5499 freeze, so this compiler and `driver-memory`
- * now answer this cell differently on purpose (a debt owed at thaw, recorded in
- * #6125). The envelope is this module's existing one, NOT #6050's
+ * would settle #5299 as a side effect. ⚠️ `driver-memory` / `driver-mongodb`
+ * were pin-only under the #5499 freeze, so this compiler and `driver-memory`
+ * answer this cell differently on purpose — a debt #6125 recorded as owed AT
+ * THAW. The thaw has arrived: the freeze dissolved 2026-08-11 (head note of
+ * `@objectstack/spec`'s `aggregation-conformance.ts`), so that debt is now DUE
+ * rather than deferred, and nothing has been triaged against it yet.
+ * The envelope is this module's existing one, NOT #6050's
  * `INVALID_FILTER` / 400: a read scope is compiled by the platform from CEL and
  * stored metadata, so a 400 would bill the caller for something they neither
  * wrote nor can change.

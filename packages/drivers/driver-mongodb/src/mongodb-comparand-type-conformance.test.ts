@@ -17,7 +17,10 @@
  * ## The worst cell, and what "inherits via the shared path" means here
  *
  * This driver has NO comparand-type policy of its own, and the ruling keeps it
- * that way (#5499 freeze — nothing here patches the driver). Measured on the
+ * that way. Nothing here patches the driver: that was the #5499 investment
+ * freeze's call when this suite was written, and the freeze dissolved
+ * 2026-08-11 (head note of `@objectstack/spec`'s `aggregation-conformance.ts`),
+ * so patching is now unclaimed rather than forbidden. Measured on the
  * wire: `{qty: undefined}` BSON-encodes to `{}` — a predicate the author wrote
  * to CONSTRAIN reaching the server as MATCH EVERYTHING, the one divergence
  * cell that returned MORE data rather than less. The door
@@ -168,8 +171,11 @@ describe('[#7872] driver-mongodb — comparand-type conformance (server-free, be
   /**
    * The reverse direction, pinned at the exact step #7956 measured it: WITHOUT
    * the door, the implicit-equality `undefined` still reaches the wire as `{}`
-   * — match everything. This driver stays frozen (#5499), so the silent edit
-   * is expected to persist on the direct path; the door is what stands in
+   * — match everything. The silent edit is expected to persist on the direct
+   * path: that was policy under the #5499 investment freeze, and the freeze
+   * dissolved 2026-08-11 (head note of `@objectstack/spec`'s
+   * `aggregation-conformance.ts`), so it is now an UNTRIAGED divergence rather
+   * than a frozen one — no card owns it. Either way the door is what stands in
    * front of it, and the refusal case above is the cell's platform answer. If
    * the mongodb package ever stops dropping undefined-valued keys, this pin
    * fails loudly and should be retired with its sentence in the suite header.

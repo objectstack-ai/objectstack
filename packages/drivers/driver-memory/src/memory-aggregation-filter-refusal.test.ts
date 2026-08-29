@@ -12,7 +12,10 @@
  * engine itself never pushes a filtered aggregation down (it lowers in
  * memory); the refusal exists for direct callers. Evaluating the predicate
  * here instead would be a capability build-out, which the #5499 family freeze
- * rules out — the refusal path is the sanctioned scope.
+ * ruled out while it stood; that freeze dissolved 2026-08-11 (head note of
+ * `@objectstack/spec`'s `aggregation-conformance.ts`), so the build-out is now
+ * unclaimed rather than forbidden and the refusal path remains this file's
+ * scope until someone claims it.
  *
  * Every case asserts `code` AND `status`, never merely "it threw" (#6144).
  */
