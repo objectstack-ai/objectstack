@@ -28,7 +28,7 @@ import {
 } from '@objectstack/cloud-connection';
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
-import { translatePage } from '@objectstack/spec/system';
+import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract';
 
 /** The pages exactly as the plugins register them with the kernel. */
@@ -136,5 +136,303 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
       // module-level singleton the kernel registers once.
       expect({ page: page.name, header: headerOf(page) }).toEqual({ page: page.name, header: before });
     }
+  });
+});
+
+// ─── Extractor ↔ resolver WALK parity (#13109) ─────────────────────────────
+//
+// The guard above compares extractor output against the SHIPPED bundle, so it
+// only ever sees keys the extractor already emits — it is structurally blind
+// to "a key that should have been offered and wasn't", which is exactly the
+// defect #13109 records. This block is the differential the shared
+// `PAGE_COMPONENT_COPY_KEYS` list cannot give: the KEY LIST has one definition
+// and both sides import it, but the WALK — which COMPONENTS carry those keys —
+// is written twice, once in `translatePage` (`packages/spec`) and once in
+// `collectExpectedEntries`. `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names the
+// failure pair a second hand-maintained copy produces: offering a key the
+// resolver ignores, or omitting one it reads. These tests fail on BOTH halves.
+//
+// The instrument is deliberately not a restatement of either walk: it runs the
+// real `translatePage` against a sentinel bundle and asks which components it
+// ACTUALLY rewrote, then compares that set against the ids the real extractor
+// ACTUALLY offered. A copy of the traversal in the test would drift with
+// whichever side it was copied from and pass through the drift it exists to
+// catch.
+//
+// ⚠️ `MAX_NESTED_COMPONENT_DEPTH` is deliberately NOT exported by
+// `packages/spec`, so the extractor mirrors the number rather than importing
+// it. The deep-chain case below is what keeps the mirror honest: it walks
+// deeper than the cap and asserts the two sides agree about where the descent
+// stops, so raising the cap on one side alone reds here.
+
+/** Every component record reachable anywhere in a page document, by id. */
+const titlesById = (node: unknown, out = new Map<string, string>()): Map<string, string> => {
+  if (Array.isArray(node)) {
+    for (const item of node) titlesById(item, out);
+    return out;
+  }
+  if (!node || typeof node !== 'object') return out;
+  const rec = node as Record<string, any>;
+  const props = rec.properties;
+  if (
+    typeof rec.id === 'string' && rec.id.length > 0 &&
+    props && typeof props === 'object' && typeof props.title === 'string'
+  ) {
+    out.set(rec.id, props.title);
+  }
+  for (const value of Object.values(rec)) titlesById(value, out);
+  return out;
+};
+
+/** The sentinel a bundle entry carries, so an applied overlay is unmistakable. */
+const sentinel = (id: string): string => `SENTINEL::${id}`;
+
+/**
+ * Ids `translatePage` ACTUALLY rewrote — measured, not restated: a bundle that
+ * offers `pages.PAGE.components.ID.title` for EVERY id in the document, then a
+ * walk of the result for the ones that came back carrying the sentinel.
+ */
+const idsResolverApplies = (page: Record<string, any>): Set<string> => {
+  const ids = [...titlesById(page).keys()];
+  const bundle = {
+    en: {
+      pages: {
+        [page.name]: {
+          components: Object.fromEntries(ids.map((id) => [id, { title: sentinel(id) }])),
+        },
+      },
+    },
+  } as any;
+  const translated = titlesById(translatePage(page as any, bundle, { locale: 'en' }));
+  return new Set(ids.filter((id) => translated.get(id) === sentinel(id)));
+};
+
+/** Ids the extractor offers a `components.ID.title` key for. */
+const idsExtractorOffers = (page: Record<string, any>): Set<string> =>
+  new Set(
+    collectExpectedEntries({ pages: [page] } as any)
+      .filter((e) =>
+        e.path[0] === 'pages' && e.path[1] === page.name &&
+        e.path[2] === 'components' && e.path[4] === 'title')
+      .map((e) => e.path[3]),
+  );
+
+/** Entries the extractor offers under `pages.PAGE.components`, as flat rows. */
+const componentRows = (page: Record<string, any>): Array<{ key: string; value?: string }> =>
+  collectExpectedEntries({ pages: [page] } as any)
+    .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name && e.path[2] === 'components')
+    .map((e) => ({ key: e.path.slice(3).join('.'), value: e.sourceValue }));
+
+/**
+ * One page carrying every nesting shape that exists on this surface — the ones
+ * `translatePage` descends and the ones it deliberately does not. Built fresh
+ * per call because `translatePage` returns a new document and the fixtures are
+ * compared against their own source.
+ */
+const walkParityPage = (): Record<string, any> => ({
+  name: 'walk_parity_page',
+  regions: [
+    {
+      name: 'top',
+      components: [
+        // Region-level `page:header` WITH an id — see the exception below.
+        { id: 'hdr', type: 'page:header', properties: { title: 'Header title' } },
+      ],
+    },
+    {
+      name: 'main',
+      components: [
+        { id: 'region_metric', type: 'object-metric', properties: { title: 'Region metric' } },
+        {
+          id: 'card',
+          type: 'page:card',
+          properties: {
+            title: 'Card',
+            // DESCENDED — the one composition key the ruling names.
+            children: [
+              { id: 'kpi_1', type: 'object-metric', properties: { title: 'KPI one' } },
+              // `label` authored at top level rather than in props.
+              { id: 'kpi_label', type: 'object-metric', label: 'KPI two', properties: { title: 'KPI two title' } },
+              {
+                id: 'inner_flex',
+                type: 'page:flex',
+                properties: {
+                  title: 'Inner flex',
+                  children: [
+                    { id: 'kpi_deep', type: 'object-metric', properties: { title: 'Deep KPI' } },
+                    // A nested `page:header` is reachable by the id route ONLY
+                    // (the page-name route addresses THE page's header and
+                    // stops at region level), so it must be offered here.
+                    { id: 'nested_header', type: 'page:header', properties: { title: 'Nested header' } },
+                  ],
+                },
+              },
+              // `children` is `z.array(z.unknown())` — non-components are legal.
+              'bare-component-id-string',
+              null,
+            ],
+            // NOT descended by `translatePage`: `body`/`footer` are a
+            // renderer-side back-compat fallback, and `items[].children` sits
+            // one level deeper than the slot the ruling names.
+            body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
+            footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
+            items: [{ children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
+          },
+        },
+      ],
+    },
+  ],
+  // NOT walked by `translatePage` at all — it maps `regions` only.
+  slots: { aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } } },
+});
+
+/** A container chain deeper than the resolver's descent cap. */
+const deepChainPage = (length: number): Record<string, any> => {
+  const node = (depth: number): Record<string, any> => ({
+    id: `d${depth}`,
+    type: 'page:flex',
+    properties: {
+      title: `Depth ${depth}`,
+      ...(depth + 1 < length ? { children: [node(depth + 1)] } : {}),
+    },
+  });
+  return { name: 'walk_depth_page', regions: [{ name: 'main', components: [node(0)] }] };
+};
+
+/** Ids repeated across levels, so the ruled arbitration is observable. */
+const collisionPage = (): Record<string, any> => ({
+  name: 'walk_collision_page',
+  regions: [
+    {
+      name: 'main',
+      components: [
+        { id: 'shared', type: 'object-metric', properties: { title: 'Region level wins' } },
+        { id: 'hdr_id', type: 'page:header', properties: { title: 'Header holds this id' } },
+        {
+          id: 'wrap',
+          type: 'page:card',
+          properties: {
+            title: 'Wrap',
+            children: [
+              { id: 'shared', type: 'object-metric', properties: { title: 'Nested namesake loses' } },
+              { id: 'hdr_id', type: 'object-metric', properties: { title: 'Nested under a header id loses' } },
+              { id: 'twice', type: 'object-metric', properties: { title: 'First nested wins' } },
+              { id: 'twice', type: 'object-metric', properties: { title: 'Second nested loses' } },
+            ],
+          },
+        },
+      ],
+    },
+  ],
+});
+
+describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
+  it('offers a per-component key for exactly the components the resolver rewrites', () => {
+    const page = walkParityPage();
+    const offered = idsExtractorOffers(page);
+    const applied = idsResolverApplies(page);
+
+    // Both directions, named separately so a failure says WHICH half broke.
+    expect({ offeredButIgnored: [...offered].filter((id) => !applied.has(id)).sort() })
+      .toEqual({ offeredButIgnored: [] });
+    // The ONE standing exception, pre-dating this card and deliberate: a
+    // region-level `page:header`'s copy is offered under `pages.PAGE.title` /
+    // `.subtitle` instead, because emitting it here too would offer one string
+    // under two keys. The resolver still honours the id route for it, so it
+    // shows up as applied-not-offered — listed explicitly rather than filtered
+    // out of the fixture, so the exception stays visible and bounded to one id.
+    expect({ appliedButNotOffered: [...applied].filter((id) => !offered.has(id)).sort() })
+      .toEqual({ appliedButNotOffered: ['hdr'] });
+  });
+
+  it('pins the two sets by name, so a shape that stops being reachable is visible', () => {
+    const page = walkParityPage();
+    expect([...idsExtractorOffers(page)].sort()).toEqual([
+      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+    ]);
+    // `card_body_child`, `card_footer_child`, `tab_child` and `slot_child` are
+    // absent from BOTH sides — the shapes `translatePage` does not descend.
+    expect([...idsResolverApplies(page)].sort()).toEqual([
+      'card', 'hdr', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+    ]);
+  });
+
+  it('carries the whole shared key list down into nesting, label either/or included', () => {
+    const rows = componentRows(walkParityPage());
+    // `label` authored at the component's top level, the same either/or
+    // `translatePage` resolves back onto.
+    expect(rows).toContainEqual({ key: 'kpi_label.label', value: 'KPI two' });
+    expect(rows).toContainEqual({ key: 'kpi_deep.title', value: 'Deep KPI' });
+    // Every offered key belongs to the shared list — the extractor must not
+    // invent a key the resolver has no reader for.
+    const keys = new Set(rows.map((r) => r.key.split('.').slice(1).join('.')));
+    expect([...keys].filter((k) => !(PAGE_COMPONENT_COPY_KEYS as readonly string[]).includes(k)))
+      .toEqual([]);
+  });
+
+  it('stops descending where the resolver stops, on a chain deeper than the cap', () => {
+    const page = deepChainPage(40);
+    const offered = idsExtractorOffers(page);
+    const applied = idsResolverApplies(page);
+    expect([...offered].sort()).toEqual([...applied].sort());
+    // Stated as a number so the mirrored cap is visible in the failure text;
+    // the set comparison above is what actually holds the two sides together.
+    const deepest = Math.max(...[...applied].map((id) => Number(id.slice(1))));
+    expect({ deepest, offeredCount: offered.size }).toEqual({ deepest: 32, offeredCount: 33 });
+  });
+
+  it('resolves a repeated id to one component, the same one the resolver picks', () => {
+    const page = collisionPage();
+    const rows = componentRows(page);
+
+    // One bundle entry, one component: no id may be offered twice.
+    const keys = rows.map((r) => r.key);
+    expect(keys.length).toEqual(new Set(keys).size);
+
+    // Region level wins outright over a nested namesake.
+    expect(rows.filter((r) => r.key === 'shared.title'))
+      .toEqual([{ key: 'shared.title', value: 'Region level wins' }]);
+    // Among nested components, document order decides.
+    expect(rows.filter((r) => r.key === 'twice.title'))
+      .toEqual([{ key: 'twice.title', value: 'First nested wins' }]);
+    // A region-level `page:header` emits nothing here, but its id still BLOCKS
+    // a nested namesake — the resolver counts it as region-level, so offering
+    // the nested one would be a key the resolver ignores.
+    expect(rows.filter((r) => r.key.startsWith('hdr_id.'))).toEqual([]);
+
+    // And the resolver agrees about which component the entry lands on.
+    const bundle = {
+      en: {
+        pages: {
+          walk_collision_page: {
+            components: {
+              shared: { title: 'S' }, twice: { title: 'T' }, hdr_id: { title: 'H' },
+            },
+          },
+        },
+      },
+    } as any;
+    const translated = translatePage(page as any, bundle, { locale: 'en' });
+    const region = translated.regions[0].components;
+    expect(region[0].properties.title).toEqual('S');
+    expect(region[1].properties.title).toEqual('H');
+    const nested = region[2].properties.children;
+    expect(nested.map((c: any) => c.properties.title)).toEqual([
+      'Nested namesake loses',
+      'Nested under a header id loses',
+      'T',
+      'Second nested loses',
+    ]);
+  });
+
+  it('leaves a component that carries no descent slot untouched', () => {
+    // A container whose `children` is absent must not gain an invented
+    // `properties` bag, and a cyclic document must not hang the extractor.
+    const cyclic: Record<string, any> = {
+      id: 'loop', type: 'page:flex', properties: { title: 'Loop', children: [] as unknown[] },
+    };
+    cyclic.properties.children.push(cyclic);
+    const page = { name: 'walk_cycle_page', regions: [{ name: 'main', components: [cyclic] }] };
+    expect(componentRows(page)).toEqual([{ key: 'loop.title', value: 'Loop' }]);
   });
 });
