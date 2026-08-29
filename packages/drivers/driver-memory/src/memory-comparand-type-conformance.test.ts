@@ -7,10 +7,14 @@
  * This is the driver the card was filed over: `{qty: {$eq: BigInt(100)}}`
  * escaped as a raw mingo `TypeError` out of `Query.compile` (mingo builds its
  * cache key with `JSON.stringify`, which refuses a BigInt), and five other
- * unsupported comparand types answered silent zero rows — on both faces. The
- * driver is under the #5499 investment freeze, so NOTHING here patches it: the
- * door (`parseFilterAST`, `@objectstack/spec/data`) refuses or narrows every
- * comparand BEFORE the driver runs, and this suite proves the inheritance —
+ * unsupported comparand types answered silent zero rows — on both faces.
+ * NOTHING here patches the driver — that was the #5499 investment freeze's
+ * call when this suite was written, and the freeze dissolved 2026-08-11 (head
+ * note of `@objectstack/spec`'s `aggregation-conformance.ts`), so patching is
+ * now unclaimed rather than forbidden. The suite's scope is unchanged either
+ * way, because what it actually asserts is the door: `parseFilterAST`
+ * (`@objectstack/spec/data`) refuses or narrows every comparand BEFORE the
+ * driver runs, and this suite proves the inheritance —
  * door-validated input executes correctly (the bigint arrives as its exact
  * number, so mingo never sees one), door-refused input never reaches mingo at
  * all.

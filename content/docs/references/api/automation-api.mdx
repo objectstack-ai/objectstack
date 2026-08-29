@@ -583,7 +583,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ success: boolean; output?: any; error?: string; durationMs?: number }` | ✅ |  |
+| **data** | `{ success: boolean; output?: any; error?: string; durationMs?: number; … }` | ✅ |  |
 
 ### Nested Shape: `TriggerFlowResponse.error`
 
@@ -606,6 +606,13 @@ const result = AutomationApiErrorCode.parse(data);
 | **output** | `any` | optional | Output data from the automation |
 | **error** | `string` | optional | Error message if execution failed |
 | **durationMs** | `number` | optional | Execution duration in milliseconds |
+| **code** | `Enum<'PERMISSION_DENIED' \| 'INVALID_SIGNAL' \| 'RUN_NOT_FOUND' \| 'STORE_UNAVAILABLE' \| …>` | optional | Machine-readable failure classification, set alongside `error` when the caller must distinguish WHY it failed. A closed union - the members and their transport mappings are documented on the contract (`AutomationResult.code`, contracts/automation-service.ts). |
+| **status** | `Enum<'completed' \| 'paused' \| 'failed'>` | optional | Lifecycle status. `paused` means the run suspended at a node and can be continued with the resume route. Absent or `completed`/`failed` means the run reached a terminal state. |
+| **runId** | `string` | optional | Run id - set when `status` is `paused`, so callers can resume it |
+| **screen** | `{ nodeId: string; title?: string; description?: string; fields: object[]; … }` | optional | The screen to render - set when the run paused at a `screen` node awaiting user input. The client collects values for `screen.fields` and resumes the run with them. |
+| **successMessage** | `string` | optional | Friendly terminal message copied from the flow definition on terminal success, so a screen-flow runner can show a meaningful toast |
+| **errorMessage** | `string` | optional | Friendly terminal message copied from the flow definition on failure |
+| **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | What the run did - records selected / acted on, gate skips, per-node status. Set on a TERMINAL result (a paused run has not finished doing it yet). |
 
 
 ---

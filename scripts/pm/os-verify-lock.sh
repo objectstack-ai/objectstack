@@ -921,6 +921,424 @@ ledger_append() {
   return 0
 }
 
+# --- the boot marker --------------------------------------------------------
+#
+# WHY A SECOND FILE, WHEN THERE IS ALREADY A LEDGER.
+#
+# The ledger's population begins where the ledger FILE begins, and WHY it
+# begins there is uncharacterised: on this fleet the file, and every record in
+# it, has been measured PREDATING the boot `/proc/uptime` reports -- twice, on
+# two boxes, each reading carrying both of its controls. Two same-direction
+# readings disqualify a mechanism; they do not establish its negation, so
+# nothing in this file claims one, and the slots block and `--report`'s scope
+# block both state the floor as what it provably is and leave the reason
+# unasserted. THAT WORDING IS CORRECT AND THIS BLOCK DOES NOT TOUCH IT.
+#
+# What this block adds is the only thing that could ever retire it: a
+# measurement that accumulates as a SIDE EFFECT of the fleet running normally.
+# Maintainer ruling, 2026-08-29: a piggyback passive marker, no dedicated
+# multi-container restart campaign. The form is the point -- the measurement
+# happens because of what gets typed, not because someone remembers to run it.
+#
+# ⛔ IT IS DELIBERATELY NOT PART OF THE LEDGER, for two independent reasons:
+#
+#   1. `LEDGER_MAX_BYTES` GATES THE LEDGER'S APPENDS. Note the shape: past the
+#      bound `ledger_append` returns early -- it does not trim, roll or rotate,
+#      so nothing is truncated and NEW records simply stop being written. A boot
+#      record living there would stop being written at exactly the point the
+#      population became long enough to be worth reading.
+#   2. `--report` parses the ledger as one record per RUN. This is one record
+#      per distinct BOOT, which is a different population; interleaving them
+#      would put a row in every outcome census that is not a run.
+#
+# ⭐ WHERE IT LIVES, AND WHY THAT LOCATION IS THE MEASUREMENT. The marker sits
+# beside the lock, in the same directory as the ledger it is about -- so it is
+# ITSELF subject to whatever happens to that directory across a reset. That is
+# the point and not an oversight: a marker written somewhere known-durable
+# would measure nothing at all. It must be somewhere (a) no size bound of this
+# file's can stop it being written, (b) normal operation writes without anyone
+# remembering, and (c) exposed to the phenomenon under study.
+#
+# ⭐ WHAT ONE RECORD CARRIES, AND WHY EVERY FIELD IS THERE. A reading without
+# its controls is not a reading -- the two existing observations each carried
+# both, in one command, and this file's records carry the same two plus the
+# identity fields that let readings from different boxes be told apart:
+#
+#   bootid=      the kernel's own boot identity (`/proc/sys/kernel/random/boot_id`,
+#                truncated). This is the KEY: it is exact, needs no clock
+#                arithmetic and no tolerance. Where it is unavailable the key
+#                falls back to the derived boot with a tolerance, and the field
+#                records `-` so a reader knows which key was used.
+#   boot= up=    the derived boot (now minus `/proc/uptime`) and the uptime it
+#                came from -- the same quantity both existing readings used.
+#   btime=       NEGATIVE CONTROL, half one. The kernel's own record of when it
+#                booted (`/proc/stat`). If this and `boot=` disagree by more
+#                than rounding, the wall clock moved and the reading is suspect.
+#   pid1after=   NEGATIVE CONTROL, half two. Seconds between the derived boot
+#                and PID 1's start. A small positive number says the PROCESS
+#                TREE restarted with the clock -- so a marker file older than
+#                the boot means the FILESYSTEM did not restart with them, not
+#                that the clock is wrong. Both existing readings recorded
+#                0.27-0.32s here. ⚠ It can come out slightly NEGATIVE: the
+#                derived boot is a whole-second subtraction against a
+#                centisecond uptime, so it and `btime` can disagree by a
+#                second, and a PID 1 that started 0.46s in then reads -0.54.
+#                That is rounding, not disagreement -- what the control says
+#                is that the number is SMALL, in either direction.
+#   pos=         POSITIVE CONTROL. A file written at this instant, read back
+#                through the same `stat` and compared against the same derived
+#                boot, must read `after`. If it ever reads `before`, the
+#                comparison is not live and every `markerpre=` in this file is
+#                worthless. This is the field that makes a `yes` a reading.
+#   prev=        THE EVIDENCE ITSELF, and the strongest field here because it
+#                is pure CONTENT rather than a filesystem timestamp: the boot
+#                identity recorded on the previous line of this same file. If
+#                it names a DIFFERENT boot, this file was present before that
+#                restart and is being appended to after it -- the marker
+#                outlived the restart, with no clock comparison involved.
+#   markerbirth= markerpre=   this file's own birth (`stat %W`) and whether it
+#                predates the derived boot -- the timestamp-based corroboration
+#                of `prev=`, and the row the two existing readings printed.
+#                ⚠ Both read `-` on a container's FIRST record, and correctly:
+#                the marker is created by that very append, so at the moment of
+#                measurement there was no marker to date. It says the same
+#                thing `prev=-` says.
+#   ledgerbirth= ledgerpre=   the same two for the LEDGER, which is a second
+#                marker with an independent lifetime, and the exact row those
+#                two readings were filed over.
+#   fs=          the filesystem type under the marker. Recorded, not reasoned
+#                from: it is an input to a future conclusion, never a
+#                substitute for one.
+#   machine=     a truncated `/etc/machine-id`, so readings carried off two
+#                boxes can be told apart -- and so a FRESH marker on a box that
+#                previously reported one is distinguishable from a first run on
+#                a new box. See the limits block in `--report`: that
+#                distinction cannot be made on-box, because a wipe takes the
+#                history with it.
+#
+# ⛔ WHAT IT COSTS, WHICH IS THE CONSTRAINT IT WAS BUILT UNDER. This runs on
+# EVERY invocation of this script, in every agent container. #12783's triage
+# fenced ledger persistence under two constraints -- this file must create
+# nothing that outlives a process and needs REAPING, and it must never redden a
+# gate -- and both bind here:
+#
+#   - The common path FORKS NOTHING on bash 5.0+, which is what the fleet runs.
+#     It reads `/proc/uptime` and the boot id with the `read` builtin, reads
+#     this file with ONE builtin read, compares, and returns; nothing is
+#     written, because on all but the first run of a boot there is nothing to
+#     record. Below 5.0 it costs exactly one command substitution -- the
+#     `now_s` fallback in `boot_derive`, and that is the only one there is.
+#     Measured on this fleet, A/B against the same file without it, worst case
+#     (`--show-budget`, which does nothing else): +1.2 to 1.5 ms per
+#     invocation, of which ~1.1 ms is bash PARSING the added source and
+#     ~0.2-0.8 ms is the mechanism. Against a run that holds this lock for tens
+#     to hundreds of seconds that is under one part in a hundred thousand.
+#   - A record is appended ONCE PER BOOT, not once per run, so the file grows
+#     by one line per restart and is bounded besides.
+#   - NOTHING HERE NEEDS REAPING. Two fixed paths, exactly as `.holder` and
+#     `.ledger` already are: the marker is append-only and bounded, the probe
+#     is overwritten in place and never grows. Neither accumulates a file per
+#     process, which is what that fence was against.
+#   - EVERY WRITE IS BEST-EFFORT and every failure is swallowed, exactly as the
+#     ledger's are. An unwritable path loses records; it does not lose runs.
+#     A measurement apparatus that can redden a gate has become part of the
+#     thing it measures.
+#
+# ⚠️ CONCURRENCY. Several agents in one container invoke this concurrently.
+# Appends are a single short `printf` to an O_APPEND fd, well under PIPE_BUF,
+# which is atomic on Linux -- the same argument the ledger's format rests on,
+# so records interleave and never tear. The read-then-append sequence is NOT
+# atomic and deliberately takes no lock (a lock round-trip here would cost more
+# than the measurement): two runs that both notice the same new boot can each
+# append a record for it. That is benign and is stated rather than prevented --
+# `--report` groups by boot identity, so a duplicated boot reads as one boot,
+# and a duplicate carries its own controls anyway.
+# `OS_VERIFY_LOCK_BOOTS` exists for exactly the reason `OS_VERIFY_LOCK_LEDGER`
+# does: so --self-test can drive the recording -- including the paths where it
+# CANNOT write -- without putting fixtures into the fleet's real measurement
+# record. Pointing real verification at a private marker just makes its boots
+# invisible to `--report`; don't.
+BOOTS_FILE="${OS_VERIFY_LOCK_BOOTS:-${LOCK_FILE}.boots}"
+BOOTS_PROBE="${BOOTS_FILE}.probe"
+
+# Past this the marker stops recording, same doctrine and same honesty as
+# LEDGER_MAX_BYTES: a record is ~230 bytes, so this is several hundred boots,
+# and `--report` says so rather than presenting a stopped file as a whole
+# history.
+readonly BOOTS_MAX_BYTES=65536
+
+# Only used on a host with no boot id, where the key is the derived boot and
+# that number jitters by a second or so between runs (whole-second `now_s`
+# against a centisecond uptime). Generous, because boots are hours apart and a
+# false "new boot" costs a spurious record while a missed one costs a reading.
+readonly BOOT_SAME_TOLERANCE_S=120
+
+BOOT_DERIVED=''
+BOOT_UPTIME=''
+BOOT_ID=''
+BOOTS_LAST_ID=''
+BOOTS_LAST_BOOT=''
+
+# ⭐ THE INSTRUMENT, factored out so the self-test can drive BOTH of its answers
+# with injected numbers. Every `pre` verdict in the marker file is this
+# function; a `yes` that could not have been a `no` is not a reading, and the
+# only way to show `no` was reachable is to reach it.
+ts_vs_boot() {
+  local ts="$1" boot="$2"
+  case "$ts" in '' | *[!0-9]*) printf '%s' '-'; return 0 ;; esac
+  case "$boot" in '' | *[!0-9]*) printf '%s' '-'; return 0 ;; esac
+  # A birth time of 0 is `stat`'s way of saying this filesystem does not record
+  # one. Read as an instant it is 1970, which would answer `before` on every
+  # host that cannot answer at all -- the single most dangerous wrong answer
+  # this function could give, because it is the one the card is about.
+  ((ts == 0)) && { printf '%s' '-'; return 0; }
+  ((ts >= boot)) && { printf 'after'; return 0; }
+  printf 'before'
+  return 0
+}
+
+# Does a file stamped `ts` PREDATE the boot -- the one sentence this whole
+# mechanism accumulates. The inversion is its own function rather than folded
+# into `ts_vs_boot`, so the instrument keeps one meaning and this verdict can
+# be driven to all three of its answers by the self-test without needing a
+# filesystem that does or does not record birth times.
+pre_verdict() {
+  case "$(ts_vs_boot "$1" "$2")" in
+    before) printf 'yes' ;;
+    after) printf 'no' ;;
+    *) printf '%s' '-' ;;
+  esac
+  return 0
+}
+
+# Derived boot and boot identity for THIS moment. Returns 1 -- and the whole
+# mechanism then does nothing at all, no file, no probe, no cost -- on any host
+# without `/proc/uptime`, which is the macOS hosts this file's bash-3.2 floor
+# exists for.
+boot_derive() {
+  local up rest nowts raw
+  BOOT_DERIVED=''
+  BOOT_UPTIME=''
+  BOOT_ID=''
+  [[ -r /proc/uptime ]] || return 1
+  read -r up rest < /proc/uptime 2> /dev/null || return 1
+  up="${up%%.*}"
+  case "$up" in '' | *[!0-9]*) return 1 ;; esac
+  # ⭐ The guarded `EPOCHSECONDS` read is `now_s`'s own spelling, repeated here
+  # rather than called, and the reason is the cost budget: a call would be
+  # `$(now_s)`, and a command substitution FORKS even for a shell function.
+  # This is the common path, taken by every invocation of this script, and the
+  # claim above -- that it forks nothing -- has to be true rather than nearly
+  # true. `now_s` remains the fallback, so a host below the 5.0 floor still
+  # gets an answer, at one fork.
+  nowts="${EPOCHSECONDS:-}"
+  case "$nowts" in
+    '' | *[!0-9]*) nowts="$(now_s 2> /dev/null)" || return 1 ;;
+  esac
+  case "$nowts" in '' | *[!0-9]*) return 1 ;; esac
+  ((nowts >= up)) || return 1
+  BOOT_DERIVED=$((nowts - up))
+  BOOT_UPTIME="$up"
+  if [[ -r /proc/sys/kernel/random/boot_id ]]; then
+    read -r raw < /proc/sys/kernel/random/boot_id 2> /dev/null || raw=''
+    raw="${raw//-/}"
+    case "$raw" in
+      '' | *[!0-9a-fA-F]*) ;;
+      *) BOOT_ID="${raw:0:12}" ;;
+    esac
+  fi
+  return 0
+}
+
+# The identity on the LAST line of the marker file. One builtin read of the
+# whole file rather than a `tail`: this is the common path and it must not
+# fork. Returns 1 when there is no usable last line.
+boots_last() {
+  local all last tok
+  BOOTS_LAST_ID=''
+  BOOTS_LAST_BOOT=''
+  [[ -f "$BOOTS_FILE" ]] || return 1
+  IFS= read -r -d '' all < "$BOOTS_FILE" 2> /dev/null
+  [[ -n "$all" ]] || return 1
+  all="${all%$'\n'}"
+  last="${all##*$'\n'}"
+  [[ -n "$last" ]] || return 1
+  for tok in $last; do
+    case "$tok" in
+      bootid=*)
+        case "${tok#bootid=}" in '-' | '') ;; *) BOOTS_LAST_ID="${tok#bootid=}" ;; esac
+        ;;
+      boot=*)
+        case "${tok#boot=}" in '' | *[!0-9]*) ;; *) BOOTS_LAST_BOOT="${tok#boot=}" ;; esac
+        ;;
+    esac
+  done
+  [[ -n "$BOOTS_LAST_ID" || -n "$BOOTS_LAST_BOOT" ]] || return 1
+  return 0
+}
+
+# Is the boot we are in DIFFERENT from the one the last record names? Exact on
+# a host with a boot id, tolerance-based on one without -- and the two are
+# never mixed: a record written with an id is only ever compared by id.
+boot_is_new() {
+  local d
+  if [[ -n "$BOOT_ID" && -n "$BOOTS_LAST_ID" ]]; then
+    [[ "$BOOT_ID" == "$BOOTS_LAST_ID" ]] && return 1
+    return 0
+  fi
+  case "$BOOTS_LAST_BOOT" in '' | *[!0-9]*) return 0 ;; esac
+  d=$((BOOT_DERIVED - BOOTS_LAST_BOOT))
+  ((d < 0)) && d=$((0 - d))
+  ((d <= BOOT_SAME_TOLERANCE_S)) && return 1
+  return 0
+}
+
+# `stat -c` is GNU, and this whole path is reached only where `/proc/uptime`
+# exists, so it is reached only on Linux. Still guarded: a failure here must
+# cost a field, never a run.
+boots_birth() {
+  local out
+  [[ -f "$1" ]] || { printf '%s' '-'; return 0; }
+  out="$(stat -c %W "$1" 2> /dev/null)" || out=''
+  case "$out" in '' | *[!0-9]*) printf '%s' '-'; return 0 ;; esac
+  printf '%s' "$out"
+  return 0
+}
+
+# One record, appended once for a boot this file has not seen. Everything here
+# is on the once-per-boot path, so it may fork; the common path above may not.
+boot_marker_record() {
+  local ts boot up btime pid1after pos mb mpre lb lpre fs machine size
+  local line rest hz ticks i k f hund whole probe_mtime fsdir
+  ts="$(now_s 2> /dev/null)" || return 0
+  case "$ts" in '' | *[!0-9]*) return 0 ;; esac
+  boot="$BOOT_DERIVED"
+  up="$BOOT_UPTIME"
+
+  if [[ -f "$BOOTS_FILE" ]]; then
+    size="$(wc -c < "$BOOTS_FILE" 2> /dev/null | tr -d ' ')"
+    case "$size" in
+      '' | *[!0-9]*) ;;
+      *) ((size > BOOTS_MAX_BYTES)) && return 0 ;;
+    esac
+  fi
+
+  # Negative control, half one: the kernel's own boot instant.
+  btime='-'
+  if [[ -r /proc/stat ]]; then
+    while read -r k rest; do
+      case "$k" in
+        btime)
+          case "$rest" in '' | *[!0-9]*) ;; *) btime="$rest" ;; esac
+          break
+          ;;
+      esac
+    done < /proc/stat
+  fi
+
+  # Negative control, half two: how long after the derived boot PID 1 started.
+  # `/proc/1/stat` field 22 is start time in clock ticks since boot; field 2 is
+  # a parenthesised command name that can contain spaces, so the fields are
+  # taken from after the LAST `)` -- where start time is the 20th.
+  pid1after='-'
+  ticks=''
+  if [[ -r /proc/1/stat ]]; then
+    read -r line < /proc/1/stat 2> /dev/null || line=''
+    if [[ -n "$line" ]]; then
+      rest="${line##*) }"
+      i=0
+      for f in $rest; do
+        i=$((i + 1))
+        if ((i == 20)); then
+          case "$f" in '' | *[!0-9]*) ;; *) ticks="$f" ;; esac
+          break
+        fi
+      done
+    fi
+  fi
+  if [[ -n "$ticks" && "$btime" != '-' ]]; then
+    hz="$(getconf CLK_TCK 2> /dev/null)" || hz=''
+    case "$hz" in '' | *[!0-9]* | 0) hz=100 ;; esac
+    # Hundredths, so this stays integer arithmetic on the bash 3.2 floor.
+    hund=$(((btime - boot) * 100 + ticks * 100 / hz))
+    if ((hund < 0)); then
+      whole=$((0 - hund))
+      pid1after="-$(printf '%d.%02d' "$((whole / 100))" "$((whole % 100))")"
+    else
+      pid1after="$(printf '%d.%02d' "$((hund / 100))" "$((hund % 100))")"
+    fi
+  fi
+
+  # Positive control: a file written at this instant must read as AFTER the
+  # derived boot. Written before the record so its verdict can travel on the
+  # same line -- a control recorded on a later line is a control for a
+  # different reading.
+  pos='-'
+  # ⚠ `2> /dev/null` comes FIRST. Redirections are applied left to right, so
+  # with it on the right a failed open of the target reports itself on the
+  # caller's stderr before it is ever silenced -- a lost record turning into a
+  # diagnostic in the middle of someone's build output.
+  printf '%s\n' "$ts" 2> /dev/null > "$BOOTS_PROBE" || true
+  if [[ -f "$BOOTS_PROBE" ]]; then
+    probe_mtime="$(stat -c %Y "$BOOTS_PROBE" 2> /dev/null)" || probe_mtime=''
+    pos="$(ts_vs_boot "$probe_mtime" "$boot")"
+  fi
+
+  mb="$(boots_birth "$BOOTS_FILE")"
+  lb="$(boots_birth "$LEDGER_FILE")"
+  # `pre` = the file is OLDER than the boot this run reports, which is the one
+  # sentence this whole mechanism exists to accumulate. `before` from the
+  # instrument is `yes` here; the inversion is spelled out rather than folded
+  # into the instrument, so the instrument keeps one meaning.
+  mpre="$(pre_verdict "$mb" "$boot")"
+  lpre="$(pre_verdict "$lb" "$boot")"
+
+  # ⚠ Measured on the marker's DIRECTORY, never on the marker. On the first
+  # record the file does not exist yet -- it is created by the append two
+  # dozen lines below -- so statting the file answers `-` on exactly the
+  # reading that establishes a container's baseline. The directory is on the
+  # same filesystem by construction and always exists.
+  fsdir="${BOOTS_FILE%/*}"
+  [[ "$fsdir" == "$BOOTS_FILE" ]] && fsdir='.'
+  fs="$(stat -f -c %T "$fsdir" 2> /dev/null)" || fs=''
+  # ⚠ Constrained to a safe charset, not merely to "no spaces". Records are
+  # read back by splitting a line on whitespace with the shell's own word
+  # splitting, so a field carrying a glob character would expand against the
+  # reader's cwd -- a token silently becoming a filename, and a misparse with
+  # no error anywhere. Every other field here is an epoch, a hex id or one of a
+  # closed set of words; this is the only one whose text comes from outside.
+  case "$fs" in '' | *[!A-Za-z0-9/._-]*) fs='-' ;; esac
+  machine='-'
+  if [[ -r /etc/machine-id ]]; then
+    read -r f < /etc/machine-id 2> /dev/null || f=''
+    case "$f" in
+      '' | *[!0-9a-fA-F]*) ;;
+      *) machine="${f:0:12}" ;;
+    esac
+  fi
+
+  printf '%s bootid=%s boot=%s up=%s btime=%s pid1after=%s prev=%s prevboot=%s markerbirth=%s markerpre=%s ledgerbirth=%s ledgerpre=%s pos=%s fs=%s machine=%s pid=%s\n' \
+    "$ts" "${BOOT_ID:--}" "$boot" "$up" "$btime" "$pid1after" \
+    "${BOOTS_LAST_ID:--}" "${BOOTS_LAST_BOOT:--}" \
+    "$mb" "$mpre" "$lb" "$lpre" "$pos" "$fs" "$machine" "$$" \
+    2> /dev/null >> "$BOOTS_FILE" || true
+  chmod 666 "$BOOTS_FILE" 2> /dev/null || true
+  chmod 666 "$BOOTS_PROBE" 2> /dev/null || true
+  return 0
+}
+
+# The entry point, called once per invocation before anything else happens.
+# ⛔ It can return nothing but 0: no caller branches on it and no run may ever
+# be decided by it.
+boot_marker_observe() {
+  boot_derive || return 0
+  if boots_last; then
+    boot_is_new || return 0
+  fi
+  boot_marker_record
+  return 0
+}
+
 # --- slots: keeping a place across foreground calls -------------------------
 #
 # THE PROBLEM THIS SOLVES, STATED EXACTLY, BECAUSE IT IS NOT THE OBVIOUS ONE.
@@ -1561,7 +1979,8 @@ usage:
   os-verify-lock.sh --status                who holds the lock, for how long, who is queued
   os-verify-lock.sh --show-budget           the acquisition budget this call would use
   os-verify-lock.sh --report                aggregate the ledger: waits, holds, queue depth,
-                                            and which commands own the lock-seconds
+                                            which commands own the lock-seconds, and the
+                                            boot marker with what it cannot conclude
   os-verify-lock.sh --self-test             verify this script
 
 WHAT THE LOCK COVERS, AND WHAT IT DOES NOT. Holding it means NO OTHER LOCKED
@@ -1669,6 +2088,12 @@ DISCLOSURE
 # anything in this function that outlived the process would be that option
 # rebuilt by accident. There is deliberately no `9>&-` on the command either:
 # closing an fd nobody opened would only imply one was.
+#
+# ⚠ THE CLAIM IS ABOUT THIS FUNCTION, NOT ABOUT THE INVOCATION. The boot marker
+# runs before dispatch, so on a Linux host two of its files can appear beside
+# the lock path even on this route. They are not lock state and not this
+# function's: nothing reads them to decide whether the lock is held, and they
+# are never reaped. The self-test pins the difference rather than the glob.
 run_unlocked() {
   local kind="$1" label="$2"
   shift 2
@@ -1765,6 +2190,14 @@ mode_status() {
   else
     printf 'ledger: %s (no records yet)\n' "$LEDGER_FILE"
   fi
+  # The boot marker, named here because `--status` is the surface an agent
+  # already runs, and a measurement nobody meets accumulates for nobody.
+  if [[ -f "$BOOTS_FILE" ]]; then
+    printf 'boots: %s (%s recorded) — `--report` reads them back with their controls\n' \
+      "$BOOTS_FILE" "$(wc -l < "$BOOTS_FILE" 2> /dev/null | tr -d ' ')"
+  else
+    printf 'boots: %s (nothing recorded yet)\n' "$BOOTS_FILE"
+  fi
   return 0
 }
 
@@ -1783,6 +2216,131 @@ pct_of() {
   sed -n "${idx}p" "$file"
 }
 
+# The accumulated boot marker, read back. It lives inside `--report` rather
+# than behind a mode of its own on purpose: `--report` is the aggregate-reading
+# surface agents already run, and a reading nobody meets accumulates for
+# nobody. Writing the records is automatic; only reading them is a choice, and
+# this is the cheapest place to put that choice in front of someone.
+boot_report() {
+  local total size stamp line tok
+  local ts bootid boot btime pid1 prev mpre lpre pos fs machine
+  printf '\nboot marker: %s\n' "$BOOTS_FILE"
+  printf 'what it is: ONE record per distinct boot this marker file has seen — appended by\n'
+  printf '  whichever run first noticed the boot had changed, never one per run. It is the\n'
+  printf '  passive half of characterising what /tmp does across a container reset, which\n'
+  printf '  on this fleet is uncharacterised: the ledger above has been measured outliving\n'
+  printf '  a reported boot, and nothing here claims to know why.\n'
+  if [[ ! -f "$BOOTS_FILE" ]]; then
+    printf 'no boots recorded yet — the first invocation on a host with /proc/uptime writes one.\n'
+    return 0
+  fi
+  total="$(wc -l < "$BOOTS_FILE" 2> /dev/null | tr -d ' ')"
+  size="$(wc -c < "$BOOTS_FILE" 2> /dev/null | tr -d ' ')"
+  printf 'records: %s\n' "$total"
+  case "$size" in
+    '' | *[!0-9]*) ;;
+    *) ((size > BOOTS_MAX_BYTES)) && printf '⚠ the marker has reached its %s-byte bound and is NO LONGER RECORDING — the boots below are the ones up to that point, not every boot since.\n' "$BOOTS_MAX_BYTES" ;;
+  esac
+
+  # The three censuses that decide whether anything below is a reading at all.
+  # POSIX awk only -- no `length(array)`, which is a gawk extension and would
+  # answer 0 on the hosts this file's portability block exists for.
+  awk '{
+         id = "-"; pr = "-"; mp = "-"; lp = "-"; po = "-"; mc = "-"
+         for (i = 2; i <= NF; i++) {
+           if (index($i, "bootid=") == 1) id = substr($i, 8)
+           else if (index($i, "prev=") == 1) pr = substr($i, 6)
+           else if (index($i, "markerpre=") == 1) mp = substr($i, 11)
+           else if (index($i, "ledgerpre=") == 1) lp = substr($i, 11)
+           else if (index($i, "pos=") == 1) po = substr($i, 5)
+           else if (index($i, "machine=") == 1) mc = substr($i, 9)
+         }
+         if (id == "-") { for (i = 2; i <= NF; i++) if (index($i, "boot=") == 1) id = substr($i, 6) }
+         boots[id] = 1
+         if (mc != "-") mach[mc] = 1
+         if (pr != "-") surv++
+         pcnt[po]++; mpcnt[mp]++; lpcnt[lp]++
+       }
+       END {
+         nb = 0; for (k in boots) nb++
+         nm = 0; for (k in mach) nm++
+         printf "distinct boots: %d   distinct machines: %d\n", nb, nm
+         printf "crossings: %d — records whose `prev` names a DIFFERENT boot. Each one is one\n", surv + 0
+         printf "  restart this marker file was present both before and after, carried by CONTENT\n"
+         printf "  rather than by a clock comparison.\n"
+         printf "positive control (a file written at that instant, read back): "
+         for (k in pcnt) printf "%s=%d ", k, pcnt[k]
+         printf "\n  ⇒ anything but `after` on a record means the comparison was not live for it,\n"
+         printf "    and that records `markerpre`/`ledgerpre` are worth nothing.\n"
+         printf "marker predates its boot: "
+         for (k in mpcnt) printf "%s=%d ", k, mpcnt[k]
+         printf "\nledger predates that boot: "
+         for (k in lpcnt) printf "%s=%d ", k, lpcnt[k]
+         printf "\n"
+       }' "$BOOTS_FILE" 2> /dev/null
+
+  # The records themselves, most recent last, in the shape the two readings on
+  # the card were filed in. Bounded, because a file that has accumulated for
+  # months should not bury the census above.
+  printf '\nthe last records (each carries both of its controls):\n'
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ts=''; bootid='-'; boot=''; btime='-'; pid1='-'; prev='-'
+    mpre='-'; lpre='-'; pos='-'; fs='-'; machine='-'
+    for tok in $line; do
+      case "$tok" in
+        bootid=*) bootid="${tok#bootid=}" ;;
+        boot=*) boot="${tok#boot=}" ;;
+        btime=*) btime="${tok#btime=}" ;;
+        pid1after=*) pid1="${tok#pid1after=}" ;;
+        prev=*) prev="${tok#prev=}" ;;
+        markerpre=*) mpre="${tok#markerpre=}" ;;
+        ledgerpre=*) lpre="${tok#ledgerpre=}" ;;
+        pos=*) pos="${tok#pos=}" ;;
+        fs=*) fs="${tok#fs=}" ;;
+        machine=*) machine="${tok#machine=}" ;;
+        *) [[ -z "$ts" ]] && ts="$tok" ;;
+      esac
+    done
+    stamp="$(utc_stamp "$ts")" || stamp="$ts"
+    printf '  %s  boot %s (%s)\n' "$stamp" "${bootid:--}" "$(utc_stamp "$boot" 2> /dev/null || printf '%s' "$boot")"
+    printf '      prev boot %s · marker predates boot: %s · ledger predates boot: %s\n' "$prev" "$mpre" "$lpre"
+    printf '      controls — positive: %s · negative: btime %s, PID 1 +%ss after derived boot\n' "$pos" "$btime" "$pid1"
+    printf '      fs %s · machine %s\n' "$fs" "$machine"
+  done < <(tail -12 "$BOOTS_FILE" 2> /dev/null)
+  case "$total" in
+    '' | *[!0-9]*) ;;
+    *) ((total > 12)) && printf '  (%s earlier record(s) not shown — the censuses above cover all of them)\n' "$((total - 12))" ;;
+  esac
+
+  # ⛔ THE LIMITS, PRINTED WITH THE NUMBERS RATHER THAN FILED BESIDE THEM. The
+  # defect this whole file keeps repairing is an instrument that answers
+  # confidently about something it did not measure; a boot table with no limits
+  # block is that defect wearing this mechanism's clothes.
+  printf '\n⛔ WHAT THIS CAN AND CANNOT CONCLUDE — read this before quoting a number above.\n'
+  printf '  CAN: that this marker file was present before a restart AND after it, once per\n'
+  printf '    crossing counted above. That is a positive fact about one path on one box,\n'
+  printf '    carried by content rather than by a clock, with both controls per reading.\n'
+  printf '  ⛔ CANNOT: that /tmp survives a reset. A wipe takes this file with it, so on this\n'
+  printf '    box a wipe is INDISTINGUISHABLE from a first run on a fresh container — both\n'
+  printf '    read as a marker whose only record says `prev=-`. The negative direction is\n'
+  printf '    visible only OFF-box: a reading carried away earlier, compared against a later\n'
+  printf '    one from the same `machine=`.\n'
+  printf '  ⛔ CANNOT: that any of it generalises. One file, one path, one container, and only\n'
+  printf '    the restart kinds this box happened to perform. From inside one host a per-host\n'
+  printf '    quirk reads exactly like a fleet rule.\n'
+  printf '  ⇒ WHAT WOULD WARRANT THE DATED LINE. Not a count of same-direction observations:\n'
+  printf '    two disqualified a mechanism and did not establish its negation, and twenty\n'
+  printf '    would not either. What is establishable is a BOUND — with k observed restarts\n'
+  printf '    all survived, the one-sided 95%% upper bound on the wipe rate is 1-0.05^(1/k):\n'
+  printf '    k=10 ⇒ ~26%%, k=20 ⇒ ~14%%, k=30 ⇒ ~9.5%%. So: k >= 10 crossings on each of\n'
+  printf '    >= 3 distinct `machine=` values, and the line is PHRASED AS THAT BOUND —\n'
+  printf '    "survived k/k observed restarts on N boxes, wipe rate under X%%" — never as\n'
+  printf '    "/tmp survives". ⭐ ONE observed non-survival settles the other direction at\n'
+  printf '    k=1; file it the day it is seen.\n'
+  return 0
+}
+
 # The standing answer to "where does the hold time go", which until now could
 # only be assembled by hand from several agents' reports after the fact.
 mode_report() {
@@ -1790,6 +2348,7 @@ mode_report() {
   printf 'ledger: %s\n' "$LEDGER_FILE"
   if [[ ! -f "$LEDGER_FILE" ]]; then
     printf 'no records yet — every run through this entry point appends one.\n'
+    boot_report
     return 0
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/os-verify-lock-report.XXXXXX")" || return 1
@@ -2006,6 +2565,7 @@ mode_report() {
        END { for (k in tot) printf "%8d %5d %s\n", tot[k], runs[k], k }' "$LEDGER_FILE" 2> /dev/null \
     | sort -rn | head -10 \
     | awk '{ t = $1; r = $2; $1 = ""; $2 = ""; sub(/^  /, ""); printf "  %6ss total  %3s run(s)  %s\n", t, r, substr($0, 1, 96) }'
+  boot_report
   return 0
 }
 
@@ -2369,7 +2929,7 @@ mode_self_test() {
   # silence a case instead (OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips the very
   # check two cases below assert). The cases that want one of these set it
   # themselves, per command, which still works.
-  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK
+  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK OS_VERIFY_LOCK_BOOTS
 
   # Both halves matter: the export reaches the child invocations, and the three
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
@@ -2380,6 +2940,8 @@ mode_self_test() {
   QUEUE_DIR="${L}.q"
   HOLDER_FILE="${L}.holder"
   LEDGER_FILE="${L}.ledger"
+  BOOTS_FILE="${L}.boots"
+  BOOTS_PROBE="${L}.boots.probe"
 
   printf 'os-verify-lock --self-test\n'
 
@@ -2514,8 +3076,25 @@ mode_self_test() {
   sleep 1.5
   kill -9 "$killpid" 2> /dev/null
   wait "$killpid" 2> /dev/null
-  st_case 'and a kill -9 mid-run leaves nothing behind to reap either' \
-    "$(ls -A "${ulock}"* 2> /dev/null | wc -l | tr -d ' ')" 0
+  # ⚠ NARROWED ONCE, AND THE NARROWING IS THE WHOLE OF THE CASE RATHER THAN AN
+  # ACCOMMODATION OF IT. This asserted that NOTHING AT ALL sat beside the lock
+  # path -- a convenient spelling of the invariant back when the only files that
+  # could be there were lock state. The boot marker puts two files beside it
+  # that are not: they carry no lock semantics, nothing reads them to decide
+  # whether the lock is held, a `kill -9` leaves them in a valid state because
+  # an append either landed whole or did not land, and REAPING them would
+  # destroy the measurement rather than tidy anything. So the assertion is
+  # re-spelled to the property it was always protecting -- no LOCK STATE
+  # survives an unlocked run -- and paired with a positive, because a narrowed
+  # assertion that counts only what it chose to look at is how a pin stops
+  # catching the regression it exists for. The residue is counted twice: once
+  # for what must not be there, once for what must.
+  local marker_expected=0
+  [[ -r /proc/uptime ]] && marker_expected=2
+  st_case 'and a kill -9 mid-run leaves no LOCK STATE behind to reap' \
+    "$(ls -A "${ulock}"* 2> /dev/null | grep -vc '\.boots$\|\.boots\.probe$')" 0
+  st_case "and the only residue is the boot marker pair this host can write (${marker_expected})" \
+    "$(ls -A "${ulock}"* 2> /dev/null | grep -c '\.boots$\|\.boots\.probe$')" "$marker_expected"
 
   # THE OTHER OUTCOME, and the reason the probe file's CREATION is checked apart
   # from the lock taken on it. A temp dir that cannot hold the probe says
@@ -2952,6 +3531,114 @@ FAKEDATE
   # it measures. This is the case that keeps it out of the way.
   st_case 'an unwritable ledger loses records, never runs' \
     "$(OS_VERIFY_LOCK_LEDGER=/proc/nonexistent/nope bash "$SELF" -c true > /dev/null 2>&1; echo $?)" 0
+
+  # --- the boot marker ------------------------------------------------------
+  #
+  # The mechanism this suite has to hold honest is a MEASUREMENT, so the cases
+  # are written to the standard the card that ordered it set: a zero is a
+  # reading only when something in the same run proves the instrument can
+  # return non-zero, and the dual. Hence the instrument is driven to every one
+  # of its answers before any case reads a field it produced.
+  #
+  # ⛔ The one thing a self-test cannot manufacture is a filesystem that DOES
+  # record a birth time predating a boot -- `touch` cannot set a birth. So the
+  # three answers of the birth comparison are pinned on the FUNCTION, and the
+  # live cases assert only the direction that would be dangerous if wrong: a
+  # file created seconds ago must never read as predating an earlier boot.
+  local bfile="${L}.boots"
+
+  st_case 'ts_vs_boot answers `after` for a stamp past the boot' "$(ts_vs_boot 100 50)" after
+  st_case 'and `before` for one under it — the direction this card is about' "$(ts_vs_boot 10 50)" before
+  st_case 'and `-` for a birth of 0, which is `stat` saying it records none' "$(ts_vs_boot 0 50)" '-'
+  st_case 'and `-` for an unparseable stamp, never a confident 1970' "$(ts_vs_boot abc 50)" '-'
+  st_case 'and `-` when the boot itself is unknown' "$(ts_vs_boot 100 '')" '-'
+  st_case 'pre_verdict says yes when the file predates the boot' "$(pre_verdict 10 50)" yes
+  st_case 'and no when it does not' "$(pre_verdict 100 50)" no
+  st_case 'and - when the question cannot be answered at all' "$(pre_verdict 0 50)" '-'
+
+  rm -f "$bfile" "${bfile}.probe"
+  bash "$SELF" -c true > /dev/null 2>&1
+  if [[ -r /proc/uptime ]]; then
+    st_case 'a run writes exactly one boot record' \
+      "$(wc -l < "$bfile" 2> /dev/null | tr -d ' ')" 1
+    st_case 'the first record has no predecessor to name' \
+      "$(grep -c ' prev=- ' "$bfile")" 1
+    st_case 'POSITIVE CONTROL: a file written at that instant reads as AFTER the boot' \
+      "$(grep -c ' pos=after ' "$bfile")" 1
+    st_case 'NEGATIVE CONTROL: PID 1 is timed against the derived boot, as a number' \
+      "$(grep -cE ' pid1after=-?[0-9]+\.[0-9][0-9] ' "$bfile")" 1
+    st_case 'and the other half of it — the kernel says when it booted, too' \
+      "$(grep -cE ' btime=[0-9]+ ' "$bfile")" 1
+
+    # THE COST CLAIM, AS AN ASSERTION. Once per boot, not once per run, is the
+    # whole reason this can sit on a path every invocation of this script takes.
+    bash "$SELF" -c true > /dev/null 2>&1
+    bash "$SELF" --status > /dev/null 2>&1
+    st_case 'later runs in the same boot append NOTHING — once per boot, not per run' \
+      "$(wc -l < "$bfile" 2> /dev/null | tr -d ' ')" 1
+
+    # THE CROSSING, which is the evidence the whole mechanism exists to
+    # accumulate -- and the field that carries it is pure content, so it needs
+    # no clock comparison and no filesystem that records births.
+    printf '1 bootid=deadbeefcafe boot=1 up=1 btime=1 pid1after=0.10 prev=- prevboot=- markerbirth=- markerpre=- ledgerbirth=- ledgerpre=- pos=after fs=- machine=- pid=1\n' > "$bfile"
+    bash "$SELF" -c true > /dev/null 2>&1
+    st_case 'a run under a boot this marker has not seen appends a record' \
+      "$(wc -l < "$bfile" 2> /dev/null | tr -d ' ')" 2
+    st_case 'and it NAMES the boot it succeeded — one restart this file spanned' \
+      "$(grep -c ' prev=deadbeefcafe ' "$bfile")" 1
+    st_case 'a marker file younger than the boot never reads as predating it' \
+      "$(tail -1 "$bfile" | grep -c ' markerpre=yes ')" 0
+    st_case 'and it does carry that field, so the zero above is an answer, not an absence' \
+      "$(tail -1 "$bfile" | grep -cE ' markerpre=(yes|no|-) ')" 1
+
+    # A NON-RUN INVOCATION RECORDS TOO. The measurement is passive: it must not
+    # be gated on someone actually taking the lock, or the boots it sees are
+    # only the boots somebody happened to verify under.
+    rm -f "$bfile" "${bfile}.probe"
+    bash "$SELF" --status > /dev/null 2>&1
+    st_case 'even --status records the boot — the measurement is not gated on a run' \
+      "$(wc -l < "$bfile" 2> /dev/null | tr -d ' ')" 1
+  else
+    # The other host. Not a skip: an assertion that the mechanism does nothing
+    # at all rather than half of something.
+    st_case 'a host without /proc/uptime records nothing at all — no file, no probe' \
+      "$([[ -e "$bfile" || -e "${bfile}.probe" ]] && echo wrote || echo 'wrote nothing')" 'wrote nothing'
+    st_case 'and --report says so rather than printing an empty table as a result' \
+      "$(bash "$SELF" --report 2>&1 | grep -c 'no boots recorded yet')" 1
+  fi
+
+  # THE BOUND, same doctrine as the ledger's: past it the marker stops
+  # recording, and the report says so rather than presenting a stopped file as
+  # a whole history. 600 records is comfortably past 65536 bytes.
+  local bigboots="${tmp}/big.boots"
+  awk 'BEGIN { for (i = 0; i < 600; i++) printf "1 bootid=deadbeefcafe boot=1 up=1 btime=1 pid1after=0.10 prev=- prevboot=- markerbirth=- markerpre=- ledgerbirth=- ledgerpre=- pos=after fs=- machine=- pid=1\n" }' > "$bigboots"
+  st_case 'the bound fixture really is past the bound (a fixture under it proves nothing)' \
+    "$(($(wc -c < "$bigboots" | tr -d ' ') > BOOTS_MAX_BYTES))" 1
+  OS_VERIFY_LOCK_BOOTS="$bigboots" bash "$SELF" -c true > /dev/null 2>&1
+  st_case 'past its bound the marker stops recording — it never trims or rolls' \
+    "$(wc -l < "$bigboots" | tr -d ' ')" 600
+  st_case 'and --report says the file has stopped rather than reading it as a whole history' \
+    "$(OS_VERIFY_LOCK_BOOTS="$bigboots" bash "$SELF" --report 2>&1 | grep -c 'the marker has reached its')" 1
+
+  # A measurement apparatus that can redden a gate has become part of the thing
+  # it measures — the same case the ledger has, for the same reason.
+  st_case 'an unwritable marker loses boots, never runs' \
+    "$(OS_VERIFY_LOCK_BOOTS=/proc/nonexistent/nope bash "$SELF" -c true > /dev/null 2>&1; echo $?)" 0
+  st_case 'and it stays quiet about it — a lost record is not a diagnostic for the caller' \
+    "$(OS_VERIFY_LOCK_BOOTS=/proc/nonexistent/nope bash "$SELF" -c true 2>&1 > /dev/null | grep -c 'No such file')" 0
+
+  # The two surfaces a reader meets it through. A measurement nobody meets
+  # accumulates for nobody.
+  st_case '--status names the boot marker' \
+    "$(bash "$SELF" --status 2>&1 | grep -c 'boots: ')" 1
+  st_case '--report reads the marker back' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'boot marker:')" 1
+  st_case 'and prints the crossings census, which is the fact being accumulated' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'crossings:')" 1
+  st_case 'and states what it CANNOT conclude beside the numbers, not away from them' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'CANNOT: that /tmp survives a reset')" 1
+  st_case 'and refuses to let a count of same-direction readings stand in for a bound' \
+    "$(bash "$SELF" --report 2>&1 | grep -c 'upper bound on the wipe rate')" 1
 
   # --- slots: keeping a place across calls ----------------------------------
   #
@@ -3393,6 +4080,23 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
 # --- dispatch ---------------------------------------------------------------
 
 main() {
+  # ⭐ THE PASSIVE MEASUREMENT, AND WHY IT IS HERE RATHER THAN IN A MODE. It
+  # runs on EVERY invocation -- a run, a refusal, a `--status`, even a usage
+  # error -- because the measurement has to happen as a side effect of what the
+  # fleet already types. A mechanism anyone has to remember to invoke measures
+  # only the days somebody remembered. See the boot-marker block above for what
+  # it records and what it costs; on all but the first invocation of a boot it
+  # forks nothing and writes nothing, and it can fail no run.
+  #
+  # ⛔ `--self-test` is the ONE exemption, and not for cost. That mode is run by
+  # CI, whose step declares that it touches no real `/tmp` path -- it drives
+  # this mechanism deliberately, through child invocations pointed at its own
+  # private lock, which is the only way the cases below can assert anything
+  # about a marker file's contents.
+  case "${1:-}" in
+    --self-test) ;;
+    *) boot_marker_observe ;;
+  esac
   case "${1:-}" in
     --self-test)
       mode_self_test

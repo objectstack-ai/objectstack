@@ -583,25 +583,51 @@ layout:
 
 ### 2. Contextual Actions
 
-Actions appear based on state:
+Actions appear based on state. `visible` and `disabled` are **CEL predicate strings**
+(or a plain boolean, or a `{ dialect, source }` envelope) — never filter objects:
 
 ```yaml
 actions:
   - type: standard_edit
     label: Edit
-    visible: { status: { $ne: 'locked' } }  # Hide if locked
+    visible: "has(record.status) && record.status != 'locked'"  # Hide while locked
   - type: workflow_approve
     label: Approve
-    visible: { permissions: { canApprove: true } }  # Hide if no permission
+    requiredPermissions: [approve_invoice]  # Hidden in the UI AND refused with 403
   - type: standard_delete
     label: Delete
     confirm: true  # Require confirmation
-    disabled: { has_children: true }  # Disable if has child records
+    disabled: "has(record.has_children) && record.has_children == true"  # Disable if has child records
 ```
+
+<Callout type="warn">
+  **Two rules turn the obvious spelling of these into bugs.**
+
+  **1. The predicate is bare CEL, and the bound record is sparse — guard every read with**
+  **`has()`.** A filter object (`{ status: { $ne: 'locked' } }` — Mongo query syntax) is in
+  none of the three arms `visible`/`disabled` declare, so it is a parse error. And the
+  record an action predicate sees is whatever the client already fetched: on `list_item`
+  that is only what the view's `$select` projected, so an unprojected column is *absent*,
+  not `null`, and CEL aborts the whole expression at key resolution. Here the abort is
+  **fail-closed** — the button is simply not offered, which looks exactly like the
+  predicate having said no, and nothing logs it. (Note the polarity is the opposite of a
+  form field or section predicate, which faults *open*.) See
+  [Actions → Visibility & Disabled Rules](/docs/protocol/objectui/actions#visibility--disabled-rules)
+  for the guard to write per predicate shape.
+
+  **2. Hiding a button is UX, not authorization** — the button is gone, the route is not.
+  That is why the approve action above declares `requiredPermissions` instead of a
+  `visible` predicate over some `permissions` map: under [ADR-0066](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0066-unified-authorization-model.md) D4 that one
+  declaration is dual-surface — the platform action route answers **403** when the caller
+  lacks the capability (the source of truth) and the UI hides the button from the same
+  declaration. A `visible` predicate would only do the second half.
+</Callout>
 
 ### 3. Conditional Field Visibility
 
-Fields appear based on other field values:
+Fields appear based on other field values. The key is **`visibleWhen`**, and its value
+is a **CEL predicate string** evaluated per record — the field is shown only when the
+predicate is TRUE:
 
 ```yaml
 fields:
@@ -611,8 +637,25 @@ fields:
   - name: shipping_address
     type: textarea
     label: Shipping Address
-    visible: { shipping_required: true }  # ← Show only if checkbox checked
+    # Shown only while the checkbox is checked. `has()` guards the unset case:
+    # an unbound reference faults, and visibility's fallback is "shown".
+    visibleWhen: "has(record.shipping_required) && record.shipping_required"
 ```
+
+<Callout type="warn">
+  There is **no `visible` key on a field**. `FieldSchema` is a strict object, so
+  `visible` is refused *by name* — before any value shape is examined — and no
+  filter object, boolean map or breakpoint map makes it parse. Which key you want
+  depends on the form the answer takes, and the two have **opposite polarity**:
+
+  - a **static** answer is `hidden`, which is **inverted** — `visible: false`
+    becomes `hidden: true`;
+  - a **per-record** answer is `visibleWhen`, the CEL predicate above, shown when
+    the predicate is **true**.
+
+  Its siblings are `readonlyWhen` and `requiredWhen`. See the
+  [Field Reference](/docs/references/data/field).
+</Callout>
 
 ### 4. Field Dependencies and Cascading
 

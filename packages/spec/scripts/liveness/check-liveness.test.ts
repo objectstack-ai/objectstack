@@ -52,6 +52,22 @@ function setEvidence(root: string, type: string, prop: string, evidence: string)
   writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
 }
 
+/** The same, one level down — a drilled child entry (`type/prop.child`). */
+function setChildEvidence(root: string, type: string, prop: string, child: string, evidence: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  ledger.props[prop].children[child].evidence = evidence;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+/**
+ * The population label the gate renders from `EVIDENCE_SCANNED_STATUSES`
+ * (#13041). Mirrored here once rather than inlined at each assertion, and the
+ * set itself is pinned against the gate's source in the population block below —
+ * so widening or narrowing the scan has to move both, deliberately.
+ */
+const SCANNED_LABEL = "'live' / 'planned' / 'experimental'";
+
 function summaryLine(output: string): string {
   return output.split('\n').find((l) => l.startsWith('evidence paths:')) ?? '';
 }
@@ -83,11 +99,11 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     // exited 0, so a directory move could rot an ADR-0087 evidence chain with
     // nothing in CI to notice.
     expect(status, output).toBe(1);
-    expect(output).toContain("'live' entr(ies) cite a file that is missing from THIS repo");
+    expect(output).toContain(`${SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo`);
     expect(output).toContain(`query/limit → ${ROTTED}`);
     // ✗, not ⚠ — the grading is the fix, and the two are one character apart.
-    expect(output).toMatch(/✗ 1 'live' entr\(ies\) cite a file/);
-    expect(output).not.toMatch(/⚠ \d+ 'live' entr\(ies\)/);
+    expect(output).toContain(`✗ 1 ${SCANNED_LABEL} entr(ies) cite a file`);
+    expect(output).not.toMatch(/⚠ \d+ .* entr\(ies\) cite a file/);
   });
 
   it('names EVERY rotted pointer, not just the first', () => {
@@ -98,7 +114,7 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     }
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
-    expect(output).toMatch(/✗ 5 'live' entr\(ies\) cite a file/);
+    expect(output).toContain(`✗ 5 ${SCANNED_LABEL} entr(ies) cite a file`);
     for (const prop of ['fields', 'where', 'orderBy', 'limit', 'offset']) {
       expect(output).toContain(`query/${prop} → ${ROTTED}`);
     }
@@ -183,33 +199,29 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     expect(output).not.toContain('name a line the cited file does not have');
   });
 
-  it('prints the citation count and how many are in range, equal on a green run', () => {
-    // The #5623 lesson applied to the new counter: printing only "in range"
-    // would read as a pass on a run where the parser extracted no citations.
-    // Hence two numbers, and a floor under the first — see the floor's own note
-    // at the assertion below for why that floor is `> 0` and when to delete it.
+  it('prints the citation count and how many are in range, in the documented two-number shape', () => {
+    // The #5623 lesson applied to the counter: printing only "in range" would
+    // read as a pass on a run where the parser extracted no citations. Hence two
+    // numbers, and the gate prints them on every run — including this one, where
+    // the population is zero.
+    //
+    // The non-vacuity FLOOR that stood here (`> 0`, ruled 2026-08-28 on #13003,
+    // comment 5458356183) and the equality check beside it were DELETED
+    // 2026-08-29 (#13043), by the standing instruction the floor's own guard
+    // comment carried, at the moment that instruction names: #13003 retired the
+    // last line citation and the population legitimately reached zero. The floor
+    // reds at exactly that moment BY DESIGN, so that reaching zero is a conscious
+    // decision rather than a silent pass; the equality check went with it because
+    // it now compares two zeroes. What the case still pins is real and is what
+    // the deletion could otherwise cost: the gate must keep EMITTING the line, in
+    // the shape this regex documents — drop the line, rename it, or collapse it
+    // to one number and this reds. A `path:NNN` citation written again gives this
+    // case a population back; restore a floor with it.
     const { status, output } = runGate(path.join(tmp, 'liveness'));
     expect(status, output).toBe(0);
     const line = output.split('\n').find((l) => l.startsWith('line citations:')) ?? '';
     const m = /line citations: (\d+) pointer\(s\) written .*?, (\d+) inside the cited file/.exec(line);
     expect(m, line).not.toBeNull();
-    // Non-vacuity. The failure mode this guards is the parser silently
-    // extracting NOTHING (#5623), and that failure mode is exactly zero — so
-    // zero is exactly what the floor tests. It was 100 until #13003, which is
-    // the migration adopting #12516's `path#symbol` grammar and therefore
-    // RETIRING line citations by design (300 at that card's filing, 175 after
-    // batch 2, 82 after batch 3). Any floor above zero reds on legitimate
-    // drainage and re-opens the same escalation one batch later; `> 0` never
-    // lies during the migration and still catches extracts-nothing at full
-    // strength. Ruled 2026-08-28 on #13003, comment 5458356183.
-    //
-    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
-    // retired — DELETE this assertion AND this comment IN THE SAME PR that
-    // retires it, along with the equality check below, which then compares two
-    // zeroes and asserts nothing. A conscious decision at zero, never a silent
-    // one; that is the whole reason the floor sits at `> 0` rather than gone.
-    expect(Number(m![1])).toBeGreaterThan(0);
-    expect(m![2]).toBe(m![1]);
     expect(line).not.toContain('PAST EOF');
   });
 
@@ -311,6 +323,126 @@ describe('check:liveness — symbol anchors (#12516)', () => {
     expect(m![2]).toBe(m![1]);
     expect(line).not.toContain('UNRESOLVED');
     expect(line).not.toContain('MALFORMED');
+  });
+});
+
+// #13041 — the scanned POPULATION. Everything above pins how the gate judges an
+// entry's evidence; these pin WHICH entries it judges at all, which is the one
+// question none of those cases can ask.
+//
+// THE DEFECT. The four evidence checks ran under `status === 'live'` while
+// `producer` was scanned at any status, so an entry whose whole content is a
+// REFUSAL carried evidence the census COUNTED and no check READ. Measured on
+// `api.json`: `inputMapping.transform` and `outputMapping.transform` are
+// `planned`, #13039 migrated both to `path#symbol` anchors precisely because the
+// refusal disappearing is what should go red — and renaming
+// `mappingDeclarationRejection` moved no verdict. Counted and verified had come
+// apart, which is the failure the ledger exists to remove.
+//
+// Every case runs the REAL gate via `--ledger-root`, for the #5623 reason the
+// blocks above state: the population lives in check-liveness.mts and a helper
+// test would pin a copy of the decision rather than the decision.
+describe('check:liveness — the evidence-scan population (#13041)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-pop-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  // THE CARD'S OWN INSTANCE, replayed. Exactly one cause: `api-mapping.ts`
+  // resolves, the citation names no line, and the file genuinely names
+  // `transform` — so neither the existence check, the line bound, nor the
+  // key-mention check can account for the exit code. Under the old `live`-only
+  // population this same mutation exited 0.
+  it("FAILS when a `planned` entry's anchored REFUSER is gone from the file", () => {
+    const root = path.join(tmp, 'planned-anchor');
+    cpSync(LEDGERS, root, { recursive: true });
+    setChildEvidence(
+      root,
+      'api',
+      'inputMapping',
+      'transform',
+      'packages/runtime/src/api-mapping.ts#mappingDeclarationRejectionRenamedAway (the refusal, renamed out from under the pointer)',
+    );
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('anchored citation(s) name a symbol the cited file does not contain');
+    expect(output).toContain(
+      'api/inputMapping.transform → packages/runtime/src/api-mapping.ts#mappingDeclarationRejectionRenamedAway',
+    );
+  });
+
+  it('FAILS when a `planned` entry cites a repo-local file that is gone', () => {
+    // `field.useGrouping` is `planned` and carries no evidence today, so the
+    // pointer this writes is the only thing that can fail — and the rot is the
+    // plainest kind, the one the existence check has caught for `live` entries
+    // since #5623.
+    const root = path.join(tmp, 'planned-missing-file');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'field', 'useGrouping', `${ROTTED} (rotted by the self-test)`);
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain(`${SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo`);
+    expect(output).toContain(`field/useGrouping → ${ROTTED}`);
+  });
+
+  it('FAILS when an `experimental` entry cites a repo-local file that is gone', () => {
+    // The other half of the widening. `agent.lifecycle` is `experimental` and
+    // its shipped evidence is a prose absence claim ("no runtime reader"), which
+    // extracts no path at all — so before this change nothing about it could
+    // ever fail, and after it, a pointer written there is held to the same
+    // standard as a `live` one.
+    const root = path.join(tmp, 'experimental-missing-file');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'agent', 'lifecycle', `${ROTTED} (rotted by the self-test)`);
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain(`agent/lifecycle → ${ROTTED}`);
+  });
+
+  // THE BOUNDARY, and it is a real one rather than an oversight — which is the
+  // half of this card worth doing whichever way the population question went.
+  // The SAME rotted string that reds the two cases above stays green on a `dead`
+  // entry, so the exclusion is attributable to the status and not to anything
+  // else about the fixture.
+  //
+  // Why `dead` is out, measured across every ledger when this landed: all 80
+  // `dead` rows carry a `note` and only 6 carry an `evidence` string. A dead
+  // row's pointer is the retirement story in `note` — which no check scans — so
+  // scanning `dead.evidence` would hold 6 rows to a standard, read nothing of
+  // the other 74, and publish that as coverage of the class.
+  it('stays GREEN when a `dead` entry carries the SAME rotted pointer', () => {
+    const root = path.join(tmp, 'dead-excluded');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'flow', 'description', `${ROTTED} (rotted by the self-test)`);
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).not.toContain(`flow/description → ${ROTTED}`);
+  });
+
+  // The partition itself, pinned at the source — the precedent is the
+  // `manifest` membership case at the end of this file, and the reason is the
+  // same: a status that falls out of BOTH sets has its evidence counted by the
+  // census and verified by nothing, silently, which is #13041 re-armed. The gate
+  // throws on that at startup; this keeps the two sets legible to a reader who
+  // reaches for the test file first.
+  it('declares every status either scanned or explicitly unscanned, and prints the population', () => {
+    const src = readFileSync(GATE, 'utf8');
+    expect(src).toContain(
+      "const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental']);",
+    );
+    expect(src).toContain("const EVIDENCE_UNSCANNED_STATUSES = new Set<string>(['dead']);");
+
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    // The gate's own output is where the population is published — a reader of a
+    // green run should not have to open the source to learn what was scanned.
+    expect(summaryLine(output)).toContain(`declared by ${SCANNED_LABEL} entries`);
   });
 });
 
@@ -493,7 +625,9 @@ describe('check:liveness — the evidence summary line (#5623)', () => {
     const { status, output } = runGate();
     expect(status, output).toBe(0);
     const line = summaryLine(output);
-    const m = line.match(/^evidence paths: (\d+) repo-local path\(s\) declared by 'live' entries, (\d+) resolved/);
+    const m = line.match(
+      new RegExp(`^evidence paths: (\\d+) repo-local path\\(s\\) declared by ${SCANNED_LABEL} entries, (\\d+) resolved`),
+    );
     expect(m, line).not.toBeNull();
     expect(m![1]).toBe(m![2]);
     // Guards the same degradation evidence.test.ts guards: a parser that extracts
@@ -566,5 +700,101 @@ describe('check:liveness — the manifest is inside the governed universe (#1072
     const src = readFileSync(GATE, 'utf8');
     expect(src).toMatch(/^\s*manifest: ManifestSchema,$/m);
     expect(src).toContain("const schema = SPEC_ONLY_SCHEMAS[type] ?? getMetadataTypeSchema(type);");
+  });
+});
+
+// A ledger `status` was free text: any truthy string was classified and counted,
+// then dropped by `foldStateCounts`, which reads four names and nothing else. The
+// gate stayed GREEN over an understated total, because `state-counts.md` computes
+// its `classified` column as the sum of those four columns and the freshness leg
+// compares it against a re-render of the same fold — every reconciliation in the
+// gate comparing that number against itself.
+//
+// Measured across all 31 ledgers on the commit that switched this on: live 819,
+// planned 10, dead 80, experimental 5 — 914 classified, no fifth value. So the
+// population is ZERO and a green `pnpm check:liveness` proves nothing about
+// whether either guard can fire. `--ledger-root` is what answers that, for the
+// #5623 reason every block above states: the REAL gate, a COPY with one status
+// misspelled, and a real exit code.
+describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-status-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Rewrite one property's `status` in a copied ledger. */
+  function setStatus(root: string, type: string, prop: string, status: string): void {
+    const file = path.join(root, `${type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    ledger.props[prop].status = status;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+  }
+
+  /** A copy of the real ledger root with `field.useGrouping` misspelled. */
+  function typodRoot(name: string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    // `field.useGrouping` is `planned` and carries no evidence, so the misspelling
+    // is the only thing in the copy that can move a verdict — no evidence-scan
+    // finding can be confused for it.
+    setStatus(root, 'field', 'useGrouping', 'planed');
+    return root;
+  }
+
+  // DISPOSITION 1. The row is named, with its coordinate and the offending value.
+  it("FAILS and names the row when a ledger `status` is misspelled", () => {
+    const { status, output } = runGate(typodRoot('d1-names-the-row'));
+    expect(status, output).toBe(1);
+    expect(output).toContain('whose `status` is not one of live / experimental / dead / planned');
+    expect(output).toContain('field/useGrouping → "planed"');
+  });
+
+  // The misspelled row is still COUNTED, deliberately. Dropping it would keep
+  // `classified` and the `byStatus` buckets in agreement and hide the row from
+  // the arithmetic below — silencing the second guard with the first.
+  it('still counts the misspelled row, under its own bucket name', () => {
+    const { output } = runGate(typodRoot('d1-still-counted'));
+    expect(output).toMatch(/^ {2}field {2,}\d+ classified \(.*\bplaned 1\b/m);
+  });
+
+  // DISPOSITION 2, through the real gate. The walk counted the row; the four
+  // columns did not; the artifact would have published the smaller number. This
+  // is the leg that fires even if the vocabulary itself grows — see
+  // readme-table.test.ts for that case, which no ledger typo can produce.
+  it('FAILS the totals arithmetic, because the fold cannot name that bucket', () => {
+    const { status, output } = runGate(typodRoot('d2-arithmetic'));
+    expect(status, output).toBe(1);
+    expect(output).toContain("do not add up to the walk's own count");
+    expect(output).toContain('1 in `planed`');
+    expect(output).toContain('is not the repair');
+  });
+
+  // The two are not one check reported twice: disposition 1 is the only one that
+  // can say WHICH row, and disposition 2 is the only one that reads a number the
+  // artifact actually publishes. A repair that satisfied one and not the other
+  // would leave the class open, so the split is pinned rather than assumed.
+  it('reports the two failures separately — one names the row, one names the number', () => {
+    const { output } = runGate(typodRoot('d1-d2-separate'));
+    const rowLine = output.split('\n').find((l) => l.includes('field/useGrouping → "planed"'));
+    const sumLine = output.split('\n').find((l) => l.includes("publishes") && l.includes('the walk counted'));
+    expect(rowLine, output).toBeTruthy();
+    expect(sumLine, output).toBeTruthy();
+    // The arithmetic is per TYPE — it cannot name the property, which is exactly
+    // why disposition 1 is not redundant with it.
+    expect(sumLine).not.toContain('useGrouping');
+    expect(sumLine).toContain('field');
+  });
+
+  // The quiet half, and the reason the whole thing could be switched on: the four
+  // real statuses are the entire population today, so an unmutated run must be
+  // green AND must show neither heading. "Exits 0" alone would also be satisfied
+  // by a guard wired to nothing.
+  it('stays GREEN on the real ledgers, where every status is one of the four', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    expect(output).not.toContain('whose `status` is not one of');
+    expect(output).not.toContain("do not add up to the walk's own count");
   });
 });

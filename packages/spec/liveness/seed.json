@@ -1,38 +1,38 @@
 {
   "type": "seed",
-  "_note": "SeedSchema. Fully live — the smallest and healthiest surface in the ledger. Consumer: SeedLoaderService (packages/metadata-protocol/src/seed-loader.ts), reached on BOTH authoring paths: (1) boot/replay — the stack's `data:` collection lands in `manifest.data`, app-plugin.ts normalizes it and calls seedLoader.load() (packages/runtime/src/app-plugin.ts:832, :971), plus the per-org replayer registered for tenant provisioning; (2) runtime drafts — publishMetaItem applies a published `seed` draft through the same loader (packages/metadata-protocol/src/protocol.ts:6764, `skipSeedApply` opt-out for package batches). Seeded 2026-08-01 (#4488).",
+  "_note": "SeedSchema. Fully live — the smallest and healthiest surface in the ledger. Consumer: SeedLoaderService (packages/metadata-protocol/src/seed-loader.ts), reached on BOTH authoring paths: (1) boot/replay — the stack's `data:` collection lands in `manifest.data`, app-plugin.ts normalizes it and calls seedLoader.load() (packages/runtime/src/app-plugin.ts:832, :971), plus the per-org replayer registered for tenant provisioning; (2) runtime drafts — publishMetaItem applies a published `seed` draft through the same loader (packages/metadata-protocol/src/protocol.ts:6764, `skipSeedApply` opt-out for package batches). Seeded 2026-08-01 (#4488). 2026-08-28 (#13003): all six `path:NNN` citations in this file — five `evidence`, one `producer` — were re-anchored to their consuming symbols. Every one was wrong and every one was IN RANGE, in a 2,680-line file.",
   "props": {
     "object": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:98",
-      "note": "target object; also the dependency-graph node key (topological insert order)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`const objectName = dataset.object` — the write target; the same key is the dependency-graph node and the per-object definition-scan key one level up in `load`)",
+      "note": "target object; also the dependency-graph node key (topological insert order). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:98` had rotted onto `function quotableSeedFailureDetail`, a client-refusal diagnostic helper ~484 lines above `loadDataset`. Re-closed by hand against 8cb96ec41."
     },
     "externalId": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:119",
-      "note": "upsert/uniqueness key, single or composite (framework#3434 join tables); also what OTHER datasets' reference values resolve against (buildReferenceMap threads it into the DB probe)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`const externalId = dataset.externalId || 'name'` — the natural key threaded into every existence read and write decision); packages/metadata-protocol/src/seed-loader.ts#decideWriteAction (insert vs update turns on the row found under that key)",
+      "note": "upsert/uniqueness key, single or composite (framework#3434 join tables); also what OTHER datasets' reference values resolve against (buildReferenceMap threads it into the DB probe). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:119` had rotted onto a docblock sentence about the two failure-detail passes sharing one vocabulary, ~465 lines above the read. `buildReferenceMap` in the note is unchanged and still real; the anchors name where the key itself is read. Re-closed by hand against 8cb96ec41."
     },
     "mode": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:245",
-      "note": "insert/update/upsert/replace/ignore — drives decideWriteAction/writeRecord."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`const mode = dataset.mode || config.defaultMode`); packages/metadata-protocol/src/seed-loader.ts#decideWriteAction (insert/update/upsert/replace/ignore, decided against the existing row)",
+      "note": "insert/update/upsert/replace/ignore — drives decideWriteAction/writeRecord. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:245` had rotted onto `export class SeedLoaderService`, the class declaration rather than any read of the key. Re-closed by hand against 8cb96ec41."
     },
     "env": {
       "status": "live",
-      "verifiedAt": "2026-08-09",
+      "verifiedAt": "2026-08-28",
       "evidenceScope": "in-repo",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:191 (filterByEnv drops datasets whose env list excludes the running environment)",
-      "producer": "packages/metadata-protocol/src/seed-loader.ts:174 — `load()` resolves the comparison environment ITSELF (resolveEnvConfig, :1809, off NODE_ENV) before anything reads config, rather than trusting a caller to pass it",
-      "note": "THE SPECIMEN THIS FIELD EXISTS FOR (#4837). Until #4704 this row was `live` on the consumer pointer alone and the verdict was FALSE: the cited line really did call filterByEnv, but none of the SIX call sites that build a SeedLoaderRequest (app boot, per-org replay, hot reload, package apply, draft publish, marketplace install) passed `env` — so `config.env` was permanently undefined, filterByEnv returned its input on its first line, and `dataset.env` was never read at all. `seed-loader.test.ts` passed throughout, because it supplies `config.env` itself: it exercised a mechanism nothing fed. #4704 fixed the wiring INSIDE `load()`, the one funnel every seeding path goes through, so call site seven cannot reopen the hole. Re-verified 2026-08-09 with both sides cited."
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#datasetAllowsEnv (`const declared = dataset.env` — the one read of the key; a dataset carrying no `env` is unrestricted, which is exactly what `SeedSchema.env`'s default parses to); packages/metadata-protocol/src/seed-loader.ts#filterByEnv (drops the datasets it excludes, and always NAMES what it dropped)",
+      "producer": "packages/metadata-protocol/src/seed-loader.ts#resolveEnvConfig (`load()` resolves the comparison environment ITSELF — `resolveSeedEnvFromNodeEnv` off NODE_ENV — before anything reads config, rather than trusting a caller to pass it, and warns by name when it cannot and env-scoped datasets exist)",
+      "note": "THE SPECIMEN THIS FIELD EXISTS FOR (#4837). Until #4704 this row was `live` on the consumer pointer alone and the verdict was FALSE: the cited line really did call filterByEnv, but none of the SIX call sites that build a SeedLoaderRequest (app boot, per-org replay, hot reload, package apply, draft publish, marketplace install) passed `env` — so `config.env` was permanently undefined, filterByEnv returned its input on its first line, and `dataset.env` was never read at all. `seed-loader.test.ts` passed throughout, because it supplies `config.env` itself: it exercised a mechanism nothing fed. #4704 fixed the wiring INSIDE `load()`, the one funnel every seeding path goes through, so call site seven cannot reopen the hole. Re-verified 2026-08-09 with both sides cited. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, BOTH halves. The evidence line `:191` had rotted onto `datasetAllowsEnv`'s own DOCBLOCK — the read was extracted out of `filterByEnv` into that helper — and the producer line `:174` onto `resolveSeedEnvFromNodeEnv`'s docblock while its parenthetical named `resolveEnvConfig, :1809`: a real symbol beside a line ~2,140 lines away from it. The specimen this row exists for (#4837) is unchanged; what had rotted is only where its two halves point, which is the failure the two-half shape was built to make visible. Re-closed by hand against 8cb96ec41."
     },
     "records": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:434",
-      "note": "the payload rows. WALK BOUNDARY: each record is a z.record — the keys an author actually writes are the TARGET OBJECT's field names, governed by that object's own field definitions (and the defineSeed factory's compile-time key check), not by this ledger. Recorded here rather than left implicit, per the datasource `config` precedent."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`for (let i = 0; i < dataset.records.length; i++)` — the payload rows, written one at a time so a failure can name the row that caused it)",
+      "note": "the payload rows. WALK BOUNDARY: each record is a z.record — the keys an author actually writes are the TARGET OBJECT's field names, governed by that object's own field definitions (and the defineSeed factory's compile-time key check), not by this ledger. Recorded here rather than left implicit, per the datasource `config` precedent. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:434` had rotted onto the `referenceVia` pointer-pair scan inside `load`, ~384 lines above the row loop. Re-closed by hand against 8cb96ec41."
     }
   }
 }

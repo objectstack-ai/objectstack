@@ -1,12 +1,12 @@
 {
   "type": "validation",
-  "_note": "ValidationRuleSchema — the ADR-0020 carrier, where a wrong verdict is expensive, so the call graph was closed with extra care. GOVERNED VIA THE GATE'S SPEC-ONLY OVERRIDE (SPEC_ONLY_SCHEMAS) since #4509: `validation` is no longer a registered metadata KIND, but the rule vocabulary is entirely live, so the ledger must keep governing the schema — being off the registry is exactly the state in which a drift can survive unnoticed (the same reason `webhook` and `query` sit there). The walked shape is the discriminated union's FIRST object member (the base keys + `script`'s type/condition — the #3095 union rule); per-variant keys (state_machine's field/transitions/initialStates, format's regex/format, json_schema's schema, conditional's when/then/otherwise, cross_field's fields) sit OUTSIDE the walk — an explicit blind spot recorded here (the union analog of the z.record rule), governed by the evaluator's own tests, not ledger rows. Consumer: the engine write path calls evaluateValidationRules on insert and on every matched update row (packages/objectql/src/engine.ts:3931, :4248, :4321) with rules from the OBJECT's embedded `validations` array (+ object_extension merge, engine.ts:1572). The evaluator provably honors every execution-control key — the zod header's prose claiming it 'only reads type/condition/field/events/severity/message' is STALE (it predates enforcement of active/priority) and should not be trusted over the ledger. TYPE-LEVEL GAP CLOSED 2026-08-02 (#4509) by RETIRING THE KIND (ADR-0088), not by building a bridge: a STANDALONE `validation` item (file `*.validation.ts` or Studio) never reached any object's write path, because the schema has no object-binding key and — every variant being `.strict()` — an author could not add one; no merge code existed, and only the reference tracker even expected one (a row that scanned a key the schema would have stripped; both are now gone). A state machine authored through that door saved cleanly and gated nothing. The kind failed the ADR-0088 admission test on its first clause — no independent lifecycle: a rule only means something against an object. Rules are authored where they have always been evaluated, as `validations:` on the object, and the per-prop verdicts below describe exactly that path (the same schema instance). Evidence lines restamped 2026-08-02 — the seeded engine.ts refs had drifted ~220 lines. Seeded 2026-08-01.",
+  "_note": "ValidationRuleSchema — the ADR-0020 carrier, where a wrong verdict is expensive, so the call graph was closed with extra care. GOVERNED VIA THE GATE'S SPEC-ONLY OVERRIDE (SPEC_ONLY_SCHEMAS) since #4509: `validation` is no longer a registered metadata KIND, but the rule vocabulary is entirely live, so the ledger must keep governing the schema — being off the registry is exactly the state in which a drift can survive unnoticed (the same reason `webhook` and `query` sit there). The walked shape is the discriminated union's FIRST object member (the base keys + `script`'s type/condition — the #3095 union rule); per-variant keys (state_machine's field/transitions/initialStates, format's regex/format, json_schema's schema, conditional's when/then/otherwise, cross_field's fields) sit OUTSIDE the walk — an explicit blind spot recorded here (the union analog of the z.record rule), governed by the evaluator's own tests, not ledger rows. Consumer: the engine write path calls evaluateValidationRules on insert and on every matched update row (packages/objectql/src/engine.ts:3931, :4248, :4321) with rules from the OBJECT's embedded `validations` array (+ object_extension merge, engine.ts:1572). The evaluator provably honors every execution-control key — the zod header's prose claiming it 'only reads type/condition/field/events/severity/message' is STALE (it predates enforcement of active/priority) and should not be trusted over the ledger. TYPE-LEVEL GAP CLOSED 2026-08-02 (#4509) by RETIRING THE KIND (ADR-0088), not by building a bridge: a STANDALONE `validation` item (file `*.validation.ts` or Studio) never reached any object's write path, because the schema has no object-binding key and — every variant being `.strict()` — an author could not add one; no merge code existed, and only the reference tracker even expected one (a row that scanned a key the schema would have stripped; both are now gone). A state machine authored through that door saved cleanly and gated nothing. The kind failed the ADR-0088 admission test on its first clause — no independent lifecycle: a rule only means something against an object. Rules are authored where they have always been evaluated, as `validations:` on the object, and the per-prop verdicts below describe exactly that path (the same schema instance). Evidence lines restamped 2026-08-02 — the seeded engine.ts refs had drifted ~220 lines. Seeded 2026-08-01. 2026-08-28 (#13003): all ten `path:NNN` citations in this file were re-anchored to their consuming symbols, and all ten were wrong. This is the batch's clearest specimen of BLOCK drift: nine of the ten pointed into one 70-line band (640-710) that is today an ADR-0124 docblock and a `readonlyWhen` helper, ~1,200 lines above `evaluateValidationRules`. Each pointer stayed in range and each looked plausible beside its neighbours, which is exactly the condition under which a whole ledger rots at once and nothing reports it.",
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:665, packages/objectql/src/validation/rule-validator.ts:676",
-      "note": "names the rule in violation logs and the broken-rule skip warning."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`Validation rule '${rule.name}' threw — skipped`, and the violation log line that names the rule and its severity); packages/objectql/src/validation/rule-validator.ts#checkPredicate (`unevaluableRuleError(rule.name, …)` — the rule name is what the rejection names)",
+      "note": "names the rule in violation logs and the broken-rule skip warning. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:665` and `:676` had BOTH rotted into the same ADR-0124 docblock above `isReadonlyWhenLocked`, ~1,180 lines above the evaluator. Nine of this file's ten citations pointed into the 640-710 band, which today is that docblock and a `readonlyWhen` helper: the whole ledger had drifted as ONE block when the module grew its conditional-field section, and every pointer stayed IN RANGE, so no check could see any of it. Re-closed by hand against 8cb96ec41."
     },
     "label": {
       "status": "dead",
@@ -22,21 +22,21 @@
     },
     "active": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:647",
-      "note": "`active: false` filters the rule out before evaluation — genuinely enforced, unlike the retired flow.active/tool.active (worth stating on a validation surface: an rls.enabled-shaped failure here would be a data-integrity hole)."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`.filter((r) => r.active !== false)` — filtered out before evaluation, not merely skipped inside it)",
+      "note": "`active: false` filters the rule out before evaluation — genuinely enforced, unlike the retired flow.active/tool.active (worth stating on a validation surface: an rls.enabled-shaped failure here would be a data-integrity hole). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:647` had rotted onto the `## Two faults, two answers (#4889)` heading inside the ADR-0124 docblock (see `name` for the block drift). Re-closed by hand against 8cb96ec41."
     },
     "events": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:654",
-      "note": "insert/update dispatch (default both). `delete` was removed from the enum in #3184 after being proven a silent no-op — guard deletions with a beforeDelete hook."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`const events = r.events ?? ['insert', 'update']; return events.includes(mode)`)",
+      "note": "insert/update dispatch (default both). `delete` was removed from the enum in #3184 after being proven a silent no-op — guard deletions with a beforeDelete hook. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:654` had rotted into the same ADR-0124 docblock (see `name`). Re-closed by hand against 8cb96ec41."
     },
     "priority": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:657",
-      "note": "stable low-number-first sort of the evaluation order."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))` — stable low-first ordering of the evaluation)",
+      "note": "stable low-number-first sort of the evaluation order. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:657` had rotted onto a blank line of that docblock (see `name`). Re-closed by hand against 8cb96ec41."
     },
     "tags": {
       "status": "dead",
@@ -46,27 +46,27 @@
     },
     "severity": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:671-678",
-      "note": "only 'error' blocks the write; 'warning'/'info' violations are logged and let the write proceed."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`const severity = rule.severity ?? 'error'` — only `error` blocks the write; `warning`/`info` are logged and the write proceeds)",
+      "note": "only 'error' blocks the write; 'warning'/'info' violations are logged and let the write proceed. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the range's endpoint `:678` had rotted onto `function isReadonlyWhenLocked`, a different feature's helper (see `name`). Re-closed by hand against 8cb96ec41."
     },
     "message": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:676, packages/objectql/src/engine.ts:3703",
-      "note": "the author-written violation text carried on every FieldValidationError (surfaced as 400 VALIDATION_FAILED); per-deployment overrides resolve via validationMessages in the translation bundle (#3957) without touching the authored value."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#checkPredicate (`message: rule.message` on the violation); packages/objectql/src/validation/rule-validator.ts#checkStateMachine (an author-written message wins over the generated fallback, untouched); packages/objectql/src/engine.ts#update (the bulk per-row path re-wraps the authored text with the row id before rethrowing `ValidationError`)",
+      "note": "the author-written violation text carried on every FieldValidationError (surfaced as 400 VALIDATION_FAILED); per-deployment overrides resolve via validationMessages in the translation bundle (#3957) without touching the authored value. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, both legs — `:676` had rotted into the ADR-0124 docblock (see `name`), and `engine.ts:3703` onto a docblock about a probe's own failure disposition, ~6,990 lines above the only place engine.ts touches this key. Recorded honestly rather than dressed up: the engine leg is NARROW — it re-wraps the message with a record id, it neither authors nor resolves it — and `#update` is a WEAK anchor, because `update` occurs throughout that file and so cannot go red if the method is deleted. The rule-validator anchors are what carry this row. Re-closed by hand against 8cb96ec41."
     },
     "type": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:692-706",
-      "note": "the union discriminant: dispatches to the state_machine/predicate/format/json_schema/conditional checkers; the schema admits exactly the handled set."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateRule (`switch (rule.type)` — dispatches to the state_machine / predicate / format / json_schema / conditional checkers); packages/objectql/src/validation/rule-validator.ts#evaluateValidationRules (`r.type === 'state_machine'` — the seed-write skip, #3433)",
+      "note": "the union discriminant: dispatches to the state_machine/predicate/format/json_schema/conditional checkers; the schema admits exactly the handled set. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the range's endpoint `:706` had rotted onto a closing brace in the `readonlyWhen` unbound-root branch (see `name`). Re-closed by hand against 8cb96ec41."
     },
     "condition": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts:697",
-      "note": "the CEL predicate (script/cross_field variants), evaluated against the merged record + previous — TRUE fails the write."
+      "verifiedAt": "2026-08-28",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts#checkPredicate (`const expr = toExpression(rule.condition)` — the CEL predicate; TRUE fails the write)",
+      "note": "the CEL predicate (script/cross_field variants), evaluated against the merged record + previous — TRUE fails the write. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:697` had rotted onto the `logger?.warn?.(` of the `readonlyWhen` unbound-root diagnostic, ~1,325 lines above the predicate compiler (see `name`). Re-closed by hand against 8cb96ec41."
     }
   }
 }

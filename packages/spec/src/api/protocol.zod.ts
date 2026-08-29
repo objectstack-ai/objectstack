@@ -1191,12 +1191,87 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
 
 /**
  * Delete Metadata Item Response
- * `reset === true` means a row was deleted (item is now at artifact default).
- * `reset === false` means no overlay row existed (already at artifact default).
+ *
+ * Describes the FULL body `DELETE /api/v1/meta/:type/:name` returns (#13155 —
+ * the #5745 ruling carried to the third verb on this door). `reset === true`
+ * means a row was deleted (item is now at artifact default); `reset === false`
+ * means no overlay row existed (already at artifact default).
+ *
+ * **Why the widening.** The metadata door has three write verbs, all running
+ * the same ADR-0094 mutation projector and the same history append, and all
+ * three put `seq` (and `projectionApplied`, when a projector is registered) on
+ * the wire. #5745 ("补齐 spec 字段", the #5563 maintainer ruling) filled the gap
+ * on {@link SaveMetaItemResponseSchema} and #7294 carried it to
+ * {@link PublishMetaItemResponseSchema}; this declaration alone stopped at
+ * `{ success, reset, message }`, so a `.parse()` of a real reset response
+ * silently STRIPPED both keys and `DeleteMetaItemResponse` could not name them
+ * at the type level. That is a decision made for one verb and never carried to
+ * its sibling, not a fresh question — the two keys below are the siblings'
+ * own, unchanged in type and meaning.
+ *
+ * ⚠️ DECLARATION change only — zero runtime behaviour is altered, and nothing
+ * here says the wire was wrong. The wire is right and the two siblings already
+ * agree with it; the third declaration was short.
+ *
+ * **Presence was measured against `origin/main`, not assumed.** The sole
+ * producer is `ObjectStackProtocolImplementation.deleteMetaItem`, whose return
+ * the REST route hands to `res.json()` verbatim (`rest-server.ts`, the reset
+ * door), so the protocol return IS the wire body. That method has exactly FOUR
+ * success returns, and they are why both new keys are optional here while
+ * `seq` is REQUIRED on both siblings:
+ *
+ * - **repository path, row deleted** — the only return that carries either
+ *   key: `seq` always, `projectionApplied` when a projector is registered.
+ * - **repository path, no row** ("nothing to delete" / "already at artifact
+ *   default") — a success/no-op that appends no history event, so there is no
+ *   sequence number to report.
+ * - **legacy raw-engine path, row deleted** — reachable in control-plane
+ *   bootstrap for a code-only type (#5264, deliberately alive). It writes no
+ *   history row and emits no watch event, so it carries no `seq` either; its
+ *   receipt message omits the `[seq=…]` suffix for the same reason.
+ * - **legacy raw-engine path, no row** — same no-op as above.
+ *
+ * So `seq` absent means "this branch appended no history event", NEVER "the
+ * delete did not happen", and `projectionApplied` absent means "no projector
+ * ran", never "the projection failed" — the same reading its siblings declare.
+ *
+ * Two keys the siblings carry are deliberately NOT declared, because this
+ * branch provably never sends them: `version` (a delete mints no new content
+ * hash — the row is gone, so there is no ADR-0008 OCC token to echo) and
+ * `advisories` (the #4463 runtime authoring gate runs on the two WRITE doors
+ * by D1; a delete submits no body for it to judge).
  */
 export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
   reset: z.boolean().optional(),
+  seq: z.number().int().optional().describe(
+    'Monotonic sequence number of the metadata event this delete appended to '
+    + 'the item history (sys_metadata_history.event_seq) — the ordering token '
+    + 'the history/audit trail is read by, and the same key both write-verb '
+    + 'siblings declare. Unlike `version` it is not an OCC token. Optional '
+    + 'HERE, unlike on those siblings, because only the repository path\'s '
+    + 'delete-ful branch appends an event: a no-op reset (no overlay row '
+    + 'existed) and the control-plane legacy raw-engine path both answer '
+    + 'without one. Absence means "this branch appended no history event", '
+    + 'never "nothing was deleted" — read `reset` for that.',
+  ),
+  projectionApplied: z.object({
+    success: z.boolean().describe('False when the projector threw; the metadata delete itself still succeeded.'),
+    error: z.string().optional().describe('Projector failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
+    + 'that materializes this metadata into its derived data-plane read model. '
+    + 'The same receipt {@link SaveMetaItemResponseSchema} and '
+    + '{@link PublishMetaItemResponseSchema} carry, because the projector runs '
+    + 'on all three verbs of this door: on a delete it re-reads the layered '
+    + 'state and either retires the derived record or resets it to the artifact '
+    + 'baseline. Present ONLY when a projector is registered for this metadata '
+    + 'type AND a row was actually deleted, which is why it is optional: its '
+    + 'absence means "no projector ran", never "the projection failed". '
+    + 'Best-effort by design — a projector failure is reported here and logged, '
+    + 'never thrown, so a caller that needs the read model to be live must '
+    + 'check `projectionApplied.success` rather than rely on the 200.',
+  ),
   message: z.string().optional(),
 }));
 

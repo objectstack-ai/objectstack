@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*",
     "zod": "^4.4.3"
   },
   "keywords": [

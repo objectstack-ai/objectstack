@@ -102,7 +102,7 @@ export const SSL_DETAIL_BELONGS_ON_DATASOURCE =
  * rejection `shared/strict-object.ts` documents.
  */
 export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>
-  `\`${key}\` is a credential and is not accepted inline in driver config (#7990): the `
+  `\`${key}\` is a credential and is not accepted inline in driver config: the `
   + 'datasource is persisted whole into `sys_metadata`, which is served back by the ordinary '
   + 'data API, so an inline credential lands in cleartext at rest. Bind the secret instead: '
   + "the Setup → Datasources connection form's secret field hands it to the datasource secret "
@@ -145,9 +145,9 @@ export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>
  */
 export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
   `this \`${key}\` embeds a password in its userinfo (\`user:password@host\`) and is not `
-  + 'accepted at publish (#8082): the datasource is persisted whole into `sys_metadata`, which '
+  + 'accepted at publish: the datasource is persisted whole into `sys_metadata`, which '
   + 'is served back by the ordinary data API, so a URL-embedded credential lands in cleartext '
-  + 'at rest exactly like an inline `password` (#7990). Keep the authored URL credential-free '
+  + 'at rest exactly like an inline `password`. Keep the authored URL credential-free '
   + '(a bare username, `user@host`, is fine) and bind the secret instead: the Setup → '
   + "Datasources connection form's secret field hands it to the datasource secret binder, "
   + 'which encrypts it into `sys_secret` and stores only an opaque handle at '
@@ -155,7 +155,7 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
   + '`external.credentialsRef`. The resolved secret is injected at connect time and wins over '
   + 'anything embedded in the URL. Do NOT substitute a `${…}` placeholder into the URL: '
   + 'placeholders in authored metadata are resolved by nothing and reach the database client '
-  + 'verbatim (#8078, measured), and are themselves refused at publish (#8336). '
+  + 'verbatim (measured), and are themselves refused at publish. '
   + 'Runtime-environment DSNs (`OS_DATABASE_URL` and friends) do '
   + 'not pass through this publish door and are unaffected.';
 
@@ -325,17 +325,17 @@ export const CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] =
  */
 export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): string =>
   `this \`${key}\` carries \`?${param}=\` in its query string — credential material that is not `
-  + 'accepted at publish (#8337): the datasource is persisted whole into `sys_metadata`, which '
+  + 'accepted at publish: the datasource is persisted whole into `sys_metadata`, which '
   + 'is served back by the ordinary data API, so a query-embedded credential lands in cleartext '
-  + 'at rest exactly like a userinfo password (#8082) or an inline key (#7990) — and at connect '
+  + 'at rest exactly like a userinfo password or an inline key — and at connect '
   + 'it can silently override the secret the binder injects. Remove the parameter and bind the '
   + "secret instead: the Setup → Datasources connection form's secret field hands it to the "
   + 'datasource secret binder, which encrypts it into `sys_secret` and stores only an opaque '
   + 'handle at `external.credentialsRef` — or reference the secrets store directly with '
   + '`external.credentialsRef`. The resolved secret is injected at connect time. Do NOT '
   + 'substitute a `${…}` placeholder into the URL: placeholders in authored metadata are '
-  + 'resolved by nothing and reach the database client verbatim (#8078, measured), and are '
-  + 'themselves refused at publish (#8336). Runtime-environment DSNs (`OS_DATABASE_URL` and '
+  + 'resolved by nothing and reach the database client verbatim (measured), and are '
+  + 'themselves refused at publish. Runtime-environment DSNs (`OS_DATABASE_URL` and '
   + 'friends) do not pass through this publish door and are unaffected.';
 
 /**
@@ -355,17 +355,17 @@ export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): 
  * defeats the binder.
  */
 export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
-  `\`${path}\` is a credential and is not accepted in the driver-options passthrough (#9040): `
+  `\`${path}\` is a credential and is not accepted in the driver-options passthrough: `
   + 'the datasource is persisted whole into `sys_metadata`, which is served back by the '
   + 'ordinary data API, so a passthrough credential lands in cleartext at rest exactly like an '
-  + 'inline `password` (#7990), a URL userinfo password (#8082) or a credential query '
-  + 'parameter (#8337). Remove the `auth` block\'s password and bind the secret instead: the '
+  + 'inline `password`, a URL userinfo password or a credential query '
+  + 'parameter. Remove the `auth` block\'s password and bind the secret instead: the '
   + "Setup → Datasources connection form's secret field hands it to the datasource secret "
   + 'binder, which encrypts it into `sys_secret` and stores only an opaque handle at '
   + '`external.credentialsRef` — or reference the secrets store directly with '
   + '`external.credentialsRef`. The resolved secret is injected at connect time and wins over '
-  + 'an `auth` block embedded in the passthrough (#8696, measured). Placeholders are no '
-  + 'escape either: a `${…}` span anywhere in `options` is itself refused at publish (#8336).';
+  + 'an `auth` block embedded in the passthrough (measured). Placeholders are no '
+  + 'escape either: a `${…}` span anywhere in `options` is itself refused at publish.';
 
 /**
  * The paths inside mongo's `options` passthrough that resolve into a login
@@ -579,9 +579,9 @@ export function credentialFreeUrl<S extends z.ZodString>(
  */
 export const UNRESOLVED_PLACEHOLDER_REFUSED = (key: string): string =>
   `this \`${key}\` contains a \`\${…}\` placeholder, and placeholders are not resolved here `
-  + '(#8336): nothing in the platform substitutes `${…}` in authored datasource config — '
+  + 'at all: nothing in the platform substitutes `${…}` in authored datasource config — '
   + 'placeholders in authored metadata are resolved by nothing, are stored verbatim in '
-  + '`sys_metadata`, and reach the database client verbatim (#8078, measured), so the '
+  + '`sys_metadata`, and reach the database client verbatim (measured), so the '
   + 'connection fails (or connects somewhere unintended) with no error naming the unresolved '
   + 'placeholder. Write the literal value instead. For secret material, bind it: the Setup → '
   + "Datasources connection form's secret field hands it to the datasource secret binder, "

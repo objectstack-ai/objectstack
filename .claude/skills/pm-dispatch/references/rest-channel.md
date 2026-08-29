@@ -1,8 +1,8 @@
 # REST 通道操作对照表(references —— 按需加载)
 
-出处:`platform-readings.md` API 配额段(**默认读序 git → REST → MCP/GraphQL** 的策略住那里,本表是
-逐操作的通道归属)。做一件事之前查一行:它有没有 REST 对应物。⛔ 不引用 issue 编号 ——
-每行自含边界与日期。
+出处:`platform-readings.md` API 配额段(**默认读序 git → payload → REST → MCP/GraphQL** 的策略住那
+里,本表是逐操作的通道归属)。做一件事之前查一行:它有没有 REST 对应物。⛔ 不引用 issue
+编号 —— 每行自含边界与日期。
 
 **通道边界**:容器 curl = App installation token,REST core 15,000/时、与 GraphQL 池独立计;出口代理按设
 计只放 **repo-scoped 路径**(`/repos/{o}/{r}/...`)加 `/rate_limit`,org 级端点未实测。⚠️ **✓ 按席位

@@ -5,6 +5,10 @@ import type {
   NormalizedEmailMessage,
   TransportSendResult,
 } from '@objectstack/spec/contracts';
+import {
+  isValidSmtpPort,
+  formatInvalidSmtpPortNotice,
+} from './smtp-port-contract.js';
 
 /**
  * SmtpTransport — self-hosted / provider SMTP delivery via nodemailer.
@@ -110,8 +114,12 @@ export class SmtpTransport implements IEmailTransport {
     }
     this.opts = opts;
     const port = Number(opts.port ?? DEFAULT_PORT);
-    if (!Number.isFinite(port) || port < 1 || port > 65535) {
-      throw new Error(`SmtpTransport: invalid port '${String(opts.port)}' (expected 1-65535)`);
+    // The range is declared ONCE, in `smtp-port-contract.ts`, and the sentence
+    // below is GENERATED from it. A hand-written `(expected 1-65535)` on this
+    // line is exactly the drift #12993 removed: it sat next to the check it
+    // described, so the two could disagree and nothing would fail.
+    if (!isValidSmtpPort(port)) {
+      throw new Error(formatInvalidSmtpPortNotice(opts.port));
     }
     this.port = port;
   }

@@ -71,7 +71,7 @@ export const SortNodeSchema = lazySchema(() => strictObject(
 // table below. (The `crypto.hash` / `HookBodyCapability` precedent,
 // `data/hook-body.zod.ts`, which is the other enum-value retirement in tree.)
 const AGG_RETIRED_MIDDLE =
-  ' was removed from `AggregationFunction` in @objectstack/spec 17 (#6188, ADR-0049 '
+  ' was removed from `AggregationFunction` in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — no SQL backend ever compiled it. `SqlDriver.mapAggregateFunc` and '
   + '`RemoteTransport.aggregate` each lower the same set of functions and refuse the rest, and '
   + "the v1 dataset runtime had to subtract this one by name to stop it reaching a `COUNT(*)` "
@@ -332,14 +332,14 @@ export type FieldNode = string;
  */
 const FIELD_NODE_OBJECT_FORM_REMOVED =
   'A `fields[]` entry is a field name (string). The nested-select object form '
-  + '`{ field, fields, alias }` was removed in @objectstack/spec 17 (#4196, ADR-0049) — nothing '
+  + '`{ field, fields, alias }` was removed in @objectstack/spec 17 (ADR-0049) — nothing '
   + 'ever produced it and nothing ever read `.fields`/`.alias`: every consumer on this path '
   + 'treats the list as `string[]`, so the object form was dropped by the SQL and memory drivers, '
   + 'projected as a column literally named "[object Object]" by MongoDB, and refused as an unknown '
   + 'field by the REST ingress. Select related data with `expand` — '
   + "`expand: { owner_id: { object: 'user', fields: ['name'] } }` — whose nested query names the "
   + 'related columns you want. A dotted `fields` path is NOT the replacement: no driver ever '
-  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532). Keep the foreign-key '
+  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`). Keep the foreign-key '
   + "column in your own projection (`fields: ['title', 'owner_id']`) — the relation is carried by "
   + 'that key, so projecting it away leaves expansion nothing to resolve. `alias` has no '
   + 'replacement here; an aliased projection is an `aggregations` or `windowFunctions` entry, '

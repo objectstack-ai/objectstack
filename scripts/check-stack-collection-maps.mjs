@@ -26,10 +26,33 @@
 // the argument for this gate in one line.)
 //
 // `SECURITY_FIELDS` joined as the eighth at #12894, and how it was missing is
-// the point rather than a footnote: it is the ONLY one of the eight that pairs
-// its keys as `[collection, kind]` TUPLES, so the two extractors this gate
-// already had (object keys, flat string arrays) could not read it and the site
-// was skipped instead of failing. It carried a `policies` dead pointer -- the
+// the point rather than a footnote. ⚠️ It is ALSO the sentence this comment
+// first got wrong, and the correction is the more useful half. The original
+// wording said the flat extractor "could not read it and the site was skipped
+// instead of failing"; #13014 re-measured that on `8cb96ec41b` and it is FALSE.
+// This gate has refused an empty extraction since #7032 -- an extract that
+// returns nothing is a FAILURE in the runner below, never a pass -- so a tuple
+// site read with the flat extractor goes RED, measured by swapping this site's
+// extractor back to `stringArrayItems`: exit 1, "SECURITY_FIELDS -- could not
+// extract the enumeration from packages/runtime/src/app-plugin.ts".
+//
+// The site was skipped because it was never a SITE. `SECURITY_FIELDS` occurred
+// ZERO times in this file before #13009 (positive control in the same probe:
+// `ARTIFACT_FIELD_TO_TYPE`, 5 occurrences), so no extractor ever ran on it and
+// there was nothing to come back empty. The hole was the hand-written SITES
+// population -- which is answerable to nothing and cannot be derived -- not the
+// extractor set. Worth keeping straight in both directions: a reader who
+// believes the original wording concludes the empty-extraction floor is missing
+// and adds a second one, and a reader who trusts the SITES list to be complete
+// repeats #12894. It is the eighth site because someone went looking, and that
+// is still the only way a ninth gets found. (#13014 measured the mechanical
+// alternative too: sweeping the tree for literals naming 8+ stack collections
+// returns 45 files, 38 of them not sites -- an allowlist that relocates the
+// hand-written list rather than deleting it.)
+//
+// The tuple shape is still why the site needed a THIRD extractor rather than
+// reusing one: it is the ONLY one of the eight that pairs its keys as
+// `[collection, kind]` TUPLES. It carried a `policies` dead pointer -- the
 // same retired kind waived on two other sites -- and removing that entry from
 // the artifact door while leaving this one unpinned would have left exactly one
 // place where the fourth instance of a twice-retired pattern could land back
@@ -272,10 +295,11 @@ export function stringArrayItems(body) {
  * disagree about what "the site enumerates" means: the flat form's strings ARE
  * the keys, and here only the tuple's head is, with the tail naming the metadata
  * kind. Reading a tuple site with the flat extractor returns an empty list at
- * depth 0 -- which reconciles against everything and reports no drift, the
- * silent-no-op shape this gate exists to refuse. (The caller turns an empty
- * result into a FAILURE for that reason; this extractor makes the non-empty
- * answer available instead.)
+ * depth 0 -- and the caller REFUSES that, loudly, by name: an empty extraction
+ * is a failure in `run()`, never a reading. ⛔ Do not read this paragraph as
+ * "the flat extractor would have passed vacuously" -- it would not, and #13014
+ * measured it (exit 1). This extractor exists so the site has a non-empty
+ * answer at all, not to rescue the gate from a silent pass it never had.
  */
 export function tupleFirstItems(body) {
   const mask = maskLiterals(body);
@@ -568,15 +592,21 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['datasets', 'jobs', 'datasources', 'translations', 'capabilities'],
+        keys: ['datasets', 'jobs', 'datasources', 'translations'],
         reason:
-          'DRIFT with a real, bounded consequence — #6242 row 4(b). Four of the five are consumed '
+          'DRIFT with a real, bounded consequence — #6242 row 4(b). All four are consumed '
           + 'functionally by AppPlugin straight off the bundle, so boot is not broken; what they never do is '
           + 'register as METADATA ITEMS, so under `bootstrap: \'artifact-only\'` (edge / serverless / '
           + 'immutable image) `GET /meta/job`, `/meta/translation`, `/meta/datasource` and `/meta/dataset` '
           + 'answer empty for a package that ships them. Adding them changes what a sealed runtime serves '
           + 'and must be measured on a real artifact-only boot first — the filing card says so, and this '
-          + 'gate does not smuggle it in.',
+          + 'gate does not smuggle it in. `capabilities` was the FIFTH key on this row and left it at '
+          + '#12892 step 1 (maintainer ruling, option 1: the door owns the registration route for the five '
+          + 'security collections). It was never the same fact as the other four: AppPlugin registers it as '
+          + 'a METADATA ITEM through `registerInMemory`, so `GET /meta/capability` was already non-empty on '
+          + 'an artifact-only boot — what was missing from that answer was the strict-parsed shape, the '
+          + '`scope` default and the ADR-0010 provenance stamp. Driven on a real artifact-only boot before '
+          + 'the entry landed, per the sentence above.',
       },
       {
         direction: 'missing',
@@ -653,9 +683,12 @@ const SITES = [
           + 'never runs; every other collection reaches the registry through the door or its own seam. '
           + 'Recorded as one row rather than left implicit so that a NEW security collection has to be '
           + 'considered here once — which is the direction this site was actually wrong in: `capabilities` '
-          + 'is registered here and NOT by the door, making this block that collection\'s sole registrar on '
-          + 'an artifact boot (#12894 half 2, carried to #12892 for the ownership decision — measured, '
-          + 'deliberately not changed here).',
+          + 'was registered here and NOT by the door, making this block that collection\'s sole registrar '
+          + 'on an artifact boot (#12894 half 2, carried to #12892 for the ownership decision). The door '
+          + 'reaches it as of #12892 step 1, so this block is no longer that collection\'s sole registrar — '
+          + 'it is the SECOND one, on the same boot path, which is the interim state the ruling permits '
+          + 'while step 2 (this block stops registering the five on the ARTIFACT path only, after a census '
+          + 'of the non-artifact boots that depend on it) lands.',
       },
     ],
   },

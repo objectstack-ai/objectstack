@@ -19,14 +19,14 @@ import { retiredKey } from '../shared/retired-key';
 // `kernel-context-preview-mode-retired`.
 const RUNTIME_MODE_PREVIEW_RETIRED =
   "`context.mode: 'preview'` was removed from `RuntimeMode` in @objectstack/spec 17 "
-  + '(#11846, ADR-0049 enforce-or-remove) — no layer of the platform ever branched on it: '
+  + '(ADR-0049 enforce-or-remove) — no layer of the platform ever branched on it: '
   + 'the value promised "bypass auth, simulate admin identity" and no code path implemented '
   + 'either half, so a deployment declaring it ran with ordinary production behaviour under '
   + 'a misleading label. Delete the value — `mode` defaults to `production`; use '
   + '`development` for local demo work. Preview DEPLOYMENTS are the deployment layer\'s '
   + 'job (`OS_PREVIEW_MODE` is routing-only and never touched identity). If a preview '
   + 'experience becomes a product capability it re-declares fresh, with the '
-  + 'production-posture hard-refusal as the first-landed half (#11846 ruling record).';
+  + 'production-posture hard-refusal as the first-landed half.';
 const PREVIEW_MODE_RETIRED =
   '`context.previewMode` was removed in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, '

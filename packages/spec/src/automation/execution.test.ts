@@ -208,8 +208,13 @@ describe('FlowRunSummarySchema', () => {
   });
 
   it('carries an uncountable-effect tally distinct from acted', () => {
-    // A connector-driven run: `acted: 0` is INCOMPLETE, not zero, and the
-    // broken-sweep query has to be able to tell.
+    // A connector-driven run: `acted: 0` is INCOMPLETE, not zero. The third
+    // clause of the broken-sweep FIRST FILTER
+    // (`selected > 0 AND acted = 0 AND unmeasured = 0`) is what reads that
+    // distinction, which is why the tally is carried separately instead of
+    // folded into `acted`. The filter only selects candidates — a healthy
+    // idempotent sweep satisfies it too, and the per-node fold discriminates
+    // (#12685) — but merging the two would corrupt even the selection.
     const summary = FlowRunSummarySchema.parse({
       selected: 9, acted: 0, skipped: 0, unmeasured: 3,
       nodes: [{ nodeId: 'push', nodeType: 'connector_action', status: 'success' as const, runs: 3, failures: 0, skipped: 0, unmeasured: 3 }],

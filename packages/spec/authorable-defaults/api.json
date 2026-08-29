@@ -106,8 +106,6 @@
     "api/MetadataImportRequest:conflictResolution = \"skip\"",
     "api/MetadataImportRequest:dryRun = false",
     "api/MetadataImportRequest:validate = true",
-    "api/MetadataOverlaySaveRequest:active = true",
-    "api/MetadataOverlaySaveRequest:scope = \"platform\"",
     "api/MetadataQueryRequest:page = 1",
     "api/MetadataQueryRequest:pageSize = 50",
     "api/MetadataQueryRequest:sortBy = \"name\"",

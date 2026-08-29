@@ -82,6 +82,10 @@ import {
   expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
+  canonicalIndexKey,
+  hashShadowColumnFor,
+  isHashShadowCarrier,
+  parseHashShadowKeyParts,
   indexedKeyColumns,
   isIndexDriftOp,
   isUniqueScopeDeclared,
@@ -91,6 +95,7 @@ import {
   parseIndexDdl,
   uniqueIndexesFromFields,
   type DeclaredIndexInput,
+  type HashShadowKeyPart,
   type ManagedDriftEntry,
   type DriftOp,
   type PhysicalIndex,
@@ -8516,7 +8521,8 @@ export class SqlDriver implements IDataDriver {
    *   {@link assertCompilableComparand}, because the envelope's `where` value
    *   is an object and no comparand may be. `driver-memory`'s half of that
    *   asymmetry (a bare filter there returns the unfiltered set in silence)
-   *   stays open under the #5499 freeze; this driver's half never was silent.
+   *   stays open; the #5499 freeze that explained it dissolved 2026-08-11 and
+   *   nothing has claimed it since. This driver's half never was silent.
    *
    * Held by `sql-driver-distinct-filter-narrowing.test.ts`.
    */
@@ -9363,7 +9369,26 @@ export class SqlDriver implements IDataDriver {
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
-    await this.ensureDatabaseExists();
+
+    // [#13028] …and NOT while DDL is deferred. Under {@link deferredDdl} every
+    // branch below is skipped in favour of recording the work, so there is no
+    // DDL for a database to exist FOR — while `ensureDatabaseExists()` is the
+    // one line here that can WRITE: it `mkdir -p`s a sqlite parent directory
+    // and, on Postgres/MySQL, issues `SELECT 1` and CREATEs THE DATABASE when
+    // that comes back `3D000` / `ER_BAD_DB_ERROR`.
+    //
+    // That made a declared dry run able to create a database (#6743 closed the
+    // sqlite half by opening an absent file in memory; this is the same
+    // promise, kept at the source and for every dialect), and it charged one
+    // round-trip per object to do it — on a control plane at ~300ms RTT × ~80
+    // objects, a `plan` that computes in seconds would have spent minutes
+    // asking a database it was never going to touch whether it existed.
+    //
+    // ⛔ NOT a relaxation of the guarantee for real DDL: `flushDeferredSchemaDdl`
+    // clears `deferredDdl` BEFORE re-entering this method with the deferred
+    // objects, so the confirmed `os migrate apply` still ensures the database
+    // ahead of the first `CREATE TABLE`.
+    if (!this.deferredDdl) await this.ensureDatabaseExists();
 
     for (const obj of objects) {
       // Re-read what the registration above recorded, rather than recomputing:
@@ -10764,8 +10789,34 @@ export class SqlDriver implements IDataDriver {
         // failures (a NULL-safe unique over data that still violates it) into
         // a loud log instead of a throw, so presence is the only proof.
         return (await this.getExistingIndexNames(op.table)).has(op.indexName);
-      case 'drop_index':
-        return await this.dropIndexIfExists(op.table, op.indexName);
+      case 'drop_index': {
+        // #13056: a TERMINAL removal — the name is retired, nothing will
+        // re-declare it, and the #11627 hash shadow derived from that name is
+        // dead the moment the index goes. Index FIRST, then the column it
+        // keyed: MySQL refuses to drop a column a key still uses, and the
+        // reverse order would take the constraint down with the column while
+        // the operator was told only that an index was dropped.
+        //
+        // ⚠️ Deliberately HERE and not inside `dropIndexIfExists`. That helper
+        // has two other callers and neither is terminal: `recreate_index`
+        // drops in order to re-create under the SAME name — routing it through
+        // this cleanup would destroy the survivor #13015's `reusable` branch
+        // exists to re-key in place, turning every rebuild into a full
+        // regeneration of a STORED generated column — and
+        // `replace_unique_index` cannot reach a shadow at all (its legacy
+        // detection excludes `isHashShadowCarrier`, stated outright in
+        // `diffManagedIndexes` precisely because that op DROPS the legacy
+        // name). "Which caller" is the wrong axis; "is this name coming back"
+        // is the right one, and only the op knows.
+        const dropped = await this.dropIndexIfExists(op.table, op.indexName);
+        // Applied when EITHER half changed the table. A half-applied migration
+        // leaves the index gone and the column behind, so an already-absent
+        // index is exactly the state whose leftover column still needs
+        // collecting — reporting that as `skipped` would claim the apply did
+        // nothing to a table it had just rewritten.
+        const shadowDropped = await this.dropOrphanedHashShadowColumn(op.table, op.indexName);
+        return dropped || shadowDropped;
+      }
       case 'recreate_index': {
         // Same name on both sides — the drop has to come first, and a UNIQUE
         // target can fail on existing duplicates. That is why this op is
@@ -11205,12 +11256,72 @@ export class SqlDriver implements IDataDriver {
           if (r.COLUMN_NAME != null) entry.columns.push(r.COLUMN_NAME);
           else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
         }
+        await this.resolveHashShadowKeys(tableName, [...byName.values()]);
       }
     } catch (e) {
       // Only a caller that can CORRECT a short read may ask for one (#7332).
       if (opts.onFailure !== 'partial') throw e;
     }
     return [...byName.values()];
+  }
+
+  /**
+   * Record, on each #11627 hash-shadow CARRIER, the declared key its shadow
+   * actually hashes (#13015).
+   *
+   * ## Why introspection and not the differ
+   *
+   * A carrier is recognisable by name alone — its sole key column is
+   * {@link SqlDriver.hashShadowColumnFor} of its own index name — but a NAME
+   * cannot say WHAT is hashed, and that difference decides between two
+   * opposite verdicts. A shadow written since #12998 hashes the declared key
+   * with its NULL-safe `COALESCE(organization_id, '__global__')` parts intact
+   * and is HEALTHY; one written before it hashes the RAW columns, so `CONCAT`
+   * yields NULL for every NULL-organization row and the constraint those rows
+   * were promised does not exist (#5030's shape). Both look identical from the
+   * `STATISTICS` view. Only the stored `GENERATION_EXPRESSION` separates them,
+   * and reading it is the difference between the differ SKIPPING shadows and
+   * the differ UNDERSTANDING them.
+   *
+   * ## Why the failure is swallowed
+   *
+   * This is an ENRICHMENT of a read with other consumers — the upsert
+   * conflict-target check and the boot's index-presence probe among them — and
+   * none of them may start failing because a second query did. A carrier whose
+   * key stays unresolved is still recognised as a carrier by
+   * `isHashShadowCarrier`, and `diffManagedIndexes` then reports NOTHING for it
+   * rather than proposing a rebuild it cannot reason about. The degraded
+   * outcome is a missing finding, never a dropped constraint.
+   */
+  protected async resolveHashShadowKeys(
+    tableName: string,
+    indexes: PhysicalIndex[],
+  ): Promise<void> {
+    const carriers = indexes.filter((i) => isHashShadowCarrier(i));
+    if (carriers.length === 0) return;
+    try {
+      const rows: Array<Record<string, unknown>> = await this.knex
+        .select('COLUMN_NAME', 'GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({ TABLE_SCHEMA: this.knex.client.database(), TABLE_NAME: tableName })
+        .whereIn(
+          'COLUMN_NAME',
+          carriers.map((i) => i.columns[0]!),
+        );
+      const exprByColumn = new Map<string, string>();
+      for (const r of rows) {
+        const column = String(r.COLUMN_NAME ?? r.column_name ?? '');
+        if (column) {
+          exprByColumn.set(column, String(r.GENERATION_EXPRESSION ?? r.generation_expression ?? ''));
+        }
+      }
+      for (const i of carriers) {
+        const parts = parseHashShadowKeyParts(exprByColumn.get(i.columns[0]!) ?? '');
+        if (parts.length > 0) i.shadowKey = parts;
+      }
+    } catch {
+      /* see the head note: an unresolved carrier degrades to "no finding". */
+    }
   }
 
   /**
@@ -13956,8 +14067,26 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
-   * that names the columns at fault and the declaration that fixes them
-   * (#11374).
+   * that names the columns at fault and the remedy that actually applies
+   * (#11374, #12999).
+   *
+   * ## TWO remedies, because the refusal has two causes
+   *
+   * | path | the fact | what fixes it |
+   * |---|---|---|
+   * | **create** | the field declares no usable `maxLength` | declare one — the next create emits `varchar(n)` |
+   * | **upgrade** | the field declares one; the COLUMN predates it and is still TEXT | convert the column by hand |
+   *
+   * One message served both until #12999, and on the upgrade path both of its
+   * halves were false: it diagnosed a missing declaration that was present, and
+   * prescribed a declaration that was already made. That is not merely
+   * imprecise — it fires once per boot on a production upgrade and reads as the
+   * release that added the bound being broken, so the operator's next move is to
+   * doubt a correct fix. The second cause exists at all because the additive
+   * sync is additive: it adds columns and indexes and never rewrites a column's
+   * type (#3728), by design — the rewrite needs an exclusive metadata lock
+   * (see the `lock_wait_timeout` note this file opens with), which is a manual
+   * floor rather than something a boot may decide to do.
    *
    * Worth the extra `columnInfo()` read because it only happens on the failure
    * path, and because the raw server error is actively misleading about where
@@ -13998,6 +14127,75 @@ export class SqlDriver implements IDataDriver {
       offenders.length > 0
         ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
         : 'One or more of its key columns is stored as TEXT';
+
+    // #12999: the SAME refusal has two causes, and the message below is true of
+    // only one of them. On CREATE the field really declares no usable bound, so
+    // "declare `maxLength`" is the fix. On an UPGRADE the bound IS declared —
+    // the additive sync never rewrites a column's type (#3728), so a column
+    // created before the declaration stays TEXT forever — and that same sentence
+    // tells the operator to do what they already did, once per boot, in
+    // production, which reads as the release they just deployed being broken.
+    //
+    // The discriminator is per COLUMN and needs BOTH halves, which is why it is
+    // computed here rather than inferred from the error code: a bounded
+    // declaration alone does not imply a stale column, because `ER_TOO_LONG_KEY`
+    // can refuse a COMPOSITE whose parts are each individually keyable (see
+    // {@link MAX_KEYABLE_VARCHAR_CHARS} — the bound is per KEY, not per column).
+    // So the branch fires only where the physical column is TEXT *and*
+    // {@link keyableTextLength} says a fresh create would have emitted
+    // `varchar(n)` for it. When `columnInfo()` fails, `offenders` is empty and
+    // this map stays empty, so the CREATE-path message stands — the honest
+    // reading, since without introspection the two causes are indistinguishable.
+    //
+    // `declaredFieldsFor` returns `undefined` for a table this driver does not
+    // own the column set of, and misses a SHARD table (registered under the base
+    // name). Both degrade to the message below rather than guessing.
+    const declaredFields = this.declaredFieldsFor(tableName);
+    const staleBounds = new Map<string, number>();
+    for (const c of offenders) {
+      const field = declaredFields?.[c];
+      const bound = field ? this.keyableTextLength(field) : null;
+      if (bound !== null) staleBounds.set(c, bound);
+    }
+
+    if (staleBounds.size > 0) {
+      const staleNamed = [...staleBounds]
+        .map(([c, n]) => `"${c}" (declares \`maxLength: ${n}\`)`)
+        .join(', ');
+      const [firstColumn, firstBound] = [...staleBounds][0];
+      // Named in full, deliberately. The mirror case in `schema-drift.ts` (the
+      // unbounded field over a stale `varchar`) already had to derive this, and
+      // the two MySQL `MODIFY` hazards it names are recorded twice more in this
+      // file, on the datetime and time widenings: MODIFY does NOT repeat a
+      // `NOT NULL`, and it DROPS a `DEFAULT` it does not restate. An operator
+      // who follows an abbreviated version of this remedy ends up worse off than
+      // the no-op they started with — a column that lost its default.
+      const others =
+        offenders.length > staleBounds.size
+          ? ` Column(s) ${offenders
+              .filter((c) => !staleBounds.has(c))
+              .map((c) => `"${c}"`)
+              .join(', ')} in the same key declare no usable bound and DO need \`maxLength\` ` +
+            `declared on the field (#11374).`
+          : '';
+      return (
+        `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
+        `column in a key without a key length. Column(s) ${staleNamed} are stored as TEXT even though the ` +
+        `field ALREADY declares a usable \`maxLength\` — the column was created before that bound was ` +
+        `declared, and the additive sync never rewrites a column's type, so re-declaring \`maxLength\` ` +
+        `changes nothing here (#12999). REMEDY: convert the column(s) to varchar(n) by hand, with a backup ` +
+        `taken first, restating the FULL column definition on MySQL (MODIFY drops a NOT NULL or DEFAULT you ` +
+        `do not repeat) — e.g. ALTER TABLE \`${tableName}\` MODIFY \`${firstColumn}\` ` +
+        `varchar(${firstBound}) plus that column's existing NOT NULL / DEFAULT clauses, restated verbatim; ` +
+        `— and let the next boot create this index. ObjectStack does NOT rewrite the column for you: that ` +
+        `ALTER needs an exclusive metadata lock on the table, which makes it a destructive, hard-to-roll-back ` +
+        `action and a deliberate manual floor rather than a boot-time one.${others} The table exists but this ` +
+        `index does NOT, so any uniqueness it declared is currently unenforced. A prefix index is deliberately ` +
+        `not substituted: on a UNIQUE index it constrains the prefix rather than the value, and rejects two ` +
+        `different values that share one.`
+      );
+    }
+
     return (
       `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
       `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
@@ -14032,11 +14230,12 @@ export class SqlDriver implements IDataDriver {
    * get different shadows.
    */
   protected static hashShadowColumnFor(indexName: string): string {
-    const direct = `${indexName}${SqlDriver.HASH_SHADOW_SUFFIX}`;
-    if (direct.length <= 64) return direct;
-    const digest = createHash('sha256').update(indexName).digest('hex').slice(0, 8);
-    const keep = 64 - SqlDriver.HASH_SHADOW_SUFFIX.length - digest.length - 1;
-    return `${indexName.slice(0, keep)}_${digest}${SqlDriver.HASH_SHADOW_SUFFIX}`;
+    // #13015: DELEGATES rather than re-deriving. The differ has to look for
+    // exactly the column the sync creates, and the two halves of that question
+    // lived in different modules — which is how a healthy shadow-carried
+    // UNIQUE came to be reported as destructive drift while the shadow column
+    // itself was protected as driver-owned. One derivation, both readers.
+    return hashShadowColumnFor(indexName);
   }
 
   /**
@@ -14143,11 +14342,48 @@ export class SqlDriver implements IDataDriver {
       columns.length === 1
         ? part(columns[0]!)
         : `CONCAT(${columns.map(part).join(', 0x1f, ')})`;
-    const sql =
-      `ALTER TABLE ${ref(tableName)} ` +
-      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED, ` +
-      `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
-    await this.knex.raw(sql);
+    const addColumn =
+      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED`;
+    const addKey = `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
+    // #13015: the shadow column OUTLIVES the index it carries. Dropping a
+    // UNIQUE key by name does not drop the generated column keyed by it, so
+    // every path that drops and re-syncs — `recreate_index` above all — arrives
+    // back here with the survivor still on the table. The unconditional
+    // `ADD COLUMN` then failed with a duplicate-COLUMN error, which is matched
+    // by NEITHER the "already exists" absorb (that spells index names) nor the
+    // unique-violation branch, so the apply ended with the constraint DROPPED
+    // and not re-created: an operator following the differ's own advice removed
+    // a live uniqueness guarantee. The survivor is therefore inspected, never
+    // assumed absent.
+    const state = await this.hashShadowColumnState(tableName, indexName, columns, nullSafeColumns);
+    if (state === 'foreign') {
+      // A real, non-generated column already owns the name. It is not ours to
+      // drop — it may hold data — so this route is refused and the caller falls
+      // through to the named #11374 refusal, which is the honest outcome.
+      this.logDurabilityFailure(
+        `[sql-driver] cannot carry UNIQUE index '${indexName}' on "${tableName}" on a hash shadow — the ` +
+          `column "${shadow}" already exists and is NOT a generated column, so it is not the driver's to ` +
+          `replace (#11627/#13015). The declared constraint is NOT enforced; rename or drop that column.`,
+      );
+      return false;
+    }
+    if (state === 'reusable') {
+      // The survivor already hashes exactly the declared key — re-key it rather
+      // than rebuild the table for a column that is byte-for-byte what we want.
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addKey}`);
+    } else if (state === 'stale') {
+      // The survivor hashes a DIFFERENT key than metadata now declares — the
+      // pre-#12998 raw-column shadow is exactly this case. Reusing it would
+      // re-enforce the old constraint under the new name, which is the silent
+      // wrong answer; the column carries no user data (it is derived), so it is
+      // dropped and re-generated. Two statements rather than one ALTER: the
+      // index it carried is already gone by the time we are here, and a single
+      // `DROP COLUMN c, ADD COLUMN c` is a shape not worth relying on.
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} DROP COLUMN ${ref(shadow)}`);
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
+    } else {
+      await this.knex.raw(`ALTER TABLE ${ref(tableName)} ${addColumn}, ${addKey}`);
+    }
     // The boot log describes the key the shadow actually enforces — the
     // NULL-safe parts in their COALESCE spelling — so "carried" can be read
     // literally (#12998).
@@ -14158,8 +14394,180 @@ export class SqlDriver implements IDataDriver {
       `[sql-driver] UNIQUE index '${indexName}' on "${tableName}" is carried by the hash-shadow column ` +
         `"${shadow}" (SHA-256 of ${described}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
         `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly (#11627). The declared ` +
-        `constraint is enforced over the full value; only the physical key differs.`,
-      { tableName, indexName, columns, shadow },
+        `constraint is enforced over the full value; only the physical key differs.` +
+        (state === 'reusable'
+          ? ` The shadow column already existed and hashes this exact key — re-keyed in place (#13015).`
+          : state === 'stale'
+            ? ` A surviving shadow column hashed a DIFFERENT key and was re-generated (#13015).`
+            : ''),
+      { tableName, indexName, columns, shadow, shadowColumnState: state },
+    );
+    return true;
+  }
+
+  /**
+   * What is already sitting where this index's hash shadow goes (#13015)?
+   *
+   *  - `absent`   — nothing; create the column and the key together.
+   *  - `reusable` — a generated column hashing EXACTLY the declared key. The
+   *                 index that keyed it was dropped (a `recreate_index`, a
+   *                 manual `DROP INDEX`, a half-applied migration); re-key it.
+   *  - `stale`    — a generated column hashing a DIFFERENT key. The pre-#12998
+   *                 shadow over RAW columns is this case: reusing it would
+   *                 re-enforce the OLD constraint under the new name — green,
+   *                 silent, and wrong — so it is re-generated instead.
+   *  - `foreign`  — a column of that name that is not generated at all. Not
+   *                 ours; refuse rather than drop something that may hold data.
+   *
+   * "Same key" is decided by {@link canonicalIndexKey}, the differ's own
+   * identity for an index key, so the question this asks and the question
+   * `diffManagedIndexes` asks cannot answer differently.
+   *
+   * An unreadable catalog degrades to `absent` — exactly the behaviour that
+   * shipped before this probe existed — rather than converting a transient
+   * read failure into a refused constraint.
+   */
+  protected async hashShadowColumnState(
+    tableName: string,
+    indexName: string,
+    columns: string[],
+    nullSafeColumns?: ReadonlySet<string>,
+  ): Promise<'absent' | 'reusable' | 'stale' | 'foreign'> {
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = await this.knex
+        .select('GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: SqlDriver.hashShadowColumnFor(indexName),
+        });
+    } catch {
+      return 'absent';
+    }
+    if (rows.length === 0) return 'absent';
+    const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
+    if (expr.trim() === '') return 'foreign';
+    const parts = parseHashShadowKeyParts(expr);
+    if (parts.length === 0) return 'stale';
+    const carried = canonicalIndexKey(
+      parts.map((k) => k.column),
+      parts.filter((k) => k.nullSafe).map((k) => k.column),
+    );
+    return carried === canonicalIndexKey(columns, [...(nullSafeColumns ?? [])])
+      ? 'reusable'
+      : 'stale';
+  }
+
+  /**
+   * Collect the #11627 hash shadow an index left behind when its name was
+   * retired for good (#13056).
+   *
+   * ## The contract this makes true
+   *
+   * {@link isHashShadowColumn}'s docblock is why the ORPHAN-column pass skips a
+   * shadow: dropping it blindly would take the UNIQUE index it carries with it.
+   * That docblock also stated what happens instead — the column "is then
+   * cleaned up by the index's own removal path" — and until this method there
+   * was no such path. Measured: `dropIndexIfExists` issues one statement family
+   * (`DROP CONSTRAINT` / `DROP INDEX` / `ALTER TABLE .. DROP INDEX`) and never
+   * touches a column, so when metadata stopped declaring a shadow-carried
+   * UNIQUE the differ reported the index as an orphan, the apply dropped it,
+   * and the `VARBINARY(32)` STORED generated column survived with nothing
+   * keying it — while the orphan-column pass declined to report it forever,
+   * exactly as designed. A STORED generated column is recomputed and written on
+   * every INSERT and on every UPDATE touching its sources, so a table that
+   * accumulates retired declarations pays for them permanently.
+   *
+   * ## Ownership is ESTABLISHED, never assumed
+   *
+   * Two refusals, in the shape of #13015's `foreign` guard — a column we have
+   * not proved is ours is left alone and named in the log, never dropped:
+   *
+   *  - a column of this name that is **not generated** may hold user data;
+   *  - a column something **still keys** is not the orphan this collects. That
+   *    second read is what turns "index first, then column" from an ordering
+   *    comment into a checked precondition: it fails closed when the drop above
+   *    silently did not take, and it declines to let a `DROP COLUMN` remove a
+   *    second index as a side effect.
+   *
+   * An unreadable catalog degrades to "leave it alone" — the behaviour that
+   * shipped before this method existed — rather than turning a transient read
+   * failure into a dropped column, the same trade
+   * {@link hashShadowColumnState} makes.
+   *
+   * Returns `true` only when a column was actually dropped.
+   */
+  protected async dropOrphanedHashShadowColumn(
+    tableName: string,
+    indexName: string,
+  ): Promise<boolean> {
+    // Shadows are a MySQL-only construct: `createHashShadowUniqueIndex` refuses
+    // every other dialect, so there is nothing to collect and no catalog read
+    // worth paying for.
+    if (!this.isMysql) return false;
+    const shadow = SqlDriver.hashShadowColumnFor(indexName);
+
+    let generationExpression: string;
+    try {
+      const rows = await this.knex
+        .select('GENERATION_EXPRESSION')
+        .from('information_schema.COLUMNS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: shadow,
+        });
+      if (rows.length === 0) return false; // nothing survived; the ordinary case
+      generationExpression = String(
+        rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '',
+      );
+    } catch {
+      return false;
+    }
+    if (generationExpression.trim() === '') {
+      this.logger.warn(
+        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
+          `'${indexName}' — a column of that name exists and is NOT a generated column, so it is not ` +
+          `the driver's to drop and may hold data (#11627/#13056). Remove it by hand if it is unwanted.`,
+        { tableName, indexName, shadow },
+      );
+      return false;
+    }
+
+    let stillKeyedBy: string[];
+    try {
+      const rows = await this.knex
+        .select('INDEX_NAME')
+        .from('information_schema.STATISTICS')
+        .where({
+          TABLE_SCHEMA: this.knex.client.database(),
+          TABLE_NAME: tableName,
+          COLUMN_NAME: shadow,
+        });
+      stillKeyedBy = [
+        ...new Set(rows.map((r: any) => String(r.INDEX_NAME ?? r.index_name ?? ''))),
+      ].filter((n) => n !== '');
+    } catch {
+      return false;
+    }
+    if (stillKeyedBy.length > 0) {
+      this.logger.warn(
+        `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
+          `'${indexName}' — ${stillKeyedBy.length} index(es) still key that column ` +
+          `(${stillKeyedBy.join(', ')}), so dropping it would remove them too (#13056).`,
+        { tableName, indexName, shadow, stillKeyedBy },
+      );
+      return false;
+    }
+
+    await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [tableName, shadow]);
+    this.logger.warn(
+      `[sql-driver] dropped the hash-shadow column "${shadow}" from "${tableName}" — the UNIQUE index ` +
+        `'${indexName}' it carried is retired, so the STORED generated column was recomputed on every ` +
+        `write for a constraint that no longer exists (#11627/#13056).`,
+      { tableName, indexName, shadow },
     );
     return true;
   }
@@ -14312,7 +14720,7 @@ export class SqlDriver implements IDataDriver {
   protected async hashShadowSourceColumns(
     tableName: string,
     indexName: string,
-  ): Promise<Array<{ column: string; nullSafe: boolean }>> {
+  ): Promise<HashShadowKeyPart[]> {
     try {
       const rows: Array<{ GENERATION_EXPRESSION?: string; generation_expression?: string }> =
         await this.knex
@@ -14326,12 +14734,11 @@ export class SqlDriver implements IDataDriver {
       const expr = String(rows[0]?.GENERATION_EXPRESSION ?? rows[0]?.generation_expression ?? '');
       // `unhex(sha2(`a`,256))`, `unhex(sha2(concat(`a`,0x1f,`b`),256))`, or with
       // a NULL-safe part: `…concat(coalesce(`org`,_utf8mb4'__global__'),0x1f,`b`)…`
-      // (#12998). The optional group marks which identifiers the expression
-      // wraps in COALESCE.
-      return [...expr.matchAll(/(coalesce\s*\(\s*)?`((?:[^`]|``)+)`/gi)].map((m) => ({
-        column: m[2]!.replace(/``/g, '`'),
-        nullSafe: m[1] != null,
-      }));
+      // (#12998). #13015 moved the parse itself next to the shadow vocabulary
+      // in `schema-drift.ts`: the differ reads the same expression to decide
+      // whether a shadow-carried index enforces what metadata declares, and two
+      // copies of this regex would be two answers to one question.
+      return parseHashShadowKeyParts(expr);
     } catch {
       return [];
     }

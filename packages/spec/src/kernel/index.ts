@@ -21,7 +21,15 @@ export * from './events.zod';
 // manifest (ADR-0007, env-overridable via OS_FEATURE_FLAGS_*) and the
 // PUBLIC_AUTH_FEATURES registry (public-auth-features.ts) for auth gates.
 export * from './manifest.zod';
-export * from './metadata-customization.zod';
+// metadata-customization.zod (MetadataOverlaySchema, FieldChangeSchema, the
+// three-layer overlay / 3-way-merge protocol) was REMOVED per ADR-0049
+// enforce-or-remove (#13135, re-charter of #12057; ADR-0126 §6 wall 4
+// supersedes it as a matter of record — "nothing may build against it").
+// Zero reachable consumers: the only implementation was `packages/metadata`'s
+// manager limb, served by no route and called only by its own unit tests. The
+// REAL customization mechanisms are ADR-0005's org-scoped overlay
+// (`allowOrgOverride` on DEFAULT_METADATA_TYPE_REGISTRY, sys_metadata rows)
+// and ADR-0126's packaged-metadata model (clone + ledger disable).
 export * from './namespace-prefix';
 export * from './platform-capabilities';
 export * from './metadata-loader.zod';

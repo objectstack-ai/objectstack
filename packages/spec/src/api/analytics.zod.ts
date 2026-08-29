@@ -64,6 +64,29 @@ export const AnalyticsQueryRequestSchema = lazySchema(() =>
 
 /**
  * Query Response (JSON)
+ *
+ * `data` IS the producer's declared return: `POST /analytics/query` ends
+ * `deps.success(await analyticsService.query(body, ctx))`
+ * (`runtime/src/domains/analytics.ts`), so the body under `data` is
+ * `IAnalyticsService.query`'s `AnalyticsResult`
+ * (`contracts/analytics-service.ts`) — member for member. #13078 restored the
+ * parity: this schema used to declare only `rows` / `fields{name,type}` /
+ * `sql?`, a strict subset of what the route relays, while the wire really
+ * carries `fields[].label` (measured against a real `AnalyticsService` in
+ * `packages/client/src/analytics-automation-json-erasure.test.ts`),
+ * `format` / `currency` / `percentScale` (the ADR-0053 / percent-scale
+ * renderer chains) and `totals` (the ADR-0021 marginal-aggregate channel).
+ *
+ * The reasoning is #6442's, recorded on `AnalyticsMetadataResponseSchema`
+ * below: when the TS contract and the runtime already agree, the schema is
+ * the lone outlier and the SCHEMA moves. A response schema that reads as the
+ * route's contract but is narrower than it refuses reads the wire carries —
+ * a consumer that bound it (exactly what a sweep reaches for, #12104) would
+ * ship a false declaration. Zero runtime change: only the declaration moves.
+ *
+ * Drift guard: `analytics.test.ts` binds `AnalyticsResultResponse['data']` to
+ * `AnalyticsResult` at compile time — narrow either side alone and it goes
+ * red. Keep new `AnalyticsResult` members mirrored here (and vice versa).
  */
 export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: z.object({
@@ -71,8 +94,35 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
     fields: z.array(z.object({
       name: z.string(),
       type: z.string(),
+      label: z.string().optional()
+        .describe('Human display label (e.g. measure `label`) — for legends/KPIs.'),
+      format: z.string().optional()
+        .describe('Display format hint (e.g. measure `format` like "$0,0", "0.0%").'),
+      currency: z.string().optional().describe(
+        'Resolved ISO 4217 code for a MONETARY measure (explicit measure '
+        + '`currency`, then source-field default, then tenant default). Absent on '
+        + 'non-monetary columns, which must never render a symbol.',
+      ),
+      percentScale: z.enum(['fraction', 'whole']).optional().describe(
+        'The column\'s percent SCALE, when it is a percentage: `fraction` for a '
+        + '0-1 ratio (`1` renders as "100%"), `whole` for percentage points (`1` '
+        + 'renders as "1%"). Resolved from metadata; absent when the column is '
+        + 'not a percentage. Renderers that receive it must scale by it instead '
+        + 'of guessing from the value.',
+      ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),
+    totals: z.array(z.object({
+      dimensions: z.array(z.string())
+        .describe('The dimension subset this marginal was grouped by (empty array = grand total)'),
+      rows: z.array(z.record(z.string(), z.unknown()))
+        .describe('The grouping\'s dimension columns plus the same measure columns as the main rows'),
+    })).optional().describe(
+      'Marginal aggregates - one entry per requested totals grouping, in '
+      + 'request order, each computed with the measure\'s true aggregate over '
+      + 'the underlying data (never re-derived from bucketed values). The '
+      + 'grand-total grouping yields a single dimensionless row.',
+    ),
   }),
 }));
 
@@ -171,6 +221,15 @@ export const AnalyticsSqlResponseSchema = lazySchema(() => BaseResponseSchema.ex
 
 export type AnalyticsEndpoint = z.input<typeof AnalyticsEndpoint>;
 export type AnalyticsQueryRequest = z.input<typeof AnalyticsQueryRequestSchema>;
+/**
+ * #13078 — previously this schema had NO exported type at all
+ * (`protocol.zod.ts` kept a module-local `z.infer` alias), so a consumer could
+ * not name the route's response even after the schema said the right thing.
+ * Exported exactly as every sibling in this file is: `z.input` + `Parsed`.
+ */
+export type AnalyticsResultResponse = z.input<typeof AnalyticsResultResponseSchema>;
+/** Post-parse shape of {@link AnalyticsResultResponse} — defaults applied, transforms run (ADR-0122). */
+export type AnalyticsResultResponseParsed = z.infer<typeof AnalyticsResultResponseSchema>;
 export type AnalyticsMetadataResponse = z.input<typeof AnalyticsMetadataResponseSchema>;
 /** Post-parse shape of {@link AnalyticsMetadataResponse} — defaults applied, transforms run (ADR-0122). */
 export type AnalyticsMetadataResponseParsed = z.infer<typeof AnalyticsMetadataResponseSchema>;

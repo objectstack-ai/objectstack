@@ -10,7 +10,7 @@ import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 
-import { validateStackExpressions } from './validate-expressions.js';
+import { validateStackExpressions, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
 // [#8405] Cross-site pin only — see the describe block at the bottom of this
 // file. Not otherwise used here; validate-semantic-roles.test.ts owns the
@@ -1148,7 +1148,20 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      *   visibleWhen  client `fallback: true` ⇒ VISIBLE; server never evaluates
      *                a FIELD-level `visibleWhen` at all (`hasFieldRules` gates
      *                on `requiredWhen || readonlyWhen || option visibility`).
-     *                ⇒ the old sentence was RIGHT here.
+     *                ⇒ the old sentence was RIGHT here — and RE-MEASURED since,
+     *                because the renderer half moved. `plugin-form`'s
+     *                `sectionFields.ts` copies an object field's ADR-0036 rules
+     *                onto the runtime form field and the SDUI renderer resolves
+     *                them with `predicateScope` BOUND (objectui#6010), so under
+     *                a scope-publishing host the predicate does not fault at
+     *                all: it resolves, the control is hidden in that one form,
+     *                and the server still returns the value to every other
+     *                reader — a silent enforcement gap. The fault-open leg
+     *                survives wherever no host publishes a scope (`/f/:slug`,
+     *                every non-form reader), which is why BOTH halves are
+     *                pinned below rather than one replacing the other. The
+     *                verdict is untouched: `FIELD_RULE_BOUND_ROOTS` still
+     *                rejects the root, and more justifiably than before.
      *   readonlyWhen server `isReadonlyWhenLocked` ⇒ LOCKED (#4889's carve-out,
      *                whose trigger IS the unbound-root case) and
      *                `stripReadonlyWhenFields` deletes the value from the
@@ -1176,10 +1189,41 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           }],
         }).filter((i) => i.where === `object 'showcase_deal' · field 'gate' ${slot}`)[0]!.message;
 
-      it('`visibleWhen` — fail-OPEN to visible, the one slot the shared sentence fitted', () => {
+      it('`visibleWhen` — fail-OPEN to visible where no host publishes a scope', () => {
         const m = messageFor('visibleWhen');
         expect(m).toMatch(/falls back to VISIBLE/);
         expect(m).toMatch(/showing for everyone/);
+      });
+
+      /**
+       * The half the re-measurement ADDED, pinned on its own so a revert of the
+       * new clause cannot hide behind the surviving fault-open sentence — which
+       * is exactly the blind spot the block comment above owns up to for the
+       * original per-slot split.
+       */
+      it('`visibleWhen` — names the SILENT enforcement gap, the outcome under a bound scope', () => {
+        const m = messageFor('visibleWhen');
+        // it RESOLVES rather than faulting, and the mechanism is named
+        expect(m).toMatch(/RESOLVES/);
+        // Spelled without the `.ts` extension on purpose — see the note at the
+        // cell: a `<name>.ts` inside a message string registers `<name>` as a
+        // read receiver in #5017's scan, and it went red on the first run.
+        expect(m).toMatch(/`sectionFields` copies this object rule/);
+        expect(m).not.toMatch(/sectionFields\.ts/);
+        expect(m).toMatch(/objectui#6010/);
+        // …and the consequence is stated as the gap, not as a fail-open
+        expect(m).toMatch(/SILENT enforcement gap/);
+        expect(m).toMatch(/every other reader still returns it/);
+        expect(m).toMatch(/WORSE of the two/);
+      });
+
+      it('the verdict is unchanged — the field level still binds only record/previous/parent', () => {
+        // ⛔ The re-measured causal clause is not a relaxation. Pinned here
+        // beside the new wording so the two can never drift apart silently.
+        expect([...FIELD_RULE_BOUND_ROOTS]).toEqual(['record', 'previous', 'parent']);
+        expect(messageFor('visibleWhen')).toMatch(
+          /a field-level conditional rule binds only `record`/,
+        );
       });
 
       it('`readonlyWhen` — says LOCKED, and never says the field stays visible', () => {

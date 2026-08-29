@@ -70,8 +70,10 @@ export const CLI_PKG = 'packages/cli';
  * really spells, never invent one.
  */
 const CLI_PKG_JSON = 'packages/cli/package.json';
+/** The CLI's own package name — the filter every consumer's prerequisite starts from. */
+const CLI_PKG_NAME = '@objectstack/cli';
 /** The one command that satisfies the prerequisite, for every gate that reports it. */
-export const CLI_BUILD_FIX = 'pnpm exec turbo run build --filter=@objectstack/cli';
+export const CLI_BUILD_FIX = `pnpm exec turbo run build --filter=${CLI_PKG_NAME}`;
 
 /**
  * The CLI's COMPILED surface — the tree `tsc -p packages/cli/tsconfig.build.json`
@@ -126,6 +128,97 @@ export const WORKSPACE_SCOPE = '@objectstack';
 /** Rebuilds one workspace package and the packages it depends on. */
 export function workspaceBuildFix(pkg) {
   return `pnpm exec turbo run build --filter=${pkg}`;
+}
+
+/**
+ * The workspace package that owns a repo-relative file: the nearest ancestor
+ * directory whose `package.json` declares a `name`.
+ *
+ * Climbs rather than stopping at the first `package.json`, because a manifest
+ * without a `name` is not a package a filter can address — treating one as the
+ * owner would emit a `--filter=undefined` that turbo matches nothing with, which
+ * is the silent under-build this whole helper exists to prevent.
+ *
+ * @param {string} relPath repo-relative
+ * @returns {string} the package name, or '' when no ancestor declares one
+ */
+export function owningPackageOf(relPath) {
+  let dir = dirname(String(relPath ?? ''));
+  const seen = new Set();
+  while (dir && dir !== '.' && dir !== '/' && !seen.has(dir)) {
+    seen.add(dir);
+    try {
+      const name = JSON.parse(readFileSync(atRepoRoot(join(dir, 'package.json')), 'utf8'))?.name;
+      if (typeof name === 'string' && name) return name;
+    } catch {
+      // No manifest here, or an unreadable one — keep climbing. A missing
+      // package.json at an intermediate directory is the normal case.
+    }
+    dir = dirname(dir);
+  }
+  return '';
+}
+
+/**
+ * The ONE command that satisfies a CLI-spawning gate's WHOLE build prerequisite
+ * (#12564): the CLI, plus the build closure of every package whose config the
+ * gate loads. `turbo`'s `build` task declares `dependsOn: ["^build"]`, so each
+ * filter pulls its own dependency closure and the list names ROOTS, not a
+ * transitive package list nobody could maintain.
+ *
+ * WHY THIS EXISTS, measured rather than assumed. A gate that spawns `os lint` /
+ * `os i18n extract` over a partially built tree reports every failing CONFIG at
+ * once — that part was never broken — but the CAUSE it can name per config is
+ * capped at ONE package, and not by any choice this repo made: node resolves a
+ * config's static imports in SOURCE ORDER and throws `ERR_MODULE_NOT_FOUND` at
+ * the first specifier with no `dist/`, aborting the load. There is exactly one
+ * package name in that error, so `Cannot find module '…'` can only ever yield
+ * one. Build it, and the loader advances to the next import and names the next.
+ *
+ * Measured on a fresh worktree at 56470d86bf: after
+ * `--filter=@objectstack/cli`, `examples/app-showcase/objectstack.config.ts`
+ * named `@objectstack/connector-mcp` (its import on line 4); after building
+ * exactly that, THE SAME CONFIG named `@objectstack/connector-openapi` (line 5),
+ * with `connector-rest` (line 6) and `connector-slack` (line 7) still unbuilt
+ * behind it. Following the diagnosis one package per round is therefore a
+ * six-round walk down one import list, and the round count is a property of the
+ * worst config's import list — not of the gate.
+ *
+ * So the remedy a reader can act on ONCE is a closure, and it must be DERIVED:
+ * a hand-written package list in a message is the note that goes stale silently
+ * the first time a config moves (#12672). This reads the same population the
+ * gate is about to judge and asks each config's own manifest who owns it.
+ *
+ * ⛔ ALL-OR-NOTHING, and that is the floor, not a convenience. A guard whose
+ * success condition equals its total-failure condition must refuse: an empty
+ * population would render as `pnpm exec turbo run build` with no filters, and a
+ * population half of whose owners resolved would render a confident, specific
+ * command that STILL does not converge — this card's own defect rebuilt one
+ * layer down, and the harder one to catch because it looks derived. Either every
+ * config names an owner or this names none and says why; the caller then falls
+ * back to the coarser `pnpm build`, which is a strict SUPERSET and so can only
+ * cost time, never coverage.
+ *
+ * Pure apart from reading manifests, so both consumers' `--self-test` drive it
+ * with a synthetic population and no build.
+ *
+ * @param {string[]} configPaths the gate's population, repo-relative
+ * @returns {{ command: string } | { unknown: string }}
+ */
+export function closureBuildFix(configPaths) {
+  if (!Array.isArray(configPaths) || configPaths.length === 0) {
+    return { unknown: 'the config population is empty, so no build closure can be named from it' };
+  }
+  const owners = [];
+  for (const configPath of configPaths) {
+    const owner = owningPackageOf(configPath);
+    if (!owner) {
+      return { unknown: `no named package.json above ${configPath} — the closure would be missing its owner` };
+    }
+    owners.push(owner);
+  }
+  const filters = [...new Set([CLI_PKG_NAME, ...owners])].sort();
+  return { command: `pnpm exec turbo run build ${filters.map((f) => `--filter=${f}`).join(' ')}` };
 }
 
 /**

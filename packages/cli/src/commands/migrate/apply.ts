@@ -21,6 +21,11 @@ import {
   summarizePendingSchemaWork,
   groupByCategory,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
+import {
+  refuseWhenHostConfigUnloadable,
+  type SchemaMigrationComposition,
+} from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
@@ -81,7 +86,30 @@ export default class MigrateApply extends Command {
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to mutate)' }),
   };
 
+  /**
+   * #13027 — the process must end when the apply does.
+   *
+   * See `migrate/plan.ts`'s twin for the measurement, and for why the failure
+   * paths deliberately stay on oclif's own exit.
+   */
   async run(): Promise<void> {
+    await this.apply();
+    // [#12953] Same refusal as `migrate plan`, through the same choke point —
+    // the ruling (2026-08-29, verbatim 「同意」) named BOTH commands, and the
+    // reconcile an operator confirms has to be judged the same way as the plan
+    // they read. Applied after `apply()` for the same reason it is there: the
+    // report is already written and must survive the non-zero exit.
+    if (this.composition) refuseWhenHostConfigUnloadable(this.composition);
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  /**
+   * What {@link apply} composed, read by {@link run} after it returns (#12953).
+   * `null` until the stack has booted, and on every path where it never did.
+   */
+  private composition: SchemaMigrationComposition | null = null;
+
+  private async apply(): Promise<void> {
     const { flags } = await this.parse(MigrateApply);
     const timer = createTimer();
     const allowDestructive = flags['allow-destructive'];
@@ -142,6 +170,7 @@ export default class MigrateApply extends Command {
       this.exit(1);
       return;
     }
+    this.composition = stack.composition;
 
     try {
       if (!stack.driver) {
@@ -167,8 +196,40 @@ export default class MigrateApply extends Command {
       // target database, so it belongs in the plan and behind the prompt.
       const pending = stack.pendingSchemaWork;
 
+      // [#13028] The boundary of what was reconciled, carried on every payload
+      // that can be read as "this deployment is migrated". A consumer gate
+      // needs `unexaminedObjects` — `applied: []` alone cannot tell "nothing to
+      // do" apart from "most of it was never looked at".
+      const compositionPayload = stack.composition.notes.length > 0
+        ? {
+            composition: {
+              hostConfig: stack.composition.hostConfigPath,
+              hostConfigLoaded: stack.composition.hostConfigLoaded,
+              ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
+              notes: stack.composition.notes,
+            },
+          }
+        : {};
+      const unexamined = stack.composition.coverage?.unexaminedObjects ?? 0;
+
       if (drift.length === 0 && pending.length === 0) {
-        if (flags.json) { await emitJson({ applied: [], skipped: [], created: [], message: 'in_sync' }, 0, { compact: true }); return; }
+        if (flags.json) {
+          await emitJson(
+            { applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
+            0,
+            { compact: true },
+          );
+          return;
+        }
+        if (unexamined > 0) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `Nothing to apply over the ${c.examinedObjects} object(s) this run examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL reconcile: it is not evidence that the deployment is in sync.',
+          );
+          return;
+        }
         printSuccess('Physical schema is already in sync with metadata — nothing to apply.');
         return;
       }
@@ -223,6 +284,7 @@ export default class MigrateApply extends Command {
           created,
           applied,
           skipped,
+          ...compositionPayload,
           duration: timer.elapsed(),
         });
         return;

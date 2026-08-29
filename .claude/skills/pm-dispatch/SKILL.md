@@ -263,7 +263,7 @@ devx@objectui;触发即规则 4 预登记的拆分条件),各席独立座位贴�
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心);`packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects`;`packages/drivers/driver-*`(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族有投入冻结指令;`formula` / `driver-sql` 不受影响)—— 车道合并(维护者 2026-08-19:「engine-core + metadata + drivers -> engine, identity + services → services 怎么样?」),原 `domain:engine-core` / `domain:metadata` / `domain:drivers` 三标签**退役**(只退出流通;GitHub 标签对象保留 —— 删标签会剥光已关卡、毁掉存档,止住流通的是本表) |
+| `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(落点在编译/查询核心);`packages/metadata*`(加载、注册、持久化、缓存、目录)、`packages/platform-objects`;`packages/drivers/driver-*` —— 车道合并(维护者 2026-08-19:「engine-core + metadata + drivers -> engine, identity + services → services 怎么样?」),原 `domain:engine-core` / `domain:metadata` / `domain:drivers` 三标签**退役**(只退出流通;GitHub 标签对象保留 —— 删标签会剥光已关卡、毁掉存档,止住流通的是本表) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`(2026-08-19 并入,原 `domain:identity` 标签**退役**,同上只退流通不删对象) |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域)—— 与 `domain:spec` 相交的三面按「是否围着 spec 契约转」切分 |
 | `domain:skills` | 两个技能根:`.claude/skills/**`(含本文件)+ `skills/**`(维护者 2026-08-11 裁定单设座位,与维护者走专题讨论;skills 更新 ADR-class,见 Guardrails);指令架构文件:根 `AGENTS.md` + 根 `CLAUDE.md`(所有面向 agent 的宪法文本);governed 面(统一定义见 ACCEPT 路径分叉)的治理执行文件:`.github/CODEOWNERS`(治理路由半边)+ SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`,一句话见守卫索引;未来同类同判)—— 维护者 2026-08-18 裁决:「skills 相关的应该都归你管,为什么派给了 devx」 |
@@ -357,25 +357,20 @@ fire 跑全仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用
 器);简报写明本轮跑的层(下轮读者靠它知道窗口盖了什么)。从不更新的卡不入窗是设计:它
 上次变更时已被扫过,老化欠账归半状态巡查不归小时轮(`since` 读法与成本对价见 runbook)。
 
-**Backlog sweep(常设职责,不等请求)。** 每轮扫任一析取命中的卡:① 全裸(无`pm:*`、
-无 `needs-user-decision`、无 `domain:*`);② 有 `pm:queue` 无 `domain:*`(仅多车道仓 —— 三流拆分
-见多仓协调;单车道仓无 `domain:*` 是队列卡常态,自扫归其席);③ 有 `domain:*` 无 pm-state。②③
-只取 `updated_at`
-早于 ~2 分钟的卡且不是可选项 —— 半标注卡是协议自己按设计生产的(一次标签写入即把
-老卡打成半标
-注),只带路由或状态机其一的卡对两个视图同时不可见。排除:`tracking`、`status:parked`(其正常
-形
-状恰是「带域标签无 pm-state」)、全部 `pm:seat` 贴、`qa-run` 记录(协议载体非工作);存量大时每
-轮限量 —— 新入卡①优先最新,半状态治愈积压②③**最老优先、P0 嫌疑先行**,⛔ 优先最新
-不适用(细则见 runbook)。**紧急卡直接分诊**
-(维护者 2026-08-13):维护者点名或 p0 嫌疑 ⇒ 立即起 `claude-fable-5` 分诊子代理,不等定时轮
-次;授权面 = 分诊本身(定级/路由/标签/既有评论格式),⛔ 不写码不认领;产出落卡,与定时轮
-分诊同格式同效力(细则见 `references/dispatch-runbook.md`)。
-**跨仓 pin 链的窗口级兜底也在本 sweep**(联动单第一产者仍是接受座位;⛔ 只立单不执行
-bump):
-objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新 console bump 单;见新 tag 族发布 ⇒ 在 cloud 立
-`.objectstack-sha` bump 单;单张封顶(先查同题 open 单,已有就追评刷新),工具链新形态只提请不扩
-面。
+**Backlog sweep(常设职责,不等请求)。** 每轮扫任一析取命中的卡:① 全裸(无`pm:*`、无
+`needs-user-decision`、无 `domain:*`);② 有 `pm:queue` 无 `domain:*`(仅多车道仓 —— 三流拆分见多仓
+协调;单车道仓无 `domain:*` 是队列卡常态,自扫归其席);③ 有 `domain:*` 无 pm-state。②③ 只取
+`updated_at` 早于 ~2 分钟的卡且不是可选项 —— 半标注卡是协议自己按设计生产的(一次标签
+写入即把老卡打成半标注),只带路由或状态机其一的卡对两个视图同时不可见。排
+除:`tracking`、`status:parked`(其正常形状恰是「带域标签无 pm-state」)、全部 `pm:seat` 贴、`qa-run`
+记录(协议载体非工作);存量大时每轮限量 —— 新入卡①优先最新,半状态治愈积压②③**最
+老优先、P0 嫌疑先行**,⛔ 优先最新不适用(细则见 runbook)。**紧急卡直接分诊** (维护者
+2026-08-13):维护者点名或 p0 嫌疑 ⇒ 立即起 `claude-fable-5` 分诊子代理,不等定时轮次;授权面 =
+分诊本身(定级/路由/标签/既有评论格式),⛔ 不写码不认领;产出落卡,与定时轮分诊同格式同
+效力(细则见 `references/dispatch-runbook.md`)。 **跨仓 pin 链的窗口级兜底也在本 sweep**(联动单第
+一产者仍是接受座位;⛔ 只立单不执行 bump): objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新
+console bump 单;见新 tag 族发布 ⇒ 在 cloud 立 `.objectstack-sha` bump 单;单张封顶(先查同题 open
+单,已有就追评刷新),工具链新形态只提请不扩面。
 
 **分类动作**(每张三选一 + 一个修复通道):**`pm:queue`** —— 有具名落点或复现的具体缺陷、
 范围明确
@@ -444,25 +439,30 @@ sanitizer 截断的卡不
 理或者bug修改,具体的代码细节其实ai看的比我清楚,让我判断我也判断不了」。
 
 - **人工地板(不论四棱是否同向,恒交维护者)**:功能新增类;ADR 类;协议/公开契约变化类;破坏
-  性或难
-  回滚动作(存量数据迁移形状、删除已发布能力、force 操作);**安全/权限边界**(放宽访问控
-  制、认
-  证流、RLS/共享语义、审计留痕的「修复」是伪装的产品决定);**门禁削弱**(降阈值、删必
-  查项、
-  抬 ratchet 上限、跳过/隔离测试 —— AI 有把CI 弄绿的结构性动机,削弱农场必须是人的动
-  作);**花
-  费/配额/舰队形态/默认模型档位** (动的是维护者的预算);**新增运行时第三方依赖**(供应
-  链/许可/维护义务)。
+  性或难回滚动作(存量数据迁移形状、删除已发布能力、force 操作);**安全/权限边界**(放宽
+  访问控制、认证流、RLS/共享语义、审计留痕的「修复」是伪装的产品决定);**门禁削
+  弱**(降阈值、删必查项、抬 ratchet 上限、跳过/隔离测试 —— AI 有把CI 弄绿的结构性动
+  机,削弱农场必须是人的动作);**花费/配额/舰队形态/默认模型档位** (动的是维护者的预
+  算);**新增运行时第三方依赖**(供应链/许可/维护义务)。
 - **代裁车道(分诊座位裁)**:代码整理(行为不变的重构)与 bug 修复。**机械边界测试**:改动是
-  否**
-  扩大接受集或公开面**?扩大 ⇒ 功能新增/协议变化 ⇒ 人工;接受集不变、拉回已声明契
-  约(declared =
-  enforced 的恢复)⇒ bug/整理 ⇒ 代裁车道。
+  否** 扩大接受集或公开面**?扩大 ⇒ 功能新增/协议变化 ⇒ 人工;接受集不变、拉回已声明
+  契约(declared = enforced 的恢复)⇒ bug/整理 ⇒ 代裁车道。
 - **置信门(全部成立才可代裁)**:① 四棱同向(全指向同一选项,任何分裂即升级);② 不在人工
   地板上;③ 不收窄、不推翻任何既有维护者裁决;④ 执行是**否决窗口不是许可门**——
   裁定 → 一次标签写入换 `needs-user-decision` 为工作态 → 卡上贴四棱块 + 结论 +
   `auto-adjudicated` 标记 → 轮次报告设**代裁清单**专节(聚合漂移的刹车);⑤ 本节首段的档位
   硬门达标(未达 ⇒ 本 fire 代裁整体跳过、卡原样留在决策箱走维护者路径,恒安全)。
+- **一类自裁门(维护者 2026-08-29 裁:「把「一类」判据写进代裁通道(skills 席立卡固化)」)**:
+  召唤中总监席可免呈自裁一张决策卡,当且仅当三判据全立:① 既有维护者裁定/在案类规
+  则/成文纪律**机械决定方向**(席位只应用不发明;裁决评论必须点名所用权威 —— 在案裁
+  定的日期/引文、类规则或纪律的家);② 失败方向响亮(拒绝/诊断/红门禁,永不无声行为漂
+  移)且一次 revert 可回;③ 四类人工地板零移动 —— 安全/权限边界 · 已发布契约语义(含
+  wire 形与产品面方向)· 产品能力取舍 · 门禁强度,任一触碰 ⇒ 照常现场呈报,不论①②;降
+  档保险丝照管(不达 `CONTRACT_REVIEW_TIER` ⇒ 通道整体跳过、卡停放),地板是排除项不是权重。
+  逐卡记录:裁决评论引本通道 + ①的权威,随后状态转移与现场裁过的卡同型(录裁 + 转
+  `pm:queue`,⛔ 裁不派);每场召唤收尾呈一张**摘要表(卡 · 权威 · 方向)**供维护者追认,被推
+  翻的行以该卡新裁决评论 + 状态转移执行。二类(边界:带一个可报点)与三类(地板)照旧现
+  场呈报,走每批 ≤5 与详细写法纪律。
 - **回翻条款**:代裁卡实施中发现契约终究要动 ⇒ dev 停手,卡回`needs-user-decision` —— 报告
   分叉,⛔ 永不静默重裁。
 - **请示纪律(维护者 2026-08-25:「不要不停的弹出来让我确认,很浪费时间」)**:①方向性授权(

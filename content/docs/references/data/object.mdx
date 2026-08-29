@@ -307,6 +307,7 @@ const result = ApiMethod.parse(data);
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
 | **description** | `string` | optional | Optional description shown under the group header |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'` |
 | **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | optional (default: `"none"`) | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
 | **defaultExpanded** | `boolean` | optional | [DEPRECATED → collapse] true → 'expanded', false → 'collapsed'. |
 | **collapsible** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum. |
@@ -656,6 +657,7 @@ External datasource binding (ADR-0015)
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
 | **description** | `string` | optional | Optional description shown under the group header |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Section visibility predicate (CEL) — the whole group (header included) is shown only when TRUE, else hidden (fail-closed). e.g. P`record.type == 'invoice'` |
 | **collapse** | `Enum<'none' \| 'expanded' \| 'collapsed'>` | optional (default: `"none"`) | [ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). |
 | **defaultExpanded** | `boolean` | optional | [DEPRECATED → collapse] true → 'expanded', false → 'collapsed'. |
 | **collapsible** | `boolean` | optional | [DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum. |

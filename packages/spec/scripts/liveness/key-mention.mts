@@ -187,9 +187,9 @@ export function reconcileKeyMentions(input: {
 
 /** Prescription printed under newly-unanchored citations. */
 export const KEY_MENTION_GUIDANCE = [
-  'A `live` entry cites a file that never names the property — in any of its',
-  'camelCase/snake_case spellings. The file exists and every cited line is in',
-  'range, so neither the existence check nor the line bound can see this; the',
+  'An evidence-scanned entry cites a file that never names the property — in any',
+  'of its camelCase/snake_case spellings. The file exists and every cited line is',
+  'in range, so neither the existence check nor the line bound can see this; the',
   'citation is nonetheless unfalsifiable as written.',
   '',
   'Measured, 7 of the first 11 of these were real rot, so start by assuming it is:',
@@ -199,10 +199,11 @@ export const KEY_MENTION_GUIDANCE = [
   '     promoted into another package (#10101), or a citation that named a',
   '     plausible SIBLING file all leave the old path resolving perfectly.',
   '     Find the file that names the key and cite that one, with a line.',
-  '  2. RE-CLASSIFY it — if no file in this repo names the key, the consumer may',
-  '     be in another realm (prefix it `objectui:` and pin the commit, per the',
-  '     ledger README) or may not exist at all, in which case the honest verdict',
-  '     is `dead` under ADR-0049 rather than a repoint to a plausible survivor.',
+  '  2. RE-CLASSIFY it — if no file in this repo names the key, the consumer (or,',
+  '     for a `planned` / `experimental` entry, the refuser) may be in another',
+  '     realm (prefix it `objectui:` and pin the commit, per the ledger README) or',
+  '     may not exist at all, in which case the honest verdict is `dead` under',
+  '     ADR-0049 rather than a repoint to a plausible survivor.',
   '  3. EXEMPT it — only when the consumer genuinely reads the key under a name',
   '     no naming-convention fold reaches (a compound child-key remap such as',
   '     `fromOverride.address` → `from_address`). Add a row to',

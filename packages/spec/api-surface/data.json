@@ -263,6 +263,7 @@
     "Field (type)",
     "FieldGroupCollapse (type)",
     "FieldGroupSection (interface)",
+    "FieldGroupVisibleWhen (type)",
     "FieldInput (type)",
     "FieldMaskingKeep (type)",
     "FieldMaskingKeepSchema (const)",

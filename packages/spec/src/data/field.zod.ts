@@ -236,21 +236,25 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * expresses BOTH cascading/dependent options (`record.country == 'cn'`) AND
    * role/context gating (`'admin' in current_user.positions`).
    *
-   * This scope is WIDER than field-level `visibleWhen`, not the same (#6146):
-   * options resolve through `resolveCascadingOptions` against the predicate
-   * scope (ADR-0068 / objectui#2284), while field- and section-level rules go
-   * through `evalFieldPredicate`, which binds `record` + `previous` + `parent`
-   * and never `current_user` (objectui#1582). Per-option is the one `*When`
-   * surface where a `current_user` test actually resolves. When it references
-   * sibling fields, declare those on the field's `dependsOn` so the form can gate
-   * and re-evaluate the option list as the parent changes.
+   * Options resolve through `resolveCascadingOptions` against that scope
+   * (ADR-0068 / objectui#2284), while field- and section-level rules go through
+   * `evalFieldPredicate` — a different evaluator, but since objectui#6010 (field)
+   * and objectui#6110 + #6111 (section) it is handed the same host scope, so
+   * `current_user` resolves on those surfaces too. What still separates this one
+   * is ENFORCEMENT, not vocabulary: per-option `visibleWhen` is the only
+   * VISIBILITY predicate the SERVER also evaluates — the rule validator refuses
+   * a write of a value whose predicate is false — while a field or section
+   * predicate is a rendering rule and nothing more. So a user-gated CHOICE
+   * belongs here; a user-gated FIELD belongs on a permission set. When the
+   * predicate references sibling fields, declare those on the field's `dependsOn`
+   * so the form can gate and re-evaluate the option list as the parent changes.
    *
    * ⚠️ Client-side hiding is UX, not authorization. When an option is gated for
    * access-control reasons the server MUST also reject writes of its value (the
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user` — wider than field-level visibleWhen, which has no `current_user`. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
 }));
 
 /**

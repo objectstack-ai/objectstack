@@ -639,9 +639,10 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:662-668` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:662-668` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
@@ -1211,18 +1212,18 @@ export const RecordActivityProps = strictObject({
 // `issue.input` so only a value which used to be legal gets the "was removed"
 // message (the `view.exportOptions` `'pdf'` precedent, #8010).
 const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
-  ['sidebar', "'sidebar' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+  ['sidebar', "'sidebar' was removed from `record:chatter` / `record:discussion` `position` — "
     + 'no renderer branch ever compared the old vocabulary: `RecordChatterPanel` docks on '
     + "'right'/'left' and renders in flow on 'bottom', so a spec-valid 'sidebar' silently fell "
     + "through to the in-flow render. Write 'right' — the docked side panel 'sidebar' meant. "
     + 'Run `os migrate meta` to list the mechanical edits for existing sources '
     + '(registered under protocol major 18); apply them by hand.'],
-  ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+  ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` — "
     + 'no renderer branch ever compared the old vocabulary. Write \'bottom\' — the renderer\'s '
     + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta` to "
     + 'list the mechanical edits for existing sources (registered under protocol major 18); '
     + 'apply them by hand.'],
-  ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` (#8762) "
+  ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` "
     + 'with no successor: no renderer branch ever implemented an overlay drawer — the value fell '
     + "through to the in-flow render. Write 'right' — the docked side panel is the nearest "
     + 'surviving shape of a side drawer. Run `os migrate meta` to list the mechanical edits '
@@ -1646,9 +1647,10 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-     * `containers.tsx` changed across the move from `9a3daf8d3` but both
-     * anchors below landed on the same lines): `containers.tsx:851-857` renders
+     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
+     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
+     * anchors below are unmoved, and both were re-READ there rather than
+     * inferred from that identity): `containers.tsx:851-857` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
@@ -1822,33 +1824,46 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
-   * `button.tsx` is byte-identical to the one at `9a3daf8d3`, so every anchor
-   * below is unmoved): `components/src/renderers/form/
-   * button.tsx:44-47` resolves `schema.icon`, and `:69` / `:71` render it on
-   * either side of the label per `iconPosition` (`mr-2 h-4 w-4` left,
-   * `ml-2 h-4 w-4` right), both suppressed while `loading`.
+   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — the
+   * read point MOVED rather than died, and the anchors below now hop into a
+   * second file): `components/src/renderers/form/
+   * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
+   * and `:57` / `:59` render it on either side of the label per
+   * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
+   * suppressed while `loading`.
    *
    * ⚠️ The resolution path is NOT `LazyIcon`, the slot the container icons on
-   * this surface use — it is a second, older path with its own normaliser and
-   * its own rename map, and the two accept different spellings:
-   *   - here: `toPascalCase` (splits on `-` only) → a one-entry rename map
-   *     (`Home` → `House`) → `icons[name]` from `lucide-react`
-   *     (`button.tsx:14-27`). An unknown name resolves to `undefined` and the
-   *     button renders with NO icon and no diagnostic anywhere.
+   * this surface use — it is the `action:*` resolver, and the two accept
+   * different spellings:
+   *   - here: `resolveIcon`
+   *     (`components/src/renderers/action/resolve-icon.ts:30-35`) →
+   *     `toPascalCase`, which splits on `-` only, then a one-entry rename map
+   *     (`Home` → `House`), both at `:14-24` → `icons[name]` from
+   *     `lucide-react`. An unknown name resolves to `null` and the button
+   *     renders with NO icon and no diagnostic anywhere.
    *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
    *     normalises to kebab-case, checks the name against Lucide's own name
    *     list, and degrades an unknown name to the `Database` glyph.
    *   So a spelling that draws an icon in a tab trigger can draw nothing here.
    *
+   * That the resolver is SHARED is what this record most recently had to be
+   * corrected for: until objectui#5993 `button.tsx` carried its own
+   * `toPascalCase` + `iconNameMap` + `icons` index — the same algorithm, but
+   * not the same function, so a rename added to `resolve-icon.ts` to absorb a
+   * lucide retirement (objectui#5586, objectui#5622) reached every `action:*`
+   * site and silently missed this one. Removing the duplicate changed where
+   * the algorithm lives, not what an author may write: the accept/reject
+   * behaviour promised above is the same on both sides of that move.
+   *
    * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:82-98` lists `label`, `variant`, `size`,
-   * `className`), so the Studio block designer does not offer the key.
-   * Unpublished is not unread — the header `icon` above is refused for the
-   * second, not the first, and this docblock exists to hold them apart.
+   * `icon` input (`button.tsx:70-87` lists `label`, `variant`, `size`,
+   * `className`; `:88-92` is `defaultProps`), so the Studio block designer
+   * does not offer the key. Unpublished is not unread — the header `icon`
+   * above is refused for the second, not the first, and this docblock exists
+   * to hold them apart.
    */
   icon: z.string().optional().describe(
-    'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
+    'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
   ),
   iconPosition: z.enum(['left', 'right'])
     .optional().default('left').describe('Icon position relative to label'),
@@ -1877,7 +1892,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
  */
 const elementFilterRetired = (key: string): string =>
   '`element:filter` property `' + key + '` was removed in @objectstack/spec 17 '
-  + '(#9220, ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
+  + '(ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
   + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
   + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
   + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
@@ -1923,11 +1938,11 @@ export const ElementFilterPropsSchema = lazySchema(() => strictObject({
  */
 const elementFormRetired = (key: string): string =>
   '`element:form` property `' + key + '` was removed in @objectstack/spec 17 '
-  + '(#9249, ADR-0049) — the whole `element:form` element is retired: no renderer for it '
+  + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
   + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
   + 'no-renderer exclusion — "use the object-bound `object-form` block"), so every key on '
   + 'this element was a capability claim nothing kept. Delete the `element:form` component '
-  + 'and use the object-bound `object-form` block instead (#7751) — it is rendered, '
+  + 'and use the object-bound `object-form` block instead — it is rendered, '
   + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
   + '`submitText`). '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
@@ -2222,9 +2237,9 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * absent from the map entirely, so even the #5068 gate said nothing.
  */
 const objectBlockHistory = (type: string) =>
-  `Until #7751 \`${type}\` had no entry in ComponentPropsMap at all, so the #5068 authoring gate `
-  + 'skipped the type: a misspelled key inside `properties` parsed clean, was stored, reached '
-  + "objectui's renderer and was ignored there (the #7750 shape — `filters` for `filter` silently "
+  `Until this type was added to ComponentPropsMap, \`${type}\` had no entry there at all, so `
+  + 'the authoring gate skipped it: a misspelled key inside `properties` parsed clean, was '
+  + "stored, reached objectui's renderer and was ignored there (`filters` for `filter` silently "
   + 'unfiltered a personal work queue, with a success receipt).';
 
 /**
@@ -2390,11 +2405,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 — all
-   * four files in the chain below, plus `lazy-icon.tsx`, are byte-identical to
-   * the ones at `9a3daf8d3`, so every anchor is unmoved), and the chain runs
+   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — of the
+   * files in the chain below, `index.tsx` DID change across the move off
+   * `190fbd01d` and its anchor moved `161` → `204`, while `ObjectMetricWidget
+   * .tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are
+   * byte-identical to the ones at `190fbd01d`; every anchor below was re-READ
+   * at the new pin rather than inferred from that identity), and the chain runs
    * three files:
-   * `plugin-dashboard/src/index.tsx:161` publishes it as a designer input
+   * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
    * `MetricWidget`; `MetricWidget.tsx:312-321` resolves it via
@@ -2611,22 +2629,22 @@ export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
 // a bare `z.string()` — and the authored-value census on both repos (this
 // repo + objectui#5939's) found zero occurrences to rewrite.
 const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
-  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): only the current wizard step\'s fields mount and the block\'s single '
+  ['wizard', "'wizard' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: only the current wizard step\'s fields mount and the block\'s single '
     + "Save bar acts as the wizard's Next, so parent + details never save through the atomic batch "
     + "(ADR-0001, the block's whole contract). Write 'simple' (sections render stacked) or 'tabbed'; "
     + "for a wizard without inline details author an `object-form`, where 'wizard' is honoured."],
-  ['split', "'split' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders inline but persists via `dataSource.create`, '
+  ['split', "'split' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders inline but persists via `dataSource.create`, '
     + "bypassing the atomic parent+details batch (ADR-0001, the block's whole contract). Write "
     + "'simple' or 'tabbed'; for a split presentation without inline details author an "
     + "`object-form`, where 'split' is honoured."],
-  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+  ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders in a portal dialog outside the master-detail '
     + "container, so the block's Save bar has no form to submit. Write 'simple' or 'tabbed'; for a "
     + "drawer overlay without inline details author an `object-form`, where 'drawer' is honoured."],
-  ['modal', "'modal' is not part of `object-master-detail-form` `formType` (#11873 — objectui#5939 "
-    + 'measured the renderer): the parent half renders in a portal dialog outside the master-detail '
+  ['modal', "'modal' is not part of `object-master-detail-form` `formType` — the renderer "
+    + 'was measured on both repos: the parent half renders in a portal dialog outside the master-detail '
     + "container (the same portal shape as 'drawer'), so the block's Save bar has no form to "
     + "submit. Write 'simple' or 'tabbed'; for a modal overlay without inline details author an "
     + "`object-form`, where 'modal' is honoured."],

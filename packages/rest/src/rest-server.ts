@@ -1484,6 +1484,37 @@ export class RestServer {
      * source — so the two capability cohorts cannot drift. `environmentId` comes
      * from the scoped route param (`/environments/:environmentId/packages`) when
      * present, `undefined` for the unscoped mount.
+     *
+     * ## [#12537] What the `.catch(() => undefined)` below MEANS downstream
+     *
+     * The swallow used to be undocumented at both of this door's swallow sites
+     * — the nearby prose explained why the wrapper exists and what an ABSENT
+     * resolver means, never what a FAILING one means. Measured rather than
+     * inferred, every claim below carrying a same-shaped positive control, in
+     * `package-door-execctx-fault-reading.test.ts`:
+     *
+     *  - The packages gate (`package-routes.ts`) reads `undefined` as the
+     *    ANONYMOUS SUBJECT — it touches the context through optional chaining
+     *    only, so an absent context is a subject whose every field is absent,
+     *    not a branch. On every wire-reachable method the anonymous floor
+     *    decides and REFUSES (401 `UNAUTHENTICATED`); with that floor isolated,
+     *    the capability clause reads the same `undefined` as a subject holding
+     *    the EMPTY capability set and refuses again (403 `FORBIDDEN`).
+     *    ⇒ neither a SKIPPED evaluation nor a fall-through to a DEFAULT or
+     *    SYSTEM subject — both of which would answer 200. The swallow fails
+     *    CLOSED; ⛔ it is not a permission-adjacent fail-open.
+     *  - ⭐ This `.catch` is the SECOND net, not the first. {@link computeExecCtx}
+     *    wraps its whole body in `try { … } catch { return undefined; }`, so a
+     *    production resolve RESOLVES with `undefined` on a fault instead of
+     *    rejecting — this `.catch` has nothing to catch on that path, and the
+     *    fault-to-anonymous conversion happens one level down.
+     *  - What the swallow costs is DIAGNOSABILITY, not permission: a faulting
+     *    resolver, an unwired resolver and a genuinely anonymous caller are ONE
+     *    answer, byte-identical on the wire.
+     *
+     * ⛔ Whether any of that should CHANGE is not settled here — un-swallowing
+     * was explicitly not ruled (#12537, 2026-08-29). This records the reading
+     * so the next reader inherits a measurement instead of an argument.
      */
     resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
         const environmentId = req?.params?.environmentId ?? undefined;

@@ -253,9 +253,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // adopting #9367's conversion) and
     // src/commands/serve-audit-registration.contract.test.ts (#9863) both import
     // `maskComments` from it to separate code from prose in the boot paths they
-    // scan. This gate did NOT demand the declaration -- its literal collector
-    // recognises path-shaped reads, and a relative import specifier that escapes
-    // the package is not one of the spellings it knows. Declared by hand because
+    // scan. This gate did NOT demand the declaration WHEN THIS ENTRY WAS
+    // WRITTEN -- its literal collector recognised path-shaped reads, and a
+    // relative import specifier that escapes the package was not one of the
+    // spellings it knew. It IS one now: #10452 taught the collector to read
+    // escaping relative specifiers and to RESOLVE them, so this pair is a
+    // declaration the gate DEMANDS, not a hand-maintained courtesy. Measured on
+    // the four entries #12932 added below -- one escaping import each and
+    // nothing else that escapes -- this gate went red on every one of them
+    // until the pair was declared, naming the repo-relative path the specifier
+    // resolves to and the test that imports it. Declared by hand FIRST because
     // the coupling is real whatever the collector saw: those scans' verdicts are
     // a function of this module's masking behaviour, so a change to it has to
     // re-run cli's suite. The undetected-import spelling is filed separately as
@@ -292,6 +299,36 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/check-cross-package-test-inputs.mjs',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // The #12964 trio, the second import-shaped coupling on this package.
+      // test/unbuilt-workspace-lead.test.ts imports `unbuiltWorkspaceLines`
+      // from `cli-unbuilt-workspace-lead.mjs` -- the decision `bin/run-dev.js`
+      // makes when oclif's "command not found" is really a workspace package
+      // with no build output -- and asserts the exact two lines it renders, so
+      // that module's behaviour IS this suite's verdict.
+      //
+      // All three entries, for three distinct reasons this roster records:
+      //   - the `.mjs` is the import, and the only one this gate demanded;
+      //   - the `.d.mts` is a real input to the typecheck verdict, exactly as
+      //     the js-comment-mask sibling above is. Measured on this card rather
+      //     than assumed: without it that test is TS7016 ("Could not find a
+      //     declaration file"), which lands in @objectstack/cli's ledgered
+      //     hidden test layer, whose note says the first new error in it must
+      //     go red rather than be absorbed;
+      //   - `cli-build-prerequisite.mjs` is what the `.mjs` delegates BOTH
+      //     halves of its answer to -- `looksLikeStaleWorkspaceDist` decides
+      //     whether to speak at all, and `workspaceBuildFix` renders the remedy
+      //     that test pins CHARACTER FOR CHARACTER. A change there moves this
+      //     suite's verdict without touching either file above it.
+      'scripts/cli-unbuilt-workspace-lead.mjs',
+      'scripts/cli-unbuilt-workspace-lead.d.mts',
+      'scripts/cli-build-prerequisite.mjs',
+      // And THIS file, for the mention shape a fourth time on this package: the
+      // test above names it while saying where its three cross-package inputs
+      // are declared. Settled the way `check-nul-bytes.mjs` is — the literal
+      // collector takes quoted paths without parsing, so a mention forces a
+      // declaration, and declaring one rarely-touched file is cheaper than
+      // rewording prose to dodge a scanner.
+      'scripts/cross-package-test-inputs.mjs',
       // `translation.zod.ts` is the second entry no test READS -- named in a
       // comment in test/i18n-section-coverage.test.ts, which describes it as the
       // DECLARATION face of the schema that test asserts against. It appears
@@ -423,6 +460,25 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // it is what gives `maskComments` its type, so this package's typecheck
     // verdict is a function of it too — the reason the `@objectstack/cli` entry
     // above declares the pair rather than the module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/plugin-email': {
+    // src/transports/smtp-port-contract.test.ts (#12993) imports `maskComments`
+    // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
+    // a comment and which is a DECLARATION of the SMTP port bound — the single
+    // question that gate exists to answer, since the whole point of the card is
+    // that `smtp.ts` still explains the range in prose while declaring it
+    // nowhere. The coupling is real: that guard's zero, and the masking control
+    // that makes the zero a measurement rather than a grep that ran, are both a
+    // function of the module's masking behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is declared alongside it
+    // because it is what gives `maskComments` its type, so this package's
+    // typecheck verdict is a function of it too — the reason the
+    // `@objectstack/cli` entry above declares the pair rather than the module
+    // alone.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',

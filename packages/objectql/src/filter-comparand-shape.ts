@@ -11,7 +11,8 @@
  * `assertListComparandShapes` below is a DELEGATING WRAPPER. The rule "a list
  * operator takes a list" has exactly one implementation, and it is
  * `@objectstack/spec/data`'s `filter-comparand-shape.ts`, whose module note
- * carries the divergence table, the #5499 freeze argument and the
+ * carries the divergence table, the shared-face argument (including the record
+ * of the dissolved #5499 freeze it was first argued from) and the
  * deliberately-not-refused list. Read that file for the rule; read this
  * function for the engine's two call sites and its wording contract.
  *

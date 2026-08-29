@@ -22,7 +22,12 @@
  *   - hidden fields never surface;
  *   - `collapse` passes through (deprecated `defaultExpanded` /
  *     `collapsible`+`collapsed` aliases are honoured for pre-ADR-0085
- *     metadata that reaches consumers un-normalized, e.g. bare DB rows).
+ *     metadata that reaches consumers un-normalized, e.g. bare DB rows);
+ *   - `visibleWhen` passes through verbatim (bare CEL string or Expression
+ *     envelope — the ADR-0049 re-introduction with enforcement): EVALUATION
+ *     is the renderer's section-gating contract (FALSE hides the whole
+ *     group, header included, fail-closed), not this helper's — grouping is
+ *     static layout, visibility is per-record state.
  *
  * Returns `null` when grouping does not apply — no declared groups, or no
  * visible field references one — so callers fall back to their existing
@@ -31,6 +36,16 @@
 
 /** Collapse behaviour of a derived section (mirrors ObjectFieldGroupSchema.collapse). */
 export type FieldGroupCollapse = 'none' | 'expanded' | 'collapsed';
+
+/**
+ * Carried section predicate (mirrors `ObjectFieldGroupSchema.visibleWhen`):
+ * a bare CEL string (author/bare-DB form) or an Expression envelope
+ * (`{ dialect, source, … }`, the post-parse form). Passed through verbatim —
+ * the renderer's section-gating contract evaluates it; this module only
+ * carries it. Structural on purpose: the helper stays dependency-free and
+ * tolerant of un-parsed metadata, same as its `collapse`-alias handling.
+ */
+export type FieldGroupVisibleWhen = string | { readonly [key: string]: unknown };
 
 /** One derived section. `key` is absent on the trailing ungrouped bucket. */
 export interface FieldGroupSection {
@@ -44,6 +59,8 @@ export interface FieldGroupSection {
   description?: string;
   /** Collapse behaviour; 'none' when the group declared nothing. */
   collapse: FieldGroupCollapse;
+  /** Section visibility predicate, passed through verbatim; absent = always visible. Never present on the ungrouped bucket. */
+  visibleWhen?: FieldGroupVisibleWhen;
   /** Member field NAMES in field-declaration order. Renderers resolve defs themselves. */
   fields: string[];
 }
@@ -86,10 +103,20 @@ export const FIELD_GROUP_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
 type AnyRec = Record<string, unknown>;
 
 /** Normalize one declared group entry; null for malformed/keyless entries. */
-function readGroup(g: unknown): { key: string; label?: string; icon?: string; description?: string; collapse: FieldGroupCollapse } | null {
+function readGroup(g: unknown): { key: string; label?: string; icon?: string; description?: string; collapse: FieldGroupCollapse; visibleWhen?: FieldGroupVisibleWhen } | null {
   if (!g || typeof g !== 'object' || Array.isArray(g)) return null;
   const grp = g as AnyRec;
   if (typeof grp.key !== 'string' || grp.key.length === 0) return null;
+  // Tolerant passthrough, same posture as the collapse aliases below: a bare
+  // CEL string or an Expression envelope rides through; any other shape is
+  // dropped rather than handed to a renderer as a malformed predicate (which
+  // would fail-closed and hide the group for a value that was never a
+  // predicate at all).
+  const vw = grp.visibleWhen;
+  const visibleWhen: FieldGroupVisibleWhen | undefined =
+    (typeof vw === 'string' && vw.length > 0) || (typeof vw === 'object' && vw !== null && !Array.isArray(vw))
+      ? (vw as FieldGroupVisibleWhen)
+      : undefined;
   let collapse: FieldGroupCollapse = 'none';
   if (grp.collapse === 'expanded' || grp.collapse === 'collapsed' || grp.collapse === 'none') {
     collapse = grp.collapse;
@@ -106,6 +133,7 @@ function readGroup(g: unknown): { key: string; label?: string; icon?: string; de
     icon: typeof grp.icon === 'string' ? grp.icon : undefined,
     description: typeof grp.description === 'string' ? grp.description : undefined,
     collapse,
+    ...(visibleWhen !== undefined ? { visibleWhen } : {}),
   };
 }
 
@@ -155,6 +183,7 @@ export function deriveFieldGroupLayout(def: unknown): FieldGroupSection[] | null
       ...(g.icon !== undefined ? { icon: g.icon } : {}),
       ...(g.description !== undefined ? { description: g.description } : {}),
       collapse: g.collapse,
+      ...(g.visibleWhen !== undefined ? { visibleWhen: g.visibleWhen } : {}),
       fields: names,
     });
   }

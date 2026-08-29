@@ -312,18 +312,10 @@ describe('MetadataPluginProtocol', () => {
           fallback: 'filesystem' as const,
           rootDir: '/metadata',
         },
-        customizationPolicies: [{
-          metadataType: 'object',
-          allowCustomization: true,
-          lockedFields: ['name', 'type'],
-          customizableFields: ['label', 'description'],
-        }],
-        mergeStrategy: {
-          defaultStrategy: 'three-way-merge' as const,
-          alwaysKeepCustom: ['fields.*.label'],
-        },
-        // `additionalTypes` was retired by #8586 (ADR-0049) — authoring it is
-        // now a parse error; see additional-types-retirement.test.ts for the pins.
+        // `additionalTypes` was retired by #8586, and `customizationPolicies`
+        // / `mergeStrategy` by #13135 (both ADR-0049) — authoring any of them
+        // is now a parse error; see additional-types-retirement.test.ts and
+        // metadata-customization-retirement.test.ts for the pins.
         enableEvents: true,
         validateOnWrite: true,
         enableVersioning: true,
@@ -332,7 +324,6 @@ describe('MetadataPluginProtocol', () => {
 
       const result = MetadataPluginConfigSchema.parse(config);
       expect(result.storage.datasource).toBe('default');
-      expect(result.customizationPolicies).toHaveLength(1);
       expect(result.cacheMaxItems).toBe(5000);
     });
 

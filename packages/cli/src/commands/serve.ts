@@ -58,6 +58,7 @@ import {
   parseRequestedPort,
   formatInvalidPortNotice,
   portTextReadNotice,
+  MAX_PORT,
   type PortInputSource,
 } from '../utils/port-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
@@ -367,6 +368,180 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
     + chalk.dim('     is the only place that says why.\n')
     + chalk.dim(`     Free a port in ${startPort}–${lastPort}, or pick another via PORT=<port> (or --port <port>).`)
   );
+}
+
+/**
+ * The port the HTTP server ACTUALLY bound, read off the transport that bound it
+ * (#13062).
+ *
+ * ## The defect this closes
+ *
+ * `serve` used to publish the port it was ASKED for on all three of the
+ * channels that ANNOUNCE an address — the `objectstack:listening` IPC message,
+ * the ready banner's `API:` row (through {@link resolveAuthBaseUrl}), and
+ * `runtime.<environment>.json`. For every port but one the requested and the
+ * bound value coincide, which is why it stayed invisible; for `0` they CANNOT
+ * coincide. `MIN_PORT = 0` is legal on purpose — `utils/port-contract.ts` says
+ * so in its own words, from its own measurement, that 0 is "a REQUEST, not an
+ * error", and `listen(0)` binds a kernel-assigned port. So `os serve --port 0`
+ * announced `{ port: 0 }`, printed `API: http://localhost:0/` and wrote
+ * `"port": 0`: three channels naming an address nothing is listening on, and
+ * nothing anywhere erroring.
+ *
+ * ## Where the answer comes from, and why it is not a second measurement
+ *
+ * `IHttpServer.getPort?()` is a DECLARED contract member
+ * (`@objectstack/spec/contracts`): *"after `listen()` resolves, implementations
+ * that provide this member MUST return the real bound port — in particular when
+ * `listen(0)` requested an ephemeral port"*. The Hono transport fills it from
+ * `@hono/node-server`'s own listening callback (`info.port`, the socket's
+ * `address().port`). So this asks the one component that KNOWS instead of
+ * re-deriving the number from the request — the same rule
+ * {@link formatExhaustedPortSearchNotice} follows just above, where every number
+ * printed is the failing walk's own record rather than a recomputation.
+ *
+ * ## The fallback IS today's behaviour, deliberately
+ *
+ * A boot with no transport (`--server=false`), a host that mounts a transport
+ * not implementing the optional member, or an answer that cannot be a bound
+ * port, all return `requestedPort` — exactly what every channel published
+ * before this function existed. This repair may not narrow what boots.
+ *
+ * ⛔ `0` is NOT accepted as an ANSWER here, though it is a legal REQUEST: no
+ * socket is ever bound to port 0, so a transport reporting it has not listened
+ * yet (`HonoHttpServer.getPort()` falls back to its constructor argument until
+ * `listen()` resolves), and republishing it is the defect itself.
+ */
+export function resolveBoundPort(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+  requestedPort: number,
+): number {
+  let reported: unknown;
+  try {
+    // `http.server` is the CANONICAL service name; `http-server` is a
+    // deprecated alias for the same instance (#4251) that new code must not
+    // read. ⚠️ `getService` THROWS when nothing registered the name — it does
+    // not return undefined — hence the `try`, not a `?.` chain alone.
+    const server = kernel?.getService?.('http.server') as { getPort?: () => unknown } | undefined;
+    if (typeof server?.getPort !== 'function') return requestedPort;
+    reported = server.getPort();
+  } catch {
+    return requestedPort;
+  }
+  if (typeof reported !== 'number' || !Number.isInteger(reported)) return requestedPort;
+  if (reported <= 0 || reported > MAX_PORT) return requestedPort;
+  return reported;
+}
+
+/** The `objectstack:listening` IPC message the `os dev` parent waits for. */
+export interface ListeningMessage {
+  type: 'objectstack:listening';
+  port: number;
+  url: string;
+}
+
+/**
+ * The three channels {@link publishBoundPort} drives — declared in the ONE
+ * order it is safe to drive them in, which is also the order the fields are
+ * listed here.
+ */
+export interface BoundPortChannels {
+  /**
+   * Writes `runtime.<environment>.json`. ⛔ Must COMPLETE before either
+   * announcement below: it is the file both of them send a consumer to.
+   */
+  writeRuntimeState: (published: { port: number; url: string }) => void;
+  /** Sends {@link ListeningMessage}, when an IPC channel is open. */
+  announceListening: (message: ListeningMessage) => void;
+  /** Prints the ready banner, whose `API:` row names the same address. */
+  printBanner: () => void;
+}
+
+/**
+ * Publish the bound port on all three channels, in the one order that is safe.
+ *
+ * ## The bug this shape exists to make impossible
+ *
+ * `os serve` announces its address on three channels: the runtime state file
+ * `runtime.<environment>.json`, the `objectstack:listening` IPC message, and
+ * the ready banner. Two of those are ANNOUNCEMENTS a consumer reacts to; the
+ * third is the FILE those consumers then open. Published in the order they
+ * happened to be written — banner, IPC, file — every consumer that believes an
+ * announcement races a file that is not there yet:
+ *
+ * ```text
+ * banner  ─▶ a supervisor sees "ready" and opens runtime.env_local.json
+ * IPC     ─▶ the `os dev` parent sees the port
+ * file    ─────────────────────────▶ ...written here. The ENOENT already happened.
+ * ```
+ *
+ * ⛔ Not hypothetical, and ⛔ not a test artefact. The e2e that pins #13062's
+ * claim (`serve-publishes-bound-port.e2e.test.ts`) is an ORDINARY consumer — it
+ * waits for the banner AND the IPC message, then reads the file — and it
+ * ejected 14 PRs from the shared merge queue in a rolling 24 hours (10
+ * independent hits, #13158) with `ENOENT: ... runtime.env_local.json`. A real
+ * supervisor written the same way loses the same race; all a loaded machine
+ * does is deschedule the child between the announcement and the write, which is
+ * why it read as a flake for a day.
+ *
+ * ⛔ The repair is NOT to make the reader poll. A consumer that must poll after
+ * being told "ready" was told "ready" too early — polling spreads the defect
+ * into every consumer forever and hides it from the one place that can fix it.
+ * The producer owns the ordering: **write the file, THEN announce it.**
+ *
+ * ## Why the channels are injected rather than called inline
+ *
+ * The ORDER is the contract here, and an order is only pinned by a test that
+ * can observe it. Passing the channels in lets
+ * `serve-bound-port-publish-order.test.ts` record the sequence and go red
+ * DETERMINISTICALLY the day it is reversed. An end-to-end test cannot do that:
+ * it can only lose the race often enough for someone to notice — which is
+ * precisely the year-of-flakes this replaces.
+ */
+export function publishBoundPort(boundPort: number, channels: BoundPortChannels): void {
+  const url = `http://localhost:${boundPort}`;
+  // 1 ─ THE FILE FIRST. Both announcements below send a consumer to it.
+  channels.writeRuntimeState({ port: boundPort, url });
+  // 2 ─ IPC: the `os dev` parent learns the real port without polling.
+  channels.announceListening({ type: 'objectstack:listening', port: boundPort, url });
+  // 3 ─ The banner: a human, or a supervisor tailing stdout, reads the same
+  //     address — and by now the state file it names is on disk.
+  channels.printBanner();
+}
+
+/**
+ * The real channels: the same three writes this command has always done, with
+ * their failure handling unchanged.
+ *
+ * Each leg keeps its OWN `try` — a boot must not die because a supervision file
+ * could not be written or because an IPC channel had already closed, and one
+ * leg failing must not cost the other two. Only the ORDER changed (#13193).
+ */
+export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChannels {
+  return {
+    writeRuntimeState: ({ port, url }) => {
+      try {
+        const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
+        const runtimeFile = path.join(resolveObjectStackHome(), `runtime.${environmentId}.json`);
+        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+        fs.writeFileSync(runtimeFile, JSON.stringify({
+          pid: process.pid,
+          port,
+          url,
+          environmentId,
+          startedAt: new Date().toISOString(),
+        }, null, 2));
+        const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
+        process.on('exit', cleanupRuntimeFile);
+      } catch { /* non-fatal — supervision file is best-effort */ }
+    },
+    announceListening: (message) => {
+      try {
+        if (typeof process.send === 'function') process.send(message);
+      } catch { /* IPC channel closed — best-effort */ }
+    },
+    printBanner,
+  };
 }
 
 /**
@@ -4208,10 +4383,31 @@ export default class Serve extends Command {
       // available to this process at all.
       if (multiNodeVerdict) emitMultiNodeCapTelemetry(kernel, multiNodeVerdict);
 
+      // ── The port this process ACTUALLY bound (#13062) ─────────────
+      // Read ONCE, here, and handed to every channel that announces an address:
+      // the ready banner below, the `objectstack:listening` IPC message and
+      // `runtime.<environment>.json`. Those three were three outputs of ONE
+      // number, and that number was the port that had been REQUESTED — equal to
+      // the bound one for every value except the one where it can never be
+      // (`--port 0`), which is how all three came to announce `localhost:0`
+      // with nothing erroring.
+      //
+      // ⭐ One read, not three. Three call sites would be free to disagree, and
+      // what this repairs is exactly a set of channels that agreed with each
+      // other while disagreeing with the socket.
+      const boundPort = resolveBoundPort(kernel, port);
+
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
-      printServerReady({
+      //
+      // ⭐ A THUNK, not a call (#13193). The banner is one of the three
+      // bound-port channels, and {@link publishBoundPort} owns the order the
+      // three fire in — the state file has to be on disk before anything
+      // announces the address that names it. Nothing INSIDE this literal
+      // changed, and nothing in it is async, so deferring it to the call a few
+      // lines below is a pure move.
+      const printBanner = () => printServerReady({
         // #10646 — the banner used to take `port` and compose
         // `http://localhost:<port>` itself, which is where this process
         // LISTENS, not where an operator can reach it. On the EE 4.1.0 compose
@@ -4228,12 +4424,15 @@ export default class Serve extends Command {
         // reads only `process.env` and the port, so calling it here changes
         // nothing about what is bound or advertised — this is printed text.
         //
-        // `port` is the port the server ACTUALLY bound (past any dev auto-shift),
-        // so the `http://localhost:<port>` tail of the chain still names the
-        // right address in the local dev loop. `baseOrigin` is `null` when the
-        // chain produced something unparseable; the banner then prints paths
-        // with no origin rather than a confident wrong URL.
-        externalBaseOrigin: resolveAuthBaseUrl(port).baseOrigin,
+        // `boundPort` is the port the server ACTUALLY bound — read back off the
+        // transport that bound it ({@link resolveBoundPort}), not the number
+        // this process was asked for. So the `http://localhost:<port>` tail of
+        // the chain still names the right address in the local dev loop,
+        // including under `--port 0`, where the requested value can never be
+        // the bound one. `baseOrigin` is `null` when the chain produced
+        // something unparseable; the banner then prints paths with no origin
+        // rather than a confident wrong URL.
+        externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,
@@ -4272,33 +4471,27 @@ export default class Serve extends Command {
       });
 
       // ── Publish the actually-bound port ────────────────────────────
-      // `port` here is the port the HTTP server actually bound — already
-      // resolved past any dev auto-shift (busy 3000 → 3001). Publish it so
-      // supervisors and the `os dev` parent never have to guess:
-      //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
-      //     parent learns the real port without polling.
+      // `boundPort` here is the port the HTTP server actually bound, read back
+      // off the transport ({@link resolveBoundPort}) — ⛔ NOT `port`, the number
+      // this process was ASKED for. This comment used to claim `port` was the
+      // bound one, and it was not: the two part company whenever `listen()`
+      // CHOSE the port rather than accepting it — under `--port 0` always, and
+      // whenever the transport's own bind walked past a port taken between this
+      // command's probe and that `listen()`. (Past a DEV auto-shift `port` is
+      // already right, because `getAvailablePort()` reassigned it; that is the
+      // reading under which the old sentence looked true.) Publish the bound
+      // one so supervisors and the `os dev` parent never have to guess:
       //   • runtime.json: a small state file under OS_HOME for external
       //     supervisors / health checks (pid + port + url).
-      const runtimeUrl = `http://localhost:${port}`;
-      try {
-        if (typeof process.send === 'function') {
-          process.send({ type: 'objectstack:listening', port: Number(port), url: runtimeUrl });
-        }
-      } catch { /* IPC channel closed — best-effort */ }
-      try {
-        const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
-        const runtimeFile = path.join(resolveObjectStackHome(), `runtime.${environmentId}.json`);
-        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
-        fs.writeFileSync(runtimeFile, JSON.stringify({
-          pid: process.pid,
-          port: Number(port),
-          url: runtimeUrl,
-          environmentId,
-          startedAt: new Date().toISOString(),
-        }, null, 2));
-        const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
-        process.on('exit', cleanupRuntimeFile);
-      } catch { /* non-fatal — supervision file is best-effort */ }
+      //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
+      //     parent learns the real port without polling.
+      //   • the ready banner, whose `API:` row names the same address.
+      //
+      // ⭐ That list is in ORDER, and the order is the whole point (#13193):
+      // the file is written BEFORE either channel announces the address that
+      // sends a consumer to it. {@link publishBoundPort} carries the race the
+      // old order lost, and the reason the repair is not reader-side polling.
+      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.

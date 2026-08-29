@@ -24,6 +24,7 @@ import { describeDriverConnection } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
 import {
   buildSchemaMigrationPlugins,
+  measureComposedCoverage,
   type SchemaMigrationComposition,
 } from './schema-migration-plugins.js';
 
@@ -337,7 +338,10 @@ export async function bootSchemaStack(
         cwd: opts.projectRoot ?? process.cwd(),
         skipSeedData: defer,
       })
-    : { plugins: [], hostConfigPath: null, hostConfigLoaded: false, notes: [] } satisfies SchemaMigrationComposition;
+    : {
+        plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
+        notes: [], coverage: null,
+      } satisfies SchemaMigrationComposition;
   for (const plugin of composition.plugins) {
     await kernel.use(plugin as any);
   }
@@ -347,6 +351,22 @@ export async function bootSchemaStack(
   await runtime.start();
 
   const driver = findSqlDriver(kernel);
+
+  // #13028 — the composed host declared its objects in `init()`; the pass that
+  // hands them to their driver lives in `ObjectQLPlugin.start()`, which the
+  // declaration-phase composition suppressed (and which a host bringing its
+  // OWN engine plugin displaces outright, since duplicate registration
+  // overwrites by name). Drive that pass here, over the deferral this boot
+  // already armed, and record what it could NOT reach — so a partial plan says
+  // so instead of reading as coverage. Runs only when this boot actually
+  // composed a host; every other caller is untouched.
+  if (opts.composeHostStack === true && composition.notes.length > 0) {
+    const measured = await measureComposedCoverage(kernel, driver, defer);
+    composition.coverage = measured.coverage;
+    composition.notes.push(...measured.notes);
+  }
+
+  // Read AFTER the pass above — that is the step which fills both of them.
   const managedTableCount = driver ? (driver as any).managedObjectFields?.size ?? 0 : 0;
   const pendingSchemaWork = defer && driver?.previewDeferredSchemaWork
     ? await driver.previewDeferredSchemaWork()

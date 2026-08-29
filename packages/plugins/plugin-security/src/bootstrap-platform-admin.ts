@@ -67,6 +67,12 @@ import {
   resolveTenancyPosture,
 } from '@objectstack/types';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
+import {
+  createSeedWriteRefusals,
+  reportSeedWriteRefusals,
+  type SeedWriteRefusals,
+} from './per-organization-catalog.js';
+import { matchesDeclaredOwnerEmail } from './platform-owner-wall-bypass.js';
 
 interface BootstrapOptions {
   /** Logger from PluginContext. */
@@ -113,19 +119,31 @@ async function tryFind(ql: any, object: string, where: any, limit = 100): Promis
   }
 }
 
-async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
+// ⛔ The `catch` RECORDS the refusal before it answers, when the caller passed
+// a log to record into. Answering `null`/`false` alone is what made a refused
+// write indistinguishable from "nothing to do": `seeded` never grows, the pass
+// returns normally, and the boot reports a successful seed of zero rows. Still
+// no rethrow — this pass reports, it does not decide whether the deployment
+// boots. See `reportSeedWriteRefusals` in `per-organization-catalog.ts`.
+async function tryInsert(
+  ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
+): Promise<any | null> {
   try {
     return await ql.insert(object, data, { context: SYSTEM_CTX });
-  } catch {
+  } catch (e) {
+    refusals?.record(object, e);
     return null;
   }
 }
 
-async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
+async function tryUpdate(
+  ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
+): Promise<boolean> {
   try {
     await ql.update(object, data, { context: SYSTEM_CTX });
     return true;
-  } catch {
+  } catch (e) {
+    refusals?.record(object, e);
     return false;
   }
 }
@@ -250,6 +268,9 @@ export async function bootstrapPlatformAdmin(
   const seeded: Record<string, string> = {};
   let resynced = 0;
   let resyncSkipped = 0;
+  // One log per pass, not per refused row: a legacy platform-wide unique index
+  // refuses EVERY default permission set, and a line each would bury the remedy.
+  const refusals = createSeedWriteRefusals();
   for (const ps of bootstrapPermissionSets) {
     if (!ps.name) continue;
     const existing = await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1);
@@ -263,7 +284,7 @@ export async function bootstrapPlatformAdmin(
       // platform still owns.
       if (options.resync) {
         if (!row.managed_by || row.managed_by === 'platform') {
-          if (await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...platformOwnedFields(ps) })) {
+          if (await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...platformOwnedFields(ps) }, refusals)) {
             resynced += 1;
           }
         } else {
@@ -297,10 +318,16 @@ export async function bootstrapPlatformAdmin(
       // the flag for. Matches `bootstrap-builtin-positions.ts` and
       // `bootstrap-system-capabilities.ts`, which already stamp `'platform'`.
       managed_by: 'platform',
-    });
+    }, refusals);
     if (created?.id) seeded[ps.name] = created.id;
     else if (created) seeded[ps.name] = id;
   }
+
+  // Reported HERE rather than at function end: every `return` below this point
+  // is an early exit of the PROMOTION half, and the catalog seed above is
+  // finished either way. Placing it at the end would make the diagnosis
+  // conditional on how promotion happened to resolve.
+  reportSeedWriteRefusals(logger, refusals);
 
   const seededCount = Object.keys(seeded).length;
   // [#11532] Under a walled posture these rows are organization-less BY RULING
@@ -439,8 +466,11 @@ export async function bootstrapPlatformAdmin(
         if (u?.id) byId.set(u.id, u);
       }
     }
+    // [#12974] The email comparison is the SHARED canonical one — the same
+    // predicate the Layer 0 owner wall bypass keys on (see
+    // `platform-owner-wall-bypass.ts`, which names this gate as its twin).
     const owners = [...byId.values()].filter(
-      (u) => isHumanUser(u) && String(u.email ?? '').trim().toLowerCase() === wanted,
+      (u) => isHumanUser(u) && matchesDeclaredOwnerEmail(u, declaredOwnerEmail!),
     );
     if (owners.length === 0) {
       logger?.info?.(

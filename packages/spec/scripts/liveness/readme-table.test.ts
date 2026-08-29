@@ -17,9 +17,12 @@ import {
   STATE_COUNTS_GEN_COMMAND,
   STATE_COUNTS_GUIDANCE,
   STATE_COUNTS_PATH,
+  STATE_COUNTS_TOTALS_GUIDANCE,
+  STATUS_COLUMNS,
   foldStateCounts,
   parseStateTable,
   reconcileReadmeTable,
+  reconcileStateCountTotals,
   reconcileStateCounts,
   renderStateCounts,
 } from './readme-table.mts';
@@ -360,5 +363,130 @@ describe('the counts prescription', () => {
     const text = STATE_COUNTS_GUIDANCE.join('\n');
     expect(text).toContain('READ the diff');
     expect(text).toContain('Notes cell');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The fold's own blind spot (#13083)
+//
+// Every leg above reads the README or the artifact, and a fold that dropped a
+// status satisfies all of them: `renderStateCounts` computes `classified` as the
+// sum of the four columns beside it, the freshness leg re-renders the same fold
+// and compares bytes, and the README agrees with that. So the population these
+// cases describe is invisible to every test above this line, and the real gate
+// is GREEN on it — which is why the proof has to be here and in
+// check-liveness.test.ts, and cannot come from `pnpm check:liveness` passing.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('reconcileStateCountTotals — the fold must not lose a property', () => {
+  /** `byStatus` and `classified` as the gate reports them, always in agreement. */
+  const HONEST = {
+    governed: ['object', 'field'],
+    byStatus: { object: { live: 49, planned: 1 }, field: { live: 66 } },
+    classified: { object: 50, field: 66 },
+  };
+
+  it('stays quiet when every property sits in one of the four published columns', () => {
+    expect(reconcileStateCountTotals(HONEST)).toEqual([]);
+  });
+
+  // A type the report does not carry is zero and zero — "measured as nothing"
+  // must not read as a gap, or the leg fires on every green tree and stops being
+  // read. Same rule `foldStateCounts` states for its own zero row.
+  it('stays quiet on a governed type the report does not carry at all', () => {
+    expect(
+      reconcileStateCountTotals({ governed: ['object', 'ghost'], byStatus: { object: { live: 49 } }, classified: { object: 49 } }),
+    ).toEqual([]);
+  });
+
+  // THE CARD'S OWN INSTANCE. One row written `"status": "planed"`: the walk
+  // classified 50, the four columns carry 49, and before this leg existed the
+  // artifact published 49 with nothing able to say otherwise.
+  it('FAILS when a status outside the four columns is counted by the walk', () => {
+    const errors = reconcileStateCountTotals({
+      governed: ['object'],
+      byStatus: { object: { live: 49, planed: 1 } },
+      classified: { object: 50 },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('object');
+    expect(errors[0]).toContain('publishes 49 classified, the walk counted 50');
+    expect(errors[0]).toContain('1 in `planed`');
+  });
+
+  it('names every unnamed bucket, so one run repairs all of them', () => {
+    const errors = reconcileStateCountTotals({
+      governed: ['object'],
+      byStatus: { object: { live: 49, planed: 1, experimentl: 2 } },
+      classified: { object: 52 },
+    });
+    expect(errors[0]).toContain('1 in `planed`');
+    expect(errors[0]).toContain('2 in `experimentl`');
+  });
+
+  it('reports each offending type separately rather than one grand total', () => {
+    const errors = reconcileStateCountTotals({
+      governed: ['object', 'field', 'api'],
+      byStatus: { object: { live: 1, planed: 1 }, field: { live: 66 }, api: { dead: 2, ded: 3 } },
+      classified: { object: 2, field: 66, api: 5 },
+    });
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('object');
+    expect(errors[1]).toContain('api');
+  });
+
+  // The OTHER way the fold loses a property, and the reason this leg is
+  // arithmetic rather than a spell-check on bucket names: a status added to
+  // STATUS_COLUMNS is published vocabulary, so the data-side guard in
+  // check-liveness.mts accepts it — and `StateCountsRow` still names four fields
+  // by hand, so the fold drops it anyway. Nothing else in either file catches
+  // this, and the message must not claim a typo when there is none.
+  it('FAILS, without blaming a typo, when the columns simply do not add up', () => {
+    const errors = reconcileStateCountTotals({
+      governed: ['object'],
+      byStatus: { object: { live: 49 } },
+      classified: { object: 51 },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('no unnamed status accounts for the gap');
+  });
+
+  // The vocabulary is read from STATUS_COLUMNS, never restated: the guard and
+  // the fold that drops the value must not be able to disagree about the four
+  // names. Pinned because a second copy is exactly how the two come apart.
+  it('measures against the published vocabulary, not a second copy of it', () => {
+    expect([...STATUS_COLUMNS]).toEqual(['live', 'experimental', 'dead', 'planned']);
+    const errors = reconcileStateCountTotals({
+      governed: ['object'],
+      byStatus: { object: { live: 1, planed: 1 } },
+      classified: { object: 2 },
+    });
+    expect(errors[0]).toContain(STATUS_COLUMNS.join(' / '));
+  });
+});
+
+describe('the totals prescription', () => {
+  // The failure a reader is most likely to "fix" the wrong way: it looks like
+  // staleness, and regenerating re-publishes the same understated number,
+  // because the generator folds through the same four names.
+  it('says regeneration is not the repair, and names why', () => {
+    const text = STATE_COUNTS_TOTALS_GUIDANCE.join('\n');
+    expect(text).toContain(STATE_COUNTS_GEN_COMMAND);
+    expect(text).toContain('is not the repair');
+    expect(text).toContain('the same four names');
+  });
+
+  it('forbids widening the vocabulary to get green, and forbids editing the artifact', () => {
+    const text = STATE_COUNTS_TOTALS_GUIDANCE.join('\n');
+    expect(text).toContain('Never add the misspelling to STATUS_COLUMNS');
+    expect(text).toContain('Never satisfy this by editing the artifact');
+  });
+
+  // The deliberate case has to be reachable from the message, or the only
+  // documented reading is "somebody typo'd" and a real vocabulary change gets
+  // hammered into the shape that makes the error go away.
+  it('describes the deliberate fifth status as an artifact-shape decision', () => {
+    const text = STATE_COUNTS_TOTALS_GUIDANCE.join('\n');
+    expect(text).toContain('artifact-shape decision');
+    expect(text).toContain('StateCountsRow');
   });
 });

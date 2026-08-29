@@ -520,6 +520,18 @@ jobs:
       - name: Stack-collection enumerations answerable to stack.zod.ts
         run: pnpm check:stack-collection-maps
 
+      # The dashboard widget `options` census vs the spec (#12926). The parser's
+      # `CONSUMED_WIDGET_OPTION_KEYS` decides which `options` keys get a
+      # `unconsumed-widget-option` warning, and five of its six members are the
+      # properties `DashboardWidgetOptionsSchema` declares in THIS repo's spec.
+      # That half was a literal pin asserted against itself, so a key added to
+      # the schema left the parser warning about spec-legal, renderer-consumed
+      # metadata — the shape that gets a diagnostic deleted by the next person
+      # who hits it. The sixth member (`description`) is a resolver output, kept
+      # as a ledger row that is checked from both ends rather than skipped.
+      - name: Widget `options` census derived from the spec, not pinned
+        run: pnpm check:widget-option-census
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved
@@ -2110,6 +2122,26 @@ jobs:
       - name: Durability-degradation log-level guard
         run: pnpm check:durability-log-level
 
+      # Logger receiver-detach guard (#12820, from #12773 / #12792). `a.b(...)`
+      # passes `a` as the receiver; `(a.error ?? a.warn)(...)`, `const fn =
+      # a.error`, `const { error } = a`, `run(a.warn)` and `{ warn: a.warn }` all
+      # evaluate to the bare function and call it with `this === undefined`.
+      # `@objectstack/core`'s ObjectLogger dereferences `this` on every channel,
+      # so a host that injects one turns those lines into a TypeError — on the
+      # channel whose whole job is to be loud when something is already wrong.
+      # The class was closed three times one package at a time (plugin-auth 3
+      # sites, driver-sql 9) and nothing watched it. The criterion is an anchored
+      # RECEIVER vocabulary, never the channel name: `error`/`warn`/`info` name
+      # an error-envelope constructor (117 sites), oclif's throwing
+      # `Command.error` (91) and `Math.log` (2) in this tree, and the two
+      # legitimate populations #12820 measured — bound `console` methods and
+      # caller-supplied options callbacks — must stay green or the gate gets
+      # turned off. Non-test source only, and every run scans a two-sided control
+      # corpus first, so a broken matcher cannot print the same green as a clean
+      # repo. Runs its own --self-test first.
+      - name: Logger receiver-detach guard
+        run: pnpm check:logger-receiver-detach
+
       # Startup registry-verdict guard (#4777). One showcase cold start produced
       # three instances of one shape in three unrelated subsystems: ask a
       # registry "is X there?" while the boot is still filling it, treat the
@@ -3218,6 +3250,38 @@ jobs:
       # cannot distinguish from a rule that stopped matching.
       - name: turbo.json package tasks name real packages and real scripts
         run: pnpm check:turbo-task-graph
+
+      # A relationship carrier is spelled as the target object's NAME (#13103).
+      # `FieldSchema.reference` is `z.string()`, and #13053 measured what a
+      # non-string one costs: a fixture spelling `reference: { object: '...' }`
+      # inside `fields:` is refused by `ObjectSchema.safeParse` AND read as
+      # `undefined` by the rule resolving it, so the suite was blind in both
+      # directions and the test still passed.
+      #
+      # ⛔ Deliberately NOT the broad guard that first suggests itself. Running
+      # every object fixture through `ObjectSchema.safeParse` was measured at
+      # 838 fixtures across 303 files going red, and those fixtures are invalid
+      # ON PURPOSE — the same carve-out `check:query-options-erasure` prints for
+      # itself: a rejection test must be able to build off-contract input. So
+      # the population judged here is the CARRIER, never the fixture.
+      #
+      # Lands as a ZERO-BASELINE ratchet: re-measured before landing at 443
+      # string carriers and 0 object/array ones at a field-def position, so
+      # there is no grandfathering file and nowhere to park the next defect.
+      # Two words keep it narrow, and the self-test is where both are observed:
+      # only a LITERAL is judged (identifiers, pass-throughs, Zod declarations
+      # and `reference: null` stay unjudged), and only at a field-def carrier
+      # POSITION (the generated i18n bundles write `reference:` as a field NAME,
+      # and are excluded BY SHAPE, never by a path ignore that would rot).
+      # A position it cannot resolve REFUSES with exit 3 rather than counting as
+      # "not a field def", and so does a run that measures zero carriers —
+      # a green whose success condition equals its total-failure condition.
+      #
+      # Reads source with scripts/ts-parse.mjs; no build, no spawns, ~5s.
+      - name: Relationship carriers are spelled as the string the spec declares
+        run: |
+          node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
+          node packages/lint/scripts/check-reference-carrier-shape.mjs
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

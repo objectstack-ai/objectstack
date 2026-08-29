@@ -22,6 +22,7 @@ import {
   mapFlowNodes,
   mapPageComponents,
   mapPages,
+  mapViewPayloads,
   renameConfigKey,
   renameKey,
 } from './walk.js';
@@ -428,8 +429,9 @@ function renameVisibilityAlias(
  *
  * The conditional-visibility predicate is unified under the canonical
  * `visibleWhen` across all layers. Applies to form sections and (recursively
- * nested) form fields in every `views[].form` / `views[].formViews.*`
- * container. **Live window**: the protocol-15 loader accepts the deprecated
+ * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
+ * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
+ * flattened form overlay's top level (#13031). **Live window**: the protocol-15 loader accepts the deprecated
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
@@ -482,22 +484,9 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
       return dict;
     };
 
-    return mapCollection(stack, 'views', (view, path) => {
-      let next = view;
-      const form = mapForm(next.form, `${path}.form`);
-      if (form !== next.form) next = { ...next, form };
-      const formViews = next.formViews;
-      if (formViews && typeof formViews === 'object' && !Array.isArray(formViews)) {
-        let fvChanged = false;
-        const nextViews: Record<string, unknown> = {};
-        for (const [name, fv] of Object.entries(formViews as Record<string, unknown>)) {
-          const mapped = mapForm(fv, `${path}.formViews.${name}`);
-          if (mapped !== fv) fvChanged = true;
-          nextViews[name] = mapped;
-        }
-        if (fvChanged) next = { ...next, formViews: nextViews };
-      }
-      return next;
+    return mapViewPayloads(stack, (payload, kind, path) => {
+      if (kind !== 'form') return payload;
+      return mapForm(payload, path) as Dict;
     });
   },
   fixture: {
@@ -2218,34 +2207,12 @@ const viewInertKeysRemoved: MetadataConversion = {
     // NOT 'data': the sweep's removal attempt was refuted by the build —
     // defineForm writes data.provider='schema' on every metadata form.
     const FORM_KEYS = ['defaultSort', 'aria'] as const;
-    return mapCollection(stack, 'views', (view, path) => {
-      let touched = false;
-      const next: Record<string, unknown> = { ...view };
-      const fix = (keys: readonly string[], sub: Record<string, unknown>, subPath: string) => {
-        const cleaned = stripKeys(sub, keys, emit, subPath);
-        if (cleaned !== sub) { touched = true; return cleaned; }
-        return sub;
-      };
-      for (const [slot, keys] of [['list', LIST_KEYS], ['form', FORM_KEYS]] as const) {
-        const v = next[slot];
-        if (v && typeof v === 'object' && !Array.isArray(v)) next[slot] = fix(keys, v as Record<string, unknown>, `${path}.${slot}`);
-      }
-      for (const [slot, keys] of [['listViews', LIST_KEYS], ['formViews', FORM_KEYS]] as const) {
-        const named = next[slot];
-        if (named && typeof named === 'object' && !Array.isArray(named)) {
-          const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
-          let subTouched = false;
-          for (const [name, v] of Object.entries(rebuilt)) {
-            if (v && typeof v === 'object' && !Array.isArray(v)) {
-              const cleaned = stripKeys(v as Record<string, unknown>, keys, emit, `${path}.${slot}.${name}`);
-              if (cleaned !== v) { rebuilt[name] = cleaned; subTouched = true; }
-            }
-          }
-          if (subTouched) { next[slot] = rebuilt; touched = true; }
-        }
-      }
-      return touched ? next : view;
-    });
+    // The per-family key sets are why {@link mapViewPayloads} labels every
+    // payload: `aria` is retired on a form and LIVE on a list, `data` the
+    // reverse, so a walk that could not tell the two apart would delete a live
+    // key on whichever family it guessed wrong.
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      stripKeys(payload, kind === 'list' ? LIST_KEYS : FORM_KEYS, emit, path));
   },
   fixture: {
     before: {
@@ -2282,28 +2249,8 @@ const viewListPassthroughKeysRemoved: MetadataConversion = {
   summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
   apply(stack, emit) {
     const LIST_KEYS = ['striped', 'bordered', 'virtualScroll'] as const;
-    return mapCollection(stack, 'views', (view, path) => {
-      let touched = false;
-      const next: Record<string, unknown> = { ...view };
-      const list = next.list;
-      if (list && typeof list === 'object' && !Array.isArray(list)) {
-        const cleaned = stripKeys(list as Record<string, unknown>, LIST_KEYS, emit, `${path}.list`);
-        if (cleaned !== list) { next.list = cleaned; touched = true; }
-      }
-      const named = next.listViews;
-      if (named && typeof named === 'object' && !Array.isArray(named)) {
-        const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
-        let subTouched = false;
-        for (const [name, lv] of Object.entries(rebuilt)) {
-          if (lv && typeof lv === 'object' && !Array.isArray(lv)) {
-            const cleaned = stripKeys(lv as Record<string, unknown>, LIST_KEYS, emit, `${path}.listViews.${name}`);
-            if (cleaned !== lv) { rebuilt[name] = cleaned; subTouched = true; }
-          }
-        }
-        if (subTouched) { next.listViews = rebuilt; touched = true; }
-      }
-      return touched ? next : view;
-    });
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'list' ? stripKeys(payload, LIST_KEYS, emit, path) : payload);
   },
   fixture: {
     before: {
@@ -2388,23 +2335,8 @@ const viewExportOptionsPdfRemoved: MetadataConversion = {
       }
       return slot;
     };
-    return mapCollection(stack, 'views', (view, path) => {
-      let touched = false;
-      const next: Record<string, unknown> = { ...view };
-      const list = stripPdf(next.list, `${path}.list`);
-      if (list !== next.list) { next.list = list; touched = true; }
-      const named = next.listViews;
-      if (named && typeof named === 'object' && !Array.isArray(named)) {
-        const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
-        let subTouched = false;
-        for (const [name, lv] of Object.entries(rebuilt)) {
-          const cleaned = stripPdf(lv, `${path}.listViews.${name}`);
-          if (cleaned !== lv) { rebuilt[name] = cleaned; subTouched = true; }
-        }
-        if (subTouched) { next.listViews = rebuilt; touched = true; }
-      }
-      return touched ? next : view;
-    });
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'list' ? (stripPdf(payload, path) as Dict) : payload);
   },
   fixture: {
     before: {
@@ -8210,8 +8142,9 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
  * sources, a pure lossless delete (it never had an effect on this surface to
  * lose).
  *
- * Walks the same containers as `view-visibleOn-to-visibleWhen`: `views[].form`
- * and `views[].formViews.*`, through `sections[]`/`groups[]` and top-level
+ * Walks the same payloads as `view-visibleOn-to-visibleWhen` — every FORM
+ * payload {@link mapViewPayloads} reaches, in all three persisted spellings
+ * (#13031) — through `sections[]`/`groups[]` and top-level
  * `fields[]`, recursing into nested `fields` (composite/repeater/record rows
  * carry their own option lists). Only the exact key `default` is stripped —
  * the alias spellings `isDefault`/`selected` were never accepted on this
@@ -8281,23 +8214,8 @@ const formViewOptionDefaultRemoved: MetadataConversion = {
       if (fields !== dict.fields) dict = { ...dict, fields };
       return dict;
     };
-    return mapCollection(stack, 'views', (view, path) => {
-      let next = view;
-      const form = mapForm(next.form, `${path}.form`);
-      if (form !== next.form) next = { ...next, form };
-      const formViews = next.formViews;
-      if (isDict(formViews)) {
-        let fvChanged = false;
-        const nextViews: Record<string, unknown> = {};
-        for (const [name, fv] of Object.entries(formViews)) {
-          const mapped = mapForm(fv, `${path}.formViews.${name}`);
-          if (mapped !== fv) fvChanged = true;
-          nextViews[name] = mapped;
-        }
-        if (fvChanged) next = { ...next, formViews: nextViews };
-      }
-      return next;
-    });
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'form' ? (mapForm(payload, path) as Dict) : payload);
   },
   fixture: {
     before: {

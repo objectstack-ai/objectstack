@@ -30,8 +30,8 @@
   产物,或本会移动它的具名探针;缺则记 INCONCLUSIVE。实测 2026-08-24(清 dist 与
   tsbuildinfo 的三腿重建):声明包 `dist/base.d.ts` 随探针移动又移回,转发文件与 entry
   barrel 三腿全同;同日三处误用。
-- **报告 `tests`/证据里有 git 本可回答的 API 读吗?**(dev 契约的读序是 git → REST →
-  MCP/GraphQL)判据:MCP `list_issues`/`search_issues` 一类 GraphQL 读,或重跑派发词已下发的去重读数
+- **报告 `tests`/证据里有 git 本可回答的 API 读吗?**(dev 契约的读序 git 先行)
+  判据:MCP `list_issues`/`search_issues` 一类 GraphQL 读,或重跑派发词已下发的去重读数
   —— fetch 之后本地 git 就答得了文件内容、diff、提交史与分支态。⛔ 不因此判 REWORK,ACCEPT
   照给,但把这条记进 ACCEPT 评论:复核不记它,退化就没有任何地方看得见。
 - **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交报,报告里

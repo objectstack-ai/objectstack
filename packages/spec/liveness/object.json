@@ -101,7 +101,7 @@
       "status": "live",
       "verifiedAt": "2026-08-28",
       "evidence": "packages/runtime/src/app-plugin.ts#collectBundleActions (walks `bundle.objects[*].actions` and `bundle.manifest.objects[*].actions`, stamping each entry with its parent object name — the list the action body-runner binding and the /meta surface are both built from)",
-      "note": "served on /meta/objects/:name. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `app-plugin.ts:929`, in range of this 1840-line file but landing in the JOB scheduling block (`svc.schedule(...)`), which reads nothing of this key. The file mentions `actions` on plenty of lines, so the #11457 key-mention check anchors and passes; only a hand read separates the per-object action walk from the unrelated `bundle.actions` and job paths. Re-closed by hand against c459da6bc."
+      "note": "served on /meta/object/:name. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — the citation was `app-plugin.ts:929`, in range of this 1840-line file but landing in the JOB scheduling block (`svc.schedule(...)`), which reads nothing of this key. The file mentions `actions` on plenty of lines, so the #11457 key-mention check anchors and passes; only a hand read separates the per-object action walk from the unrelated `bundle.actions` and job paths. Re-closed by hand against c459da6bc."
     },
     "managedBy": {
       "status": "live",

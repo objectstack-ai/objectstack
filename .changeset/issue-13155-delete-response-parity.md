@@ -1,0 +1,11 @@
+---
+"@objectstack/spec": minor
+---
+
+Widen `DeleteMetaItemResponseSchema` to parity with the two sibling verbs on the same metadata door (#13155). `DELETE /api/v1/meta/:type/:name` now declares `seq` and `projectionApplied` — the two keys its own branch has always sent, and the two keys `SaveMetaItemResponseSchema` (#5745, by the #5563 maintainer ruling) and `PublishMetaItemResponseSchema` (#7294) already declare. All three verbs run the same ADR-0094 mutation projector and the same history append; two declared the result and the third did not, so this carries an existing ruling to its sibling rather than taking a new decision.
+
+This is an accept-set widening with zero wire change — every payload that parsed before still parses, and the two keys the schema used to silently strip now survive a parse. `projectionApplied` is the channel a caller reads *instead of* trusting the 200 (the projector is best-effort: a failure is reported on the receipt, never thrown), and `seq` is the ordering token the history/audit trail is read by; undeclared, neither was reachable from a `DeleteMetaItemResponse` without an `as any`, and a generated client carried neither.
+
+Both keys are `.optional()`, measured against the producer rather than copied from the siblings: `deleteMetaItem` has **four** success returns and only one appends a history event, so `seq` is required on the siblings but optional here — the two "nothing to delete" no-ops and the control-plane legacy raw-engine delete (which writes no history row and emits no watch event) all answer without it. `seq` absent therefore means "this branch appended no history event", never "nothing was deleted"; `reset` remains the key that answers that. `version` and `advisories` are deliberately *not* declared: a delete mints no new content hash, and the runtime authoring gate runs on the two write doors only.
+
+Nothing in `@objectstack/client` changes — its `meta.deleteItem` binds this exported type rather than transcribing a member list, so it inherits the widening. Pinned on both sides: the spec suite pins what the schema says, and a new producer-side conformance gate in `@objectstack/objectql` drives the real protocol against a real engine and fails if the response and the declaration drift apart again.
