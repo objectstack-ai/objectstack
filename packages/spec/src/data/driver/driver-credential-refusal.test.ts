@@ -893,7 +893,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
     expect(paths).toContain('config.url');
     expect(paths).toContain('config.options.auth.password');
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('not accepted in the driver-options passthrough'))).toBe(true);
   });
 
   it('an empty `config.url` is the COMPOSED branch, not this one — a live discrete username is not refused', () => {
@@ -923,7 +923,7 @@ describe('datasource — bound credentialsRef + user-less mongo url refused (#90
       external: { ...BOUND },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.message.includes('#8082'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('embeds a password in its userinfo'))).toBe(true);
     expect(result.error!.issues.some((i) => i.message.includes("the URL's own userinfo"))).toBe(false);
   });
 });
@@ -1124,6 +1124,6 @@ describe('datasource — bound credentialsRef + composed mongo config naming no 
     expect(paths).toContain('config.username');
     expect(paths).toContain('config.options.auth.password');
     expect(result.error!.issues.some((i) => i.message.includes("add `username` to `config`"))).toBe(true);
-    expect(result.error!.issues.some((i) => i.message.includes('#9040'))).toBe(true);
+    expect(result.error!.issues.some((i) => i.message.includes('not accepted in the driver-options passthrough'))).toBe(true);
   });
 });
