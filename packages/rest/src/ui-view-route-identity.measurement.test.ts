@@ -105,8 +105,13 @@ function makeServer(protocol: any) {
     const server = recordingServer();
     const provider = async () => anyService();
     const rs: any = new RestServer(
+        // ⚠️ Exactly 20 arguments — the constructor's arity. A longer list
+        // still RUNS (JS drops the surplus) but silently shifts every argument
+        // past the overflow point onto the wrong parameter, so the boot under
+        // measurement stops being the boot you wrote. `tsconfig.test.json`
+        // covers this file, which is what turned that into a compile error
+        // rather than a quietly different harness.
         server, protocol as any, {} as any, undefined, undefined, () => 'env_13214',
-        provider, provider, provider, provider, provider, provider, provider,
         provider, provider, provider, provider, provider, provider, provider,
         provider, provider, provider, () => true, provider, undefined, provider,
     );
