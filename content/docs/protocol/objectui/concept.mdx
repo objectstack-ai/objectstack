@@ -601,7 +601,9 @@ actions:
 
 ### 3. Conditional Field Visibility
 
-Fields appear based on other field values:
+Fields appear based on other field values. The key is **`visibleWhen`**, and its value
+is a **CEL predicate string** evaluated per record — the field is shown only when the
+predicate is TRUE:
 
 ```yaml
 fields:
@@ -611,8 +613,25 @@ fields:
   - name: shipping_address
     type: textarea
     label: Shipping Address
-    visible: { shipping_required: true }  # ← Show only if checkbox checked
+    # Shown only while the checkbox is checked. `has()` guards the unset case:
+    # an unbound reference faults, and visibility's fallback is "shown".
+    visibleWhen: "has(record.shipping_required) && record.shipping_required"
 ```
+
+<Callout type="warn">
+  There is **no `visible` key on a field**. `FieldSchema` is a strict object, so
+  `visible` is refused *by name* — before any value shape is examined — and no
+  filter object, boolean map or breakpoint map makes it parse. Which key you want
+  depends on the form the answer takes, and the two have **opposite polarity**:
+
+  - a **static** answer is `hidden`, which is **inverted** — `visible: false`
+    becomes `hidden: true`;
+  - a **per-record** answer is `visibleWhen`, the CEL predicate above, shown when
+    the predicate is **true**.
+
+  Its siblings are `readonlyWhen` and `requiredWhen`. See the
+  [Field Reference](/docs/references/data/field).
+</Callout>
 
 ### 4. Field Dependencies and Cascading
 
