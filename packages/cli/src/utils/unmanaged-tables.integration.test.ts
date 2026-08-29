@@ -38,7 +38,14 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { bootSchemaStack, type SchemaStack } from '../../utils/schema-migrate.js';
+// Module-top side-effect load, paid during COLLECTION rather than inside a
+// clocked test body: `sweep()` below reaches `normalizeRows` through a dynamic
+// `import()`, and this package resolves that specifier through `dist/`, so the
+// first call would transform that dependency's whole module graph while a
+// `testTimeout` is running (`check:test-source-alias`; measured 3.1-3.6s idle,
+// 20.26s on a starved core). This decides only WHERE the load is paid.
+import '@objectstack/metadata-protocol';
+import { bootSchemaStack, type SchemaStack } from './schema-migrate.js';
 import { collectUnmanagedTables, type UnmanagedTablesReport } from './unmanaged-tables.js';
 
 const require_ = createRequire(import.meta.url);

@@ -29,7 +29,7 @@ import {
   collectUnmanagedTables,
   renderUnmanagedTables,
   type UnmanagedTablesReport,
-} from './unmanaged-tables.js';
+} from '../../utils/unmanaged-tables.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
   resolveTenancyPosture,
@@ -182,7 +182,7 @@ export default class MigratePlan extends Command {
       // ⛔ And it is NOT `composition.coverage`: coverage says what this plan
       // EXAMINED of what the deployment declares, this says what exists that
       // no declaration accounts for. Merged, "examined and clean" would be
-      // indistinguishable from "never looked at". See `./unmanaged-tables.ts`.
+      // indistinguishable from "never looked at". See `../../utils/unmanaged-tables.ts`.
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
         driver: stack.driver,

@@ -79,6 +79,16 @@
  * composition that does not mirror the deployment produces an UNMEASURED
  * result, and an unmeasured result must say so rather than render as findings.
  *
+ * ## Why this lives in `utils/` and not beside `plan.ts`
+ *
+ * `package.json`'s `oclif.commands` declares `{ strategy: 'pattern', target:
+ * './dist/commands', glob: '**' + '/*.js' }`, so EVERY compiled file under
+ * `commands/` is loaded as a command — and before this module moved here, every
+ * `os` invocation printed `command migrate:unmanaged-tables not found` from
+ * oclif's `findCommand`. Measured on the built CLI. Every other module the
+ * migrate commands share (`schema-migrate`, `schema-migration-plugins`,
+ * `migrate-occupancy-gate`) already lives here for the same reason.
+ *
  * ## ⛔ "Could not look" is never reported as "nothing found"
  *
  * Every path that fails to obtain an answer returns {@link UnmanagedTablesUnreadable}
@@ -91,10 +101,10 @@
 import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix } from '@objectstack/spec/system';
 // The result-set/no-answer predicate `os migrate duplicates` already publishes
 // (#10677). Imported rather than re-spelled: a second copy would drift, and the
-// two commands must agree on what "the seam did not answer" looks like. Both
-// modules are siblings under `commands/migrate/`, and the import costs nothing
-// `plan.ts` does not already load.
-import { isResultSet } from './duplicates.js';
+// two commands must agree on what "the seam did not answer" looks like. It
+// costs nothing `plan.ts` does not already load — that module's own heavy value
+// imports are deliberately lazy, for the reason its header gives.
+import { isResultSet } from '../commands/migrate/duplicates.js';
 
 /** How a raw SELECT is issued against the driver the plan diffed. */
 export type PlannedDriverExec = (sql: string, params?: unknown[]) => Promise<unknown>;

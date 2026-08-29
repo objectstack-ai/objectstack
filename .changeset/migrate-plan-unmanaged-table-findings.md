@@ -41,6 +41,17 @@ Shards are folded onto their base before the membership test, the declared set
 is unioned into the managed set, and the driver's own scratch tables
 (`_objectstack_sequences`, `__os_mig_*`) carry no reserved prefix.
 
+**The sweep runs only where the question is answerable.** "No declaration
+accounts for this table" needs a composed object set that MIRRORS what this
+deployment's `os serve` registers, so the sweep requires
+`composition.hostConfigLoaded` — the same discriminator #12953 kept for
+consumers. On a project with a compiled artifact and no host config the composed
+set is the artifact plus the platform floor (measured: `sys_metadata` and its
+four siblings, `sys_migration`, `sys_migration_journal`,
+`sys_metadata_activation`, `sys_secret`), against which a real database's other
+platform tables would every one be reported — so that shape reports
+`unreadable` with the reason instead of findings.
+
 Every path that fails to obtain an answer reports `status: 'unreadable'` with a
 reason — a missing seam, an unrecognised dialect, a catalog read that threw, a
 seam that returns no result set — and never an empty list. Non-SQL drivers are
