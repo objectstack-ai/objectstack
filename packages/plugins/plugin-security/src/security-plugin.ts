@@ -5582,11 +5582,14 @@ export class SecurityPlugin implements Plugin {
       isPlatformAdmin,
     });
 
-    // [#12974] Verified platform OWNER crosses the Layer 0 org wall.
-    // Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能简单点，
-    // 对于超级管理员，配置了环境变量邮箱的，在执行墙的时候不要强制加上 org_id
-    // 的过滤」— when the wall ARMS (layer0 non-null: the `isolated` equality,
-    // the `group` union, or the fail-closed deny sentinel an org-less session
+    // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
+    // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
+    // 简单点，对于超级管理员，配置了环境变量邮箱的，在执行墙的时候不要强制加上
+    // org_id 的过滤」— the ruling is about the wall's FILTER on operator
+    // screens reading; the director's correction (same card, after the dogfood
+    // gate) scopes the door accordingly. When the READ wall ARMS (layer0
+    // non-null on a select/count/aggregate: the `isolated` equality, the
+    // `group` union, or the fail-closed deny sentinel an org-less session
     // otherwise hits), the org filter is NOT appended for a session whose
     // account is the VERIFIED declared platform owner (`OS_PLATFORM_OWNER_EMAIL`
     // under the #11343 verified-email predicate — the same match the elevation
@@ -5595,18 +5598,27 @@ export class SecurityPlugin implements Plugin {
     // answers `false` on env-unset before touching any row, and it is not even
     // consulted while Layer 0 contributes nothing.
     //
-    // ONLY Layer 0 is lifted. Layer 1 (business RLS, object/field permissions,
-    // the write `check` path) is untouched by construction — this branch
-    // rewrites the `layer0` half of the split and nothing else. Reads AND
-    // writes both come through this computation (`computeRlsFilter` /
-    // `computeWriteTenantCheckFilter`), so both carry the audit event.
-    if (layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
+    // WRITES keep today's behaviour for everyone INCLUDING the owner (`isWrite`
+    // guards the branch): an org-less tenant-scoped write is REFUSED 403 naming
+    // the missing active organization — the ADR-0123 D2 contract, whose verdict
+    // is DERIVED from this very computation (`computeWriteTenantCheckFilter` →
+    // the deny sentinel). Lifting the write twin would not grant the owner a
+    // cross-org write; it would mint exactly the NULL-organization rows the
+    // platform is eliminating, and it measurably broke the dogfood pin (500
+    // where the 403 refusal belongs). The by-id write PRE-IMAGE read carries
+    // the write operation name through this method, so it stays walled too.
+    //
+    // ONLY the read-side Layer 0 is lifted. Layer 1 (business RLS, object/field
+    // permissions, the write `check` path) is untouched by construction — this
+    // branch rewrites the `layer0` half of the split and nothing else.
+    if (!isWrite && layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
       // The audit floor (hard piece 3 of the ruling): a structured warn-level
-      // log with the stable event name, per wall-bypassing computation —
-      // plugin-audit is not wired into plugin-security (no dependency in
-      // either direction; its `audit` service ingress is a CLOSED auth-session
-      // vocabulary), so the `sys_audit_log` ledger is deliberately not the
-      // sink here. Named after the cloud precedent (`cross_org_admin_read`).
+      // log with the stable event name, per wall-bypassing READ computation —
+      // the only bypass kind left. plugin-audit is not wired into
+      // plugin-security (no dependency in either direction; its `audit`
+      // service ingress is a CLOSED auth-session vocabulary), so the
+      // `sys_audit_log` ledger is deliberately not the sink here. Named after
+      // the cloud precedent (`cross_org_admin_read`).
       this.logger.warn?.(
         `[security/#12974] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
           'the Layer 0 organization wall — the org filter below was NOT appended',

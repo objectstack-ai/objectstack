@@ -18,14 +18,20 @@
  *    probe performs no row I/O at all;
  *  - email mismatch ⇒ walled (fast negative, no row I/O);
  *  - email matches but the account is NOT verified ⇒ walled;
- *  - verified match ⇒ no `org_id` filter — including the org-less session
- *    that previously hit the fail-closed deny sentinel (the cloud#1676
- *    "operator console reads EMPTY" shape), and the `group` union wall;
+ *  - verified match ⇒ no `org_id` filter on READS — including the org-less
+ *    session that previously hit the fail-closed deny sentinel (the
+ *    cloud#1676 "operator console reads EMPTY" shape), and the `group`
+ *    union wall;
+ *  - the door is READ-ONLY (director's correction on the card): the
+ *    WRITE-side Layer 0 twin is KEPT for the owner — an org-less
+ *    tenant-scoped write still resolves the deny sentinel that drives the
+ *    ADR-0123 D2 403 refusal, and an org-carrying owner write keeps the
+ *    equality wall;
  *  - the bypass lifts ONLY Layer 0: authored business RLS (Layer 1) still
- *    binds the owner, and the write-side Layer 0 twin is the same branch;
- *  - every wall-bypassing computation carries the stable audit event name
- *    (`platform_owner_wall_bypass` — structured warn-level log, the ruled
- *    floor while plugin-audit is not wired into plugin-security).
+ *    binds the owner;
+ *  - every wall-bypassing READ computation carries the stable audit event
+ *    name (`platform_owner_wall_bypass` — structured warn-level log, the
+ *    ruled floor while plugin-audit is not wired into plugin-security).
  *
  * Harness modeled on `federated-tenant-layer0.test.ts`: a real SecurityPlugin
  * over a fake ObjectQL, asserted at `getReadFilter` — the composed
@@ -174,7 +180,7 @@ describe('[#12974] verified-platform-owner Layer 0 wall bypass — the door', ()
     expect(filter).toBeUndefined();
   });
 
-  it('org-LESS verified owner under `isolated` ⇒ no fail-closed deny sentinel either (the cloud#1676 empty-screen shape)', async () => {
+  it('org-LESS verified owner under `isolated` ⇒ no fail-closed READ deny sentinel (the cloud#1676 empty-screen shape; the WRITE sentinel stays — see the read-only pins)', async () => {
     process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
     const { plugin } = await boot({
       users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
@@ -234,14 +240,32 @@ describe('[#12974] the bypass lifts ONLY Layer 0', () => {
     expect(filter).toEqual({ name: 'u_owner' });
   });
 
-  it('the WRITE-side Layer 0 twin is lifted for the owner and kept for everyone else', async () => {
+  it('the WRITE-side Layer 0 twin is KEPT for the owner: the org wall and the org-less deny sentinel both stand', async () => {
+    // Director's correction on the card (after the dogfood gate red): the door
+    // is READ-only. The write twin feeds the ADR-0123 D2 refusal — an org-less
+    // tenant-scoped write must refuse 403 naming the missing active
+    // organization, for the owner exactly as for everyone else; lifting it
+    // would mint the NULL-organization rows the platform is eliminating (and
+    // measurably turned that refusal into a 500 on the dogfood rig).
     process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
     const { plugin } = await boot({
       users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
     });
+    // Org-carrying owner write: the equality wall stands.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const owner = await (plugin as any).computeWriteTenantCheckFilter([PLAIN_MEMBER], 'task', 'update', sessionCtx());
-    expect(owner).toBeNull();
+    expect(owner).toEqual({ organization_id: 'org-1' });
+    // Org-LESS owner write: the deny sentinel stands — this is the exact
+    // verdict the ADR-0123 D2 refusal derives its 403 from.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ownerOrgless = await (plugin as any).computeWriteTenantCheckFilter(
+      [PLAIN_MEMBER],
+      'task',
+      'insert',
+      sessionCtx({ tenantId: undefined }),
+    );
+    expect(ownerOrgless).toEqual({ ...RLS_DENY_FILTER });
+    // Everyone else: unchanged, same wall.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const member = await (plugin as any).computeWriteTenantCheckFilter(
       [PLAIN_MEMBER],
@@ -254,14 +278,18 @@ describe('[#12974] the bypass lifts ONLY Layer 0', () => {
 });
 
 describe('[#12974] audit — the ruled floor', () => {
-  it('a wall-bypassing computation emits the stable event name; a walled one does not', async () => {
+  it('a wall-bypassing READ emits the stable event name; a walled read and an owner WRITE do not', async () => {
     process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
     const { plugin, warn } = await boot({
       users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
     });
-    await readFilter(plugin, sessionCtx({ userId: 'u_m', email: 'member@corp.example' }));
     const bypassEvents = () =>
       warn.mock.calls.filter(([, meta]) => meta?.event === PLATFORM_OWNER_WALL_BYPASS_EVENT);
+    await readFilter(plugin, sessionCtx({ userId: 'u_m', email: 'member@corp.example' }));
+    expect(bypassEvents()).toHaveLength(0);
+    // Owner WRITE: no bypass happens, so no event may claim one did.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (plugin as any).computeWriteTenantCheckFilter([PLAIN_MEMBER], 'task', 'update', sessionCtx());
     expect(bypassEvents()).toHaveLength(0);
     await readFilter(plugin, sessionCtx());
     const fired = bypassEvents();

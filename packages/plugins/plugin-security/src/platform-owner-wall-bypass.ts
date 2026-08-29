@@ -15,10 +15,13 @@
  *  - **The Layer 0 owner wall bypass** (`security-plugin.ts`
  *    `isVerifiedPlatformOwnerSession`, maintainer ruling 2026-08-29 on the
  *    tracking card, verbatim and untranslated: 「能不能简单点，对于超级管理员，
- *    配置了环境变量邮箱的，在执行墙的时候不要强制加上 org_id 的过滤」): the
- *    `org_id` tenant filter is NOT appended for a session whose account
- *    satisfies {@link isVerifiedPlatformOwnerRow}. Everyone else's wall is
- *    byte-identical to before the ruling.
+ *    配置了环境变量邮箱的，在执行墙的时候不要强制加上 org_id 的过滤」): on
+ *    READS, the `org_id` tenant filter is NOT appended for a session whose
+ *    account satisfies {@link isVerifiedPlatformOwnerRow}. Everyone else's
+ *    wall is byte-identical to before the ruling, and WRITES keep today's
+ *    behaviour for the owner too — the ADR-0123 D2 org-less write refusal
+ *    stands (director's correction on the same card: lifting the write twin
+ *    would mint the NULL-organization rows the platform is eliminating).
  *
  * The comparison itself mirrors the elevation gate's owner match, which
  * `walled-owner-operator-stamp.ts` (plugin-auth) already mirrors for the
