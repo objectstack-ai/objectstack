@@ -168,6 +168,11 @@ export default class MigratePlan extends Command {
                 composition: {
                   hostConfig: stack.composition.hostConfigPath,
                   hostConfigLoaded: stack.composition.hostConfigLoaded,
+                  // [#13028] The plan's own boundary, so a consumer gate can
+                  // refuse a PARTIAL plan instead of reading `managedTables`
+                  // as coverage. `unexaminedObjects > 0` is the discriminator;
+                  // `reasons` says which kind of partial it is.
+                  ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
                   notes: stack.composition.notes,
                 },
               }
@@ -201,7 +206,22 @@ export default class MigratePlan extends Command {
       console.log('');
 
       if (drift.length === 0 && pending.length === 0) {
-        printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        // [#13028] "In sync" is a claim about the objects this plan EXAMINED.
+        // On a composed host that examined a strict subset — a control plane
+        // declaring ~80 tables of which 8 reached the diffed driver — printing
+        // the unqualified sentence tells an operator the deployment is
+        // migrated when most of it was never looked at. Say which it is.
+        const partial = (stack.composition.coverage?.unexaminedObjects ?? 0) > 0;
+        if (partial) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `No drift over the ${c.examinedObjects} object(s) this plan examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL plan: it is not evidence that the deployment is in sync.',
+          );
+        } else {
+          printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        }
         console.log('');
         return;
       }

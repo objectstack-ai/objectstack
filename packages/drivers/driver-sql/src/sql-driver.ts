@@ -9363,7 +9363,26 @@ export class SqlDriver implements IDataDriver {
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
-    await this.ensureDatabaseExists();
+
+    // [#13028] …and NOT while DDL is deferred. Under {@link deferredDdl} every
+    // branch below is skipped in favour of recording the work, so there is no
+    // DDL for a database to exist FOR — while `ensureDatabaseExists()` is the
+    // one line here that can WRITE: it `mkdir -p`s a sqlite parent directory
+    // and, on Postgres/MySQL, issues `SELECT 1` and CREATEs THE DATABASE when
+    // that comes back `3D000` / `ER_BAD_DB_ERROR`.
+    //
+    // That made a declared dry run able to create a database (#6743 closed the
+    // sqlite half by opening an absent file in memory; this is the same
+    // promise, kept at the source and for every dialect), and it charged one
+    // round-trip per object to do it — on a control plane at ~300ms RTT × ~80
+    // objects, a `plan` that computes in seconds would have spent minutes
+    // asking a database it was never going to touch whether it existed.
+    //
+    // ⛔ NOT a relaxation of the guarantee for real DDL: `flushDeferredSchemaDdl`
+    // clears `deferredDdl` BEFORE re-entering this method with the deferred
+    // objects, so the confirmed `os migrate apply` still ensures the database
+    // ahead of the first `CREATE TABLE`.
+    if (!this.deferredDdl) await this.ensureDatabaseExists();
 
     for (const obj of objects) {
       // Re-read what the registration above recorded, rather than recomputing:

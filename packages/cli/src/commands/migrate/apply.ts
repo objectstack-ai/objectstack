@@ -167,8 +167,40 @@ export default class MigrateApply extends Command {
       // target database, so it belongs in the plan and behind the prompt.
       const pending = stack.pendingSchemaWork;
 
+      // [#13028] The boundary of what was reconciled, carried on every payload
+      // that can be read as "this deployment is migrated". A consumer gate
+      // needs `unexaminedObjects` — `applied: []` alone cannot tell "nothing to
+      // do" apart from "most of it was never looked at".
+      const compositionPayload = stack.composition.notes.length > 0
+        ? {
+            composition: {
+              hostConfig: stack.composition.hostConfigPath,
+              hostConfigLoaded: stack.composition.hostConfigLoaded,
+              ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
+              notes: stack.composition.notes,
+            },
+          }
+        : {};
+      const unexamined = stack.composition.coverage?.unexaminedObjects ?? 0;
+
       if (drift.length === 0 && pending.length === 0) {
-        if (flags.json) { await emitJson({ applied: [], skipped: [], created: [], message: 'in_sync' }, 0, { compact: true }); return; }
+        if (flags.json) {
+          await emitJson(
+            { applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
+            0,
+            { compact: true },
+          );
+          return;
+        }
+        if (unexamined > 0) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `Nothing to apply over the ${c.examinedObjects} object(s) this run examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL reconcile: it is not evidence that the deployment is in sync.',
+          );
+          return;
+        }
         printSuccess('Physical schema is already in sync with metadata — nothing to apply.');
         return;
       }
@@ -223,6 +255,7 @@ export default class MigrateApply extends Command {
           created,
           applied,
           skipped,
+          ...compositionPayload,
           duration: timer.elapsed(),
         });
         return;
