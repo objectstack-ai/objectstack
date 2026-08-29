@@ -1297,8 +1297,39 @@ jobs:
       # dependency-free `node` checks), and it is REQUIRED where that lane is
       # advisory. The four anchors that were already dead were fixed in the same
       # PR, so this ships with no baseline and no allowlist.
+      #
+      # ── FOLDED IN, deliberately: the `file:line` anchor half ──────────────
+      #
+      # `content/docs/permissions/system-context.mdx` calls itself "the
+      # authority" for every behaviour keyed off `ExecutionContext.isSystem`
+      # and says it is "built by census over the whole repo, not by recall".
+      # Nothing held it to either claim, and it rotted at a measured rate: 101
+      # of its 111 anchors pointed at a line that no longer held what the row
+      # named, 19 days after the census was written, with CI green throughout.
+      #
+      # ⭐ The load-bearing direction is CENSUS -> PAGE, not page -> code. At
+      # the commit that motivated the card, re-resolving EVERY anchor on the
+      # page would have passed while it was missing 32 sites and its headline
+      # was 29 too low: a gate that only checks what a page already says can
+      # never find what the page failed to say. Measured again here on the
+      # shipped gate -- with an unanchored read site injected, the resolution
+      # checks report 0 findings and the population check names the site.
+      #
+      # It is a second command in THIS step rather than a step of its own: this
+      # job has no paths filter, so the census runs on code-only PRs (the ones
+      # that ADD a read site), and folding costs no new check context, no new
+      # `check:*` manifest key, and no new required-status entry for one page.
+      # The `--self-test` invocation is what `check:self-test-wired` requires,
+      # and it is the only instrument on this gate's matching rules -- a clean
+      # tree cannot tell a working rule from a weakened one.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
       - name: Docs anchors resolve to real headings
-        run: pnpm check:doc-anchors
+        run: |
+          pnpm check:doc-anchors
+          node scripts/check-system-context-census.mjs --self-test
+          node scripts/check-system-context-census.mjs
 
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
