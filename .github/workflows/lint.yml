@@ -2110,6 +2110,26 @@ jobs:
       - name: Durability-degradation log-level guard
         run: pnpm check:durability-log-level
 
+      # Logger receiver-detach guard (#12820, from #12773 / #12792). `a.b(...)`
+      # passes `a` as the receiver; `(a.error ?? a.warn)(...)`, `const fn =
+      # a.error`, `const { error } = a`, `run(a.warn)` and `{ warn: a.warn }` all
+      # evaluate to the bare function and call it with `this === undefined`.
+      # `@objectstack/core`'s ObjectLogger dereferences `this` on every channel,
+      # so a host that injects one turns those lines into a TypeError — on the
+      # channel whose whole job is to be loud when something is already wrong.
+      # The class was closed three times one package at a time (plugin-auth 3
+      # sites, driver-sql 9) and nothing watched it. The criterion is an anchored
+      # RECEIVER vocabulary, never the channel name: `error`/`warn`/`info` name
+      # an error-envelope constructor (117 sites), oclif's throwing
+      # `Command.error` (91) and `Math.log` (2) in this tree, and the two
+      # legitimate populations #12820 measured — bound `console` methods and
+      # caller-supplied options callbacks — must stay green or the gate gets
+      # turned off. Non-test source only, and every run scans a two-sided control
+      # corpus first, so a broken matcher cannot print the same green as a clean
+      # repo. Runs its own --self-test first.
+      - name: Logger receiver-detach guard
+        run: pnpm check:logger-receiver-detach
+
       # Startup registry-verdict guard (#4777). One showcase cold start produced
       # three instances of one shape in three unrelated subsystems: ask a
       # registry "is X there?" while the boot is still filling it, treat the
