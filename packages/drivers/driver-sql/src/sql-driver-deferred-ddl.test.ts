@@ -212,3 +212,75 @@ describe('SqlDriver deferred schema DDL (#3917)', () => {
     });
   });
 });
+
+/**
+ * #13028 — a deferred `initObjects` does not ensure the database EXISTS either.
+ *
+ * `ensureDatabaseExists()` is the one line in `initObjects` that can write
+ * while nothing else does: it `mkdir -p`s a sqlite parent directory and, on
+ * Postgres/MySQL, issues `SELECT 1` and CREATEs the database when that comes
+ * back `3D000` / `ER_BAD_DB_ERROR`. Under the deferral every DDL branch is
+ * skipped in favour of recording the work, so there is no DDL for a database
+ * to exist for — and #6743's promise ("a plan must not bring a database into
+ * existence") was only being kept for sqlite, by the CLI, one layer up.
+ *
+ * The cost half is why it is measured rather than merely tidied: `os migrate
+ * plan` on a composed control plane registers ~80 objects one call at a time,
+ * and a `SELECT 1` per call is ~80 round-trips against a database the command
+ * is never going to touch.
+ */
+describe('deferred initObjects does not ensure the database exists (#13028)', () => {
+  let driver: SqlDriver;
+
+  afterEach(async () => {
+    await driver.disconnect();
+  });
+
+  it('skips the probe while deferred', async () => {
+    driver = makeDriver();
+    const calls: string[] = [];
+    (driver as any).ensureDatabaseExists = async () => { calls.push('ensure'); };
+
+    driver.setDeferredDdl(true);
+    await driver.initObjects([WIDGET]);
+
+    expect(calls).toEqual([]);
+    // …and the registration the deferral exists to preserve still happened.
+    expect((driver as any).managedObjectFields.has('widgets')).toBe(true);
+    expect(driver.deferredSchemaObjectCount).toBe(1);
+  });
+
+  it('still runs it on a NON-deferred sync — the guarantee for real DDL is unchanged', async () => {
+    driver = makeDriver();
+    const calls: string[] = [];
+    const real = (driver as any).ensureDatabaseExists.bind(driver);
+    (driver as any).ensureDatabaseExists = async () => { calls.push('ensure'); await real(); };
+
+    await driver.initObjects([WIDGET]);
+
+    expect(calls).toEqual(['ensure']);
+    expect(await (driver as any).knex.schema.hasTable('widgets')).toBe(true);
+  });
+
+  it('runs it on the FLUSH, before the first CREATE TABLE', async () => {
+    driver = makeDriver();
+    driver.setDeferredDdl(true);
+    await driver.initObjects([WIDGET]);
+
+    // Instrumented only now, so what it records is about the flush alone.
+    const order: string[] = [];
+    const realEnsure = (driver as any).ensureDatabaseExists.bind(driver);
+    (driver as any).ensureDatabaseExists = async () => {
+      // Recorded together with the state of the world at that moment: "before
+      // the first CREATE TABLE" is the claim, and the table's absence here is
+      // what proves it rather than call ORDER alone.
+      order.push(`ensure(table=${await (driver as any).knex.schema.hasTable('widgets')})`);
+      await realEnsure();
+    };
+
+    await driver.flushDeferredSchemaDdl();
+
+    expect(order).toEqual(['ensure(table=false)']);
+    expect(await (driver as any).knex.schema.hasTable('widgets')).toBe(true);
+  });
+});

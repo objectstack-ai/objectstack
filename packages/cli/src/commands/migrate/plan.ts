@@ -19,6 +19,7 @@ import {
   summarize,
   summarizePendingSchemaWork,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
@@ -69,7 +70,26 @@ export default class MigratePlan extends Command {
     json: Flags.boolean({ description: 'Output as JSON' }),
   };
 
+  /**
+   * #13027 — the process must end when the plan does.
+   *
+   * The body is {@link plan}; this wrapper exists so every one of its early
+   * `return`s funnels through one deliberate exit. A composed host stack can
+   * leave the event loop alive — its `start()` was suppressed, so anything it
+   * armed during `init()` has no release path — and this command has measurably
+   * outlived its own "Graceful shutdown complete" by 78 minutes.
+   *
+   * ⛔ The FAILURE paths are deliberately NOT routed here: `this.exit(n)` throws
+   * an `ExitError` that oclif's `handle()` turns into a `process.exit` of its
+   * own, so they already terminate — and catching them here to exit "tidily"
+   * would swallow the report with them.
+   */
   async run(): Promise<void> {
+    await this.plan();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async plan(): Promise<void> {
     const { flags } = await this.parse(MigratePlan);
     const timer = createTimer();
 
@@ -168,6 +188,11 @@ export default class MigratePlan extends Command {
                 composition: {
                   hostConfig: stack.composition.hostConfigPath,
                   hostConfigLoaded: stack.composition.hostConfigLoaded,
+                  // [#13028] The plan's own boundary, so a consumer gate can
+                  // refuse a PARTIAL plan instead of reading `managedTables`
+                  // as coverage. `unexaminedObjects > 0` is the discriminator;
+                  // `reasons` says which kind of partial it is.
+                  ...(stack.composition.coverage ? { coverage: stack.composition.coverage } : {}),
                   notes: stack.composition.notes,
                 },
               }
@@ -201,7 +226,22 @@ export default class MigratePlan extends Command {
       console.log('');
 
       if (drift.length === 0 && pending.length === 0) {
-        printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        // [#13028] "In sync" is a claim about the objects this plan EXAMINED.
+        // On a composed host that examined a strict subset — a control plane
+        // declaring ~80 tables of which 8 reached the diffed driver — printing
+        // the unqualified sentence tells an operator the deployment is
+        // migrated when most of it was never looked at. Say which it is.
+        const partial = (stack.composition.coverage?.unexaminedObjects ?? 0) > 0;
+        if (partial) {
+          const c = stack.composition.coverage!;
+          printWarning(
+            `No drift over the ${c.examinedObjects} object(s) this plan examined — but `
+            + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
+            + 'This is a PARTIAL plan: it is not evidence that the deployment is in sync.',
+          );
+        } else {
+          printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
+        }
         console.log('');
         return;
       }

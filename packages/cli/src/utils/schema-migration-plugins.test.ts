@@ -8,6 +8,7 @@ import {
   findHostConfig,
   composeForDeclarations,
   buildSchemaMigrationPlugins,
+  measureComposedCoverage,
 } from './schema-migration-plugins.js';
 
 /**
@@ -193,5 +194,161 @@ describe('buildSchemaMigrationPlugins', () => {
     const said = out.notes.join(' ');
     expect(said).toContain('could not be loaded');
     expect(said).toContain('UNMEASURED');
+  });
+});
+
+/**
+ * #13028 — the plan reports its own BOUNDARY.
+ *
+ * The card's measurement: 36 host plugins composed on ObjectStack Cloud's
+ * staging control plane, ~80 `sys_*` tables declared, **8** examined, and every
+ * consumer-visible signal green — the config loaded, the composition printed a
+ * healthy note, the plan named real tables. A coverage gate reading
+ * `managedTables` passed over a plan that had not looked at most of the
+ * deployment.
+ *
+ * These cases pin the discriminator that gate needed. They use engine doubles
+ * rather than a boot: the integration file owns "does a real composed boot now
+ * reach the driver", and what is isolated here is the REPORT — which is the
+ * half that has to stay honest even when the coverage does not.
+ */
+describe('measureComposedCoverage (#13028)', () => {
+  /**
+   * A driver double. `syncSchema` is the method `engine.syncObjectSchema()`
+   * requires and `SqlDriver` implements — its presence is what separates a SQL
+   * driver from one that cannot register a managed schema at all.
+   */
+  const driverDouble = (name: string) => ({ name, syncSchema: async () => undefined });
+
+  /** An engine double: a registry, driver resolution, and the sync entry point. */
+  const engineDouble = (opts: {
+    objects: Array<{ name: string; external?: unknown }>;
+    driverFor: (name: string) => unknown;
+    sync?: (name: string) => Promise<void>;
+  }) => ({
+    registry: { getAllObjects: () => opts.objects },
+    getDriverForObject: opts.driverFor,
+    syncObjectSchema: opts.sync ?? (async () => undefined),
+  });
+
+  const kernelWith = (engine: unknown) => ({
+    getService: (slot: string) => (slot === 'objectql' ? engine : undefined),
+  });
+
+  it('reports full coverage when every declared object lands on the diffed driver', async () => {
+    const driver = driverDouble('control');
+    const synced: string[] = [];
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }, { name: 'sys_permission_set' }],
+      driverFor: () => driver,
+      sync: async (n) => { synced.push(n); },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), driver, true);
+
+    expect(synced).toEqual(['sys_position', 'sys_permission_set']);
+    expect(out.coverage).toMatchObject({
+      registeredObjects: 2,
+      examinedObjects: 2,
+      unexaminedObjects: 0,
+    });
+    // Silence is the point: a plan that examined everything must render
+    // byte-identically to one from before this existed.
+    expect(out.notes).toEqual([]);
+  });
+
+  it('names the shortfall — and its reason — when objects sit on ANOTHER driver', async () => {
+    // The measured cloud shape: a composed host brings its own engine/driver
+    // pair, `findSqlDriver()` resolves one driver, and part of the declared set
+    // is bound somewhere the plan will never diff.
+    const planned = driverDouble('control');
+    const elsewhere = driverDouble('tenant');
+    const engine = engineDouble({
+      objects: [{ name: 'sys_notification' }, { name: 'sys_position' }, { name: 'sys_user' }],
+      driverFor: (n) => (n === 'sys_notification' ? planned : elsewhere),
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+
+    expect(out.coverage).toMatchObject({
+      registeredObjects: 3,
+      examinedObjects: 1,
+      unexaminedObjects: 2,
+    });
+    expect(out.coverage.reasons.otherDriver).toBe(2);
+    const said = out.notes.join(' ');
+    expect(said).toContain('1 of 3 declared object(s) are in the diffed set');
+    expect(said).toContain('2 bound to a different datasource');
+    // The sentence a consumer gate and an operator both need: an empty result
+    // over the rest is not a pass.
+    expect(said).toContain('PARTIAL');
+    expect(said).toContain('UNMEASURED');
+  });
+
+  it('counts federated, unbound and unsupported objects apart from one another', async () => {
+    const planned = driverDouble('control');
+    const engine = engineDouble({
+      objects: [
+        { name: 'sys_position' },
+        { name: 'remote_customer', external: { remoteName: 'customers' } },
+        { name: 'orphan' },
+      ],
+      driverFor: (n) => (n === 'sys_position' ? planned : undefined),
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+
+    expect(out.coverage.reasons).toMatchObject({ federated: 1, unbound: 1, otherDriver: 0 });
+    const said = out.notes.join(' ');
+    expect(said).toContain('1 federated (no managed table)');
+    expect(said).toContain('1 bound to no driver');
+  });
+
+  it('reports a REFUSING driver as a shortfall, quoting it', async () => {
+    const planned = driverDouble('control');
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }],
+      driverFor: () => planned,
+      sync: async () => { throw new Error('pool is closed'); },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+
+    expect(out.coverage.examinedObjects).toBe(0);
+    expect(out.coverage.reasons.failed).toBe(1);
+    const said = out.notes.join(' ');
+    expect(said).toContain('REFUSED schema registration for 1 object(s)');
+    expect(said).toContain('pool is closed');
+  });
+
+  it('says the registry was UNREADABLE rather than answering "zero objects"', async () => {
+    // #9285's contract, one layer out: "the registry holds nothing" and "the
+    // registry could not be read" have opposite consequences, and only the
+    // first is a truthful reason to report full coverage over an empty set.
+    const out = await measureComposedCoverage(kernelWith({ registry: {} }), driverDouble('control'), true);
+
+    expect(out.coverage.registeredObjects).toBe(0);
+    const said = out.notes.join(' ');
+    expect(said).toContain('no readable ObjectQL registry');
+    expect(said).toContain('UNMEASURED coverage, not full coverage');
+  });
+
+  it('REFUSES to bind on a boot that did not defer DDL — that call would create tables', async () => {
+    // The guard that keeps this pass from turning a dry run into a migration:
+    // `syncObjectSchema` takes the DDL path when the driver is not deferring,
+    // so a non-deferred boot reports UNMEASURED instead of syncing.
+    const planned = driverDouble('control');
+    let synced = 0;
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }],
+      driverFor: () => planned,
+      sync: async () => { synced++; },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), planned, false);
+
+    expect(synced).toBe(0);
+    expect(out.notes.join(' ')).toContain('did not defer schema DDL');
+    expect(out.notes.join(' ')).toContain('UNMEASURED');
   });
 });
