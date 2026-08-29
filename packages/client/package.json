@@ -33,7 +33,10 @@
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/rest": "workspace:*",
     "@objectstack/runtime": "workspace:*",
+    "@objectstack/service-analytics": "workspace:*",
+    "@objectstack/service-automation": "workspace:*",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
