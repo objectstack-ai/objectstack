@@ -225,6 +225,13 @@ export interface SchemaMigrationComposition {
    */
   hostConfigLoaded: boolean;
   /**
+   * The underlying failure, when `hostConfigPath !== null && !hostConfigLoaded`
+   * — the message the load threw, carried structurally so the commands can NAME
+   * it in their refusal (#12953) instead of re-parsing the prose in `notes`.
+   * `null` on every other shape, including a config that loaded.
+   */
+  hostConfigError: string | null;
+  /**
    * One line per thing this composition did or could not do, for the command to
    * print. Empty when nothing was composed, so a project with neither a config
    * nor an artifact produces byte-identical output to before this existed.
@@ -243,6 +250,7 @@ const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
   plugins: [],
   hostConfigPath: null,
   hostConfigLoaded: false,
+  hostConfigError: null,
   notes: [],
   coverage: null,
 }) as SchemaMigrationComposition;
@@ -276,6 +284,7 @@ export async function buildSchemaMigrationPlugins(opts: {
   const plugins: unknown[] = [];
   const notes: string[] = [];
   let hostConfigLoaded = false;
+  let hostConfigError: string | null = null;
 
   if (hostConfigPath) {
     try {
@@ -311,10 +320,21 @@ export async function buildSchemaMigrationPlugins(opts: {
       );
     } catch (error: any) {
       // Loud, and on stderr in both modes (`--json` reserves stdout, and the
-      // reservation is already installed by the time this runs). NOT fatal: a
-      // config that cannot load — a missing env var is the common one — used to
-      // be irrelevant to this command, and turning that into a failed `plan`
-      // would break a command that works today. Say what was lost instead.
+      // reservation is already installed by the time this runs).
+      //
+      // ⚠️ This warning is no longer the WHOLE of the response. It used to be —
+      // the reasoning was that a config which cannot load (a missing env var is
+      // the common one) used to be irrelevant to this command, so failing the
+      // run would regress a command that works today. Maintainer ruling
+      // 2026-08-29 (#12953), verbatim 「同意」, overrode that: a green exit over
+      // an UNMEASURED partial metadata set is the false-green a migration tool
+      // must never emit, and the population it "regresses" was computing
+      // defective plans all along. The commands now exit non-zero on this path
+      // — see {@link describeUnloadableHostConfig}.
+      //
+      // The warning text and `hostConfigLoaded` stay exactly as they were: the
+      // ruling pinned both, because consumers (objectstack-ai/cloud#1705) read
+      // the discriminator and a count alone cannot replace it.
       const message = error?.message ?? String(error);
       const line =
         `Host config ${hostConfigPath} could not be loaded: ${message}. `
@@ -324,6 +344,7 @@ export async function buildSchemaMigrationPlugins(opts: {
       // eslint-disable-next-line no-console
       console.warn(`[migrate] ⚠ ${line}`);
       notes.push(line);
+      hostConfigError = message;
     }
   }
 
@@ -338,7 +359,84 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push('Composed PlatformObjectsPlugin (the platform floor `os serve` composes unconditionally).');
   }
 
-  return { plugins, hostConfigPath, hostConfigLoaded, notes, coverage: null };
+  return { plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null };
+}
+
+/**
+ * The one composition shape `os migrate plan` / `apply` must REFUSE (#12953),
+ * rendered as the operator-facing error — or `null` when this run is not it.
+ *
+ * ## Which shape, and why only this one
+ *
+ * A host config that EXISTS and could not be loaded. The object set the command
+ * then diffs is the data stack plus the platform floor: nine tables, none of
+ * them this deployment's, and `0` drift over them prints as "in sync". The
+ * maintainer ruled that green exit out on 2026-08-29 (verbatim 「同意」) —
+ * a green exit over an UNMEASURED partial metadata set is the false-green a
+ * migration tool must never emit, and the population this "regresses" was
+ * computing defective plans all along.
+ *
+ * The scope was pinned in the same ruling, in three directions, and the
+ * predicate below is written to hold all three:
+ *
+ *   • config present + unloadable → non-zero (this function answers non-`null`);
+ *   • config ABSENT (`hostConfigPath === null`) → today's behaviour, unchanged.
+ *     `hostConfigLoaded` is `false` on that path too — which is exactly why the
+ *     test is on `hostConfigPath`, not on `hostConfigLoaded` alone;
+ *   • config present + loadable → today's behaviour, unchanged.
+ *
+ * ⛔ Not a general "the composition is partial" refusal. A plan that composed
+ * fine but could not EXAMINE everything it declared is #13028's `coverage`
+ * block, it stays exit 0, and widening this predicate to cover it would turn a
+ * population the ruling deliberately left alone red.
+ *
+ * The message names the three things the ruling requires of it: the config
+ * file, the underlying failure, and the remedy.
+ */
+export function describeUnloadableHostConfig(
+  composition: SchemaMigrationComposition,
+): string | null {
+  if (composition.hostConfigPath === null || composition.hostConfigLoaded) return null;
+  const cause = composition.hostConfigError ?? 'the load threw without a message';
+  return (
+    `Host config ${composition.hostConfigPath} exists but could not be loaded: ${cause}. `
+    + 'This run therefore covered ONLY the objects the data stack registered — a fraction of '
+    + 'what this deployment serves — so its result is UNMEASURED, not "in sync", and it is '
+    + 'reported as a FAILURE rather than as success. '
+    + 'Remedy: supply the environment this config needs (the failure named above says which), '
+    + 'or fix the config, then re-run.'
+  );
+}
+
+/**
+ * Apply {@link describeUnloadableHostConfig}'s verdict to the process.
+ *
+ * A shared choke point rather than two copies, for the reason `apply` already
+ * states about `composeHostStack`: the plan an operator reads and the reconcile
+ * they confirm must be the same judgement, so the two commands cannot be
+ * allowed to drift on it.
+ *
+ * ⚠️ Writes to **stderr**, in both modes. `printError` writes to stdout, and
+ * `--json` reserves stdout for the payload — the payload is still emitted in
+ * full on this path, because the ruling kept `composition.hostConfigLoaded` as
+ * the machine discriminator its consumers read.
+ *
+ * ⚠️ Sets `process.exitCode` rather than throwing oclif's `this.exit(1)`: the
+ * report — the plan, or the JSON document — has already been written by the
+ * time this runs and must survive. `migrate/plan.ts`'s `run()` wrapper reads
+ * `process.exitCode` and hands it to `exitOneShotCommand`.
+ *
+ * @returns `true` when this run was the refused shape.
+ */
+export function refuseWhenHostConfigUnloadable(
+  composition: SchemaMigrationComposition,
+): boolean {
+  const line = describeUnloadableHostConfig(composition);
+  if (line === null) return false;
+  // eslint-disable-next-line no-console
+  console.error(`[migrate] ✗ ${line}`);
+  process.exitCode = 1;
+  return true;
 }
 
 /**

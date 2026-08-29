@@ -226,18 +226,30 @@ describe('#12525: the child\'s REAL port is read back out of its own banner', ()
     });
 
     it('serve.ts still builds that row from the BOUND port, not the requested one', () => {
-      // ⭐ The load-bearing premise of the whole read-back. `port` is the
-      // variable `getAvailablePort()` may have shifted; `requestedPort` is what
-      // the harness asked for. If the banner were ever built from the latter,
-      // this check could never disagree with the harness and would be a
-      // phantom — green on every run, including the drifted ones.
+      // ⭐ The load-bearing premise of the whole read-back. `requestedPort` is
+      // what the harness asked for; `boundPort` is what the transport reports
+      // it BOUND. If the banner were ever built from the former, this check
+      // could never disagree with the harness and would be a phantom — green
+      // on every run, including the drifted ones.
+      //
+      // ⚠️ It used to read `resolveAuthBaseUrl(port)`, and `port` is only
+      // ALMOST the bound one: `getAvailablePort()` reassigns it past a dev
+      // auto-shift, which is the case this file drives, but it is still the
+      // number that was REQUESTED and it stays 0 under `--port 0` (#13062).
+      // The banner now reads the transport's own answer, so the premise below
+      // is the stronger one it was always meant to be.
       const serveSource = readFileSync(resolve(HERE, '../src/commands/serve.ts'), 'utf8');
       expect(serveSource).toContain('port = await getAvailablePort(requestedPort)');
       expect(
         serveSource,
-        'the ready banner no longer derives its API row from `resolveAuthBaseUrl(port)` — '
+        'the ready banner no longer derives its API row from `resolveAuthBaseUrl(boundPort)` — '
         + 'if it now uses the REQUESTED port, the #12525 read-back is vacuous by construction',
-      ).toContain('externalBaseOrigin: resolveAuthBaseUrl(port).baseOrigin');
+      ).toContain('externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin');
+      expect(
+        serveSource,
+        'the bound port is no longer resolved off the transport — `boundPort` is what the '
+        + 'banner, the IPC message and runtime.<env>.json all publish (#13062)',
+      ).toContain('const boundPort = resolveBoundPort(kernel, port)');
     });
   });
 

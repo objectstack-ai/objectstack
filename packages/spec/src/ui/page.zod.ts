@@ -145,11 +145,22 @@ export const PageComponentSchema = lazySchema(() => strictObject({
   // name (#8199's placement rule).
   surface: 'this page component',
 }, {
-  /** Definition */
+  /**
+   * Definition.
+   *
+   * The union's string arm is DELIBERATE — an open namespace for custom and
+   * registered components (kebab SDUI blocks, plugin console widgets,
+   * `custom.*` shapes) — but it is not unclaimed: inside the namespaces the
+   * enum itself populates, the vocabulary is closed at author time by the
+   * `component-type-unknown` authoring rule, against the claim stated in
+   * `component-type-vocabulary.ts`. The parse stays open so stored documents
+   * keep loading; the refusal lands at the authoring doors, where the author
+   * is still present to fix the string.
+   */
   type: z.union([
     PageComponentType,
     z.string()
-  ]).describe('Component Type (Standard enum or custom string)'),
+  ]).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`).'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */
