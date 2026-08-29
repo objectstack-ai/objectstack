@@ -123,6 +123,72 @@
 // restore); only the instrument changes. What is not negotiable is that SOME
 // instrument reads the built artifact before the ablation's colour is believed.
 //
+// ## The mutation is TWO files whenever the package's build writes committed artifacts
+//
+// `dist/` is not the only thing a build writes. A package whose build runs a
+// generator also writes CHECKED-IN artifacts, and those land in the working
+// tree rather than in an ignored output directory. So an ablation on such a
+// package is a TWO-FILE mutation, and only one of the two is the file the agent
+// chose:
+//
+//   mutated  packages/spec/src/data/field.zod.ts        <- chosen, restored
+//   written  packages/spec/authorable-surface/data.json <- committed, tracked, LEFT
+//
+// The restore leg then goes wrong in a way every per-path proof calls clean.
+// Measured: a plant ablation restored with `git checkout HEAD -- <mutated path>`
+// left `packages/spec/authorable-surface/data.json | 1 +` behind -- a PHANTOM
+// authorable key in a committed contract baseline. On that tree
+//
+//   git diff HEAD -- <the mutated path>   empty
+//   git hash-object <the mutated path>    == its HEAD blob
+//   grep <marker> <the mutated path>      0
+//
+// ALL THREE PASS. The silence is directional, which is why a STRICTER per-path
+// proof cannot close it and only a whole-tree read can. What followed was a
+// rebuild refusing with the ADR-0049 enforce-or-remove prescription -- every
+// word of it correct, about a key that never existed: a FALSE RED, costing
+// rounds. Skip that rebuild instead and the suite runs against a `dist/` that
+// still carries the ablation: the false GREEN this whole script exists to stop,
+// arriving through the restore leg. And in either case `git add -A` at that
+// moment COMMITS the phantom, so the next unrelated PR reds on a contract
+// baseline someone else corrupted by following the procedure correctly.
+//
+// So both modes also read `git status --porcelain` over the WHOLE tree.
+// Deliberately whole-tree and not a list of known-dirty paths: `packages/spec`
+// is the INSTANCE (`gen:schema` writes `authorable-surface/`,
+// `json-schema.manifest/` and `api-surface/`), not the class, and a fix
+// enumerating those three leaves every other generated-artifact package with
+// the same hole.
+//
+// ### Which leg you are on is DERIVED from the marker, not declared
+//
+// A dirty tree is CORRECT on a mutate leg and WRONG on a restore leg, and the
+// two share a command line: `--absent` is both the delete-ablation mutate leg
+// and the plant-ablation restore leg (see the two-shapes section above). Rather
+// than grow a flag -- which would strand the three documents that state this
+// script's invocation, two of them governed surfaces no code PR may edit -- the
+// leg is read off the marker, per dirty path, against HEAD:
+//
+//   present mode   a dirty path that GAINED the marker is the plant     -> MUTATE leg
+//   absent  mode   a dirty path that LOST the marker is the deleted guard -> MUTATE leg
+//   neither, on any dirty path                                          -> RESTORE leg
+//
+// On a MUTATE leg every other dirty path is REPORTED and never fatal: the build
+// was supposed to write them, and that is the earliest moment the restore leg's
+// true size can be known -- it is two files, and here they are. On a RESTORE
+// leg the tree must be clean, and every dirty path is FATAL and named. That is
+// the assertion which recovered the measured run, now delivered in the gate
+// refusal's place instead of after it.
+//
+// Untracked paths count as dirty. A sharded artifact gains FILES and not only
+// lines, and `git add -A` commits an untracked one exactly like a modified one.
+// A scratch file of your own trips this too, by design: at the restore leg the
+// honest statement is "this tree is not the tree you think you are measuring",
+// and the remedy (move it out, or restore it) is one line either way.
+//
+// Reading the tree is not optional and not skippable: a `git status` that
+// cannot be read is RED, like every other thing this script cannot see.
+//
 // ## Why this is not a `check:*` gate
 //
 // It judges a deliberately mutated working tree, so it can only be run by the
@@ -141,6 +207,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, extname } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -267,6 +334,156 @@ export function verdict({ mode, distExists, scanned, codeHits, mapHits }) {
   return { ok: true, msg: `marker absent from all ${scanned} built files${extra} -- the artifact the suite consumes no longer carries it.` };
 }
 
+// ---------------------------------------------------------------------------
+// Whole-tree accounting -- see "The mutation is TWO files" in the header.
+// ---------------------------------------------------------------------------
+
+// The record separator of `git status -z`. Built with `fromCharCode` rather
+// than written as a string literal: `check:nul-bytes` and this repo's byte
+// discipline both refuse a raw NUL in a tracked file, and an escape spelling
+// inside a literal is one careless editor round-trip away from becoming one.
+const NUL = String.fromCharCode(0);
+
+/**
+ * Parse `git status --porcelain -z` output into entries.
+ *
+ * `-z` rather than the line form on purpose: the line form QUOTES and escapes
+ * any path holding a space or a non-ASCII byte, so a leaked artifact under such
+ * a path would be reported under a name that does not exist on disk and
+ * `git show HEAD:<it>` would fail -- read as "not at HEAD", i.e. silently
+ * mis-classified. With `-z` each record is `XY<space><path>`, and a rename or
+ * copy record is FOLLOWED by a second record holding the origin path, which is
+ * consumed rather than mistaken for an entry of its own.
+ */
+export function parsePorcelainZ(out) {
+  const records = out.split(NUL).filter((r) => r.length > 0);
+  const entries = [];
+  for (let i = 0; i < records.length; i += 1) {
+    const rec = records[i];
+    if (rec.length < 4) continue; // 'XY path' is four characters at minimum
+    const xy = rec.slice(0, 2);
+    const path = rec.slice(3);
+    if (xy[0] === 'R' || xy[0] === 'C') i += 1; // consume the origin record
+    entries.push({ xy, path, untracked: xy === '??' });
+  }
+  return entries;
+}
+
+/**
+ * Which leg this run is on, and which dirty paths the ablation accounts for.
+ *
+ * `files`: [{ path, xy, untracked, headHas, treeHas }] -- `headHas`/`treeHas`
+ * say whether the marker occurs in that path's HEAD blob / working copy.
+ *
+ * The marker moving in the direction the MODE implies is what identifies the
+ * file the agent chose to mutate. Anything else dirty was written by something
+ * the agent did not choose -- which on a restore leg is the entire finding.
+ */
+export function classifyTree({ mode, files }) {
+  const explains = (f) => (mode === 'present' ? f.treeHas && !f.headHas : f.headHas && !f.treeHas);
+  const mutated = files.filter(explains);
+  const unaccounted = files.filter((f) => !explains(f));
+  return { leg: mutated.length > 0 ? 'mutate' : 'restore', mutated, unaccounted };
+}
+
+/**
+ * The whole-tree verdict, pure so the self-test can pin every branch.
+ *
+ * Fatal ONLY on a restore leg. A mutate leg's tree is dirty by construction, so
+ * refusing there would void a legitimate step; naming what the build wrote is
+ * the useful act at that moment instead.
+ */
+export function treeVerdict({ mode, gitReadable, gitError, files }) {
+  if (!gitReadable) {
+    return {
+      ok: false,
+      leg: null,
+      paths: [],
+      msg:
+        `cannot read \`git status\` for this tree${gitError ? ` (${gitError})` : ''} -- refusing to certify a restore `
+        + 'it never looked at. An ablation leaves a SECOND, committed mutation behind whenever the package it '
+        + 'mutates has a build that writes checked-in artifacts, and this is the only check here that can see it.',
+    };
+  }
+  const { leg, mutated, unaccounted } = classifyTree({ mode, files });
+  if (files.length === 0) {
+    return {
+      ok: true,
+      leg: 'restore',
+      paths: [],
+      msg: 'working tree clean against HEAD -- nothing of this ablation is recorded outside dist/.',
+    };
+  }
+  if (leg === 'mutate') {
+    const n = files.length;
+    return {
+      ok: true,
+      leg,
+      paths: files.map((f) => f.path),
+      msg:
+        `mutate leg: ${n} path${n === 1 ? '' : 's'} differ${n === 1 ? 's' : ''} from HEAD, of which `
+        + `${mutated.length} carr${mutated.length === 1 ? 'ies' : 'y'} the marker. Your restore leg has to put ALL of `
+        + 'them back, not only the source you chose: a build that writes checked-in artifacts makes this a TWO-FILE '
+        + 'mutation, and restoring only the source leaves the ablation recorded in the tree, where the next build '
+        + 'reads it as a real change and `git add -A` commits it. Prove the restore with a WHOLE-TREE '
+        + '`git status --porcelain`, never a per-path diff -- a per-path diff is clean on exactly the tree that is '
+        + 'still mutated.',
+    };
+  }
+  const n = unaccounted.length;
+  return {
+    ok: false,
+    leg,
+    paths: unaccounted.map((f) => f.path),
+    msg:
+      `restore leg: no dirty path carries the marker, so the source you mutated is back -- but ${n} path`
+      + `${n === 1 ? ' still differs' : 's still differ'} from HEAD. The TREE is not restored: the ablation is still `
+      + "recorded in what this package's build wrote, so every measurement from here on measures the wrong tree, the "
+      + 'next build can refuse loudly about a change that never happened, and `git add -A` commits the phantom into a '
+      + 'contract baseline.',
+  };
+}
+
+/** `git status --porcelain -z` over the whole worktree. Impure; the verdict lives above. */
+function readTreeStatus(repoRoot) {
+  try {
+    const out = execFileSync('git', ['status', '--porcelain', '-z'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { gitReadable: true, entries: parsePorcelainZ(out) };
+  } catch (err) {
+    const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
+    return { gitReadable: false, gitError: detail, entries: [] };
+  }
+}
+
+/** Does `marker` occur in this path's working copy / HEAD blob? Binary and missing both read `false`. */
+function markerPresence(repoRoot, entries, marker) {
+  const hasMarker = (buf) => buf != null && !buf.includes(0) && buf.toString('utf8').includes(marker);
+  return entries.map((e) => {
+    let tree = null;
+    try {
+      tree = readFileSync(join(repoRoot, e.path));
+    } catch {
+      tree = null; // deleted in the worktree, or unreadable
+    }
+    let head = null;
+    try {
+      head = execFileSync('git', ['show', `HEAD:${e.path}`], {
+        cwd: repoRoot,
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      head = null; // not present at HEAD (added / untracked), or unreadable
+    }
+    return { ...e, treeHas: hasMarker(tree), headHas: hasMarker(head) };
+  });
+}
+
 function fail(msg) {
   console.error(`✗ ablation-dist-preflight: ${msg}`);
   process.exit(1);
@@ -305,12 +522,32 @@ function run(argv) {
   for (const f of scan.codeHits.slice(0, 5)) console.log(`  hit  ${relative(REPO_ROOT, f)}`);
   if (scan.codeHits.length > 5) console.log(`  hit  ... and ${scan.codeHits.length - 5} more`);
   for (const f of scan.mapHits.slice(0, 3)) console.log(`  map  ${relative(REPO_ROOT, f)} (sourcemap, not counted)`);
-  if (!v.ok) {
-    console.error(`✗ ${v.msg}`);
+  if (v.ok) {
+    console.log(`✓ dist/: ${v.msg}`);
+  } else {
+    console.error(`✗ dist/: ${v.msg}`);
     console.error(`  rebuild: pnpm --filter ${name} build`);
-    process.exit(1);
   }
-  console.log(`✓ ${v.msg}`);
+
+  // The second half of the same question: `dist/` is not the only thing the
+  // build wrote. Both verdicts are computed and printed before either exits,
+  // deliberately -- in the measured incident BOTH were true at once ("marker
+  // still present in 26 built files" AND a leaked committed baseline), and
+  // reporting only the first sends the agent into a rebuild loop against a
+  // build that is refusing precisely because of the second.
+  const status = readTreeStatus(REPO_ROOT);
+  const files = status.gitReadable ? markerPresence(REPO_ROOT, status.entries, marker) : [];
+  const tv = treeVerdict({ mode, gitReadable: status.gitReadable, gitError: status.gitError, files });
+  const say = (s) => (tv.ok ? console.log(s) : console.error(s));
+  say(`${tv.ok ? (tv.paths.length > 0 ? '⚠' : '✓') : '✗'} tree: ${tv.msg}`);
+  for (const p of tv.paths.slice(0, 20)) say(`  dirty  ${p}`);
+  if (tv.paths.length > 20) say(`  dirty  ... and ${tv.paths.length - 20} more`);
+  if (tv.paths.length > 0) {
+    say(`  restore: git checkout HEAD -- ${tv.paths.slice(0, 3).join(' ')}${tv.paths.length > 3 ? ' <...>' : ''}`);
+    say('           (an untracked path has nothing at HEAD -- delete it or move it out of the repo)');
+  }
+
+  if (!v.ok || !tv.ok) process.exit(1);
 }
 
 function selfTest() {
@@ -362,6 +599,141 @@ function selfTest() {
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // ---- whole-tree accounting: the pure table -------------------------------
+  const f = (path, headHas, treeHas, untracked = false) => ({ path, xy: untracked ? '??' : ' M', untracked, headHas, treeHas });
+  const treeCases = [
+    ['unreadable git is RED, never a skip', { mode: 'absent', gitReadable: false, gitError: 'not a git repository', files: [] }, false, null],
+    ['clean tree is green (present)', { mode: 'present', gitReadable: true, files: [] }, true, 'restore'],
+    ['clean tree is green (absent)', { mode: 'absent', gitReadable: true, files: [] }, true, 'restore'],
+    // present mode: the plant is the path that GAINED the marker.
+    ['present: planted source alone -> mutate leg, green', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true)] }, true, 'mutate'],
+    ['present: plant + leaked artifact -> mutate leg, green but both listed', { mode: 'present', gitReadable: true, files: [f('src/a.ts', false, true), f('gen/base.json', false, false)] }, true, 'mutate'],
+    // The measured incident: restore leg, only the build-written artifact left.
+    ['absent: leaked artifact after restore -> RESTORE leg, RED', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', false, true)] }, false, 'restore'],
+    ['present: leaked artifact after a delete-ablation restore -> RESTORE leg, RED', { mode: 'present', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
+    // absent mode is ALSO a delete-ablation's mutate leg: the guard's literal left the tree.
+    ['absent: deleted guard -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false)] }, true, 'mutate'],
+    ['absent: deleted guard + leaked artifact -> mutate leg, green', { mode: 'absent', gitReadable: true, files: [f('src/a.ts', true, false), f('gen/base.json', false, false)] }, true, 'mutate'],
+    // An untracked path is dirty too -- a sharded artifact gains FILES, and `git add -A` takes them.
+    ['absent: untracked path at the restore leg is RED', { mode: 'absent', gitReadable: true, files: [f('gen/new-shard.json', false, false, true)] }, false, 'restore'],
+    // A marker present on BOTH sides never identifies a mutation in either mode.
+    ['absent: marker on both sides does not explain the dirt', { mode: 'absent', gitReadable: true, files: [f('gen/base.json', true, true)] }, false, 'restore'],
+    ['present: marker on neither side does not explain the dirt', { mode: 'present', gitReadable: true, files: [f('gen/base.json', false, false)] }, false, 'restore'],
+  ];
+  for (const [label, input, expectedOk, expectedLeg] of treeCases) {
+    const got = treeVerdict(input);
+    if (got.ok !== expectedOk || got.leg !== expectedLeg) {
+      console.error(`  ✗ ${label}: expected ok=${expectedOk} leg=${expectedLeg}, got ok=${got.ok} leg=${got.leg}`);
+      failed += 1;
+    } else {
+      console.log(`  ✓ ${label}`);
+    }
+  }
+
+  // A red restore leg must NAME the leaked path -- a refusal that does not say
+  // which file is still mutated sends the agent back to the per-path diff that
+  // is clean on exactly this tree.
+  {
+    const red = treeVerdict({ mode: 'absent', gitReadable: true, files: [f('packages/spec/authorable-surface/data.json', false, true)] });
+    const named = red.paths.includes('packages/spec/authorable-surface/data.json');
+    if (named) console.log('  ✓ a red restore leg names the leaked path');
+    else {
+      console.error('  ✗ a red restore leg names the leaked path');
+      failed += 1;
+    }
+  }
+
+  // ---- porcelain parsing ---------------------------------------------------
+  {
+    const Z = String.fromCharCode(0);
+    const parsed = parsePorcelainZ([' M packages/spec/authorable-surface/data.json', '?? scratch note.txt', 'R  new/name.ts', 'old/name.ts', ''].join(Z));
+    const checks = [
+      ['parses a modified path', parsed[0]?.path === 'packages/spec/authorable-surface/data.json' && parsed[0]?.untracked === false],
+      ['parses an untracked path holding a space, unquoted', parsed[1]?.path === 'scratch note.txt' && parsed[1]?.untracked === true],
+      ['consumes a rename origin record instead of listing it', parsed.length === 3 && parsed[2]?.path === 'new/name.ts'],
+    ];
+    for (const [label, ok] of checks) {
+      if (ok) console.log(`  ✓ ${label}`);
+      else {
+        console.error(`  ✗ ${label}`);
+        failed += 1;
+      }
+    }
+  }
+
+  // ---- whole-tree accounting: a real git tree -------------------------------
+  // The pure table cannot catch a broken `git status` read or a broken
+  // HEAD-vs-worktree marker probe, and those are the wires that make the
+  // verdict mean anything. This leg replays the measured incident end to end.
+  const repo = mkdtempSync(join(tmpdir(), 'ablation-preflight-git-'));
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    const srcPath = join(repo, 'source.ts');
+    const genPath = join(repo, 'generated-baseline.json');
+    const MARK = 'OS_ABLATION_LEAK_MARK';
+    const GUARD = 'OS_GUARD_LITERAL';
+
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'selftest@objectstack.invalid');
+    git('config', 'user.name', 'ablation selftest');
+    writeFileSync(srcPath, `export const guard = "${GUARD}";\n`);
+    writeFileSync(genPath, '{"keys":["a"]}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base');
+
+    const legFor = (mode) => {
+      const st = readTreeStatus(repo);
+      const files = st.gitReadable ? markerPresence(repo, st.entries, mode === 'present' ? MARK : GUARD) : [];
+      return treeVerdict({ mode, gitReadable: st.gitReadable, gitError: st.gitError, files });
+    };
+
+    // 1. plant ablation, mutate leg: the source gains the marker and the
+    //    "build" writes the marker into the committed baseline as well.
+    writeFileSync(srcPath, `export const guard = "${GUARD}";\nexport const planted = "${MARK}";\n`);
+    writeFileSync(genPath, `{"keys":["a","${MARK}"]}\n`);
+    const mutateLeg = legFor('present');
+
+    // 2. restore ONLY the mutated source -- exactly what the discipline says,
+    //    and exactly what left a phantom key in a committed contract baseline.
+    git('checkout', 'HEAD', '--', 'source.ts');
+    const restoreLeg = legFor('absent');
+    // The per-path proof the discipline prescribes, read at the moment it is
+    // used: it is EMPTY on this tree, which is why it cannot close the hole.
+    const perPathDiffAtRestore = git('diff', 'HEAD', '--', 'source.ts').trim();
+
+    // 3. restore the leaked artifact too.
+    git('checkout', 'HEAD', '--', 'generated-baseline.json');
+    const cleanLeg = legFor('absent');
+
+    // 4. delete ablation, mutate leg: the guard literal leaves the tree.
+    writeFileSync(srcPath, 'export const guard = "";\n');
+    const deleteLeg = legFor('absent');
+    git('checkout', 'HEAD', '--', 'source.ts');
+
+    // 5. an untracked scratch file is dirt too.
+    writeFileSync(join(repo, 'scratch.txt'), 'notes\n');
+    const untrackedLeg = legFor('absent');
+
+    const gitChecks = [
+      ['git leg: mutate leg is green and lists BOTH files', mutateLeg.ok === true && mutateLeg.leg === 'mutate' && mutateLeg.paths.length === 2],
+      ['git leg: per-path restore leaves the tree RED', restoreLeg.ok === false && restoreLeg.leg === 'restore'],
+      ['git leg: the RED names the leaked baseline', restoreLeg.paths.includes('generated-baseline.json')],
+      ['git leg: the per-path diff is EMPTY on that same unrestored tree', perPathDiffAtRestore === ''],
+      ['git leg: whole-tree restore is green', cleanLeg.ok === true && cleanLeg.paths.length === 0],
+      ['git leg: a deleted guard is a mutate leg, not a restore leg', deleteLeg.ok === true && deleteLeg.leg === 'mutate'],
+      ['git leg: an untracked path reds the restore leg', untrackedLeg.ok === false && untrackedLeg.paths.includes('scratch.txt')],
+    ];
+    for (const [label, ok] of gitChecks) {
+      if (ok) console.log(`  ✓ ${label}`);
+      else {
+        console.error(`  ✗ ${label}`);
+        failed += 1;
+      }
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 
   if (failed > 0) {
