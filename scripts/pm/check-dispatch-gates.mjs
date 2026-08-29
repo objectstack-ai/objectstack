@@ -29,10 +29,27 @@
  * and exits 0 on any completed run. There is no verdict in it for CI to hold —
  * gating on it would buy a slow read of the whole workflow tree whose exit code
  * is 0 by construction. What CI can hold is the half that HAS a verdict, the
- * self-test. That self-test is not fixture-only either: it reads the real
- * pr-automation.yml and walks the real packages tree in the cases where a
- * fixture cannot prove the point, so the derivation's contact with reality is
- * covered by this gate too.
+ * self-test. That self-test is not fixture-only either. In the cases where a
+ * fixture cannot prove the point it runs the same discovery the tool does —
+ * every workflow file in the tree, and then the source of every gate that
+ * discovery finds — sweeps the tracked corpus, builds temporary git
+ * repositories with real history and drives changedPathsFromGit against them,
+ * and re-runs the tool's own CLI as a child process against the real checkout:
+ * invoked directly, through a symlink to it, and imported by a consumer
+ * module, plus a spawned import that reads a sibling gate's live table. So the
+ * derivation's contact with reality is covered by this gate too — and most of
+ * what the paragraph above calls a slow read is already paid for here, with a
+ * verdict attached to it.
+ *
+ * ⛔ That description carries no figures, deliberately. The count of workflows,
+ * of gate sources, of files swept and of temporary repositories all move with
+ * the tree, and one frozen in a comment goes stale without anything failing —
+ * which is exactly how the older spelling of this paragraph ("it reads the
+ * real pr-automation.yml and walks the real packages tree") came to describe a
+ * self-test far smaller than the one CI runs, in the file the lint workflow
+ * sends readers to for the measured argument. A reading belongs to a named
+ * commit, not to a header. Same repair, and the same reason, as the cost note
+ * in the workflow comment that points here (#12831).
  *
  * ## Why this file exists instead of pointing the script at the tool directly
  *
