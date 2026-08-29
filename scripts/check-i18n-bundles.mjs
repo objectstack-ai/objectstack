@@ -332,7 +332,10 @@ const WORKSPACE_CLOSURE_FIX = POPULATION_CLOSURE.command ?? 'pnpm build';
  */
 const CLOSURE_FIX_NOTE = [
   `That is this gate's WHOLE prerequisite in ONE command (#12564) — the CLI, plus the`,
-  `build closure of every package whose extract config it runs.`,
+  `build closure of every package whose extract config it runs. Clearing only the CLI`,
+  `(\`${CLI_BUILD_FIX}\`)`,
+  `moves the wall rather than removing it: \`os i18n extract\` loads the package it is`,
+  `pointed at, so that package needs its own build output too.`,
   `⛔ Clearing it one package at a time does NOT converge: node stops resolving a`,
   `config's imports at the FIRST one with no \`dist/\`, so each round can name exactly`,
   `one more, however many are missing. Run the closure once.`,
@@ -1078,8 +1081,6 @@ function checkCliBuildPrerequisite() {
       `output — and that command is not there:`,
       ``,
       `  ${resolved.file}`,
-      ``,
-      `Only the CLI: ${CLI_BUILD_FIX}`,
     ],
     { fix: WORKSPACE_CLOSURE_FIX, alsoFix: CLOSURE_FIX_NOTE },
   );
