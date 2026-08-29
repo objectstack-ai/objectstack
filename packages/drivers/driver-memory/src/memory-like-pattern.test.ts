@@ -9,9 +9,11 @@
  * family a real pattern arm. The other backends then had a choice per the
  * issue's own bar: implement the same semantics, or refuse loudly in the
  * ADR-0112 envelope — never quietly answer something else. `driver-mongodb`,
- * objectql's `having` and `service-analytics` refuse, because they have no arm
- * and are in the #5499 frozen family. This driver implements, for two reasons
- * that do not apply to them:
+ * objectql's `having` and `service-analytics` refuse, because they have no
+ * arm; they were also inside the #5499 investment freeze when they chose, and
+ * that freeze dissolved 2026-08-11 (head note of `@objectstack/spec`'s
+ * `aggregation-conformance.ts`), so their refusal now rests on the missing arm
+ * alone. This driver implements, for two reasons that do not apply to them:
  *
  * 1. **It is the in-memory DOUBLE.** An application whose tests run here and
  *    whose production runs SQL would get a 400 in test for a filter that works

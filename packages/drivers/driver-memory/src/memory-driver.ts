@@ -409,8 +409,11 @@ export class InMemoryDriver implements IDataDriver {
     //
     // `offset` above is deliberately left on truthiness: `slice(0)` IS the
     // identity slice, so presence and truthiness cannot be told apart there —
-    // no behaviour to fix. The #5499 freeze exception granted here is the limit
-    // door only.
+    // no behaviour to fix — and that is the whole reason now. The #6577 ruling
+    // scoped its exception to the limit door only, but it was an exception to
+    // the #5499 investment freeze, and that freeze dissolved 2026-08-11 (head
+    // note of `@objectstack/spec`'s `aggregation-conformance.ts`). So scope is
+    // no longer what holds this line back; the identity-slice argument is.
     if (query.limit !== undefined) {
       results = results.slice(0, query.limit);
     }

@@ -4,7 +4,6 @@
     "ai/AIModelConfig — no type export",
     "ai/CodeContent — no type export",
     "ai/ImageContent — no type export",
-    "api/AnalyticsResultResponse — no type export",
     "api/Discovery — no type export",
     "api/HttpFindQueryParams — no type export",
     "api/MetadataExportRequest — no type export",

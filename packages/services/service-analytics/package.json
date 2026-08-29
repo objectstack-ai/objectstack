@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

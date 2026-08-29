@@ -25,9 +25,14 @@ import type { TemporalFieldKindResolver } from './mongodb-temporal.js';
  * no value at this driver's own call site, and this module is EXPORTED, so a
  * caller hands the builder whatever string it likes. A door that cannot be
  * reached by the values it governs looks shut and is not. The narrowing would
- * additionally delete the `array_agg` / `string_agg` arms below as a side
- * effect (both left the enum at #6188), which is a second accept-face change
- * and a separate card. See {@link LOWERED_HERE}.
+ * additionally have deleted the `array_agg` / `string_agg` arms below as a side
+ * effect (both left the enum at #6188), which was a second accept-face change
+ * and a separate card: #13075, now LANDED. It did not land as a deletion —
+ * those two arms are NAMED and refused ({@link refuseRetiredAggregateFunction}),
+ * because this switch's `default` answers a `$sum` and falling through would
+ * have turned a visibly-wrong array into a plausible number. The reasoning
+ * above is unchanged by it: `function` is still a bare `string`, and the
+ * enforcement is still at the lowering site. See {@link LOWERED_HERE}.
  */
 export interface AggregationInput {
   function: string;
@@ -381,17 +386,24 @@ function malformedGroupByError(node: unknown): Error {
  * develops the day after it is typed — the note over `driver-memory`'s
  * `SUPPORTED_FIELD_OPERATORS` (#5345), applied to the aggregate vocabulary.
  *
- * ⚠️ Two entries are NOT declared by `AggregationFunction`: `array_agg` and
- * `string_agg` left the enum at #6188 (ADR-0049 enforce-or-remove) and both SQL
- * faces refuse them as undeclared names today, while this face still lowers
- * them. That divergence is real, it PRE-DATES this change, and closing it is a
- * second accept-face narrowing with its own changeset — filed as #13075 rather
- * than ridden in here. What it must not do is leak into a refusal: the messages
- * offer {@link LOWERED_AND_DECLARED}, because a remedy naming a retired
- * spelling is a remedy `AggregationNodeSchema` rejects at the protocol door.
+ * ⚠️ This roster CARRIED two entries `AggregationFunction` does not declare —
+ * `array_agg` and `string_agg`, which left the enum at #6188 (ADR-0049
+ * enforce-or-remove) while this face went on lowering them, so one query
+ * answered 400 on `driver-sql` and `driver-turso` and a `$push` array here.
+ * #13075 CLOSED that divergence: {@link buildAccumulator} names both arms and
+ * refuses them ({@link refuseRetiredAggregateFunction}), so they are off this
+ * roster too — a roster that named what the switch no longer lowers would be a
+ * lie, and it is what the refusal messages read.
+ *
+ * The reason they were kept OUT of those messages stands, and is why
+ * {@link LOWERED_AND_DECLARED} still filters rather than being collapsed into
+ * this constant: a remedy naming a retired spelling is a remedy
+ * `AggregationNodeSchema` rejects at the protocol door. The two sets are equal
+ * TODAY; the filter is what keeps that true of the next name this face lowers
+ * ahead of the enum, instead of only of those two.
  */
 const LOWERED_HERE: readonly string[] = [
-  'count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg',
+  'count', 'sum', 'avg', 'min', 'max', 'count_distinct',
 ];
 
 /**
@@ -679,6 +691,72 @@ function numericAggregandExpr(path: string): Document {
 }
 
 /**
+ * [#13075] `array_agg` / `string_agg` — names the Query Protocol RETIRED.
+ *
+ * Both left `AggregationFunction` at #6188 under ADR-0049 enforce-or-remove: no
+ * SQL backend ever compiled either, and `string_agg` never had one shape to
+ * lower to (the delimiter is a second argument in PostgreSQL, a `SEPARATOR`
+ * clause in MySQL and a differently-named function in SQL Server). This face
+ * kept lowering both anyway, so ONE query answered `400` on `driver-sql` and
+ * `driver-turso` and a `$push` array here — the local/remote fork #5907 exists
+ * to prevent, one vocabulary later.
+ *
+ * ## Why 400 and not 501 — the #5907 classification
+ *
+ * `driver-sql` sorts every refused aggregate into two classes and these two are
+ * class 1: `refuseAggregateFunction` asks whether the spec still DECLARES the
+ * name, and answers `INVALID_QUERY`/400 when it does not. "The protocol has no
+ * such function" is a different fact from "this backend cannot lower it"
+ * (`NOT_IMPLEMENTED`/501, the class {@link refusePerAggregationFilter} and
+ * {@link refuseDateBucketedGroupBy} answer in) and deserves the different
+ * answer. `driver-turso`'s `RemoteTransport` carries the same note verbatim.
+ * So this refusal is answer-for-answer parity with both SQL faces.
+ *
+ * ## Why these two are NAMED here rather than left to the `default` arm
+ *
+ * `objectql`'s in-memory fallback deleted its arms for these two outright at
+ * #6188 and let them fall through, which it could do safely because its switch
+ * is over the ENUM TYPE — `case 'array_agg'` there does not type-check, which
+ * is exactly why that face could not keep them by accident and this one could.
+ * `AggregationInput.function` is a bare `string` (the driver's own `aggregate`
+ * reads aggregations through an `any` cast), so the arms here compiled fine and
+ * survived the retirement unnoticed.
+ *
+ * Falling through is ALSO not currently safe here: this builder's `default` arm
+ * answers `{ $sum: … }`, so deleting these two arms without naming them would
+ * turn a visibly-wrong ARRAY into an arithmetically PLAUSIBLE NUMBER — strictly
+ * the worse failure, and the very defect #12818 is fixing in that arm. Naming
+ * them is correct whichever order the two land in: before #12818's fix it is
+ * the only thing standing between these names and a silent sum, and after it
+ * the two agree on the answer while this arm keeps telling a caller that the
+ * name was REMOVED rather than merely unrecognised — the same distinction
+ * `AggregationFunction`'s own error map draws, and for the same reason (telling
+ * the author of `arry_agg` that their value "was removed" would misinform).
+ *
+ * The prescription itself is deliberately NOT restated here. It lives once, on
+ * the enum's error map in `@objectstack/spec`, where the parse door hands it to
+ * every caller who arrives through a spec-valid request; a copy in this file
+ * would be a second wording of one vocabulary with nothing keeping the two in
+ * step. This message names where it is and what to do instead in one line.
+ */
+function refuseRetiredAggregateFunction(func: string): never {
+  const err = new Error(
+    `Aggregate function "${func}" was REMOVED from @objectstack/spec `
+    + `AggregationFunction at #6188 (ADR-0049 enforce-or-remove) and is not lowered by this `
+    + `backend (driver-mongodb). Declared now: ${AggregationFunction.options.join(', ')}. `
+    + `This answers INVALID_QUERY/400 rather than NOT_IMPLEMENTED/501 because the protocol no `
+    + `longer has this name at all, which is a different fact from a capability gap in the `
+    + `backend (#5907) — the same answer \`driver-sql\` and \`driver-turso\` give it. There is no `
+    + `replacement in the query vocabulary: read the rows with an ordinary \`fields\` query and `
+    + `shape them in the caller, or model the roll-up as a stored field. Parsing the query `
+    + `through AggregationNodeSchema reports this with the full retirement prescription.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  throw err;
+}
+
+/**
  * Build a single MongoDB accumulator expression from an aggregation descriptor.
  */
 function buildAccumulator(agg: AggregationInput): Document {
@@ -723,12 +801,14 @@ function buildAccumulator(agg: AggregationInput): Document {
       // on that side rather than in this expression.
       return { $addToSet: fieldRef ?? null };
 
+    // [#13075] REFUSED, where this face used to LOWER both: `array_agg` to a
+    // `$push` and `string_agg` to a `$push` plus a join in
+    // {@link postProcessAggregation}. Both names left `AggregationFunction` at
+    // #6188; see {@link refuseRetiredAggregateFunction} for why they are named
+    // here rather than left to fall through.
     case 'array_agg':
-      return { $push: fieldRef ?? '$$ROOT' };
-
     case 'string_agg':
-      // Collect into array; caller can post-process with $reduce
-      return { $push: fieldRef ?? '' };
+      refuseRetiredAggregateFunction(agg.function);
 
     default:
       // [#12818] REFUSED, where this arm used to `return { $sum: fieldRef ?? 0 }`.
@@ -764,8 +844,18 @@ function buildAccumulator(agg: AggregationInput): Document {
 /**
  * Post-process aggregation results.
  *
- * Handles count_distinct conversion ($addToSet → count) and
- * string_agg conversion ($push → joined string).
+ * Handles count_distinct conversion ($addToSet -> count).
+ *
+ * ## [#13075] The `string_agg` join is GONE
+ *
+ * This function also joined a `string_agg` alias's `$push` array into a
+ * delimited string. `string_agg` left `AggregationFunction` at #6188, and
+ * {@link buildAccumulator} now refuses the name outright, so no pipeline this
+ * builder emits can produce the array that limb existed to reshape — it was
+ * reachable only for a caller hand-feeding `postProcessAggregation` a result
+ * set the builder could not have built. Deleted rather than left unreachable,
+ * the reason `objectql`'s in-memory fallback gives for the same deletion: dead
+ * arms are how a retired vocabulary comes back by accident.
  *
  * ## [#6814] Why the null exclusion is HERE
  *
@@ -804,11 +894,7 @@ export function postProcessAggregation(
     .filter((a) => a.function === 'count_distinct')
     .map((a) => a.alias);
 
-  const stringAggFields = aggregations
-    .filter((a) => a.function === 'string_agg')
-    .map((a) => a.alias);
-
-  if (countDistinctFields.length === 0 && stringAggFields.length === 0) {
+  if (countDistinctFields.length === 0) {
     return results;
   }
 
@@ -819,11 +905,6 @@ export function postProcessAggregation(
         // `!= null` on purpose: it takes `undefined` with it, which is what a
         // set built from a field some documents do not carry can hold.
         processed[field] = processed[field].filter((v: unknown) => v != null).length;
-      }
-    }
-    for (const field of stringAggFields) {
-      if (Array.isArray(processed[field])) {
-        processed[field] = processed[field].join(', ');
       }
     }
     return processed;

@@ -25,11 +25,19 @@
  * `driver-mongodb` let the BSON encoder silently EDIT the document —
  * `{qty: undefined}` encoded to `{}`, a filter that matches EVERY row (the
  * matrix's worst cell: an amplifying, disclosure-shaped wrong answer when a
- * tenant or RLS predicate sits in the same object). Both driver families that
- * lack a policy are under the #5499 investment freeze, so the policy cannot be
- * grown per driver; it is promoted here, to the face the SQL family already
- * agrees with, and the frozen drivers inherit it by receiving already-validated
- * input (they sit behind the engine's lowering seam — see
+ * tenant or RLS predicate sits in the same object). Neither driver family that
+ * lacks a policy has one to grow. This door was first argued from the #5499
+ * investment freeze — those drivers were frozen, so the policy could not be
+ * grown per driver — and that premise is gone: the maintainer lifted the freeze
+ * for `driver-mongodb` and `driver-memory` on 2026-08-11 (recorded in
+ * `./aggregation-conformance.ts`). The shared face survives losing it on the
+ * matrix's own terms. A policy grown per driver is one accepted set with an
+ * implementation per backend, and #7956 measured what that produces: two camps,
+ * one hole, and a silent-edit cell no reading had found. The #7872 ruling puts
+ * the definition at this face for that reason, not for the freeze. So the set
+ * stays promoted here, to the face the SQL family already agrees with, and the
+ * two drivers that carry no policy of their own inherit it by receiving
+ * already-validated input (they sit behind the engine's lowering seam — see
  * `@objectstack/objectql`'s `lowerWhereFilterArray` — and behind
  * {@link parseFilterAST}, which calls this walk on everything it returns).
  *
@@ -45,10 +53,10 @@
  * `RemoteTransport`'s `Date` → ISO 8601), and refuses one beyond ±2^53 loudly
  * rather than letting the precision loss answer silently. This is what makes
  * "each of the six accepted types compiles on every driver path" true on the
- * memory path too, without touching the frozen driver: after this door, no
- * `bigint` reaches mingo at all. Direct driver callers (not going through the
- * platform's doors) keep the drivers' native `bigint` binding, which stays
- * pinned in `driver-turso`'s own suite.
+ * memory path too, with no driver-local patch in `driver-memory`: after this
+ * door, no `bigint` reaches mingo at all. Direct driver callers (not going
+ * through the platform's doors) keep the drivers' native `bigint` binding,
+ * which stays pinned in `driver-turso`'s own suite.
  *
  * ## What is a LITERAL comparand — the positions this door judges
  *

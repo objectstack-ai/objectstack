@@ -14,7 +14,7 @@
 | 4 | service-analytics filter-normalizer | `packages/services/service-analytics/src/strategies/filter-normalizer.ts:1235`(`lowerAnalyticsWhere`) | analytics / cube 侧 |
 | 5 | `formula` | `packages/formula/src/matches-filter.ts:73`(`matchesFilterCondition`) | RLS 写侧 `check` 与公式求值;JS 两值语义的基准面 |
 | 半面 | objectql `having-filter` | `packages/objectql/src/having-filter.ts:92` / `:98`(`applyHaving` / `matchesHaving`) | 聚合**后**过滤。算半面是因为词表是子集,**但申报义务不打折** —— 它是**唯一没有 conformance 表覆盖的面**(`FILTER_LOGIC_CASES` 不驱动 HAVING 路径),所以漏了它连门禁都不会红 |
-| 冻结 | `driver-memory` / `driver-mongodb` | — | 维护者 2026-08-05 投入冻结:**pin-annotate,不翻转**。冻结面仍要申报,结论是「不在范围 + 冻结指令」。现场注释见 `read-scope-sql.ts:176`、`having-filter.ts:41` |
+| 已解冻 | `driver-memory` / `driver-mongodb` | `packages/drivers/driver-memory/src/memory-matcher.ts:134`(`checkCondition`)、`packages/drivers/driver-mongodb/src/mongodb-filter.ts:700`(`translateFieldOperators`) | 2026-08-05 投入冻结,**2026-08-11 两条裁决解除** ⇒ 「不在范围 + 冻结指令」作废,按普通面申报 |
 
 **这张表本身由 PR 维护 —— 与域表同一纪律。** 增删一面(新驱动、新求值器、某面被合并
 或退役、冻结状态变化)的那个 PR 顺手改这里,不留给下一次裁决重新数。清单**会**过期是

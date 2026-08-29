@@ -458,6 +458,25 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/js-comment-mask.d.mts',
     ],
   },
+  '@objectstack/plugin-email': {
+    // src/transports/smtp-port-contract.test.ts (#12993) imports `maskComments`
+    // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
+    // a comment and which is a DECLARATION of the SMTP port bound — the single
+    // question that gate exists to answer, since the whole point of the card is
+    // that `smtp.ts` still explains the range in prose while declaring it
+    // nowhere. The coupling is real: that guard's zero, and the masking control
+    // that makes the zero a measurement rather than a grep that ran, are both a
+    // function of the module's masking behaviour, so a change to it has to
+    // re-run this package's suite. The `.d.mts` sibling is declared alongside it
+    // because it is what gives `maskComments` its type, so this package's
+    // typecheck verdict is a function of it too — the reason the
+    // `@objectstack/cli` entry above declares the pair rather than the module
+    // alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/platform-objects': {
     // src/managed-api-method-affordance-sweep.test.ts (#7934) imports every
     // `*.object.ts` in the monorepo and runs `validateManagedApiMethods` over

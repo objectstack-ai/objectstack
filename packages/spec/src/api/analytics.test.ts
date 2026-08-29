@@ -7,8 +7,8 @@ import {
   AnalyticsMetadataResponseSchema,
   AnalyticsSqlResponseSchema,
 } from './analytics.zod';
-import type { AnalyticsMetadataResponse } from './analytics.zod';
-import type { CubeMeta } from '../contracts/analytics-service';
+import type { AnalyticsMetadataResponse, AnalyticsResultResponse } from './analytics.zod';
+import type { AnalyticsResult, CubeMeta } from '../contracts/analytics-service';
 
 /** Type-level identity: true iff A and B are the same type. */
 type Eq< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
@@ -29,6 +29,23 @@ type Assert< T extends true > = T;
  * `@ts-expect-error`-style pin no program compiles is no pin at all.
  */
 export type CubeMetaMatchesContract = Assert< Eq< AnalyticsMetadataResponse['data'][number], CubeMeta > >;
+
+/**
+ * #13078 — the declared `data` of `AnalyticsResultResponse` IS the
+ * `AnalyticsResult` contract interface, not merely shaped like it.
+ *
+ * `POST /analytics/query` relays `IAnalyticsService.query`'s declared return
+ * through `deps.success(result)` verbatim, and the contract was already
+ * correct while `AnalyticsResultResponseSchema` declared a strict subset
+ * (`fields[].label` / `format` / `currency` / `percentScale` and `totals`
+ * were missing) — the same two-files-one-shape drift #6442 fixed for the
+ * meta sibling, caught the same way. Binding them here is what stops it
+ * happening a third time: narrow either one alone and this goes red.
+ *
+ * Exported deliberately — an unread alias inside a test body is TS6196, and a
+ * `@ts-expect-error`-style pin no program compiles is no pin at all.
+ */
+export type AnalyticsResultMatchesContract = Assert< Eq< AnalyticsResultResponse['data'], AnalyticsResult > >;
 
 describe('AnalyticsEndpoint', () => {
   it('should accept all valid endpoints', () => {
@@ -161,6 +178,76 @@ describe('AnalyticsResultResponseSchema', () => {
       AnalyticsResultResponseSchema.parse({
         success: true,
         data: { fields: [] },
+      })
+    ).toThrow();
+  });
+
+  // #13078 — the AnalyticsResult members the schema used to be missing. The
+  // PRESERVATION half matters as much as the parse: this schema strips
+  // undeclared keys (BaseResponseSchema.extend + plain z.object), so before
+  // the widening these exact payloads "passed" while the parse silently
+  // dropped every one of the keys a dashboard reads.
+  it('should preserve fields[].label/format/currency/percentScale — the renderer chains', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [{ industry: 'Retail', mrr: 5000, win_rate: 0.42 }],
+        fields: [
+          { name: 'industry', type: 'string', label: 'Industry' },
+          { name: 'mrr', type: 'number', label: 'MRR', format: '$0,0', currency: 'USD' },
+          { name: 'win_rate', type: 'number', label: 'Win rate', format: '0.0%', percentScale: 'fraction' },
+        ],
+      },
+    });
+    expect(resp.data.fields[0].label).toBe('Industry');
+    expect(resp.data.fields[1].currency).toBe('USD');
+    expect(resp.data.fields[2].percentScale).toBe('fraction');
+    expect(resp.data.fields[2].format).toBe('0.0%');
+  });
+
+  it('should preserve totals — the marginal-aggregate channel, grand total included', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [
+          { region: 'EMEA', quarter: 'Q1', revenue: 100 },
+          { region: 'EMEA', quarter: 'Q2', revenue: 150 },
+        ],
+        fields: [
+          { name: 'region', type: 'string' },
+          { name: 'quarter', type: 'string' },
+          { name: 'revenue', type: 'number' },
+        ],
+        totals: [
+          { dimensions: ['region'], rows: [{ region: 'EMEA', revenue: 250 }] },
+          { dimensions: [], rows: [{ revenue: 250 }] },
+        ],
+      },
+    });
+    expect(resp.data.totals).toHaveLength(2);
+    expect(resp.data.totals?.[1].dimensions).toEqual([]);
+    expect(resp.data.totals?.[1].rows[0].revenue).toBe(250);
+  });
+
+  it('should reject a percentScale outside the closed vocabulary, and a totals entry without dimensions', () => {
+    expect(() =>
+      AnalyticsResultResponseSchema.parse({
+        success: true,
+        data: {
+          rows: [],
+          fields: [{ name: 'win_rate', type: 'number', percentScale: 'percent' }],
+        },
+      })
+    ).toThrow();
+
+    expect(() =>
+      AnalyticsResultResponseSchema.parse({
+        success: true,
+        data: {
+          rows: [],
+          fields: [],
+          totals: [{ rows: [] }],
+        },
       })
     ).toThrow();
   });

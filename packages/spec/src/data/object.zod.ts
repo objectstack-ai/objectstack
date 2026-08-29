@@ -1464,7 +1464,7 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
   // Tombstones age out too: drop an entry ~two majors after the removal
   // (by then it's archaeology, not an upgrade; see CHANGELOG.md for history).
   namespace:
-    '`namespace` was retired — the object `name` IS the canonical id ' +
+    '`namespace` was retired (ADR-0129 D3) — the object `name` IS the canonical id ' +
     'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
     'to declare. Embed the module prefix in the name instead: `namespace: "sys", ' +
     'name: "user"` becomes `name: "sys_user"`. Until this shape was closed on the ' +

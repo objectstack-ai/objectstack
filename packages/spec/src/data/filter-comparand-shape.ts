@@ -38,8 +38,15 @@
  * The table above IS the argument for a shared face: three backends, three
  * answers, one declared contract. `driver-memory` already carries a shape gate
  * (`filter-refusal.ts`), but it is that package's own and no other driver reads
- * it — and both driver families are under a maintainer investment freeze
- * (#5499), so the policy cannot be grown per driver.
+ * it. The second reason this was first argued from — both driver families sat
+ * under the #5499 maintainer investment freeze, so the policy could not be
+ * grown per driver — no longer holds: that freeze was lifted on 2026-08-11
+ * (recorded in `./aggregation-conformance.ts`). The table is the reason that
+ * survives, and it was always the load-bearing one: growing the policy per
+ * driver means one declared contract with an implementation per backend, which
+ * is what the three rows above measured. #8234 settled the same question one
+ * branch over for comparand TYPE — "enforced once at the shared compile face
+ * for all five drivers" — and this file is that answer for comparand SHAPE.
  *
  * [#9228] It now lives in `packages/spec` rather than in the engine. The gate
  * shipped at `@objectstack/objectql`'s lowering seam (PR #6209), which covers

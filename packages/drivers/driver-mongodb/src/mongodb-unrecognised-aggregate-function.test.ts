@@ -61,10 +61,13 @@
  * — and NOT on `expected undefined to be 'INVALID_QUERY'`, because the un-fixed
  * builder does not throw anonymously, it answers. (That is the opposite
  * direction from `driver-sql`'s ablation of the same class, where every failure
- * was an absent `code`.) The controls — the six declared functions and the two
- * retired ones this face still lowers, and the numbers they compute — must stay
- * GREEN, pinning that the change moved what happens to UNRECOGNISED names and
- * nothing else.
+ * was an absent `code`.) The controls — the six declared functions and the
+ * numbers they compute — must stay GREEN, pinning that the change moved what
+ * happens to UNRECOGNISED names and nothing else. (As written for #12818 that
+ * control set ALSO named `array_agg` / `string_agg`, "the two retired ones this
+ * face still lowers". #13075 closed that divergence, so they are controls no
+ * longer: they are refusals, pinned below in the block that used to record the
+ * lowering.)
  *
  * Measured: recorded on the PR.
  */
@@ -132,8 +135,12 @@ function value(fn: string, field?: string): unknown {
 describe('[#12818] an UNDECLARED aggregate function answers INVALID_QUERY / 400', () => {
   // `median` is the card's own repro. The rest are what a SQL-fluent author
   // reaches for and `AggregationFunction` does not declare — the same roster
-  // `driver-sql` refuses, minus the two this face still lowers (pinned as a
-  // divergence of its own further down, rather than quietly omitted).
+  // `driver-sql` refuses, minus `array_agg` / `string_agg`. Those two are
+  // refused here as well since #13075 — but by `refuseRetiredAggregateFunction`,
+  // whose first sentence says the name "was REMOVED" rather than "is not a
+  // declared aggregate function", so they would fail the `startsWith` below.
+  // They are pinned in their own block further down, rather than quietly
+  // omitted from this one.
   const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat', 'variance'];
 
   for (const fn of UNDECLARED) {
@@ -211,7 +218,18 @@ describe('[#12818] class 2 is EMPTY — every declared function lowers here', ()
    * exported, so it is restated here as the population the cases below drive —
    * and the cases are what hold the restatement honest.
    */
-  const LOWERED = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg'];
+  const LOWERED = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
+
+  /**
+   * [#13075] The two names that LEFT the roster above, kept rather than
+   * dropped. `array_agg` and `string_agg` sat on it because this face lowered
+   * them; it refuses both now, so naming them as lowered would be the lie the
+   * roster exists to prevent. But two names simply disappearing from a list is
+   * exactly the shape a silent re-baseline takes, and from `main` it is
+   * indistinguishable from the divergence reopening — so they move here and the
+   * roster case below asserts the fact that replaced the one they used to pin.
+   */
+  const RETIRED_AND_REFUSED = ['array_agg', 'string_agg'];
 
   it('the declared-but-unlowered set is EMPTY', () => {
     expect([...AggregationFunction.options].filter((f) => !LOWERED.includes(f))).toEqual([]);
@@ -237,6 +255,17 @@ describe('[#12818] class 2 is EMPTY — every declared function lowers here', ()
         `${fn} is on the roster and must lower`,
       ).not.toThrow();
     }
+    // [#13075] …and every name that left the roster really refuses. This half
+    // is what makes the shrink above a measured change rather than a quiet one:
+    // if `buildAccumulator` lowered either name again, the roster would be back
+    // to advertising a lowering the switch does not perform, and nothing but
+    // this loop would say so. The envelope is read, never a bare `toThrow()` —
+    // `refusalOf` already fails loudly when a pipeline comes back instead.
+    for (const fn of RETIRED_AND_REFUSED) {
+      const err = refusalOf(fn);
+      expect(err.code, `${fn} left the roster at #13075 and must refuse`).toBe('INVALID_QUERY');
+      expect(err.status).toBe(400);
+    }
   });
 
   it('the two refusal sentences remain distinguishable', () => {
@@ -250,27 +279,49 @@ describe('[#12818] class 2 is EMPTY — every declared function lowers here', ()
   });
 });
 
-// ── The divergence this card does NOT close, pinned so it cannot be mistaken ─
+// ── The divergence this file recorded, CLOSED by #13075 ─────────────────────
 
-describe('[#12818] `array_agg` / `string_agg` still lower here — recorded, not fixed', () => {
+describe('[#12818 → #13075] `array_agg` / `string_agg` are REFUSED here — the recorded divergence is CLOSED', () => {
   /**
    * #6188 retired both from `AggregationFunction` (ADR-0049 enforce-or-remove);
-   * `driver-sql` and `driver-turso` therefore refuse them today as UNDECLARED
-   * names (400), while this face still lowers them to `$push`. That divergence
-   * PRE-DATES this card and closing it is a second accept-face narrowing with
-   * its own changeset, so it is filed as #13075 rather than ridden in here.
+   * `driver-sql` and `driver-turso` have refused them as UNDECLARED names ever
+   * since, while this face went on lowering them to `$push` — so one query
+   * answered 400 on two backends and an array on the third. #12818 could not
+   * close that (a second accept-face narrowing, its own changeset), so it
+   * RECORDED the divergence here as two cases asserting the lowering, for one
+   * reason: without them, the absence of `array_agg` from the UNDECLARED roster
+   * above reads as an oversight in this file instead of a measured property of
+   * this driver.
    *
-   * It is pinned rather than left silent for one reason: without these cases,
-   * the absence of `array_agg` from the UNDECLARED roster above reads as an
-   * oversight in this file instead of a measured property of this driver.
+   * #13075 closed it, and those two cases are INVERTED IN PLACE — not deleted,
+   * not re-baselined. A pin whose fact a later card falsifies is the one kind
+   * of test that must not quietly vanish: from `main`, its disappearance and
+   * the divergence silently REOPENING look identical. Each case now asserts the
+   * refusal that replaced the lowering it used to record.
+   *
+   * ⚠️ Class 1 / 400, but NOT the message the roster above asserts.
+   * `refuseRetiredAggregateFunction` says the name "was REMOVED" at #6188,
+   * which is a different fact from "is not a declared aggregate function" —
+   * telling the author of `arry_agg` their value was removed would misinform,
+   * and telling the author of `array_agg` the protocol never had the name would
+   * too. Both producers are kept for that reason, the same distinction
+   * `AggregationFunction`'s own error map draws. The envelope is what is
+   * asserted — `code` and `status` (ADR-0112) — never a bare `toThrow()`, for
+   * the reason this file's head note gives.
    */
-  it('lowers `array_agg` rather than refusing it (unlike both SQL faces)', () => {
-    expect(value('array_agg', 'score')).toEqual([10, 20, 30, 40, 50, 60]);
-  });
-
-  it('lowers `string_agg` rather than refusing it (unlike both SQL faces)', () => {
-    expect(value('string_agg', 'score')).toEqual([10, 20, 30, 40, 50, 60]);
-  });
+  for (const fn of ['array_agg', 'string_agg'] as const) {
+    it(`refuses \`${fn}\` rather than lowering it — the answer both SQL faces already gave`, () => {
+      const err = refusalOf(fn);
+      expect(err.code).toBe('INVALID_QUERY');
+      expect(err.status).toBe(400);
+      // The RETIRED wording: the caller learns the name left the vocabulary,
+      // and when. These two positive readings are also the control for the
+      // negative one below — an empty message could not satisfy them.
+      expect(err.message).toContain('was REMOVED');
+      expect(err.message).toContain('#6188');
+      expect(err.message.startsWith(UNDECLARED_SENTENCE(fn))).toBe(false);
+    });
+  }
 
   it('neither is a member of the declared vocabulary', () => {
     expect(AggregationFunction.options).not.toContain('array_agg');
