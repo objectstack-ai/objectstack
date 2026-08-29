@@ -66,6 +66,11 @@ import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
+import {
+  PLATFORM_OWNER_WALL_BYPASS_EVENT,
+  isVerifiedPlatformOwnerRow,
+} from './platform-owner-wall-bypass.js';
+import { resolvePlatformOwnerEmail } from '@objectstack/types';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -5577,7 +5582,108 @@ export class SecurityPlugin implements Plugin {
       isPlatformAdmin,
     });
 
+    // [#12974] Verified platform OWNER crosses the Layer 0 org wall.
+    // Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能简单点，
+    // 对于超级管理员，配置了环境变量邮箱的，在执行墙的时候不要强制加上 org_id
+    // 的过滤」— when the wall ARMS (layer0 non-null: the `isolated` equality,
+    // the `group` union, or the fail-closed deny sentinel an org-less session
+    // otherwise hits), the org filter is NOT appended for a session whose
+    // account is the VERIFIED declared platform owner (`OS_PLATFORM_OWNER_EMAIL`
+    // under the #11343 verified-email predicate — the same match the elevation
+    // gate makes; see `isVerifiedPlatformOwnerSession` for the fail-closed
+    // ladder). Everyone else's wall is byte-identical to before: the probe
+    // answers `false` on env-unset before touching any row, and it is not even
+    // consulted while Layer 0 contributes nothing.
+    //
+    // ONLY Layer 0 is lifted. Layer 1 (business RLS, object/field permissions,
+    // the write `check` path) is untouched by construction — this branch
+    // rewrites the `layer0` half of the split and nothing else. Reads AND
+    // writes both come through this computation (`computeRlsFilter` /
+    // `computeWriteTenantCheckFilter`), so both carry the audit event.
+    if (layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
+      // The audit floor (hard piece 3 of the ruling): a structured warn-level
+      // log with the stable event name, per wall-bypassing computation —
+      // plugin-audit is not wired into plugin-security (no dependency in
+      // either direction; its `audit` service ingress is a CLOSED auth-session
+      // vocabulary), so the `sys_audit_log` ledger is deliberately not the
+      // sink here. Named after the cloud precedent (`cross_org_admin_read`).
+      this.logger.warn?.(
+        `[security/#12974] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
+          'the Layer 0 organization wall — the org filter below was NOT appended',
+        {
+          event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
+          object,
+          operation,
+          userId: context?.userId,
+          organizationId: context?.tenantId ?? null,
+          tenancyPosture: this.tenancyPosture,
+          suppressedFilter: layer0,
+        },
+      );
+      return { layer0: null, layer1 };
+    }
+
     return { layer0, layer1 };
+  }
+
+  /**
+   * [#12974] Is this session's account the VERIFIED declared platform owner —
+   * the predicate the Layer 0 owner wall bypass keys on?
+   *
+   * Server-side facts only, fail-closed at every rung (each `false` below is
+   * "still walled", never an error):
+   *
+   *  1. `resolvePlatformOwnerEmail()` unset/blank ⇒ `false` for everyone —
+   *     read live per call (cheap), before any I/O, so an undeclared owner
+   *     costs nothing and bypasses nobody.
+   *  2. No authenticated `userId` on the context ⇒ `false`. System contexts
+   *     never reach this method (the middleware's `isSystem` skip and
+   *     `getReadFilter`'s mirror both return earlier), and carry no `userId`
+   *     anyway.
+   *  3. Fast NEGATIVE on the context's server-resolved session email
+   *     (`resolveAuthzContext`: the better-auth session record or the
+   *     `sys_user` read — never a client-supplied header): a normalized
+   *     mismatch walls without touching the row store, which keeps the wall's
+   *     hot path free of per-request I/O for every non-owner session. Only
+   *     narrowing — a MATCH (or an absent email) still requires the row.
+   *  4. The authoritative answer is the `sys_user` ROW (system-context by-id
+   *     read, memoized per request-context like `__rlsMembershipStaged` /
+   *     `__preImage`): {@link isVerifiedPlatformOwnerRow} = the canonical
+   *     declared-owner email match (the elevation gate's twin,
+   *     `platform-owner-wall-bypass.ts`) AND the #11343 verified-email
+   *     allow-list (`isEmailVerifiedUserRow` — absent-means-unverified).
+   *     Missing row / unreadable store ⇒ `false`.
+   *
+   * The `isSystem: true` read below cannot recurse: system operations
+   * short-circuit the security middleware before any RLS computation.
+   */
+  private async isVerifiedPlatformOwnerSession(context: any): Promise<boolean> {
+    const declared = resolvePlatformOwnerEmail();
+    if (!declared) return false;
+    if (!context || typeof context !== 'object') return false;
+    const userId = context.userId;
+    if (typeof userId !== 'string' || userId === '') return false;
+    if (typeof context.__verifiedPlatformOwner === 'boolean') return context.__verifiedPlatformOwner;
+    if (typeof context.email === 'string' && context.email.trim() !== '') {
+      if (context.email.trim().toLowerCase() !== declared.toLowerCase()) {
+        context.__verifiedPlatformOwner = false;
+        return false;
+      }
+    }
+    let row: unknown = null;
+    try {
+      if (typeof this.ql?.findOne === 'function') {
+        row = await this.ql.findOne('sys_user', { where: { id: userId }, context: { isSystem: true } });
+      } else if (typeof this.ql?.find === 'function') {
+        const rows = await this.ql.find('sys_user', { where: { id: userId }, limit: 1, context: { isSystem: true } });
+        row = Array.isArray(rows) ? rows[0] : ((rows as any)?.value?.[0] ?? null);
+      }
+    } catch {
+      row = null;
+    }
+    const verdict = isVerifiedPlatformOwnerRow(row, declared);
+    context.__verifiedPlatformOwner = verdict;
+    return verdict;
   }
 
   /**
