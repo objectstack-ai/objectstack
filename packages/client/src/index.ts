@@ -1673,14 +1673,25 @@ export class ObjectStackClient {
     /**
      * Get a specific installed package by its ID (reverse domain identifier).
      *
-     * ⛔ [#11925] NOT bound, and the `{ package }` envelope is left exactly as
-     * it was — the two mounted surfaces answer this route with DIFFERENT
-     * envelopes, so no single declaration is true (#12034). `runtime`'s
-     * `/packages` domain sends `success(pkg)` — the bare row — while `rest`'s
-     * `GET {base}/packages/:id` sends `sendOk(res, { package: { ...pkg,
-     * source } })`, and the REST routes "shadow live dispatcher twins" only
-     * where a `package` service is registered. Binding the member here would
-     * harden a claim that is already false on one of the two.
+     * ⛔ [#11925 / #12034] STILL NOT bound, and the `{ package }` envelope is
+     * left exactly as it was. #12034 shipped its `install` / `enable` /
+     * `disable` neighbours (one producer each) and deliberately did NOT ship
+     * this one, because this route is a REAL fork with no single true type.
+     * Both bodies below were MEASURED by driving each registrar, not read off
+     * the source:
+     *
+     *     dispatcher  handlePackages('/<id>', 'GET')
+     *       -> { success: true, data: { id, manifest, enabled, status } }
+     *     rest        GET /api/v1/packages/:id
+     *       -> { success: true, data: { package: { …row, source } } }
+     *
+     * `unwrapResponse` strips one envelope, so the post-unwrap value is the
+     * BARE row on the dispatcher and `{ package }` on REST. Binding either
+     * member here hardens a claim that is false on the other surface. Making
+     * it bindable means converging the two PRODUCERS — a wire-behaviour change
+     * to two mounted surfaces, above this card's authority, with a clause-②
+     * narrowing analysis of its own. The measured convergence cost is recorded
+     * on #12034 for that ruling.
      *
      * Its SCOPED twin `ScopedEnvironmentClient.packages.get` IS bound, because
      * only the REST registrar serves the scoped mount — one surface, one
@@ -1695,14 +1706,25 @@ export class ObjectStackClient {
     /**
      * Install a new package from its manifest.
      *
-     * ⛔ [#11925] NOT bound. This method and its `enable` / `disable`
-     * neighbours declare `{ package; message? }`, and the ONLY surface that
-     * serves them — `runtime`'s `/packages` domain; `rest` mounts no twin for
-     * any of the three — answers `success(pkg)`, the bare row (#12034). The
-     * declared envelope is not merely erased, it is false, and the `any`
-     * member is what keeps that invisible. Correcting it is a response-shape
-     * decision with its own clause-② analysis, not the `any`-binding this card
-     * carries, so the shape is left untouched here.
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope.
+     *
+     * What this REPLACED was not an erasure but a FALSEHOOD: the declaration
+     * read `{ package: any; message?: string }`, a shape no surface has ever
+     * sent, and the `any` member is what kept that invisible —
+     * `(await client.packages.install(m)).package` compiled and was
+     * `undefined` at runtime. There is exactly ONE serving surface, so there
+     * was never a "which surface do we match" question: `rest`'s registrar
+     * mounts only `POST /packages/publish`, `GET /packages`,
+     * `GET /packages/:id` and `DELETE /packages/:id` (measured by driving
+     * `registerPackageRoutes` and enumerating what it mounted — this route is
+     * `NO_HANDLER` there), leaving `runtime`'s `/packages` domain alone to
+     * answer, and it answers `success(pkg)`: `{ success: true, data: <row> }`,
+     * status 201. `message` is gone with the wrapper — no surface sends one.
+     *
+     * The wire fact is pinned end-to-end in
+     * `packages-write-envelope.test.ts` (the real dispatcher answering a real
+     * client call), and the DECLARATION in `return-type-precision.test.ts` —
+     * a runtime test cannot observe a return-type narrowing at all.
      *
      * By default the server rejects a manifest whose `id` is already
      * installed with **409 Conflict** (duplicate-id guard) instead of
@@ -1712,7 +1734,7 @@ export class ObjectStackClient {
     install: async (
         manifest: any,
         options?: { settings?: Record<string, any>; enableOnInstall?: boolean; overwrite?: boolean },
-    ) => {
+    ): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}`, {
             method: 'POST',
@@ -1723,7 +1745,7 @@ export class ObjectStackClient {
                 ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
             }),
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
@@ -1739,24 +1761,38 @@ export class ObjectStackClient {
 
     /**
      * Enable a disabled package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, for
+     * the reason spelled out on `install` above: one serving surface
+     * (`PATCH /packages/:id/enable` is `NO_HANDLER` on the REST registrar),
+     * and it answers `success(registry.enablePackage(id))`. The
+     * `{ package: any; message?: string }` this replaces was never emitted by
+     * anything.
      */
-    enable: async (id: string) => {
+    enable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/enable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
      * Disable an installed package.
+     *
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope, same
+     * single-producer argument as `install` / `enable` above
+     * (`PATCH /packages/:id/disable` is `NO_HANDLER` on the REST registrar).
+     * The dispatcher answers `success(registry.disablePackage(id))`, so the
+     * row comes back with `enabled: false` — the caller reads the row itself,
+     * never a `.package` member.
      */
-    disable: async (id: string) => {
+    disable: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/disable`, {
             method: 'PATCH',
         });
-        return this.unwrapResponse<{ package: any; message?: string }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /* [#3563 PR-4] Lifecycle beyond install/enable — these eleven routes

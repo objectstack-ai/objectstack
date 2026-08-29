@@ -363,6 +363,62 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
 }
 
 /**
+ * [#12034 — shipping half] The three `packages` WRITE verbs, bound to the bare
+ * `InstalledPackage` row.
+ *
+ * These did not carry an ERASED type, they carried a FALSE one:
+ * `{ package: any; message?: string }`, a body no surface has ever emitted.
+ * The only serving surface is `runtime`'s `/packages` domain — the REST
+ * registrar mounts no twin for `POST /packages`,
+ * `PATCH /packages/:id/enable` or `PATCH /packages/:id/disable`, measured by
+ * driving `registerPackageRoutes` and enumerating what it mounted — and it
+ * answers `success(pkg)`. That the WIRE says so is pinned against the real
+ * dispatcher in `packages-write-envelope.test.ts`; that the DECLARATION says
+ * so can only be pinned here, for this file's standing reason.
+ *
+ * ⛔ `packages.get` is deliberately ABSENT from this list. It is the half of
+ * #12034 that was NOT shipped: its two mounted surfaces answer different
+ * envelopes (dispatcher `success(pkg)`, REST `sendOk(res, { package })`), so
+ * no declaration is true on both and binding either member would harden a
+ * falsehood — the very defect this function closes for its neighbours. Making
+ * it bindable requires converging the PRODUCERS, which is a wire-behaviour
+ * ruling of its own.
+ */
+export async function returnTypePrecisionPins12034(): Promise<void> {
+    // ── direction 1: the bare row, on all three ──────────────────────────
+    expectTypeOf(await client.packages.install({ id: 'com.acme.crm', version: '1.0.0' }))
+        .toEqualTypeOf<InstalledPackage>();
+    expectTypeOf(await client.packages.enable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    expectTypeOf(await client.packages.disable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+
+    // ── direction 2: the read the false declaration invited must now FAIL ─
+    // ⚠️ RED BEFORE, all three: while the member was `any`, `.package` was a
+    // legal read, so each suppression below went UNUSED and tsc reported
+    // TS2578. That unused-suppression signal IS the defect stated as a
+    // compile error — the whole point of the card is that
+    // `(await client.packages.enable(id)).package` compiled and was
+    // `undefined` at runtime. After the binding the row has no `package` key,
+    // the suppressions are used, and the reads are refused at the call site
+    // where a consumer would have written them.
+    // @ts-expect-error the install route answers the row; there is no `.package`
+    void (await client.packages.install({ id: 'com.acme.crm', version: '1.0.0' })).package;
+    // @ts-expect-error the enable route answers the row; there is no `.package`
+    void (await client.packages.enable('com.acme.crm')).package;
+    // @ts-expect-error the disable route answers the row; there is no `.package`
+    void (await client.packages.disable('com.acme.crm')).package;
+
+    // Same direction for the `message` sibling the old envelope also promised
+    // and no surface sends.
+    // @ts-expect-error no surface sends a `message` alongside the row
+    void (await client.packages.enable('com.acme.crm')).message;
+
+    // ── the UNSHIPPED half, pinned as unchanged ──────────────────────────
+    // Not evidence for this card — a guard that `get` is not "tidied up" into
+    // one of the two shapes while the fork is still open.
+    expectTypeOf(await client.packages.get('com.acme.crm')).toEqualTypeOf<{ package: any }>();
+}
+
+/**
  * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
  * counted as evidence that this card's change was needed. Each pins a
  * near-miss trap the next sweep would otherwise reach for.
@@ -406,6 +462,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof searchResultIsNotTheGlobalSearchShape).toBe('function');
         expect(typeof returnTypePrecisionPins11925).toBe('function');
         expect(typeof returnTypePrecisionPins12038).toBe('function');
+        expect(typeof returnTypePrecisionPins12034).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });
