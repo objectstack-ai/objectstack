@@ -864,6 +864,146 @@ describe('PublishMetaItemResponseSchema (#7294 — declares the full publish res
   });
 });
 
+import { DeleteMetaItemResponseSchema } from './protocol.zod';
+import type { DeleteMetaItemResponse } from './protocol.zod';
+
+/** Type-level identity helpers for the reachability pins below. */
+type EqD< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
+type AssertD< T extends true > = T;
+
+/**
+ * #13155 — the compile-time half, at module scope and EXPORTED.
+ *
+ * This is the cost the card names, stated as a type fact: `projectionApplied`
+ * is the channel a caller reads INSTEAD of trusting the 200, and `seq` is the
+ * ordering token the history/audit trail is read by. Undeclared, neither was
+ * reachable from a `DeleteMetaItemResponse` without an `as any` — the
+ * consumer-side tolerance Prime Directive #12 rejects.
+ *
+ * These live at module scope rather than inside an `it()` for the reason the
+ * sibling read-side file records: an unread alias in a function body is TS6196
+ * under `noUnusedLocals`, and a pin no program compiles is a phantom check.
+ * `packages/spec` compiles its tests via `tsconfig.test.json`, so reverting the
+ * declaration turns these red at `pnpm typecheck`.
+ */
+export type DeleteSeqIsReachable = AssertD< EqD< DeleteMetaItemResponse['seq'], number | undefined > >;
+export type DeleteProjectionIsReachable = AssertD<
+  EqD< DeleteMetaItemResponse['projectionApplied'], { success: boolean; error?: string | undefined } | undefined >
+>;
+
+/**
+ * #13155 — the third verb on the metadata door declares what its branch sends.
+ *
+ * `save` (#5745, by the #5563 maintainer ruling) and `publish` (#7294) each
+ * declare `seq` and `projectionApplied`. `delete/reset` runs the same ADR-0094
+ * projector and the same history append and puts the same two keys on the
+ * wire, and declared neither — so this is a decision made for one verb and
+ * never carried to its sibling, not a fresh question. The first case below is
+ * the one that was red: it asserts nothing is stripped.
+ *
+ * ⚠️ Optionality here DIFFERS from both siblings, and it is measured rather
+ * than mirrored: `seq` is REQUIRED on save and publish because each has a
+ * single success return that always sets it, while `deleteMetaItem` has FOUR
+ * success returns and only one of them appends a history event. The other
+ * three — the two "no row to delete" no-ops and the control-plane legacy
+ * raw-engine delete (#5264, which writes no history row and emits no watch
+ * event) — answer without a `seq`. Declaring it required would make three of
+ * the producer's own returns fail their own contract, which is the #5563
+ * defect in mirror image.
+ */
+describe('DeleteMetaItemResponseSchema (#13155 — carries #5745 to the third verb)', () => {
+  /**
+   * A verbatim capture of a real `deleteMetaItem` return — the repository
+   * path's delete-ful branch, the only one of the four that carries `seq`.
+   */
+  const realResponse = {
+    success: true,
+    reset: true,
+    seq: 3,
+    message: 'Customization overlay deleted — view/cases reset to artifact default. [seq=3]',
+  };
+
+  it('round-trips a real response without stripping any field', () => {
+    const parsed = DeleteMetaItemResponseSchema.parse(realResponse);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+    expect(parsed).toEqual(realResponse);
+  });
+
+  it('keeps seq as an integer and rejects a fractional one', () => {
+    expect(DeleteMetaItemResponseSchema.parse(realResponse).seq).toBe(3);
+    expect(DeleteMetaItemResponseSchema.safeParse({ ...realResponse, seq: 3.5 }).success).toBe(false);
+  });
+
+  it('leaves seq optional — the three branches that append no history event omit it', () => {
+    // The repository path's miss: a success/no-op, no history event.
+    const noOverlay = {
+      success: true,
+      reset: false,
+      message: 'No customization overlay found for view/cases — already at artifact default.',
+    };
+    // The legacy raw-engine delete: a row really went away, still no `seq`,
+    // and its receipt message carries no `[seq=…]` suffix for that reason.
+    const legacyDeleted = {
+      success: true,
+      reset: true,
+      message: 'Customization overlay deleted — view/cases reset to artifact default.',
+    };
+    for (const body of [noOverlay, legacyDeleted]) {
+      const parsed = DeleteMetaItemResponseSchema.parse(body);
+      expect(DeleteMetaItemResponseSchema.safeParse(body).success).toBe(true);
+      expect(parsed.seq).toBeUndefined();
+      // Absence of `seq` must not be readable as "nothing happened" — `reset`
+      // is the key that answers that, and it survives on both branches.
+      expect(parsed.reset).toBe(body.reset);
+    }
+  });
+
+  it('requires success — every one of the four returns emits it', () => {
+    const body: Record<string, unknown> = { ...realResponse };
+    delete body.success;
+    expect(DeleteMetaItemResponseSchema.safeParse(body).success).toBe(false);
+  });
+
+  it('carries projectionApplied — the same ADR-0094 receipt both siblings declare', () => {
+    const parsed = DeleteMetaItemResponseSchema.parse({
+      ...realResponse,
+      projectionApplied: { success: false, error: 'boom-from-projector' },
+    });
+    expect(parsed.projectionApplied).toEqual({ success: false, error: 'boom-from-projector' });
+    // Best-effort by contract: the projector threw, the delete still
+    // succeeded, and the failure is reported here rather than as a non-200 —
+    // which is why a caller reads this instead of trusting the 200.
+    expect(parsed.success).toBe(true);
+  });
+
+  it('projectionApplied.success is required once the key is present', () => {
+    expect(
+      DeleteMetaItemResponseSchema.safeParse({ ...realResponse, projectionApplied: { error: 'x' } }).success,
+    ).toBe(false);
+  });
+
+  it('leaves projectionApplied optional — absent means no projector ran', () => {
+    expect(realResponse).not.toHaveProperty('projectionApplied');
+    expect(DeleteMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    expect(DeleteMetaItemResponseSchema.parse(realResponse).projectionApplied).toBeUndefined();
+  });
+
+  it('declares neither `version` nor `advisories` — this branch provably sends neither', () => {
+    // The mirror is the siblings' SHAPE, not their member list. A delete mints
+    // no new content hash (the row is gone, so there is no ADR-0008 OCC token
+    // to echo as `If-Match`), and the #4463 authoring gate runs on the two
+    // WRITE doors by D1 — a delete submits no body for it to judge. Declaring
+    // either would be a contract for bytes no producer emits.
+    const parsed = DeleteMetaItemResponseSchema.parse({
+      ...realResponse,
+      version: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      advisories: [],
+    }) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('version');
+    expect(parsed).not.toHaveProperty('advisories');
+  });
+});
+
 import { RuntimeAuthoringIssueSchema } from './protocol.zod';
 
 /**
