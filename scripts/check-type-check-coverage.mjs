@@ -752,7 +752,7 @@ const EXEMPT = {
 //     the fix: widen a hidden test layer's `include` one file at a time and
 //     measure each addition, because a wholesale glob can bill the layer for a
 //     non-test file it never asked to cover.)
-// `@objectstack/cli` (146 raw across 65 files, after #8612 repaired the first
+// `@objectstack/cli` (144 raw across 65 files, after #8612 repaired the first
 // two of its 59 missing import extensions) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 //
@@ -905,8 +905,14 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/cli': {
-    errors: 146,
-    note: 'TS7006 x60 (implicit any), TS2835 x57 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+    errors: 144,
+    note: 'TS7006 x59 (implicit any), TS2835 x56 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+      + 'LOWERED 146 -> 144 (#13109) and RE-TALLIED above from the same run, not rescaled: '
+      + 'test/platform-page-i18n-parity.test.ts 2 -> 0 (1 TS2835 + 1 TS7006), from adding the `.js` '
+      + 'extension to its one `../src/utils/i18n-extract` import -- the same one-import repair #8612 made '
+      + 'twice below, taken here because that file gained new tests in the same PR and untyped test code '
+      + 'is what let the cascade grow. FULLY ATTRIBUTED: no other file moved, and the per-code and '
+      + 'per-file tallies below were re-measured whole rather than decremented. '
       + 'The package #7353 was really about, and the largest single thing the exclude-shaped detector could '
       + 'not see: `tsconfig.json` says `include: ["src"]` and has no `exclude` AT ALL, so there was never an '
       + 'exclusion to notice, and the test files in the sibling `test/` tree are read by nothing -- not '
@@ -919,11 +925,12 @@ const TEST_DEBT = {
       + '(1 TS2835 + 34 TS7006) and test/i18n-extract.test.ts 7 -> 0 (1 TS2835 + 6 TS7006), from adding the '
       + '`.js` extension to one import each. Outside those two files the before and after diagnostic sets '
       + 'are identical line for line, and nothing new appeared anywhere. '
-      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 57 of the 59 extension-less '
-      + 'relative imports this layer carried are still there, spread over 24 files, and every one of the 60 '
+      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 56 of the 59 extension-less '
+      + 'relative imports this layer carried are still there, spread over 23 files, and every one of the 59 '
       + 'surviving TS7006 sits in a file that also carries a TS2835 -- there is no implicit-any anywhere in '
-      + 'this layer without a broken import above it. Read the top-of-ledger NodeNext note before sizing it: '
-      + 'TS2835 plus the cascade it causes are 117 of the 146 and are 57 repairs, not 117. Concentrated '
+      + 'this layer without a broken import above it, and the 23 files carrying a TS2835 are EVERY file in '
+      + 'this layer that carries any error at all. Read the top-of-ledger NodeNext note before sizing it: '
+      + 'TS2835 plus the cascade it causes are 115 of the 144 and are 56 repairs, not 115. Concentrated '
       + 'rather than spread -- test/data-model-rules.test.ts x26, test/i18n-declared-surface-gate.test.ts '
       + 'x19, test/i18n-section-coverage.test.ts x18, test/commands.test.ts x15, '
       + 'test/remote-api-commands.test.ts x12 are 90 of it. '

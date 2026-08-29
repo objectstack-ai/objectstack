@@ -29,7 +29,7 @@ import {
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
 import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
-import { collectExpectedEntries } from '../src/utils/i18n-extract';
+import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
 /** The pages exactly as the plugins register them with the kernel. */
 const PAGES = [
