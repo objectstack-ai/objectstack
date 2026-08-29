@@ -3404,7 +3404,8 @@ export class ObjectQL implements IObjectQLEngine {
       // Propagate the service-principal label (`ExecutionContext.actor`,
       // e.g. `svc:flow:<name>`) so a non-user write stays attributable in the
       // audit log — the writer's `userId ?? session.actor` fallback is dead
-      // without this hop (ADR-0014 D2, #4366).
+      // without this hop (the `ExecutionContext.actor` audit-attribution
+      // contract, `@objectstack/spec` kernel/execution-context.zod.ts; #4366).
       ...(typeof (execCtx as any).actor === 'string' && (execCtx as any).actor
         ? { actor: (execCtx as any).actor }
         : {}),
@@ -11166,8 +11167,9 @@ export class ObjectQL implements IObjectQLEngine {
   ): void {
     // The triggered-by half. `userId` survives the `sudo()`-shaped elevation,
     // which is what makes the two halves recordable at all; `actor` is the
-    // service-principal channel (ADR-0014 D2) that keeps a non-user-
-    // authenticated caller attributable instead of anonymous.
+    // service-principal channel (the `ExecutionContext.actor` contract,
+    // `@objectstack/spec` kernel/execution-context.zod.ts) that keeps a
+    // non-user-authenticated caller attributable instead of anonymous.
     const triggeredBy =
       (context?.userId != null && String(context.userId)) ||
       (typeof (context as any)?.actor === 'string' && (context as any).actor.trim()) ||

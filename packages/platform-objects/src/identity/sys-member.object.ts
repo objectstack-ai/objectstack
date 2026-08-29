@@ -71,7 +71,8 @@ export const SysMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       // Same gate as the other two mirrors — the org CAPABILITY, not
-      // multi-org (ADR-0081 D1).
+      // multi-org (ADR-0093 D9: single-org sessions carry an active org
+      // via plugin-auth's default-org bootstrap).
       requiresFeature: 'organization',
       successMessage: 'Invitation sent',
       refreshAfter: true,
@@ -122,7 +123,7 @@ export const SysMember = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',
-      // Gated on the org CAPABILITY, not multi-org (ADR-0081 D1): the
+      // Gated on the org CAPABILITY, not multi-org (ADR-0093 D9): the
       // better-auth endpoints resolve the session's active org, which
       // single-org mode now guarantees via plugin-auth's default-org
       // bootstrap. Same gate on every membership mutation below.
@@ -254,7 +255,7 @@ export const SysMember = ObjectSchema.create({
       // `deleteBehavior:'cascade'` is a suggestion, not an audit: nothing
       // depends on the restrict. In particular it is NOT an accidental
       // last-administrator guard — that invariant is enforced by a `beforeDelete`
-      // hook registered on `sys_member` itself (ADR-0024 D5.2,
+      // hook registered on `sys_member` itself (cloud ADR-0024 D5.2,
       // `last-admin-guard.ts`), and the engine's cascade recurses through the
       // PUBLIC `delete()` precisely so the child's own hooks and events fire.
       // The guard therefore still refuses a cascade that would take the last
