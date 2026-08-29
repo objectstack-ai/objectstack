@@ -105,7 +105,14 @@ function makeMemoryDriver() {
         async connect() {}, async disconnect() {}, async checkHealth() { return true; },
         async execute() { return null; },
         async find(object: string, ast: any) {
-            return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            // Hold the caller's bound, AFTER the filter and by PRESENCE — a
+            // limit-blind double answers more rows than the caller asked for
+            // and every assertion about a bounded read passes for the wrong
+            // reason (`check:objectql-double-limit`). The two sibling
+            // conformance files predate that gate and sit in its shrink-only
+            // baseline; a new double conforms.
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
         },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
