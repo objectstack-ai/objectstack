@@ -19,6 +19,7 @@ import {
   summarize,
   summarizePendingSchemaWork,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
@@ -69,7 +70,26 @@ export default class MigratePlan extends Command {
     json: Flags.boolean({ description: 'Output as JSON' }),
   };
 
+  /**
+   * #13027 — the process must end when the plan does.
+   *
+   * The body is {@link plan}; this wrapper exists so every one of its early
+   * `return`s funnels through one deliberate exit. A composed host stack can
+   * leave the event loop alive — its `start()` was suppressed, so anything it
+   * armed during `init()` has no release path — and this command has measurably
+   * outlived its own "Graceful shutdown complete" by 78 minutes.
+   *
+   * ⛔ The FAILURE paths are deliberately NOT routed here: `this.exit(n)` throws
+   * an `ExitError` that oclif's `handle()` turns into a `process.exit` of its
+   * own, so they already terminate — and catching them here to exit "tidily"
+   * would swallow the report with them.
+   */
   async run(): Promise<void> {
+    await this.plan();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async plan(): Promise<void> {
     const { flags } = await this.parse(MigratePlan);
     const timer = createTimer();
 

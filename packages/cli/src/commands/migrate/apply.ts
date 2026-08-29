@@ -21,6 +21,7 @@ import {
   summarizePendingSchemaWork,
   groupByCategory,
 } from '../../utils/schema-migrate.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 
@@ -81,7 +82,18 @@ export default class MigrateApply extends Command {
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to mutate)' }),
   };
 
+  /**
+   * #13027 — the process must end when the apply does.
+   *
+   * See `migrate/plan.ts`'s twin for the measurement, and for why the failure
+   * paths deliberately stay on oclif's own exit.
+   */
   async run(): Promise<void> {
+    await this.apply();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async apply(): Promise<void> {
     const { flags } = await this.parse(MigrateApply);
     const timer = createTimer();
     const allowDestructive = flags['allow-destructive'];
