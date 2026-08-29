@@ -36,7 +36,7 @@ be false.
 **Graded `patch`, deliberately.** No correct query's answer moves: all six
 declared functions and the two retired ones this face still lowers
 (`array_agg` / `string_agg`, an existing divergence from the SQL faces, recorded
-and filed separately rather than closed here) are byte-identically unchanged,
+and filed as #13075 rather than closed here) are byte-identically unchanged,
 pinned by controls that compute their values in the same suite. The only inputs
 whose behaviour changes are ones this driver was already answering *wrongly*, so
 there is no working capability being removed — the same shape, in this same

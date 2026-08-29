@@ -258,7 +258,7 @@ describe('[#12818] `array_agg` / `string_agg` still lower here — recorded, not
    * `driver-sql` and `driver-turso` therefore refuse them today as UNDECLARED
    * names (400), while this face still lowers them to `$push`. That divergence
    * PRE-DATES this card and closing it is a second accept-face narrowing with
-   * its own changeset, so it is filed separately rather than ridden in here.
+   * its own changeset, so it is filed as #13075 rather than ridden in here.
    *
    * It is pinned rather than left silent for one reason: without these cases,
    * the absence of `array_agg` from the UNDECLARED roster above reads as an

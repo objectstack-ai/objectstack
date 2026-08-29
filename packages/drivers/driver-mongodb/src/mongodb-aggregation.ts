@@ -385,7 +385,7 @@ function malformedGroupByError(node: unknown): Error {
  * `string_agg` left the enum at #6188 (ADR-0049 enforce-or-remove) and both SQL
  * faces refuse them as undeclared names today, while this face still lowers
  * them. That divergence is real, it PRE-DATES this change, and closing it is a
- * second accept-face narrowing with its own changeset — filed separately rather
+ * second accept-face narrowing with its own changeset — filed as #13075 rather
  * than ridden in here. What it must not do is leak into a refusal: the messages
  * offer {@link LOWERED_AND_DECLARED}, because a remedy naming a retired
  * spelling is a remedy `AggregationNodeSchema` rejects at the protocol door.
