@@ -1,0 +1,538 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#13255] REACHABILITY and CONSEQUENCE of a swallowed execution-context
+ * resolution, measured at the PACKAGE-MANAGEMENT door.
+ *
+ * ## What this file is, and what its sibling already answered
+ *
+ * `package-door-execctx-fault-reading.test.ts` (#12537) answered what an
+ * `undefined` execution context MEANS to this gate: a subject that holds
+ * nothing, evaluated, denying — not a skipped evaluation and not a fall-through
+ * to a system subject. It drove ONE fault class (a synchronously-throwing
+ * `authServiceProvider`) and it left the card's own two questions open.
+ *
+ * This file answers those two:
+ *
+ *  1. **Reachability.** Which PRODUCTION inputs degrade the resolution, driven
+ *     one class at a time through the REAL supplier (`RestServer`, wired at its
+ *     constructor seams — no monkeypatched private) and the REAL registrar
+ *     (`registerPackageRoutes`, wired the way `rest-api-plugin.ts` wires it).
+ *  2. **Consequence.** What the door answers for each class, and specifically
+ *     whether a SERVER-SIDE FAULT is ever disguised as a permission denial or
+ *     as anonymous access.
+ *
+ * ## Measured answers — the four the card asked for
+ *
+ *  - **Is a fault disguised as a permission denial? YES, in TWO shapes.**
+ *    - `CONTEXT LOST` (six classes) — the whole context is gone, so the
+ *      anonymous floor decides: **401 `UNAUTHENTICATED`**, "Authentication is
+ *      required to access this endpoint." The caller may hold a valid session;
+ *      the fault is elsewhere.
+ *    - `GRANTS LOST` (two classes) — identity survives and the CAPABILITY
+ *      aggregation is what faulted, so the door answers **403 `FORBIDDEN`**,
+ *      "Reading packages requires the `studio.access` or `setup.access`
+ *      capability." An authenticated administrator is told they lack a
+ *      capability while the permission store is down. ⭐ This shape does NOT
+ *      travel through the `.catch(() => undefined)` the card names, nor through
+ *      `computeExecCtx`'s own `catch`: it is `tryFind`'s per-read swallow
+ *      inside `resolveAuthzContext` (`@objectstack/core`), one layer further
+ *      out. Section 5 pins that both shapes are byte-identical to their
+ *      innocent twins.
+ *  - **Is a fault ever served as ANONYMOUS ACCESS, or as a silent success? NO.**
+ *    Every degraded class is REFUSED on every wire-reachable method of all
+ *    four routes. The swallow fails CLOSED. (Section 6.)
+ *  - **Does a fault ever reach the caller as the 5xx it is? NO — never, in any
+ *    class.** That zero is read against a WORKING instrument: section 1 shows
+ *    this same door answering **500 `INTERNAL_ERROR`** when the fault is raised
+ *    one layer later, by the package service. So "no 5xx" is a property of the
+ *    degradation, not of the harness.
+ *  - **Does the `.catch(() => undefined)` at
+ *    `resolvePackageRouteExecutionContext` ever fire on production input? NO.**
+ *    In every class below the private resolver FULFILS. `computeExecCtx` wraps
+ *    its whole body in `try { … } catch { return undefined; }`, and every
+ *    remaining seam (`resolveRequestEnvironmentId`, `getSession`, `tryFind`)
+ *    carries its own swallow — so nothing reaches the wrapper as a rejection.
+ *    ⇒ the card's PREMISE holds in its consequence ("a failed resolve is
+ *    indistinguishable from no context") and is off by one level in its
+ *    MECHANISM: the named `.catch` is a second net over a first that never
+ *    lets anything through. Section 4 measures this per class, against a
+ *    control that shows the witness CAN report a rejection.
+ *
+ * ## ⛔ What this file does not do
+ *
+ * It does not repair anything and it asserts no verdict. Question 3's repair —
+ * distinguishing "no context" from "resolution failed" — is a behaviour change
+ * on a public door and is explicitly out of this card's scope. `rest-server.ts`
+ * is not edited by this change at all (it is under a same-file serial hold);
+ * everything here is measurement.
+ *
+ * ## Reading discipline
+ *
+ * Every class is driven beside a POSITIVE CONTROL that is the same wiring with
+ * the one fault removed — so a refusal is read as caused by the fault rather
+ * than by an under-wired harness. Statuses are never asserted as ends in
+ * themselves: each is read as the observable of a decision, and section 5 pins
+ * the decision by showing the fault and its innocent twin are one answer.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+import type { RouteHandler } from '@objectstack/spec/contracts';
+import { registerPackageRoutes } from './package-routes.js';
+import { RestServer } from './rest-server.js';
+
+const PKGS = '/api/v1/packages';
+
+// ---------------------------------------------------------------------------
+// Harness — the REAL supplier and the REAL registrar, wired the production way.
+// ---------------------------------------------------------------------------
+
+/** The constructor seams a host actually wires. Nothing private is replaced. */
+interface Wiring {
+  kernelManager?: any;
+  defaultEnvironmentIdProvider?: any;
+  authServiceProvider?: any;
+  objectQLProvider?: any;
+  settingsServiceProvider?: any;
+  requestEnvResolver?: any;
+}
+
+function serverWith(w: Wiring): RestServer {
+  return new RestServer(
+    { get: () => {}, post: () => {}, put: () => {}, delete: () => {}, patch: () => {}, use: () => {} } as any,
+    {} as any,
+    {} as any,
+    w.kernelManager,
+    undefined,
+    w.defaultEnvironmentIdProvider,
+    w.authServiceProvider,
+    w.objectQLProvider,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    w.settingsServiceProvider,
+    undefined,
+    undefined,
+    w.requestEnvResolver,
+  );
+}
+
+interface Captured { status: number; body: any }
+
+/**
+ * Mount the four package routes against a real `RestServer`, with the resolver
+ * wired EXACTLY as `rest-api-plugin.ts` wires it:
+ * `resolveExecutionContext: (req) => restServer.resolvePackageRouteExecutionContext(req)`.
+ */
+function mount(rest: RestServer, list: () => Promise<unknown> = async () => []): Map<string, RouteHandler> {
+  const routes = new Map<string, RouteHandler>();
+  const server = {
+    get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
+    post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+    put: (p: string, h: RouteHandler) => { routes.set(`PUT:${p}`, h); },
+    delete: (p: string, h: RouteHandler) => { routes.set(`DELETE:${p}`, h); },
+    patch: () => {}, use: () => {}, listen: async () => {}, close: async () => {},
+  } as any;
+  registerPackageRoutes(
+    server,
+    () => ({ list, publish: async () => ({}), delete: async () => ({}) }) as any,
+    '/api/v1',
+    { resolveExecutionContext: (req: any) => rest.resolvePackageRouteExecutionContext(req) } as any,
+  );
+  return routes;
+}
+
+async function drive(
+  routes: Map<string, RouteHandler>,
+  method: string,
+  path: string,
+  req: Record<string, any> = {},
+): Promise<Captured> {
+  const handler = routes.get(`${method}:${path}`);
+  if (!handler) throw new Error(`no handler for ${method} ${path}`);
+  const captured: Captured = { status: 0, body: undefined };
+  const res: any = {
+    json(data: any) { captured.body = data; },
+    send() {},
+    status(code: number) { captured.status = code; return res; },
+    header() { return res; },
+  };
+  await handler(
+    { params: {}, query: {}, body: undefined, headers: {}, method, path, ...req } as any,
+    res,
+  );
+  return captured;
+}
+
+/** Fulfilled-or-rejected as an observable value, never as an assertion. */
+const settle = async (p: Promise<unknown>): Promise<'fulfilled' | 'rejected'> =>
+  p.then(() => 'fulfilled' as const, () => 'rejected' as const);
+
+// ---------------------------------------------------------------------------
+// Healthy production wiring — the baseline every fault is injected into.
+// ---------------------------------------------------------------------------
+
+/** A better-auth-shaped service that resolves a real session. */
+const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_admin' } }) } });
+
+/**
+ * A permission store that actually grants the package capabilities, through
+ * the SHIPPED aggregation (`sys_user_permission_set` → `sys_permission_set`
+ * → `system_permissions`) rather than by handing the door a ready-made context.
+ */
+const qlHealthy = () => ({
+  find: async (object: string) => {
+    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg' }];
+    if (object === 'sys_permission_set') {
+      return [{ id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] }];
+    }
+    return [];
+  },
+});
+
+/** The same store, unreachable — every read throws, as a driver outage does. */
+const qlDown = () => ({ find: async () => { throw new Error('permission store unreachable'); } });
+
+/** The same store, reachable and genuinely EMPTY — the innocent twin of `qlDown`. */
+const qlEmpty = () => ({ find: async () => [] });
+
+const healthy = (): Wiring => ({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlHealthy() });
+
+// ---------------------------------------------------------------------------
+// 1. CONTROL BOARD — every answer this file later reports ABSENT is shown to be
+//    producible by this instrument first. Without the 500 control, "a fault is
+//    never surfaced as a 5xx" would be indistinguishable from "this harness
+//    cannot produce a 5xx".
+// ---------------------------------------------------------------------------
+
+describe('[#13255] controls — the instrument can produce 200, 401, 403 and 500', () => {
+  it('CONTROL 200: the full production stack, healthy end to end, serves the read', async () => {
+    const captured = await drive(mount(serverWith(healthy())), 'GET', PKGS);
+    expect(captured.status).toBe(200);
+    expect(captured.body?.success).toBe(true);
+  });
+
+  it('CONTROL 200: and the capabilities came from the SHIPPED aggregation, not a stub', async () => {
+    const rest = serverWith(healthy());
+    const ctx = await rest.resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'GET', path: PKGS });
+    expect(ctx?.userId).toBe('u_admin');
+    expect(ctx?.systemPermissions).toContain('manage_metadata');
+    expect(ctx?.systemPermissions).toContain('studio.access');
+  });
+
+  it('CONTROL 401: a genuinely anonymous caller (no auth wired at all) is refused', async () => {
+    const captured = await drive(mount(serverWith({})), 'GET', PKGS);
+    expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
+  });
+
+  it('CONTROL 403: an authenticated caller who genuinely holds nothing is refused on capability', async () => {
+    const captured = await drive(
+      mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })),
+      'GET',
+      PKGS,
+    );
+    expect(captured.status).toBe(403);
+    expect(captured.body?.error?.code).toBe('FORBIDDEN');
+  });
+
+  it('⭐ CONTROL 500: THIS door does answer a 5xx — when the fault is raised by the package service', async () => {
+    const routes = mount(serverWith(healthy()), async () => { throw new Error('driver exploded'); });
+    const captured = await drive(routes, 'GET', PKGS);
+    expect(captured.status).toBe(500);
+    expect(captured.body?.error?.code).toBe('INTERNAL_ERROR');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. REACHABILITY — the fault classes, one per production seam.
+//
+//    `ctx: 'lost'`   — the whole execution context is gone.
+//    `ctx: 'grants'` — identity survives, the capability aggregation is empty.
+// ---------------------------------------------------------------------------
+
+interface FaultClass {
+  id: string;
+  /** The production condition this stands for. */
+  what: string;
+  /** Healthy wiring with exactly ONE seam faulted. */
+  faulted: () => Wiring;
+  /** The request that reaches the door (scoped mount supplies `params`). */
+  req?: Record<string, any>;
+  ctx: 'lost' | 'grants';
+  read: { status: number; code: string };
+  write: { status: number; code: string };
+}
+
+const DENY = { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE };
+const FORBID = { status: 403, code: 'FORBIDDEN' };
+
+const CLASSES: FaultClass[] = [
+  {
+    id: 'KERNEL_BOOT',
+    what: 'a scoped `/environments/:environmentId/packages` request whose tenant kernel fails to boot',
+    faulted: () => ({ ...healthy(), kernelManager: { getOrCreate: async () => { throw new Error('kernel boot failed'); } } }),
+    req: { params: { environmentId: 'env_broken' } },
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'AUTH_SERVICE_DOWN',
+    what: 'the auth service is unavailable (provider rejects)',
+    faulted: () => ({ ...healthy(), authServiceProvider: async () => { throw new Error('auth service unavailable'); } }),
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'AUTH_SERVICE_SYNC_THROW',
+    what: 'the auth-service provider throws SYNCHRONOUSLY (escapes the seam\'s own `.catch`)',
+    faulted: () => ({ ...healthy(), authServiceProvider: (() => { throw new Error('auth provider blew up'); }) as any }),
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'AUTH_API_BUILD',
+    what: 'the auth service is present but `getApi()` fails',
+    faulted: () => ({ ...healthy(), authServiceProvider: async () => ({ getApi: async () => { throw new Error('api build failed'); } }) }),
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'SESSION_STORE_DOWN',
+    what: 'the session store is unreachable (`getSession` rejects)',
+    faulted: () => ({ ...healthy(), authServiceProvider: async () => ({ api: { getSession: async () => { throw new Error('session store down'); } } }) }),
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'SETTINGS_PROVIDER_SYNC_THROW',
+    what: 'a post-identity provider seam throws SYNCHRONOUSLY — the caller IS authenticated',
+    faulted: () => ({ ...healthy(), settingsServiceProvider: (() => { throw new Error('settings provider blew up'); }) as any }),
+    ctx: 'lost', read: DENY, write: DENY,
+  },
+  {
+    id: 'PERMISSION_STORE_DOWN',
+    what: 'identity resolves, then every permission-store read throws',
+    faulted: () => ({ ...healthy(), objectQLProvider: async () => qlDown() }),
+    ctx: 'grants', read: FORBID, write: FORBID,
+  },
+  {
+    id: 'DATA_ENGINE_UNRESOLVABLE',
+    what: 'identity resolves, then the data engine cannot be resolved at all',
+    faulted: () => ({ ...healthy(), objectQLProvider: async () => { throw new Error('datasource unavailable'); } }),
+    ctx: 'grants', read: FORBID, write: FORBID,
+  },
+];
+
+describe('[#13255] reachability — each production fault class, driven, with its own control', () => {
+  it.each(CLASSES)('$id — $what', async (klass) => {
+    // ---- the fault -------------------------------------------------------
+    const rest = serverWith(klass.faulted());
+    const req = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    const ctx = await rest.resolvePackageRouteExecutionContext(req);
+    if (klass.ctx === 'lost') {
+      expect(ctx).toBeUndefined();
+    } else {
+      // Identity SURVIVES; only the capability aggregation is empty. The
+      // difference matters: this shape is refused by a different clause.
+      expect(ctx?.userId).toBe('u_admin');
+      expect(ctx?.systemPermissions).toEqual([]);
+    }
+    // `isSystem` is never synthesised by a degrade, in either shape.
+    expect(ctx?.isSystem).not.toBe(true);
+
+    // ---- POSITIVE CONTROL: the same wiring, fault removed ----------------
+    // A refusal above is caused by the injected fault, not by a harness that
+    // could never have been served in the first place.
+    const control = await drive(mount(serverWith(healthy())), 'GET', PKGS, klass.req ?? {});
+    expect(control.status).toBe(200);
+    expect(control.body?.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. CONSEQUENCE — what the package-management door answers, per class, on the
+//    read cohort and the write cohort.
+// ---------------------------------------------------------------------------
+
+describe('[#13255] consequence — the door\'s answer for each fault class', () => {
+  it.each(CLASSES)('$id — read and write cohorts', async (klass) => {
+    const routes = mount(serverWith(klass.faulted()));
+    const extra = klass.req ?? {};
+
+    const read = await drive(routes, 'GET', PKGS, extra);
+    expect(read.status).toBe(klass.read.status);
+    expect(read.body?.error?.code).toBe(klass.read.code);
+
+    const del = await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } });
+    expect(del.status).toBe(klass.write.status);
+    expect(del.body?.error?.code).toBe(klass.write.code);
+
+    const publish = await drive(routes, 'POST', `${PKGS}/publish`, {
+      ...extra,
+      body: { manifest: { id: 'com.acme.crm', version: '1.0.0' } },
+    });
+    expect(publish.status).toBe(klass.write.status);
+    expect(publish.body?.error?.code).toBe(klass.write.code);
+  });
+
+  it('⭐ NO class, on any route, is answered with the 5xx the fault actually is', async () => {
+    const seen: number[] = [];
+    for (const klass of CLASSES) {
+      const routes = mount(serverWith(klass.faulted()));
+      const extra = klass.req ?? {};
+      seen.push((await drive(routes, 'GET', PKGS, extra)).status);
+      seen.push((await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'x' } })).status);
+      seen.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'x', version: '1.0.0' } } })).status);
+    }
+    // ⚠️ ZERO. Its control is section 1's 500 case, on this same door and this
+    // same harness — so this reads as "the degradation never surfaces", not as
+    // "the instrument cannot see a 5xx".
+    expect(seen.filter((s) => s >= 500)).toEqual([]);
+    expect(seen.every((s) => s === ANONYMOUS_DENY_STATUS || s === 403)).toBe(true);
+  });
+
+  it('the capability clause, isolated from the anonymous floor, refuses the lost context too', async () => {
+    // `method: 'OPTIONS'` is the one input that makes `shouldDenyAnonymous`
+    // yield without authenticating — used here ONLY to separate the two
+    // clauses. ⚠️ The registrar mounts no OPTIONS route, so this is not a wire
+    // path; it is the instrument that tells "evaluated and holds nothing"
+    // apart from "never evaluated".
+    const lost = CLASSES.find((c) => c.id === 'AUTH_SERVICE_DOWN')!;
+    const captured = await drive(mount(serverWith(lost.faulted())), 'GET', PKGS, { method: 'OPTIONS' });
+    expect(captured.status).toBe(403);
+    expect(captured.body?.error?.code).toBe('FORBIDDEN');
+
+    // CONTROL: past the SAME clause, a healthy stack is served.
+    const control = await drive(mount(serverWith(healthy())), 'GET', PKGS, { method: 'OPTIONS' });
+    expect(control.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. THE `.catch(() => undefined)` THE CARD NAMES IS NEVER THE THING THAT
+//    FIRES. Measured per class, not inferred.
+// ---------------------------------------------------------------------------
+
+describe('[#13255] the private resolver FULFILS on every production fault class', () => {
+  it('CONTROL: the witness can report a rejection at all', async () => {
+    expect(await settle(Promise.reject(new Error('control')))).toBe('rejected');
+    expect(await settle(Promise.resolve(1))).toBe('fulfilled');
+  });
+
+  it.each(CLASSES)('$id — `resolveExecCtx` resolves; it does not reject', async (klass) => {
+    const rest = serverWith(klass.faulted());
+    const req = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    // The PRIVATE resolver, read BEFORE the wrapper's `.catch` can act — so
+    // this reads the supplier, not the net over it.
+    const inner = (rest as any).resolveExecCtx(req.params?.environmentId, req);
+    expect(await settle(inner)).toBe('fulfilled');
+  });
+
+  it('CONTROL: when the inner resolve IS made to reject, the wrapper is what absorbs it', async () => {
+    // The one case in this file that replaces a private — deliberately, as the
+    // control that proves the readings above are a property of the production
+    // supplier rather than of the wrapper.
+    const rest = serverWith(healthy());
+    (rest as any).computeExecCtx = async () => { throw new Error('injected inner rejection'); };
+    const req = { params: {}, headers: {}, method: 'GET', path: PKGS };
+    expect(await settle((rest as any).resolveExecCtx(undefined, req))).toBe('rejected');
+    expect(await settle(rest.resolvePackageRouteExecutionContext({ ...req }))).toBe('fulfilled');
+    expect(await rest.resolvePackageRouteExecutionContext({ ...req })).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. THE DISGUISE — each fault shape is byte-identical to its INNOCENT twin.
+//    This is the card's question 2, stated as a decision rather than a status.
+// ---------------------------------------------------------------------------
+
+describe('[#13255] a server-side fault is indistinguishable from the denial it imitates', () => {
+  it('CONTEXT LOST: an auth-service outage answers exactly what a genuine anonymous caller answers', async () => {
+    const faulted = await drive(
+      mount(serverWith({ ...healthy(), authServiceProvider: async () => { throw new Error('auth service unavailable'); } })),
+      'GET', PKGS,
+    );
+    const anonymous = await drive(mount(serverWith({})), 'GET', PKGS);
+    expect(faulted.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(JSON.stringify(faulted)).toBe(JSON.stringify(anonymous));
+  });
+
+  it('GRANTS LOST: a permission-store outage answers exactly what "you hold nothing" answers', async () => {
+    const faulted = await drive(
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS,
+    );
+    const genuinelyEmpty = await drive(
+      mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })), 'GET', PKGS,
+    );
+    expect(faulted.status).toBe(403);
+    expect(faulted.body?.error?.message).toContain('studio.access');
+    expect(JSON.stringify(faulted)).toBe(JSON.stringify(genuinelyEmpty));
+  });
+
+  it('CONTROL: the same comparison SEPARATES two answers that differ', async () => {
+    const [refused, served] = await Promise.all([
+      drive(mount(serverWith({})), 'GET', PKGS),
+      drive(mount(serverWith(healthy())), 'GET', PKGS),
+    ]);
+    expect(JSON.stringify(refused)).not.toBe(JSON.stringify(served));
+  });
+
+  it('and the two DISGUISES are not each other — the door distinguishes lost-context from lost-grants', async () => {
+    const lost = await drive(
+      mount(serverWith({ ...healthy(), authServiceProvider: async () => { throw new Error('down'); } })), 'GET', PKGS,
+    );
+    const grants = await drive(
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS,
+    );
+    expect(lost.status).not.toBe(grants.status);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. FAIL-CLOSED — no fault class is ever SERVED. The security-relevant zero.
+// ---------------------------------------------------------------------------
+
+describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a silent success', () => {
+  it('every class is refused on every wire-reachable route, and never answers 200', async () => {
+    const statuses: number[] = [];
+    const bodies: any[] = [];
+    for (const klass of CLASSES) {
+      const routes = mount(serverWith(klass.faulted()));
+      const extra = klass.req ?? {};
+      for (const call of [
+        () => drive(routes, 'GET', PKGS, extra),
+        () => drive(routes, 'GET', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } }),
+        () => drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } }),
+        () => drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'com.acme.crm', version: '1.0.0' } } }),
+      ]) {
+        const captured = await call();
+        statuses.push(captured.status);
+        bodies.push(captured.body);
+      }
+    }
+    // ⚠️ ZERO, twice. Both are read against section 1's 200 controls, which
+    // show this harness serving this same door on healthy wiring.
+    expect(statuses.filter((s) => s === 200)).toEqual([]);
+    expect(bodies.filter((b) => b?.success === true)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. ⭐ A SEAM ASYMMETRY worth recording: at one and the same provider seam, a
+//    REJECTION degrades softly and a SYNCHRONOUS THROW loses the whole
+//    identity. Same fault, two different wire answers.
+// ---------------------------------------------------------------------------
+
+describe('[#13255] at a post-identity provider seam, sync-throw and rejection do not agree', () => {
+  it('a REJECTING settings provider is absorbed by the seam\'s own `.catch` — the caller is still served', async () => {
+    const captured = await drive(
+      mount(serverWith({ ...healthy(), settingsServiceProvider: async () => { throw new Error('settings unavailable'); } })),
+      'GET', PKGS,
+    );
+    expect(captured.status).toBe(200);
+  });
+
+  it('the SAME seam, throwing synchronously, escapes that `.catch` and the caller is refused 401', async () => {
+    const captured = await drive(
+      mount(serverWith({ ...healthy(), settingsServiceProvider: (() => { throw new Error('settings unavailable'); }) as any })),
+      'GET', PKGS,
+    );
+    expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
+  });
+});
