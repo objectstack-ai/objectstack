@@ -2,9 +2,29 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node"]
+    // [#11663 L2] Widened from `./src` as a CONSEQUENCE of the `paths` rule
+    // below, exactly as `packages/plugins/plugin-security/tsconfig.json`
+    // documents (#11184, itself following `packages/rest` / #9960):
+    // redirecting `@objectstack/types` to its source puts
+    // `packages/types/src/**` into this program, and `rootDir` is enforced over
+    // every program file even under `--noEmit`. `..` (= `packages/`) is the
+    // directory that contains every file in the program. Emit is unaffected:
+    // this package builds with tsup.
+    "rootDir": "..",
+    "types": ["node"],
+    // [#11663 L2] `@objectstack/types` is imported as a VALUE by
+    // `src/security/platform-admin.ts` (`resolvePlatformOwnerEmail`,
+    // `isEmailVerifiedUserRow`). Without this rule its TYPES resolve through
+    // the workspace link to `dist/*.d.ts` — a build artifact — so a stale dist
+    // would make this package's type verdict a function of build state rather
+    // than of the source in the checkout (`check:type-source-resolution`
+    // refuses exactly that). Anchored to the bare specifier only: nothing here
+    // imports an `@objectstack/types/*` subpath, and a `paths` target matching
+    // nothing on disk would silently fall back to node resolution.
+    "paths": {
+      "@objectstack/types": ["../types/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
-  "exclude": [] 
+  "exclude": []
 }
