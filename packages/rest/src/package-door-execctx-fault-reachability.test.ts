@@ -416,7 +416,7 @@ describe('[#13255] the private resolver FULFILS on every production fault class'
 
   it.each(CLASSES)('$id — `resolveExecCtx` resolves; it does not reject', async (klass) => {
     const rest = serverWith(klass.faulted());
-    const req = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    const req: Record<string, any> = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
     // The PRIVATE resolver, read BEFORE the wrapper's `.catch` can act — so
     // this reads the supplier, not the net over it.
     const inner = (rest as any).resolveExecCtx(req.params?.environmentId, req);
