@@ -63,6 +63,11 @@
  *            agreement, and the #12971 repair works by making the CJS output
  *            resolve the SAME anchor -- so agreement is the property a
  *            regression would actually break, quietly.
+ *   TYPED    the declaration a `require` consumer RESOLVES is CommonJS-
+ *            flavoured and is really on disk. This is the #13112 class and it
+ *            is a different question from the three above: those ask whether
+ *            the JavaScript works, this asks whether the TYPES the same
+ *            consumer reads describe the module kind they were resolved for.
  *
  * ## Why BOTH, when either alone would have caught #12971
  *
@@ -253,11 +258,28 @@ const EXIT_PREREQ = 3;
 // free; LOWERING one to make a run pass is the move this block exists to make
 // visible in a diff.
 
-const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1 });
+const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1, typedEntries: 102 });
 const MIN_ENTRIES = 90;
 const MIN_PACKAGES = 58;
 const MIN_CJS_FILES = 520;
 const MIN_PROBES = 1;
+const MIN_TYPED_ENTRIES = 88;
+
+/**
+ * Where each count was measured. Carried PER ROW rather than as one commit in
+ * the message template, because the counts were not all taken on the same
+ * tree: TYPED arrived with #13112 and its floor was measured there. Folding a
+ * later measurement under an earlier commit's name would make the refusal
+ * message cite a tree the number does not come from — a small lie in the one
+ * place a reader goes to decide whether a floor is trustworthy.
+ */
+const MEASURED_AT = Object.freeze({
+  entries: '8cb96ec41b', packages: '8cb96ec41b', cjsFiles: '8cb96ec41b', probes: '8cb96ec41b',
+  // The manifest tree of #13112's fix. `dist/` is unaffected by that diff (an
+  // `exports` map decides what a resolver READS, never what tsup EMITS), so
+  // this count is the same one a clean build of that commit produces.
+  typedEntries: '196612a313',
+});
 
 /**
  * The first floor a run falls below, as a refusal message -- or `null` when
@@ -269,17 +291,24 @@ const MIN_PROBES = 1;
 export function floorProblem(counts) {
   const rows = [
     [counts?.entries ?? 0, MIN_ENTRIES, MEASURED.entries, 'published `require` entry point(s)',
-      'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.'],
+      'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.',
+      MEASURED_AT.entries],
     [counts?.packages ?? 0, MIN_PACKAGES, MEASURED.packages, 'publishable package(s)',
-      'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.'],
+      'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.',
+      MEASURED_AT.packages],
     [counts?.cjsFiles ?? 0, MIN_CJS_FILES, MEASURED.cjsFiles, 'emitted CommonJS file(s)',
-      'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.'],
+      'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.',
+      MEASURED_AT.cjsFiles],
     [counts?.probes ?? 0, MIN_PROBES, MEASURED.probes, 'cross-format behaviour probe(s) run',
-      'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.'],
+      'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.',
+      MEASURED_AT.probes],
+    [counts?.typedEntries ?? 0, MIN_TYPED_ENTRIES, MEASURED.typedEntries, 'require entry point(s) with a CommonJS-flavoured `types`',
+      'This is the TYPED population. `resolveRequireTypes` returned nothing across the tree, so every entry took the "no types" branch or none was judged at all — and a defect that hands every CJS consumer an ESM declaration would read as a clean tree.',
+      MEASURED_AT.typedEntries],
   ];
-  for (const [got, min, measured, what, why] of rows) {
+  for (const [got, min, measured, what, why, at] of rows) {
     if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on 8cb96ec41b).\n`
+    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on ${at ?? MEASURED_AT.entries}).\n`
       + `  ${why}\n`
       + '  ⛔ NOT a pass: nothing, or nearly nothing, was read.';
   }
@@ -373,6 +402,90 @@ export function resolveRequireTarget(node, inRequire = false) {
 }
 
 /**
+ * Resolve the declaration file a `require`-condition consumer READS, the way
+ * TypeScript's node16/nodenext resolver does: walk the condition object in key
+ * order, take `types` wherever it is reached, descend `require` / `node` /
+ * `default`, never `import` / `module` / `browser`.
+ *
+ * ⚠️ `types` matches at ANY level -- including as a SIBLING of
+ * `import`/`require`, which is the whole #13112 defect. A sibling `types`
+ * answers for BOTH conditions, so a dual-build package hands its `require`
+ * consumer the ESM-flavoured `.d.ts` while the `.d.cts` twin tsup emitted
+ * beside `index.cjs` is named by nothing and ships unreachable. A resolver
+ * that looked only INSIDE the `require` branch would report "no types" for the
+ * defective shape and "no types" for a legitimately CJS-first package alike,
+ * and could not tell the two apart -- so it is the RESOLVED path that is
+ * judged here, never the spelling.
+ *
+ * @param {unknown} node an `exports` subtree
+ * @returns {string | null}
+ */
+export function resolveRequireTypes(node) {
+  if (typeof node === 'string' || node === null || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const r = resolveRequireTypes(n);
+      if (r) return r;
+    }
+    return null;
+  }
+  for (const [k, v] of Object.entries(node)) {
+    if (k.startsWith('.') || k === 'import' || k === 'module' || k === 'browser') continue;
+    if (k === 'types') {
+      if (typeof v === 'string') return v;
+      continue;
+    }
+    if (k === 'require' || k === 'node' || k === 'default') {
+      const r = resolveRequireTypes(v);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+/**
+ * The module kind TypeScript assigns a declaration file: the extension decides
+ * when it carries one (`.d.cts` is always CommonJS, `.d.mts` always ESM),
+ * otherwise the package's `"type"` decides -- the same rule TypeScript applies
+ * to `.cjs` / `.mjs` / `.js`. So `dist/index.d.ts` is CJS-flavoured in a
+ * CJS-first package and ESM-flavoured in a `"type": "module"` one, and the
+ * SAME path is correct under `require` in the first and wrong in the second.
+ * ⛔ Hence the invariant is module KIND, never the `.d.cts` extension: demanding
+ * the extension would red every correct CJS-first package in the repo.
+ *
+ * @param {string} path a declaration path
+ * @param {boolean} isModuleType the package declares `"type": "module"`
+ * @returns {'commonjs' | 'module'}
+ */
+export function declarationModuleKind(path, isModuleType) {
+  if (path.endsWith('.d.cts')) return 'commonjs';
+  if (path.endsWith('.d.mts')) return 'module';
+  return isModuleType ? 'module' : 'commonjs';
+}
+
+/**
+ * The declaration one subpath hands a `require` consumer. Mirrors
+ * `importTargetFor`'s subpath lookup; falls back to the root `types`/`typings`
+ * field for the `(main)` row, which is what a resolver reads when there is no
+ * `exports` map at all.
+ *
+ * @returns {string | null}
+ */
+export function requireTypesFor(pkg, subpath) {
+  const ex = pkg?.exports;
+  if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
+    const keys = Object.keys(ex);
+    if (keys.some((k) => k.startsWith('.'))) return subpath in ex ? resolveRequireTypes(ex[subpath]) : null;
+    if (subpath === '.') return resolveRequireTypes(ex);
+    return null;
+  }
+  for (const key of ['types', 'typings']) {
+    if (typeof pkg?.[key] === 'string') return pkg[key].startsWith('./') ? pkg[key] : `./${pkg[key]}`;
+  }
+  return null;
+}
+
+/**
  * The published `require` entry points of one manifest.
  *
  * @param {any} pkg parsed package.json
@@ -454,6 +567,7 @@ export function collectEntries(root) {
     const dir = dirname(mp);
     for (const { subpath, target } of requireEntries(pkg)) {
       const importTarget = importTargetFor(pkg, subpath);
+      const typesTarget = requireTypesFor(pkg, subpath);
       rows.push({
         id: `${pkg.name}#${subpath}`,
         pkg: pkg.name,
@@ -463,6 +577,8 @@ export function collectEntries(root) {
         relDir: relative(root, dir),
         abs: resolve(dir, target),
         importAbs: importTarget ? resolve(dir, importTarget) : null,
+        typesTarget,
+        typesAbs: typesTarget ? resolve(dir, typesTarget) : null,
         isModuleType: pkg.type === 'module',
       });
     }
@@ -542,7 +658,7 @@ export function isParseFailure(stderr) {
 // ---------------------------------------------------------------------------
 
 /**
- * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, probesRun: number}>}
+ * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, typedEntries: number, probesRun: number}>}
  */
 export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) {
   const rows = collectEntries(root);
@@ -555,6 +671,10 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   // whether anything was built.
   const orphanLedger = orphanLedgerRows(ledger, rows);
   let cjsFileCount = 0;
+  // TYPED's own count, and its findings held aside so they report together
+  // rather than interleaved with the per-row LOADS diagnostics.
+  let typedEntries = 0;
+  const typedFindings = [];
 
   for (const r of rows) {
     r.distDir = join(r.dir, 'dist');
@@ -566,8 +686,36 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
     }
     r.cjsFiles = commonJsFilesUnder(r.distDir, r.isModuleType);
     cjsFileCount += r.cjsFiles.length;
+
+    // TYPED — see the header. Asked only of rows whose require target really
+    // emitted, so a package that failed to build answers the LOADS question
+    // first rather than collecting a second finding about the same absence.
+    if (!r.typesTarget) {
+      findings.push(
+        `${r.id}: the require condition resolves NO \`types\` — a consumer reading this entry point gets whatever `
+          + `TypeScript finds beside ${r.target} by file adjacency, or nothing. Declare it: `
+          + `"require": { "types": "./<the .d.cts twin>", "default": "${r.target}" }.`,
+      );
+    } else if (!(existsSync(r.typesAbs) && statSync(r.typesAbs).isFile())) {
+      findings.push(
+        `${r.id}: the require condition declares types ${r.typesTarget}, which is NOT emitted though `
+          + `${relative(root, r.distDir)} exists — the manifest promises a declaration npm would ship and tsc cannot read.`,
+      );
+    } else if (declarationModuleKind(r.typesTarget, r.isModuleType) !== 'commonjs') {
+      typedFindings.push(
+        `${r.id}: the require condition resolves types ${r.typesTarget}, which is ESM-flavoured in a `
+          + `"type": "module" package — so a CommonJS consumer under node16/nodenext resolution is handed an ES-module `
+          + `declaration for a CommonJS entry point and gets TS1479 ("the referenced file is an ECMAScript module and `
+          + `cannot be imported with 'require'"), while the JavaScript at ${r.target} loads perfectly. Give each `
+          + `condition its own types: "import": { "types": "./x.d.ts", "default": "./x.js" }, `
+          + `"require": { "types": "./x.d.cts", "default": "./x.cjs" }.`,
+      );
+    } else {
+      typedEntries++;
+    }
   }
-  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun: 0 };
+  findings.push(...typedFindings);
+  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun: 0 };
 
   // PARSES — over the union of emitted CommonJS files, deduped across the
   // several entries a package may declare.
@@ -607,7 +755,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   const probeResults = await runBehaviourProbes(root, rows, probes);
   findings.push(...probeResults.findings);
 
-  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun: probeResults.ran };
+  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun: probeResults.ran };
 }
 
 /** Read the expectation a probe declares. Only `spec-version` exists today. */
@@ -670,10 +818,10 @@ function readLedger(root) {
 async function main(argv) {
   const root = REPO_ROOT;
   const ledger = readLedger(root);
-  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, probesRun } = await scan(root, ledger);
+  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, probesRun } = await scan(root, ledger);
 
   if (argv.includes('--list')) {
-    for (const r of rows) console.log(`${r.id.padEnd(48)} ${r.target}`);
+    for (const r of rows) console.log(`${r.id.padEnd(48)} ${String(r.target).padEnd(34)} types=${r.typesTarget ?? '(none)'}`);
     console.log(`\n${rows.length} require entry point(s) across ${new Set(rows.map((r) => r.pkg)).size} publishable package(s).`);
     return EXIT_OK;
   }
@@ -694,6 +842,7 @@ async function main(argv) {
     packages: new Set(rows.map((r) => r.pkg)).size,
     cjsFiles: cjsFileCount,
     probes: probesRun,
+    typedEntries,
   });
   if (floor !== null) {
     console.error(`check:dual-build-cjs-loads REFUSES — ${floor}`);
@@ -708,14 +857,16 @@ async function main(argv) {
     console.error('A `require` condition in an exports map is a published promise. A consumer that');
     console.error('resolves through it gets a load failure, not a degraded feature — and the repo\'s');
     console.error('own suites cannot see it, because vitest resolves workspace packages through the');
-    console.error('`import` condition.');
+    console.error('`import` condition. The same blindness covers the TYPED findings: the declaration');
+    console.error('a CJS consumer resolves is never the one this repo\'s own typecheck reads.');
     return EXIT_FINDINGS;
   }
 
   console.log(
     `✓ check:dual-build-cjs-loads — ${rows.length} published require entry point(s) across ` +
       `${new Set(rows.map((r) => r.pkg)).size} package(s) load; ${cjsFileCount} emitted CommonJS file(s) parse; ` +
-      `${probesRun} cross-format behaviour probe(s) agree` +
+      `${probesRun} cross-format behaviour probe(s) agree; ` +
+      `${typedEntries} require condition(s) resolve a CommonJS-flavoured \`types\` that exists` +
       (ledgerHits.length ? `; ${ledgerHits.length} declared non-loadable entr(ies) still justified.` : '.'),
   );
   for (const h of ledgerHits) console.log(`  · declared: ${h}`);
@@ -759,6 +910,26 @@ export async function selfTest() {
   t('a manifest with no exports falls back to `main`', requireEntries({ main: 'dist/index.js' })[0]?.target === 'dist/index.js');
   t('a wildcard subpath is skipped (no single file to probe)', requireEntries({ exports: { './x/*': { require: './x/*.cjs' } } }).length === 0);
 
+  // ── the types resolver: what a `require` consumer actually READS ──────────
+  t('THE #13112 shape: a SIBLING `types` answers for the require condition too',
+    resolveRequireTypes({ types: './x.d.ts', import: './x.js', require: './x.cjs' }) === './x.d.ts');
+  t('a nested `types` inside the require branch wins over nothing else',
+    resolveRequireTypes({ import: { types: './x.d.ts', default: './x.js' }, require: { types: './x.d.cts', default: './x.cjs' } }) === './x.d.cts');
+  t('⛔ the `import` branch is never read for a require consumer',
+    resolveRequireTypes({ import: { types: './only-esm.d.ts', default: './x.mjs' }, require: { default: './x.cjs' } }) === null);
+  t('`types` under a `default` fallback is reached', resolveRequireTypes({ default: { types: './x.d.ts', default: './x.js' } }) === './x.d.ts');
+  t('an entry with no types anywhere resolves null', resolveRequireTypes({ import: './x.mjs', require: './x.js' }) === null);
+  t('`browser` is not a types source', resolveRequireTypes({ browser: { types: './b.d.ts' }, require: { types: './n.d.cts', default: './n.cjs' } }) === './n.d.cts');
+
+  // ── module kind: the reason the invariant is not "must end in .d.cts" ────
+  t('`.d.cts` is CommonJS whatever the package type', declarationModuleKind('./x.d.cts', true) === 'commonjs' && declarationModuleKind('./x.d.cts', false) === 'commonjs');
+  t('`.d.mts` is ESM whatever the package type', declarationModuleKind('./x.d.mts', false) === 'module');
+  t('GREEN CONTROL — `.d.ts` in a CJS-first package is CommonJS-flavoured and correct under require',
+    declarationModuleKind('./x.d.ts', false) === 'commonjs');
+  t('THE defect — `.d.ts` in a "type": "module" package is ESM-flavoured', declarationModuleKind('./x.d.ts', true) === 'module');
+  t('requireTypesFor reads the named subpath', requireTypesFor({ exports: { '.': { types: './a.d.ts' }, './b': { require: { types: './b.d.cts', default: './b.cjs' } } } }, './b') === './b.d.cts');
+  t('requireTypesFor falls back to the root `types` for a (main) row', requireTypesFor({ types: 'dist/index.d.ts' }, '(main)') === './dist/index.d.ts');
+
   // ── diagnostics classification ────────────────────────────────────────────
   t('a SyntaxError diagnostic is a parse failure', isParseFailure("foo.cjs:1\nSyntaxError: Cannot use 'import.meta' outside a module"));
   t('a plain Error diagnostic is NOT a parse failure', !isParseFailure('Error: Vitest cannot be imported in a CommonJS module using require().'));
@@ -767,16 +938,33 @@ export async function selfTest() {
   // ── the fixture tree ──────────────────────────────────────────────────────
   const root = mkdtempSync(join(tmpdir(), 'dual-cjs-'));
   try {
-    const dual = { type: 'module', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } } };
+    // The shape the TYPED invariant demands: each condition names its own
+    // declaration. Every fixture below is built from it, so a TYPED regression
+    // shows up as a failure in the case it belongs to rather than as noise in
+    // all of them.
+    const dual = {
+      type: 'module',
+      exports: {
+        '.': {
+          import: { types: './dist/index.d.ts', default: './dist/index.js' },
+          require: { types: './dist/index.d.cts', default: './dist/index.cjs' },
+        },
+      },
+    };
+    // The declarations those conditions name. Real files, because TYPED asks
+    // whether they are on disk and a modelled answer would not be an answer.
+    const DTS = { 'dist/index.d.ts': 'export declare const ok: number;\n', 'dist/index.d.cts': 'export declare const ok: number;\n' };
 
     writePkg(root, 'good', { name: '@t/good', version: '0.0.0', ...dual }, {
       'dist/index.js': 'export const ok = 1;\n',
       'dist/index.cjs': 'exports.ok = 1;\n',
+      ...DTS,
     });
     // THE case: `import.meta` verbatim in a CJS output — #12971 exactly.
     writePkg(root, 'importmeta', { name: '@t/importmeta', version: '0.0.0', ...dual }, {
       'dist/index.js': 'export const u = import.meta.url;\n',
       'dist/index.cjs': 'exports.u = import.meta.url;\n',
+      ...DTS,
     });
     // …and in a shared CHUNK the entry does not even reference, which a
     // require-only smoke would miss.
@@ -784,11 +972,13 @@ export async function selfTest() {
       'dist/index.js': 'export const ok = 1;\n',
       'dist/index.cjs': 'exports.ok = 1;\n',
       'dist/chunk-AAA.cjs': 'exports.u = import.meta.url;\n',
+      ...DTS,
     });
     // Parses, then throws at load — the half a parse check cannot see.
     writePkg(root, 'throws', { name: '@t/throws', version: '0.0.0', ...dual }, {
       'dist/index.js': 'export const ok = 1;\n',
       'dist/index.cjs': "throw new Error('nope at load');\n",
+      ...DTS,
     });
     writePkg(root, 'esmonly', { name: '@t/esmonly', version: '0.0.0', type: 'module', exports: { '.': { import: './dist/index.js' } } }, {
       'dist/index.js': 'export const ok = 1;\n',
@@ -837,12 +1027,14 @@ export async function selfTest() {
     writePkg(root, 'agree', { name: '@t/agree', version: '0.0.0', ...dual }, {
       'dist/index.js': "export const v = () => 'same';\n",
       'dist/index.cjs': "exports.v = () => 'same';\n",
+      ...DTS,
     });
     // Loads in both formats, parses in both, and still disagrees — the silent
     // degradation a load smoke alone cannot see.
     writePkg(root, 'disagree', { name: '@t/disagree', version: '0.0.0', ...dual }, {
       'dist/index.js': "export const v = () => 'from-esm';\n",
       'dist/index.cjs': "exports.v = () => null;\n",
+      ...DTS,
     });
     const agreeProbe = [{ pkg: '@t/agree', subpath: '.', export: 'v', expect: 'same', why: 'self-test' }];
     const disagreeProbe = [{ pkg: '@t/disagree', subpath: '.', export: 'v', expect: 'from-esm', why: 'self-test' }];
@@ -855,6 +1047,57 @@ export async function selfTest() {
     t('agreement on the WRONG value is still a finding', pWrong.findings.some((f) => f.includes('@t/agree') && f.includes('declared expectation')), pWrong.findings.join(' | '));
     const pGone = await scan(root, empty, [{ pkg: '@t/no-such-package', subpath: '.', export: 'v', expect: 'x', why: 'self-test' }]);
     t('a probe naming a vanished entry point is a finding, not a silent skip', pGone.findings.some((f) => f.includes('no longer exists')), pGone.findings.join(' | '));
+
+    // ── TYPED: the #13112 class, in both directions ─────────────────────────
+    //
+    // Every case below emits real declaration files, because the invariant is
+    // partly "is it on disk" and a modelled file answers nothing.
+    const siblingTypes = { type: 'module', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } } };
+    writePkg(root, 'sibling', { name: '@t/sibling', version: '0.0.0', ...siblingTypes }, {
+      'dist/index.js': 'export const ok = 1;\n', 'dist/index.cjs': 'exports.ok = 1;\n',
+      'dist/index.d.ts': 'export declare const ok: number;\n', 'dist/index.d.cts': 'export declare const ok: number;\n',
+    });
+    // GREEN CONTROL — the SAME sibling-`types` spelling in a CJS-FIRST
+    // package, where `dist/index.d.ts` really is the CommonJS declaration.
+    // This is the case that keeps the invariant module-KIND rather than the
+    // `.d.cts` extension: an extension rule reds this correct package, and 50
+    // entries in this repo are spelled exactly this way.
+    writePkg(root, 'cjsfirst', { name: '@t/cjsfirst', version: '0.0.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs', require: './dist/index.js' } } }, {
+      'dist/index.mjs': 'export const ok = 1;\n', 'dist/index.js': 'exports.ok = 1;\n',
+      'dist/index.d.ts': 'export declare const ok: number;\n',
+    });
+    // A require branch that names a declaration nothing emitted.
+    writePkg(root, 'notypesfile', { name: '@t/notypesfile', version: '0.0.0', ...dual }, {
+      'dist/index.js': 'export const ok = 1;\n', 'dist/index.cjs': 'exports.ok = 1;\n',
+      'dist/index.d.ts': 'export declare const ok: number;\n',
+    });
+    // A require branch that names no declaration at all.
+    writePkg(root, 'notypes', { name: '@t/notypes', version: '0.0.0', type: 'module', exports: { '.': { import: './dist/index.js', require: './dist/index.cjs' } } }, {
+      'dist/index.js': 'export const ok = 1;\n', 'dist/index.cjs': 'exports.ok = 1;\n',
+    });
+    const rTyped = await scan(root, empty, []);
+    t('THE #13112 case: a sibling `types` in a "type": "module" package is a TYPED finding',
+      rTyped.findings.some((f) => f.startsWith('@t/sibling#.') && f.includes('ESM-flavoured')), rTyped.findings.join(' | '));
+    t('…and the finding names TS1479, the error the consumer actually sees',
+      rTyped.findings.some((f) => f.startsWith('@t/sibling#.') && f.includes('TS1479')));
+    t('…and it prescribes the per-condition shape',
+      rTyped.findings.some((f) => f.startsWith('@t/sibling#.') && f.includes('"require": { "types": "./x.d.cts"')));
+    t('GREEN CONTROL — the same spelling in a CJS-FIRST package is silent',
+      !rTyped.findings.some((f) => f.startsWith('@t/cjsfirst#.')), rTyped.findings.filter((f) => f.includes('cjsfirst')).join(' | '));
+    t('GREEN CONTROL — a correctly nested dual package is silent',
+      !rTyped.findings.some((f) => f.startsWith('@t/good#.')), rTyped.findings.filter((f) => f.includes('@t/good')).join(' | '));
+    t('a require branch naming a declaration that was never emitted is a finding',
+      rTyped.findings.some((f) => f.startsWith('@t/notypesfile#.') && f.includes('is NOT emitted')), rTyped.findings.join(' | '));
+    t('a require branch that resolves NO types at all is a finding, not a silent pass',
+      rTyped.findings.some((f) => f.startsWith('@t/notypes#.') && f.includes('resolves NO')), rTyped.findings.join(' | '));
+    // Every live entry is judged exactly once: it is either counted clean or
+    // it produced one TYPED finding. A count that drifts from that partition
+    // is the vacuity the floor above exists to catch, one layer up.
+    const typedFindingCount = rTyped.findings.filter((f) => /resolves NO |is NOT emitted though|ESM-flavoured in a/.test(f)).length;
+    t('every live entry is judged exactly once — counted clean OR reported',
+      rTyped.typedEntries + typedFindingCount === rTyped.rows.filter((r) => r.exists).length,
+      `typed=${rTyped.typedEntries} findings=${typedFindingCount} live=${rTyped.rows.filter((r) => r.exists).length}`);
+    t('…and three of the fixtures are the reported ones', typedFindingCount === 3, String(typedFindingCount));
 
     // The shipped probe table must name entry points that really exist here.
     const realRows = collectEntries(REPO_ROOT);
@@ -891,19 +1134,25 @@ export async function selfTest() {
   // driven down individually AND the measured tuple is asserted to clear them
   // all — a floor accidentally set above its own measurement would red every
   // real run, which is the opposite failure and just as invisible in review.
-  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes };
+  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedEntries: MEASURED.typedEntries };
   t('FLOOR — the values measured on 8cb96ec41b clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
   t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
   t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
   t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', floorProblem({ ...full, probes: 0 }) !== null);
+  t('FLOOR — a dead types resolver refuses (TYPED judged nothing)', floorProblem({ ...full, typedEntries: 0 }) !== null);
+  t('FLOOR — the TYPED refusal cites the tree ITS number came from, not the older one',
+    /\(102 on 196612a313\)/.test(floorProblem({ ...full, typedEntries: 0 }) ?? ''), JSON.stringify(floorProblem({ ...full, typedEntries: 0 })));
   t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
   t('FLOOR — the refusal names the count, the floor and the measurement',
     /measured only 0 .* below the floor of \d+ \(613 on 8cb96ec41b\)/s.test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
     JSON.stringify(floorProblem({ ...full, cjsFiles: 0 })));
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
-    && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes);
+    && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes
+    && MIN_TYPED_ENTRIES <= MEASURED.typedEntries);
+  t('FLOOR — every count carries the tree it was measured on',
+    Object.keys(MEASURED).every((k) => typeof MEASURED_AT[k] === 'string' && MEASURED_AT[k].length >= 10));
   t('FLOOR — the refusal code is distinct from findings and prerequisite',
     EXIT_REFUSE !== EXIT_FINDINGS && EXIT_REFUSE !== EXIT_PREREQ && EXIT_REFUSE !== EXIT_OK);
 
@@ -923,7 +1172,7 @@ export async function selfTest() {
     console.error(`✗ check-dual-build-cjs-loads self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, and the parse failure the ledger may never silence).`);
+  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, the parse failure the ledger may never silence, and TYPED in both directions — the #13112 shape red, the identically-spelled CJS-first package green).`);
   return EXIT_OK;
 }
 
