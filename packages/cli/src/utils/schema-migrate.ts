@@ -338,7 +338,10 @@ export async function bootSchemaStack(
         cwd: opts.projectRoot ?? process.cwd(),
         skipSeedData: defer,
       })
-    : { plugins: [], hostConfigPath: null, hostConfigLoaded: false, notes: [], coverage: null } satisfies SchemaMigrationComposition;
+    : {
+        plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
+        notes: [], coverage: null,
+      } satisfies SchemaMigrationComposition;
   for (const plugin of composition.plugins) {
     await kernel.use(plugin as any);
   }
