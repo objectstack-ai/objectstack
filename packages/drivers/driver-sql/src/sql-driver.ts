@@ -14021,8 +14021,26 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
-   * that names the columns at fault and the declaration that fixes them
-   * (#11374).
+   * that names the columns at fault and the remedy that actually applies
+   * (#11374, #12999).
+   *
+   * ## TWO remedies, because the refusal has two causes
+   *
+   * | path | the fact | what fixes it |
+   * |---|---|---|
+   * | **create** | the field declares no usable `maxLength` | declare one — the next create emits `varchar(n)` |
+   * | **upgrade** | the field declares one; the COLUMN predates it and is still TEXT | convert the column by hand |
+   *
+   * One message served both until #12999, and on the upgrade path both of its
+   * halves were false: it diagnosed a missing declaration that was present, and
+   * prescribed a declaration that was already made. That is not merely
+   * imprecise — it fires once per boot on a production upgrade and reads as the
+   * release that added the bound being broken, so the operator's next move is to
+   * doubt a correct fix. The second cause exists at all because the additive
+   * sync is additive: it adds columns and indexes and never rewrites a column's
+   * type (#3728), by design — the rewrite needs an exclusive metadata lock
+   * (see the `lock_wait_timeout` note this file opens with), which is a manual
+   * floor rather than something a boot may decide to do.
    *
    * Worth the extra `columnInfo()` read because it only happens on the failure
    * path, and because the raw server error is actively misleading about where
@@ -14063,6 +14081,75 @@ export class SqlDriver implements IDataDriver {
       offenders.length > 0
         ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
         : 'One or more of its key columns is stored as TEXT';
+
+    // #12999: the SAME refusal has two causes, and the message below is true of
+    // only one of them. On CREATE the field really declares no usable bound, so
+    // "declare `maxLength`" is the fix. On an UPGRADE the bound IS declared —
+    // the additive sync never rewrites a column's type (#3728), so a column
+    // created before the declaration stays TEXT forever — and that same sentence
+    // tells the operator to do what they already did, once per boot, in
+    // production, which reads as the release they just deployed being broken.
+    //
+    // The discriminator is per COLUMN and needs BOTH halves, which is why it is
+    // computed here rather than inferred from the error code: a bounded
+    // declaration alone does not imply a stale column, because `ER_TOO_LONG_KEY`
+    // can refuse a COMPOSITE whose parts are each individually keyable (see
+    // {@link MAX_KEYABLE_VARCHAR_CHARS} — the bound is per KEY, not per column).
+    // So the branch fires only where the physical column is TEXT *and*
+    // {@link keyableTextLength} says a fresh create would have emitted
+    // `varchar(n)` for it. When `columnInfo()` fails, `offenders` is empty and
+    // this map stays empty, so the CREATE-path message stands — the honest
+    // reading, since without introspection the two causes are indistinguishable.
+    //
+    // `declaredFieldsFor` returns `undefined` for a table this driver does not
+    // own the column set of, and misses a SHARD table (registered under the base
+    // name). Both degrade to the message below rather than guessing.
+    const declaredFields = this.declaredFieldsFor(tableName);
+    const staleBounds = new Map<string, number>();
+    for (const c of offenders) {
+      const field = declaredFields?.[c];
+      const bound = field ? this.keyableTextLength(field) : null;
+      if (bound !== null) staleBounds.set(c, bound);
+    }
+
+    if (staleBounds.size > 0) {
+      const staleNamed = [...staleBounds]
+        .map(([c, n]) => `"${c}" (declares \`maxLength: ${n}\`)`)
+        .join(', ');
+      const [firstColumn, firstBound] = [...staleBounds][0];
+      // Named in full, deliberately. The mirror case in `schema-drift.ts` (the
+      // unbounded field over a stale `varchar`) already had to derive this, and
+      // the two MySQL `MODIFY` hazards it names are recorded twice more in this
+      // file, on the datetime and time widenings: MODIFY does NOT repeat a
+      // `NOT NULL`, and it DROPS a `DEFAULT` it does not restate. An operator
+      // who follows an abbreviated version of this remedy ends up worse off than
+      // the no-op they started with — a column that lost its default.
+      const others =
+        offenders.length > staleBounds.size
+          ? ` Column(s) ${offenders
+              .filter((c) => !staleBounds.has(c))
+              .map((c) => `"${c}"`)
+              .join(', ')} in the same key declare no usable bound and DO need \`maxLength\` ` +
+            `declared on the field (#11374).`
+          : '';
+      return (
+        `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
+        `column in a key without a key length. Column(s) ${staleNamed} are stored as TEXT even though the ` +
+        `field ALREADY declares a usable \`maxLength\` — the column was created before that bound was ` +
+        `declared, and the additive sync never rewrites a column's type, so re-declaring \`maxLength\` ` +
+        `changes nothing here (#12999). REMEDY: convert the column(s) to varchar(n) by hand, with a backup ` +
+        `taken first, restating the FULL column definition on MySQL (MODIFY drops a NOT NULL or DEFAULT you ` +
+        `do not repeat) — e.g. ALTER TABLE \`${tableName}\` MODIFY \`${firstColumn}\` ` +
+        `varchar(${firstBound}) plus that column's existing NOT NULL / DEFAULT clauses, restated verbatim; ` +
+        `— and let the next boot create this index. ObjectStack does NOT rewrite the column for you: that ` +
+        `ALTER needs an exclusive metadata lock on the table, which makes it a destructive, hard-to-roll-back ` +
+        `action and a deliberate manual floor rather than a boot-time one.${others} The table exists but this ` +
+        `index does NOT, so any uniqueness it declared is currently unenforced. A prefix index is deliberately ` +
+        `not substituted: on a UNIQUE index it constrains the prefix rather than the value, and rejects two ` +
+        `different values that share one.`
+      );
+    }
+
     return (
       `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
       `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
