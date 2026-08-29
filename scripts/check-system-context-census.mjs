@@ -49,11 +49,39 @@
  *                   row's prose.
  *   B  POPULATION   every elevation read site the census finds is anchored at its
  *                   exact `file:line`. Zero omissions. ⭐ This is the mandatory one.
- *   C  COUNTS       every number the page states about the current tree equals the
- *                   census. A pattern that matches NOTHING is an error, so a
- *                   reworded page cannot silently stop being checked.
+ *   C  COUNTS       every CENSUS-DERIVED number the page states equals the census.
+ *                   A pattern that matches NOTHING is an error, so a reworded page
+ *                   cannot silently stop being checked. The page's whole-corpus
+ *                   TEXT counts are deliberately NOT compared -- see the next
+ *                   section -- but they are still required to be present and dated.
  *   D  CLASSIFICATION  an anchor that is not a read site must be a declared
  *                   `NON_READ_ANCHORS` row, and that row must still locate the line.
+ *
+ * ## ⭐ What is enforced, and why the text decomposition is NOT
+ *
+ * The page carries two kinds of number and they behave nothing alike.
+ *
+ *   CENSUS-DERIVED    properties of the population this page certifies: the
+ *                     elevation read sites, their packages and files, the total
+ *                     property reads the census subtracts from, the documented
+ *                     collision subtraction, and the page's own split of the sites
+ *                     into behaviour-bearing and carry-onward rows. These move
+ *                     only when the elevation contract moves -- which is precisely
+ *                     when this page must be edited anyway. ⭐ ALL of these stay
+ *                     enforced.
+ *
+ *   WHOLE-CORPUS TEXT how many LINES carry the string `isSystem` anywhere under
+ *                     `packages/` and `examples/` (tests included), how many times
+ *                     the bare identifier appears, how many of those the parser
+ *                     puts in an object-literal key, and the prose remainder.
+ *                     ⛔ NOT enforced: `UNENFORCED_TEXT_COUNTS` carries the six,
+ *                     with the measurement that moved them there.
+ *
+ * The split is not a tolerance. Nothing about the CONTRACT stopped being checked:
+ * a read site with no row, a deleted site, a rotted anchor and an empty census all
+ * still fail. What stopped being checked is a set of numbers about a population
+ * the page does not certify -- and whose churn, measured, was blocking the page
+ * from ever landing.
  *
  * ## Why `NON_READ_ANCHORS` carries needles instead of line numbers
  *
@@ -81,8 +109,9 @@
  * ## Refusals, never quiet passes (#4690)
  *
  * A page that cannot be read, a census with no sites, zero anchors found, a corpus
- * of zero files, a declared-count pattern that matches nothing, and a ledger row
- * that locates nothing are all exit 1 naming what could not be read.
+ * of zero files, a declared-count pattern that matches nothing, an UNENFORCED row
+ * that vanished or lost its date, and a ledger row that locates nothing are all
+ * exit 1 naming what could not be read.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -253,6 +282,13 @@ export const NON_READ_ANCHORS = [
  * packages"). Those are history, they are true of a tree that no longer exists, and
  * a gate that "corrected" them would be rewriting the record.
  *
+ * ⛔ Also deliberately excluded, and for a different reason: the six WHOLE-CORPUS
+ * TEXT counts, which live in `UNENFORCED_TEXT_COUNTS` below. Everything that
+ * remains here is CENSUS-DERIVED -- it changes only when the elevation population
+ * changes. ⭐ That invariant is pinned by a self-test case (`CRITERION`), which
+ * drifts a fixture census's text figures and requires every entry in this list to
+ * hold still: re-add a text count here and the self-test names it.
+ *
  * `pattern` must have exactly one capture group -- the number -- and must match at
  * least once. A pattern that matches nothing is an ERROR: it means the page was
  * reworded out from under the check, which is how a counts gate goes quietly
@@ -284,40 +320,10 @@ export const DECLARED_COUNTS = [
     why: 'the denominator of the same claim',
   },
   {
-    id: 'table-lines-total',
-    pattern: /\| Lines carrying `isSystem` in the corpus \|\s*(\d+) \|/,
-    value: (c) => c.text.linesTotal,
-    why: 'the decomposition table: text lines, tests included',
-  },
-  {
-    id: 'table-lines-tests',
-    pattern: /\| — in tests \|\s*(\d+) \|/,
-    value: (c) => c.text.linesInTests,
-    why: 'the decomposition table: text lines in tests',
-  },
-  {
-    id: 'table-lines-sources',
-    pattern: /\| — in non-test sources \|\s*(\d+) \|/,
-    value: (c) => c.text.linesInSources,
-    why: 'the decomposition table: text lines in sources',
-  },
-  {
-    id: 'table-appearances',
-    pattern: /\| Appearances of the bare identifier `isSystem` in non-test sources \|\s*(\d+) \|/,
-    value: (c) => c.text.identifierAppearances,
-    why: 'the decomposition table: identifier appearances',
-  },
-  {
     id: 'table-declarations',
     pattern: /\| — parsed as a declaration \|\s*(\d+) \|/,
     value: (c) => c.roleCounts.declaration,
     why: 'the decomposition table: declarations',
-  },
-  {
-    id: 'table-keys',
-    pattern: /\| — parsed as an object-literal \/ type key[^|]*\|\s*(\d+) \|/,
-    value: (c) => c.roleCounts.key,
-    why: 'the decomposition table: producers and option objects',
   },
   {
     id: 'table-reads',
@@ -330,12 +336,6 @@ export const DECLARED_COUNTS = [
     pattern: /\| — parsed in some other syntactic position[^|]*\|\s*(\d+) \|/,
     value: (c) => c.roleCounts.other,
     why: 'the decomposition table: everything else the parser saw',
-  },
-  {
-    id: 'table-prose',
-    pattern: /\| — the remainder: text inside comments and string literals \|\s*(\d+) \|/,
-    value: (c) => c.text.inCommentsAndStrings,
-    why: 'the decomposition table: the prose remainder',
   },
   {
     id: 'table-unrelated-reads',
@@ -386,6 +386,107 @@ export const DECLARED_COUNTS = [
     why: "the ruling's package count",
   },
 ];
+
+/**
+ * ⛔ The six numbers this gate deliberately does NOT hold to the census, listed
+ * here so that stays a decision instead of an omission.
+ *
+ * Each one counts WHOLE-CORPUS TEXT: lines carrying the string `isSystem`
+ * anywhere under `packages/` and `examples/` (tests included), appearances of the
+ * bare identifier in non-test sources, the object-literal keys among them, and the
+ * prose remainder. None of them is a property of the elevation contract the page
+ * certifies -- a test that mentions the flag, a seed object carrying
+ * `isSystem: true`, or a comment moves them.
+ *
+ * ## Why they are here rather than in `DECLARED_COUNTS`, measured
+ *
+ * They were enforced, and enforcement did not survive contact with the repo. CI
+ * scores a pull request's MERGE with `main`, and the merge queue re-derives that
+ * merge against a NEWER `main` on every attempt -- so a page carrying whole-corpus
+ * text counts races a target that moves roughly eighteen times a working day, and
+ * can be reddened by a merge it never touched. Measured on this page's own branch,
+ * over one night, by three unrelated merges to `main`:
+ *
+ *   base 8cb96ec41b34 -> db39dfc1c9   linesTotal 1804 -> 1810, linesInTests 1010 ->
+ *                                     1012, linesInSources 794 -> 798, appearances
+ *                                     809 -> 813, keys 308 -> 310, prose 356 -> 358
+ *   db39dfc1c9 -> 8a483b38b8          linesTotal 1810 -> 1811, linesInTests 1012 ->
+ *                                     1013
+ *
+ * ⭐ And the control, over the SAME refs and the same corpus: every census-derived
+ * figure held flat -- 109 sites, 20 packages, 45 files, 6 ledger subtractions, and
+ * the role counts 21 declarations / 115 reads / 9 other -- across db39dfc1c9,
+ * 8a483b38b8, ca1965f2b5 and the merged tree. The population did not move once
+ * while the text counts moved eight times. That is the whole argument: the
+ * enforced set is the one that changes when the CONTRACT changes.
+ *
+ * ## ⛔ What this is NOT
+ *
+ * It is not a tolerance and it is not a narrowing of the contract. The POPULATION
+ * check (every elevation read must be anchored), the RESOLUTION check, the
+ * CLASSIFICATION check and the census-derived counts are untouched, and an empty
+ * census still refuses. What narrows is the set of numbers the page DECLARES about
+ * a population it does not certify.
+ *
+ * Each row is still required to MATCH: a pattern that stops matching is an error
+ * exactly as it is for an enforced count, so the rows cannot be reworded off the
+ * page and quietly disappear. What is dropped is only the comparison.
+ */
+export const UNENFORCED_TEXT_COUNTS = [
+  {
+    id: 'table-lines-total',
+    pattern: /\| Lines carrying `isSystem` in the corpus \|\s*(\d+) \|/,
+    value: (c) => c.text.linesTotal,
+    why: 'the decomposition table: text lines, tests included',
+  },
+  {
+    id: 'table-lines-tests',
+    pattern: /\| — in tests \|\s*(\d+) \|/,
+    value: (c) => c.text.linesInTests,
+    why: 'the decomposition table: text lines in tests',
+  },
+  {
+    id: 'table-lines-sources',
+    pattern: /\| — in non-test sources \|\s*(\d+) \|/,
+    value: (c) => c.text.linesInSources,
+    why: 'the decomposition table: text lines in sources',
+  },
+  {
+    id: 'table-appearances',
+    pattern: /\| Appearances of the bare identifier `isSystem` in non-test sources \|\s*(\d+) \|/,
+    value: (c) => c.text.identifierAppearances,
+    why: 'the decomposition table: identifier appearances',
+  },
+  {
+    id: 'table-keys',
+    pattern: /\| — parsed as an object-literal \/ type key[^|]*\|\s*(\d+) \|/,
+    value: (c) => c.roleCounts.key,
+    why: 'the decomposition table: producers and option objects',
+  },
+  {
+    id: 'table-prose',
+    pattern: /\| — the remainder: text inside comments and string literals \|\s*(\d+) \|/,
+    value: (c) => c.text.inCommentsAndStrings,
+    why: 'the decomposition table: the prose remainder',
+  },
+];
+
+/**
+ * The page must DATE its unenforced decomposition, and the gate holds it to that.
+ *
+ * ⚠️ A number nothing enforces rots silently -- which is the disease this whole
+ * page exists to treat, one level down. Six bare numbers that read as current and
+ * are checked by nothing would be a worse page than six numbers that say when they
+ * were true. So the marker is required: no marker, no unenforced table.
+ *
+ * ⛔ The DATE and the REF are deliberately not compared to anything. Requiring
+ * them to be recent would re-introduce exactly the churn this split removes; their
+ * job is to tell a reader how old the numbers are, not to be fresh.
+ */
+export const UNENFORCED_MEASURED_AT = {
+  pattern: /measured on (\d{4}-\d{2}-\d{2}) at `([0-9a-f]{7,40})`/,
+  why: 'the dated marker on the unenforced decomposition',
+};
 
 /**
  * How many numbered rows section 6 ("Reads that only carry the flag onward") has.
@@ -475,6 +576,8 @@ export function evaluate({
   readFile,
   ledger = NON_READ_ANCHORS,
   declaredCounts = DECLARED_COUNTS,
+  unenforcedCounts = UNENFORCED_TEXT_COUNTS,
+  measuredAt = UNENFORCED_MEASURED_AT,
 }) {
   const problems = [];
 
@@ -605,6 +708,30 @@ export function evaluate({
         `[declared-count] \`${declared.id}\` says ${stated}, the census says ${actual} (${declared.why}).`
       );
     }
+  }
+
+  // ── C2. THE UNENFORCED DECOMPOSITION: present and dated, never compared ──────
+  // ⛔ The values below are NOT checked against the census -- see
+  // UNENFORCED_TEXT_COUNTS for the measurement that put them there. What IS
+  // checked is that the rows still exist and still say when they were true, so
+  // "not enforced" cannot decay into "not there" or "undated".
+  for (const row of unenforcedCounts) {
+    if (!row.pattern.exec(pageText)) {
+      problems.push(
+        `[unenforced-count-missing] the page no longer carries the \`${row.id}\` row ` +
+          `(${row.why}). It is deliberately not held to the census, but it is still ` +
+          'required to be there -- delete it from UNENFORCED_TEXT_COUNTS if it is ' +
+          'really gone, rather than leaving a row nobody can find.'
+      );
+    }
+  }
+  if (unenforcedCounts.length > 0 && measuredAt && !measuredAt.pattern.exec(pageText)) {
+    problems.push(
+      `[unenforced-counts-undated] the page states ${unenforcedCounts.length} number(s) this gate ` +
+        'does not enforce and no longer says when they were measured ' +
+        `(${measuredAt.why}). An unenforced number without a date reads as current ` +
+        'and is checked by nothing -- restore the marker or delete the numbers.'
+    );
   }
 
   return {
@@ -830,13 +957,37 @@ function fixturePage({ anchor = 'pkg/a.ts:2', helper = 'pkg/a.ts:7' } = {}) {
   ].join('\n');
 }
 
+/**
+ * The page's UNENFORCED decomposition, as a fixture: the six rows plus the dated
+ * marker. Every knob is a way the page could decay -- a number going stale, a row
+ * reworded away, the date dropped -- so the criterion can be driven from both sides.
+ */
+function fixtureUnenforcedTable({ linesTotal = 6, dropTestsRow = false, dated = true } = {}) {
+  return [
+    '',
+    '| Measurement | Count | CI |',
+    '|:---|--:|:--:|',
+    '| Lines carrying `isSystem` in the corpus | ' + linesTotal + ' | — |',
+    ...(dropTestsRow ? [] : ['| — in tests | 1 | — |']),
+    '| — in non-test sources | 5 | — |',
+    '| Appearances of the bare identifier `isSystem` in non-test sources | 5 | — |',
+    '| — parsed as an object-literal / type key (producers) | 1 | — |',
+    '| — the remainder: text inside comments and string literals | 2 | — |',
+    '',
+    dated
+      ? 'The rows marked — were measured on 2026-08-29 at `ca1965f2b5` and are not enforced.'
+      : 'The rows marked — are not enforced.',
+    '',
+  ].join('\n');
+}
+
 function selfTest() {
   let failures = 0;
   const t = (name, ok, detail = '') => {
     if (!ok) failures += 1;
     process.stdout.write(`${ok ? '  ok  ' : '  FAIL'} ${name}${detail ? ` -- ${detail}` : ''}\n`);
   };
-  const run = (page, census = FIXTURE_CENSUS, declaredCounts = []) =>
+  const run = (page, census = FIXTURE_CENSUS, declaredCounts = [], unenforcedCounts = []) =>
     evaluate({
       pageText: page,
       census,
@@ -844,6 +995,8 @@ function selfTest() {
       readFile: fixtureRead,
       ledger: FIXTURE_LEDGER,
       declaredCounts,
+      unenforcedCounts,
+      measuredAt: UNENFORCED_MEASURED_AT,
     });
 
   // ── the GREEN control: a page that is correct ───────────────────────────────
@@ -896,6 +1049,7 @@ function selfTest() {
     tracked: FIXTURE_TRACKED,
     readFile: fixtureRead,
     ledger: [{ file: 'pkg/a.ts', needle: 'no such text anywhere', why: 'x' }],
+    unenforcedCounts: [],
     declaredCounts: [],
   });
   t('LEDGER: a needle that matches nothing is a finding', ledgerStale.problems.some((p) => p.startsWith('[ledger-stale]')));
@@ -905,6 +1059,7 @@ function selfTest() {
     tracked: FIXTURE_TRACKED,
     readFile: fixtureRead,
     ledger: [{ file: 'pkg/a.ts', needle: 'return', why: 'x' }],
+    unenforcedCounts: [],
     declaredCounts: [],
   });
   t('LEDGER: a needle matching two lines is a finding', ledgerAmbig.problems.some((p) => p.startsWith('[ledger-ambiguous]')));
@@ -914,6 +1069,7 @@ function selfTest() {
     tracked: FIXTURE_TRACKED,
     readFile: fixtureRead,
     ledger: FIXTURE_LEDGER,
+    unenforcedCounts: [],
     declaredCounts: [],
   });
   t('LEDGER: a row no anchor uses is a finding', ledgerUnused.problems.some((p) => p.startsWith('[ledger-row-unused]')));
@@ -960,6 +1116,7 @@ function selfTest() {
     tracked: FIXTURE_TRACKED,
     readFile: fixtureRead,
     ledger: FIXTURE_LEDGER,
+    unenforcedCounts: [],
     declaredCounts: [
       { id: 'x', pattern: /helper at `pkg\/a\.ts:(\d+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
     ],
@@ -967,6 +1124,103 @@ function selfTest() {
   t(
     'COUNTS: an underivable value is a finding, never compared as -1',
     underivable.problems.some((p) => p.startsWith('[count-underivable]'))
+  );
+
+  // ── ⭐ CRITERION: enforced means CENSUS-DERIVED, pinned over the REAL lists ──
+  //
+  // The drift below is what an unrelated merge to `main` does to this repo: one
+  // test line that mentions the flag, one non-test source line carrying an
+  // `isSystem: true` key, one comment that names it. Nothing about the elevation
+  // population changes -- same sites, same packages, same files, same ledger.
+  //
+  // ⭐ These two cases run over `DECLARED_COUNTS` and `UNENFORCED_TEXT_COUNTS`
+  // THEMSELVES, not over a fixture stand-in. That is the point: move a text count
+  // back into the enforced list and the first case names it by id. A criterion
+  // change with nothing watching it is how the next reader undoes it.
+  const textDrifted = {
+    ...FIXTURE_CENSUS,
+    roleCounts: { ...FIXTURE_CENSUS.roleCounts, key: FIXTURE_CENSUS.roleCounts.key + 1 },
+    text: { linesTotal: 6, linesInTests: 1, linesInSources: 5, identifierAppearances: 5, classified: 3, inCommentsAndStrings: 2 },
+  };
+  const driftPage = fixturePage();
+  const driftedEnforced = DECLARED_COUNTS.filter(
+    (d) => d.value(FIXTURE_CENSUS, driftPage) !== d.value(textDrifted, driftPage)
+  );
+  t(
+    'CRITERION: every ENFORCED count holds still under whole-corpus text drift',
+    driftedEnforced.length === 0,
+    driftedEnforced.map((d) => d.id).join(', ')
+  );
+  const stuckUnenforced = UNENFORCED_TEXT_COUNTS.filter(
+    (d) => d.value(FIXTURE_CENSUS, driftPage) === d.value(textDrifted, driftPage)
+  );
+  t(
+    'CRITERION: all six UNENFORCED text counts DO move under that same drift',
+    UNENFORCED_TEXT_COUNTS.length === 6 && stuckUnenforced.length === 0,
+    `${UNENFORCED_TEXT_COUNTS.length} row(s); unmoved: ${stuckUnenforced.map((d) => d.id).join(', ')}`
+  );
+
+  // ── the same criterion, behaviourally, on one page ──────────────────────────
+  const countSentence = '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
+  const okPage = fixturePage() + countSentence;
+  const staleText = run(
+    okPage + fixtureUnenforcedTable({ linesTotal: 999 }),
+    textDrifted,
+    FIXTURE_COUNTS,
+    UNENFORCED_TEXT_COUNTS
+  );
+  t(
+    'CRITERION: a stale whole-corpus text count is NOT a finding',
+    staleText.problems.length === 0,
+    staleText.problems.join(' | ')
+  );
+  const rowGone = run(
+    okPage + fixtureUnenforcedTable({ dropTestsRow: true }),
+    textDrifted,
+    FIXTURE_COUNTS,
+    UNENFORCED_TEXT_COUNTS
+  );
+  t(
+    'CRITERION: an unenforced row reworded off the page IS a finding',
+    rowGone.problems.some((p) => p.startsWith('[unenforced-count-missing]') && p.includes('`table-lines-tests`')),
+    rowGone.problems.join(' | ')
+  );
+  const undated = run(
+    okPage + fixtureUnenforcedTable({ dated: false }),
+    textDrifted,
+    FIXTURE_COUNTS,
+    UNENFORCED_TEXT_COUNTS
+  );
+  t(
+    'CRITERION: unenforced numbers with no date are a finding, not a quiet pass',
+    undated.problems.some((p) => p.startsWith('[unenforced-counts-undated]')),
+    undated.problems.join(' | ')
+  );
+
+  // ── ⛔ and the half that must NOT have moved: the contract still reds ────────
+  const rottedToo = run(
+    fixturePage({ anchor: 'pkg/a.ts:4' }) + countSentence + fixtureUnenforcedTable({ linesTotal: 999 }),
+    FIXTURE_CENSUS,
+    FIXTURE_COUNTS,
+    UNENFORCED_TEXT_COUNTS
+  );
+  t(
+    'CRITERION: a rotted ANCHOR still reds on the very page whose text counts are stale',
+    rottedToo.problems.some((p) => p.startsWith('[site-without-a-row]')) &&
+      rottedToo.problems.some((p) => p.startsWith('[anchor-is-not-a-read-site]')),
+    rottedToo.problems.join(' | ')
+  );
+  const grewToo = run(
+    okPage + fixtureUnenforcedTable({ linesTotal: 999 }),
+    arrived,
+    FIXTURE_COUNTS,
+    UNENFORCED_TEXT_COUNTS
+  );
+  t(
+    'CRITERION: a POPULATION change still reds on that same page',
+    grewToo.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts:4')) &&
+      grewToo.problems.some((p) => p.includes('`headline-sites` says 1, the census says 2')),
+    grewToo.problems.join(' | ')
   );
 
   // ── absence is loud ────────────────────────────────────────────────────────
