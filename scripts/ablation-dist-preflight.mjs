@@ -437,10 +437,11 @@ export function treeVerdict({ mode, gitReadable, gitError, files }) {
     paths: unaccounted.map((f) => f.path),
     msg:
       `restore leg: no dirty path carries the marker, so the source you mutated is back -- but ${n} path`
-      + `${n === 1 ? ' still differs' : 's still differ'} from HEAD. The TREE is not restored: the ablation is still `
-      + "recorded in what this package's build wrote, so every measurement from here on measures the wrong tree, the "
-      + 'next build can refuse loudly about a change that never happened, and `git add -A` commits the phantom into a '
-      + 'contract baseline.',
+      + `${n === 1 ? ' still differs' : 's still differ'} from HEAD, so the TREE is not restored. Two ways to get here, `
+      + 'both fatal to the next measurement: the leg\'s build wrote a CHECKED-IN artifact (the ablation is still '
+      + 'recorded there, the next build reads it as a real change, and `git add -A` commits the phantom into a '
+      + 'committed baseline); or work of your own was never committed, which the ablation discipline requires before '
+      + 'mutating precisely so that HEAD is a restore point. Read the paths below and treat them as the restore leg.',
   };
 }
 
