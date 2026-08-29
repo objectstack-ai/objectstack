@@ -1492,15 +1492,19 @@ export class ObjectStackClient {
      * The `data` member is `IAnalyticsService.query`'s declared return, relayed
      * verbatim by the domain (`deps.success(await analyticsService.query(…))`).
      *
-     * ⛔ NOT bound to `AnalyticsResultResponseSchema` (`@objectstack/spec/api`),
-     * which looks like the route's own response type: its
-     * `data.fields` declares `{ name, type }` only, while the contract this
-     * route relays also carries `label` / `format` / `currency` /
-     * `percentScale` and `totals` — measured on a real `AnalyticsService` in
-     * `analytics-automation-json-erasure.test.ts`. Binding it would have
-     * narrowed the declaration below what the producer serves, which is the
-     * bound-but-false shape #12034 paid to remove. (The schema's own drift is
-     * a spec-side question, filed separately.)
+     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse`
+     * (`@objectstack/spec/api`). When #12104 wrote this annotation the schema
+     * was a stale projection — its `data.fields` declared `{ name, type }`
+     * only, while the contract this route relays also carries `label` /
+     * `format` / `currency` / `percentScale` and `totals` (measured on a real
+     * `AnalyticsService` in `analytics-automation-json-erasure.test.ts`), so
+     * binding it would have been the bound-but-false shape #12034 paid to
+     * remove. #13078 has since brought the schema to parity (pinned
+     * schema ≡ contract in `spec/api/analytics.test.ts`), but the binding
+     * stays on the producer's contract on purpose: the contract is what the
+     * route relays, and the schema is its transcription — annotating the
+     * source rather than the copy is what keeps this method immune to the
+     * transcription drifting again.
      */
     query: async (payload: any): Promise<BaseResponse & { data: AnalyticsResult }> => {
       const route = this.getRoute('analytics');
@@ -3806,14 +3810,21 @@ export class ObjectStackClient {
        * therefore resolves to the `AutomationResult` alone. The two differ in
        * the wrapper only, which is why the payload type is the same one.
        *
-       * ⛔ NOT bound to `TriggerFlowResponse` (`@objectstack/spec/api`), which
-       * looks like this route's response type: its `data` declares
-       * `{ success, output?, error?, durationMs? }`, and the door also serves
-       * `status` / `runId` / `screen` (a paused run — see the row above),
-       * `code`, `successMessage` / `errorMessage` and `summary`. Measured
-       * against the real `AutomationEngine` in
-       * `analytics-automation-json-erasure.test.ts`. Binding the narrower
-       * schema would refuse the very reads this docblock tells callers to make.
+       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse`
+       * (`@objectstack/spec/api`). When #12104 wrote this annotation the
+       * schema was a stale projection — its `data` declared
+       * `{ success, output?, error?, durationMs? }` while the door also
+       * serves `status` / `runId` / `screen` (a paused run — see the row
+       * above), `code`, `successMessage` / `errorMessage` and `summary`
+       * (measured against the real `AutomationEngine` in
+       * `analytics-automation-json-erasure.test.ts`), so binding it would
+       * have refused the very reads this docblock tells callers to make.
+       * #13078 has since brought the schema to parity (pinned
+       * schema ≡ contract in `spec/api/automation-api.zod.test.ts`), but the
+       * binding stays on the producer's contract on purpose: the contract is
+       * what the route relays, and the schema is its transcription —
+       * annotating the source rather than the copy is what keeps this method
+       * immune to the transcription drifting again.
        */
       trigger: async (triggerName: string, payload: any): Promise<BaseResponse & { data: AutomationResult }> => {
           const route = this.getRoute('automation');

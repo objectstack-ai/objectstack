@@ -50,17 +50,21 @@
  * highest-risk band (`return-type-precision.test.ts`, shape class 2). Hence one
  * driven case per method rather than a family-wide assumption.
  *
- * ## Two spec response schemas are NARROWER than their producer — measured here
+ * ## Two spec response schemas WERE narrower than their producer — measured here
  *
- * `AnalyticsResultResponseSchema.data` and `TriggerFlowResponseSchema.data` are
- * stale projections of `AnalyticsResult` / `AutomationResult`: the fixtures
- * below serve keys those schemas do not declare (`fields[].label`, and a paused
- * run's `status` / `runId` / `screen`). That is why the two annotations bind the
- * PRODUCER's contract type rather than those two response types — binding them
- * would have been a false narrowing of exactly the kind #12034 removed. The
- * other two route schemas (`AnalyticsMetadataResponseSchema`,
- * `AnalyticsSqlResponseSchema`) DO agree with their producer's declared return,
- * and the annotations use them.
+ * When #12104 landed, `AnalyticsResultResponseSchema.data` and
+ * `TriggerFlowResponseSchema.data` were stale projections of
+ * `AnalyticsResult` / `AutomationResult`: the fixtures below serve keys those
+ * schemas did not then declare (`fields[].label`, and a paused run's
+ * `status` / `runId` / `screen`). That is why the two annotations bind the
+ * PRODUCER's contract type rather than those two response types — binding
+ * them would have been a false narrowing of exactly the kind #12034 removed.
+ * #13078 has since widened both schemas to parity (pinned schema ≡ contract
+ * in `spec/api/analytics.test.ts` / `spec/api/automation-api.zod.test.ts`);
+ * the annotations stay on the contracts, which are the source the routes
+ * relay. The other two route schemas (`AnalyticsMetadataResponseSchema`,
+ * `AnalyticsSqlResponseSchema`) agreed with their producer's declared return
+ * all along, and the annotations use them.
  *
  * ---------------------------------------------------------------------------
  * Reverse verification, direction predicted BEFORE running
@@ -97,10 +101,12 @@ const CONTEXT = (): any => ({
 
 /**
  * One cube with a LABELLED measure and dimension. The labels are load-bearing
- * rather than decorative: `AnalyticsResult.fields[].label` is a key
- * `AnalyticsResultResponseSchema.data.fields` does not declare, so serving it
- * is what proves that schema is a narrower projection than the producer's
- * contract — the measurement the annotation choice rests on.
+ * rather than decorative: `AnalyticsResult.fields[].label` was a key
+ * `AnalyticsResultResponseSchema.data.fields` did not declare when #12104
+ * measured it, so serving it is what proved that schema a narrower projection
+ * than the producer's contract — the measurement the annotation choice rests
+ * on (#13078 has since widened the schema to parity; the served key is the
+ * evidence either way).
  */
 const ACCOUNT_CUBE: Cube = {
     name: 'crm_account',
@@ -119,8 +125,8 @@ const ROWS = [{ industry: 'tech', account_count: 3 }];
 /**
  * The ADR-0021 dataset the REST-served `queryDataset` route runs. Its dimension
  * carries a `label` on purpose: the dataset executor enriches
- * `AnalyticsResult.fields[].label` from it, which is the key
- * `AnalyticsResultResponseSchema.data.fields` does not declare.
+ * `AnalyticsResult.fields[].label` from it — the key whose serving proved the
+ * pre-#13078 schema narrower than the contract (see the cube above).
  */
 const DATASET = {
     name: 'account_metrics',
@@ -160,7 +166,7 @@ const gate = defineActionDescriptor({
 /**
  * start → gate (pauses) → end. A PAUSED run is chosen deliberately: it is the
  * arm whose `AutomationResult` carries `status` / `runId` / `screen`, none of
- * which `TriggerFlowResponseSchema.data` declares.
+ * which `TriggerFlowResponseSchema.data` declared before #13078 widened it.
  */
 function realAutomation(): AutomationEngine {
     const engine = new AutomationEngine(
@@ -352,8 +358,10 @@ describe('#12104 — the four DISPATCHER-served methods resolve to the envelope,
         const body = await client.automation.trigger('approve_account', {});
 
         expect(body.success).toBe(true);
-        // The keys `TriggerFlowResponseSchema.data` does NOT declare, served by
-        // the real engine: this is why the annotation binds `AutomationResult`.
+        // The keys `TriggerFlowResponseSchema.data` did NOT declare before
+        // #13078, served by the real engine: this measurement is why the
+        // annotation binds `AutomationResult` (and, since #13078, why the
+        // schema had to move to parity with it).
         expect(body.data.status).toBe('paused');
         expect(typeof body.data.runId).toBe('string');
         expect(body.data.screen?.title).toBe('Approve the account');
@@ -377,14 +385,15 @@ describe('#12104 — the REST-served method resolves to the BARE payload', () =>
         expect(Array.isArray(body.fields)).toBe(true);
     });
 
-    it('and it serves a `fields[].label` the analytics RESPONSE schema does not declare', async () => {
+    it('and it serves the `fields[].label` that proved the pre-#13078 response schema narrower', async () => {
         // The measurement behind one of the two annotation choices. `query` and
         // `queryDataset` are the SAME contract return — `IAnalyticsService`
         // declares `Promise< AnalyticsResult >` for both — so a key the service
-        // really emits is a key `AnalyticsResult` really carries. And
-        // `AnalyticsResultResponseSchema.data.fields` declares only
-        // `{ name, type }`, so binding that schema on `analytics.query` would
-        // have been a FALSE narrowing of the contract the route relays.
+        // really emits is a key `AnalyticsResult` really carries. When #12104
+        // measured this, `AnalyticsResultResponseSchema.data.fields` declared
+        // only `{ name, type }`, so binding that schema on `analytics.query`
+        // would have been a FALSE narrowing of the contract the route relays;
+        // #13078 has since widened the schema to parity with the contract.
         const { client } = producerBackedClient();
 
         const body = await client.analytics.queryDataset({
