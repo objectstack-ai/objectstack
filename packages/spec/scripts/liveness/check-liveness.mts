@@ -186,10 +186,12 @@ import {
   STATE_COUNTS_FILE,
   STATE_COUNTS_GUIDANCE,
   STATE_COUNTS_PATH,
+  STATE_COUNTS_TOTALS_GUIDANCE,
   STATUS_COLUMNS,
   foldStateCounts,
   parseStateTable,
   reconcileReadmeTable,
+  reconcileStateCountTotals,
   reconcileStateCounts,
   renderStateCounts,
 } from './readme-table.mts';
@@ -393,6 +395,36 @@ for (const s of STATUS_COLUMNS) {
   }
 }
 
+// ── THE SAME PARTITION, ASKED OF THE DATA (#13083) ──
+//
+// The loop above holds the CODE to the published vocabulary. Nothing held the
+// LEDGERS to it. `classify()` accepts any truthy string and counts it, so a row
+// written `"status": "planed"` is classified (the forward pass is satisfied, no
+// UNCLASSIFIED finding), counted into a `byStatus` bucket named after the typo,
+// and then dropped by `foldStateCounts` — which reads four names and nothing
+// else. The artifact publishes a `classified` total short by exactly the typo'd
+// population, and every reconciliation in this gate compares that number against
+// itself, so it stays green.
+//
+// After #13041 the same unvalidated string carries a second consequence: a
+// status in neither evidence-scan set has its `evidence` pointer counted by the
+// census and read by no check. A typo lands in neither set BY CONSTRUCTION,
+// which is the defect that loop exists to prevent — reachable through the data
+// instead of through the code.
+//
+// So the vocabulary is read from `STATUS_COLUMNS` rather than written out again:
+// the guard and the fold that drops the value must not be able to disagree about
+// what the four names are. That is the same reason `EVIDENCE_SCANNED_LABEL`
+// below is derived from its set rather than restated.
+//
+// Population measured before switching this on, across all 31 ledgers on this
+// commit: live 819, planned 10, dead 80, experimental 5 — 914 classified, no
+// fifth value. So it starts GREEN and only a NEW typo can red it, which is the
+// zero-census argument the orphan-proof and key-mention flips were switched on
+// under. A check that starts at zero can be red; that is why the census came
+// first.
+const KNOWN_STATUSES = new Set<string>(STATUS_COLUMNS);
+
 /**
  * The scanned population, rendered for the gate's own output. Derived from the
  * set rather than written out again, so the numbers and the population they
@@ -523,6 +555,8 @@ const report: any = {
   countsArtifactErrors: [] as string[], // state-counts.md is missing, or its bytes are not what the gate measures (#7377)
   countsRowSetErrors: [] as string[], // the README's row set and the artifact's disagree
   countsHandEdited: [] as string[], // a count column is back in the README — a hand-maintained number in the merge path
+  countsTotalErrors: [] as string[], // the four columns and the walk's own `classified` disagree — the fold dropped a status (#13083)
+  unknownStatus: [] as string[], // a ledger `status` outside STATUS_COLUMNS — counted by the walk, dropped by the fold (#13083)
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
   producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
@@ -635,6 +669,13 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   cat.classified++;
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
   report.totals.byStatus[status] = (report.totals.byStatus[status] || 0) + 1;
+  // #13083 — an unrecognized value is still COUNTED here, deliberately. Dropping
+  // it would keep `cat.classified` and the `byStatus` buckets in agreement and
+  // hide the row from the totals reconciliation downstream, which is the very
+  // silence this names. It is counted, and it is reported.
+  if (!KNOWN_STATUSES.has(status)) {
+    report.unknownStatus.push(`${type}/${path} → "${status}"`);
+  }
   // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
   if (led !== null) {
     verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
@@ -897,6 +938,19 @@ if (!existsSync(readmeFile)) {
   report.countsHandEdited = counts.handCountErrors;
 }
 
+// ── the fold's arithmetic (#13083) ──
+// Outside the README block above on purpose: the three legs there all read the
+// README or the artifact, and every one of them is satisfied by a fold that
+// silently dropped a status. This one reads the WALK — `types.<type>.classified`,
+// counted by its own `++` and never through `byStatus` — so it is the only
+// comparison here whose two sides are not the same measurement twice. It must
+// therefore run even when the README is gone, which is why it is not nested.
+report.countsTotalErrors = reconcileStateCountTotals({
+  governed: GOVERNED,
+  byStatus: Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
+  classified: Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.classified])),
+});
+
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
 // A MALFORMED value does fail: it silently disables the staleness check for
@@ -981,7 +1035,14 @@ const failed =
   report.readmeMalformedRows.length > 0 ||
   report.countsArtifactErrors.length > 0 ||
   report.countsRowSetErrors.length > 0 ||
-  report.countsHandEdited.length > 0;
+  report.countsHandEdited.length > 0 ||
+  // A ledger `status` outside the published vocabulary, and the arithmetic that
+  // proves the artifact under-counted because of it (#13083). Red rather than ⚠
+  // on the zero-census argument stated at KNOWN_STATUSES: measured across all 31
+  // ledgers on the commit that switched this on, every value was one of the
+  // four, so the gate starts green and only a NEW typo can red it.
+  report.unknownStatus.length > 0 ||
+  report.countsTotalErrors.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -1169,6 +1230,29 @@ if (asJson) {
     console.log(`\n✗ ${totalUnclassified} UNCLASSIFIED — classify in packages/spec/liveness/<type>.json:`);
     report.unclassified.forEach((s: string) => console.log(`    ${s}`));
   }
+  if (report.unknownStatus.length) {
+    console.log(
+      `\n✗ ${report.unknownStatus.length} ledger row(s) whose \`status\` is not one of ` +
+      `${STATUS_COLUMNS.join(' / ')}:`,
+    );
+    report.unknownStatus.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   This is the shape UNCLASSIFIED above cannot catch, and it is worse than\n' +
+      '   UNCLASSIFIED because it looks DONE: the row has a verdict, the forward pass is\n' +
+      `   satisfied, the walk counts it — and then ${STATE_COUNTS_FILE} drops it, because\n` +
+      `   the fold reads ${STATUS_COLUMNS.join(' / ')} and nothing else. The published\n` +
+      '   total comes out short by exactly these rows, and every other check in this gate\n' +
+      '   compares that total against itself and agrees (#13083).\n\n' +
+      '   Since #13041 the same value costs a second check: the evidence scan reads a\n' +
+      '   declared population, and a status in neither the scanned nor the unscanned set\n' +
+      "   has its `evidence` pointer counted by the census and READ BY NOTHING. A typo is\n" +
+      '   in neither set by construction.\n\n' +
+      '   Fix the VALUE in packages/spec/liveness/<type>.json — it is almost always a\n' +
+      "   misspelling of the verdict the author meant. ⛔ Never widen STATUS_COLUMNS to\n" +
+      '   accept it: that vocabulary is what the generated artifact publishes as columns,\n' +
+      '   and a fifth name there changes the artifact (see the totals failure below).',
+    );
+  }
   if (report.ungoverned.length) {
     console.log(`\n✗ ${report.ungoverned.length} REGISTERED metadata type(s) governed by nothing:`);
     report.ungoverned.forEach((t: string) => console.log(`    ${t}`));
@@ -1287,6 +1371,15 @@ if (asJson) {
       '   would publish two sets of numbers with only one of them enforced. Delete the\n' +
       '   cell; the Notes prose is what this table is for.',
     );
+  }
+  if (report.countsTotalErrors.length) {
+    console.log(
+      `\n✗ ${report.countsTotalErrors.length} governed type(s) where ${STATE_COUNTS_FILE}'s columns ` +
+      "do not add up to the walk's own count:",
+    );
+    report.countsTotalErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    STATE_COUNTS_TOTALS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
   // ── re-verification clock ──
   // Annotated at the boundary: `report` is deliberately `any` (see its
