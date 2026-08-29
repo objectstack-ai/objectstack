@@ -161,7 +161,7 @@ policy layer over an existing pipeline, never a second execution dialect.
 | Use | When |
 |:---|:---|
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
-| **`http.server` mount** (plugin code) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. Mount it on `http.server`; `contributes.routes` parses but serves nothing. |
+| **`http.server` mount** (plugin code) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. Mount it on `http.server`. |
 
 If the logic is "a bit of computation, then a record write", express it as a
 **flow** and point a `type: 'flow'` endpoint at it — that keeps the URL

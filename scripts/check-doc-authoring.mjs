@@ -763,6 +763,25 @@ function buildsStrictObjectOptions(fn, ts) {
  * schema, not prose) or a `StrictObjectOptions`-typed / `*_STRICT_OPTIONS`
  * const, which is how the shared visibility and editability option sets are
  * written.
+ *
+ * The const's declared type is read through {@link declaredTypeText} — the same
+ * helper {@link collectTextSinkConsts} uses — so the two type anchors in this
+ * file cannot answer differently about the same declaration. They could before:
+ * this one read `decl.type` alone and was blind to `… satisfies
+ * StrictObjectOptions`, a spelling the tree already uses for the sibling type
+ * (`WIDGET_GUIDANCE_SETS`, `ui/dashboard.zod.ts`), while its sibling anchor had
+ * been widened and this one had not.
+ *
+ * That divergence was never visible in the VERDICT, and saying so is the point:
+ * {@link collectTextSinkConsts} reaches the same prose by its own type anchor
+ * plus the const→const closure, so a `satisfies`-spelled options table was
+ * reported either way — measured, both spellings, before and after. What the
+ * divergence cost was the REDUNDANCY. The spelling was carried by exactly one
+ * mechanism, and the seed path through here — the one that reaches a guidance
+ * table hoisted out of the options object — would not have compensated if that
+ * one were ever narrowed. Which is why the case pinned in `--self-test` is on
+ * this predicate rather than on a scan: end to end the two anchors are
+ * indistinguishable, so a fixture would pass with this widening reverted.
  */
 function inStrictOptions(prop, ts) {
   let cur = prop;
@@ -773,7 +792,7 @@ function inStrictOptions(prop, ts) {
     }
     if (ts.isVariableDeclaration(p)) {
       const nm = p.name.getText();
-      return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(p.type ? p.type.getText() : '');
+      return /_STRICT_OPTIONS$/.test(nm) || /\bStrictObjectOptions\b/.test(declaredTypeText(p, ts));
     }
     // A function boundary. Transparent ONLY when the function declares itself
     // an options factory by its return-type annotation — the fourth-population
@@ -807,6 +826,11 @@ function identifiersIn(node, ts, out = new Set()) {
  * first and is silently blind to the second — and silence is the failure mode
  * this whole file exists to prevent. `as const` is walked THROUGH rather than
  * stopped at, because the `satisfies` sits outside it in that spelling.
+ *
+ * Both type anchors in this file route through here — {@link inStrictOptions}'s
+ * const branch and {@link collectTextSinkConsts}'s — so "what type does this
+ * const declare" has ONE answer. Two copies of the read is how the second one
+ * came to be a spelling behind the first.
  *
  * The INITIALIZER is deliberately not searched for the type name: a local like
  * `new Set<KeySetGuidance>()` (`shared/suggestions.zod.ts`, inside the error
@@ -1448,7 +1472,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, and `.describe()` prose; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out, and the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1764,6 +1788,100 @@ function selfTestRule3(expect) {
     expect('the satisfies-spelling red names its const',
       r.violations[0]?.where, 'via OPTION_GUIDANCE_SETS');
 
+    // RED #13 — a whole OPTIONS TABLE in the `satisfies StrictObjectOptions`
+    // spelling, with the id one object deeper than the key that anchors it. The
+    // const is deliberately NOT named `*_STRICT_OPTIONS`, so the name branch
+    // cannot be what rescues it, and the prose is nested `guidance` rather than
+    // a top-level string, so reaching it means the climb really arrived.
+    //
+    // ⚠️ What this case pins, and what it does NOT. It is RED on both sides of
+    // the {@link inStrictOptions} widening: {@link collectTextSinkConsts} already
+    // registers this const by its declared type, and {@link customerTextPosition}
+    // resolves the string at `via NAV_ITEM_SURFACE` without ever consulting the
+    // position test. So this is a REGRESSION pin on the class — the shape stays
+    // reported — and NOT the reverse proof for the widening. The reverse proof is
+    // the predicate battery below, because end to end the two anchors are
+    // redundant and no fixture can tell them apart.
+    writeFileSync(target, [
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'export const NAV_ITEM_SURFACE = {',
+      "  surface: 'this navigation item',",
+      '  guidance: {',
+      "    legacyKey: '`legacyKey` was removed in protocol 17 (#13105). Delete it.',",
+      '  },',
+      '} satisfies StrictObjectOptions;',
+    ].join('\n'));
+    r = scan();
+    expect('an id in the nested guidance of a `satisfies StrictObjectOptions` options table is RED',
+      r.violations.length, 1);
+    expect('the options-table red names the const it travelled through',
+      r.violations[0]?.where, 'via NAV_ITEM_SURFACE');
+    expect('the options-table red is bucketed as a strictObject option',
+      r.violations[0]?.bucket, 'strictObject');
+
+    // ── The TYPE ANCHORS, asserted on the PREDICATE ─────────────────────
+    //
+    // Not through a scan, and the reason is the whole point of this block: the
+    // two anchors are REDUNDANT in the verdict, so a fixture written to prove
+    // this one would pass with it reverted — a case reporting an anchor as
+    // covered while proving only that its sibling still works. Measured: with
+    // {@link collectTextSinkConsts} reverted to the annotation-only read, this
+    // widening alone recovers the HOISTED shapes (a guidance table lifted out of
+    // the options object, reached through the seed path here) and nothing else.
+    //
+    // Redundancy is the point rather than the excuse. The `satisfies` spelling
+    // is carried by one mechanism today; two anchors that read a declaration the
+    // same way is the property whose absence let one of them fall a spelling
+    // behind in the first place, silently, with every gate green.
+    const anchor = (head, tail) => {
+      const sf = parseSourceFile('packages/spec/src/ui/anchor.zod.ts', [
+        "import type { StrictObjectOptions } from '../shared/strict-object';",
+        `export const ${head} = {`,
+        "  surface: 'this navigation item',",
+        "  guidance: { legacyKey: '`legacyKey` was removed in protocol 17. Delete it.' },",
+        `}${tail};`,
+      ].join('\n'));
+      let prop;
+      let decl;
+      const walk = (n) => {
+        if (!decl && ts.isVariableDeclaration(n)) decl = n;
+        if (!prop && ts.isPropertyAssignment(n) && n.name.getText() === 'guidance') prop = n;
+        ts.forEachChild(n, walk);
+      };
+      ts.forEachChild(sf, walk);
+      return { prop, decl };
+    };
+
+    // [label, declaration head, trailing type expression, is a StrictObjectOptions position]
+    const SPELLINGS = [
+      ['the ANNOTATION', 'NAV_ITEM_SURFACE: StrictObjectOptions', '', true],
+      ['`satisfies`', 'NAV_ITEM_SURFACE', ' satisfies StrictObjectOptions', true],
+      ['`as const satisfies`, where the type sits OUTSIDE the `as`',
+        'NAV_ITEM_SURFACE', ' as const satisfies StrictObjectOptions', true],
+      ['some OTHER satisfied type', 'NAV_ITEM_SURFACE', ' satisfies Record<string, unknown>', false],
+    ];
+    // A battery that registered no cases is a battery that passes, which is the
+    // failure this file is a monument to wearing a harness hat.
+    expect('the spelling battery actually registered its cases', SPELLINGS.length, 4);
+    for (const [label, head, tail, want] of SPELLINGS) {
+      const { prop, decl } = anchor(head, tail);
+      expect(`the position test reads ${label}`, inStrictOptions(prop, ts), want);
+      expect(`...and BOTH type anchors agree about the same declaration — ${label}`,
+        /\bStrictObjectOptions\b/.test(declaredTypeText(decl, ts)), want);
+    }
+
+    // The NAME branch is asserted apart from the four above, because it is the
+    // half a type read cannot cover: no type is written here at all, so a
+    // widening of the type read must leave it firing rather than absorb it.
+    {
+      const { prop, decl } = anchor('NAV_STRICT_OPTIONS', '');
+      expect('the `*_STRICT_OPTIONS` NAME branch fires with no type written at all',
+        inStrictOptions(prop, ts), true);
+      expect('...and it is the NAME doing it — the type read is empty here, so the name branch '
+        + 'is still load-bearing rather than shadowed by the widened type read',
+        declaredTypeText(decl, ts), '');
+    }
+
     // ── The FOURTH population: text BUILT INSIDE A FUNCTION ─────────────────
     //
     // Ruled 2026-08-29, verbatim 「同意」 — the inheritance reaches refusal prose
@@ -1772,7 +1890,7 @@ function selfTestRule3(expect) {
     // the clause is written as "the FUNCTION must sit in a recognised position"
     // rather than "climb through function bodies".
 
-    // RED #13 — the founding shape of this population: an `error:` error map
+    // RED #14 — the founding shape of this population: an `error:` error map
     // written inline as an arrow function, its prose in a `+` chain.
     writeFileSync(target, [
       "import { z } from 'zod';",
@@ -1792,7 +1910,7 @@ function selfTestRule3(expect) {
     expect('the error-callback red gets its OWN bucket, not `message`',
       r.violations[0]?.bucket, 'functionBuilt');
 
-    // RED #14 — the HOISTED spelling of the same thing, which is how most of
+    // RED #15 — the HOISTED spelling of the same thing, which is how most of
     // this tree writes it: the prose lives in a module const and the `error`
     // callback only DISPATCHES to it, so the literal is not lexically inside
     // any function at all. Without `error:` seeding the sink pass, this const
@@ -1810,7 +1928,7 @@ function selfTestRule3(expect) {
     expect('an id in a const DISPATCHED from an `error:` callback is RED', r.violations.length, 1);
     expect('the hoisted error-map red names its const', r.violations[0]?.where, 'via PREVIEW_RETIRED');
 
-    // RED #15 — a message BUILDER function referenced from `message:`. The
+    // RED #16 — a message BUILDER function referenced from `message:`. The
     // literal sits in a function; the function is a text-sink const.
     writeFileSync(target, [
       "import { z } from 'zod';",
@@ -1826,7 +1944,7 @@ function selfTestRule3(expect) {
     expect('the builder red names the const it travelled through',
       r.violations[0]?.where, 'via INLINE_CREDENTIAL_REFUSED (built in a function)');
 
-    // RED #16 — a builder whose result is a `retiredKey()` argument, and one
+    // RED #17 — a builder whose result is a `retiredKey()` argument, and one
     // whose body ends in a `return` rather than a concise arrow body. The
     // `return` leg is a separate clause in the climb and was measured live.
     writeFileSync(target, [
@@ -1844,7 +1962,7 @@ function selfTestRule3(expect) {
     expect('the return-leg red names the const it travelled through',
       r.violations[0]?.where, 'via capRemoved (built in a function)');
 
-    // RED #17 — an options FACTORY declared by its return-type annotation. The
+    // RED #18 — an options FACTORY declared by its return-type annotation. The
     // literal sits at a recognised strictObject key inside a function nothing
     // else identifies, so only the annotation makes it reachable.
     writeFileSync(target, [
@@ -1862,7 +1980,7 @@ function selfTestRule3(expect) {
     expect('the options-factory red names the position',
       r.violations[0]?.where, 'strictObject history (built in a function)');
 
-    // RED #18 — a plain STRING at `error:`, zod 4's spelling of `message:`.
+    // RED #19 — a plain STRING at `error:`, zod 4's spelling of `message:`.
     // Nothing was built in a function, so it is bucketed `message`.
     writeFileSync(target, [
       "import { z } from 'zod';",

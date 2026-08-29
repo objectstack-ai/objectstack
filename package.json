@@ -39,6 +39,7 @@
     "check:parse-guard": "node scripts/check-parse-guard.mjs --self-test && node scripts/check-parse-guard.mjs",
     "check:bash32-floor": "node scripts/check-bash32-floor.mjs --self-test && node scripts/check-bash32-floor.mjs",
     "check:stack-collection-maps": "node scripts/check-stack-collection-maps.mjs --self-test && node scripts/check-stack-collection-maps.mjs",
+    "check:widget-option-census": "node scripts/check-widget-option-census.mjs --self-test && node scripts/check-widget-option-census.mjs",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs",
     "check:doc-anchors": "node scripts/check-doc-anchors.mjs --self-test && node scripts/check-doc-anchors.mjs",
     "check:docs-single-h1": "node scripts/check-docs-single-h1.mjs --self-test && node scripts/check-docs-single-h1.mjs",

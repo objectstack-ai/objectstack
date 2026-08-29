@@ -68,11 +68,29 @@
 import { writeFileSync } from 'node:fs';
 
 import { normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
-// The lowering itself, not a copy of it. `@objectstack/cli` declares no
-// `exports` map, so this deep path is an ordinary internal import into a
-// PRIVATE package — no published surface is added or widened by it (#6293's
-// ruling: reach the goal without growing `@objectstack/cli`'s public entry).
-import { lowerCallables } from '@objectstack/cli/dist/utils/lower-callables.js';
+// The lowering itself, not a copy of it — reached as SOURCE, by relative path.
+//
+// It used to arrive as `@objectstack/cli/dist/utils/lower-callables.js`, which
+// resolved only because that package declared no `exports` map: every `dist/**`
+// module of it was importable from anywhere, whatever its entry barrel named.
+// #12879 closed that hole, and this import is the one in-repo case it had to
+// decide explicitly. Declaring the subpath in the CLI's `exports` was the other
+// option and is the wrong one twice over: it would make an internal compiler
+// util part of the published contract — which is #6293's ruling inverted (reach
+// the goal WITHOUT growing `@objectstack/cli`'s public entry) — and it would
+// ratify an accidental reachability nobody ever offered, pricing every later
+// internal refactor of that package at a minor bump.
+//
+// So the module is reached the way every other package-internal read in this
+// suite is: a relative path into the sibling package's SOURCE. It is the shape
+// `route-ledger-live-mount-parity.dogfood.test.ts` uses for its five route
+// ledgers, and the reason this package's `tsconfig.json` sets `rootDir` to the
+// repo root (its comment there says so). Two things it buys that the `dist`
+// path could not: the pin becomes a verdict about the checkout rather than
+// about a build artifact (`check-test-source-alias`'s whole subject — #7668 is
+// what a dist-resolved pin costs), and this suite no longer needs
+// `@objectstack/cli` BUILT in order to run.
+import { lowerCallables } from '../../../cli/src/utils/lower-callables.js';
 
 type AnyFn = (...args: unknown[]) => unknown;
 

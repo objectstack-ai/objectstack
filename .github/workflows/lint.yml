@@ -520,6 +520,18 @@ jobs:
       - name: Stack-collection enumerations answerable to stack.zod.ts
         run: pnpm check:stack-collection-maps
 
+      # The dashboard widget `options` census vs the spec (#12926). The parser's
+      # `CONSUMED_WIDGET_OPTION_KEYS` decides which `options` keys get a
+      # `unconsumed-widget-option` warning, and five of its six members are the
+      # properties `DashboardWidgetOptionsSchema` declares in THIS repo's spec.
+      # That half was a literal pin asserted against itself, so a key added to
+      # the schema left the parser warning about spec-legal, renderer-consumed
+      # metadata — the shape that gets a diagnostic deleted by the next person
+      # who hits it. The sixth member (`description`) is a resolver output, kept
+      # as a ledger row that is checked from both ends rather than skipped.
+      - name: Widget `options` census derived from the spec, not pinned
+        run: pnpm check:widget-option-census
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved
