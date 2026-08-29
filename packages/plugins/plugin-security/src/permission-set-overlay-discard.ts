@@ -51,6 +51,21 @@
  * environment-authored and refused — the maintainer's cited hazard verbatim:
  * "a name collision with a genuinely env-authored set would be destroyed
  * without a trace".
+ *
+ * ## The audit entry may never be optimistic
+ *
+ * This action's whole point is that it is AUDITED, so the one thing its log
+ * entry may not do is assert an action that did not fully land. The
+ * degraded-kernel branch below discarded its `tryUpdate` result, and on a
+ * refused resync every field of the success entry stayed individually true —
+ * the overlay count was right, `objectGrantsBefore`/`objectGrantsAfter` were
+ * both read off real rows — while the entry as a whole claimed a completed
+ * sanctioned operator action over a write the store had rejected. The result
+ * is now read, and a refused resync gets its own entry stating the failure
+ * INSTEAD of the success line (never alongside it): the overlay deletion DID
+ * land and must stay on the record, and the un-healed grant count must stop
+ * being reported as a healed one. What the CALLER is told is deliberately
+ * unchanged — see {@link PermissionSetOverlayDiscardResult}.
  */
 
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -103,7 +118,17 @@ export interface PermissionSetOverlayDiscardDeps {
 
 export interface PermissionSetOverlayDiscardResult {
   permissionSet: any;
-  /** Object grants the row now carries (post-reconcile) — the "healed" number, for callers to assert on. */
+  /**
+   * Object grants the row now carries (post-reconcile) — the "healed" number,
+   * for callers to assert on.
+   *
+   * ⚠️ Literally "what the row carries NOW", which is not always a healed
+   * count: on the degraded-kernel branch a REFUSED resync write leaves this
+   * equal to the pre-discard count. That case is reported on the audit
+   * channel (an entry naming the refusal replaces the success line) and
+   * deliberately NOT on this contract — propagating it to the caller would
+   * widen a declared surface and is out of scope here.
+   */
   healedObjectGrantCount: number;
   overlaysDiscarded: number;
 }
