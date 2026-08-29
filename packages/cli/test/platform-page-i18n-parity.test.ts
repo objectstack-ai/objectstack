@@ -165,13 +165,24 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
 // deeper than the cap and asserts the two sides agree about where the descent
 // stops, so raising the cap on one side alone reds here.
 
-/** Every component record reachable anywhere in a page document, by id. */
-const titlesById = (node: unknown, out = new Map<string, string>()): Map<string, string> => {
+/**
+ * Every component record reachable anywhere in a page document, by id — a
+ * generic JSON walk, deliberately NOT a copy of either side's traversal, so it
+ * cannot drift with the walk it is measuring. `seen` is its own cycle guard:
+ * one fixture below is self-referential.
+ */
+const titlesById = (
+  node: unknown,
+  out = new Map<string, string>(),
+  seen = new Set<object>(),
+): Map<string, string> => {
+  if (!node || typeof node !== 'object') return out;
+  if (seen.has(node)) return out;
+  seen.add(node);
   if (Array.isArray(node)) {
-    for (const item of node) titlesById(item, out);
+    for (const item of node) titlesById(item, out, seen);
     return out;
   }
-  if (!node || typeof node !== 'object') return out;
   const rec = node as Record<string, any>;
   const props = rec.properties;
   if (
@@ -180,7 +191,7 @@ const titlesById = (node: unknown, out = new Map<string, string>()): Map<string,
   ) {
     out.set(rec.id, props.title);
   }
-  for (const value of Object.values(rec)) titlesById(value, out);
+  for (const value of Object.values(rec)) titlesById(value, out, seen);
   return out;
 };
 
@@ -425,14 +436,34 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     ]);
   });
 
-  it('leaves a component that carries no descent slot untouched', () => {
-    // A container whose `children` is absent must not gain an invented
-    // `properties` bag, and a cyclic document must not hang the extractor.
+  it('terminates on a self-referential `children` array', () => {
+    // `children` is `z.array(z.unknown())` authored data, so the resolver
+    // carries an ancestor-path cycle guard and this walk mirrors it.
+    //
+    // ⚠️ `kind: 'html'` is load-bearing, not decoration. The object-sections
+    // pass inside the SAME `collectExpectedEntries` call reaches this page
+    // through `@objectstack/lint`'s `walkPageComponents`, which has no cycle
+    // guard and blows the stack on this fixture (RangeError, measured) — filed
+    // separately, out of scope here. `walkPageComponents` skips source-authored
+    // pages, while `translatePage` walks their regions like any other page, so
+    // this kind isolates the pass under test. That divergence is itself part of
+    // why this walk is NOT `walkPageComponents`.
     const cyclic: Record<string, any> = {
       id: 'loop', type: 'page:flex', properties: { title: 'Loop', children: [] as unknown[] },
     };
     cyclic.properties.children.push(cyclic);
-    const page = { name: 'walk_cycle_page', regions: [{ name: 'main', components: [cyclic] }] };
+    const page = {
+      name: 'walk_cycle_page', kind: 'html',
+      regions: [{ name: 'main', components: [cyclic] }],
+    };
     expect(componentRows(page)).toEqual([{ key: 'loop.title', value: 'Loop' }]);
+    // The resolver terminates on the same document too, and still applies the
+    // entry — read directly rather than through the generic walk above, whose
+    // by-id map cannot express "the same id twice, one translated".
+    const bundle = {
+      en: { pages: { walk_cycle_page: { components: { loop: { title: 'L' } } } } },
+    } as any;
+    const translated = translatePage(page as any, bundle, { locale: 'en' }) as any;
+    expect(translated.regions[0].components[0].properties.title).toEqual('L');
   });
 });
