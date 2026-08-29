@@ -2075,7 +2075,10 @@ describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
 });
 
 import { DeleteMetaItemRequestSchema } from './protocol.zod';
-import type { DeleteMetaItemRequest, DeleteMetaItemResponse } from './protocol.zod';
+// `DeleteMetaItemResponse` is imported once, above, beside the response-side
+// suite that pins its two #13155 keys — the member pin below reads it from
+// there rather than re-importing the same binding.
+import type { DeleteMetaItemRequest } from './protocol.zod';
 
 describe('DeleteMetaItemRequestSchema declares the contract members the reset door sends (#11679)', () => {
   // The sharper sibling of the audit door: the MEMBER was declared all along
