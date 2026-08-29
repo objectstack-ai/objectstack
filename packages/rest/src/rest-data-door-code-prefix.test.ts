@@ -52,17 +52,30 @@
  * and the assertion. The `exports`-resolved workspace deps (`@objectstack/types`,
  * `@objectstack/spec`) are untouched by the mutation.
  *
- *   §1 predicted RED     — the ruled behaviour is what the revert removes.
- *   §2 predicted GREEN   — the branches the ruling does not touch. These are
- *                          the real controls: a fix that stripped by PATTERN
- *                          instead of by the declared code reddens here (the
- *                          no-code and non-matching-prefix cases) and nowhere
- *                          else.
- *   §3 predicted RED     — the demoted-spelling case rides the same arm.
- *   §4 predicted RED     — the degradation is part of the new arm.
- *   §5 predicted GREEN   — the share family is untouched by this card, in both
- *                          the arm that already stripped and the two exits
- *                          measured still carrying the prefix.
+ * Measured on the revert, 9 red / 48 green across this file and the two moved
+ * pins, against predictions written first:
+ *
+ *   §1 predicted RED 4    measured 4 red — as predicted.
+ *   §2 predicted GREEN 8  measured green — as predicted, and these are the real
+ *                         controls: a fix that stripped by PATTERN instead of by
+ *                         the declared code reddens on the no-code and the
+ *                         non-matching-prefix cases and nowhere else.
+ *   §3 predicted RED 1    measured 1 red — as predicted.
+ *   §4 predicted RED 1    measured 1 red — as predicted.
+ *   §5 predicted GREEN 3  measured 2 green, 1 RED. ⚠️ The prediction was WRONG
+ *                         and is recorded rather than re-fitted: `CONVERGENCE`
+ *                         asserts BOTH doors, so half of it reads the `/data`
+ *                         side the revert removes. Red is the correct answer
+ *                         for it. The other two are genuine controls and stayed
+ *                         green — the share family is untouched by this card,
+ *                         in the arm that already stripped and in the two exits
+ *                         measured still carrying the prefix.
+ *
+ * The two moved pins (`rest-4xx-message-truncation.test.ts`,
+ * `rest-5xx-status-passthrough.test.ts`) reddened one case each under the same
+ * revert and every OTHER case in both files stayed green — which is the check
+ * that exactly the two the ruling authorised moved, and nothing else was
+ * loosened to make room.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -362,10 +375,10 @@ describe('[#12975] the share family: convergence, and the two exits still carryi
     it('⚠️ MEASURED, NOT REPAIRED HERE — two exits still ship the prefix', async () => {
         // Recorded rather than fixed: the ruling moved ONE arm, and both exits
         // below are reached through `resolveErrorResponse`'s own declared-4xx
-        // passthrough, which it did not name. Filed for the maintainer; this
-        // case is the evidence, and it REDS the day either exit is converged,
-        // which is the point — the follow-up moves it deliberately instead of
-        // discovering the divergence a third time.
+        // passthrough, which it did not name. Filed for the maintainer as
+        // #13095; this case is the evidence, and it REDS the day either exit is
+        // converged, which is the point — the follow-up moves it deliberately
+        // instead of discovering the divergence a third time.
         //
         //   (a) the record-share family's CLASSIFIED arm — a producer that
         //       declared `{ code, status }` AND used the prefix idiom;
