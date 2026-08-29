@@ -183,33 +183,29 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     expect(output).not.toContain('name a line the cited file does not have');
   });
 
-  it('prints the citation count and how many are in range, equal on a green run', () => {
-    // The #5623 lesson applied to the new counter: printing only "in range"
-    // would read as a pass on a run where the parser extracted no citations.
-    // Hence two numbers, and a floor under the first — see the floor's own note
-    // at the assertion below for why that floor is `> 0` and when to delete it.
+  it('prints the citation count and how many are in range, in the documented two-number shape', () => {
+    // The #5623 lesson applied to the counter: printing only "in range" would
+    // read as a pass on a run where the parser extracted no citations. Hence two
+    // numbers, and the gate prints them on every run — including this one, where
+    // the population is zero.
+    //
+    // The non-vacuity FLOOR that stood here (`> 0`, ruled 2026-08-28 on #13003,
+    // comment 5458356183) and the equality check beside it were DELETED
+    // 2026-08-29 (#13043), by the standing instruction the floor's own guard
+    // comment carried, at the moment that instruction names: #13003 retired the
+    // last line citation and the population legitimately reached zero. The floor
+    // reds at exactly that moment BY DESIGN, so that reaching zero is a conscious
+    // decision rather than a silent pass; the equality check went with it because
+    // it now compares two zeroes. What the case still pins is real and is what
+    // the deletion could otherwise cost: the gate must keep EMITTING the line, in
+    // the shape this regex documents — drop the line, rename it, or collapse it
+    // to one number and this reds. A `path:NNN` citation written again gives this
+    // case a population back; restore a floor with it.
     const { status, output } = runGate(path.join(tmp, 'liveness'));
     expect(status, output).toBe(0);
     const line = output.split('\n').find((l) => l.startsWith('line citations:')) ?? '';
     const m = /line citations: (\d+) pointer\(s\) written .*?, (\d+) inside the cited file/.exec(line);
     expect(m, line).not.toBeNull();
-    // Non-vacuity. The failure mode this guards is the parser silently
-    // extracting NOTHING (#5623), and that failure mode is exactly zero — so
-    // zero is exactly what the floor tests. It was 100 until #13003, which is
-    // the migration adopting #12516's `path#symbol` grammar and therefore
-    // RETIRING line citations by design (300 at that card's filing, 175 after
-    // batch 2, 82 after batch 3). Any floor above zero reds on legitimate
-    // drainage and re-opens the same escalation one batch later; `> 0` never
-    // lies during the migration and still catches extracts-nothing at full
-    // strength. Ruled 2026-08-28 on #13003, comment 5458356183.
-    //
-    // ⛔ WHEN THIS POPULATION LEGITIMATELY REACHES ZERO — the last line citation
-    // retired — DELETE this assertion AND this comment IN THE SAME PR that
-    // retires it, along with the equality check below, which then compares two
-    // zeroes and asserts nothing. A conscious decision at zero, never a silent
-    // one; that is the whole reason the floor sits at `> 0` rather than gone.
-    expect(Number(m![1])).toBeGreaterThan(0);
-    expect(m![2]).toBe(m![1]);
     expect(line).not.toContain('PAST EOF');
   });
 
