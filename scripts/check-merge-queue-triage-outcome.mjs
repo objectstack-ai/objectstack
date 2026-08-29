@@ -235,6 +235,11 @@ function makeDoubles(world) {
     prNumber: 10008,
     workflowId: WORKFLOW_ID,
     headBranch: `gh-readonly-queue/main/pr-10008-${'a'.repeat(40)}`,
+    // The queue HEAD this build produced. The branch name's suffix is the queue
+    // BASE, and the PAIR is what limb ② compares to tell an independent hit from
+    // a speculative-stack inheritance — so a world carrying only one of the two
+    // could exercise nothing but the "cannot tell" path.
+    headSha: 'f'.repeat(40),
     jobs: [],
     logs: {},
     logErrors: {},
@@ -375,6 +380,7 @@ function makeDoubles(world) {
         id: w.runId,
         workflow_id: w.workflowId,
         head_branch: w.headBranch,
+        head_sha: w.headSha,
         html_url: `https://github.com/objectstack-ai/objectstack/actions/runs/${w.runId}`,
       },
     },
@@ -436,6 +442,40 @@ const shardJob = (id, name = 'Test Core (3/3)') => ({
 /** The comment body a previous ejection left behind, as the ledger reads it. */
 const sightingComment = (key, pr, runId) =>
   `### merge queue build failed\n<!-- merge-queue-triage:${runId} -->\n<!-- queue-signature:${key}|pr=${pr}|run=${runId} -->`;
+
+/**
+ * A merge_group run as `listWorkflowRunsForRepo` returns it.
+ *
+ * `base` is the sha the queue branch NAME carries (the commit this build was
+ * stacked on); `head` is the commit the build actually produced. Limb ②'s stack
+ * test is `one victim's base === another victim's head`, so a fixture that let
+ * these two default to the same shape could not tell the test from a tautology.
+ */
+const queueRun = (id, pr, base, head) => ({
+  id,
+  workflow_id: WORKFLOW_ID,
+  conclusion: 'failure',
+  head_branch: `gh-readonly-queue/main/pr-${pr}-${base}`,
+  head_sha: head,
+});
+
+/**
+ * The 2026-08-27 incident's three queue builds, as the card that filed this
+ * work recorded them.
+ *
+ * The shas are the incident's OWN abbreviations right-padded to 40 hex — the
+ * source table abbreviates, so the full commits are not recoverable from it and
+ * inventing look-alike full shas would misrepresent the record. What is
+ * reproduced faithfully is the SHAPE that matters: `pr-12851`'s base IS
+ * `pr-12843`'s head, and `pr-12855`'s base IS `pr-12851`'s head.
+ */
+const pad = (short) => short.padEnd(40, '0');
+const INCIDENT = {
+  mainTip: pad('b489d3c72'),   // main before the queue
+  head12843: pad('e875b2f18'), // #12843's queue head — and #12851's base
+  head12851: pad('e391b5fb14'),// #12851's queue head — and #12855's base
+  head12855: pad('1a24e9778'),
+};
 
 /** The anchor issue an earlier pair already produced. */
 const anchorIssue = (number, key) => ({
@@ -676,6 +716,81 @@ function scenarios(root) {
             && /\|\s*#10003\s*\|/.test(r.calls.issueUpdate[0]?.body ?? ''),
             `the refreshed body lists all three victims, got: ${JSON.stringify(r.calls.issueUpdate[0]?.body ?? '')}`),
           t(postedBody(r).includes(`#${anchor?.number}`), "the third victim's comment links the SAME anchor"),
+        ];
+      },
+    },
+    {
+      id: 'A12',
+      name: 'SPECULATIVE STACK: three victims of ONE stack score as ONE independent hit',
+      // The recorded incident, re-scored. Its three "distinct pull requests"
+      // were #12843 and the two PRs GitHub had queued on top of it; only #12843
+      // owned the failure, and establishing that by hand cost two seats real
+      // time. A change to a counting rule that cannot re-score the incident that
+      // motivated it is not verified, so this scenario IS that incident.
+      world: () => base({
+        runId: 33141213420,
+        prNumber: 12855,
+        headSha: INCIDENT.head12855,
+        headBranch: `gh-readonly-queue/main/pr-12855-${INCIDENT.head12851}`,
+        repoComments: [
+          sightingComment(KEY_A, 12843, 33140380738),
+          sightingComment(KEY_A, 12851, 33141029941),
+        ],
+        queueRuns: [
+          queueRun(33140380738, 12843, INCIDENT.mainTip, INCIDENT.head12843),
+          queueRun(33141029941, 12851, INCIDENT.head12843, INCIDENT.head12851),
+        ],
+      }),
+      check(r, t) {
+        const body = r.calls.issueCreate[0]?.body ?? '';
+        return [
+          t(r.calls.issueCreate.length === 1,
+            `the anchor is STILL filed — the trigger is untouched, only the count is honest (got ${r.calls.issueCreate.length})`),
+          t(/\*\*3 pull requests\*\*/.test(body),
+            `the raw victim count is still reported as 3 rather than hidden, got: ${JSON.stringify(body.slice(0, 240))}`),
+          t(/\*\*1 independent hit\*\*/.test(body),
+            `and it is SCORED as one independent hit, got: ${JSON.stringify(body.slice(0, 240))}`),
+          t(/\|\s*#12843\s*\|\s*S1 · root\s*\|/.test(body),
+            `#12843 — the only PR that owned the failure — is the stack ROOT, got: ${JSON.stringify(body)}`),
+          t(/\|\s*#12851\s*\|\s*S1 · inherited\s*\|/.test(body)
+            && /\|\s*#12855\s*\|\s*S1 · inherited\s*\|/.test(body),
+            '#12851 and #12855 are marked INHERITED — they were merely behind it in the queue'),
+          t(body.includes('Queue depth is not evidence'),
+            'the anchor says WHY the raw count overstates, instead of just printing a smaller number'),
+          t(postedBody(r).includes('同属 **1 条投机栈**'),
+            "the victim's own triage comment carries the same reading as the anchor"),
+        ];
+      },
+    },
+    {
+      id: 'A13',
+      name: 'FALSE-NEGATIVE GUARD: three UNRELATED victims still count as three',
+      // The symmetric risk, and the reason the stack test is `base === head` on
+      // FULL shas: a prefix comparison or a time ordering would fuse these three
+      // into one stack and under-report a real cross-PR signal. Trading the false
+      // positive for a false negative is strictly worse here.
+      world: () => base({
+        repoComments: [
+          sightingComment(KEY_A, 10105, 32328768059),
+          sightingComment(KEY_A, 10003, 32328768060),
+        ],
+        queueRuns: [
+          queueRun(32328768059, 10105, 'b'.repeat(40), 'c'.repeat(40)),
+          queueRun(32328768060, 10003, 'd'.repeat(40), 'e'.repeat(40)),
+        ],
+      }),
+      check(r, t) {
+        const body = r.calls.issueCreate[0]?.body ?? '';
+        return [
+          t(r.calls.issueCreate.length === 1, `one anchor is filed, got ${r.calls.issueCreate.length}`),
+          t(/\*\*3 pull requests\*\*/.test(body) && /\*\*3 independent hits\*\*/.test(body),
+            `three victims, three independent hits — no stack was invented, got: ${JSON.stringify(body.slice(0, 240))}`),
+          t((body.match(/\|\s*independent\s*\|/g) ?? []).length === 3,
+            `every row is marked independent, got: ${JSON.stringify(body)}`),
+          t(!body.includes('Queue depth is not evidence'),
+            'the stack-inheritance caveat is ABSENT — it must not become boilerplate on every anchor'),
+          t(!/could not be placed in a stack/.test(body),
+            'every victim WAS placed, so the "unresolved" hedge does not appear either'),
         ];
       },
     },
@@ -949,6 +1064,14 @@ function list() {
 // is a FAILURE here, not a skip: the substitution would then be a no-op, the
 // battery would stay green, and the self-test would report a detector it never
 // exercised.
+//
+// `expect` names the scenarios that must go RED. The optional `keepGreen` names
+// scenarios that must NOT move — the other half of the reading, and the only
+// half that can catch a detector which reds on everything. A rule that decides
+// "these two victims are the same hit" has a false NEGATIVE direction as well as
+// a false positive one, and a mutation test that only ever asks for more red
+// cannot see it: a stack test degraded into "always one stack" would turn every
+// count into 1 and still satisfy every `expect` in this table.
 
 const MUTATIONS = [
   {
@@ -1050,6 +1173,40 @@ const MUTATIONS = [
     expect: ['A9'],
   },
   {
+    id: 'M15',
+    what: 'the queue base sha goes back to being MATCHED but not CAPTURED, so speculative-stack inheritance is invisible again and queue depth reads as victim count',
+    from: 'const QUEUE_REF = /^gh-readonly-queue\\/.+\\/pr-(\\d+)-([0-9a-f]{40})$/;',
+    to: 'const QUEUE_REF = /^gh-readonly-queue\\/.+\\/pr-(\\d+)-[0-9a-f]{40}$/;',
+    expect: ['A12'],
+    // ⚠️ A13 must NOT move. Three unrelated victims read as three either way, so
+    // it is the control that proves A12's red comes from the stack test rather
+    // than from the anchor body simply having changed shape.
+    keepGreen: ['A13'],
+  },
+  {
+    id: 'M16',
+    what: 'same-stack is inferred from CO-OCCURRENCE instead of base === head, so unrelated victims fuse into one stack and a real cross-PR signal is under-reported',
+    from: '      for (const upstream of producers.get(e.base) ?? []) {',
+    to: '      for (const upstream of [...producers.values()].flatMap((s) => [...s])) {',
+    // The mirror of M15, and the reason both exist. M15 removes the evidence and
+    // the count goes UP; M16 stops requiring it and the count goes DOWN. A stack
+    // rule can be wrong in either direction, and a battery that only catches one
+    // of them would sign off on "everything is one stack" — which reports 1
+    // independent hit for every anchor it ever files.
+    //
+    // ⚠️ A12 is listed here as MEASURED, not as predicted: this mutation leaves
+    // A12's count at "1 independent hit" (its three victims really are one
+    // stack) and it was first written with A12 as the control. A12 reds anyway,
+    // because co-occurrence marks #12843 `inherited` too — it unions with the
+    // PRs BEHIND it — and a stack whose every row is inherited names no owner to
+    // start from. That the root marker is the sharper detector here, not the
+    // count, is the useful half of this entry.
+    expect: ['A13', 'A12'],
+    // A1 carries no stack of its own, so it is the control that this mutation
+    // does not simply red the battery.
+    keepGreen: ['A1'],
+  },
+  {
     id: 'M13',
     what: 'the redelivery guard stops returning, so a repeated delivery re-posts and double-counts its own signature',
     from: "  core.info('triage comment for this run already exists \u2014 skipping.');\n  return;",
@@ -1088,6 +1245,15 @@ async function selfTest() {
     for (const id of m.expect) {
       assert(red.failures.some((f) => f.id === id),
         `${m.id}: scenario ${id} is one of the ones that catches it, got [${[...new Set(red.failures.map((f) => f.id))].join(', ')}]`);
+    }
+    // The dual. A scenario named here must survive the mutation untouched --
+    // that is what makes its GREEN a reading rather than an absence, and it is
+    // the only assertion that can fail a detector which simply reds on
+    // everything.
+    for (const id of m.keepGreen ?? []) {
+      assert(!red.failures.some((f) => f.id === id),
+        `${m.id}: scenario ${id} must NOT move -- it is the control for this mutation, `
+          + `got failures [${red.failures.filter((f) => f.id === id).map((f) => f.message).join(' | ')}]`);
     }
   }
 

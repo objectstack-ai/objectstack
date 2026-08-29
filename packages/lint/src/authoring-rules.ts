@@ -109,6 +109,7 @@ import { validatePresetComparands } from './validate-preset-comparands.js';
 import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
+import { validateComponentTypes } from './validate-component-types.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
@@ -730,6 +731,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateComponentProps(stack),
+  },
+  // The TYPE half of the same door (#12183's ruling): a component `type` inside
+  // a spec-reserved namespace must be vocabulary the platform declares, or the
+  // page ships a placeholder scaffold to the end user. Namespace-shaped on
+  // purpose — custom/registered types outside the spec's own namespaces are the
+  // open string arm's declared story and stay untouched (the accept set and its
+  // ledger live in `component-type-vocabulary.ts`, `@objectstack/spec/ui`).
+  {
+    name: 'validateComponentTypes',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-component-types.ts',
+    surfaces: CLI_ONLY,
+    // Page-local judgment, so the per-write snapshot IS sufficient — what the
+    // crossing owes is not a wider snapshot but the #4716 discipline: a gating
+    // rule reaches the Studio/REST/MCP door only behind a measured
+    // false-refusal budget over REAL stored page rows, and the population this
+    // rule was measured on (the in-repo corpus, 0 findings) is authored
+    // config-file metadata, not tenant rows. A tenant page carrying a
+    // reserved-namespace type their own plugin registers would be refused at
+    // the only door that tenant has. Crossing is its own rollout decision with
+    // that replay as its evidence, not a bare `runtimeTypes` edit.
+    surfaceReason:
+      'Gating rule held off the runtime door pending the #4716 crossing discipline: a measured ' +
+      'false-refusal budget over stored tenant page rows (the in-repo 0-finding measurement covers ' +
+      'authored config-file metadata only). Crossing is its own rollout card.',
+    run: (stack) => validateComponentTypes(stack),
   },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.

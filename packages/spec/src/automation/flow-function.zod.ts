@@ -141,8 +141,12 @@ export const DEFAULT_FLOW_FUNCTION_EFFECT: FlowFunctionEffect = 'pure';
  * construction, so before this change a misspelled `effect` was dropped at the
  * schema and then *not looked for* by the reader — and the failure is the quiet
  * direction: the function is registered, it runs, and its writes are counted as
- * none, so #4354's broken-sweep filter stays silent on the one flow that needed
- * it. (A misspelled `effect` VALUE — `'write'` — already fails loudly-ish:
+ * none, so the run reports `selected > 0, acted 0, unmeasured 0` and lands
+ * INSIDE #4354's broken-sweep first filter, reading exactly like the broken
+ * sweep that filter exists to detect — on the one flow that was doing its work
+ * through the function. Declaring `effect: 'writes'` is what would have kept it
+ * out (`unmeasured > 0`); the misspelling is what dropped the declaration.
+ * (A misspelled `effect` VALUE — `'write'` — already fails loudly-ish:
  * `normalizeFlowFunctionEntry` degrades it to `'writes'` and surfaces the raw
  * string. A misspelled KEY had no such backstop.)
  */
@@ -173,7 +177,8 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
     'Until this shape was closed, these were dropped silently — and `normalizeFlowFunctionEntry` reads only ' +
     '`handler`/`effect` by construction, so a misspelled `effect` was discarded twice over: ' +
     'the function still registered, still ran, and its writes were still counted as none, ' +
-    'which is what keeps the broken-sweep filter quiet on the run that needed it.',
+    'which is what drops the run INTO the broken-sweep first filter ' +
+    '(`selected > 0 AND acted = 0 AND unmeasured = 0`) on the very flow whose work the declaration would have accounted for.',
 }, {
   handler: z.function().describe('The function invoked by name (a `script` node, a string-named Hook/Action handler)'),
   effect: FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)

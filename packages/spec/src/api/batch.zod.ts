@@ -93,7 +93,7 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
   // and should be reintroduced deliberately, not back-filled to match a promise
   // nothing kept. Tombstoned so writing it is audible, not silently stripped.
   validateOnly: retiredKey(
-    '`options.validateOnly` was removed from BatchOptions in @objectstack/spec. '
+    '`options.validateOnly` was removed from BatchOptions in @objectstack/spec 17.0.0. '
     + 'It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have '
     + 'silently executed. There is no dry-run today — drop the key. If you need to preview a batch '
     + 'without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) '
