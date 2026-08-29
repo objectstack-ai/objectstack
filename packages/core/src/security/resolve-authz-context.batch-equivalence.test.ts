@@ -38,7 +38,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveUserAuthzGrants } from './resolve-authz-context.js';
 import type { ResolveUserAuthzGrantsOptions } from './resolve-authz-context.js';
 
@@ -403,6 +404,39 @@ const BATCHED_LEGS: Record<string, number> = {
 const asMultiset = (calls: RecordedCall[]) => calls.map((c) => JSON.stringify(c)).sort();
 
 describe('[#10825] batched resolveUserAuthzGrants — equivalence with the sequential reads', () => {
+  /**
+   * [#11663 L2] These goldens are captured from a deployment that declares NO
+   * platform administrators, and they must stay that way.
+   *
+   * The config anchor added a third reason to read `sys_user` — but a
+   * CONDITIONAL one: with `OS_PLATFORM_OWNER_EMAIL` unset the derivation
+   * answers "not an admin" on an empty list before it looks at any row (pin
+   * P2), so every query below is byte-identical to what the sequential
+   * implementation issued and NOT ONE golden moved for this leg. That is a real
+   * property of the change, and it is only worth anything if the suite pins the
+   * condition it rests on: an ambient value in a CI worker would silently add a
+   * `sys_user` read to `seeded-permissions-and-email` and turn a green
+   * differential control into a mystery. So the variable is cleared here rather
+   * than assumed absent, and the memo — keyed on the raw string — is dropped
+   * with it on both sides.
+   *
+   * ⛔ If a future leg makes the read unconditional, the golden MOVES and the
+   * move is written down in the PR that makes it. It is never re-captured to
+   * agree with new output.
+   */
+  const ENV = 'OS_PLATFORM_OWNER_EMAIL';
+  let ambientOwnerEmail: string | undefined;
+  beforeAll(() => {
+    ambientOwnerEmail = process.env[ENV];
+    delete process.env[ENV];
+    resetPlatformAdminEmailMemo();
+  });
+  afterAll(() => {
+    if (ambientOwnerEmail === undefined) delete process.env[ENV];
+    else process.env[ENV] = ambientOwnerEmail;
+    resetPlatformAdminEmailMemo();
+  });
+
   it('the fixture matrix and the captured goldens have not drifted apart', () => {
     expect(FIXTURES.map((f) => f.name).sort()).toEqual(Object.keys(GOLDEN).sort());
     expect(Object.keys(BATCHED_LEGS).sort()).toEqual(Object.keys(GOLDEN).sort());

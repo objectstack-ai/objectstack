@@ -24,8 +24,16 @@ import {
 import { PermissionDeniedError } from './errors.js';
 import { permissionSetRowFields } from './permission-set-projection.js';
 
-/** Minimal in-memory ql: sys_permission_set + sys_metadata + delete support. */
-function makeQl(declared: any[] = []) {
+/**
+ * Minimal in-memory ql: sys_permission_set + sys_metadata + delete support.
+ *
+ * `refuseUpdatesWith` makes every `update` throw AFTER the dispatch predicate
+ * has accepted the call shape — the real failure ORDER (the engine validates,
+ * the store refuses), and the only one `tryUpdate`'s catch ever sees. Extended
+ * in place rather than added as a second double: this file's `update`/`delete`
+ * doubles are pinned 1-per-file in `scripts/engine-double-contract.pinned.json`.
+ */
+function makeQl(declared: any[] = [], refusal: { refuseUpdatesWith?: Error } = {}) {
   const permRows: any[] = [];
   const metaRows: any[] = [];
   const tableFor = (object: string) =>
@@ -57,6 +65,7 @@ function makeQl(declared: any[] = []) {
     async update(object: string, data: any, options?: any) {
       const rows = tableFor(object);
       const dispatch = assertEngineUpdateDispatch(data, options);
+      if (refusal.refuseUpdatesWith) throw refusal.refuseUpdatesWith;
       const targets = dispatch.kind === 'by-id'
         ? (rows ?? []).filter((r: any) => r.id === dispatch.id)
         : (rows ?? []).filter((r: any) => matches(r, options?.where));
@@ -228,5 +237,122 @@ describe('discardPermissionSetOverlay — pin 5: refuses what it must', () => {
     await expect(discardPermissionSetOverlay(nonAdminDeps, tenantAdminCtx, 'ps_1'))
       .rejects.toBeInstanceOf(PermissionDeniedError);
     expect(ql.metaRows).toHaveLength(1); // untouched
+  });
+});
+
+
+/* ------------------------------------------------------------------------- *
+ *  pin 6 — the audit entry may never assert a write the store refused
+ *
+ *  The defect: on the degraded-kernel branch (no metadata protocol) the resync
+ *  `tryUpdate`'s result was discarded — not assigned, not tested. On refusal
+ *  the row was re-read UNCHANGED, so `objectGrantsAfter` equalled
+ *  `objectGrantsBefore` and the `info` line still announced a completed
+ *  "sanctioned operator action". Every field was individually true; the entry
+ *  as a whole was false. That is the one record that may not be optimistic.
+ * ------------------------------------------------------------------------- */
+
+function recordingLogger() {
+  const info: any[] = [];
+  const warn: any[] = [];
+  const error: any[] = [];
+  return {
+    info, warn, error,
+    sink: {
+      info: (m: string, meta?: any) => { info.push({ m, meta }); },
+      warn: (m: string, meta?: any) => { warn.push({ m, meta }); },
+      error: (m: string, e?: any, meta?: any) => { error.push({ m, e, meta }); },
+    },
+  };
+}
+
+const connectionFailure = () =>
+  Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
+
+/** The degraded kernel this branch exists for: no metadata protocol at all. */
+function degradedDeps(ql: ReturnType<typeof makeQl>, logger: any): PermissionSetOverlayDiscardDeps {
+  return { ...deps(ql), logger, getProtocol: () => undefined };
+}
+
+describe('discardPermissionSetOverlay — pin 6: a refused resync is never audited as a success', () => {
+  it('degraded kernel + REFUSED resync: the success line is WITHHELD and one entry stating the failure is emitted instead', async () => {
+    const artifact = declaredSet(); // ships 3 objects
+    const ql = makeQl([artifact], { refuseUpdatesWith: connectionFailure() });
+    ql.permRows.push({
+      id: 'ps_1', name: 'ehr_quality_inspector', managed_by: 'package', package_id: 'com.example.ehr',
+      ...permissionSetRowFields(artifact),
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true }, obj_b: { allowRead: true } }), // 2 — stale
+    });
+    ql.metaRows.push(overlayRow({ obj_a: {}, obj_b: {} }));
+    const log = recordingLogger();
+
+    const result = await discardPermissionSetOverlay(degradedDeps(ql, log.sink), tenantAdminCtx, 'ps_1');
+
+    // The destructive half DID land — which is why the entry is emitted with
+    // the failure stated rather than withheld outright.
+    expect(ql.metaRows).toHaveLength(0);
+    // The row was NOT healed: it still enforces its pre-discard grants.
+    expect(result.healedObjectGrantCount).toBe(2);
+
+    // ⭐ No optimistic audit line, at any level.
+    expect(log.info.some((l) => l.m.includes('overlay discarded (sanctioned operator action)'))).toBe(false);
+    expect(log.warn.some((l) => l.m.includes('(sanctioned operator action)'))).toBe(false);
+
+    // Exactly ONE entry, and it states what did and did not land.
+    expect(log.error).toHaveLength(1);
+    expect(log.error[0].m).toContain('RESYNC WRITE WAS REFUSED');
+    expect(log.error[0].m).toContain('PARTIALLY applied');
+    expect(log.error[0].meta).toMatchObject({
+      id: 'ps_1',
+      name: 'ehr_quality_inspector',
+      by: 'u_admin',
+      overlaysDiscarded: 1,
+      objectGrantsBefore: 2,
+      objectGrantsAfter: 2, // un-healed, and the message says so
+      resyncWriteRefused: true,
+    });
+    expect(log.error[0].meta.refusals[0]).toMatchObject({ object: 'sys_permission_set', class: 'other', count: 1 });
+    expect(log.error[0].meta.refusals[0].driverCodes).toContain('ECONNREFUSED');
+  });
+
+  it('⭐ counter-direction: the same degraded branch with a write the store ACCEPTS still emits the unchanged success line, and nothing on the failure channel', async () => {
+    const artifact = declaredSet();
+    const ql = makeQl([artifact]); // updates land
+    ql.permRows.push({
+      id: 'ps_1', name: 'ehr_quality_inspector', managed_by: 'package', package_id: 'com.example.ehr',
+      ...permissionSetRowFields(artifact),
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true }, obj_b: { allowRead: true } }),
+    });
+    ql.metaRows.push(overlayRow({ obj_a: {}, obj_b: {} }));
+    const log = recordingLogger();
+
+    const result = await discardPermissionSetOverlay(degradedDeps(ql, log.sink), tenantAdminCtx, 'ps_1');
+
+    expect(result.healedObjectGrantCount).toBe(3); // genuinely healed to the artifact
+    expect(log.error).toHaveLength(0);
+    const success = log.info.find((l) => l.m.includes('overlay discarded (sanctioned operator action)'));
+    expect(success).toBeDefined();
+    expect(success!.meta).toMatchObject({ objectGrantsBefore: 2, objectGrantsAfter: 3, overlaysDiscarded: 1 });
+    expect(success!.meta.resyncWriteRefused).toBeUndefined();
+  });
+
+  it('against a REDUCED sink with no `error`, the refused resync still prints — at `warn`, never nowhere', async () => {
+    const artifact = declaredSet();
+    const ql = makeQl([artifact], { refuseUpdatesWith: connectionFailure() });
+    ql.permRows.push({
+      id: 'ps_1', name: 'ehr_quality_inspector', managed_by: 'package', package_id: 'com.example.ehr',
+      ...permissionSetRowFields(artifact),
+      object_permissions: JSON.stringify({ obj_a: { allowRead: true } }),
+    });
+    ql.metaRows.push(overlayRow({ obj_a: {} }));
+    const warn: any[] = [];
+
+    await discardPermissionSetOverlay(
+      degradedDeps(ql, { warn: (m: string, meta?: any) => { warn.push({ m, meta }); } }),
+      tenantAdminCtx,
+      'ps_1',
+    );
+
+    expect(warn.some((l) => l.m.includes('RESYNC WRITE WAS REFUSED'))).toBe(true);
   });
 });
