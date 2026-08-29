@@ -54,6 +54,25 @@
 //             diff at all — because a reader who cannot see the shortfall reads the
 //             bridge's silence as "no page documents this", which is the #9192 failure
 //             one surface down.
+//             ⚠️ THAT RATIO IS REF-PINNED AND THE TREE HAS MOVED SINCE (#12966).
+//             `9ff11921a`'s "45 of 221" remains a true statement about `9ff11921a`;
+//             it is not the current figure and must not be read as one. On
+//             `8f10a79f7a` the same command reads 47 of 219 — measured row by row,
+//             not inferred, and every move has a named cause:
+//               · 222 → 219 client-bound: three `:type/:section/:name` rows were
+//                 DELETED from `rest-route-ledger.ts`. All three were already
+//                 unreachable, so this moves `reachable` by zero.
+//               · 43 → 44 tails: `rest-server.ts` unrolled its
+//                 `for (const publishedPath of […])` loop into a LITERAL `path:`.
+//                 A variable `path:` yields no tail and a literal one does, so this
+//                 minted exactly one new tail, `/:type/:name/published`.
+//               · 45 → 47 reachable: that single tail selects two rows that no tail
+//                 could select before — `meta.getPublished` on the rest ledger and
+//                 `meta.getPublished` on the runtime ledger.
+//             ⭐ So 45 → 47 is the bridge working BETTER, not drifting, and the
+//             registrar-count fix in `isMigrationLedgerEntry` deliberately LEAVES IT
+//             AT 47. ⛔ Never "restore" 45: the one recognizer change that reproduces
+//             it does so by dropping ten real registrars (see that docblock).
 //   command — the CLI command PHRASE a changed command file implements
 //             (`packages/cli/src/commands/meta/resync.ts` → `os meta resync`). Derived
 //             from the oclif filesystem convention, never from a curated table — see the
@@ -696,6 +715,49 @@ function isTestFile(path) {
   return /(^|\/)__(tests|mocks|fixtures)__\//.test(path)
     || /(^|\/)tests?\//.test(path)
     || /(^|\/)[^/]+\.(test|spec|bench)\.[^/]+$/.test(path);
+}
+
+/**
+ * An ADR-0049 MIGRATION LEDGER ENTRY — a file under `migrations/entries/` whose whole job
+ * is to record that a key was RETIRED. It is the one class of file that names a surface
+ * precisely BECAUSE THAT SURFACE NO LONGER EXISTS, so the filename convention means the
+ * opposite of what it means anywhere else: a retirement entry for a `route`-named key is
+ * spelled exactly like a registrar and registers nothing.
+ *
+ * ⛔ ANCHORING DOES NOT FIX THIS, AT ANY SPELLING — MEASURED, NOT ASSUMED (#12966). The
+ * obvious remedy is to require `route` to be a whole dot/dash-delimited token rather than
+ * any substring. It fails because in BOTH of today's entries `routes` ALREADY IS a whole
+ * token, split identically to every genuine registrar:
+ *
+ *   18.kernel__Manifest__contributes.routes.ts        [18] [kernel__Manifest__contributes] [routes]
+ *   18.plugin-manifest-contributes-routes-retired.ts  [18] [plugin] … [routes] [retired]
+ *   hmr-routes.ts                                     [hmr] [routes]          ← a real registrar
+ *
+ * Both anchorings were implemented against this tree and measured on `8f10a79f7a`:
+ *   · token `route|routes` — excludes ZERO of the two entries, and costs
+ *     `packages/spec/src/api/router.zod.ts`, which is the Zod-contract admission question
+ *     #11857 half A is open on. Fixes nothing, pre-empts a pending ruling.
+ *   · token `route` alone — excludes 10 of the 14, including the tail-producing
+ *     `external-datasource-routes.ts`, and lands `reachable` back on 45 BY BREAKING THE
+ *     BRIDGE. ⚠️ That is the dangerous one: 45 is the previously published figure, so the
+ *     control appears to recover at the exact moment the recognizer stops working.
+ *
+ * A DIRECTORY CLASS IS THE ONLY CUT that separates the two populations, and it is the
+ * durable one: the entry count grows every time a `route`-named key is retired, so a
+ * per-file exclusion would rot on the third entry — the same bill `isTestFile`'s arms 1
+ * and 3 were written over the convention to avoid.
+ *
+ * Excluded from the CEILING population too, for the reason `walkSourceFiles` already
+ * gives about test directories: a row counted `remediable by discovery` claims that
+ * widening the FILENAME CONVENTION would reach it, and no widening may legitimately admit
+ * a file that records a key's deletion. Measured on `8f10a79f7a`: 275 `.ts` files under
+ * the one such tree (`packages/spec/src/migrations/entries/`), of which 2 match the
+ * registrar convention and 0 declare a `path:` — so the ceiling moves by zero tails.
+ *
+ * Verify with `--self-test`.
+ */
+function isMigrationLedgerEntry(path) {
+  return /(^|\/)migrations\/entries\//.test(path);
 }
 
 /**
@@ -1474,7 +1536,7 @@ function walkSourceFiles(root, readDir = readdirSync) {
       if (!e.isFile() || !e.name.endsWith('.ts')) continue;
       // The PATH, never `e.name` — see above.
       const rel = relative(root, p);
-      if (isTestFile(rel)) continue;
+      if (isTestFile(rel) || isMigrationLedgerEntry(rel)) continue;
       sourceFiles.push(rel);
       if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
     }
@@ -2210,6 +2272,30 @@ function selfTest() {
   ];
   for (const [path, want, label] of testFileCases) check('isTestFile', label, path, want, isTestFile(path));
 
+  // ── the ADR-0049 ledger-entry exclusion (#12966) ─────────────────────────
+  //
+  // ⛔ BOTH SEGMENTS, WHOLE (the failure mode this predicate is one step away from):
+  // `migrations/` alone would swallow the migration RUNNERS, which are ordinary
+  // implementation and one of which could legitimately be a registrar; `entries/` alone
+  // is a common enough segment to be a blunt instrument. The pair is what names the ADR-0049
+  // ledger and nothing else.
+  const ledgerEntryCases = [
+    ['packages/spec/src/migrations/entries/retired-keys/18.kernel__Manifest__contributes.routes.ts', true,
+      'a retired-keys entry whose basename ends in the whole token `routes`'],
+    ['packages/spec/src/migrations/entries/semantic/18.plugin-manifest-contributes-routes-retired.ts', true,
+      'a semantic entry carrying `routes` as an interior whole token'],
+    ['packages/spec/src/migrations/entries/retired-defs/9.some-def.ts', true,
+      'any other entry in the tree — the cut is the DIRECTORY, not the spelling'],
+    ['packages/spec/src/migrations/runner-route.ts', false,
+      'a migrations/ file OUTSIDE entries/ is untouched — one segment is not the class'],
+    ['packages/spec/src/migrations/entries.ts', false,
+      'a FILE named entries.ts is not the entries/ directory — the segment must be whole'],
+    ['packages/foo/src/entries/route-table.ts', false,
+      'a bare entries/ directory outside migrations/ is not the class either'],
+  ];
+  for (const [path, want, label] of ledgerEntryCases)
+    check('isMigrationLedgerEntry', label, path, want, isMigrationLedgerEntry(path));
+
   // ── the WALK's admission decision, against a fake tree (#11866) ──────────────
   //
   // The cases above pin the PREDICATE, and the predicate was never wrong: every one of
@@ -2242,6 +2328,19 @@ function selfTest() {
     'packages/foo/node_modules/dep/route.ts',            // pruned directory
     'packages/foo/dist/route.ts',                        // pruned directory
     'packages/foo/README.md',                            // not a .ts file
+    // #12966. NON-VACUOUS BY CONSTRUCTION, like every fixture above it: neither entry
+    // carries a test infix or lives under a test directory, so BOTH are walked under the
+    // previous line and BOTH matched `REGISTRAR_FILE_RE` — an ADR-0049 tombstone
+    // recording that `contributes.routes` was DELETED was being counted as a file that
+    // registers routes. Reverting the exclusion turns the two equality checks below red.
+    'packages/foo/src/migrations/entries/retired-keys/18.kernel__Manifest__contributes.routes.ts',
+    'packages/foo/src/migrations/entries/semantic/18.plugin-manifest-contributes-routes-retired.ts',
+    'packages/foo/src/migrations/entries/semantic/18.plain-rename.ts',  // ceiling population only
+    // ⭐ THE OVER-REACH CONTROL, and the reason the predicate needs both segments: a
+    // migrations/ file that is NOT under entries/ is ordinary implementation and must
+    // still reach the registrar list. Without it the exclusion could widen to all of
+    // `migrations/` and every check here would stay green.
+    'packages/foo/src/migrations/runner-route.ts',
   ];
   const fakeRoot = '/repo';
   const fakeDirs = new Map();
@@ -2264,9 +2363,9 @@ function selfTest() {
   const walked = walkSourceFiles(fakeRoot, fakeReadDir);
   const sorted = (a) => [...a].sort().join(' | ');
   check('walkSourceFiles', 'a registrar-NAMED file under __tests__/ is NOT a registrar — the walk tests the path',
-    'registrarFiles', 'packages/foo/src/real-route.ts', sorted(walked.registrarFiles));
+    'registrarFiles', 'packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.registrarFiles));
   check('walkSourceFiles', 'and the three test directories contribute nothing to the CEILING population either',
-    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
+    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
   // Per-fixture, so a regression NAMES the arm that came back rather than only the totals.
   const excludedFixtures = [
     ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching REGISTRAR_FILE_RE'],
@@ -2281,6 +2380,13 @@ function selfTest() {
     // these two rows name WHICH arm came back.
     ['packages/foo/test/fixtures/stub-route.ts', 'a non-underscore test/fixtures/ file matching REGISTRAR_FILE_RE'],
     ['packages/foo/src/engine.bench.ts', 'a .bench.ts benchmark'],
+    // #12966, one row per entry so a regression NAMES which one came back.
+    ['packages/foo/src/migrations/entries/retired-keys/18.kernel__Manifest__contributes.routes.ts',
+      'an ADR-0049 retired-keys tombstone matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/migrations/entries/semantic/18.plugin-manifest-contributes-routes-retired.ts',
+      'an ADR-0049 semantic entry matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/migrations/entries/semantic/18.plain-rename.ts',
+      'a ledger entry with no registrar name — excluded from the CEILING too'],
   ];
   for (const [rel, label] of excludedFixtures) {
     check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
@@ -2288,6 +2394,9 @@ function selfTest() {
   }
   check('walkSourceFiles', 'a genuine registrar still survives the walk', 'packages/foo/src/real-route.ts',
     true, walked.registrarFiles.includes('packages/foo/src/real-route.ts'));
+  check('walkSourceFiles', 'a migrations/ registrar OUTSIDE entries/ survives — the exclusion is the DIRECTORY class, not the word',
+    'packages/foo/src/migrations/runner-route.ts', true,
+    walked.registrarFiles.includes('packages/foo/src/migrations/runner-route.ts'));
   check('walkSourceFiles', 'a .test.ts file is still excluded by the FILE arm', 'packages/foo/src/engine.test.ts',
     false, walked.sourceFiles.includes('packages/foo/src/engine.test.ts'));
   check('walkSourceFiles', 'node_modules/ and dist/ are still pruned', 'packages/foo/{node_modules,dist}/route.ts',
@@ -3751,6 +3860,14 @@ function selfTest() {
   // today, most of them `plugin-auth` routes that never take a `path:` property. That is a
   // different card with a different measurement; the tails assertion below states the
   // omission as a fact rather than leaving it to be discovered.
+  //
+  // ⚠️ THE LIVE HALF OF THAT PARAGRAPH EXPIRED; THE FIXTURE BELOW DID NOT (#12966).
+  // `rest-server.ts` has since unrolled the `publishedPath` loop into a literal `path:`,
+  // so on `8f10a79f7a` something DOES bridge to `/:type/:name/published` in the live
+  // tree, and the shortfall reads 172 of 219 rather than 176 of 221. None of that
+  // reaches this block: the fixture is hermetic and models the variable-path SHAPE,
+  // which is still the shape the scan cannot see wherever it survives. Kept verbatim
+  // for that reason — ⛔ do not "refresh" a hermetic fixture to match today's tree.
   const variablePathRegistrar = [
     'export class RestServer {',
     '    private registerStateRoutes() {',

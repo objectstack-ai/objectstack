@@ -91,6 +91,22 @@ The `sdk` hop needs a registrar `path:` tail to select a route-ledger row. Measu
 `9ff11921a`: **45 of the 221 client-bound ledger rows are reachable, 176 are not.** An
 unreachable row is not "unlisted this time" — no symbol change bridges to it, ever.
 
+⚠️ **That measurement is ref-pinned, and the tree has moved since (#12966).** On
+`8f10a79f7a` the same command reads **47 of 219**, and the difference is not recognizer
+drift — each move was measured row by row:
+
+| `--bridge-coverage` | `a6eca9223` | `8f10a79f7a` | why |
+| --- | ---: | ---: | --- |
+| registrar files | 12 | 12 | two ADR-0049 ledger entries were admitted in between and are excluded again here; they produced **0 tails and 0 reachable rows**, so they never moved the figures below |
+| route tails | 43 | 44 | `rest-server.ts` unrolled `for (const publishedPath of […])` into a literal `path:` — a variable path yields no tail, a literal one does |
+| client-bound rows | 222 | 219 | three `:type/:section/:name` rows deleted from `rest-route-ledger.ts`, all three already unreachable |
+| **reachable** | **45** | **47** | the one new tail `/:type/:name/published` selects `meta.getPublished` on the rest ledger *and* on the runtime ledger |
+
+⭐ 45 → 47 is the bridge reaching **more** of its population, not losing track of it, so
+the figure stands at 47. ⛔ Do not "restore" 45: the only recognizer spelling that
+reproduces it drops ten of the fourteen matched files, including a tail-producing
+registrar — the control appears to recover exactly when the recognizer stops working.
+
 That number now travels with the answer. `bridgeCoverage` is emitted on every run whose
 change carried a bridgeable symbol (`{ measured: false, reason }` when it did not — never a
 fabricated zero), the drift comment renders it in *What this run could not see*, and
