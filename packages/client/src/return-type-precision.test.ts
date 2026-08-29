@@ -622,14 +622,18 @@ export async function returnTypePrecisionPins13023(): Promise<void> {
  *    would compile and be false in exactly the direction this card just paid to
  *    close.
  *
- * 2. MEASURED AND DELIBERATELY UNDECLARED: `deleteMetaItem`'s repository-delete
- *    branch really does put `seq` (and, when a mutation projector is
- *    registered, `projectionApplied`) on the wire — the implementation's own
- *    declared return names both. `DeleteMetaItemResponseSchema` declares
- *    neither, and the ruling binds the SPEC type, so they stay unreadable here.
- *    That is a producer-side declared-vs-sent gap of its own, filed separately;
- *    ⛔ do not "complete" this annotation by hand — a local member list that
- *    outruns the schema is the defect this card removed.
+ * 2. THE GAP THIS BLOCK USED TO PIN AS UNDECLARED IS NOW CLOSED, on the spec
+ *    side, which is the only side allowed to close it: #13208 (issue #13155)
+ *    widened `DeleteMetaItemResponseSchema` to declare `seq` and
+ *    `projectionApplied` — the two wire-receipt keys `deleteMetaItem`'s
+ *    repository-delete branch always sent. This file's two `@ts-expect-error`
+ *    pins on those reads were therefore falsified BY DESIGN (a TS2578 unused
+ *    suppression is exactly how the closure was meant to surface here) and
+ *    are re-judged as the positive reads below: the keys are reachable from
+ *    the BOUND type with no local member list, so a later schema regression
+ *    that drops either key reds these reads as TS2339. The ⛔ against
+ *    hand-completing the annotation stands — nothing here writes members;
+ *    the type still comes whole from `@objectstack/spec`.
  */
 declare const metaResetBody: DeleteMetaItemResponse;
 
@@ -639,10 +643,10 @@ export function deleteDataResponseIsNotTheMetaResetShape(): void {
     void mismatched;
 }
 
-export function metaResetResponseDeclaresNoWireExtras(): void {
-    // @ts-expect-error `seq` is on the wire but NOT in the schema this type binds
+export function metaResetResponseDeclaresTheWireReceipt(): void {
+    // #13208 declared both wire-receipt keys on the schema; these positive
+    // reads red as TS2339 if either is ever dropped from the bound type.
     void metaResetBody.seq;
-    // @ts-expect-error `projectionApplied` likewise — declared by the producer, not by the contract
     void metaResetBody.projectionApplied;
 }
 
@@ -661,7 +665,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins12104).toBe('function');
         expect(typeof returnTypePrecisionPins13023).toBe('function');
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
-        expect(typeof metaResetResponseDeclaresNoWireExtras).toBe('function');
+        expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });
