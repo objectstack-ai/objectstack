@@ -40,15 +40,20 @@ const moduleLoadFailures = [];
 /**
  * The other reading of "command … not found": the command is there and its
  * MODULE would not load, because a workspace package this repo builds has no
- * usable `dist/`. See `bin/unbuilt-workspace-lead.mjs` for the whole argument.
+ * usable `dist/`. See `scripts/cli-unbuilt-workspace-lead.mjs` for the whole
+ * argument, including why the CLI's name is passed IN rather than imported
+ * there.
  *
  * Lazy and `catch`-wrapped for the same reason as `announceInvocationFailure`:
  * a reporter that throws must never become the report.
  */
 async function announceUnbuiltWorkspace(error) {
   try {
-    const { unbuiltWorkspaceLines } = await import('./unbuilt-workspace-lead.mjs');
-    for (const line of unbuiltWorkspaceLines(error, moduleLoadFailures) ?? []) {
+    const [{ unbuiltWorkspaceLines }, { INVOCATION_PREFIX }] = await Promise.all([
+      import('../../../scripts/cli-unbuilt-workspace-lead.mjs'),
+      import('../src/utils/invocation.ts'),
+    ]);
+    for (const line of unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? []) {
       process.stderr.write(`${line}\n`);
     }
   } catch {

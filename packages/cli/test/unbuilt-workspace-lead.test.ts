@@ -32,7 +32,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { unbuiltWorkspaceLines } from '../bin/unbuilt-workspace-lead.mjs';
+import { unbuiltWorkspaceLines } from '../../../scripts/cli-unbuilt-workspace-lead.mjs';
+import { INVOCATION_PREFIX } from '../src/utils/invocation.js';
 
 /**
  * `warning.detail` of the first of the 58 `ModuleLoadError` warnings the
@@ -53,7 +54,7 @@ const notFound = () => new Error('command i18n:extract:packages/platform-objects
 
 describe('unbuiltWorkspaceLines', () => {
   it('names the package whose build output is missing, and the one command that fixes it', () => {
-    const lines = unbuiltWorkspaceLines(notFound(), [MEASURED_DETAIL]);
+    const lines = unbuiltWorkspaceLines(notFound(), [MEASURED_DETAIL], INVOCATION_PREFIX);
 
     expect(lines).toBeDefined();
     expect(lines).toHaveLength(2);
@@ -70,7 +71,7 @@ describe('unbuiltWorkspaceLines', () => {
   it('leaves a genuinely missing command alone — nothing failed to load', () => {
     // `os frobnicate` in a tree whose commands all load: oclif emits no
     // module-load warning, so there is nothing to classify and nothing to say.
-    expect(unbuiltWorkspaceLines(new Error('command frobnicate not found'), [])).toBeUndefined();
+    expect(unbuiltWorkspaceLines(new Error('command frobnicate not found'), [], INVOCATION_PREFIX)).toBeUndefined();
   });
 
   it('says nothing when the module that failed belongs to somebody else', () => {
@@ -78,14 +79,14 @@ describe('unbuiltWorkspaceLines', () => {
     // The two words are chosen so neither is a substring of the other: a
     // `lodash` specifier must not be read as an `@objectstack` one.
     const thirdParty = "message: [MODULE_NOT_FOUND] import() failed to load /repo/packages/cli/src/commands/x.ts: Cannot find module 'lodash/merge.js' imported from /repo/packages/cli/src/commands/x.ts";
-    expect(unbuiltWorkspaceLines(notFound(), [thirdParty])).toBeUndefined();
+    expect(unbuiltWorkspaceLines(notFound(), [thirdParty], INVOCATION_PREFIX)).toBeUndefined();
   });
 
   it('says nothing when the failure was not oclif reporting a missing command', () => {
     // A parse error, and a genuine runtime error, both keep oclif's reporting
     // exactly as it was even in a tree that really is unbuilt.
-    expect(unbuiltWorkspaceLines(new Error('Nonexistent flag: --no-ui'), [MEASURED_DETAIL])).toBeUndefined();
-    expect(unbuiltWorkspaceLines(new Error('ENOENT: no such file or directory'), [MEASURED_DETAIL])).toBeUndefined();
+    expect(unbuiltWorkspaceLines(new Error('Nonexistent flag: --no-ui'), [MEASURED_DETAIL], INVOCATION_PREFIX)).toBeUndefined();
+    expect(unbuiltWorkspaceLines(new Error('ENOENT: no such file or directory'), [MEASURED_DETAIL], INVOCATION_PREFIX)).toBeUndefined();
   });
 
   it('survives oclif hard-wrapping the sentence it has to recognise', () => {
@@ -94,7 +95,7 @@ describe('unbuiltWorkspaceLines', () => {
     // neither shape; `looksLikeMissingCliCommand` flattens first, and this case
     // is what keeps this file honest about depending on that.
     const wrapped = ' ›   Error: command \n ›   i18n:extract:packages/platform-objects/scripts/i18n-extract.config.ts not \n ›   found';
-    expect(unbuiltWorkspaceLines(wrapped, [MEASURED_DETAIL])?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/spec');
+    expect(unbuiltWorkspaceLines(wrapped, [MEASURED_DETAIL], INVOCATION_PREFIX)?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/spec');
   });
 
   it('covers the STALE dist as well as the missing one, with the same fix', () => {
@@ -102,7 +103,7 @@ describe('unbuiltWorkspaceLines', () => {
     // added. Same environment fact, same one command.
     const stale =
       "message: import() failed to load /repo/packages/cli/src/commands/lint.ts: The requested module '@objectstack/spec/system' does not provide an export named 'authorisesIrreversibleAction'";
-    const lines = unbuiltWorkspaceLines(notFound(), [stale]);
+    const lines = unbuiltWorkspaceLines(notFound(), [stale], INVOCATION_PREFIX);
     expect(lines?.[0]).toContain('does not provide an export named');
     expect(lines?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/spec');
   });
@@ -111,6 +112,6 @@ describe('unbuiltWorkspaceLines', () => {
     // Emission order is `Promise.all` order over the command modules, so the
     // classifiable warning is not reliably first.
     const thirdParty = "Cannot find module 'lodash/merge.js' imported from /repo/packages/cli/src/commands/x.ts";
-    expect(unbuiltWorkspaceLines(notFound(), [thirdParty, MEASURED_DETAIL])?.[0]).toContain('@objectstack/spec');
+    expect(unbuiltWorkspaceLines(notFound(), [thirdParty, MEASURED_DETAIL], INVOCATION_PREFIX)?.[0]).toContain('@objectstack/spec');
   });
 });
