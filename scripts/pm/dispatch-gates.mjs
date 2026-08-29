@@ -2703,6 +2703,71 @@ export function coveringJobFilter(entry, inputPath) {
  * still matches through that constant while a card editing the GATE FILE
  * matches through identity. They answer different inputs.
  *
+ * ## The FIFTH key this file measured and REFUSED: the module a gate IMPORTS (#13126)
+ *
+ * `firstPartyImportTargets` already follows a gate's `./sibling.mjs` import —
+ * but only to inherit that module's HINTS, which answers "what population does
+ * this gate watch, once you count what its helper watches". The same edge
+ * answers a second question, and it is identity-shaped: *if I edit this helper,
+ * which gate can I break?* None of the four keys above reaches it. A module is
+ * not the family's own file, not a `paths:` pattern, not a job filter, and its
+ * own path is not a literal the gate spells.
+ *
+ * The gap is real and was measured over the live tree, 183 families x 7347
+ * tracked files:
+ *
+ *   (family, imported module) pairs      273
+ *   ...another key already answers        41   15%, mostly a `scripts/**` hint
+ *                                              a gate declares for other reasons
+ *   ...NOVEL, no key reaches them        232   swept over the whole corpus with
+ *                                              the candidate key consulted LAST:
+ *                                              ADDED 232, RE-ATTRIBUTED 0, LOST 0
+ *
+ * So the key would be additive by construction, the way #13000's is, and it is
+ * still refused. The reason is PRECISION and the numbers are not close. #13000
+ * bought its class for 5 novel leads on this same corpus; this one costs 232,
+ * and 201 of the 232 (87%) land on five shared utilities that nearly every gate
+ * links:
+ *
+ *   scripts/invoked-as.mjs             a card that names 14 families names 118
+ *   scripts/import-prerequisite.mjs    14 -> 55
+ *   scripts/ts-parse.mjs               13 -> 37
+ *   scripts/js-comment-mask.mjs        17 -> 38
+ *   scripts/workspace-enumerator.mjs   12 -> 23
+ *
+ * Every one of those leads is TRUE — editing `invoked-as.mjs` really can turn
+ * all 118 red. A 118-gate list is still the failure this file's header names:
+ * the dev who gets one stops reading it, which ends exactly where a list that
+ * omits the one gate that matters ends. The tail is the opposite shape and is
+ * the half worth having — 21 modules carrying 31 pairs, the median card moving
+ * from 14 families to 15 — and the ONLY property separating the two halves is
+ * fan-in. This file draws its lines on provenance rather than on volume
+ * (`firstPartyImportTargets` says so where it refuses an imported gate file),
+ * and a fan-in cut has no provenance to state: `invoked-as.mjs` and
+ * `dispatch-gates.mjs` are the same KIND of edge, one link apart.
+ *
+ * Two narrowings were measured and neither earns it either:
+ *
+ *   importer is a `--self-test` family   12 novel pairs, but 8 of the 12 are
+ *                                        `<- invoked-as.mjs`, and the line is
+ *                                        the INHERITANCE narrowing borrowed for
+ *                                        the question #11556 / #11511 settled
+ *                                        separately — identity is not that
+ *   target is not itself a gate file     63 novel pairs, and it still takes an
+ *                                        `import-prerequisite.mjs` card to 55
+ *
+ * What the refusal COSTS is a live missing lead, and it is named rather than
+ * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
+ * THIS file, and a card editing this file derives 14 families without naming
+ * it. That gate gets run by hand. The miss costs one CI round, which is the
+ * side this file's header errs on everywhere, and it is a far smaller cost than
+ * the 118-lead card the general key prints for the module all 118 import.
+ *
+ * Two shapes make 232 a LOWER bound rather than an exact size, both already
+ * refused upstream for their own measured reasons: a dynamic `import()` of a
+ * `scripts/` module (3 live family-module pairs) and a relative target outside
+ * `scripts/` (3, all `eslint.config.mjs`).
+ *
  * Returns `{ key, via }` — `via` is the provenance label the output prints, so
  * a lead can never be read as the wrong kind of claim.
  */
@@ -6758,6 +6823,80 @@ function selfTest() {
     `promoting ${promoted.length} module(s) to gate files subtracts no inherited hint from any other family`
       + `${subtracted.length ? ` — LOST: ${subtracted.join(' · ')}` : ''}`,
     subtracted.length === 0,
+  );
+
+  // ── The refused fifth key, kept honest (#13126) ────────────────────────────
+  // `coveringKey`'s docblock refuses an IDENTITY key over these same import
+  // edges, and that refusal is a MEASUREMENT rather than a preference: it holds
+  // only while the class stays concentrated in the shared utilities nearly
+  // every gate links. Prose cannot notice the tree flattening under it, so the
+  // price is re-derived here on every run and asserted. A red in this block is
+  // not a broken derivation — it says the refusal is due a re-pricing.
+  const importClassFamilies = [...discoverFamilies().byCheck];
+  const importClassEdges = new Map();
+  for (const [check, e] of importClassFamilies) {
+    const edges = new Set();
+    for (const f of e.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+        if ((e.files ?? []).includes(mod)) continue;
+        edges.add(mod);
+      }
+    }
+    importClassEdges.set(check, edges);
+  }
+  const importNovel = [];
+  let importCoveredElsewhere = 0;
+  for (const [check, e] of importClassFamilies) {
+    for (const mod of importClassEdges.get(check) ?? []) {
+      if (coveringKey(e, mod)) importCoveredElsewhere++;
+      else importNovel.push([check, mod]);
+    }
+  }
+  t(
+    `the refused import-edge class is real and NOVEL — ${importNovel.length} (family, imported module)`
+      + ` pair(s) no key reaches, of ${importNovel.length + importCoveredElsewhere}`,
+    importNovel.length > 0,
+  );
+  t(
+    `…and the split the refusal quotes is not invented: ${importCoveredElsewhere} pair(s) another key`
+      + ' already answers, so the novel half is a measurement and not the raw count',
+    importCoveredElsewhere > 0,
+  );
+  // The card's own witness, and the single lead this refusal is KNOWN to cost.
+  // Asserted in both halves: the import edge exists, and no key names it.
+  const bareRootKey = 'scripts/pm/bare-root-worklist.mjs --self-test';
+  const bareRootImportFamily = importClassFamilies.find(([c]) => c === bareRootKey)?.[1];
+  t(
+    'the witness holds — bare-root-worklist --self-test imports THIS file, and no key names that'
+      + ' family for a card editing it',
+    (importClassEdges.get(bareRootKey)?.has('scripts/pm/dispatch-gates.mjs') ?? false)
+      && !!bareRootImportFamily
+      && coveringKey(bareRootImportFamily, 'scripts/pm/dispatch-gates.mjs') === null,
+  );
+  // Why it is refused, re-derived rather than recalled: the worst module would
+  // print a list nobody reads. The bound is the header's own "22 leads is the
+  // same as none", doubled — green through ordinary drift, red only if the
+  // concentration genuinely collapses and the class is worth re-pricing.
+  const importAddPerModule = new Map();
+  for (const [, mod] of importNovel) importAddPerModule.set(mod, (importAddPerModule.get(mod) ?? 0) + 1);
+  const importWorst = [...importAddPerModule]
+    .map(([mod, add]) => ({
+      mod,
+      add,
+      after: add + importClassFamilies.filter(([, e]) => coveringKey(e, mod)).length,
+    }))
+    .sort((a, b) => b.after - a.after);
+  t(
+    `the refusal is still earned — a card editing ${importWorst[0]?.mod} would name`
+      + ` ${importWorst[0]?.after} families under the refused key`,
+    (importWorst[0]?.after ?? 0) > 44,
+  );
+  const importTop5 = importWorst.slice(0, 5).reduce((s, r) => s + r.add, 0);
+  t(
+    `…and the class is still concentrated: ${importTop5} of ${importNovel.length} novel pair(s) land`
+      + ` on ${Math.min(5, importWorst.length)} module(s)`,
+    importTop5 * 2 > importNovel.length,
   );
 
   // #12107, the live half — three claims about THIS tree, each one a thing the
