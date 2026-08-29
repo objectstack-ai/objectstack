@@ -1301,7 +1301,13 @@ boot_marker_record() {
   fsdir="${BOOTS_FILE%/*}"
   [[ "$fsdir" == "$BOOTS_FILE" ]] && fsdir='.'
   fs="$(stat -f -c %T "$fsdir" 2> /dev/null)" || fs=''
-  case "$fs" in '' | *[[:space:]]*) fs='-' ;; esac
+  # ⚠ Constrained to a safe charset, not merely to "no spaces". Records are
+  # read back by splitting a line on whitespace with the shell's own word
+  # splitting, so a field carrying a glob character would expand against the
+  # reader's cwd -- a token silently becoming a filename, and a misparse with
+  # no error anywhere. Every other field here is an epoch, a hex id or one of a
+  # closed set of words; this is the only one whose text comes from outside.
+  case "$fs" in '' | *[!A-Za-z0-9/._-]*) fs='-' ;; esac
   machine='-'
   if [[ -r /etc/machine-id ]]; then
     read -r f < /etc/machine-id 2> /dev/null || f=''
