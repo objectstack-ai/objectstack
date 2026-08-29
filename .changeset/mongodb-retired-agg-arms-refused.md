@@ -22,14 +22,17 @@ enum. `AggregationInput.function` here is a bare `string` — the driver's own
 fine and survived the retirement unnoticed.
 
 Both names now answer `INVALID_QUERY` / **400**, answer-for-answer parity with
-both SQL faces. They are named explicitly rather than left to fall through,
-because falling through is not currently safe: `buildAccumulator`'s `default`
-arm answers `{ $sum: … }`, so deleting the arms alone would turn a visibly-wrong
-ARRAY into an arithmetically PLAUSIBLE NUMBER — strictly the worse failure, and
-the very defect #12818 is fixing in that arm. Naming them is correct whichever
-order the two land in, and after #12818 lands the arm still draws the
+both SQL faces. They are named explicitly rather than left to fall through.
+When this change was written, falling through was not safe at all:
+`buildAccumulator`'s `default` arm answered `{ $sum: … }`, so deleting the arms
+alone would have turned a visibly-wrong ARRAY into an arithmetically PLAUSIBLE
+NUMBER — strictly the worse failure, and exactly the defect #13076 has since
+fixed in that arm (#12818). Naming them was correct whichever order the two
+landed in, and now that #13076 is on `main` the named arm still draws the
 distinction `AggregationFunction`'s own error map draws: a caller who bypassed
-the parse door is told the name was **removed**, not merely unrecognised.
+the parse door is told the name was **removed** at #6188, which is a different
+fact from `default`'s "is not a declared aggregate function". Both producers are
+kept for that reason.
 
 The retirement prescription itself is not restated here — it lives once, on the
 enum's error map in `@objectstack/spec`, and a copy in the driver would be a
