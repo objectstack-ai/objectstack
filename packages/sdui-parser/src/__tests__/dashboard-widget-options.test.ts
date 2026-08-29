@@ -48,6 +48,17 @@
  * files to re-read when either half moves — this repo's
  * `packages/spec/src/ui/dashboard.zod.ts` for the declared keys, objectui's
  * `DatasetWidget.tsx` for the read sites.
+ *
+ * THE DECLARED HALF IS NOW RE-DERIVED — ELSEWHERE, NOT HERE (objectstack#12926).
+ * The pin below asserting six literal strings is a claim about the ARRAY, and
+ * on its own it pinned the parser against itself: adding a key to
+ * `DashboardWidgetOptionsSchema` left it green and made it wrong. That gap is
+ * closed by `scripts/check-widget-option-census.mjs`, which reads both files by
+ * SOURCE TEXT and reds when a declared key is missing from the array — a gate
+ * rather than a test here because this package takes no dependency on
+ * `@objectstack/spec` and stays dependency-free by design. This file is
+ * unchanged by that and still carries the claims the gate does not make: the
+ * emitted diagnostic, its severity, and the array's own shape.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -123,6 +134,8 @@ describe('the census the expectations derive from is not vacuous', () => {
     // `translateDashboard` writes into `options` (see `WidgetLike.options` in
     // `packages/spec/src/system/i18n-resolver.ts`), also a read site in this
     // repo. Re-read both files when this pin fails.
+    // The declared half of that sentence is re-derived by
+    // `scripts/check-widget-option-census.mjs`; this pin is the array's shape.
     expect([...CONSUMED_WIDGET_OPTION_KEYS]).toEqual([
       'dateGranularity',
       'description',
