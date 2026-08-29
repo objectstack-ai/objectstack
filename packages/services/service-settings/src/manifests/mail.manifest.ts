@@ -70,6 +70,20 @@ const manifest = {
     { type: 'group', id: 'smtp', label: 'SMTP', required: false, visible: "${data.provider === 'smtp'}" },
     { type: 'text', key: 'smtp_host', label: 'Host', required: true,
       description: 'Example: smtp.example.com', visible: "${data.provider === 'smtp'}" },
+    // ⚠️ `min`/`max` here are the SMTP port contract, and this service ENFORCES
+    // them (`declaredBounds` / `validatePatch`) — so this is a real door, not a
+    // decoration. Its ONE declaration lives in `@objectstack/plugin-email`
+    // (`src/transports/smtp-port-contract.ts`), beside the refusal that actually
+    // rejects a bad port. This is a MIRROR, not a second source: importing it
+    // would add a runtime edge from a service to a plugin and invert the
+    // layering, so the two are held equal by an executable cross-package
+    // assertion instead — exactly as the provider list above is. See
+    // `packages/plugins/plugin-email/src/transports/smtp-port-contract.test.ts`,
+    // which goes red the moment these numbers stop matching the transport's
+    // (#12993).
+    // ⛔ Never "unify" this floor with the CLI's listen range, which floors at 0
+    // (`0` = let the OS choose a port to LISTEN on). 0 is not a destination you
+    // can connect to, so it is not a legal SMTP port.
     { type: 'number', key: 'smtp_port', label: 'Port', required: false, default: 587,
       min: 1, max: 65535, visible: "${data.provider === 'smtp'}" },
     { type: 'toggle', key: 'smtp_secure', label: 'Use TLS', required: false, default: true,
