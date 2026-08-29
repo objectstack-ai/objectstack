@@ -20,6 +20,10 @@ import {
   summarizePendingSchemaWork,
 } from '../../utils/schema-migrate.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
+import {
+  refuseWhenHostConfigUnloadable,
+  type SchemaMigrationComposition,
+} from '../../utils/schema-migration-plugins.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
@@ -86,8 +90,25 @@ export default class MigratePlan extends Command {
    */
   async run(): Promise<void> {
     await this.plan();
+    // [#12953] A host config that EXISTS but could not be loaded means the plan
+    // above covered a fraction of this deployment — UNMEASURED, not "in sync" —
+    // and the maintainer ruled that green exit out (2026-08-29, verbatim
+    // 「同意」). Applied HERE, after `plan()`, deliberately: every one of its
+    // early returns (no SQL driver, in sync, the rendered plan) has already
+    // written its report by now, and the report — the human plan, or the JSON
+    // document whose `composition.hostConfigLoaded` the ruling kept as the
+    // consumer's discriminator — must survive the refusal, not be replaced by
+    // it. `this.composition` is `null` on the boot-failure path, which already
+    // exits non-zero through oclif.
+    if (this.composition) refuseWhenHostConfigUnloadable(this.composition);
     await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
   }
+
+  /**
+   * What {@link plan} composed, read by {@link run} after it returns (#12953).
+   * `null` until the stack has booted, and on every path where it never did.
+   */
+  private composition: SchemaMigrationComposition | null = null;
 
   private async plan(): Promise<void> {
     const { flags } = await this.parse(MigratePlan);
@@ -132,6 +153,7 @@ export default class MigratePlan extends Command {
       this.exit(1);
       return;
     }
+    this.composition = stack.composition;
 
     try {
       if (!stack.driver) {

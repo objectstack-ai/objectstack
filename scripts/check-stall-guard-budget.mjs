@@ -144,10 +144,21 @@
  *    item 3; it does not extend the guard's reach.
  *
  * The affected population is 7 guard-wrapped STEPS across 5 jobs, not 4 jobs:
- * `temporal-conformance` carries TWO guarded steps on ONE job clock, so the
- * second one's `p` includes the first one's entire runtime. The census below
- * prints each site's `slack` independently, which is correct for the criterion
- * and reads as more independent than the clock actually is.
+ * TWO of those jobs carry two guarded steps each on ONE job clock --
+ * `temporal-conformance` in ci.yml, and `rerun-safety` in
+ * rerun-safety-nightly.yml, whose two sites are consecutive full passes of the
+ * suite -- so in each pair the second site's `p` includes the first one's
+ * entire runtime.
+ *
+ * Each site's `slack` is still computed independently, which is correct for the
+ * criterion; on its own it also READ as more independent than the clock
+ * actually is. So the census now names the sharing where it exists:
+ *
+ *     ... · slack 10m (1 of 2 guarded steps in this job; they share one timeout clock)
+ *
+ * A job holding exactly one guarded step gets no such clause -- see
+ * `attachSiblings` for how the grouping is derived, and why it is keyed on job
+ * membership rather than on the file or on a matching `--stall-minutes`.
  *
  * ### Re-deriving these numbers instead of trusting them
  *
@@ -378,6 +389,8 @@ export function scan(root, defaults, parseYaml) {
     if (lines.length === found.length) found.forEach((site, i) => { site.line = lines[i]; });
   }
 
+  attachSiblings(sites);
+
   for (const site of sites) {
     const judged = judge(site, defaults);
     Object.assign(site, judged);
@@ -386,6 +399,83 @@ export function scan(root, defaults, parseYaml) {
   }
 
   return { sites, violations, problems, files: names.length, jobs, steps };
+}
+
+/**
+ * Mark, on every site, how many guard-wrapped steps share its job clock and
+ * which one of them it is (`siblingCount`, 1-based `siblingIndex`).
+ *
+ * `timeout-minutes` runs ONE clock for a whole job, so two guarded steps in the
+ * same job do not each get the `slack` the census prints beside them: the later
+ * one starts with the earlier one's entire runtime already spent. The criterion
+ * `T - C >= W` is unaffected and deliberately still models neither the prep
+ * before a step nor the step's own runtime -- this is what the census SAYS, not
+ * what the gate DECIDES.
+ *
+ * ## The grouping key is (file, job id), and each half is load-bearing
+ *
+ * NOT the job id alone. A job id is unique only within its own workflow file,
+ * and this tree really does reuse three of them across files (`publish` in
+ * docker-publish.yml and release.yml, `patrol` in half-state-patrol.yml and
+ * release-coverage-patrol.yml, `registry-canary` in publish-smoke.yml and
+ * scaffold-e2e.yml). Keyed on the id alone, two single-guard jobs in different
+ * files would be printed as siblings -- inventing a shared clock that does not
+ * exist, which is the more dangerous direction to be wrong in.
+ *
+ * NOT the file either: one workflow file holds many independent job clocks (28
+ * files, 51 jobs here). And NOT a matching `--stall-minutes` value: five of the
+ * seven sites in this tree are 10m, spread over four different jobs, and a
+ * coincidence of budgets is not a shared clock. Those are the two mistakes the
+ * self-test pins against, because they are the ones the next reader reaches for.
+ *
+ * ## Why the ordinal can be trusted
+ *
+ * A site's position within its job's group is the order `scan` pushed it, which
+ * comes from `job.steps` -- an ARRAY. Document order there is guaranteed by
+ * construction, not by object-key iteration order, so `2 of 2` really is the
+ * second step on the clock and not merely one of two. That is the half a reader
+ * needs: a SECOND guarded step is the one whose real headroom is quietly
+ * smaller than the number printed next to it.
+ *
+ * @param {object[]} sites in sweep order; annotated in place
+ */
+export function attachSiblings(sites) {
+  const byJobClock = new Map();
+  for (const site of sites) {
+    const key = JSON.stringify([site.file, site.job]);
+    const group = byJobClock.get(key);
+    if (group) group.push(site);
+    else byJobClock.set(key, [site]);
+  }
+  for (const group of byJobClock.values()) {
+    group.forEach((site, index) => {
+      site.siblingIndex = index + 1;
+      site.siblingCount = group.length;
+    });
+  }
+  return sites;
+}
+
+/**
+ * The clause that stops a census `slack` from reading as an independent
+ * per-step budget, or `''` for a job holding exactly one guarded step.
+ *
+ * It names the CONSEQUENCE and not only the count: `1 of 2` alone leaves a
+ * reader knowing there is another guarded step somewhere without knowing that
+ * it spends the same clock. The note is unconditional on the budget source
+ * because a job's timeout clock is per-job whether it is declared or is
+ * GitHub's default; when a tighter STEP-level `timeout-minutes` is what binds,
+ * the census already says so in the `budget ...m (step timeout-minutes)` field
+ * printed immediately before this clause.
+ *
+ * @param {object} site a judged site carrying the fields `attachSiblings` set
+ */
+export function siblingNote(site) {
+  if (!(site.siblingCount > 1)) return '';
+  return (
+    ` (${site.siblingIndex} of ${site.siblingCount} guarded steps in this job; ` +
+    'they share one timeout clock)'
+  );
 }
 
 /** `file:line job/step`, for a message. */
@@ -485,7 +575,7 @@ function census(result) {
     (site) =>
       `  ${where(site)}\n` +
       `      window ${site.window}m (${site.windowSource}) · cap ${site.cap}m (${site.capSource}) · ` +
-      `budget ${site.budget}m (${site.budgetSource}) · slack ${site.slack}m`,
+      `budget ${site.budget}m (${site.budgetSource}) · slack ${site.slack}m${siblingNote(site)}`,
   );
 }
 
@@ -603,6 +693,31 @@ export async function selfTest() {
     `        run: |\n          ${command}\n`;
 
   const GUARDED = 'node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/x.log" --stall-minutes 10 -- pnpm test';
+
+  /** A guard invocation with its own window, so a fixture can vary that alone. */
+  const guarded = (window) => `node scripts/run-with-stall-guard.mjs --log x --stall-minutes ${window} -- pnpm test`;
+
+  /**
+   * A workflow of several jobs, each with several guarded steps:
+   * `{ jobId: { timeout, steps: [[stepName, command], ...] } }`. Needed because
+   * `workflow()` above builds exactly one job of exactly one step, and the
+   * property under test here is precisely how sites are grouped ACROSS jobs.
+   */
+  const multi = (jobs) =>
+    `name: fixture\non: push\njobs:\n` +
+    Object.entries(jobs)
+      .map(
+        ([jobId, { timeout, steps }]) =>
+          `  ${jobId}:\n    timeout-minutes: ${timeout}\n    runs-on: ubuntu-latest\n    steps:\n` +
+          steps.map(([name, command]) => `      - name: ${name}\n        run: |\n          ${command}\n`).join(''),
+      )
+      .join('');
+
+  /** The census lines `--list` and a green `run()` print, one per site. */
+  const censusOf = (root) => {
+    const { defaults } = guardDefaults(root);
+    return census(scan(root, defaults, parse));
+  };
 
   try {
     // ── 1. The shape the repo ships: W=10 C=20 T=30, slack exactly one window ─
@@ -741,7 +856,90 @@ export async function selfTest() {
     // ── 8. Line numbers: attached when they can be trusted, never guessed ────
     assert('a site carries the line its command sits on', greenScan.sites[0].line === 10, JSON.stringify(greenScan.sites[0]));
 
-    // ── 9. The real repository -- the direction the fixtures cannot prove ────
+    // ── 9. Siblings on one job clock: what the census must and must NOT say ──
+    //
+    // The census prints one `slack` per SITE, but `timeout-minutes` runs one
+    // clock per JOB. These cases pin the note that closes that gap -- and, more
+    // importantly, pin the two ways of deriving it that are WRONG. Both wrong
+    // ways are green against a single-sibling tree, so only fixtures shaped
+    // like the mistake can hold them.
+
+    // The positive case: two guarded steps, one job, one clock.
+    const pair = fixture({
+      'a.yml': multi({
+        conformance: { timeout: 30, steps: [['first', guarded(10)], ['second', guarded(10)]] },
+      }),
+    });
+    const pairCensus = censusOf(pair);
+    assert('two guarded steps in one job produce two sites', pairCensus.length === 2, JSON.stringify(pairCensus));
+    assert(
+      'the FIRST of two guarded steps is named as 1 of 2 sharing one clock',
+      /slack 10m \(1 of 2 guarded steps in this job; they share one timeout clock\)/.test(pairCensus[0]),
+      pairCensus[0],
+    );
+    assert(
+      '...and the SECOND as 2 of 2 -- the ordinal follows job.steps order, so it is the later step on the clock',
+      /slack 10m \(2 of 2 guarded steps in this job; they share one timeout clock\)/.test(pairCensus[1]),
+      pairCensus[1],
+    );
+    assert(
+      '...and the note names the CONSEQUENCE, not only the count',
+      pairCensus.every((line) => line.includes('they share one timeout clock')),
+      JSON.stringify(pairCensus),
+    );
+    // The verdict must not move: this card changes what the census SAYS only.
+    const pairRun = drive(pair);
+    assert('...and a sibling pair is still judged on T - C >= W alone, so it stays green', pairRun.code === 0, pairRun.out);
+
+    // THE NEGATIVE CONTROL this card was accepted on: one guarded step, no note.
+    const lone = fixture({ 'a.yml': workflow({ jobTimeout: 30, command: GUARDED }) });
+    const loneCensus = censusOf(lone);
+    assert('a job with a single guarded step gets NO sibling note', !/guarded steps in this job/.test(loneCensus.join('\n')), JSON.stringify(loneCensus));
+    assert('...and its slack line is otherwise unchanged', /slack 10m$/.test(loneCensus[0]), loneCensus[0]);
+
+    // WRONG DERIVATION 1: grouping by a matching `--stall-minutes` value. Five
+    // of this repo's seven real sites are 10m across four different jobs, so
+    // this mistake would report siblings almost everywhere.
+    const sameWindowTwoJobs = fixture({
+      'a.yml': multi({
+        alpha: { timeout: 30, steps: [['only', guarded(10)]] },
+        beta: { timeout: 30, steps: [['only', guarded(10)]] },
+      }),
+    });
+    const sameWindowCensus = censusOf(sameWindowTwoJobs);
+    assert('two jobs are read as two sites', sameWindowCensus.length === 2, JSON.stringify(sameWindowCensus));
+    assert(
+      'two SEPARATE jobs that merely share a --stall-minutes value are NOT siblings',
+      !/guarded steps in this job/.test(sameWindowCensus.join('\n')),
+      JSON.stringify(sameWindowCensus),
+    );
+    // ...and they are not siblings for merely sharing a FILE, either: the two
+    // jobs above live in one workflow file and still get no note.
+
+    // WRONG DERIVATION 2: grouping by job id alone. A job id is unique only
+    // within its file, and this tree reuses three ids across files today.
+    const sameIdTwoFiles = fixture({
+      'a.yml': multi({ publish: { timeout: 30, steps: [['only', guarded(10)]] } }),
+      'b.yml': multi({ publish: { timeout: 30, steps: [['only', guarded(10)]] } }),
+    });
+    const sameIdCensus = censusOf(sameIdTwoFiles);
+    assert('the same job id in two files yields two sites', sameIdCensus.length === 2, JSON.stringify(sameIdCensus));
+    assert(
+      'the same job id in two DIFFERENT files is two clocks, not a sibling pair',
+      !/guarded steps in this job/.test(sameIdCensus.join('\n')),
+      JSON.stringify(sameIdCensus),
+    );
+
+    // A job holding three, to prove the count is the group size and not a
+    // hardcoded pair -- the wording has to stay right above N = 2.
+    const trio = fixture({
+      'a.yml': multi({ probe: { timeout: 30, steps: [['a', guarded(10)], ['b', guarded(10)], ['c', guarded(10)]] } }),
+    });
+    const trioCensus = censusOf(trio);
+    assert('a job holding three guarded steps counts three, not two', /\(3 of 3 guarded steps in this job/.test(trioCensus[2]), JSON.stringify(trioCensus));
+    assert('...and the middle one is 2 of 3', /\(2 of 3 guarded steps in this job/.test(trioCensus[1]), trioCensus[1]);
+
+    // ── 10. The real repository -- the direction the fixtures cannot prove ───
     const realDefaults = guardDefaults(repoRoot());
     assert('the real guard still declares both defaults', Boolean(realDefaults.defaults), JSON.stringify(realDefaults.problems));
     if (realDefaults.defaults) {
@@ -750,6 +948,43 @@ export async function selfTest() {
       assert('the repo scan actually reads workflows', real.files > 0 && real.jobs > 0, `${real.files}/${real.jobs}`);
       assert('the repo has guard-wrapped steps -- at 0 this gate guards nothing', real.sites.length > 0, `${real.sites.length}`);
       assert('the repo is green on the invariant', real.violations.length === 0, JSON.stringify(real.violations.map((v) => where(v))));
+
+      // The sibling annotation, re-derived here independently of the code that
+      // wrote it, so agreement is a check rather than a restatement.
+      const expected = new Map();
+      for (const site of real.sites) {
+        const key = `${site.file} ${site.job}`;
+        expected.set(key, (expected.get(key) ?? 0) + 1);
+      }
+      assert(
+        'every real site knows its group size, and its ordinal is inside it',
+        real.sites.every((s) => s.siblingCount === expected.get(`${s.file} ${s.job}`) && s.siblingIndex >= 1 && s.siblingIndex <= s.siblingCount),
+        JSON.stringify(real.sites.map((s) => `${s.file} ${s.job} ${s.siblingIndex}/${s.siblingCount}`)),
+      );
+      for (const [key, size] of expected) {
+        const ordinals = real.sites.filter((s) => `${s.file} ${s.job}` === key).map((s) => s.siblingIndex);
+        assert(`the ordinals in \`${key}\` are exactly 1..${size}`, JSON.stringify(ordinals) === JSON.stringify([...Array(size).keys()].map((i) => i + 1)), JSON.stringify(ordinals));
+      }
+
+      // Non-vacuity for the note itself. Every assertion above about the ABSENCE
+      // of a note would also pass if the note could never be produced, and the
+      // fixtures are the only thing proving it can -- on fixture trees. This is
+      // the same proof against the population the census actually prints: at
+      // least one real job holds more than one guarded step. If that ever stops
+      // being true, this reds so the header prose above gets re-measured too,
+      // rather than quietly describing a population that no longer exists.
+      const realSiblingJobs = [...expected].filter(([, size]) => size > 1);
+      assert(
+        'at least one REAL job holds more than one guarded step, so the census note is exercised by the live tree',
+        realSiblingJobs.length > 0,
+        `groups: ${JSON.stringify([...expected])}`,
+      );
+      const noted = census(real).filter((line) => line.includes('guarded steps in this job'));
+      assert(
+        '...and the real census prints one note per site in those jobs',
+        noted.length === realSiblingJobs.reduce((n, [, size]) => n + size, 0),
+        `${noted.length} note(s) for ${JSON.stringify(realSiblingJobs)}`,
+      );
     }
   } finally {
     for (const dir of roots) rmSync(dir, { recursive: true, force: true });
@@ -762,7 +997,9 @@ export async function selfTest() {
   }
   console.log(
     `✓ check-stall-guard-budget --self-test: ${checked} assertions over real fixture trees on disk (real run() path) -- ` +
-      'both violation tiers driven red, the guard defaults proven READ rather than copied, and the empty population proven to REFUSE.',
+      'both violation tiers driven red, the guard defaults proven READ rather than copied, the empty population proven to ' +
+      'REFUSE, and the sibling note proven to follow JOB membership -- absent for a lone guarded step, and absent for two ' +
+      'jobs sharing only a --stall-minutes value or only a job id.',
   );
   return 0;
 }
