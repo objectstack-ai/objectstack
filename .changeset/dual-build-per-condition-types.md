@@ -1,6 +1,5 @@
 ---
 "@objectstack/cloud-connection": patch
-"@objectstack/core": patch
 "@objectstack/lint": patch
 "@objectstack/mcp": patch
 "@objectstack/metadata-core": patch
@@ -76,10 +75,22 @@ Each condition now names its own declaration, the shape TypeScript documents:
 } }
 ```
 
-35 entry points across 28 packages, subpaths included. The root `types` field is
+33 entry points across 27 packages, subpaths included. The root `types` field is
 untouched, so `node10` resolvers are unaffected; the `import` condition resolves
 exactly what it resolved before, measured as an unchanged control in the same
 run.
+
+## `@objectstack/core` is deliberately NOT changed
+
+Splitting a declaration in two makes TypeScript compare it nominally, and
+`ObjectKernel` carries a `private plugins` member that reaches every plugin
+through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+declarations of a private property 'plugins'"); with core held back and the
+other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+`check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+types, not about an exports map.
 
 ## For consumers
 

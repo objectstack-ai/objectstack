@@ -247,6 +247,51 @@ const DUAL_FORMAT_BEHAVIOUR_PROBES = [
   },
 ];
 
+/**
+ * ## TYPED's declared exemptions -- and the one thing they are NOT
+ *
+ * Giving a `require` condition its own `.d.cts` splits one declaration into
+ * two, and TypeScript compares a class with a `private` member NOMINALLY: two
+ * declaration files mean two incompatible identities of the same class, even
+ * byte-for-byte identical ones. That is TypeScript's dual-package hazard, on
+ * the type axis, and it is a property of the DEPENDENCY, never of the consumer
+ * that trips over it.
+ *
+ * `@objectstack/core` is where the repo actually meets it. `ObjectKernel`
+ * carries `private plugins` and travels through `PluginContext.getKernel()`
+ * into every plugin's `init`, so the moment core ships two declarations, any
+ * compilation that reaches core through BOTH resolution modes sees two
+ * `ObjectKernel`s. Measured on this branch, whole-repo `pnpm build`:
+ *
+ *   28 packages split (core included)      RED — @objectstack/verify, 5 × TS2345
+ *   27 packages split (core held back)     GREEN — 71/71 tasks
+ *   28 + the 37-package ESM mirror         RED — @objectstack/plugin-dev, TS2345
+ *
+ * The mirror round is the informative one: it moves the failure rather than
+ * removing it. Splitting `@objectstack/objectql` is what fixes `verify` and
+ * what breaks `plugin-dev`, because a split dependency resolves core one way
+ * from its `.d.mts` and the other from its `.d.ts`. So the exemption is not
+ * "core is hard", it is: **core cannot be split until `ObjectKernel`'s
+ * identity stops being nominal**, and that is a decision about core's public
+ * types, not about an exports map.
+ *
+ * ⛔ An exemption here is NOT a quieter red. It is a declaration that the
+ * entry's `.d.cts` ships unreachable ON PURPOSE, with the measurement that
+ * says why. Shrink-only: an entry that can be split must lose its row in the
+ * same PR that splits it, and a row naming an entry point that no longer
+ * exists is a finding (the same both-directions rule the load ledger learned).
+ *
+ * @type {Record<string, {reason: string}>}
+ */
+const TYPED_EXEMPTIONS = Object.freeze({
+  '@objectstack/core#.': {
+    reason: 'Splitting core\'s declarations gives `ObjectKernel` (which carries `private plugins`) two nominal identities, and it crosses every plugin boundary via `PluginContext.getKernel()`. Measured: with core split, `pnpm build` fails in @objectstack/verify with 5 × TS2345; with core held back and the other 27 packages split, 71/71 tasks pass. Blocked on a decision about core\'s public types, not on this exports map (#13112).',
+  },
+  '@objectstack/core#./logger': {
+    reason: 'Same declaration set as `@objectstack/core#.` — the subpath is emitted from the same tsup pass and splits the same identities. Held back with its sibling so core has one resolution story rather than two (#13112).',
+  },
+});
+
 const EXIT_OK = 0;
 const EXIT_FINDINGS = 1;
 const EXIT_REFUSE = 2;
@@ -658,9 +703,9 @@ export function isParseFailure(stderr) {
 // ---------------------------------------------------------------------------
 
 /**
- * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, typedEntries: number, typedJudged: number, probesRun: number}>}
+ * @returns {Promise<{rows: any[], findings: string[], prereq: string[], ledgerHits: string[], staleLedger: string[], orphanLedger: string[], cjsFileCount: number, typedEntries: number, typedJudged: number, typedExempt: string[], typedOrphans: string[], probesRun: number}>}
  */
-export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) {
+export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES, exemptions = TYPED_EXEMPTIONS) {
   const rows = collectEntries(root);
   const findings = [];
   const prereq = [];
@@ -684,6 +729,12 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   // entries are defective and falls only when the walk or the resolver stops
   // asking, which is the thing the floor is for.
   let typedJudged = 0;
+  const typedExempt = [];
+  // Both directions, same rule the load ledger learned the hard way: a row that
+  // no longer names a live entry point is a finding, not dead text.
+  const typedOrphans = Object.keys(exemptions)
+    .filter((id) => !rows.some((r) => r.id === id))
+    .map((id) => `${id} — TYPED_EXEMPTIONS carries a row for this id, but no published require condition resolves to it. Delete the row; it is exempting nothing.`);
 
   for (const r of rows) {
     r.distDir = join(r.dir, 'dist');
@@ -712,6 +763,10 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
           + `${relative(root, r.distDir)} exists — the manifest promises a declaration npm would ship and tsc cannot read.`,
       );
     } else if (declarationModuleKind(r.typesTarget, r.isModuleType) !== 'commonjs') {
+      if (exemptions[r.id]) {
+        typedExempt.push(`${r.id} — ${exemptions[r.id].reason}`);
+        continue;
+      }
       typedFindings.push(
         `${r.id}: the require condition resolves types ${r.typesTarget}, which is ESM-flavoured in a `
           + `"type": "module" package — so a CommonJS consumer under node16/nodenext resolution is handed an ES-module `
@@ -725,7 +780,17 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
     }
   }
   findings.push(...typedFindings);
-  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun: 0 };
+  // The shrink-only direction: an exempted entry that is now CORRECT must lose
+  // its row in the PR that fixed it, or the next reader reads a live blocker
+  // where there is none.
+  for (const [id, row] of Object.entries(exemptions)) {
+    const r = rows.find((x) => x.id === id);
+    if (!r || !r.exists || !r.typesTarget) continue;
+    if (declarationModuleKind(r.typesTarget, r.isModuleType) === 'commonjs') {
+      staleLedger.push(`${id} — TYPED_EXEMPTIONS says its require condition cannot resolve a CommonJS declaration, but it now does (${r.typesTarget}). Delete the row (shrink-only). Its recorded reason: ${row.reason}`);
+    }
+  }
+  if (prereq.length) return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, typedExempt, typedOrphans, probesRun: 0 };
 
   // PARSES — over the union of emitted CommonJS files, deduped across the
   // several entries a package may declare.
@@ -765,7 +830,7 @@ export async function scan(root, ledger, probes = DUAL_FORMAT_BEHAVIOUR_PROBES) 
   const probeResults = await runBehaviourProbes(root, rows, probes);
   findings.push(...probeResults.findings);
 
-  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun: probeResults.ran };
+  return { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, typedExempt, typedOrphans, probesRun: probeResults.ran };
 }
 
 /** Read the expectation a probe declares. Only `spec-version` exists today. */
@@ -828,7 +893,7 @@ function readLedger(root) {
 async function main(argv) {
   const root = REPO_ROOT;
   const ledger = readLedger(root);
-  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, probesRun } = await scan(root, ledger);
+  const { rows, findings, prereq, ledgerHits, staleLedger, orphanLedger, cjsFileCount, typedEntries, typedJudged, typedExempt, typedOrphans, probesRun } = await scan(root, ledger);
 
   if (argv.includes('--list')) {
     for (const r of rows) console.log(`${r.id.padEnd(48)} ${String(r.target).padEnd(34)} types=${r.typesTarget ?? '(none)'}`);
@@ -859,7 +924,7 @@ async function main(argv) {
     return EXIT_REFUSE;
   }
 
-  const problems = [...findings, ...staleLedger, ...orphanLedger];
+  const problems = [...findings, ...staleLedger, ...orphanLedger, ...typedOrphans];
   if (problems.length) {
     console.error(`✗ check:dual-build-cjs-loads — ${problems.length} finding(s) across ${rows.length} published require entry point(s):`);
     for (const f of problems) console.error(`  ✗ ${f}`);
@@ -880,6 +945,7 @@ async function main(argv) {
       (ledgerHits.length ? `; ${ledgerHits.length} declared non-loadable entr(ies) still justified.` : '.'),
   );
   for (const h of ledgerHits) console.log(`  · declared: ${h}`);
+  for (const h of typedExempt) console.log(`  · declared UNREACHABLE declaration: ${h}`);
   return EXIT_OK;
 }
 
@@ -1085,7 +1151,11 @@ export async function selfTest() {
     writePkg(root, 'notypes', { name: '@t/notypes', version: '0.0.0', type: 'module', exports: { '.': { import: './dist/index.js', require: './dist/index.cjs' } } }, {
       'dist/index.js': 'export const ok = 1;\n', 'dist/index.cjs': 'exports.ok = 1;\n',
     });
-    const rTyped = await scan(root, empty, []);
+    // ⛔ An EXPLICITLY empty exemption table: the default is the SHIPPED one,
+    // whose rows name real repo packages that do not exist in this fixture
+    // tree — passing it here would manufacture two orphans and make the
+    // green control below assert the opposite of what it says.
+    const rTyped = await scan(root, empty, [], {});
     t('THE #13112 case: a sibling `types` in a "type": "module" package is a TYPED finding',
       rTyped.findings.some((f) => f.startsWith('@t/sibling#.') && f.includes('ESM-flavoured')), rTyped.findings.join(' | '));
     t('…and the finding names TS1479, the error the consumer actually sees',
@@ -1109,6 +1179,26 @@ export async function selfTest() {
       && rTyped.typedJudged === rTyped.rows.filter((r) => r.exists).length,
       `clean=${rTyped.typedEntries} findings=${typedFindingCount} judged=${rTyped.typedJudged} live=${rTyped.rows.filter((r) => r.exists).length}`);
     t('…and three of the fixtures are the reported ones', typedFindingCount === 3, String(typedFindingCount));
+
+    // ── TYPED_EXEMPTIONS, both directions ───────────────────────────────────
+    const exemptSibling = { '@t/sibling#.': { reason: 'self-test: a declared, measured reason long enough to be real' } };
+    const rExempt = await scan(root, empty, [], exemptSibling);
+    t('an exempted TYPED entry is DECLARED, not a finding',
+      !rExempt.findings.some((f) => f.startsWith('@t/sibling#.') && f.includes('ESM-flavoured'))
+      && rExempt.typedExempt.some((h) => h.startsWith('@t/sibling#.')), JSON.stringify(rExempt.typedExempt));
+    t('…and it is still not COUNTED as clean — an exemption is not a pass',
+      rExempt.typedEntries === rTyped.typedEntries, `exempt-run=${rExempt.typedEntries} plain-run=${rTyped.typedEntries}`);
+    t('⛔ an exemption never silences a MISSING declaration (a different fact)',
+      (await scan(root, empty, [], { '@t/notypesfile#.': { reason: 'self-test: should not help, the file is simply absent' } }))
+        .findings.some((f) => f.startsWith('@t/notypesfile#.') && f.includes('is NOT emitted')));
+    const rStale = await scan(root, empty, [], { '@t/good#.': { reason: 'self-test: stale, this entry is correctly split already' } });
+    t('an exemption on an entry that is now CORRECT is a finding (shrink-only)',
+      rStale.staleLedger.some((x) => x.startsWith('@t/good#.') && x.includes('TYPED_EXEMPTIONS')), JSON.stringify(rStale.staleLedger));
+    const rOrph = await scan(root, empty, [], { '@t/nowhere#./gone': { reason: 'self-test: names an entry point that does not exist at all' } });
+    t('an exemption naming an entry NOT in the population is a finding',
+      rOrph.typedOrphans.some((x) => x.startsWith('@t/nowhere#./gone') && x.includes('exempting nothing')), JSON.stringify(rOrph.typedOrphans));
+    t('GREEN CONTROL — an empty exemption table produces no orphans and no declarations',
+      rTyped.typedOrphans.length === 0 && rTyped.typedExempt.length === 0);
 
     // The shipped probe table must name entry points that really exist here.
     const realRows = collectEntries(REPO_ROOT);
@@ -1174,6 +1264,20 @@ export async function selfTest() {
     EXIT_REFUSE !== EXIT_FINDINGS && EXIT_REFUSE !== EXIT_PREREQ && EXIT_REFUSE !== EXIT_OK);
 
   // ── the real ledger is well-formed and shrink-only in shape ───────────────
+  // The SHIPPED exemption table against the REAL population — the half a
+  // fixture tree cannot give, and the one that goes stale silently.
+  const realEntries = collectEntries(REPO_ROOT);
+  t('every shipped TYPED exemption names a live require entry point',
+    Object.keys(TYPED_EXEMPTIONS).every((id) => realEntries.some((r) => r.id === id)),
+    JSON.stringify(Object.keys(TYPED_EXEMPTIONS).filter((id) => !realEntries.some((r) => r.id === id))));
+  t('every shipped TYPED exemption carries a reason that says what was measured',
+    Object.values(TYPED_EXEMPTIONS).every((v) => typeof v?.reason === 'string' && v.reason.length > 80));
+  t('every shipped TYPED exemption is an entry that really is ESM-flavoured under require',
+    Object.keys(TYPED_EXEMPTIONS).every((id) => {
+      const r = realEntries.find((x) => x.id === id);
+      return r && r.typesTarget && declarationModuleKind(r.typesTarget, r.isModuleType) !== 'commonjs';
+    }), JSON.stringify(Object.keys(TYPED_EXEMPTIONS)));
+
   const realLedger = readLedger(REPO_ROOT);
   t('every real ledger entry carries a reason', Object.values(realLedger).every((v) => typeof v?.reason === 'string' && v.reason.length > 20));
   t('every real ledger key is `<package>#<subpath>`', Object.keys(realLedger).every((k) => /^[^#]+#(\.|\.\/.+|\(main\))$/.test(k)));
