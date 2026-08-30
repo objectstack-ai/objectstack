@@ -457,3 +457,154 @@ describe('isMissingTableError — Postgres sub-object phrases are NOT missing ta
         expect(isMissingTableError(err)).toBe(false);
     });
 });
+
+describe('isMissingTableError — the phrase must name the table that was READ (#13324)', () => {
+    /**
+     * The measured defect. Reading a VIEW whose base table is gone fails with a
+     * phrase that answers the shape test perfectly and names something else.
+     *
+     * Both spellings libsql produces are pinned: the wrapper's `SQLITE_ERROR: `
+     * prefix and the bare `cause` message underneath it, since the predicate
+     * walks the `cause` chain and must reach the same verdict at either node.
+     */
+    const VIEW_OVER_MISSING_BASE = 'no such table: main.table_that_does_not_exist';
+
+    it('answers NOT benign for a view whose base table is missing', () => {
+        // Measured against a real libsql file database: `CREATE VIEW
+        // sys_metadata AS SELECT … FROM table_that_does_not_exist`, then
+        // `SELECT * FROM sys_metadata`. `sys_metadata` exists and may be backed
+        // by rows; the licence "there are no rows" is false about it.
+        const err = Object.assign(new Error(`SQLITE_ERROR: ${VIEW_OVER_MISSING_BASE}`), {
+            code: 'SQLITE_ERROR',
+            cause: Object.assign(new Error(VIEW_OVER_MISSING_BASE), { code: 'SQLITE_ERROR' }),
+        });
+        expect(isMissingTableError(err, 'sys_metadata')).toBe(false);
+    });
+
+    it('is the ONLY thing that separates the view case from a genuine miss', () => {
+        // ⛔ The two are byte-identical in shape, measured on libsql — a view
+        // over `absent_base`, and a genuine missing table the caller qualified.
+        // Any repair that reads only the phrase must answer both the same way,
+        // which is why the read's name is a parameter and not a regex.
+        const viewFault = new Error('no such table: main.absent_base');
+        const genuineMiss = new Error('no such table: main.orders');
+        expect(viewFault.message.replace('absent_base', 'orders')).toBe(genuineMiss.message);
+
+        expect(isMissingTableError(viewFault, 'orders')).toBe(false);
+        expect(isMissingTableError(genuineMiss, 'orders')).toBe(true);
+    });
+
+    /**
+     * ⛔ Fence: every shape recognised today for a GENUINE missing table must
+     * still be recognised. A suite that silently lost a true positive is the
+     * failure mode this repair is most likely to cause, so each limb of the
+     * signature is pinned with the read named.
+     */
+    const TRUE_POSITIVES: ReadonlyArray<readonly [string, unknown, string]> = [
+        ['sqlite `no such table: X`', new Error('no such table: sys_metadata_history'), 'sys_metadata_history'],
+        [
+            'sqlite schema-qualified `no such table: main.X`',
+            new Error('no such table: main.sys_metadata_history'),
+            'sys_metadata_history',
+        ],
+        [
+            'PG `relation "x" does not exist`',
+            Object.assign(new Error('relation "sys_metadata_history" does not exist'), { code: '42P01' }),
+            'sys_metadata_history',
+        ],
+        [
+            'MySQL `table "x" doesn\'t exist`',
+            new Error("Table 'app.sys_metadata_history' doesn't exist"),
+            'sys_metadata_history',
+        ],
+        ['MySQL `unknown table`', new Error("Unknown table 'app.sys_metadata_history'"), 'sys_metadata_history'],
+        [
+            'the SQLSTATE limb, message carrying no name at all',
+            Object.assign(new Error('db error'), { code: '42P01' }),
+            'sys_metadata_history',
+        ],
+        [
+            'the mysql2 symbolic-code limb',
+            Object.assign(new Error('db error'), { code: 'ER_NO_SUCH_TABLE' }),
+            'sys_metadata_history',
+        ],
+        [
+            'the errno limb',
+            Object.assign(new Error('opaque'), { errno: 1146 }),
+            'sys_metadata_history',
+        ],
+        [
+            'the driver wrapper, original attached as `cause`',
+            Object.assign(new Error("The database refused to run this query for object 'sys_file'."), {
+                code: 'DATABASE_ERROR',
+                cause: new Error('no such table: sys_file'),
+            }),
+            'sys_file',
+        ],
+    ];
+
+    it.each(TRUE_POSITIVES)('still benign: %s', (_name, error, readObject) => {
+        expect(isMissingTableError(error, readObject)).toBe(true);
+    });
+
+    describe('the comparison folds away what two dialects spell differently', () => {
+        it('ignores case', () => {
+            expect(isMissingTableError(new Error('no such table: SYS_METADATA'), 'sys_metadata')).toBe(true);
+        });
+
+        it('ignores the MySQL database qualifier', () => {
+            expect(
+                isMissingTableError(new Error("Table 'app.sys_metadata' doesn't exist"), 'sys_metadata'),
+            ).toBe(true);
+        });
+
+        it('ignores the legacy `namespace__short` object prefix `resolveTableName` strips', () => {
+            // A caller naming the object `crm__account` reads the table
+            // `account`; a strict comparison would call that a mismatch and
+            // turn a genuine missing table loud.
+            expect(isMissingTableError(new Error('no such table: account'), 'crm__account')).toBe(true);
+        });
+    });
+
+    describe('no evidence means "as we were", never "be loud"', () => {
+        it('keeps the pre-#13324 verdict when the caller names nothing', () => {
+            // The parameter is optional because this is a published export.
+            // Omitting it must reproduce the old behaviour EXACTLY — including
+            // the old behaviour on the very error this card is about.
+            expect(isMissingTableError(new Error(VIEW_OVER_MISSING_BASE))).toBe(true);
+            expect(isMissingTableError(new Error('no such table: sys_metadata'))).toBe(true);
+        });
+
+        it('ignores a non-string second argument', () => {
+            // Before this card the second positional parameter was the internal
+            // `depth` counter. A stale numeric argument must not be read as a
+            // table name (which would compare against `"0"` and answer loud).
+            expect(isMissingTableError(new Error('no such table: sys_metadata'), 0 as never)).toBe(true);
+        });
+
+        it('leaves a phrase with no extractable name benign', () => {
+            // `unknown table` with nothing quoted after it names nothing, so it
+            // cannot contradict the caller.
+            expect(isMissingTableError(new Error('unknown table'), 'sys_metadata')).toBe(true);
+        });
+    });
+
+    it('does not let a mismatching phrase be rescued by a matching `cause`', () => {
+        // Same disposition #6347 gave the sub-object exclusion: recognition
+        // ends the question rather than descending, so a nested phrase naming
+        // the read table cannot restore the benign verdict.
+        const err = Object.assign(new Error('no such table: main.some_other_table'), {
+            cause: Object.assign(new Error('relation "sys_metadata" does not exist'), { code: '42P01' }),
+        });
+        expect(isMissingTableError(err, 'sys_metadata')).toBe(false);
+    });
+
+    it('leaves the DDL predicate untouched', () => {
+        // The new channel is scoped to MISSING_TABLE; `isSchemaAlreadyExistsError`
+        // takes no read name and must not have acquired one.
+        const err = Object.assign(new Error('table sys_metadata already exists'), {
+            code: 'SQLITE_ERROR',
+        });
+        expect(isSchemaAlreadyExistsError(err)).toBe(true);
+    });
+});

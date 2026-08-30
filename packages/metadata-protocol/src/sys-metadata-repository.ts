@@ -1880,7 +1880,9 @@ export class SysMetadataRepository implements MetadataRepository {
     subject: string,
   ): 1 {
     // Benign — and only benign: a fresh DB has no row to be inconsistent with.
-    if (isMissingTableError(error)) return 1;
+    // [#13324] Both callers read `this.historyTable`, so a failure naming any
+    // other relation is not evidence that THIS one is empty.
+    if (isMissingTableError(error, this.historyTable)) return 1;
 
     if (!this.historyCounterFailureReported) {
       this.historyCounterFailureReported = true;

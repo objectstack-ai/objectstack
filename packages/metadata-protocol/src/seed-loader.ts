@@ -1428,7 +1428,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // seen. It propagates, envelope intact: the seed run fails loudly instead
       // of writing a batch of rows nobody will be able to see. No new error code
       // and no new result field — the caller receives the read's own failure.
-      if (!isMissingTableError(error)) throw error;
+      if (!isMissingTableError(error, 'sys_organization')) throw error;
     }
     return undefined;
   }
@@ -2476,7 +2476,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // write plan from data it never read. No new error code and no new
       // result field — the caller receives the read's own failure, envelope
       // intact, and the seed's existing error accounting reports it.
-      if (!isMissingTableError(error)) throw error;
+      if (!isMissingTableError(error, objectName)) throw error;
     }
     return map;
   }

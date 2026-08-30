@@ -65,6 +65,13 @@ function createLogger() {
  * re-wrap a driver error. `findCalls` records that the read really ran, which
  * is what turns "the seed proceeded" into "the seed proceeded AND the injected
  * throw fired".
+ *
+ * [#13324] It also accepts a FUNCTION of the object name, because the loader
+ * reads more than one table on this path (`sys_organization` for the sole-org
+ * probe, then the seeded object) and a missing-table fault names the table it
+ * was raised for. A single fixed value phrased for one of them is a fault that
+ * no driver produces for the other, and `isMissingTableError` now tells those
+ * apart — so the per-object form is what keeps this fixture faithful.
  */
 function createEngine() {
     const store: Record<string, StoreRow[]> = {};
@@ -75,7 +82,7 @@ function createEngine() {
     const engine = {
         find: vi.fn(async (objectName: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
             findCalls.push(objectName);
-            if (failFind !== null) throw failFind;
+            if (failFind !== null) throw typeof failFind === 'function' ? failFind(objectName) : failFind;
             let records = store[objectName] ?? [];
             if (query?.where) {
                 const where = query.where;
@@ -134,7 +141,7 @@ function createEngine() {
         engine,
         store,
         findCalls,
-        failReadsWith: (error: unknown) => { failFind = error; },
+        failReadsWith: (error: unknown | ((objectName: string) => unknown)) => { failFind = error; },
         stopFailingReads: () => { failFind = null; },
     };
 }
@@ -180,8 +187,8 @@ const seedOf = (mode: string, records: Array<Record<string, unknown>>) => [{
 /** The real driver phrasings, verbatim. */
 const connectionDropped = () =>
     Object.assign(new Error('connection terminated unexpectedly'), { code: 'ECONNRESET' });
-const tableNotProvisioned = () =>
-    Object.assign(new Error('SQLITE_ERROR: no such table: my_app_widget'), { code: 'SQLITE_ERROR' });
+const tableNotProvisioned = (objectName = 'my_app_widget') =>
+    Object.assign(new Error(`SQLITE_ERROR: no such table: ${objectName}`), { code: 'SQLITE_ERROR' });
 
 /** Capture a rejection without letting a resolve pass silently. */
 async function rejection(run: () => Promise<unknown>): Promise<{ code?: string; message?: string } & Record<string, unknown>> {
@@ -315,7 +322,7 @@ describe('[#8896] seed loader — an existing-records read that FAILED is not "n
 
     it('an UNPROVISIONED table is truthful emptiness: the seed writes its rows', async () => {
         const { engine, store, findCalls, failReadsWith } = createEngine();
-        failReadsWith(tableNotProvisioned());
+        failReadsWith((objectName: string) => tableNotProvisioned(objectName));
 
         const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
             seeds: seedOf('upsert', [{ name: 'Fresh', sku: 'W-A' }]),
@@ -333,8 +340,8 @@ describe('[#8896] seed loader — an existing-records read that FAILED is not "n
 
     it('an UNPROVISIONED table in the postgres phrasing (42P01) is benign too', async () => {
         const { engine, findCalls, failReadsWith } = createEngine();
-        failReadsWith(Object.assign(
-            new Error('relation "my_app_widget" does not exist'),
+        failReadsWith((objectName: string) => Object.assign(
+            new Error(`relation "${objectName}" does not exist`),
             { code: '42P01' },
         ));
 

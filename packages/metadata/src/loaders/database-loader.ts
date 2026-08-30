@@ -331,7 +331,7 @@ export class DatabaseLoader implements MetadataLoader {
     } catch (error) {
       // Benign — and ONLY benign: there is no table, therefore no row, so
       // numbering from 1 cannot collide with anything.
-      if (isMissingTableError(error)) return 1;
+      if (isMissingTableError(error, this.historyTableName)) return 1;
       throw error;
     }
   }
@@ -760,7 +760,11 @@ export class DatabaseLoader implements MetadataLoader {
    *          with its empty value.
    */
   private rethrowUnlessTableUnprovisioned(error: unknown): void {
-    if (isMissingTableError(error)) return;
+    // [#13324] Every caller of this helper reads `this.tableName`, so that is
+    // the relation whose emptiness they are about to trust — a failure naming
+    // any OTHER relation (a view over a dropped base table) is not evidence
+    // about it and stays loud.
+    if (isMissingTableError(error, this.tableName)) return;
     throw error;
   }
 
