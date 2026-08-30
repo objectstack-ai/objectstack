@@ -219,6 +219,23 @@ const REFUSAL_RECORD_METHOD = 'record';
 /** The gate's own propagation vocabulary (#5241) -- a catch reaching one answers its caller. */
 const PROPAGATION_CALLEES = new Set(['errorFromThrown', 'handleRouteError']);
 
+/**
+ * The WEAKEST channel, and the one the gate's own #9748 limb already models: the
+ * catch increments a counter declared outside the `try`, and the enclosing
+ * function reads that counter back — into a log line, or into what it returns.
+ *
+ * Weakest because only the COUNT survives; the driver code, the message and the
+ * identity of the refused row do not. It is still categorically different from
+ * darkness: `catch { refused++; }` beside `if (refused > 0) logger.warn(...)`
+ * cannot produce the failure this card is about, where a pass that landed
+ * nothing prints the same bytes as a pass with nothing to do.
+ *
+ * Both halves are checked, and the second is why this is not a spelling
+ * heuristic: an accumulator nothing ever reads is darkness with an extra
+ * variable, and is reported as dark.
+ */
+const ACCUMULATOR_CHANNEL = 'accumulator-reported';
+
 const LOGGER_RECEIVERS = /^(logger|log|console)$/i;
 const LOG_LEVELS = new Set(['error', 'fatal', 'warn', 'info', 'debug', 'trace', 'log']);
 const LOUD_LEVELS = new Set(['error', 'fatal']);
@@ -243,6 +260,17 @@ const POSITIVE_CONTROLS = [
       + '-- silent by the log axis, a write in the try, and answering through the #12923 accumulator. It must be a '
       + 'member AND it must come back CHANNELLED, or the instrument cannot tell a repair from a swallow.',
     tier: 'channelled',
+  },
+  {
+    file: 'packages/plugins/plugin-sharing/src/primary-bu-projection.ts',
+    why:
+      '`backfillPrimaryBu`\'s per-row `catch { refused++; }`, read back by the report branch below it '
+      + '(#12981). It pins the WEAKEST channel — the one where only the count survives — because that '
+      + 'is the one a repair reaches when the loud-report contract belongs to another card. Without '
+      + 'it, a caller-side repair is invisible to this instrument and the census stops working as a '
+      + 'progress measure, which is the property the ruling asked for.',
+    tier: 'channelled',
+    channel: 'accumulator-reported',
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
@@ -575,6 +603,10 @@ function analyzeFile(file, relPath, findings, stats) {
     stats.buckets[bucket] += 1;
     if (bucket === 'loud') return;
 
+    if (!channel) {
+      const accumulators = catchAccumulators(node, node.catchClause.block);
+      if (accumulatorIsRead(node, accumulators, sf)) channel = ACCUMULATOR_CHANNEL;
+    }
     const tier = channel ? 'channelled' : bindingRead ? 'carries-error' : 'dark';
     findings.push({
       file: relPath,
@@ -589,6 +621,52 @@ function analyzeFile(file, relPath, findings, stats) {
       snippet: catchSnippet(node.catchClause, sf),
     });
   });
+}
+
+/** Names this catch increments (`n++`, `n += 1`) that are NOT declared inside the try. */
+function catchAccumulators(tryNode, catchBlock) {
+  const declaredInTry = new Set();
+  walkAll(tryNode, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) declaredInTry.add(n.name.text);
+  });
+  const names = new Set();
+  walkAll(catchBlock, (n) => {
+    let target = null;
+    if ((ts.isPostfixUnaryExpression(n) || ts.isPrefixUnaryExpression(n))
+      && n.operator === ts.SyntaxKind.PlusPlusToken) target = n.operand;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken) target = n.left;
+    if (target && ts.isIdentifier(target) && !declaredInTry.has(target.text)) names.add(target.text);
+  });
+  return names;
+}
+
+/** Does the enclosing function read one of these names OUTSIDE the catch clause? */
+function accumulatorIsRead(node, names, sf) {
+  if (names.size === 0) return false;
+  const fn = enclosingFunctionNode(node);
+  if (!fn?.body) return false;
+  let read = false;
+  walkAll(fn.body, (n) => {
+    if (read || !ts.isIdentifier(n) || !names.has(n.text)) return;
+    for (let c = n.parent; c && c !== fn; c = c.parent) {
+      if (ts.isCatchClause(c)) return;
+      // A read that decides or reports: a return value, a call argument
+      // (`logger.warn(msg, { refused })`), or an `if` the report hangs off.
+      if (ts.isReturnStatement(c) || ts.isCallExpression(c) || ts.isIfStatement(c)) {
+        read = true;
+        return;
+      }
+    }
+  });
+  return read;
+}
+
+function enclosingFunctionNode(node) {
+  for (let c = node.parent; c; c = c.parent) {
+    if (ts.isFunctionDeclaration(c) || ts.isMethodDeclaration(c)
+      || ts.isArrowFunction(c) || ts.isFunctionExpression(c)) return c;
+  }
+  return null;
 }
 
 function enclosingFunctionName(node, sf) {
@@ -716,6 +794,10 @@ function selfTest() {
     if (hits.length === 0) {
       problems.push(`positive control found NO member: ${control.file}\n    ${control.why}`);
       continue;
+    }
+    if (control.channel && !hits.some((h) => h.channel === control.channel)) {
+      problems.push(`positive control ${control.file} yielded no member on channel `
+        + `\`${control.channel}\` (saw: ${[...new Set(hits.map((h) => h.channel))].join(', ')}).`);
     }
     if (!hits.some((h) => h.tier === control.tier)) {
       problems.push(`positive control ${control.file} yielded ${hits.length} member(s) but none at tier `
