@@ -52,12 +52,37 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative, resolve, sep } from 'node:path';
 
 import { describe, it, expect } from 'vitest';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
+/**
+ * Seeded from `__dirname`, ⛔ not from `dirname(fileURLToPath(import.meta.url))`
+ * — the spelling this file was first written with, and the spelling that cost a
+ * CI round.
+ *
+ * This package is CJS-typed (no `"type": "module"`; it publishes
+ * `dist/index.js` as CommonJS), so under `module: NodeNext` `import.meta` is a
+ * **TS1470** however well it runs under vitest. That is normally invisible from
+ * inside the package — its own `typecheck` script excludes `**\/*.test.ts` — but
+ * this test layer IS in front of tsc, through the `@objectstack/plugin-auth`
+ * `TEST_DEBT` entry in `check-type-check-coverage.mjs` under `scripts/`, a
+ * ledger that may only SHRINK. (⚠️ The name is split exactly as the two sibling
+ * files that record this trap split it: `check:cross-package-test-inputs`
+ * resolves path-shaped tokens against this file's `REPO_ROOT` anchor, so
+ * spelling it as one repo-relative path — even in prose — declares an input
+ * this package does not have, and the gate says so.) The `import.meta` spelling pushed it 94 -> 95 and turned the
+ * job red. `plugin-security/src/seed-write-refusal.test.ts` records the same
+ * ratchet moving 11 -> 12 for the identical reason, so this is the second time
+ * the trap has been paid for and written down.
+ *
+ * `__dirname` type-checks under this package's own config, is defined at
+ * runtime by vitest's transform, and is one of the spellings
+ * `check:cross-package-test-inputs` resolves STATICALLY — which this file needs,
+ * because its walk of the sibling `plugin-security` source tree is an escaping
+ * read that gate is there to see.
+ */
+const HERE = __dirname;
 /** …/packages/plugins/plugin-auth/src → repo root */
 const REPO_ROOT = resolve(HERE, '../../../..');
 const PLUGIN_SRC_TREES = [
