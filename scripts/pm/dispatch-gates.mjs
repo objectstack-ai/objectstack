@@ -111,6 +111,42 @@
  *     path literal to match. Those are derived from the change's KIND instead
  *     and printed under their own heading — see CHANGE_KIND_GATES.
  *
+ * ## What no verdict above can reach: the always-runs tail (#13333)
+ *
+ * All five verdicts partition the families this file DISCOVERS. A gate CI runs
+ * that discovery never sees is in none of them — not silent, not undetermined,
+ * not even unreachable — because a family that is never discovered has no entry
+ * to fall into. `runCommandTexts`' header calls that the one output shape this
+ * contract forbids, and it shipped again: a dev derived 29 families, ran all 29
+ * green, and reddened `Lint & Repo Gates` on
+ * `packages/lint/scripts/check-reference-carrier-shape.mjs` — invoked by path
+ * from a package, so keyed by neither the root `check:*` namespace nor the
+ * `scripts/`-rooted path matcher.
+ *
+ * ⛔ The instance fix is REFUSED. #12205, #12850 and #13126 each widened a
+ * matcher for one such gate and closed; the same red shipped again under a
+ * different gate name each time, and #12956 and #13392 are open on it now.
+ * Triage ruled it a class on 2026-08-30. So the tail does not extend discovery
+ * at all — it reads what CI runs and reports what discovery did not reach, so a
+ * gate added tomorrow in any spelling appears with nothing to update here.
+ *
+ * Measured at the time of writing: 189 unconditional steps across the
+ * pull-request workflows CI cannot narrow by path, 162 of them accounted for by
+ * a discovered family and 27 not — and the 27 are invisible for at least three
+ * unrelated reasons (a package-local path, a non-`node` interpreter, a root
+ * script that is not named `check:*`), which is why no widening of the three
+ * matchers was going to be the last one. See `alwaysRunSteps` for what the tail
+ * excludes and why each exclusion is the safe direction, and for why this is
+ * the COMPLEMENT of the "22 leads is the same as none" set rather than a slice
+ * of it.
+ *
+ * ⚠️ It answers ONE branch of that class. The tail says nothing about a
+ * derivation that runs on a stale tree (#13392), that prints fabricated leads
+ * (#13312, #13449), or that is truncated downstream of this file (#13462) — and
+ * a gate whose population is unreachable for the #13126 reason is discovered
+ * here, so the tail does not name it either. ⛔ Do not read a green tail as the
+ * class being closed.
+ *
  * ## Why CI's own trigger is read, and what it does NOT answer (#9171)
  *
  * The watch-hint half asks whether a gate READS your file. CI asks a different
@@ -994,6 +1030,234 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     }
   }
   return out;
+}
+// ── The "always runs" tail: the steps CI runs whatever your diff is (#13333) ─
+//
+// Everything above discovers CHECK FAMILIES. The four functions below answer
+// the complementary question, and it is the one a dev following the dispatch
+// brief has no way to ask: which steps does CI run on EVERY pull request that
+// this derivation names no family for at all?
+
+/**
+ * Does this workflow declare a `pull_request:` trigger?
+ *
+ * `extractTriggerPaths` returns `[]` for two different workflows — one with a
+ * `pull_request:` trigger and no `paths:` filter, and one with no
+ * `pull_request:` trigger at all — and the always-runs derivation must not
+ * confuse them: the first runs on every PR, the second runs on none. The walk
+ * is the same narrow one, kept beside it so the pair cannot drift.
+ */
+export function declaresPullRequestTrigger(workflowText) {
+  let inOn = false;
+  for (const line of workflowText.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      inOn = /^(?:on|'on'|"on"|true):\s*$/.test(trimmed);
+      continue;
+    }
+    if (inOn && /^pull_request:\s*$/.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * A job's steps, each as `{ name, if: <text|null>, text }`, with the original
+ * indentation kept so every extractor above reads a step exactly as it reads a
+ * whole file — the same property `extractJobBlocks` relies on one level up.
+ *
+ * ## Why the step is the unit, when everything else here counts families
+ *
+ * A family is what a dev RUNS; a step is what CI runs. Those are the same thing
+ * only while every step invokes a discoverable family, and the measurement in
+ * `alwaysRunSteps` below is that they are not. Counting families can therefore
+ * never surface a step that contributes none — the step simply is not in the
+ * universe the three verdicts partition, which is the one output shape this
+ * file's header forbids.
+ *
+ * ## The two boundaries, and the direction each fails in
+ *
+ * The steps list is located by its own `steps:` key and the step boundaries are
+ * the SHALLOWEST dash lines inside it, so nothing outside that list can be read
+ * as a step. A block-scalar body cannot be mistaken for one either: a body is
+ * indented deeper than its `run:` key, which is itself deeper than the dash, so
+ * a `- item` line inside a shell heredoc or a `printf` sits below the dash
+ * indent by construction rather than by luck.
+ *
+ * `if:` is read only at the step's own key column. Read anywhere in the step
+ * text it would pick up the condition on a nested `with:` value and mark an
+ * unconditional step conditional; read at the key column it cannot, because a
+ * `run:` body is always deeper than the column its key sits on. A step whose
+ * `if:` this cannot parse is treated as CONDITIONAL — the safe direction here
+ * is the opposite of the one `extractJobBlocks` takes for jobs, because the
+ * output is a claim that CI runs the step NO MATTER WHAT. A missed step costs a
+ * lead; a step wrongly promised as unconditional is a fabricated one.
+ */
+export function extractStepBlocks(jobText) {
+  const lines = jobText.split('\n');
+  let stepsIndent = -1;
+  let regionStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (/^steps:\s*$/.test(trimmed)) {
+      stepsIndent = /^[ \t]*/.exec(lines[i])[0].length;
+      regionStart = i + 1;
+      break;
+    }
+  }
+  if (regionStart === -1) return [];
+  let regionEnd = lines.length;
+  for (let i = regionStart; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (/^[ \t]*/.exec(lines[i])[0].length <= stepsIndent) {
+      regionEnd = i;
+      break;
+    }
+  }
+  let dashIndent = -1;
+  for (let i = regionStart; i < regionEnd; i++) {
+    const m = /^([ \t]*)-[ \t]+\S/.exec(lines[i]);
+    if (!m) continue;
+    if (dashIndent === -1 || m[1].length < dashIndent) dashIndent = m[1].length;
+  }
+  if (dashIndent === -1) return [];
+  const starts = [];
+  for (let i = regionStart; i < regionEnd; i++) {
+    const m = /^([ \t]*)(-[ \t]+)\S/.exec(lines[i]);
+    if (m && m[1].length === dashIndent) starts.push({ line: i, keyColumn: m[1].length + m[2].length });
+  }
+  return starts.map((s, k) => {
+    const to = k + 1 < starts.length ? starts[k + 1].line : regionEnd;
+    const text = lines.slice(s.line, to).join('\n');
+    let name = null;
+    let cond = null;
+    for (let i = s.line; i < to; i++) {
+      const m = /^([ \t]*)(?:-[ \t]+)?([A-Za-z_][\w-]*):[ \t]*(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const column = i === s.line ? s.keyColumn : m[1].length;
+      if (column !== s.keyColumn) continue;
+      if (m[2] === 'name' && name === null) name = unquoteScalar(m[3]);
+      if (m[2] === 'if' && cond === null) cond = m[3].trim() === '' ? '(block scalar)' : m[3].trim();
+    }
+    return { name: name ?? '(unnamed step)', if: cond, text };
+  });
+}
+
+/**
+ * Every step CI runs on EVERY pull request that the family derivation above
+ * names nothing for — the "always runs" tail.
+ *
+ * Input is the same `[{ file, text }]` the discovery reads, so the tail and the
+ * families come from ONE read of each workflow and cannot describe different
+ * revisions of it.
+ *
+ * ## The measured failure (#13333, and four closed instances before it)
+ *
+ * A dev followed the standing instruction exactly — derive the family with this
+ * tool rather than from a recalled list — got 29 families, ran all 29 green,
+ * and shipped a red on `Lint & Repo Gates`. The gate was
+ * `packages/lint/scripts/check-reference-carrier-shape.mjs`, invoked by path in
+ * an unconditional step. It is not in the residue's `silent` bucket and not in
+ * `undetermined`: it is in NO bucket, because the three matchers in
+ * `extractCheckInvocations` key discovery on a root `check:*` script name or a
+ * `scripts/`-rooted path, and this gate is neither. A family that is never
+ * discovered has no entry to fall into — the shape `runCommandTexts`' header
+ * calls the one output this contract forbids.
+ *
+ * ⛔ The fix REFUSED here is adding that gate, or its shape, to the discovery
+ * matchers. #12205 (`check:exported-any-returns`), #12850
+ * (`check:dispatcher-error-vocabulary`) and #13126 (228 unreached (family,
+ * module) pairs) were each closed that way, and the same red shipped again
+ * under a different gate name each time; #12956 and #13392 are open on the same
+ * mechanism. Triage ruled it a class, not an instance, on 2026-08-30. So the
+ * answer is not a wider matcher — it is to stop deriving the answer from the
+ * matchers alone and read what CI actually runs.
+ *
+ * ## Why this is NOT "22 leads is the same as none"
+ *
+ * The header refuses naming every unfiltered family for every card, and that
+ * refusal stands: on this tree 166 of the 187 discovered families sit outside
+ * both path declarations CI obeys, and printing 166 leads per card would say
+ * nothing. This is the COMPLEMENT of that set, not a slice of it. A step leaves
+ * this list the moment the derivation names any family for it, so the list is
+ * bounded by the derivation's own blind spot and shrinks as discovery improves
+ * — it cannot grow toward the farm. Measured on this tree at the time of
+ * writing: 189 unconditional steps across the unfiltered pull-request
+ * workflows, 162 of them accounted for by a discovered family, 27 not.
+ *
+ * It also carries NO per-card claim and must not be read as one. Every row is
+ * identical for every card, which is the honest shape: these steps run whatever
+ * the diff is, so a per-card verdict on them would be the lie.
+ *
+ * ## What is excluded, and why each exclusion is the safe direction
+ *
+ *   - a workflow with an `on.pull_request.paths` filter: CI can narrow it, so
+ *     its steps are not unconditional and the path derivation above already
+ *     answers for them;
+ *   - a workflow with no `pull_request:` trigger at all: it runs on no PR;
+ *   - a job carrying any `if:`, and a step carrying any `if:`: the claim being
+ *     made is "CI runs this no matter what", and a condition this walk did not
+ *     evaluate could falsify it. Both counts are RETURNED rather than dropped —
+ *     an exclusion nobody can size is one nobody can weigh, the same reason the
+ *     unfiltered-workflow count is printed rather than left as an absence.
+ *
+ * ⛔ Steps are NOT classified into "gate" and "setup". `pnpm install` and
+ * `pnpm lint` are both in this tail on this tree, and only one of them is a
+ * verification — but every rule that separates them is a guess about a step's
+ * intent, and a guess in this position fabricates. What every row DOES share is
+ * exactly what is claimed for it: CI runs it on every PR and this derivation
+ * names no family for it. The reader judges the rest, which is the same
+ * contract `unreachableLines` states for its own listing.
+ */
+export function alwaysRunSteps(entries) {
+  const rows = [];
+  const counts = {
+    unconditional: 0,
+    accounted: 0,
+    unaccounted: 0,
+    conditionalSteps: 0,
+    conditionalJobs: 0,
+    filteredWorkflows: 0,
+    nonPullRequestWorkflows: 0,
+  };
+  for (const { file, text } of entries) {
+    if (!declaresPullRequestTrigger(text)) {
+      counts.nonPullRequestWorkflows += 1;
+      continue;
+    }
+    if (extractTriggerPaths(text).length > 0) {
+      counts.filteredWorkflows += 1;
+      continue;
+    }
+    for (const job of extractJobBlocks(text)) {
+      if (job.if) {
+        counts.conditionalJobs += 1;
+        continue;
+      }
+      for (const step of extractStepBlocks(job.text)) {
+        const commands = runCommandTexts(step.text)
+          .flatMap((c) => c.split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (commands.length === 0) continue;
+        if (step.if) {
+          counts.conditionalSteps += 1;
+          continue;
+        }
+        counts.unconditional += 1;
+        if (extractCheckInvocations(step.text, file).length > 0) {
+          counts.accounted += 1;
+          continue;
+        }
+        rows.push({ workflow: file, job: job.name, step: step.name, commands });
+      }
+    }
+  }
+  counts.unaccounted = rows.length;
+  return { rows, counts };
 }
 
 /**
@@ -5471,6 +5735,92 @@ export function unreachableLines(unreachable, swept) {
   }
   return lines;
 }
+/**
+ * The "always runs" tail, rendered — printed on EVERY run, like the unreachable
+ * listing and for the same reason.
+ *
+ * The disclosure has no value behind a flag nobody is told to pass: the dev who
+ * paid for #13333 ran every family this tool named, and the step that reddened
+ * was one the tool had never mentioned. `unreachableLines`' header records the
+ * identical lesson one bucket over, and the fix there was to print at the
+ * moment of use rather than to write a warning somewhere.
+ *
+ * ## Deduplicated by COMMAND, never by step name
+ *
+ * `Install dependencies` appears once per job and is the same command every
+ * time; `Build workspace packages` and `Build the ledgered packages'
+ * dependencies` are different names for two different turbo filters. Collapsing
+ * by name would merge two real commands and hide one; collapsing by command
+ * text merges only what is literally the same thing to run. The jobs a repeated
+ * command also belongs to are named on its row, so nothing is lost by the
+ * collapse — a reader can still see it is five jobs' worth of setup and not a
+ * gate.
+ *
+ * Refuses rather than prints when the counts do not account for each other, on
+ * the same contract as `residueLines`: a tail that has silently lost rows reads
+ * exactly like a farm with nothing left to disclose (#4690).
+ */
+export const ALWAYS_RUN_COMMAND_CAP = 4;
+
+export function alwaysRunLines(rows, counts) {
+  const { unconditional, accounted, unaccounted, conditionalSteps, conditionalJobs } = counts ?? {};
+  if (!Number.isInteger(unconditional) || unconditional <= 0) {
+    throw new Error(
+      `the always-runs tail found ${String(unconditional)} unconditional CI step(s): a workflow tree with none ` +
+        'is a broken walk, not a clean farm — an unreadable input must never look like an empty answer (#4690)',
+    );
+  }
+  if (!Number.isInteger(accounted) || !Number.isInteger(unaccounted) || accounted + unaccounted !== unconditional) {
+    throw new Error(
+      `the always-runs tail does not account for its own steps: ${String(accounted)} accounted + ` +
+        `${String(unaccounted)} unaccounted != ${unconditional} unconditional`,
+    );
+  }
+  if (unaccounted !== rows.length) {
+    throw new Error(`the always-runs tail counted ${unaccounted} unaccounted step(s) but carries ${rows.length} row(s)`);
+  }
+
+  const byCommand = new Map();
+  for (const row of rows) {
+    const key = row.commands.join('\n');
+    if (!byCommand.has(key)) byCommand.set(key, { ...row, alsoIn: [] });
+    else byCommand.get(key).alsoIn.push(`${row.workflow} · ${row.job}`);
+  }
+
+  const lines = [
+    `Always runs — ${unaccounted} of the ${unconditional} unconditional CI step(s) are ones this derivation names NO family for` +
+      ` (${byCommand.size} distinct command(s), over ${unconditional - unaccounted} it does name one for).`,
+    '  ⛔ NOT a per-card list and NOT narrowable: these steps sit in a workflow with no pull_request path filter, in a job and a',
+    '    step with no `if:`, so CI runs every one of them on EVERY pull request whatever your diff is. Running every family named',
+    '    above therefore does NOT cover them — that is the gap this tail exists to close, and it is identical for every card.',
+    '  ⛔ NOT classified into gates and setup. Some rows are verification and some are `pnpm install`; every rule that tells them',
+    '    apart is a guess about a step\'s intent. What is claimed for each row is only what was measured: CI runs it, and the',
+    '    derivation above names nothing for it.',
+  ];
+  if (conditionalSteps || conditionalJobs) {
+    lines.push(
+      `  Excluded as conditional, and sized rather than dropped: ${conditionalJobs} job(s) and ${conditionalSteps} step(s) carry an` +
+        ' `if:`, so CI may skip them and this tail makes no claim about those.',
+    );
+  }
+  if (byCommand.size === 0) {
+    lines.push('  (none — every unconditional step contributes a family the derivation can name.)');
+    return lines;
+  }
+  for (const row of byCommand.values()) {
+    const also = row.alsoIn.length ? `   (also run by ${row.alsoIn.length} other job(s))` : '';
+    lines.push(`  - [${row.workflow} · ${row.job}] ${row.step}${also}`);
+    // A row is a POINTER to a step, not a transcript of it. One step in this
+    // tree is a 30-line shell program that discovers and runs every hook
+    // self-test, and printed whole it is longer than the other fifteen rows
+    // together — a tail nobody reads discloses nothing. The elision names the
+    // file to read instead, so the disclosure survives the cut.
+    for (const command of row.commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`      ${command}`);
+    const elided = row.commands.length - ALWAYS_RUN_COMMAND_CAP;
+    if (elided > 0) lines.push(`      … ${elided} more line(s) — read the step in ${row.workflow}`);
+  }
+  return lines;
+}
 
 export function residueLines(
   {
@@ -5874,8 +6224,15 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // the reason stated there: one read, three answers, no chance of them
   // describing different revisions of a file.
   const jobPopulationsByCheck = new Map();
+  // The always-runs tail (#13333) reads the SAME text as the three answers
+  // above, for the same reason they read it together: a tail derived from a
+  // second read could describe a different revision of a workflow than the
+  // families it is printed beside, and the whole point of the tail is that it
+  // states what the family list does not cover.
+  const workflowEntries = [];
   for (const wf of workflows) {
     const text = readFileSync(join(wfDir, wf), 'utf8');
+    workflowEntries.push({ file: wf, text });
     invocations.push(...extractCheckInvocations(text, wf));
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
     for (const pop of jobPathPopulations(text, wf)) {
@@ -6039,7 +6396,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
   }
-  return { byCheck, workflows };
+  return { byCheck, workflows, workflowEntries };
 }
 
 function derive(paths, { showResidue = false } = {}) {
@@ -6052,7 +6409,7 @@ function derive(paths, { showResidue = false } = {}) {
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
-  const { byCheck, workflows } = discoverFamilies({ tree: watchHintTree(swept) });
+  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree: watchHintTree(swept) });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
   // #13312) — so the two cannot disagree about which literals are dead.
@@ -6155,6 +6512,17 @@ function derive(paths, { showResidue = false } = {}) {
   // pass — see `unreachableLines` for the CI failure that made that concrete.
   console.log('');
   for (const line of unreachableLines(unreachable, swept.length)) console.log(line);
+
+  // The always-runs tail prints on every run for the same reason and with the
+  // same standing: it is not about the card's paths either, and the family list
+  // above provably does not cover it (#13333). Above the residue rather than
+  // below it, because the residue's closing line tells the reader the
+  // derivation is complete, and this is the part that is not.
+  console.log('');
+  {
+    const { rows, counts } = alwaysRunSteps(workflowEntries);
+    for (const line of alwaysRunLines(rows, counts)) console.log(line);
+  }
 
   console.log('');
   for (const line of residueLines({
@@ -11639,6 +12007,159 @@ function selfTest() {
   } finally {
     rmSync(entryTmp, { recursive: true, force: true });
   }
+
+  // ── The always-runs tail (#13333) ────────────────────────────────────────
+  //
+  // Two halves, and the SECOND is the one that answers the card. The fixtures
+  // pin the walk; the live pins below assert that the tail reaches the CLASS on
+  // this tree — that it names a second member, invisible for a DIFFERENT reason
+  // than the gate the card was filed about. A fix demonstrated only on
+  // `check-reference-carrier-shape` is the instance fix triage refused, and the
+  // way to keep that from rotting back in is to make the class assertion a
+  // case, derived live, rather than a sentence in a docblock.
+  const tailWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    '    branches:',
+    '      - main',
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: Setup',
+    '        uses: actions/checkout@v4',
+    '      - name: A discoverable family',
+    '        run: pnpm check:engine-double-contract',
+    '      - name: A package-local gate invoked by path',
+    '        run: |',
+    '          node packages/lint/scripts/check-fixture-shape.mjs --self-test',
+    '          node packages/lint/scripts/check-fixture-shape.mjs',
+    '      - name: A gate run by another interpreter',
+    '        run: bash scripts/pm/os-fixture-lock.sh --self-test',
+    '      - name: Conditional, so no claim is made about it',
+    '        if: github.event_name == \'push\'',
+    '        run: pnpm exec turbo run build',
+    '      - name: A body carrying a dash line',
+    '        run: |',
+    '          printf \'%s\\n\' "- not a step"',
+    '          pnpm lint',
+    '  conditional-job:',
+    '    if: needs.filter.outputs.console == \'true\'',
+    '    steps:',
+    '      - name: Never claimed as always-run',
+    '        run: pnpm check:console-pin',
+  ].join('\n');
+
+  t('a pull_request trigger is distinguished from no trigger at all', declaresPullRequestTrigger(tailWf));
+  t(
+    'a workflow with no pull_request trigger is not read as unfiltered',
+    !declaresPullRequestTrigger('on:\n  push:\n    branches:\n      - main\njobs:\n  x:\n    steps: []'),
+  );
+
+  const tailJob = extractJobBlocks(tailWf).find((j) => j.id === 'gates');
+  const tailSteps = extractStepBlocks(tailJob.text);
+  t('every step of the job is found, and only the steps', tailSteps.length === 6);
+  t('a step name is read from its own key column', tailSteps[1].name === 'A discoverable family');
+  t('a step `if:` is read', tailSteps[4].if === "github.event_name == 'push'");
+  t('a step without an `if:` is not given one', tailSteps[2].if === null);
+  t(
+    'a dash line INSIDE a block-scalar body is not read as a step',
+    tailSteps[5].name === 'A body carrying a dash line' && tailSteps[5].text.includes('- not a step'),
+  );
+
+  const tail = alwaysRunSteps([{ file: 'fixture.yml', text: tailWf }]);
+  const tailNames = tail.rows.map((r) => r.step);
+  t('a step whose family the derivation names is NOT in the tail', !tailNames.includes('A discoverable family'));
+  t('a package-local gate invoked by path IS in the tail', tailNames.includes('A package-local gate invoked by path'));
+  t('a gate run by another interpreter IS in the tail', tailNames.includes('A gate run by another interpreter'));
+  t('a conditional STEP is excluded and counted', !tailNames.includes('Conditional, so no claim is made about it') && tail.counts.conditionalSteps === 1);
+  t('a conditional JOB is excluded and counted', !tailNames.includes('Never claimed as always-run') && tail.counts.conditionalJobs === 1);
+  t('a `uses:` step with no command is neither counted nor listed', !tailNames.includes('Setup') && tail.counts.unconditional === 4);
+  t('the tail accounts for every unconditional step it counted', tail.counts.accounted + tail.counts.unaccounted === tail.counts.unconditional);
+  t(
+    'a workflow CI can narrow by path is excluded from the tail entirely',
+    alwaysRunSteps([{ file: 'f.yml', text: tailWf.replace('    branches:\n      - main', "    paths:\n      - 'packages/**'") }]).counts
+      .filteredWorkflows === 1,
+  );
+
+  const tailLines = alwaysRunLines(tail.rows, tail.counts);
+  t('the rendered tail sizes itself against the unconditional total', tailLines[0].includes(`${tail.counts.unaccounted} of the ${tail.counts.unconditional}`));
+  t('the rendered tail refuses to be read as a per-card list', tailLines.some((l) => l.includes('EVERY pull request whatever your diff is')));
+  t('the rendered tail refuses to classify its rows into gates and setup', tailLines.some((l) => l.includes('NOT classified into gates and setup')));
+
+  const dedupeRows = [
+    { workflow: 'a.yml', job: 'One', step: 'Install dependencies', commands: ['pnpm install --frozen-lockfile'] },
+    { workflow: 'a.yml', job: 'Two', step: 'Install dependencies', commands: ['pnpm install --frozen-lockfile'] },
+    { workflow: 'a.yml', job: 'Two', step: 'Install dependencies', commands: ['pnpm install --offline'] },
+  ];
+  const dedupeLines = alwaysRunLines(dedupeRows, { unconditional: 4, accounted: 1, unaccounted: 3, conditionalSteps: 0, conditionalJobs: 0 });
+  t('rows are deduplicated by COMMAND, never by step name', dedupeLines.filter((l) => l.startsWith('  - ')).length === 2);
+  t('a repeated command names how many other jobs also run it', dedupeLines.some((l) => l.includes('also run by 1 other job(s)')));
+
+  const longRow = [{ workflow: 'a.yml', job: 'J', step: 'S', commands: Array.from({ length: 30 }, (_, i) => `line ${i}`) }];
+  const longLines = alwaysRunLines(longRow, { unconditional: 2, accounted: 1, unaccounted: 1, conditionalSteps: 0, conditionalJobs: 0 });
+  t('a long step is elided to a pointer rather than transcribed', longLines.some((l) => l.includes(`${30 - ALWAYS_RUN_COMMAND_CAP} more line(s) — read the step in a.yml`)));
+  t('the elision still prints the capped head of the command', longLines.filter((l) => /^ {6}line \d+$/.test(l)).length === ALWAYS_RUN_COMMAND_CAP);
+
+  const refusedTail = (rows, counts) => {
+    try {
+      alwaysRunLines(rows, counts);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  t('a tail that found NO unconditional step refuses rather than reads as a clean farm (#4690)', refusedTail([], { unconditional: 0, accounted: 0, unaccounted: 0 }));
+  t('a tail whose counts do not add up refuses', refusedTail([], { unconditional: 5, accounted: 1, unaccounted: 1 }));
+  t('a tail whose row count contradicts its own total refuses', refusedTail([], { unconditional: 5, accounted: 4, unaccounted: 1 }));
+
+  // ── LIVE, on this tree: does the tail reach the CLASS? ────────────────────
+  //
+  // Re-derived on every run, so these fail when the workflows move rather than
+  // when someone remembers to re-read them. ⛔ No count is pinned: the number
+  // of unconditional steps moves with every workflow edit and a frozen one
+  // would go stale with nothing failing — which is the defect this whole file
+  // is about.
+  const liveTail = alwaysRunSteps(
+    readdirSync(join(ROOT, '.github/workflows'))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => ({ file: f, text: readFileSync(join(ROOT, '.github/workflows', f), 'utf8') })),
+  );
+  const liveCommands = liveTail.rows.flatMap((r) => r.commands);
+  t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
+  t(
+    'the live tail names the INSTANCE the card was filed about: a package-local gate invoked by path',
+    liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c)),
+  );
+  // The class assertion. The instance above is invisible because its path is
+  // not under `scripts/`; this one is invisible because its INTERPRETER is not
+  // `node` at all. Two different structural reasons, so a fix that reached only
+  // the first would fail here.
+  const otherInterpreter = liveCommands.filter((c) => /^(?:bash|sh|python3?)\s+\S+/.test(c));
+  t(
+    'the live tail reaches the CLASS: a second member invisible for a DIFFERENT reason (another interpreter)',
+    otherInterpreter.length > 0,
+  );
+  t(
+    'and that second member is not the card\'s own gate wearing a different name',
+    otherInterpreter.some((c) => !c.includes('reference-carrier')),
+  );
+  // The partition. Every row is a step the family derivation names NOTHING for,
+  // so a row that yields an invocation would mean the tail and the family list
+  // are double-counting the same step — the two halves have to be disjoint for
+  // either count to mean anything.
+  t(
+    'no row in the live tail yields a check invocation — the tail and the family list are disjoint',
+    liveTail.rows.every((r) => extractCheckInvocations(r.commands.join('\n'), r.workflow).length === 0),
+  );
+  t(
+    'every live row really sits in a workflow CI cannot narrow by path',
+    liveTail.rows.every((r) => {
+      const text = readFileSync(join(ROOT, '.github/workflows', r.workflow), 'utf8');
+      return declaresPullRequestTrigger(text) && extractTriggerPaths(text).length === 0;
+    }),
+  );
+  t('the live tail renders without refusing', alwaysRunLines(liveTail.rows, liveTail.counts).length > 0);
 
   let failed = 0;
   for (const [name, cond] of cases) {
