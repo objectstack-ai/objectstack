@@ -3049,9 +3049,36 @@ export function coveringJobFilter(entry, inputPath) {
  * What the refusal COSTS is a live missing lead, and it is named rather than
  * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
  * THIS file, and a card editing this file derives 14 families without naming
- * it. That gate gets run by hand. The miss costs one CI round, which is the
- * side this file's header errs on everywhere, and it is a far smaller cost than
- * the 118-lead card the general key prints for the module all 118 import.
+ * it. That gate gets run by hand, but lint.yml runs it on every PR too, so the
+ * miss costs one CI round, which is the side this file's header errs on
+ * everywhere, and it is a far smaller cost than the 118-lead card the general
+ * key prints for the module all 118 import.
+ *
+ * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
+ * price and an AVERAGE over the class, and the next reader will quote it as the
+ * price of every missed lead. For a minority it is wrong. Which minority is a
+ * TREE-fact, re-derived and printed by every `--self-test` run instead of
+ * recorded here, because this class has already been measured at three
+ * different sizes on three different days:
+ *
+ *   - the large majority of novel pairs sit in a family at least one UNFILTERED
+ *     workflow runs. CI opens that module on this PR whatever the derivation
+ *     said, so one round really is the whole price; and
+ *   - the rest sit in families NO every-PR workflow runs — today the
+ *     paths-filtered and scheduled callers (the patrols, `validate-deps.yml`,
+ *     and the release-time ones). No CI round on this PR repays those. The
+ *     family next executes on its own cadence, detached from the change.
+ *
+ * That remainder is a LOWER bound for the same two reasons the novel total is
+ * (below), and it is NOT the claim that a load break in those helpers ships
+ * green: every module carrying a deferred pair is imported by every-PR families
+ * as well, so a module that fails to LOAD reddens this PR through a sibling.
+ * What defers is the narrower break, the one only the deferred consumer would
+ * have seen. Nor do the deferred pairs spread thin — they concentrate on the
+ * shared heads this refusal is refused FOR, i.e. the modules most likely to be
+ * edited into a break. Both halves are asserted in `--self-test`; a red there
+ * says the exception changed shape and this paragraph is due a re-read, not
+ * that the derivation broke.
  *
  * Two shapes make 232 a LOWER bound rather than an exact size, both already
  * refused upstream for their own measured reasons: a dynamic `import()` of a
@@ -7510,6 +7537,58 @@ function selfTest() {
     `…and the class is still concentrated: ${importTop5} of ${importNovel.length} novel pair(s) land`
       + ` on ${Math.min(5, importWorst.length)} module(s)`,
     importTop5 * 2 > importNovel.length,
+  );
+  // The PRICE the refusal states is an AVERAGE (#13467). "The miss costs one CI
+  // round" holds for a novel pair whose family some UNFILTERED workflow runs —
+  // CI opens the module on that PR regardless — and does not hold for one whose
+  // family no every-PR workflow runs at all: nothing on the PR repays that
+  // miss. Prose cannot notice the split moving and this one has moved three
+  // times, so the docblock states the SHAPE and these three assertions print
+  // the sizes. A red here re-prices the paragraph; it does not fault the
+  // derivation.
+  const everyPRWorkflow = new Map();
+  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    const wfText = readFileSync(join(ROOT, '.github/workflows', wf), 'utf8');
+    // No `paths:` on a workflow that declares `pull_request` is the same
+    // reading `discoverFamilies` makes when it drops such a workflow from
+    // `triggers` — an unfiltered workflow discriminates nothing, which is
+    // exactly why it runs on every PR.
+    everyPRWorkflow.set(wf, declaresPullRequestTrigger(wfText) && extractTriggerPaths(wfText).length === 0);
+  }
+  const runsOnEveryPR = (e) => [...(e?.workflows ?? [])].some((wf) => everyPRWorkflow.get(wf));
+  const importFamilyByCheck = new Map(importClassFamilies);
+  const importDeferred = importNovel.filter(([check]) => !runsOnEveryPR(importFamilyByCheck.get(check)));
+  const importDeferredWorkflows = [...new Set(
+    importDeferred.flatMap(([check]) => [...(importFamilyByCheck.get(check)?.workflows ?? [])]),
+  )].sort();
+  t(
+    `the "one CI round" price is an average, not a uniform one — ${importDeferred.length} of`
+      + ` ${importNovel.length} novel pair(s) sit in families no every-PR workflow runs`
+      + ` (${importDeferredWorkflows.join(', ') || 'none'}), so no CI round on the PR repays that miss`,
+    importDeferred.length > 0 && importDeferred.length * 4 < importNovel.length,
+  );
+  // The half that keeps the exception from being over-read: a deferred pair is
+  // a deferred LEAD, never a silent load break. Every module carrying one is
+  // imported by every-PR families too, so a module that fails to LOAD reddens
+  // the PR through a sibling; what defers is the narrower break.
+  const importLoadBreakSilent = importDeferred.filter(([, mod]) =>
+    !importClassFamilies.some(([c2, e2]) => runsOnEveryPR(e2) && (importClassEdges.get(c2)?.has(mod) ?? false)));
+  t(
+    'a deferred pair defers the LEAD, not the load break — every module carrying one is imported by'
+      + ' an every-PR family as well, so failing to load still reddens the PR'
+      + `${importLoadBreakSilent.length ? ` — SILENT: ${importLoadBreakSilent.map(([c, m]) => `${c} <- ${m}`).join(' · ')}` : ''}`,
+    importLoadBreakSilent.length === 0,
+  );
+  // And they are not spread thin: the deferred pairs land on the shared heads
+  // this key is refused FOR — the modules most likely to be edited into a
+  // break. `fan-in <= 3` is the tail boundary the aggregate paragraph uses.
+  const importFanIn = (mod) => importClassFamilies.filter(([c2]) => importClassEdges.get(c2)?.has(mod)).length;
+  const importDeferredOnHeads = importDeferred.filter(([, mod]) => importFanIn(mod) > 3);
+  t(
+    `…and the deferred pair(s) concentrate on the heads rather than the tail:`
+      + ` ${importDeferredOnHeads.length} of ${importDeferred.length} land on a module more than 3`
+      + ` families import`,
+    importDeferredOnHeads.length * 2 > importDeferred.length,
   );
 
   // #12107, the live half — three claims about THIS tree, each one a thing the
