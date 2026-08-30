@@ -12,11 +12,15 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  *
  * Both objects are tenant-scoped: the kernel provisions `organization_id` on
  * them, so `SqlDriver.resolveTenantField()` answers `organization_id` and the
- * driver's `auditMissingTenant` gate treats every unscoped write to them as a
- * finding on a walled deployment (`OS_TENANCY_POSTURE=isolated|group`). That
- * gate is right to ask, and the two legal answers are "thread the caller's
- * tenant" or "declare this write global, and say why". These sweeps are the
- * second, and the warrant is structural rather than aesthetic:
+ * driver's `auditMissingTenant` gate treats an unscoped APPLICATION-SURFACE
+ * write to them as a finding on a walled deployment
+ * (`OS_TENANCY_POSTURE=isolated|group`). Its scope stops there — a write made
+ * under `ExecutionContext.isSystem` is outside the control by ruling (#13491)
+ * — and these sweeps are not such a write: they carry no elevated context,
+ * they reach the gate, and it is right to ask. The two legal answers are
+ * "thread the caller's tenant" or "declare this write global, and say why".
+ * These sweeps are the second, and the warrant is structural rather than
+ * aesthetic:
  *
  *  1. **No request context exists to thread.** The only callers are
  *     `NotificationDispatcher` and `HttpDispatcher`, whose `runPartition()`

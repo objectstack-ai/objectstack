@@ -3598,9 +3598,30 @@ export class ObjectQL implements IObjectQLEngine {
       opts.timezone = execCtx!.timezone;
     }
     if (isSystem && opts.bypassTenantAudit === undefined) {
+      // ── SCOPE EXCLUSION (ruled), not a silenced defect ──────────────────
       // System-elevated writes (boot-time seeds, internal mirrors, scheduled
-      // hooks) are unscoped by design — silence the audit warn for them but
-      // still flag genuine user-path bugs.
+      // hooks) are the platform writing to itself, and crossing tenants is
+      // their SEMANTICS rather than an oversight. They sit OUTSIDE the scope
+      // of the driver's `[tenant-audit]` control, whose subject is the
+      // APPLICATION-SURFACE call site.
+      //
+      // This line used to say only "unscoped by design" — a declaration that
+      // had never been adjudicated. It has been, on #13491: maintainer ruling
+      // 2026-08-30 (第 5 场总监席决裁批 #9, verbatim「同意」), option A:
+      //
+      //   > 追认「`isSystem` 写入不在本控制范围内」为正式裁定(系统写入系平台
+      //   > 自写、合法跨租户;控制目标是应用面调用点)。
+      //
+      // ⚠️ The population that follows from it: ~40 of the 175 service write
+      // call sites the tenant-audit census counted against a tenancy-enabled
+      // object, the other ~135 excluded right here. ⛔ Never describe that
+      // control as covering "all writes" — it does not, by ruling, and a
+      // reader who thinks it does will read a quiet log as an all-clear.
+      //
+      // ⚠️ The ruling states its own condition for return (回头条款): should
+      // a system write turn out to land a NULL-tenant row on a walled
+      // deployment, the scoping goes back to the maintainer. That measurement
+      // is #13497. A ruling with a live look-back clause, not a settled law.
       opts.bypassTenantAudit = true;
     }
     if (preserveAudit && opts.preserveAudit === undefined) {

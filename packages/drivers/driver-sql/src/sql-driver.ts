@@ -11956,10 +11956,50 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Surface writes that target a tenant-scoped object but don't carry a
-   * `tenantId`. These are almost always system / seed / admin paths that
-   * forgot to thread the active session context — easy to miss in code
-   * review and impossible to find after a breach.
+   * Surface an **application-surface** write that targets a tenant-scoped
+   * object without carrying a `tenantId` — a call site that forgot to thread
+   * the acting session's organization, which is easy to miss in code review
+   * and impossible to find after a breach.
+   *
+   * ## ⭐ What this control's scope IS — declared, because it was ruled
+   *
+   * ⛔ It is **not** "every write". Writes made under
+   * `ExecutionContext.isSystem` are OUTSIDE this control's scope: they are the
+   * platform writing to itself, and crossing tenants is their semantics rather
+   * than an oversight. The engine declares that exclusion by threading
+   * `bypassTenantAudit` for them (`objectql/src/engine.ts`, the `isSystem`
+   * branch of `buildDriverOptions`, which carries the ruling in full).
+   *
+   * That exclusion was a bare code comment ("unscoped by design") for its whole
+   * life and had never been adjudicated. It has been, on #13491: maintainer
+   * ruling 2026-08-30 (第 5 场总监席决裁批 #9, verbatim「同意」), option A —
+   * 追认「`isSystem` 写入不在本控制范围内」为正式裁定.
+   *
+   * So the honest population: of the **175** service write call sites the
+   * tenant-audit census counted against a tenancy-enabled object, roughly
+   * **40** are application-surface sites this control can speak about — 24 of
+   * them carrying no tenant context at all — and the other ~135 are excluded
+   * by the ruling above before this method's second guard. ⛔ Do not describe
+   * this control as covering all writes; a quiet log is not an all-clear over
+   * the whole write surface, only over that ~40.
+   *
+   * ⚠️ The ruling states its own condition for return (回头条款): should a
+   * system write turn out to land a NULL-tenant row on a walled deployment,
+   * the scoping goes back to the maintainer. That measurement is #13497.
+   *
+   * ## Guard order — scope first, posture second, and why it stays that way
+   *
+   * The chain below is: env kill switch → SCOPE → the write already carried
+   * its tenant → deployment POSTURE → the object has a tenant column →
+   * throttle. Every step before the throttle is a pure predicate, so the SET
+   * of writes that reach the warning is their conjunction and does not depend
+   * on their order. What the order does buy is real and is load-bearing twice
+   * over: an out-of-scope write never pays the live posture read (#5262 traded
+   * the memo for that read on exactly this argument), and it never runs
+   * `resolveTenancyPosture()`, which THROWS on a malformed
+   * `OS_TENANCY_POSTURE` — so a misconfigured deployment cannot turn a
+   * diagnostics helper into a failing write on the platform's own paths.
+   * `sql-driver-13491-tenant-audit-scope.test.ts` pins both directions.
    *
    * Throttled to one warning per `${object}:${op}` so background workers
    * don't spam the log. Set `options.bypassTenantAudit = true` (or env
@@ -11971,7 +12011,13 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
-    if (options?.bypassTenantAudit === true) return;
+    // Guard 2 is a SCOPE gate, not a posture check, and the name says so:
+    // `bypassTenantAudit` is how a caller (or the engine, for every
+    // `isSystem` write) declares this write is not one this control is about.
+    // Ruled on #13491 — see the docblock above; ⛔ do not re-file its position
+    // ahead of the posture read as a defect.
+    const outOfControlScope = options?.bypassTenantAudit === true;
+    if (outOfControlScope) return;
     // A write that DID carry its tenant is the case this audit has nothing to
     // say about, and it is the overwhelmingly common one — so it exits here,
     // before the posture read below. Ordering only (both guards are pure

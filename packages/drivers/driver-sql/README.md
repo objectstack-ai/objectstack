@@ -385,10 +385,23 @@ isolation (`tenancy.enabled` + `tenancy.tenantField`).
 
 ### Audit warning
 
-The driver logs **one warning per `{object}:{op}`** when a write hits a
-tenant-scoped object without `options.tenantId`. Genuine system writes
-(`ExecutionContext.isSystem === true`) auto-silence; everything else
-surfaces as `[tenant-audit] ...` so missing-context bugs are visible.
+The driver logs **one warning per `{object}:{op}`** when an
+**application-surface** write hits a tenant-scoped object without
+`options.tenantId`, on a deployment that asked for an organization wall
+(`OS_TENANCY_POSTURE=isolated|group`), so missing-context bugs are visible as
+`[tenant-audit] ...`.
+
+⛔ **This control does not cover every write, and must not be described as if
+it did.** Writes made under `ExecutionContext.isSystem` are outside its scope
+by ruling — the platform writing to itself, legitimately across tenants — and
+the engine declares that by threading `bypassTenantAudit` for them. Of the 175
+service write call sites the tenant-audit census counted against a
+tenancy-enabled object, roughly 40 are application-surface sites this control
+speaks about (24 of them carrying no tenant context at all); the rest are out
+of scope. A quiet log is an all-clear over that ~40, not over the whole write
+surface. Maintainer ruling 2026-08-30 on #13491, with a stated look-back
+clause: if a system write is ever measured landing a NULL-tenant row on a
+walled deployment (#13497), the scoping returns to the maintainer.
 
 Override per call: `options.bypassTenantAudit = true`.
 Override globally: `OS_TENANT_AUDIT=0`.
