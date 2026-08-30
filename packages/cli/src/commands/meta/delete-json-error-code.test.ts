@@ -37,6 +37,18 @@
  * neither key, and asserts `createApiClient` was never called, so "no code"
  * is measured on a genuinely local throw rather than on a network path that
  * happened not to run.
+ *
+ * ## Why every case carries an explicit 60s budget
+ *
+ * Not a slow test being papered over — the budget is wall-clock only and no
+ * assertion moves with it. Each case drives a real `Command.run` against the
+ * real oclif root, which resolves the plugin/manifest surface before the
+ * command body runs; measured at ~0.8s per case on an idle box, and measured
+ * TIMING OUT at vitest's 5s default when this file ran inside the package's
+ * full 220-file suite on a shared container. A default-budget case here is a
+ * test whose verdict depends on what else the box happens to be doing. The
+ * neighbouring `delete-reset-carriers.test.ts` reaches the same conclusion for
+ * the same reason and spells it the same way.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -145,7 +157,7 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     expect(thrown.code).toBe('METADATA_CONFLICT');
     expect(thrown.httpStatus).toBe(409);
     expect(thrown.message).toBe(CONFLICT_SENTENCE);
-  });
+  }, 60_000);
 
   it('the FLAT dialect reaches the envelope as `code` + `httpStatus` beside `error`', async () => {
     stub.client = clientAnswering(409, { error: CONFLICT_SENTENCE, code: 'METADATA_CONFLICT' });
@@ -164,7 +176,7 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     expect(payload.code).toBe('METADATA_CONFLICT');
     // …and the payload is FLAT — option C was declined as breaking.
     expect(typeof payload.error).toBe('string');
-  });
+  }, 60_000);
 
   it('the WRAPPED dispatcher dialect lands on the SAME spelling, not the numeric status', async () => {
     stub.client = clientAnswering(409, {
@@ -181,7 +193,7 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     // NUMBER under `code` would make the branch our docs teach never match.
     expect(typeof payload.code).toBe('string');
     expect(payload.code).not.toBe('409');
-  });
+  }, 60_000);
 
   it('a status with no code publishes the status alone, not an invented code', async () => {
     stub.client = clientAnswering(503, { message: 'upstream unavailable' });
@@ -191,7 +203,7 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     const payload = JSON.parse(run.out);
     expect(payload).toEqual({ success: false, error: 'upstream unavailable', httpStatus: 503 });
     expect(Object.keys(payload)).not.toContain('code');
-  });
+  }, 60_000);
 
   it("OMIT ARM — the CLI's own local refusal emits NEITHER key, in the BYTES", async () => {
     // `metaDeleteOptions` throws a plain `Error` before a client exists.
@@ -209,7 +221,7 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     expect(run.out).not.toContain('"code"');
     expect(run.out).not.toContain('"httpStatus"');
     expect(Object.keys(payload).sort()).toEqual(['error', 'success']);
-  });
+  }, 60_000);
 
   it('human `table` output is UNTOUCHED — same bytes, no carriers', async () => {
     // Explicitly out of scope for this card: the prose stays prose.
@@ -220,5 +232,5 @@ describe('[#13347] `os meta delete --format json` publishes the code it was hand
     expect(run.out).toContain(CONFLICT_SENTENCE);
     expect(run.out).not.toContain('httpStatus');
     expect(run.out).not.toContain('METADATA_CONFLICT');
-  });
+  }, 60_000);
 });
