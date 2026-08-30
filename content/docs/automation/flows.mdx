@@ -1436,7 +1436,7 @@ curl -b cookies.txt -X POST \
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
-`200`. The route classifies four outcomes, and it reads the engine's own verdict
+`200`. The route classifies five outcomes, and it reads the engine's own verdict
 to do it — never the message text:
 
 | Status | `error.code` | What happened | What to do |
@@ -1444,10 +1444,14 @@ to do it — never the message text:
 | `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
 | `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
+| `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |
 | `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
 
-The first three never dispatched anything: no node executed, no record was
-written, and there is no run to look up. Only `400` describes a run.
+The first four never dispatched anything: no node executed, no record was
+written, and there is no run to look up. Only `400` describes a run. The
+`FLOW_INPUT_SCHEMA_INVALID` verdict is a pure function of the flow definition —
+re-running the guard cannot change the answer — so a `retry` strategy does not
+burn its budget on it: the run log holds exactly one refusal row.
 
 **The same table answers at every door that dispatches a flow.** Invoking a
 `type: 'flow'` [action](/docs/ui/actions) through
