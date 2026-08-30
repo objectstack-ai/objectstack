@@ -2933,15 +2933,40 @@ function selfTest() {
     //    stay unrecognised — the first would make `enclosingDeclaration`
     //    answer with a control-flow head, the second with a declaration no
     //    stamp can live inside.
-    for (const [name, source] of [
-      ['a control-flow head', `function outer(code: string) {\n  if (code) {\n    const e = new Error('x');\n    (e as any).code = code;\n  }\n}\n`],
-      ['an interface signature', `interface Thing {\n  fail(code: string, message: string): void;\n}\nfunction outer(code: string) {\n  const e = new Error('x');\n  (e as any).code = code;\n}\n`],
-    ]) {
-      const decl = enclosingDeclaration(source, source.indexOf('.code = code'));
+    //
+    //    ⚠️ Each case below puts the stamp where the SUSPECT header would be
+    //    the nearest preceding one. That placement is the whole assertion, and
+    //    getting it wrong is silent: an earlier draft of the signature case put
+    //    the stamp inside a later `function outer(`, which wins as
+    //    nearest-preceding whether or not the signature is recognised — so the
+    //    pin passed with the body-follows check DELETED. Ablate a pin like this
+    //    before believing it.
+    {
+      // A control-flow head sits BETWEEN the enclosing function and the stamp,
+      // so if `if (` were read as a method it would win as the nearer header.
+      const controlFlow =
+        `function outer(code: string) {\n  if (code) {\n    const e = new Error('x');\n    (e as any).code = code;\n  }\n}\n`;
+      const decl = enclosingDeclaration(controlFlow, controlFlow.indexOf('.code = code'));
       ok(
         decl !== null && decl.name === 'outer' && !decl.isMethod,
-        `${name} is now read as a method header — \`enclosingDeclaration\` answered ` +
-          `${decl ? `${decl.name} (isMethod=${decl.isMethod})` : 'null'} instead of the enclosing function \`outer\`.`,
+        'a control-flow head is now read as a method header — `enclosingDeclaration` answered ' +
+          `${decl ? `${decl.name} (isMethod=${decl.isMethod})` : 'null'} instead of the enclosing function \`outer\`. ` +
+          'The statement keywords must stay in the method lookahead.',
+      );
+    }
+    {
+      // A body-less SIGNATURE, with NOTHING else that could be recognised: the
+      // only honest answer is `null`. If the body-follows check goes, the
+      // signature is read as a declaration and this answers `fail`.
+      const signature =
+        `interface Thing {\n  fail(code: string, message: string): void;\n}\n` +
+        `const e = new Error('x');\n(e as any).code = code;\n`;
+      const decl = enclosingDeclaration(signature, signature.indexOf('.code = code'));
+      ok(
+        decl === null,
+        'a body-less method SIGNATURE is now read as a declaration — `enclosingDeclaration` answered ' +
+          `${decl ? `${decl.name}(${decl.params})` : 'null'}. A signature owns no body, so no stamp can be ` +
+          'inside it; the `{`-follows check is what separates it from a real method header.',
       );
     }
     ok(
