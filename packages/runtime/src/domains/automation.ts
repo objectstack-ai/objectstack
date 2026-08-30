@@ -1133,15 +1133,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // that is not a permission denial, so a transport calling it
             // directly would otherwise get an exception where every other
             // refusal on this domain hands back a response.
+            // [#12206, Option A] The door answers the canonicalized PARSED
+            // flow `registerFlow` stored (schema defaults materialized,
+            // `edge.condition` strings lowered to their envelopes) — the same
+            // shape `GET /automation/:name` serves — never an echo of the
+            // caller's own pre-parse bytes.
+            let registered;
             try {
-                automationService.registerFlow(body.name, body);
+                registered = automationService.registerFlow(body.name, body);
             } catch (e) {
                 return {
                     handled: true,
                     response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
                 };
             }
-            return { handled: true, response: deps.success(body) };
+            return { handled: true, response: deps.success(registered) };
         }
     }
 
@@ -1851,15 +1857,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // same route-agnostic `flowDefinitionRefusal` helper POST
                 // uses above, so the two doors cannot disagree about the
                 // class of an identical refusal (#8055 wired POST only).
+                // [#12206, Option A] Same as the POST door above: answer the
+                // canonicalized parsed flow the engine stored, not the
+                // caller's echo. This also closes the old PUT quirk where the
+                // echoed `definition` could lack `name` (the name rode the
+                // path) — the parsed flow always carries it.
+                let registered;
                 try {
-                    automationService.registerFlow(name, definition);
+                    registered = automationService.registerFlow(name, definition);
                 } catch (e) {
                     return {
                         handled: true,
                         response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
                     };
                 }
-                return { handled: true, response: deps.success(definition) };
+                return { handled: true, response: deps.success(registered) };
             }
         }
 

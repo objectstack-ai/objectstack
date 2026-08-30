@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { IAutomationService, AutomationResult } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
+import { FlowSchema } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 
@@ -19,7 +20,10 @@ describe('Automation Service Contract', () => {
     const service: IAutomationService = {
       execute: async () => ({ success: true }),
       listFlows: async () => [],
-      registerFlow: (_name, _definition) => {},
+      // [#12206] `registerFlow` answers the canonicalized parsed flow it
+      // stored — the same object `getFlow` serves; parsing IS the minimal
+      // conforming implementation.
+      registerFlow: (_name, definition) => FlowSchema.parse(definition),
       unregisterFlow: (_name) => {},
       getFlow: async (_name) => null,
       toggleFlow: async (_name, _enabled) => {},

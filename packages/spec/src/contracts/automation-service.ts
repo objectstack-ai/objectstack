@@ -400,11 +400,19 @@ export interface IAutomationService {
     listFlows(): Promise<string[]>;
 
     /**
-     * Register a flow definition
+     * Register a flow definition.
+     *
+     * Returns the canonicalized, PARSED flow it stored — `FlowSchema.parse`
+     * output with schema defaults materialized, the same object a subsequent
+     * {@link getFlow} answers. This is what the `/automation` write doors
+     * relay to the caller (#12206, Option A): the caller learns what the
+     * engine actually stored, not an echo of its own request bytes.
+     *
      * @param name - Flow name (snake_case)
-     * @param definition - Flow definition object
+     * @param definition - Flow definition object (raw, pre-parse)
+     * @returns The canonicalized parsed flow as stored
      */
-    registerFlow?(name: string, definition: unknown): void;
+    registerFlow?(name: string, definition: unknown): FlowParsed;
 
     /**
      * Canonicalize a flow definition WITHOUT registering it (#4454).

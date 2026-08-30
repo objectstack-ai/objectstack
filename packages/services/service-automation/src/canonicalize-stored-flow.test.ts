@@ -156,4 +156,22 @@ describe('registerFlow still behaves identically (#4454 refactor)', () => {
         // …and the defaults it needs.
         expect(flow.version).toBeDefined();
     });
+
+    // [#12206, Option A] `registerFlow` no longer returns void: it answers the
+    // canonicalized PARSED flow it stored — the very object `getFlow` serves —
+    // which is what the `/automation` write doors relay to the caller.
+    // Reverse verification (predicted before running): reverting the `return
+    // parsed` in `registerFlow` makes `returned` undefined and reds all three
+    // assertions.
+    it('returns the canonicalized parsed flow it stored — the same object getFlow serves', async () => {
+        const engine = new AutomationEngine(silentLogger);
+        const raw = legacyFlow();
+        const returned = engine.registerFlow('sweep_stale', raw);
+
+        expect(returned).toBe(await engine.getFlow('sweep_stale'));
+        // Parsed, not the caller's bytes: the converted config and the
+        // materialized default are both visible on the returned value.
+        expect((returned as any).nodes[1].config.filter).toEqual({ status: 'stale' });
+        expect(returned.version).toBe(1);
+    });
 });
