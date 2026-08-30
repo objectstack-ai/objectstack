@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import ExcelJS from 'exceljs';
 import { RouteManager } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
 import type { RestApiPluginConfig } from './rest-api-plugin';
+import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
 // ---------------------------------------------------------------------------
 // Mocks & Helpers
@@ -1263,8 +1263,7 @@ describe('RestServer', () => {
       // xlsx is a zip — verify the PK signature, then round-trip the content.
       expect(buf.subarray(0, 2).toString('latin1')).toBe('PK');
 
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buf);
+      const wb = await loadXlsxWorkbook(buf);
       const ws = wb.getWorksheet('Export');
       expect(ws).toBeDefined();
       // row.values is 1-indexed (values[0] is empty).

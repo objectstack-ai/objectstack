@@ -150,6 +150,13 @@ describe('[#13197] every write path goes through the constraint, not just create
       driver.bulkCreate('doc', [{ id: 'a', doc_no: 'D-0100' }, { id: 'b', doc_no: 'D-0100' }]),
     );
     expectUniqueViolationEnvelope(err, 'doc_no');
+
+    // [#13340] The envelope alone is a VACUOUS control here — the refusal was
+    // already correct before the batch was made atomic, so this assertion
+    // passed while the first row of the batch was still landing. The row
+    // count is what discriminates: 2 before, 2 after, nothing half-applied.
+    expect(await driver.count('doc')).toBe(2);
+    expect(await driver.find('doc', { fields: ['id'], where: { doc_no: 'D-0100' } })).toHaveLength(0);
   });
 
   it('updateMany refuses BEFORE mutating anything — no half-applied batch', async () => {

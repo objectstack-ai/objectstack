@@ -473,19 +473,26 @@ describe('[#13239] every write path is checked, not just create', () => {
       ]),
     );
     expectUniqueViolationEnvelope(err, 'account_id', 'code');
-    // The DUPLICATE did not land — that is the constraint, and it is what this
-    // asserts. ⚠️ `bulkCreate` is `Promise.all(map(create))`, so rows accepted
-    // BEFORE the refusal stay: the batch is not atomic. That is older than
-    // either uniqueness card (any mid-batch `create` failure has always left a
-    // partial batch) and identical on the field surface, so it is recorded here
-    // as a known boundary rather than silently re-baselined — never "the
-    // constraint half-applied".
+    // [#13340] ⛔ The refusal is NOT what this test is for — the refusal was
+    // already correct, and #13197/#13239 already pin it. What it asserts is
+    // that THE ROW COUNT DOES NOT MOVE: the batch is all-or-nothing.
+    //
+    // This assertion was INVERTED in place, not re-baselined. It used to read
+    // `toHaveLength(1)` / `toBe(3)` and recorded the opposite behaviour as a
+    // known boundary: `bulkCreate` was `Promise.all(map(create))`, so the row
+    // accepted BEFORE the refusal stayed in the store and a refused 2-row
+    // batch left a 2-row table holding THREE rows. #13340 gave `bulkCreate`
+    // the check-then-push posture `updateMany` has had since #13197, so
+    // neither row lands now. The old numbers are kept in this comment
+    // deliberately: they are the discriminating reading, and an assertion
+    // that only checked "the refusal still happens" would pass in both
+    // worlds.
     const colliding = await driver.find('ledger', {
       fields: ['id'],
       where: { account_id: 'A9', code: 'Z' },
     });
-    expect(colliding).toHaveLength(1);
-    expect(await driver.count('ledger')).toBe(3);
+    expect(colliding).toHaveLength(0);
+    expect(await driver.count('ledger')).toBe(2);
   });
 
   it('updateMany refuses BEFORE mutating anything — no half-applied batch', async () => {

@@ -857,7 +857,7 @@ export class LifecycleService {
         // incomplete evidence" is the correct failure direction: a log cannot
         // bring back a reaped row, and the rows this defers are still there for
         // the next sweep to reap once the read succeeds.
-        if (!isMissingTableError(error)) throw error;
+        if (!isMissingTableError(error, 'sys_organization')) throw error;
       }
     }
 
@@ -924,7 +924,7 @@ export class LifecycleService {
         // one's), and break the documented invariant that a sweep failure is
         // isolated and never thrown into the scheduler. That is strictly more
         // damage than the defect being repaired.
-        if (isMissingTableError(error)) continue;
+        if (isMissingTableError(error, obj.name)) continue;
         const msg = (error as Error)?.message ?? String(error);
         report.errors.push({
           object: obj.name,
