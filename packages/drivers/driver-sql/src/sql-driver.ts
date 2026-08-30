@@ -11083,7 +11083,26 @@ export class SqlDriver implements IDataDriver {
     return honoured;
   }
 
-  /** Map an introspected SQLite column to a knex builder for the rebuilt table. */
+  /**
+   * Map an introspected SQLite column to a knex builder for the rebuilt table.
+   *
+   * ⚠️ [#12738] The `json` arm below is DELIBERATELY not routed through
+   * {@link jsonColumn}, and this is the one place in the driver where that
+   * reads like an oversight. The input here is a column's EXISTING declared
+   * type, read back from `pragma_table_info` — not a field's metadata — and
+   * this method's whole contract is to hand back the column the table already
+   * had. A legacy column declared `json` therefore stays `json` through a
+   * rebuild, which is exactly the migration shape #12738 ruled: new columns
+   * only, existing columns keep their declared type.
+   *
+   * Routing it through the new emitter would make an UNRELATED drift rebuild
+   * (a relaxed NOT NULL, a dropped column) silently re-declare the column as
+   * `text` and, because the rebuild's `insert … select` copies every row
+   * through the new affinity, rewrite the stored bytes of live data — a
+   * conversion nobody asked for, ridden in on an unrelated op. Columns created
+   * AFTER #12738 arrive here declared `text` already and take the `text` arm
+   * below, so the rebuild is stable in both eras without special-casing.
+   */
   protected buildRebuiltColumn(t: Knex.CreateTableBuilder, c: IntrospectedColumn): any {
     if (c.name === 'id') return t.string('id').primary();
     const ty = (c.type || 'text').toLowerCase();
@@ -15078,6 +15097,77 @@ export class SqlDriver implements IDataDriver {
     });
   }
 
+  /**
+   * [#12738] Declare a JSON-valued column as the type that is semantically
+   * correct **for this dialect** — the single seam both JSON routes in
+   * {@link createColumn} go through.
+   *
+   * ## The ruling
+   *
+   * Maintainer, 2026-08-28 (recorded on #12738): each dialect declares the
+   * semantically correct JSON column type. Server dialects keep their NATIVE
+   * JSON type; the SQLite family declares `text`. Two directions were on the
+   * table and BOTH were refused — unifying everything onto `json` (it hands
+   * SQLite the affinity trap below) and changing the shared arm for all
+   * dialects (it would strip Postgres's json/jsonb and MySQL's JSON, which are
+   * correct and stay).
+   *
+   * ## Why SQLite is the exception, measured rather than argued
+   *
+   * SQLite has no JSON type. It derives a column's AFFINITY from substrings of
+   * the declared type name, and `json` contains none of the markers (`INT`,
+   * `CHAR`/`CLOB`/`TEXT`, `BLOB`, `REAL`/`FLOA`/`DOUB`), so it falls through to
+   * **NUMERIC** and converts number-like input on the way in. Measured through
+   * raw SQL on a column declared `json`: a bare `'0123'` is stored as the
+   * INTEGER `123`. `text` takes TEXT affinity and converts nothing — and TEXT
+   * is what SQLite's own JSON1 functions operate on, so this is the type the
+   * database actually means.
+   *
+   * That exposure is the one #12380 had to defeat on this driver's SQLite half
+   * by making the `Field.json` codec injective. This change removes it at the
+   * ROOT for new columns instead of encoding around it.
+   *
+   * ⛔ Measured, not assumed — knex's own compilers, read and then run:
+   * `ColumnCompiler.prototype.json = 'text'` is the BASE, and the sqlite3
+   * dialect is the one that overrides it (`ColumnCompiler_SQLite3.prototype
+   * .json = 'json'`). Compiled DDL for `t.json('v')`: `better-sqlite3` and
+   * `sqlite3` → `` `v` json ``; `pg` → `"v" json`; `mysql2` → `` `v` json ``.
+   * `t.text('v')` under sqlite → `` `v` text ``. So this branch is not a
+   * preference between two spellings — it is the one dialect where knex's
+   * answer names a type the engine does not have.
+   *
+   * ## Why `this.isSqlite` is the right discriminator
+   *
+   * It covers every SQLite face this monorepo ships, and the coverage was
+   * verified rather than presumed:
+   *
+   *  - plain {@link SqlDriver} on `sqlite3` / `sqlite` / `better-sqlite3`
+   *    (`SQLITE_EMIT_CLIENTS`);
+   *  - `TursoDriver` in all three transport modes — local, embedded-replica
+   *    and remote all configure `client: 'better-sqlite3'`;
+   *  - `SqliteWasmDriver`, which passes a knex Client CONSTRUCTOR (so the
+   *    string match answers `''`) and therefore **overrides `isSqlite` to
+   *    `true`** for exactly this reason. A `config.client` string test written
+   *    inline here would have silently missed it.
+   *
+   * ## What this does NOT do
+   *
+   * It changes what NEW columns are declared as. It never rewrites an existing
+   * column: the schema sync is additive, and a legacy `json` column keeps its
+   * declared type, its NUMERIC affinity, and the #12380 encoding that defeats
+   * it. Nothing starts reporting drift over the difference either — the base-
+   * type finding in `schema-drift.ts` is gated on
+   * `multiValueColumnTypeIsLoadBearing(dialect)`, which is `postgres || mysql`
+   * — and no read path consults the physical type: `isJsonField` answers from
+   * METADATA, so decoding is identical on both spellings.
+   *
+   * @see turso-json-column-type-asymmetry.test.ts — the #12586 pin, INVERTED by
+   *   this change per its own header (it now pins the convergence).
+   */
+  protected jsonColumn(table: Knex.CreateTableBuilder, name: string): any {
+    return this.isSqlite ? table.text(name) : table.json(name);
+  }
+
   protected createColumn(
     table: Knex.CreateTableBuilder,
     name: string,
@@ -15101,7 +15191,7 @@ export class SqlDriver implements IDataDriver {
     if (field.reference_to !== undefined) refuseRejectedReferenceAlias(name);
 
     if (field.multiple) {
-      table.json(name);
+      this.jsonColumn(table, name);
       return;
     }
 
@@ -15388,7 +15478,7 @@ export class SqlDriver implements IDataDriver {
         //
         // A type that genuinely wants the bound belongs in the string-family
         // case above, named — never acquired by falling through to here.
-        col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
+        col = JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name);
     }
 
     if (col) {
