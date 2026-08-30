@@ -1,8 +1,8 @@
 # REST 通道操作对照表(references —— 按需加载)
 
-出处:`platform-readings.md` API 配额段(**默认读序 git → payload → REST → MCP/GraphQL** 的策略住那
-里,本表是逐操作的通道归属)。做一件事之前查一行:它有没有 REST 对应物。⛔ 不引用 issue
-编号 —— 每行自含边界与日期。
+出处:`platform-readings.md` API 配额段(**默认读序 git →
+payload → REST → MCP/GraphQL** 的策略住那里,本表是逐操作的通道归属)。做一件事之前查一行:
+它有没有 REST 对应物。⛔ 不引用 issue 编号 —— 每行自含边界与日期。
 
 **通道边界**:容器 curl = App installation token,REST core 15,000/时、与 GraphQL 池独立计;出口代理按设
 计只放 **repo-scoped 路径**(`/repos/{o}/{r}/...`)加 `/rate_limit`,org 级端点未实测。⚠️ **✓ 按席位
@@ -21,8 +21,8 @@
   `list_issues` 永不返回 assignees,这条差别本身就是走 REST 的理由)。
 - ✓ 整条评论线:`GET .../issues/{n}/comments?per_page=100`。
 - ✓ Timeline 事件:`GET .../issues/{n}/timeline`(cross-ref、`added_to_merge_queue`、ready_for_review)。
-- ✓ PR diff / 文件清单:`GET .../pulls/{n}` 带 Accept `application/vnd.github.diff` · `.../pulls/{n}/files`(后
-  者实测可瞬态 404 ⇒ PR 文件读取优先走 git)。
+- ✓ PR diff / 文件清单:`GET .../pulls/{n}` 带 Accept
+  `application/vnd.github.diff` · `.../pulls/{n}/files`(后者实测可瞬态 404 ⇒ PR 文件读取优先走 git)。
 - ✓ 取某 ref 上的文件:`GET .../contents/{path}?ref=...`(raw accept)。
 - ✓ 祖先 / 对比:`GET .../compare/{base}...{head}` —— 浅检出上本地祖先判据不可信时的正解。
 - ✓ 门禁 / workflow:`GET .../commits/{sha}/check-runs` · `GET .../actions/runs`。
@@ -47,10 +47,10 @@
    (2 与 5 同批:2026-08-24 核对官方文档,未逐个实调)。断粮出路:等 MCP 恢复,或人工点一下。
 2. **auto-merge / 入队挂载**:GraphQL mutation(MCP `enable_pr_auto_merge`)。走合并队列的仓落地必经它 ⇒
    配额红窗**无退路**;直合仓有退路(合并本身有 REST 端点 `PUT .../pulls/{n}/merge`)。
-3. **语义搜索**:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点 + 本地 grep(既有纪
-   律);REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
-4. **Projects field_values**:GraphQL-only —— 舰队并不需要它;MCP 服务器端**无条件**抓它才是漏
-   点,不是需求。
+3. **语义搜索**:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点 +
+   本地 grep(既有纪律);REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
+4. **Projects field_values**:GraphQL-only —— 舰队并不需要它;MCP 服务器端**无条件**抓它才是漏点,
+   不是需求。
 5. **`issue transfer`**(2026-08-24 官方文档核对补入):issues 端点表无 transfer 路由 ⇒ 同为
    GraphQL-only。拿不到时当轮改走「在目的仓重建」配方 —— 纯 REST、配额免疫,配方住
    `platform-readings.md`。
@@ -68,20 +68,20 @@
   合」零分辨力(一周内三席据人形 `merged_by` 误判「绕队」,三次全假 —— 都是队列合并)。
 - **问「本仓 auto-merge 是否经队列」,答案来自尝试动作,不来自属性字段**:① 直接合并
   `PUT .../pulls/{n}/merge`,强制队列 ruleset 下回 **405 `Changes must be made through the merge queue`**;② PR
-  上的 `added_to_merge_queue` timeline 事件;③ 对已入队 PR 调 update-branch 回「已入队分支不能更
-  新,要改先出队」。①② 拼写与边界是 `platform-readings.md` 队列段既有行,本条只归拢判据。
+  上的 `added_to_merge_queue` timeline 事件;③ 对已入队 PR 调 update-branch 回「已入队分支不能更新,
+  要改先出队」。①② 拼写与边界是 `platform-readings.md` 队列段既有行,本条只归拢判据。
 - ⚠️ **计数不是机理读数(被当天推翻的推断的墓碑)**:「`GET .../actions/runs?event=merge_group`
-  计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现
-  merge_group run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生
-  过没有」,不答「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset 的
-  required 集本身、或看队列合并是否真在等检查;⛔ 别处写下的计数值一律先复测再用。
-- **required job 名与分片矩阵的改名耦合(现行,自 2026-08-24)**:队列 required 集按 **job / check-run
-  名**匹配,**workflow 名从不作为 check context 出现**(所以拿 workflow 名在选择器里搜什么也搜不
-  到);改其中任一 job 名**或 test 分片矩阵的形状**,必须**同一笔**更新队列的 required 集,否则
-  队列静默挂起。姊妹仓 objectui 当日配置为 **9 个**:`Lint` · `Type Check` ·
-  `Test (shard 1/4 … 4/4)` · `Build & E2E` · `Build Docs` · `Changeset Declaration`。⛔ required 选择只
-  gate**等待**、不 gate**触发** —— 未列入的检查照跑、算力相同,红了不再挡队列(维护者当
-  日裁定,原话:「我觉得够了」)。
-- **配 required 集时先排掉 push-only job**:`if: github.event_name == 'push'` 的 job 在 `merge_group` 构建上
-  永不报到,列为 required 即挂死队列;未展开的矩阵名(带字面 `${{ }}` 的串)是被跳过的占位
-  符,不是真 context。
+  计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现 merge_group
+  run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生过没有」,
+  不答「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset
+  的 required 集本身、或看队列合并是否真在等检查;⛔ 别处写下的计数值一律先复测再用。
+- **required job 名与分片矩阵的改名耦合(现行,自 2026-08-24)**:
+  队列 required 集按 **job / check-run 名**匹配,**workflow 名从不作为 check context 出现**(所以拿
+  workflow 名在选择器里搜什么也搜不到);改其中任一 job 名**或 test 分片矩阵的形状**,
+  必须**同一笔**更新队列的 required 集,否则队列静默挂起。
+  姊妹仓 objectui 当日配置为 **9 个**:`Lint` · `Type Check` ·`Test (shard 1/4 … 4/4)` · `Build & E2E`
+  · `Build Docs` · `Changeset Declaration`。⛔ required 选择只 gate**等待**、不 gate**触发** ——
+  未列入的检查照跑、算力相同,红了不再挡队列(维护者当日裁定,原话:「我觉得够了」)。
+- **配 required 集时先排掉 push-only job**:
+  `if: github.event_name == 'push'` 的 job 在 `merge_group` 构建上永不报到,列为 required 即挂死队列;
+  未展开的矩阵名(带字面 `${{ }}` 的串)是被跳过的占位符,不是真 context。
