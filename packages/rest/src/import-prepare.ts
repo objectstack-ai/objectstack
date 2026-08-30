@@ -13,6 +13,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { resolveNamedMapping, applyMappingToRows, type MappingArtifactLike } from './import-mapping.js';
+import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
 
 /**
  * Minimal RFC-4180-style CSV parser used by the bulk-import endpoint
@@ -138,15 +139,23 @@ export async function parseXlsxToRows(
     mapping: Record<string, string> = {},
     sheet?: string | number,
 ): Promise<Array<Record<string, any>>> {
-    const ExcelJS: any = (await import('exceljs')).default ?? (await import('exceljs'));
+    const ExcelJS = await loadExcelJs();
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buffer);
-    const ws = sheet !== undefined ? wb.getWorksheet(sheet as any) : wb.worksheets[0];
+    // The assertion is on the Node `Buffer` arm ONLY. `ArrayBuffer` is already
+    // assignable to the module-local shim exceljs declares for this parameter,
+    // so that arm reaches `load` unasserted and stays checked; asserting the
+    // whole union would switch that check off. See `xlsx-module.ts`.
+    await wb.xlsx.load(buffer instanceof ArrayBuffer ? buffer : asXlsxLoadInput(buffer));
+    const ws = sheet !== undefined ? wb.getWorksheet(sheet) : wb.worksheets[0];
     if (!ws) return [];
 
     const cells: string[][] = [];
-    ws.eachRow({ includeEmpty: false }, (row: any) => {
-        const values = row.values as any[]; // 1-based; index 0 is unused
+    ws.eachRow({ includeEmpty: false }, (row) => {
+        // exceljs declares `Row.values` as the 1-based array form (index 0
+        // unused) OR a keyed object; a workbook parsed from bytes yields the
+        // array. The keyed shape iterates zero times either way — its `.length`
+        // was `undefined` before, so the loop below never ran for it.
+        const values = Array.isArray(row.values) ? row.values : [];
         const line: string[] = [];
         for (let c = 1; c < values.length; c++) line.push(xlsxCellToString(values[c]));
         cells.push(line);

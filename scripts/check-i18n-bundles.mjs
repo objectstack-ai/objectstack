@@ -990,8 +990,10 @@ function reportPrerequisiteNotMet(headline, detail, options = {}) {
       `\n\n  Fix:  ${fix}\n` +
       alsoFix.map((l) => `        ${l}\n`).join('') +
       `\n${nothingChecked}\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
-      `  \`pnpm check:i18n | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code 1 — capture it BEFORE any pipe: \`pnpm check:i18n > /tmp/i18n.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the pipe's status, and \`| head -N\` turns even \`\${PIPESTATUS[0]}\`/\`pipefail\` green:\n` +
+      `  \`head\` closes the read end early, so this gate takes EPIPE and exits 0 — the pipe changed the\n` +
+      `  exit code itself. \`| tail\` reads to EOF; \`\${PIPESTATUS[0]}\` after it is the true status.)`,
   );
   process.exit(1);
 }
