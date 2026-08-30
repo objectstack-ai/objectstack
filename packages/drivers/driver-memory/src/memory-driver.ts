@@ -42,8 +42,9 @@ import {
 // module docblock.
 import {
   assertNoUniqueViolation,
+  uniqueConstraintsFromDeclaredIndexes,
   uniqueConstraintsFromFields,
-  type MemoryUniqueConstraint,
+  type MemoryUniqueEnforcement,
 } from './memory-unique-constraint.js';
 
 /**
@@ -187,10 +188,14 @@ interface MemoryTransaction {
  *
  * ## What this driver enforces, and what it still does not
  *
- * Since #13197 it enforces **field-level `unique`**, with `driver-sql`'s
+ * Since #13197 it enforces **field-level `unique`**, and since #13239
+ * **object-level declared `indexes[]` entries carrying `unique`** — both
+ * declaration surfaces `driver-sql` materializes uniqueness from, with its
  * ADR-0120 D1/D3 scoping (`memory-unique-constraint.ts` carries the measured
- * arm-for-arm table): a colliding write is REFUSED — `code: 'UNIQUE_VIOLATION'`,
- * `status: 409` — instead of landing silently. That closes the one gap whose
+ * arm-for-arm tables, including the #4986 trap: bare `unique: true` means
+ * `'organization'` at field level and `'global'` on a declared index). A
+ * colliding write is REFUSED — `code: 'UNIQUE_VIOLATION'`, `status: 409` —
+ * instead of landing silently. That closes the one gap whose
  * failure mode was a wrong ANSWER rather than a missing check: an autonumber
  * allocated out-of-process used to duplicate an existing business identifier
  * with no error anywhere, because the engine's collision resync
@@ -201,9 +206,10 @@ interface MemoryTransaction {
  * indexes temporal fields and records those unique constraints — and nothing
  * more — so there is no primary key, no `NOT NULL`, no foreign key and no
  * column typing. `bulkCreate` will still happily land two rows with the same
- * `id` (unless `id` itself declares `unique`) where a SQL driver raises a
- * constraint violation, and a read returns both. Object-level declared
- * `indexes[]` — composite uniques — are not enforced either.
+ * `id` (unless `id` itself declares `unique`, or a declared index lists it)
+ * where a SQL driver raises a constraint violation, and a read returns both.
+ * A declared index WITHOUT `unique` is an access path and buys nothing here:
+ * this store is a linear scan.
  *
  * That still makes it a WEAK oracle: code green against this driver can still
  * be broken against the SQL engines production runs on. Prefer in-memory SQLite
@@ -237,13 +243,15 @@ export class InMemoryDriver implements IDataDriver {
   private temporalFields: Map<string, Map<string, TemporalFieldKind>> = new Map();
 
   /**
-   * [#13197] Declared field-level unique constraints per object, populated by
-   * {@link syncSchema} — the same shape and the same lifetime as
-   * {@link temporalFields} above, and for the same reason: an object absent
-   * from this map was never declared, so nothing is enforced for it. This
-   * driver does not infer a constraint from the data it happens to hold.
+   * [#13197, #13239] Declared unique constraints per object, populated by
+   * {@link syncSchema} — both declaration surfaces in one list (field-level
+   * `unique` and object-level `indexes[]` entries carrying `unique`), with the
+   * same shape and the same lifetime as {@link temporalFields} above, and for
+   * the same reason: an object absent from this map was never declared, so
+   * nothing is enforced for it. This driver does not infer a constraint from
+   * the data it happens to hold.
    */
-  private uniqueConstraints: Map<string, MemoryUniqueConstraint[]> = new Map();
+  private uniqueConstraints: Map<string, MemoryUniqueEnforcement[]> = new Map();
   private transactions: Map<string, MemoryTransaction> = new Map();
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
@@ -1488,15 +1496,20 @@ export class InMemoryDriver implements IDataDriver {
     // (ADR-0053 D-B3) and, like it, is idempotent.
     const kinds = indexTemporalFields(schema?.fields);
     this.temporalFields.set(object, kinds);
-    // [#13197] Learn the object's field-level unique constraints in the same
-    // pass. Deliberately NOT retroactive: rows already in the table arrived
+    // [#13197, #13239] Learn the object's unique constraints in the same pass —
+    // BOTH declaration surfaces `driver-sql` materializes uniqueness from:
+    // field-level `unique` and object-level `indexes[]` entries carrying
+    // `unique`. Deliberately NOT retroactive: rows already in the table arrived
     // from `initialData` or a persistence adapter, before any schema existed,
     // and REFUSING them here would turn a declaration into a boot failure over
     // data this driver did not write. From here on every write is checked, and
     // an already-duplicated pair is reported by the first write that touches
     // it — the same posture `driver-sql` takes when a unique index cannot be
     // built over dirty data (it announces, it does not delete rows).
-    this.uniqueConstraints.set(object, uniqueConstraintsFromFields(schema));
+    this.uniqueConstraints.set(object, [
+      ...uniqueConstraintsFromFields(schema),
+      ...uniqueConstraintsFromDeclaredIndexes(schema),
+    ]);
     if (kinds.size > 0) {
       const table = this.db[object];
       for (let i = 0; i < table.length; i++) {
@@ -1687,8 +1700,8 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
-   * [#13197] Refuse `candidate` if it violates one of `object`'s declared
-   * field-level unique constraints.
+   * [#13197, #13239] Refuse `candidate` if it violates one of `object`'s
+   * declared unique constraints — field-level or object-level declared index.
    *
    * The ONE seam every write path goes through, so create, update and
    * update-many cannot disagree about what `unique` means — the same
