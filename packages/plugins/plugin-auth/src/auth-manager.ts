@@ -3118,8 +3118,8 @@ export class AuthManager {
       await this.addOptionalPlugin(plugins, 'sso', async () => {
       const { sso } = await import('@better-auth/sso');
       // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
-      // better-auth adapter / a global model map, not per-plugin here (see
-      // AUTH_SSO_PROVIDER_SCHEMA).
+      // better-auth adapter / a global model map, not per-plugin here (see the
+      // `ssoProvider` NOTE in auth-schema-config.ts).
       //
       // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
       // model and read no `schema` option. Re-measured against the installed

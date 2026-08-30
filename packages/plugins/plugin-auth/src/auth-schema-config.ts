@@ -908,73 +908,44 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 // SSO plugin – ssoProvider table (@better-auth/sso)
 // ---------------------------------------------------------------------------
 
-/**
- * `@better-auth/sso` plugin `ssoProvider` model mapping.
- *
- * Each row is an external OIDC/SAML IdP this environment federates login to
- * (the relying-party side — ADR-0024's OPEN per-env SSO mechanism). The
- * protocol detail lives in JSON blobs (`oidcConfig` / `samlConfig`); the model
- * itself is thin.
- *
- * | camelCase (better-auth) | snake_case (ObjectStack) |
- * |:------------------------|:-------------------------|
- * | providerId              | provider_id              |
- * | oidcConfig              | oidc_config              |
- * | samlConfig              | saml_config              |
- * | userId                  | user_id                  |
- * | organizationId          | organization_id          |
- * | issuer / domain         | (same name — no remap) |
- * | domainVerified          | domain_verified          |
- *
- * ## Coverage, measured 2026-08-20 against `@better-auth/sso@1.7.1`
- *
- * The previous note here said only "Mirrors `@better-auth/sso@1.6.20`'s
- * `BaseSSOProvider`" — a field-surface claim about a version two minors behind
- * the installed one, which nobody had re-checked. Re-measured by resolving the
- * plugin's real model the way the adapter does (`field.fieldName ?? key`) over
- * `getAuthTables({ plugins: [sso()] }).ssoProvider.fields`:
- *
- *  - `sso()` declares 7 fields — `issuer`, `oidcConfig`, `samlConfig`,
- *    `userId`, `providerId`, `organizationId`, `domain` — exactly the members
- *    of the shipped `BaseSSOProvider` type
- *    (`dist/index-CZytzKv6.d.mts:189-197`).
- *  - `sso({ domainVerification: { enabled: true } })` — the shape
- *    `OS_SSO_DOMAIN_VERIFICATION` turns on — adds an 8th, `domainVerified`.
- *  - Every one of those 8 resolves to a column `sys_sso_provider` declares.
- *    Nothing in the map is orphaned, and nothing in the model is unmapped.
- *
- * ⚠️ Unlike the core models, this mapping has **no parity gate**:
- * `better-auth-schema-parity.test.ts` deliberately passes `getAuthTables()` no
- * `sso` plugin, so an upstream field added to `ssoProvider` would land here
- * silently. Until that changes, re-run the resolution above by hand when the
- * `@better-auth/sso` pin moves — the check is one `getAuthTables` call.
- */
-export const AUTH_SSO_PROVIDER_SCHEMA = {
-  modelName: 'sys_sso_provider',
-  fields: {
-    providerId: 'provider_id',
-    oidcConfig: 'oidc_config',
-    samlConfig: 'saml_config',
-    userId: 'user_id',
-    organizationId: 'organization_id',
-    // DNS domain-ownership proof (ADR-0024 ②). @better-auth/sso writes
-    // `domainVerified` on its `ssoProvider` model when domain verification is
-    // enabled; map it so the env can surface a verified/unverified badge. The
-    // one-time `domainVerificationToken` is NOT a provider column — it lives in
-    // the verification table and is returned only from request-domain-verification.
-    domainVerified: 'domain_verified',
-  },
-} as const;
-
-// NOTE: there is intentionally no `buildSsoPluginSchema()`. The original reason
-// was that the plugin exposed NO `schema` option (true of 1.6.20) — that is no
-// longer why. Measured 2026-08-19 against the installed `@better-auth/sso@1.7.1`:
-// `SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}` exists and
-// the runtime honours it, so the mapping above COULD be handed to the plugin.
-// It is still consumed at the ADAPTER layer instead (AUTH_MODEL_TO_PROTOCOL +
-// field resolution in objectql-adapter.ts), which is now a deliberate choice
-// about where the bridge lives rather than a limitation of the dependency;
-// revisiting it is the open architecture question on #8224. See ADR-0024.
+// NOTE: there is intentionally no `ssoProvider` mapping constant here, and no
+// `buildSsoPluginSchema()`. Each `sys_sso_provider` row is an external
+// OIDC/SAML IdP this environment federates login to (the relying-party side —
+// ADR-0024's OPEN per-env SSO mechanism); protocol detail lives in JSON blobs
+// (`oidc_config` / `saml_config`), so the model itself is thin. Unlike scim
+// below, the absence of a mapping is a CHOICE, not a limitation of the
+// dependency: `@better-auth/sso@1.7.1` DOES accept a schema option —
+// `SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}` exists
+// and the runtime honours it (measured 2026-08-19, #8224) — so a mapping COULD
+// be handed to `sso({ schema })`. It deliberately is not (#10074, ruling A —
+// do not rewire the seam): the bridge lives at the ADAPTER layer, where
+// AUTH_MODEL_TO_PROTOCOL maps `ssoProvider` → `sys_sso_provider` and the
+// adapter's mechanical camelCase → snake_case field resolution
+// (objectql-adapter.ts) owns every column name — a rule total by
+// construction, where a hand-maintained per-field list is covered only if
+// someone remembers to update it. That layer is pinned by the dedicated
+// sso/scim block in better-auth-schema-parity.test.ts.
+//
+// `domainVerified` (ADR-0024 ②): with `sso({ domainVerification: { enabled:
+// true } })` — the shape `OS_SSO_DOMAIN_VERIFICATION` turns on — the plugin
+// writes an eighth `ssoProvider` field, `domainVerified` (DNS
+// domain-ownership proof), which the adapter rule resolves to
+// `domain_verified`, declared on the `sys_sso_provider` platform object so
+// the env can surface a verified/unverified badge. The one-time
+// `domainVerificationToken` is NOT a provider column — it lives in the
+// verification table and is returned only from request-domain-verification.
+// (The parity block constructs bare `sso()`, whose 7 declared fields exclude
+// `domainVerified`, so this eighth column rests on the platform-object
+// declaration plus the mechanical rule.)
+//
+// A mapping constant here would be a SECOND declaration of adapter-owned
+// column names that nothing reads and nothing enforces — it could drift from
+// the live ones with every gate green, and the next reader could not tell
+// which was authoritative (ADR-0049 enforce-or-remove); one was removed for
+// exactly that reason, mirroring the scim sibling below. Do not re-add one
+// unless it is actually handed to `sso({ schema })` — the one trigger #10074
+// named that would justify that rewiring is sso needing `additionalFields`,
+// which has no adapter-layer equivalent.
 
 // ---------------------------------------------------------------------------
 // SCIM plugin – scim* tables (@better-auth/scim)
