@@ -3,6 +3,6 @@
   "entries": {
     "src/meta-public-book-grant.test.ts": 1,
     "src/rest-batch-size-cap.test.ts": 1,
-    "src/rest.test.ts": 4
+    "src/rest.test.ts": 3
   }
 }
