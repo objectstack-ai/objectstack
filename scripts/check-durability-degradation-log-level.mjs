@@ -1196,6 +1196,78 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // The census is therefore UNMOVED at 64, and #8901's restart conjunct (b) is
 // not triggered by this reading.
 
+// ── THE WRAPPER HOP'S OWN SHAPE CHECK — MEASURED AND CHANGED (#12358) ────────
+//
+// The block above records the fake seam and stops there, because telling
+// `this.delete(ref, opts)` from `someSet.delete(x)` was #11921's provenance
+// problem and out of that card's scope. This block is that fix, and the census
+// #12358 required before anyone narrowed anything. See
+// `contradictsWrapperResolution` for the predicate and its direction of error.
+//
+// RE-DERIVED, not inherited. The filing's table was measured on `origin/main`
+// @ 3ddad51b5c and is five days older than this tree; the denominator has since
+// moved 64 -> 66, so every figure below was re-run here on `origin/main`
+// @ 5f0a9c4a. The DELTA reproduced exactly: +8 under the `walkAll` probe, the
+// same 8 seams by identity, and the ablation still removes exactly two.
+//
+//   | recognizer                                       | read seams |
+//   |--------------------------------------------------|-----------:|
+//   | today — `walkSameTickInclusive`, depth 2          |         66 |
+//   | probe — `walkAll`, depth 2                        |         74 |
+//   | probe, with the `delete` wrapper hop refused      |         72 |
+//
+// ⚠️ THE ABLATION IS THE CONTROL, NOT THE FIX. Refusing the `delete` hop
+// outright drops TWO seams — sys-metadata-repository.ts:1353 `close`->
+// `terminate` (the FAKE) and :883 `promoteDraft`->`dropPromotedDraftRow` (a
+// REAL `await this.delete(ref, …)`). In a summary that is indistinguishable
+// from the correct outcome, which is why the pair is pinned in the self-test.
+//
+// THE CENSUS OVER THE WHOLE SCAN ROOT. The filing named two candidate shapes
+// and refused to choose between them without one. Both were measured, on
+// today's recognizer AND under the `walkAll` probe that arms the defect:
+//
+//   | wrapper-hop guard                          | today | walkAll | removes  |
+//   |--------------------------------------------|------:|--------:|----------|
+//   | none (as shipped before this change)       |    66 |      74 | —        |
+//   | A. receiver, bare identifiers admitted     |    66 |      73 | the fake |
+//   | A'. receiver, strict `this`/`self` only    |    66 |      73 | the fake |
+//   | B1. `contradictsDriverReadShape` on the hop|    66 |      74 | NOTHING  |
+//   | B2. required-parameter count               |    66 |      73 | the fake |
+//   | A + B2 (taken)                             |    66 |      73 | the fake |
+//
+// Every row adds zero seams — measured, not argued: the added-seam set is empty
+// in all six runs.
+//
+// ⚠️ B1 IS A VACUOUS FIX AND THE CENSUS IS WHAT SAYS SO. Read literally, "give
+// the hop a `contradictsDriverReadShape`-style argument test" means calling
+// that predicate on the hop — refuse when the first argument is a function
+// literal. `self.watchers.delete(subscription)` passes an identifier, so it
+// refuses nothing at all, on this tree or in principle. B2 is that candidate
+// read at the level the vocabulary-side predicate actually works at: not the
+// literal predicate, but its METHOD — refute the call against the contract
+// already in hand. Reported so the next reader does not re-derive it.
+//
+// WHY A + B2 RATHER THAN EITHER. The measurement cannot separate them: on this
+// tree all three cost nothing and remove exactly the fake seam. Their FAILURE
+// modes are independent, and each is one edit away in live code — A alone
+// returns the fake seam if `delete`'s second parameter becomes optional, B2
+// alone returns it if the registry is reached through a bare identifier
+// (`watchers.delete(x)` after a destructure). The conjunction is measured at
+// the same zero cost as either half, so both are asked.
+//
+// ⭐ WHAT THIS CHANGE DOES AND DOES NOT DO. The defect is LATENT: today's
+// recognizer never reaches the fake read, because the wrapper recursion's
+// `walkSameTickInclusive` stops at the `withTxn` callback. So the deliverable
+// is a MEASURED ZERO-DELTA — the full checker output is byte-identical before
+// and after on this tree, verdicts, counts and `--list` lines alike — plus a
+// refusal that holds under the widening that would arm it. ⛔ No baseline entry
+// was added and none was needed: an entry says a human read a seam, not that a
+// rule stopped inventing one.
+//
+// ⛔ #12360 (the `MAX_READ_WRAPPER_DEPTH = 2` bound, which the table above shows
+// costs the census 6 further seams) is a SEPARATE card on this same file and is
+// deliberately not touched here.
+
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
  *
@@ -1293,6 +1365,97 @@ function contradictsDriverReadShape(node) {
     const first = node.arguments[0];
     if (!first) return false;
     return ts.isArrowFunction(first) || ts.isFunctionExpression(first);
+}
+
+/**
+ * The same question one level up: can this call be a call to THAT declaration?
+ *
+ * `contradictsDriverReadShape` asks it of `IDataDriver`. The wrapper hop in
+ * `isReadCall` asked nothing at all. `functionBodies` is a flat, file-scoped
+ * index keyed by BARE NAME, so any call whose `calleeName` happens to equal a
+ * function declared in the same file was followed into that function's body —
+ * whatever it was called ON, and whatever it was passed.
+ *
+ * That is #11921's defect on the WRAPPER name instead of the vocabulary name,
+ * and it runs the other way. A vocabulary false positive over-counts a seam
+ * that exists; a wrapper false positive INVENTS one, and prints it in
+ * `--list` naming a real caller and a real callee, indistinguishable from a
+ * genuine seam. The read-seam denominator is what #5186, #6451, #9165, #8845
+ * and #8901 are all quoted against, so a fake member is the unsafe direction.
+ *
+ * THE LIVE INSTANCE (#12358, re-measured here — see the census below).
+ * `sys-metadata-repository.ts` `close()` calls `w.terminate()`; `terminate` is
+ * a local const arrow whose only call is `self.watchers.delete(subscription)`
+ * on a `private readonly watchers = new Set<...>()`. `calleeName` reads that
+ * as `delete`, and the hop resolved `delete` to THIS FILE's
+ * `async delete(ref, opts)`, whose `findOne` makes the chain read as a
+ * `sys_metadata` read. A `Set.prototype.delete` on an in-memory watcher
+ * registry, one hop from the census.
+ *
+ * Two INDEPENDENT facts refute that resolution and this predicate asks both.
+ * Neither is a new vocabulary and neither carries a staleness obligation: both
+ * are read off the declaration the index ALREADY holds.
+ *
+ *   RECEIVER — a same-file body can only run for a call that names it
+ *   unqualified (`terminate()`), or on `this`/`super`, or on some binding that
+ *   may hold it (`w.terminate()`, which is how the live `terminate` is really
+ *   reached). A receiver that is itself a property access, an index or a call
+ *   result — `self.watchers.delete`, `a.b.c()` — names a member of ANOTHER
+ *   object, and resolving it to this file's body is a name collision by
+ *   construction.
+ *
+ *   ARITY — a call supplying fewer arguments than the resolved declaration
+ *   REQUIRES is not a call to that declaration; in a type-checked tree it would
+ *   not compile. `self.watchers.delete(subscription)` passes one;
+ *   `delete(ref, opts)` requires two.
+ *
+ * Each clause alone closes the live instance, and each has a failure mode the
+ * other does not: the receiver clause survives `opts` becoming optional, the
+ * arity clause survives the registry being reached through a bare identifier
+ * (`watchers.delete(x)` after a destructure). Measured, the conjunction costs
+ * exactly what either half costs — nothing — so both are asked.
+ *
+ * DIRECTION OF THE ERROR, stated up front as the vocabulary-side predicate
+ * states its own: this can only refuse to FOLLOW a hop. It cannot add a seam,
+ * so it cannot manufacture a violation; what it can do is drop a real read
+ * whose wrapper is reached in a shape it does not model — the under-counting
+ * direction every other narrowness in this file takes, and the one AGENTS.md
+ * declares for the family ("under-matches on purpose rather than risk a false
+ * positive"). Spread calls (`f(...args)`) are exempt from the arity clause for
+ * that same reason: the argument count is not knowable, so it is not asserted.
+ *
+ * WHY THIS IS NOT THE RECEIVER ALLOWLIST `contradictsDriverReadShape` REJECTS.
+ * That objection is measured and it stands — for the VOCABULARY hit, where the
+ * receiver IS the driver binding (`this.engine`, `driver`, `ledger`, `port`)
+ * and requiring a `this`-rooted receiver drops 14 of 66 seams, 12 of them real.
+ * This clause is not a list of receiver NAMES, and it does not require `this`:
+ * it reads receiver DEPTH, admits every bare identifier, and is measured at
+ * zero seams on the whole scan root.
+ */
+function contradictsWrapperResolution(node, body) {
+    const expr = node.expression;
+    if (ts.isPropertyAccessExpression(expr)) {
+        const recv = expr.expression;
+        const mayHoldIt =
+            recv.kind === ts.SyntaxKind.ThisKeyword ||
+            recv.kind === ts.SyntaxKind.SuperKeyword ||
+            ts.isIdentifier(recv);
+        if (!mayHoldIt) return true;
+    }
+    // `setParentNodes` is fixed true in `ts-parse.mjs`, so the body indexed by
+    // `indexFunctionBodies` reaches its own declaration — no second index, and
+    // no change to the `functionBodies` value shape its other consumers read.
+    const params = body?.parent?.parameters;
+    if (!params) return false;
+    if (node.arguments.some((a) => ts.isSpreadElement(a))) return false;
+    let required = 0;
+    for (const p of params) {
+        // A `this` parameter is a type annotation, never an argument position.
+        if (ts.isIdentifier(p.name) && p.name.text === 'this') continue;
+        if (p.questionToken || p.initializer || p.dotDotDotToken) break;
+        required += 1;
+    }
+    return node.arguments.length < required;
 }
 
 const MAX_READ_WRAPPER_DEPTH = 2;
@@ -2275,6 +2438,10 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
     if (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;
     const body = functionBodies.get(name);
     if (!body) return false;
+    // #12358: the hop's own shape check. Without it a callee NAME that merely
+    // collides with a same-file declaration is followed into that body, and the
+    // seam it manufactures is indistinguishable from a real one.
+    if (contradictsWrapperResolution(node, body)) return false;
     seen.add(name);
     let found = false;
     walkSameTickInclusive(body, (child) => {
@@ -5308,6 +5475,113 @@ function selfTestReadSeams() {
                             const hit = list.find(matches);
                             return hit ?? null;
                         } catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+
+        // ── #12358: the WRAPPER hop's shape check, both clauses, both ways ──
+        //
+        // The live instance is LATENT on today's recognizer — the wrapper
+        // recursion's `walkSameTickInclusive` stops before the fake read is
+        // reached — so these fixtures put the read on the wrapper's own tick.
+        // That is deliberate: it pins the HOP, which is the defect, instead of
+        // pinning the callback refusal that is currently masking it. Measured:
+        // with `contradictsWrapperResolution` ablated, the two `expectSeams: 0`
+        // cases below report 1 seam each, so neither assertion is vacuous.
+        {
+            // RECEIVER clause, isolated: the arity matches, so only the
+            // receiver can refuse this. `self.watchers.delete(subscription)`
+            // reduced — a `Set.prototype.delete` whose name collides with the
+            // file's own `delete` method.
+            name: 'passes: #12358 — a compound receiver does not resolve to the same-file method it collides with',
+            code: `
+                class R {
+                    private readonly watchers = new Set<any>();
+                    private async delete(ref: string) {
+                        return await this.driver.findOne('sys_metadata', { ref });
+                    }
+                    close(sub: any): void {
+                        try { this.watchers.delete(sub); }
+                        catch { /* one wedged consumer must not strand the rest */ }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // ARITY clause, isolated: the receiver is a bare identifier, which
+            // this predicate deliberately admits, so only the argument count
+            // can refuse it. One argument against a two-parameter declaration.
+            name: 'passes: #12358 — a call that cannot satisfy the resolved declaration is not that declaration',
+            code: `
+                class R {
+                    private async delete(ref: string, opts: unknown) {
+                        return await this.driver.findOne('sys_metadata', { ref, opts });
+                    }
+                    close(registry: Set<any>, sub: any): void {
+                        try { registry.delete(sub); }
+                        catch { /* the registry is in-memory; nothing to report */ }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // THE OTHER HALF OF THE DISCRIMINATING PAIR, and the reason the
+            // two above are not enough on their own. Refusing the `delete` hop
+            // outright — the cheap fix — drops this seam too, and a summary
+            // cannot tell that apart from the correct outcome. Measured on the
+            // live tree under the `walkAll` probe: the blunt refusal takes 74
+            // to 72 (both), this predicate takes 74 to 73 (the fake only).
+            name: 'flags: #12358 — a `this`-rooted chain into the real method is still a read seam',
+            code: `
+                class R {
+                    async delete(ref: string, opts: unknown) {
+                        return await this.driver.findOne('sys_metadata', { ref, opts });
+                    }
+                    private async dropPromotedDraftRow(ref: string, opts: unknown) {
+                        return await this.delete(ref, opts);
+                    }
+                    async promoteDraft(ref: string, opts: unknown) {
+                        try { return await this.dropPromotedDraftRow(ref, opts); }
+                        catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // The documented limitation, pinned rather than described: a spread
+            // call's argument count is not knowable, so the arity clause does
+            // not assert one. Over-counting, which is the safe direction.
+            name: 'flags (documented limitation): #12358 — a spread call is exempt from the arity clause',
+            code: `
+                class R {
+                    private async delete(ref: string, opts: unknown) {
+                        return await this.driver.findOne('sys_metadata', { ref, opts });
+                    }
+                    async drop(args: [string, unknown]) {
+                        try { return await this.delete(...args); }
+                        catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // The clause must count REQUIRED parameters, not declared ones, or
+            // it drops real reads through every wrapper with an optional tail.
+            name: 'flags: #12358 — an optional parameter is not a required one',
+            code: `
+                class R {
+                    private async delete(ref: string, opts?: unknown) {
+                        return await this.driver.findOne('sys_metadata', { ref, opts });
+                    }
+                    async drop(ref: string) {
+                        try { return await this.delete(ref); }
+                        catch { return null; }
                     }
                 }`,
             expectViolation: true,
