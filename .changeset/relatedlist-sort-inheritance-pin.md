@@ -1,0 +1,5 @@
+---
+"@objectstack/spec": patch
+---
+
+Pin the derived related-list sort-inheritance rule as contract text in `relatedList`'s `.describe()` (#13294), the same way `relatedListFilter` was pinned by #8704. The behaviour is already landed and browser-verified (#11345, 2026-08-29 acceptance run): a derived related list (`relatedList: 'primary'`) inherits the child object's DEFAULT list view `sort` — the `isDefault` expanded view, or the first declared list item when none is marked default (resolver `expandViewContainer`, `ui/view.zod.ts`) — and a child object with no list-view sort emits no ordering parameter at all, falling back to record-id order. The wire spelling is stated too: the REST shorthand `sort=<field>` / `sort=-<field>`, never the OData `$orderby` token. Text-only change — the `relatedList` accept-set is byte-identical before and after; a new pin test asserts both the inheritance statement and the negative (no-sort ⇒ no-ordering-parameter) half of the contract text. Generated reference pages regenerated via `pnpm --filter @objectstack/spec check:generated --fix`.

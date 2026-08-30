@@ -1131,8 +1131,19 @@ export const FieldSchema = lazySchema(() => {
    *                       the DETAIL renderer's interpretation. Being prominence
    *                       (not a `relatedLayout` switch) is what admits it to the
    *                       object model under ADR-0085's admission test.
+   *
+   * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
+   * run): a derived related list (`relatedList: 'primary'`) inherits its row
+   * order from the child object's DEFAULT list view `sort` — the `isDefault`
+   * expanded view, or the first declared list item when none is marked
+   * default (resolver `expandViewContainer`, `ui/view.zod.ts`). On the wire
+   * this reaches the server as the REST shorthand `sort=<field>` /
+   * `sort=-<field>` (objectui's `serializeOrderBy` lowers
+   * `QueryParams.$orderby` to this shape) — never the OData `$orderby` token.
+   * A child object with no list-view sort emits no ordering parameter at all,
+   * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); \'primary\' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085).'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); \'primary\' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**

@@ -79,28 +79,67 @@ export const SMTP_PORT_MAX = 65535;
 export const SMTP_PORT_RANGE_TEXT = `${SMTP_PORT_MIN}-${SMTP_PORT_MAX}`;
 
 /**
- * Is `port` inside the range this transport will connect on?
+ * Is `port` a port this transport can actually connect on?
  *
- * ⚠️ This is the enforcement `smtp.ts` already had, moved and NOT narrowed.
- * The accept set is unchanged in both directions, deliberately: a refactor
- * that quietly rejected a value which worked yesterday would be a behaviour
- * change wearing a cleanup's clothes. In particular a **non-integer** inside
- * the range (`587.5`) is accepted here exactly as it was before, and is
- * refused later by `net.connect` under an internal name — filed separately
- * rather than repaired here, because that is an accept-set defect and this
- * card is about the duplication.
+ * Three conditions, and `Number.isInteger` carries the first two of them:
+ * finite (it refuses `NaN` and both infinities), whole, and inside the range.
+ *
+ * ## ⭐ Why integrality is part of the contract (#13189)
+ *
+ * This predicate arrived from `smtp.ts` as `Number.isFinite` and no more, and
+ * #12993 kept it that way on purpose — narrowing an accept set inside a
+ * refactor whose whole claim is behaviour preservation would have been a
+ * behaviour change wearing a cleanup's clothes. It is narrowed here, in a card
+ * that is about nothing else, for a reason that is measured rather than
+ * stylistic:
+ *
+ * A fractional port **cannot ever connect**. MEASURED on Node 22:
+ * `net.connect({ port: 587.5 })` throws `ERR_SOCKET_BAD_PORT`, and by the time
+ * nodemailer has re-coded it the operator is shown a bare `RangeError`
+ * (`code: 'ECONNECTION'`) reading `Port should be >= 0 and < 65536. Received
+ * type number (587.5).` — at SEND time, naming a TCP rule and not the
+ * Settings field they typed in. So admitting `587.5` here bought nothing: it
+ * deferred a certain refusal by three layers and stripped the transport's name
+ * off it on the way.
+ *
+ * ⭐ And the refusal this door already emitted **stated the integer rule
+ * without enforcing it**: `587.5` is inside `1-65535` on any reading of
+ * `(expected 1-65535)`. The sentence and the check disagreed. Exactly one of
+ * them had to move, and the one that can never be satisfied is the value.
+ *
+ * ## ⚠️ This is NOT the CLI contract diverging — it is the two converging
+ *
+ * `packages/cli/src/utils/port-contract.ts` is often read as the precedent
+ * *against* this, because its module header is emphatic that a door may not
+ * narrow what boots. Read to the end of it: `parseRequestedPort` is
+ * `if (!Number.isInteger(parsed)) return null;` and `strictPortReading` is
+ * `Number.isInteger` behind `/^[+-]?\d+$/`. That module's width is about
+ * **string spellings** — `3e3`, `0x0BB8`, `3000.0`, `3000abc`, `+3000`,
+ * `08080` — every one of which `parseInt` reduces to an INTEGER before it is
+ * ever range-checked. It governs how an operator may *spell* a port, never
+ * whether a fractional one is admitted. On integrality the CLI has been strict
+ * all along, in code. `smtp-port-contract.test.ts` holds that reading.
  */
 export function isValidSmtpPort(port: number): boolean {
-  return Number.isFinite(port) && port >= SMTP_PORT_MIN && port <= SMTP_PORT_MAX;
+  return Number.isInteger(port) && port >= SMTP_PORT_MIN && port <= SMTP_PORT_MAX;
 }
 
 /**
- * The refusal for a port outside the range, naming the value the caller
- * actually supplied and the range from the constants above.
+ * The refusal for a port this transport will not connect on, naming the value
+ * the caller actually supplied and the rule from the constants above.
  *
  * `raw` is the caller's ORIGINAL value, not the coerced number: an operator
  * who configured `"abc"` needs to see `abc`, not `NaN`.
+ *
+ * ⭐ **"an integer" is load-bearing, not decoration (#13189).** This sentence
+ * used to read `(expected 1-65535)` while the guard admitted `587.5` — which
+ * IS in 1-65535 — so the door stated a rule it did not enforce. Now that the
+ * guard tests integrality, the sentence has to say so or the lie has merely
+ * moved from the check to the message. The range itself stays GENERATED from
+ * {@link SMTP_PORT_MIN} / {@link SMTP_PORT_MAX}: the word is prose about the
+ * predicate, and ⛔ re-spelling either bound here would rebuild the exact
+ * duplication #12993 deleted.
  */
 export function formatInvalidSmtpPortNotice(raw: unknown): string {
-  return `SmtpTransport: invalid port '${String(raw)}' (expected ${SMTP_PORT_RANGE_TEXT})`;
+  return `SmtpTransport: invalid port '${String(raw)}' (expected an integer ${SMTP_PORT_RANGE_TEXT})`;
 }

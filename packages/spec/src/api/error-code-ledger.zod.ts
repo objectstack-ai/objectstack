@@ -210,6 +210,7 @@ export const ERROR_CODE_LEDGER = {
     'PROJECT_NOT_FOUND',
     'PROJECT_PROVISIONING',       // project exists but is still provisioning
     'PROJECT_PROVISIONING_FAILED',
+    'READ_BACK_FAILED',           // approval write recorded, but its read-back is filtered by the caller's org scope — the result envelope cannot be built; the write is NOT rolled back
     'REPORTS_LIST_FAILED',
     'REPORT_DELETE_FAILED',
     'REPORT_GET_FAILED',

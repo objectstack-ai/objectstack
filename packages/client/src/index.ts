@@ -2194,11 +2194,45 @@ export class ObjectStackClient {
       //    promised could not happen. `get` is the method that really does
       //    answer a `database` block.
       //
-      // The keys the route DOES send beside `environment` (`warnings`,
-      // `durationMs`, and a conditional `hostnameAssignment`) are deliberately
-      // not declared here — adding them is new published surface and a
-      // separate decision, not part of this rename.
-      return this.unwrapResponse<{ environment: any }>(res);
+      // The three keys the route sends BESIDE `environment` are declared here
+      // as of 2026-08-29. That absence used to be deliberate and this comment
+      // used to say so; the decision it was waiting for has since been made, so
+      // the stance is recorded rather than left standing:
+      //
+      //   ⚖️ Maintainer ruling, 2026-08-29, verbatim: 「同意」— option 甲.
+      //   `warnings` and `durationMs` are declared PRESENT, `hostnameAssignment`
+      //   OPTIONAL (the producer's own "absence stays absence" contract), and
+      //   all three are typed as the INLINE WIRE SHAPE.
+      //
+      // ⛔ Inline, and NOT bound to `@objectstack/spec/cloud`'s
+      // `ProvisionEnvironmentResponseSchema`. That is the namespace docblock's
+      // #11925/#12036 constraint applied to the response side: those contracts
+      // are camelCase row types for a control plane that speaks snake_case on
+      // `/api/v1/cloud/*`, so binding them would typecheck and be false. The
+      // ruling names the inline shape for that reason.
+      //
+      // ⚠️ Two facts a later reader must not have to rediscover:
+      //
+      //  - The producer shape is an INHERITED reading, not one measured from
+      //    this repo. `objectstack-ai/cloud` is not readable from here, so the
+      //    handler body quoted on the card (`packages/service-cloud/src/routes/
+      //    environment-lifecycle.ts`, POST `/cloud/environments`, spreading
+      //    `environment` / `warnings` / `durationMs` / conditional
+      //    `hostnameAssignment`) is the card author's 2026-08-28 measurement,
+      //    relayed. No gate in this repo can check it.
+      //  - `ProvisionEnvironmentResponseSchema` additionally declares a REQUIRED
+      //    `credential`, which that handler quote does not send, and marks
+      //    `warnings` `.optional()`, which the ruling declares present. Both
+      //    divergences are recorded and UNJUDGED; neither is settled here. The
+      //    `credential` one is why binding the schema is not the safe default
+      //    it looks like: it would make this SDK declare a key the wire does
+      //    not carry — this method's own defect class, pointed the other way.
+      return this.unwrapResponse<{
+        environment: any;
+        warnings: string[];
+        durationMs: number;
+        hostnameAssignment?: { requestedHostname: string; assignedHostname: string };
+      }>(res);
     },
 
     /**

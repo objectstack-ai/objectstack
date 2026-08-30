@@ -65,7 +65,10 @@ function expectFeaturesRefusal(
   // The identity an author (and an AI author's retry loop) acts on: the root,
   // the surface, the fail-open reason, the ruling, and the prescription.
   expect(issue!.message).toContain('Form-view predicates may not name the `features.*` scope root');
-  expect(issue!.message).toContain('ruled 2026-08-27 on');
+  expect(issue!.message).toContain('ruled 2026-08-27');
+  // The negative twin of the citation pin: the ruling is cited by DATE, never
+  // by a tracker id a refused author cannot resolve (#13156's strip).
+  expect(issue!.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   expect(issue!.message).toContain('UNBOUND');
   expect(issue!.message).toContain('fails OPEN');
   expect(issue!.message).toContain('`record.*`');

@@ -10,6 +10,7 @@ import {
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
   describeUnloadableHostConfig,
+  NO_DDL_EXECUTED_NOTICE,
   type SchemaMigrationComposition,
 } from './schema-migration-plugins.js';
 
@@ -285,6 +286,86 @@ describe('describeUnloadableHostConfig (#12953)', () => {
     }));
     expect(said).toContain('/srv/app/objectstack.config.mjs');
     expect(said).toContain('the load threw without a message');
+  });
+});
+
+/**
+ * #13118 — the MUTATING command additionally says it wrote nothing.
+ *
+ * Maintainer ruling 2026-08-29, verbatim 「同意」, option 2: `os migrate apply`
+ * refuses on the unloadable-config path WITHOUT touching the database, and the
+ * refusal must say so — "an operator reading it must not have to guess whether
+ * the database was touched".
+ *
+ * The zero-DDL behaviour itself is pinned over a real child process and a real
+ * `sqlite_master` read in
+ * `packages/cli/test/migrate-apply-refuses-before-ddl.e2e.test.ts`; this file
+ * owns the WORDING, and the two things the option must not do:
+ *
+ *  • it must not leak into `os migrate plan`, whose message the ruling pinned
+ *    unchanged (`plan` 行为不变) — so the default spelling is byte-identical to
+ *    the #12953 text;
+ *  • it must not widen the predicate. An option that made the untouched
+ *    populations answer non-null would turn every config-less and every
+ *    healthy project red, and direction 1 would keep passing while it did.
+ */
+describe('describeUnloadableHostConfig — the no-DDL notice (#13118)', () => {
+  function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
+    return {
+      plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
+      notes: [], coverage: null, ...over,
+    };
+  }
+
+  const unloadable = composition({
+    hostConfigPath: '/srv/app/objectstack.config.ts',
+    hostConfigLoaded: false,
+    hostConfigError: 'Missing required environment variable AUTH_SECRET',
+  });
+
+  it('states that no DDL ran when the caller asserts it', () => {
+    const said = describeUnloadableHostConfig(unloadable, { noDdlExecuted: true });
+    expect(said).toContain(NO_DDL_EXECUTED_NOTICE.trim());
+    // ⭐ And it is an ADDITION, not a replacement: the ruling said to REUSE the
+    // #12953 wording and add to it, so every element that ruling required is
+    // still there.
+    expect(said).toContain('/srv/app/objectstack.config.ts');
+    expect(said).toContain('Missing required environment variable AUTH_SECRET');
+    expect(said).toContain('UNMEASURED');
+    expect(said).toMatch(/Remedy:/);
+  });
+
+  it("says nothing about DDL by default — `plan`'s message is byte-identical to #12953's", () => {
+    // The default spelling and the explicit-false spelling are the same
+    // string, and neither carries the notice. `plan` passes no options at all,
+    // so this is the exact text it emits.
+    const byDefault = describeUnloadableHostConfig(unloadable);
+    expect(byDefault).not.toContain('NO DDL');
+    expect(byDefault).toBe(describeUnloadableHostConfig(unloadable, {}));
+    expect(byDefault).toBe(describeUnloadableHostConfig(unloadable, { noDdlExecuted: false }));
+  });
+
+  it('the notice is the only difference the option makes', () => {
+    // Written as a subtraction rather than as a second copy of the sentence:
+    // a test that re-spells the message is a test that stops holding it.
+    const withNotice = describeUnloadableHostConfig(unloadable, { noDdlExecuted: true })!;
+    expect(withNotice.replace(NO_DDL_EXECUTED_NOTICE, '')).toBe(
+      describeUnloadableHostConfig(unloadable),
+    );
+  });
+
+  it('⛔ does not widen the predicate — the untouched populations stay null', () => {
+    // Both with the option set: an option that could turn "no config" or
+    // "config loads fine" into a refusal is the failure #12953 already named,
+    // and direction 1 above passes identically while it happens.
+    expect(describeUnloadableHostConfig(
+      composition({ hostConfigPath: null, hostConfigLoaded: false }),
+      { noDdlExecuted: true },
+    )).toBeNull();
+    expect(describeUnloadableHostConfig(
+      composition({ hostConfigPath: '/srv/app/objectstack.config.ts', hostConfigLoaded: true }),
+      { noDdlExecuted: true },
+    )).toBeNull();
   });
 });
 
