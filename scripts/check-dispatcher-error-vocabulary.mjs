@@ -324,6 +324,33 @@ export const SHAPES = [
   // `resolveConstant` before giving up on it — that is where a local ternary
   // of literals is reduced, and it reports under `assignconst`.
   { name: 'codehelper', re: /\.code\s*=\s*([A-Za-z_$][\w$]*)\s*[;,\n)]/g, resolve: 'helper', lowercase: 'here' },
+  // [#13233] The SAME helper reasoning as `codehelper`, in the OBJECT-LITERAL
+  // stamp position: `return { severity, code, message }` (shorthand) and
+  // `{ code: code }` / `{ code: errCode }` (longhand). `codehelper` was
+  // anchored on the assignment operator, but "the identifier is a PARAMETER,
+  // so the literals live at the CALL SITES" is a property of the HELPER, not
+  // of `=`. Until this shape landed, no pattern in either gate fired here at
+  // all — no site AND no unresolved, the one way this gate's "reported, never
+  // dropped" bound cannot notice itself failing.
+  //
+  // The regex is a CANDIDATE generator, not the shape. Two structural guards
+  // in `deriveSites` decide, and both are load-bearing:
+  //   · the innermost enclosing bracket at the `code` token must be `{`, which
+  //     is what separates an object literal from the argument list
+  //     `f(a, code, b)` and the array `[a, code]`. A regex cannot earn that —
+  //     measured on this tree: the naive `[{,]` anchor alone reports 19
+  //     helpers where the structural guard reports 13, and not one of the six
+  //     extras is an object-literal stamp (`onChildExit(sig, code)` and
+  //     `findBareAny(code)` are argument lists; `postureError` is already a
+  //     `codehelper` site read through its own call). This is the same
+  //     over-match that made #13131 discard a regex instrument for the census.
+  //   · the identifier must be a PARAMETER of the enclosing declaration
+  //     (`helperCodesFor`), exactly as in the assignment position.
+  // ⛔ Named `objlithelper` rather than folded into `codehelper` on purpose:
+  // SHAPES is a PUBLISHED list whose price is that an unrecognised spelling
+  // reports nothing, so a new recognizer that hides under an existing name
+  // cannot be counted, pinned or ratcheted separately from the one it borrows.
+  { name: 'objlithelper', re: /(?:\bcode\s*:\s*|[{,]\s*(?=code\s*[,;}\n]))([A-Za-z_$][\w$]*)\s*[,;}\n]/g, resolve: 'objlithelper', lowercase: 'here' },
 ];
 
 /**
@@ -1121,6 +1148,49 @@ function resolveFromWorkspacePackage(name, spec, { scanned, packageDirs } = {}) 
  *     reported, never dropped.
  */
 
+/**
+ * [#13233] The innermost enclosing OPEN BRACKET for each offset in `indices`,
+ * as `{ ch, at }` — or `null` where the offset is at bracket depth zero, and
+ * ABSENT from the map where the offset is inside a string, a template or a
+ * regex literal.
+ *
+ * This is the guard that lets a textual scan say "object literal" rather than
+ * guess it. `objlithelper`'s regex has to admit a leading `,` to reach a
+ * property that is not the first one, and that same `,` is what separates
+ * arguments (`f(a, code, b)`) and array elements (`[a, code]`) — three
+ * positions written identically, distinguished only by which bracket is open.
+ *
+ * ⚠️ Absent-not-null for a match inside a string is DELIBERATE and is the one
+ * place this shape is stricter than its siblings. Every other SHAPE regex runs
+ * over the `maskComments`ed source, which by contract leaves STRINGS standing,
+ * so `'{ code, message }'` written inside a string literal matches them. The
+ * quote-skipping pass below never visits those offsets, so the caller sees no
+ * opener and declines. Declining is right — a brace inside a string opens
+ * nothing — and it is stated here rather than discovered, because a shape that
+ * silently sees less than the list it belongs to is exactly the class of
+ * defect this gate keeps paying for.
+ *
+ * One pass per file, so the cost is linear in the source rather than in
+ * matches × source, which a per-match backward walk would be.
+ */
+export function enclosingOpeners(src, indices) {
+  const want = new Set(indices);
+  const out = new Map();
+  const stack = [];
+  for (let i = 0; i < src.length; i += 1) {
+    if (want.has(i)) out.set(i, stack.length ? stack[stack.length - 1] : null);
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') stack.push({ ch: c, at: i });
+    else if (c === ')' || c === ']' || c === '}') stack.pop();
+    else if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i += 1;
+      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+    }
+  }
+  return out;
+}
+
 /** The substring inside the parentheses opening at `open`, brackets balanced. */
 export function sliceBalanced(src, open) {
   let depth = 0;
@@ -1416,7 +1486,19 @@ export function helperCodesFor(ident, offset, src, resolveIdent = () => null) {
  * two-drivers-one-constant-name case) stays two findings.
  */
 function addUnresolved(list, entry) {
-  if (list.some((u) => u.file === entry.file && u.shape === entry.shape && u.value === entry.value)) return;
+  // [#13233] `helper` joins the key rather than replacing part of it. A file
+  // can declare TWO helpers whose code parameter is spelled `code` — the
+  // object-literal position reaches both — and folding them into one entry
+  // would hand the declaration table a row that discharges a helper nobody
+  // classified. Every pre-existing caller leaves `helper` undefined on both
+  // sides, so this is identity for them.
+  if (
+    list.some(
+      (u) => u.file === entry.file && u.shape === entry.shape && u.value === entry.value && u.helper === entry.helper,
+    )
+  ) {
+    return;
+  }
   list.push(entry);
 }
 
@@ -1479,7 +1561,18 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
   for (const { rel, stripped } of scanned) {
     for (const shape of SHAPES) {
       shape.re.lastIndex = 0;
-      for (const m of stripped.matchAll(shape.re)) {
+      const matches = [...stripped.matchAll(shape.re)];
+      // [#13233] The object-literal helper position needs to know WHICH bracket
+      // is open at each candidate, which is a per-file fact — computed once for
+      // the whole match set rather than per match.
+      const openers =
+        shape.resolve === 'objlithelper'
+          ? enclosingOpeners(
+              stripped,
+              matches.map((m) => m.index + m[0].indexOf('code')),
+            )
+          : null;
+      for (const m of matches) {
         let code = m[1];
         let emitAs = shape.name;
         const emit = (value, shapeName) => {
@@ -1549,7 +1642,17 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
             // A helper this scan CAN see but whose callers all pass variables.
             // Reported, never dropped — the bound this gate states for every
             // value it cannot reduce to a literal.
-            addUnresolved(unresolved, { file: rel, shape: shape.name, value: code, reason: 'helper' });
+            // [#13233] The helper's NAME rides along so the discharge table can
+            // key on the declaration rather than on the parameter's spelling —
+            // two helpers in one file both taking a `code` are one entry
+            // otherwise, and one row would then discharge both.
+            addUnresolved(unresolved, {
+              file: rel,
+              shape: shape.name,
+              value: code,
+              reason: 'helper',
+              helper: enclosingDeclaration(stripped, m.index)?.name,
+            });
             continue;
           }
           for (const hc of helperCodes) {
@@ -1557,6 +1660,49 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
             if (sites.some((x) => x.code === hc && x.file === rel && x.shape === shape.name)) continue;
             sites.push({ code: hc, file: rel, shape: shape.name });
           }
+          continue;
+        } else if (shape.resolve === 'objlithelper') {
+          // [#13233] The same join as `helper` above — a PARAMETER at the
+          // stamp, its literals at the call sites — one stamp position over.
+          // Two structural guards, in the order that makes the cheap one first.
+          const codeAt = m.index + m[0].indexOf('code');
+          const opener = openers.get(codeAt);
+          // Not inside a `{`: an argument list, an array, or (absent from the
+          // map) a string. The regex has to admit `,` to reach a non-first
+          // property, so this is what makes the shape mean what it is named.
+          if (!opener || opener.ch !== '{') continue;
+          // `${code}` inside a template — a brace that opens an interpolation,
+          // not a literal. Belt and braces: the pass above already skips
+          // template bodies, so this fires only if a backtick was itself
+          // consumed as part of a skipped span.
+          if (opener.at > 0 && stripped[opener.at - 1] === '$') continue;
+          const objHelperCodes = helperCodesFor(code, codeAt, stripped, (arg) =>
+            resolveConstant(arg, stripped, rel, readFile, ctx),
+          );
+          // NOT a parameter — so this is not a code-carrying helper at all, and
+          // it is NOT this shape's to report. `code: CONST` is `objlitconst`'s
+          // (it resolves or reports there), `code: 'X'` is `objlit`'s, and a
+          // `code:` fed by a lower-case LOCAL in an object literal is reached
+          // by NEITHER — the object-literal twin of the `assignconst` local
+          // that #9568 closed for the assign position. That remainder is on
+          // the record in OBJECT_LITERAL_CODE_HELPER_BLINDNESS, unclosed and
+          // uncensused, rather than swallowed here.
+          if (objHelperCodes === null) continue;
+          if (objHelperCodes.length === 0) {
+            // A helper this scan CAN see whose callers all pass values it
+            // cannot reduce. Reported, never dropped — and, unlike every other
+            // unresolved reason, DISCHARGEABLE by a declaration row, because
+            // the author has no source-side remedy for it. See `reconcile`.
+            addUnresolved(unresolved, {
+              file: rel,
+              shape: shape.name,
+              value: code,
+              reason: 'helper',
+              helper: enclosingDeclaration(stripped, codeAt)?.name,
+            });
+            continue;
+          }
+          for (const hc of objHelperCodes) emit(hc, shape.name);
           continue;
         } else if (shape.resolve === 'template' && !/^[A-Za-z][A-Za-z0-9_]*$/.test(code)) {
           // Interpolated: no literal exists to check against the registry. It
@@ -1616,13 +1762,58 @@ export function parseDeclaration(source) {
   return rows;
 }
 
+/**
+ * [#13233] The second declared list: helpers this scan can SEE but cannot
+ * reduce, classified.
+ *
+ * Read textually and anchored on its own array, for the same reasons
+ * `parseDeclaration` is.
+ */
+export function parseUnresolvedHelpers(source) {
+  const start = source.indexOf('export const UNRESOLVED_CODE_HELPERS');
+  if (start < 0) {
+    throw new Error(`${DECLARATION}: UNRESOLVED_CODE_HELPERS not found — the anchor moved.`);
+  }
+  const body = maskComments(source).slice(start);
+  const end = body.indexOf('\n];');
+  if (end < 0) {
+    throw new Error(`${DECLARATION}: UNRESOLVED_CODE_HELPERS terminator not found — the anchor moved.`);
+  }
+  const rows = [];
+  for (const entry of body.slice(0, end).split(/\}\s*,/)) {
+    const file = /\bfile:\s*'([^']+)'/.exec(entry);
+    const helper = /\bhelper:\s*'([^']+)'/.exec(entry);
+    const param = /\bparam:\s*'([^']+)'/.exec(entry);
+    const shape = /\bshape:\s*'([^']+)'/.exec(entry);
+    const door = /\bdoor:\s*'([^']+)'/.exec(entry);
+    const verdict = /\bverdict:\s*'([^']+)'/.exec(entry);
+    if (!file || !helper || !param || !shape || !door || !verdict) continue;
+    rows.push({
+      file: file[1],
+      helper: helper[1],
+      param: param[1],
+      shape: shape[1],
+      door: door[1],
+      verdict: verdict[1],
+    });
+  }
+  return rows;
+}
+
 // ---------------------------------------------------------------------------
 // Reconciliation
 // ---------------------------------------------------------------------------
 
 const key = (s) => `${s.code}@${s.file}#${s.shape}`;
 
-export function reconcile({ sites, declared, registered, unresolved }) {
+/**
+ * [#13233] A helper's identity for the discharge table: WHICH declaration, and
+ * which of its parameters carries the code. Not the code itself — that is the
+ * one thing an unresolved helper does not have.
+ */
+const helperKey = (h) => `${h.helper ?? ''}(${h.param ?? h.value})@${h.file}#${h.shape}`;
+
+export function reconcile({ sites, declared, registered, unresolved, declaredHelpers = [] }) {
   const findings = [];
   const declaredByKey = new Map(declared.map((d) => [key(d), d]));
   const siteKeys = new Set(sites.map(key));
@@ -1705,7 +1896,46 @@ export function reconcile({ sites, declared, registered, unresolved }) {
     }
   }
 
+  // [#13233] The DISCHARGE half, and the one place this gate lets a declaration
+  // answer an `unresolved` instead of the source.
+  //
+  // ⚠️ Restricted to `reason: 'helper'`, and the restriction is the whole
+  // argument. The other two reasons name a remedy the author can carry out —
+  // `constant` says resolve it or teach the resolver the spelling, `reassigned`
+  // says spell it `const` — so a row there would buy an exemption from work
+  // that is possible. A HELPER whose callers pass values this scan cannot
+  // reduce has no such remedy: the callers may be in another package
+  // (`sendError` has 0 in-file calls), or they may pass a vocabulary this gate
+  // has declared out of its own population (`Parser#error`'s 16 kebab
+  // diagnostics), or they may pass a genuine runtime value (`http-dispatcher`'s
+  // `thrown.code`). Left undischargeable, each of those is a RED with no
+  // verdict available — not a row somebody forgot, but a red nobody CAN clear.
+  //
+  // It is a WIDENING, not a weakening, and the baseline is what says so: on the
+  // parent commit these helpers produced no site AND no unresolved, because no
+  // shape reached them at all. After it they are seen, recorded with evidence,
+  // and reconciled in BOTH directions — a row whose helper stops being
+  // unresolved goes stale and REDS, exactly like a site row. ⛔ What it must
+  // never become is a place to park a helper nobody looked at: the row carries
+  // a door and a verdict on the same closed vocabularies every site row uses.
+  const helperRowByKey = new Map(declaredHelpers.map((r) => [helperKey(r), r]));
+  const unresolvedHelperKeys = new Set(
+    unresolved.filter((u) => u.reason === 'helper').map((u) => helperKey(u)),
+  );
+  for (const row of declaredHelpers) {
+    if (unresolvedHelperKeys.has(helperKey(row))) continue;
+    findings.push({
+      kind: 'stale-helper-row',
+      text:
+        `${DECLARATION} declares the code helper '${row.helper}(${row.param})' at ${row.file} ` +
+        `(${row.shape}) as unresolvable, but the scan no longer reports it. Either the helper moved or ` +
+        `went away, or its call sites now reduce to literals — in which case the codes are ordinary ` +
+        `sites and want ordinary rows. Delete this one.`,
+    });
+  }
+
   for (const u of unresolved) {
+    if (u.reason === 'helper' && helperRowByKey.has(helperKey(u))) continue;
     // [#10918] A reassigned mutable local has a literal in it — the reduction
     // is refused for a reason the author can act on, so the remedy named is the
     // one that applies. Telling them to "teach resolveConstant() the spelling"
@@ -1713,7 +1943,14 @@ export function reconcile({ sites, declared, registered, unresolved }) {
     findings.push({
       kind: 'unresolved-constant',
       text:
-        u.reason === 'reassigned'
+        u.reason === 'helper'
+          ? `${u.file}: the code helper '${u.helper ?? '?'}(${u.value})' (${u.shape}) is visible to this ` +
+            `scan, but none of its in-file call sites passes a value that reduces to a literal, so the ` +
+            `codes it stamps are unknown. Reported rather than dropped. This is the one unresolved ` +
+            `reason a DECLARATION can answer, because the source may hold no remedy: add a row to ` +
+            `UNRESOLVED_CODE_HELPERS in ${DECLARATION} with a door, a verdict and the evidence — or, if ` +
+            `the callers can spell literals, make them and let it become ordinary sites.`
+          : u.reason === 'reassigned'
           ? `${u.file}: '${u.value}' (${u.shape}) is a \`let\`/\`var\` this file also REASSIGNS, so its ` +
             `initializer is not the set of codes it stamps and reducing it would report a value the ` +
             `program may never send. Reported rather than dropped. Make it a \`const\` (a ternary or a ` +
@@ -3015,8 +3252,10 @@ function main() {
   );
 
   const { sites, unresolved } = deriveSites({ registered, files, readFile, packageDirs });
-  const declared = parseDeclaration(readFileSync(join(ROOT, DECLARATION), 'utf8'));
-  const findings = reconcile({ sites, declared, registered, unresolved });
+  const declarationSource = readFileSync(join(ROOT, DECLARATION), 'utf8');
+  const declared = parseDeclaration(declarationSource);
+  const declaredHelpers = parseUnresolvedHelpers(declarationSource);
+  const findings = reconcile({ sites, declared, registered, unresolved, declaredHelpers });
 
   // [#9098] The door-typing half. `walkSources` skips the door file only if it
   // is a test or the declaration — it is neither, so read it from the scanned
