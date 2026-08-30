@@ -531,7 +531,12 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) corrupt(value);
     };
     corrupt(corrupted.views);
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(48);
+    // The count tracks the CORPUS, not an issue: 49 today because #13216 added
+    // a `page` section to `view.form.ts` — the surface block for the new `page`
+    // view type, gated by `visibleWhen: "data.type == 'page'"` exactly as every
+    // other surface block is — so the walk has one more predicate to reach.
+    // Earlier measurements stay what they were: history, not the census.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(49);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -605,8 +610,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // and `in`-list literals are deliberately not this rule's (see the anchor
     // note above) — exactly the #11566 (PR #11989) respell of the sibling
     // `maxLength` row, which took the measurement from 47 to 44. Earlier
-    // measurements stay what they were — history, not the census.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(41);
+    // measurements stay what they were — history, not the census. It is 42
+    // today: #13216's `page` section in `view.form.ts` is gated by
+    // `data.type == 'page'`, one more `==` literal comparison of exactly the
+    // shape the seven sibling surface blocks already carry.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(42);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
