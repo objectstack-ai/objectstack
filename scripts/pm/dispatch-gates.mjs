@@ -6335,6 +6335,23 @@ export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts
  * make the true number bigger, never smaller — which is what lets this stay
  * honest without the derivation reaching for the network.
  *
+ * The CHANGED SET inherits that lower-bound property, and for a while nothing
+ * said so (#13392). `changed` is diffed against the same possibly-stale
+ * snapshot the count is, so files-changed-vs-upstream is a SUPERSET of what
+ * this reads: an empty `changed` means "nothing changed that THIS SNAPSHOT can
+ * see", never "nothing changed". The measured failure sat exactly in that gap:
+ * a run whose snapshot was at most ~13 minutes old read `behind: 1, changed:
+ * []` — exact for its visible range — and rendered it as "nothing this answer
+ * derives from changed", while upstream landed four surface commits between
+ * that reading and the CI run that consumed the answer, one of them carrying
+ * the very family whose absence turned CI red. At this repo's landing cadence
+ * (a merge-queue landing every few minutes) NO local instrument can earn the
+ * unqualified sentence — not even a freshness check on the snapshot, because
+ * fresh-at-derivation is not true-at-consumption. So `driftLines` scopes the
+ * quiet sentence to the visible range and states the remainder as untellable,
+ * rather than gating a reassurance on a freshness reading this function cannot
+ * take honestly.
+ *
  * Every field degrades to null rather than throwing. No base ref, a shallow
  * clone and no git at all are real states, and none of them is an error here.
  * They are not a NON-EVENT either: `driftLines` renders EVERY degraded field as
@@ -6342,12 +6359,19 @@ export const DERIVATION_SURFACE = ['.github/workflows', 'package.json', 'scripts
  * degrading here costs the caller a reading and never costs it the news.
  *
  * "Every" is load-bearing and was once only "the base ref". This function
- * degrades in TWO places — `base` when the ref does not resolve, and `behind`
- * when the ref resolves and the COUNT cannot be read — and the second one is
- * not a corner of the first: a shallow clone reads a distance fine (measured:
- * `--depth=1`, before and after the upstream moves), while an unborn HEAD makes
- * `rev-list --count` fail with a resolvable ref in hand. `unmeasuredDrift`
- * below is the single predicate both degraded fields are read through.
+ * degrades in THREE places — `base` when the ref does not resolve, `behind`
+ * when the ref resolves and the COUNT cannot be read, and `changed` when the
+ * count reads and the DIFF does not — and none is a corner of another: a
+ * shallow clone reads a distance fine (measured: `--depth=1`, before and after
+ * the upstream moves), while an unborn HEAD makes `rev-list --count` fail with
+ * a resolvable ref in hand, and that same shallow clone, one shallow fetch
+ * later, counts a distance of 1 while `HEAD...ref` dies with `no merge base`
+ * (measured, exit 128) because the boundary cut the history the three-dot form
+ * needs. The third door used to collapse into `changed: []` — a FAILED read
+ * rendered as the quiet visible-range-clear sentence, the least earned
+ * reassurance of all (#13392) — so `changed` is now `null` when the diff was
+ * not read, and only an ARRAY when it was. `unmeasuredDrift` below is the
+ * single predicate all three degraded fields are read through.
  */
 export function baseDrift({ cwd = ROOT } = {}) {
   const read = (args) => {
@@ -6359,14 +6383,19 @@ export function baseDrift({ cwd = ROOT } = {}) {
     }
   };
   const base = read(['rev-parse', '--short', DEFAULT_BASE_REF]);
-  if (base === null) return { base: null, behind: null, changed: [], headDate: null, baseDate: null };
+  if (base === null) return { base: null, behind: null, changed: null, headDate: null, baseDate: null };
   const counted = read(['rev-list', '--count', `HEAD..${DEFAULT_BASE_REF}`]);
   const behind = /^\d+$/.test(counted ?? '') ? Number(counted) : null;
-  const names = behind ? read(['diff', '--name-only', `HEAD...${DEFAULT_BASE_REF}`, '--', ...DERIVATION_SURFACE]) : '';
+  // At `behind: 0` the empty set is exact BY CONSTRUCTION — an empty commit
+  // range moves no files — so it is a reading without running the diff. With
+  // no distance in hand there is no range to read, so `changed` is unread too.
+  const names = behind ? read(['diff', '--name-only', `HEAD...${DEFAULT_BASE_REF}`, '--', ...DERIVATION_SURFACE]) : behind === 0 ? '' : null;
   return {
     base,
     behind,
-    changed: names ? names.split('\n').filter(Boolean) : [],
+    // `null` = the diff was NOT read (a failed read is not an empty one);
+    // an array — even empty — = the diff ran and this is what it said.
+    changed: names === null ? null : names.split('\n').filter(Boolean),
     headDate: read(['log', '-1', '--format=%cI', 'HEAD']),
     baseDate: read(['log', '-1', '--format=%cI', DEFAULT_BASE_REF]),
   };
@@ -6376,13 +6405,15 @@ export function baseDrift({ cwd = ROOT } = {}) {
  * WHICH step of the measurement failed — or `null` when a reading was taken,
  * whatever its value.
  *
- * `baseDrift` has TWO doors to "no reading was taken", and to a reader they are
- * one state. The base ref may not resolve (`base: null` — a fresh checkout, a
- * clone nobody fetched, a graft), or the ref may resolve and the DISTANCE from
- * it be unreadable (`behind: null`): `rev-list --count` fails on an unborn
- * HEAD, which an ordinary fully-fetched clone reaches with one ordinary
- * command, and also on a git that dies mid-run or a count that comes back
- * non-numeric.
+ * `baseDrift` has THREE doors to "no reading was taken", and to a reader they
+ * are one state. The base ref may not resolve (`base: null` — a fresh
+ * checkout, a clone nobody fetched, a graft), the ref may resolve and the
+ * DISTANCE from it be unreadable (`behind: null`): `rev-list --count` fails on
+ * an unborn HEAD, which an ordinary fully-fetched clone reaches with one
+ * ordinary command, and also on a git that dies mid-run or a count that comes
+ * back non-numeric — or the distance may read and the CHANGED SET not
+ * (`changed: null`): the three-dot diff needs a merge base the checkout may
+ * not hold, which a shallow clone reaches with one shallow fetch.
  *
  * The second door used to fall through to `!drift.behind` and render
  * byte-identically to `behind: 0` — the same collapse the first door was fixed
@@ -6403,9 +6434,11 @@ export function baseDrift({ cwd = ROOT } = {}) {
  * silent below.
  */
 function unmeasuredDrift(drift) {
+  const distanceUnknown = `This tree's distance from ${DEFAULT_BASE_REF} is UNKNOWN. Not zero: no reading was taken.`;
   if (drift.base === null) {
     return {
       what: `${DEFAULT_BASE_REF} does not resolve in this checkout`,
+      unknown: distanceUnknown,
       how: 'A fresh checkout, a clone nobody fetched or a graft all reach here.',
       fix: `Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for a reading.`,
     };
@@ -6413,19 +6446,57 @@ function unmeasuredDrift(drift) {
   if (!Number.isFinite(drift.behind)) {
     return {
       what: `${DEFAULT_BASE_REF} resolves here (${drift.base}), but counting from HEAD to it failed`,
+      unknown: distanceUnknown,
       how: `An unborn HEAD — 'git checkout --orphan', or a ref fetched into a repo holding no commit of its own — a git that died mid-run, or a non-numeric count all reach here.`,
       fix: `Run 'git rev-list --count HEAD..${DEFAULT_BASE_REF}' here to see which, then derive again for a reading.`,
+    };
+  }
+  // The THIRD door (#13392): the ref resolves, the distance reads, and the diff
+  // that names WHICH files moved across it does not. This is the least safe of
+  // the three to be silent about, because it used to collapse into
+  // `changed: []` and render as the quiet visible-range-clear sentence — a
+  // reassurance manufactured from a failed read. It is a state of ordinary
+  // working checkouts, not of broken ones: a shallow clone plus one shallow
+  // fetch counts a distance fine and has no merge base for the three-dot form
+  // (measured — and this fleet's containers clone shallow).
+  if (!Array.isArray(drift.changed)) {
+    return {
+      what: `${DEFAULT_BASE_REF} resolves here (${drift.base}) and HEAD counts at least ${drift.behind} commit(s) behind it, but reading WHICH files changed across that range failed`,
+      unknown: `The changed set is UNKNOWN. Not empty: no reading was taken.`,
+      how: `A shallow checkout holding no merge base — one shallow fetch after a '--depth' clone — or a git that died mid-run reach here.`,
+      fix: `Run 'git diff --name-only HEAD...${DEFAULT_BASE_REF} -- ${DERIVATION_SURFACE.join(' ')}' here to see why, then derive again for a reading.`,
     };
   }
   return null;
 }
 
 /**
- * Render the drift. Loud when it can have changed the answer, quiet when it
- * demonstrably cannot, and SILENT at zero — the last one for the same reason
- * the banner has no "all paths present" twin: against a base ref nobody
- * refreshed, a clean bill of health is precisely the reading the measured
- * failure would have passed.
+ * Render the drift. Loud when it can have changed the answer, scoped and
+ * self-limiting when the VISIBLE range is clear, and SILENT at zero — the last
+ * one for the same reason the banner has no "all paths present" twin: against
+ * a base ref nobody refreshed, a clean bill of health is precisely the reading
+ * the measured failure would have passed.
+ *
+ * The quiet branch used to be "quiet when it demonstrably cannot [have changed
+ * the answer]", and that classification was measured false (#13392). It
+ * printed "nothing this answer derives from changed across that range" from a
+ * reading whose range ends at the last-fetched snapshot, and a reader takes
+ * "that range" to reach upstream. On the incident run the snapshot was at most
+ * ~13 minutes old and the visible reading exact — `behind: 1`, one off-surface
+ * commit — yet by the time CI consumed the answer, upstream had landed four
+ * derivation-surface commits the sentence had vouched could not exist, one
+ * carrying the family whose absence turned CI red. The dev who read the line
+ * did not ignore a warning; it COMPLIED with one. That is worse than the loud
+ * case being missed: a false reassurance recruits the reader's trust against
+ * them. And no local instrument fixes it — a freshness gate on the snapshot
+ * would have called that base fresh and reassured anyway, because
+ * fresh-at-derivation is not true-at-consumption against a queue that lands
+ * every few minutes. So the quiet branch now states exactly what it measured
+ * (the VISIBLE commits are surface-clear), states the half it cannot measure
+ * as untellable rather than clear, and hands over the fetch. An "I cannot
+ * tell" that is true beats a "nothing changed" that is sometimes false — the
+ * sentence a reader can safely comply with is the only kind this tool may
+ * print.
  *
  * That silence at zero is what makes the UNMEASURABLE case a defect rather
  * than a fourth flavour of quiet. `baseDrift` degrades a field to null in two
@@ -6456,7 +6527,7 @@ export function driftLines(drift) {
   const unmeasured = unmeasuredDrift(drift);
   if (unmeasured) {
     return [
-      `  ⚠️  STALENESS NOT MEASURED — ${unmeasured.what}. This tree's distance from ${DEFAULT_BASE_REF} is UNKNOWN. Not zero: no reading was taken.`,
+      `  ⚠️  STALENESS NOT MEASURED — ${unmeasured.what}. ${unmeasured.unknown}`,
       `    ${unmeasured.how} An unmeasured tree is where the families below are LEAST trustworthy, not most. ${unmeasured.fix}`,
     ];
   }
@@ -6464,7 +6535,10 @@ export function driftLines(drift) {
   const { behind, base, changed, headDate, baseDate } = drift;
   const span = `HEAD${headDate ? ` ${headDate}` : ''} vs ${DEFAULT_BASE_REF} ${base}${baseDate ? ` ${baseDate}` : ''}`;
   if (changed.length === 0) {
-    return [`  At least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, but nothing this answer derives from changed across that range — ${span}.`];
+    return [
+      `  At least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, and none of the commit(s) this tree can SEE touched what this answer derives from — ${span}.`,
+      `    Whether UNSEEN upstream work did, this run cannot tell: the range above ends at ${DEFAULT_BASE_REF}, a LOCAL snapshot only a fetch moves — not at upstream. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for the strongest reading a checkout can take.`,
+    ];
   }
   return [
     `  ⚠️  STALE TREE — this answer is derived from a tree at least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, and ${changed.length} file(s) it derives from CHANGED across that range.`,
@@ -11017,8 +11091,43 @@ function selfTest() {
   t('a drift carrying no distance FIELD at all reads unmeasured too — absent is not a reading either',
     driftLines({ base: 'aaaaaaa', changed: [] }).join('\n').includes('STALENESS NOT MEASURED'));
   const benign = driftLines({ base: 'aaaaaaa', behind: 7, changed: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
-  t('behind, but with the derivation surface untouched, states the distance in ONE quiet line', benign.length === 1 && benign[0].includes('7 commit(s) behind'));
-  t('and that quiet line does not cry stale, so the loud spelling stays rare', !benign.join('\n').includes('STALE TREE'));
+  const benignText = benign.join('\n');
+  t('behind with the VISIBLE surface untouched states the distance, and scopes the claim to what the tree can see',
+    benign.length === 2 && benign[0].includes('7 commit(s) behind') && benign[0].includes('can SEE'));
+  t('and it states the unseen half as untellable instead of clear — the sentence a reader may safely comply with',
+    benignText.includes('cannot tell') && benignText.includes('LOCAL snapshot'));
+  // The departure pin for the measured false reassurance (#13392). The old
+  // spelling asserted "nothing this answer derives from changed across that
+  // range" from a reading whose range ends at the last fetch; a dev complied
+  // with it and CI reddened on a family that landed upstream inside the gap
+  // the sentence had vouched empty. The length-and-content conjunct is what
+  // keeps this from passing vacuously — an empty render also contains no
+  // reassurance, and that species of green pin is the one this block already
+  // buried once.
+  t('the reassurance spelling is GONE — no quiet line asserts that nothing this answer derives from changed',
+    benign.length === 2 && benign[0].includes('none of the commit(s)') && !benignText.includes('nothing this answer derives from changed'));
+  t('it hands over the fetch, the one action that strengthens the reading', benignText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  t('and the quiet spelling still does not cry stale, so the loud spelling stays rare', !benignText.includes('STALE TREE'));
+  // The THIRD unmeasured door (#13392): distance reads, changed set does not.
+  // Under the old shape this state collapsed into `changed: []` and rendered
+  // as the quiet clear sentence — a reassurance manufactured from a FAILED
+  // read, the least earned of all.
+  const unreadSet = driftLines({ base: 'aaaaaaa', behind: 7, changed: null, headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
+  const unreadSetText = unreadSet.join('\n');
+  t('a distance that READS beside a changed set that does NOT refuses as a third unmeasured door, never as quiet',
+    unreadSet.length === 2 && unreadSetText.includes('STALENESS NOT MEASURED') && unreadSetText.includes('Not empty'));
+  t('it names the base it resolved AND the distance it counted, so a reader can tell WHICH step failed this time',
+    unreadSetText.includes('aaaaaaa') && unreadSetText.includes('7 commit(s)'));
+  t('its remedy is the diff — not the fetch, not the count',
+    unreadSetText.includes(`git diff --name-only HEAD...${DEFAULT_BASE_REF}`)
+      && !unreadSetText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`)
+      && !unreadSetText.includes('git rev-list --count'));
+  t('and it neither reassures nor cries stale — no reading, no claim in either direction',
+    unreadSet.length === 2 && !unreadSetText.includes('can SEE') && !unreadSetText.includes('STALE TREE'));
+  t('so the three unmeasured doors are told apart rather than flattened by the shared predicate',
+    new Set([unmeasuredText, uncountedText, unreadSetText]).size === 3);
+  t('a drift carrying no changed FIELD at all reads unmeasured too — absent is not a reading either',
+    driftLines({ base: 'aaaaaaa', behind: 7 }).join('\n').includes('STALENESS NOT MEASURED'));
   const loud = driftLines({ base: 'aaaaaaa', behind: 120, changed: ['scripts/pm/dispatch-gates.mjs', '.github/workflows/lint.yml'], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-08T00:00:00Z' });
   const loudText = loud.join('\n');
   t('a changed derivation surface is LOUD, and names what it compared', loudText.includes('STALE TREE') && loudText.includes('HEAD') && loudText.includes(DEFAULT_BASE_REF) && loudText.includes('120 commit(s)'));
@@ -11047,7 +11156,7 @@ function selfTest() {
     // above only describe. Its reading must not be the zero the clone reads.
     const unresolvableRepo = baseDrift({ cwd: up });
     t('a checkout with no such remote measures NO base, and does not fall back to zero',
-      unresolvableRepo.base === null && unresolvableRepo.behind === null);
+      unresolvableRepo.base === null && unresolvableRepo.behind === null && unresolvableRepo.changed === null);
     t('and from a real repo too it arrives as a sentence, not as the silence the level clone gets',
       driftLines(unresolvableRepo).join('\n').includes('STALENESS NOT MEASURED')
         && driftLines(baseDrift({ cwd: clone })).length === 0);
@@ -11062,8 +11171,8 @@ function selfTest() {
     gd(['remote', 'add', DEFAULT_BASE_REMOTE, up], unborn);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE, `${DEFAULT_BASE_BRANCH}:refs/remotes/${DEFAULT_BASE_REF}`], unborn);
     const unbornRepo = baseDrift({ cwd: unborn });
-    t('a checkout whose base ref RESOLVES but whose own HEAD is unborn measures a base and NO distance',
-      typeof unbornRepo.base === 'string' && unbornRepo.behind === null);
+    t('a checkout whose base ref RESOLVES but whose own HEAD is unborn measures a base, NO distance and NO changed set',
+      typeof unbornRepo.base === 'string' && unbornRepo.behind === null && unbornRepo.changed === null);
     t('and that door speaks from a real repo too, rather than reading as the silence the level clone gets',
       driftLines(unbornRepo).join('\n').includes('STALENESS NOT MEASURED')
         && driftLines(baseDrift({ cwd: clone })).length === 0);
@@ -11085,7 +11194,8 @@ function selfTest() {
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const offSurface = baseDrift({ cwd: clone });
     t('drift against a real repo is measured from git, never assumed', offSurface.behind === 1 && !!offSurface.base);
-    t('and a commit outside the derivation surface leaves the loud list empty', offSurface.changed.length === 0 && driftLines(offSurface).length === 1);
+    t('and a commit outside the derivation surface stays off the loud list — and the quiet render says what it can see',
+      offSurface.changed.length === 0 && driftLines(offSurface).length === 2 && driftLines(offSurface)[0].includes('can SEE'));
     // Now upstream moves a file the answer IS derived from — the measured shape.
     mkdirSync(join(up, 'scripts'), { recursive: true });
     writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
@@ -11105,6 +11215,32 @@ function selfTest() {
       typeof orphaned.base === 'string' && orphaned.behind === null);
     t('and the clone that measured a distance one command ago says so instead of falling silent',
       driftLines(orphaned).join('\n').includes('STALENESS NOT MEASURED'));
+    // The THIRD door, measured from a real repo rather than hand-built
+    // (#13392): a SHALLOW clone. Depth-1 cloning is how this fleet's own
+    // containers arrive, which is what makes this door a state of production
+    // checkouts and not of repos built to show it. One shallow fetch after
+    // upstream moves leaves the distance countable — the fetched tip is
+    // visible — while the three-dot diff dies with no merge base, because the
+    // shallow boundary cut it out of the checkout. Under the pre-fix shape
+    // this exact state collapsed into `changed: []` and rendered the quiet
+    // clear sentence from a FAILED read — so the last assertion here is the
+    // required red: it fails if a reassurance can ever again be manufactured
+    // without an established reading.
+    const shallow = join(driftTmp, 'shallow');
+    gd(['clone', '-q', '--depth', '1', `file://${up}`, shallow], driftTmp);
+    t('a fresh shallow clone still counts a distance fine — shallowness alone breaks nothing (positive control)',
+      baseDrift({ cwd: shallow }).behind === 0);
+    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 3;\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'move a check script beyond the shallow boundary'], up);
+    gd(['fetch', '-q', '--depth', '1', DEFAULT_BASE_REMOTE], shallow);
+    const shallowRepo = baseDrift({ cwd: shallow });
+    t('one shallow fetch later the distance still READS and the changed set does NOT — null, never an empty array',
+      shallowRepo.behind >= 1 && shallowRepo.changed === null);
+    const shallowText = driftLines(shallowRepo).join('\n');
+    t('and that run REFUSES from the real repo too, naming the changed set as the step that failed',
+      shallowText.includes('STALENESS NOT MEASURED') && shallowText.includes('Not empty'));
+    t('with an upstream SURFACE commit sitting in the unreadable range right now, no line reassures — not the visible-range sentence, not the retired unqualified one',
+      !shallowText.includes('can SEE') && !shallowText.includes('nothing this answer derives from changed'));
   } finally {
     rmSync(driftTmp, { recursive: true, force: true });
   }

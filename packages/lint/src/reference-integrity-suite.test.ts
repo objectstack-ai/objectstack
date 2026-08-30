@@ -23,6 +23,10 @@ describe('reference-integrity suite — membership', () => {
       'validateChartBindings',
       'validateNavAccess',
       'validateNavTargetRefs',
+      // [#13216] The conscious edit this written-out list exists to force: the
+      // page reference on a `type: 'page'` list view, placed beside the nav
+      // twin that asks the identical question one surface over.
+      'validateViewPageRefs',
       'validateNavObjectServability',
       'validateTranslationReferences',
       'validateTranslatableSections',

@@ -1439,6 +1439,86 @@ const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefi
 };
 
 /**
+ * [#13216] The `type: 'page'` mount refusals, in BOTH directions.
+ *
+ * `page` is the one member of the view `type` enum that renders nothing of its
+ * own: every other member describes how to draw the object's ROWS, and degrades
+ * to a wrong-but-visible list when its config block is missing (which is why
+ * `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS` treats those as WARNINGs — the
+ * renderer falls back to literal default field names). A `page` view has no
+ * rows to fall back to: without `pageName` there is no page to hand the page
+ * renderer, so the view is not "degraded", it is empty. Nothing weaker than a
+ * parse refusal is honest about that, and the refusal is why `page` is
+ * deliberately absent from `VIEW_BINDING_BLOCKS` — see the note there.
+ *
+ * The reverse direction matters just as much and is the cheaper mistake to
+ * make: `pageName` on a `grid` (or any non-`page`) view is accepted-and-ignored,
+ * the failure mode this file's `VIEW_HISTORY` exists to record and the one that
+ * reads as working to whoever authored it — human or model.
+ *
+ * ## Why `columns` is checked here and the other inert keys are not
+ *
+ * `columns` is the ONLY required key on {@link ListViewSchema}, so a `page` view
+ * cannot be authored without writing one, and the only truthful value is `[]`.
+ * Leaving that unchecked would mean the platform forces an author to write a
+ * value and then ignores what they wrote. The optional type-specific blocks
+ * (`kanban` on a grid view, `chart` on a tree view, …) are NOT checked, here or
+ * anywhere: tolerating a stale optional block is this schema's standing
+ * disposition, and narrowing it is a separate decision about every view type,
+ * not a rider on this one.
+ *
+ * ⛔ `columns` is NOT made optional to spare the author the `[]`. The list and
+ * form overlay arms of {@link ViewMetadataSchema} are told apart by exactly two
+ * properties — "no required `columns`, disjoint `type` enum" — and the list arm
+ * is tried FIRST, so an optional `columns` would let a flattened FORM overlay
+ * that carries no explicit `type` match the LIST arm, default to `'grid'`, and
+ * have its `sections` silently stripped by that arm's `.strip()`.
+ */
+const VIEW_PAGE_MOUNT_NEEDS_PAGE_NAME =
+  "A `type: 'page'` view mounts a published page and has no rows of its own, so it needs to say "
+  + 'WHICH page: declare `pageName`. Unlike every other view type there is no fallback rendering — '
+  + "without it the view is blank. Shape: `{ type: 'page', pageName: '<page_name>', columns: [] }`.";
+
+const VIEW_PAGE_NAME_NEEDS_PAGE_TYPE =
+  "`pageName` is only read by a `type: 'page'` view (it names the published page that view mounts). "
+  + 'On any other view type it is accepted and never applied — the view renders as its own type and '
+  + "the page is never reached. Set `type: 'page'` to mount the page, or remove `pageName`.";
+
+const VIEW_PAGE_MOUNT_HAS_COLUMNS =
+  "A `type: 'page'` view renders the page named by `pageName`, not a column list — the declared "
+  + 'columns are never read. `columns` is required on every list view, so write the empty list: '
+  + '`columns: []`. (To show records in columns, use a row-rendering view type — `grid` and its '
+  + 'siblings — or let the page itself declare the list it wants.)';
+
+/**
+ * The `type` ⇄ `pageName` binding check attached to {@link ListViewSchema}.
+ *
+ * Attached with `.superRefine` rather than being folded into the shape because
+ * it is a relation BETWEEN two keys. Zod 4 attaches refinements to the schema
+ * itself, so `.extend()` and `.omit()` carry it — which is what puts this check
+ * on the flattened runtime overlay arm ({@link ViewMetadataSchema} member 3,
+ * the door a Studio tenant or an MCP/AI author writes through) and on
+ * {@link ObjectListViewSchema} (`objects[].listViews.*`) without a second copy.
+ */
+function checkListViewPageMount(
+  view: { type?: string; pageName?: string; columns?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const isPageMount = view.type === 'page';
+  const hasPageName = typeof view.pageName === 'string' && view.pageName.length > 0;
+
+  if (isPageMount && !hasPageName) {
+    ctx.addIssue({ code: 'custom', path: ['pageName'], message: VIEW_PAGE_MOUNT_NEEDS_PAGE_NAME });
+  }
+  if (!isPageMount && hasPageName) {
+    ctx.addIssue({ code: 'custom', path: ['pageName'], message: VIEW_PAGE_NAME_NEEDS_PAGE_TYPE });
+  }
+  if (isPageMount && Array.isArray(view.columns) && view.columns.length > 0) {
+    ctx.addIssue({ code: 'custom', path: ['columns'], message: VIEW_PAGE_MOUNT_HAS_COLUMNS });
+  }
+}
+
+/**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
  *
@@ -1465,7 +1545,24 @@ const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefi
  *   }
  * }
  */
-export const ListViewSchema = lazySchema(() => strictObject({
+/**
+ * The unrefined SHAPE behind {@link ListViewSchema}, module-private.
+ *
+ * Split out for exactly one reason: zod 4 refuses `.omit()` on an object schema
+ * that carries refinements (`".omit() cannot be used on object schemas
+ * containing refinements"`, thrown at construction), and
+ * {@link ObjectListViewSchema} is built by omitting `userFilters` from this
+ * shape. So the shape stays refinement-free and BOTH terminals attach
+ * {@link checkListViewPageMount} themselves — one check function, two
+ * attachment points, no second copy of the rule.
+ *
+ * ⛔ Not exported, deliberately: a top-level EXPORTED schema binding mints a
+ * new protocol def in `json-schema.manifest/` and a full set of ratcheted
+ * `authorable-surface/` keys, so publishing this shape would duplicate every
+ * `ui/ListView` key under a second name (the same argument
+ * {@link VIEW_METADATA_MEMBERS} records for the union's members).
+ */
+const ListViewShapeSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
   guidance: {
@@ -1489,7 +1586,8 @@ export const ListViewSchema = lazySchema(() => strictObject({
     'gantt',      // Project Timeline
     'map',        // Geospatial
     'chart',      // Aggregate visualisation
-    'tree'        // Self-referencing hierarchy (tree-grid)
+    'tree',       // Self-referencing hierarchy (tree-grid)
+    'page'        // Mount an already-published `page` — see `pageName` below
   ]).default('grid'),
   
   /** Data Source Configuration */
@@ -1585,6 +1683,33 @@ export const ListViewSchema = lazySchema(() => strictObject({
   chart: ListChartConfigSchema.optional(),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
+
+  /**
+   * The published `page` a `type: 'page'` view mounts.
+   *
+   * Named `pageName` because that is what a page reference is already called on
+   * every other surface that carries one — `PageNavItemSchema.pageName` in
+   * `app.zod.ts`, the collection it resolves against (`stack.pages`), and the
+   * lint rule that resolves it (`nav-target-unresolved`). A second spelling for
+   * the same reference would split the one thing an author has to learn.
+   *
+   * Grammar is {@link SnakeCaseIdentifierSchema} — the SAME schema
+   * `PageSchema.name` is declared with — rather than the bare `z.string()`
+   * the nav item uses, so the set of values this key accepts is exactly the set
+   * of strings that could name a page. A `pageName` outside that grammar names
+   * nothing that can exist, and saying so at parse is cheaper than resolving it
+   * against a collection. (The nav item stays a bare string: its targets may be
+   * `${…}`-interpolated at render time, which a view mount has no path to.)
+   *
+   * Existence of the target is a separate question with its own answers, on the
+   * doors that can see the collection: `defineStack`'s `validateCrossReferences`
+   * (build-time, throws) and `validateViewPageRefs` in `@objectstack/lint`
+   * (the CLI commands and the runtime publish gate).
+   */
+  pageName: SnakeCaseIdentifierSchema.optional().describe(
+    "Published page this view mounts — required when `type: 'page'`, and refused on every other view type. "
+    + 'Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience.',
+  ),
 
   /** View Metadata (Airtable-style view management) */
   description: I18nLabelSchema.optional().describe('View description for documentation/tooltips'),
@@ -1742,6 +1867,15 @@ export const ListViewSchema = lazySchema(() => strictObject({
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 }));
+
+/**
+ * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
+ * `type: 'page'` ⇄ `pageName` binding check. See that shape for why the two are
+ * separate bindings, and {@link checkListViewPageMount} for what the check
+ * refuses.
+ */
+export const ListViewSchema = lazySchema(() =>
+  ListViewShapeSchema.superRefine(checkListViewPageMount));
 
 /**
  * [#12868] Form-view select option — {@link SelectOptionSchema} minus the
@@ -3088,7 +3222,14 @@ export const ObjectUserFiltersSchema = lazySchema(() => strictObject({
  * reports it pre-parse. See objectui #2338.
  */
 export const ObjectListViewSchema = lazySchema(() =>
-  ListViewSchema.omit({ userFilters: true }).extend({ userFilters: ObjectUserFiltersSchema.optional() }));
+  ListViewShapeSchema.omit({ userFilters: true })
+    .extend({ userFilters: ObjectUserFiltersSchema.optional() })
+    // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
+    // object), so the binding check is re-attached here rather than inherited.
+    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
+    // authoring surface — as the one door where a `page` view with no
+    // `pageName` parses clean.
+    .superRefine(checkListViewPageMount));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -3991,7 +4132,16 @@ const ViewContainerWireSchema = lazySchema(() =>
  * measured serving filter that decides exactly this pair.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
-  ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
+  // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
+  // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
+  // refuses to overwrite a key on an object that carries refinements. So the
+  // binding check is re-attached AFTER `.strip()` instead of inherited — this
+  // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
+  // author reaches, so it is the last place the refusal may go missing.
+  // `viewDoorsCarryingPageMountCheck` in `view.test.ts` fails if any of the
+  // three attachment points is dropped.
+  ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
+    .superRefine(checkListViewPageMount),
 );
 
 /**

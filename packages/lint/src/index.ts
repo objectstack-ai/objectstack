@@ -351,6 +351,11 @@ export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-refe
 export { validateNavTargetRefs, NAV_TARGET_UNRESOLVED } from './validate-nav-target-refs.js';
 export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-target-refs.js';
 
+// [#13216] The same page reference on the OTHER surface that can carry one: a
+// `type: 'page'` list view's `pageName`. Advisory, for its nav twin's reason.
+export { validateViewPageRefs, VIEW_PAGE_UNRESOLVED } from './validate-view-page-refs.js';
+export type { ViewPageRefFinding, ViewPageRefSeverity } from './validate-view-page-refs.js';
+
 // [#7912] The servability question about an `object` nav target: not "does the
 // name resolve?" but "can the destination answer a list at all?". Gates, and
 // gates alone among the nav rules — `enable` is declared on the object in this

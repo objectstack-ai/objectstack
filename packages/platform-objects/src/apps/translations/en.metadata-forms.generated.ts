@@ -612,6 +612,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Chart",
         description: "Chart-specific configuration."
       },
+      page: {
+        label: "Page",
+        description: "The published page this view mounts."
+      },
       end_user_controls: {
         label: "End-user controls",
         description: "What end users can do on this view — quick filters, filter tabs, visualization switching (ADR-0047, Airtable Interface parity)."
@@ -692,6 +696,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       chart: {
         label: "Chart"
+      },
+      pageName: {
+        label: "Page Name",
+        helpText: "Name of an already-published page (lowercase snake_case). The page renders in place of the record list, so leave Columns empty."
       },
       userFilters: {
         label: "User Filters",

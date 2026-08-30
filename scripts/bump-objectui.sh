@@ -549,12 +549,22 @@ fi
 # --- The other half of the pin-update procedure (#5960) ----------------------
 # ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's
 # `sdui.manifest.json`, and that file changes when — and only when — this pin
-# moves. So the pin bump is the ratchet's trigger, and it is the ONLY one:
-# measured on origin/main, no workflow runs `pnpm sdui:manifest`, no workflow
-# installs Playwright for it, `packages/console/dist/` is gitignored and the
-# published @objectstack/console tarball ships no manifest. Producing it in this
-# repo's CI was considered and REJECTED (#5960) — it would put a full objectui
-# build plus a chromium download on every matching PR.
+# moves. So the pin bump is the ratchet's trigger, and the ratchet has no
+# AUTOMATIC one at all: `packages/console/dist/` is gitignored and the published
+# @objectstack/console tarball ships no manifest, so the file exists only where
+# somebody dumped it. Producing it in this repo's CI was considered and REJECTED
+# (#5960) — it would put a full objectui build plus a chromium download on every
+# matching PR.
+#
+# ⚠️ Corrected 2026-08-30 (#13091): this comment used to read "measured on
+# origin/main, no workflow runs `pnpm sdui:manifest`, no workflow installs
+# Playwright for it". Both halves stopped being true on 2026-08-10, when
+# `.github/workflows/cut-rc.yml` landed doing both, one step apart, as the last
+# check before publish. The trigger claim above is unaffected — cut-rc is a
+# `workflow_dispatch`-only lane a human starts by typing the version — but "no
+# workflow" was an absolute about the whole workflow set, and that is the shape
+# that rotted. Read a workflow's `on:` block rather than a file count. ADR-0082
+# addendum 2 carries the full correction.
 #
 # Deliberately a REMINDER, not a hard gate: a machine without Playwright must
 # still be able to move the pin, and hard-failing here would be the rejected
