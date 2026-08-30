@@ -449,166 +449,152 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
 });
 
 /**
- * ## [#13131] A code-carrying helper that stamps through an OBJECT LITERAL is
- * ## invisible to `codehelper` — MEASURED, and deliberately NOT closed here
+ * ## [#13233] The OBJECT-LITERAL stamp position — CLOSED, and what it cost
  *
- * `codehelper` above is anchored on an ASSIGNMENT: its regex is `.code = ident`.
+ * `codehelper` was anchored on an ASSIGNMENT: its regex is `.code = ident`.
  * The reasoning it implements — "the identifier is a PARAMETER, so the literals
  * live at the CALL SITES" — is a property of the HELPER, not of the assignment
  * operator, and it holds just as well for the equally ordinary helper that
  * builds an object literal:
  *
  *     function postureError(code: string, message: string) {
- *       return { severity: 'error', code, message };   // <- nothing matches
+ *       return { severity: 'error', code, message };   // <- nothing matched
  *     }
  *
- * No shape in either gate anchors there. `objlit` needs a quote, `objlitconst`
+ * No shape in either gate anchored there. `objlit` needs a quote, `objlitconst`
  * needs a SCREAMING_SNAKE identifier after the colon (and the conventional
  * parameter name is `code`), `objlittemplate` needs backticks, and `codehelper`
- * needs the `.code =`. So this is worse than a wrong verdict: no pattern fires
- * at all, which means there is no site AND no unresolved entry either — nothing
- * is reported, and nothing says so. That is precisely the bound this gate
- * states for itself ("a value it cannot reduce is REPORTED, never dropped")
- * failing in the one way the bound cannot notice.
+ * needs the `.code =`. So it was worse than a wrong verdict: no pattern fired
+ * at all, which means there was no site AND no unresolved entry — nothing
+ * reported, and nothing saying so. That is precisely the bound this gate states
+ * for itself ("a value it cannot reduce is REPORTED, never dropped") failing in
+ * the one way the bound cannot notice. `objlithelper` in SHAPES closes it.
  *
- * ## TWO blindnesses, not one — and the second is why the first is not enough
+ * ## TWO blindnesses, and BOTH are now closed
  *
- * ① POSITION. The object-literal stamp position has no shape (above). OPEN.
+ * ① POSITION. The object-literal stamp position had no shape. [#13233] CLOSED —
+ *    `objlithelper`, guarded structurally by `enclosingOpeners` (the enclosing
+ *    bracket must be `{`) and by `helperCodesFor` (the identifier must be a
+ *    parameter).
  * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognised
  *    `function f(`, `constructor(` and `const|let|var f = (` — and NO class
- *    method. So a code-carrying helper that is a METHOD was out of reach even
- *    in the position `codehelper` already implements: the same body that
- *    produces a site as a free function produced nothing as
- *    `private error(code, …)`. [#13226] CLOSED — see `METHOD_HEADER` below.
+ *    method. [#13226] CLOSED — see `METHOD_HEADER` below.
  *
- * These are independent, and the card's own live instance needs BOTH:
+ * They were independent, and the card's own live instance needed BOTH:
  * `Parser#error(code, message, start?, tag?)` in `packages/sdui-parser` is a
- * class method that stamps through an object literal. Widening the position
- * alone would still not reach it.
+ * class method that stamps through an object literal. ⭐ It is reached now, and
+ * `--self-test`'s boundary case — which asserted for one round that a
+ * class-method-through-object-literal helper derives NOTHING — is the
+ * assertion that flipped to say so.
  *
- * ## [#13226] What closing ② cost, and what it did NOT buy
+ * ## What each closure cost, measured on `packages/**` non-test source
  *
- * ⭐ Closing ② moved NOTHING on this tree: sites and `unresolved` are
- * byte-identical before and after, measured through the real `deriveSites` over
- * `packages/**` against a worktree at the parent commit. Two independent
- * reasons, and the second is the one worth carrying forward:
+ * ② moved NOTHING: sites and `unresolved` were byte-identical before and after,
+ * for two reasons, and the second is the one that carried forward. No class-
+ * method helper stamps in the ASSIGNMENT position today (of the 17 `.code =
+ * ident` matches, 5 are true helpers and every one is a `function` or a
+ * `constructor`). And the 4 helpers ② unblocked all stamp through an OBJECT
+ * literal, so ① still dropped them — their cost was ①'s to pay, and ① has now
+ * paid it.
  *
- *   · No class-method helper stamps in the ASSIGNMENT position today. Of the 17
- *     `.code = ident` matches in `packages/**` non-test source, 5 are true
- *     helpers (the identifier is a parameter) and every one of those is a
- *     `function` or a `constructor` — 0 are methods.
- *   · The 4 helpers ② was blocking all stamp through an OBJECT LITERAL, so
- *     blindness ① still drops them. ⚠️ The 25 call sites and 3 undischargeable
- *     `unresolved` in the split below are therefore NOT a cost ② paid; they are
- *     a cost ① will pay, on the day the position widens. Reading them as ②'s is
- *     the mistake this paragraph exists to prevent.
+ * ① is the expensive one:
  *
- * What ② bought is that the widening of ① will REACH those helpers when it
- * lands. `enclosingDeclaration` at the `Parser#error` stamp offset now answers
- * `error(code, message, start, tag)`; before it answered the Parser
- * CONSTRUCTOR. (The constructor's parameter names parsed as `["readonly",
- * "readonly"]` when this was first measured — that half was a separate defect
- * in `parseParamNames`, since repaired, and it reads `["src","opts"]` now.
- * Both halves had to be true for the stamp to resolve; neither alone sufficed.)
+ *   helpers reached              13 (all named; see `invisibleDeclarationForms`)
+ *   (a) call sites newly reached 117  — 76 reduce to a literal, 41 do not
+ *   (b) NEW verdict rows          29  — 0 of them already carried a row
+ *   (c) helpers that reduce to NOTHING  5
  *
- * ## The measurement (blast radius), on `packages/**` non-test source
+ * (b) is one genre end to end: 29 lowercase ADR-0114 D2 `FieldErrorCode`
+ * members (`required`, `invalid_type`, `min_value`, …) in four files, every one
+ * stamped by a helper whose `code` parameter is TYPED to that closed enum. They
+ * land at `ApiError.details.fields[].code`, never at `error.code` — ADR-0112 D6
+ * genre — and they are declared `foreign-vocabulary` in `UNREGISTERED_CODE_SITES`.
  *
- * Method: the predicate — a `code` property of an object literal whose value is
- * an identifier that is a PARAMETER of the enclosing function — evaluated on
- * the real TypeScript AST, with call-site arguments reduced by THIS gate's own
- * literal grammar (`/^[A-Za-z][A-Za-z0-9_]*$/`, so a hyphen does not reduce)
- * and checked against the registered vocabulary and the declaration table.
- * A regex instrument was tried first and discarded: it matched `${code}` inside
- * a template and `f(a, code, b)` inside an argument list, and then LOST a true
- * positive because a bracket inside a regex literal unbalanced its scan.
+ * (c) was the card's declared BLOCKER, and it is answered by mechanism rather
+ * than by suppression: an `unresolved` entry with reason `helper` is now
+ * DISCHARGEABLE by a row in `UNRESOLVED_CODE_HELPERS`, reconciled in both
+ * directions like any site row. Every other unresolved reason stays an
+ * unconditional red, because every other reason names a remedy the author can
+ * carry out. See `reconcile`.
  *
- *   predicate matches            14 helpers (13 named, 1 anonymous)
- *   (a) call sites newly reached 116   — 75 reduce to a literal, 41 do not
- *   (b) NEW verdict rows needed   29   — 0 of them already carry a row
- *   (c) undischargeable `unresolved` findings  5
+ * ## ⚠️ The precision this position does NOT have — measured, not conceded
  *
- * Split by whether `enclosingDeclaration` could see the declaration at all
- * BEFORE [#13226] — the split is history now that ② is closed, and it is kept
- * because it is what the ① widening will actually meet:
+ * `.code = ident` needs a property called `code` on a value being MUTATED,
+ * which in this repo is almost always an error. `{ code }` is simply how any
+ * record carries any field named `code`, and the widening reaches all of them.
+ * Of the 13 helpers, TWO carry no error code whatsoever:
+ * `auth-manager.deliverPhoneOtp(phone, code)` stamps an SMS one-time password,
+ * and `check-yaml-examples.block(code, decl)` stamps a raw YAML fence body.
  *
- *   reachable then (blindness ① only)  10 helpers · 91 call sites · 29 rows · 2 unresolved
- *   blocked by blindness ②              4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ * ⛔ And there is no sibling-key test that separates them, which was measured
+ * rather than assumed. The obvious candidate — require the stamping literal to
+ * carry a `message` sibling, the ADR-0112 envelope shape this record's own
+ * `shorthand` spells — FAILS on the largest true positive: `record-validator`'s
+ * `fail` stamps `{ field, code, def, constraint, messageKey, options, value }`
+ * with no `message` at all, and alone contributes 15 of the 29 rows.
+ * `share-links.sendErr` stamps `{ code }` and nothing else. A narrowing that
+ * dropped the two false positives would drop 25 of the 29 rows with them.
  *
- * ⚠️ [#13226] re-derived these on today's tree and they had DRIFTED — upward,
- * by exactly one helper. The first census read 13 helpers · 106 call sites · 4
- * unresolved; a 14th helper (`block` in `packages/spec/scripts/`, 10 call sites,
- * none reducing) landed between the two readings and accounts for the whole
- * difference (106 + 10 = 116, 4 + 1 = 5). (b) 29 and the ZERO below did not
- * move, and the blindness-② line reproduced digit for digit. The lesson is not
- * that the numbers were wrong — they were right when taken — but that this is a
- * census of a moving tree, so a reader acting on it re-runs it rather than
- * quoting it.
- *
- * ⚠️ (b) is not the whole cost, and reading it as the whole cost is the trap
- * this note exists to prevent. All 29 new rows are LOWERCASE `FieldErrorCode`
- * diagnostics (`required`, `invalid_type`, `min_value`, …) in four files —
- * ADR-0112 D6 genre, not wire codes. The four `unresolved` findings are the
- * expensive half: an `unresolved` entry is pushed UNCONDITIONALLY and no
- * declaration row discharges it (see `reconcile`), so each one is a RED gate
- * with no verdict available — including `Parser#error`, whose 16 call sites all
- * pass kebab literals that this gate's grammar refuses to reduce.
+ * ⇒ the two are CLASSIFIED in `UNRESOLVED_CODE_HELPERS`, not filtered out. A
+ * predicate drawn around the cases one finds inconvenient is an exemption
+ * wearing a predicate's clothes, and it would have been drawn where no
+ * principle could later re-derive it.
  *
  * ## No victim today — verified, not assumed
  *
- * Of the 31 SCREAMING_SNAKE values reached, 31 are already registered; the
- * count of values that are BOTH ADR-0112 D1 shaped AND unregistered — i.e. a
- * real wire code hiding behind this blindness — is ZERO. `check:error-code-casing`
- * likewise reports nothing on any of the files involved. So the value of
- * closing this is preventing a future defect, not fixing a present one.
+ * Of the 33 SCREAMING_SNAKE values reached, 33 are already registered; the
+ * count of values BOTH ADR-0112 D1 shaped AND unregistered — a real wire code
+ * hiding behind this blindness — is ZERO. `check:error-code-casing` likewise
+ * reports nothing on any file involved. So closing this prevented a future
+ * defect; it fixed no present one. ⛔ It is a property of the TREE, not of the
+ * gate, so it expires: re-measure rather than citing this line.
  *
- * ⚠️ [#13226] re-measured this number, because it is the one that grades the
- * work: a single unregistered D1-shaped code hiding here would make this a live
- * defect rather than a future one. It is still ZERO (the reached population
- * drifted 33 → 31; every one of them registered). ⛔ It is a property of the
- * TREE, not of the gate, so it expires: whoever widens ① re-measures it rather
- * than citing this line.
- *
- * ⚠️ One bound the measurement does NOT have. `helperCodesFor` scans only the
- * DECLARING file, so every count here is over IN-FILE call sites. An exported
- * helper called from other packages contributes 0 — `sendError` in
+ * ⚠️ One bound none of these numbers has. `helperCodesFor` scans only the
+ * DECLARING file, so every count is over IN-FILE call sites. An exported helper
+ * called from other packages contributes 0 — `sendError` in
  * `packages/types/src/response-envelope.ts` has 0 in-file calls and is one of
- * the four `unresolved`. Counting cross-file callers needs resolution this
- * source scan does not have; that number is UNMEASURED, and it is a lower bound
- * on (a), never an upper one.
+ * the five in (c). That figure is a LOWER bound on (a), never an upper one.
  *
- * ## ⛔ What this declaration deliberately does NOT do
+ * ## ⛔ What this closure deliberately does NOT do
  *
- * ⛔ It does not widen `codehelper`. Triage ruled the measuring round scoped to
- * measurement: 「先量出加宽后的爆炸半径, ⛔ 不先加宽。数没量出来之前,"该不该加宽"
- * 不是一个可裁的问题。」 The numbers above are that measurement; whether to
- * widen is now a decidable question and belongs on its own card, with the
- * verdict rows (`domain:cli`) as a rider on the same change.
- *
- * ⛔ It does not add verdict rows. A row for a site no shape derives is a
- * `stale-row` finding, so the rows cannot land before the widening.
+ * ⛔ It does not widen the literal grammar to admit a hyphen so that
+ * `Parser#error`'s kebab call sites reduce. That family is declared out of BOTH
+ * gates by `KEBAB_DIAGNOSTIC_VOCABULARY` above, and reducing it here would move
+ * that boundary under cover of a position change.
+ * ⛔ It does not reach a `code:` fed by a lower-case LOCAL in an object literal
+ * (`const c = x ? 'A' : 'B'; return { code: c }`) — the object-literal twin of
+ * the `assignconst` local #9568 closed for the assign position. `objlithelper`
+ * declines it (the identifier is not a parameter), `objlitconst` needs
+ * SCREAMING_SNAKE, and `objlit` needs a quote. UNCLOSED and UNCENSUSED, on the
+ * record here rather than in the gap between three shapes.
+ * ⛔ It does not admit the ANONYMOUS ARROW, for the reason below: a nameless
+ * helper offers nothing for a call scan to anchor on.
  */
 export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
   /**
-   * The two spellings of the unseen position. Each is a complete helper whose
-   * only difference from `SAME_GENRE_CONTROL` is the stamping line.
+   * The two spellings of the position, now RECOGNISED. Each is a complete
+   * helper whose only difference from `SAME_GENRE_CONTROL` is the stamping
+   * line, and `--self-test` drives all three: the assignment control and both
+   * object-literal spellings must now derive the SAME site, which is how a
+   * closure that only half-works is caught.
    */
   shorthand: `  return { severity: 'error', code, message };`,
   longhand: `  return { severity: 'error', code: code, message };`,
   /**
-   * The SAME-GENRE POSITIVE CONTROL: the identical helper stamping through the
-   * assignment `codehelper` does implement. `--self-test` runs both, so the
-   * zero on the object-literal spellings is a READING rather than a harness
-   * that stopped working — the discipline `KEBAB_DIAGNOSTIC_VOCABULARY` above
-   * records, applied to a different axis.
+   * The SAME-GENRE control: the identical helper stamping through the
+   * assignment `codehelper` implements. It was the witness that the zero on the
+   * object-literal spellings was a READING rather than a broken harness; it is
+   * now the EQUIVALENCE partner, and it is still checked on every run, because
+   * "both derive the same thing" reads identically when both are broken.
    */
   control: `  const e = new Error(message);\n  (e as any).code = code;\n  return e;`,
   /** Unregistered in both `StandardErrorCode` and the ledger, in both casings. */
   probe: 'HELPER_SCREAMING',
   probeLowercase: 'helper_lowercase',
   /**
-   * Blindness ②: the declaration forms `enclosingDeclaration` cannot see.
+   * Declaration forms `enclosingDeclaration` still cannot see.
    *
-   * [#13226] `class method` came OFF this list — `METHOD_HEADER` recognises it.
+   * [#13226] `class method` came off this list — `METHOD_HEADER` recognises it.
    * The anonymous arrow stays, and stays for a reason that is not laziness: it
    * has no NAME, and every one of `helperCodesFor`'s call scans is built from
    * the declaration's name. A nameless helper can therefore produce neither a
@@ -623,21 +609,29 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
   invisibleDeclarationForms: Object.freeze(['anonymous arrow']),
   /** [#13226] Declaration forms that ARE recognised, in `DECL_HEADER_RE` order. */
   recognisedDeclarationForms: Object.freeze(['function', 'constructor', 'const/let/var arrow', 'class method']),
-  /** The live instance, read as evidence only — it is NOT edited by this card. */
+  /** The live instance the two closures together made reachable. */
   liveInstance: 'packages/sdui-parser/src/parse.ts  Parser#error(code, message, start?, tag?)',
   /**
-   * Measured blast radius of closing blindness ①, `packages/**` non-test source.
-   * [#13226] re-derived on today's tree — see the drift note in the prose above.
+   * [#13233] What closing the POSITION actually moved, re-derived on this tree
+   * through the real `deriveSites` rather than through a separate instrument.
    */
   measured: Object.freeze({
-    helpers: 14,
-    callSitesNewlyReached: 116,
+    helpers: 13,
+    callSitesNewlyReached: 117,
     newVerdictRows: 29,
-    undischargeableUnresolved: 5,
+    unresolvedHelpers: 5,
+    unresolvedHelpersDischarged: 5,
     unregisteredWireCodesHiding: 0,
+    /**
+     * Helpers whose `code` parameter carries no error code at all — an SMS
+     * one-time password and a YAML fence body. The precision the object-literal
+     * position cannot have, kept as a NUMBER so that "the widening is clean"
+     * cannot quietly become the story.
+     */
+    nonErrorCodeHelpersReached: 2,
   }),
   /**
-   * [#13226] What closing blindness ② actually moved on the tree: NOTHING.
+   * [#13226] What closing blindness ② moved on the tree: NOTHING.
    * Kept as a number because "the fix changed no output" is the kind of claim
    * that rots into "the fix did nothing" — the positive control in `--self-test`
    * is what says the recognizer fires.
@@ -2078,7 +2072,24 @@ function selfTest() {
       `function fail(code: string, msg: string): Error {\n` +
       `  const e = new Error(msg);\n  (e as any).code = code;\n  return e;\n}\n` +
       `throw fail('HELPER_ONE', 'x');`,
+    // [#13233] the same helper, one stamp position over.
+    objlithelper:
+      `function diag(code: string, msg: string) {\n` +
+      `  return { severity: 'error', code, message: msg };\n}\n` +
+      `report(diag('OBJ_HELPER_ONE', 'x'));`,
   };
+  // [#13233] Every PUBLISHED shape carries a sample, checked rather than
+  // assumed. The per-shape loop below iterates `samples`, not `SHAPES`, so a
+  // shape added without one is simply never pinned — and the run still prints a
+  // confident "N shapes OK" with N one too small. That is this file's own
+  // recurring defect (a published list whose price is that an unrecognised
+  // member reports nothing, SILENTLY) turned on the pin harness itself, and it
+  // was live: `objlithelper` landed unpinned and the count read 8 of 9.
+  ok(
+    SHAPES.every((s) => s.name in samples),
+    `SHAPES publishes ${SHAPES.map((s) => s.name).filter((n) => !(n in samples)).join(', ')} with no ` +
+      '--self-test sample, so nothing pins it. Add one in the same edit that adds the shape.',
+  );
   const registered = new Set(['ALREADY_REGISTERED']);
   for (const [name, source] of Object.entries(samples)) {
     const { sites } = deriveSites({
@@ -3013,28 +3024,29 @@ function selfTest() {
     }
   }
 
-  // [#13131] The OBJECT-LITERAL stamp position inside a code-carrying helper,
-  // and the CLASS-METHOD declaration form, are both outside this gate —
-  // MEASURED (see OBJECT_LITERAL_CODE_HELPER_BLINDNESS above) and declared out
-  // rather than closed, because the round that measured them was scoped to
-  // measurement. Pinned HERE, in the one place the declaration lives, so a
-  // later widening of either half cannot land silently: something fails, and
-  // what fails names the decision.
+  // [#13233] The OBJECT-LITERAL stamp position inside a code-carrying helper is
+  // now IN this gate's population, and these are the pins that say so. They
+  // were a set of ZEROS for two rounds — the position measured and declared out
+  // while the measuring card's scope forbade widening — and flipping them is
+  // the deliberate act that records the widening. ⛔ Do not soften one back
+  // into a zero to make a change pass: the zero meant "declared blind" and the
+  // assertion now means "reached", and those are different claims about the
+  // tree.
   //
-  // ⚠️ Nothing below asserts a bare zero. Every zero is paired with the
+  // ⚠️ Nothing below asserts a bare number. Every assertion is paired with the
   // SAME-GENRE POSITIVE CONTROL — the identical helper stamping through the
-  // assignment this gate does implement — so a harness that stopped working
-  // fails on the control instead of passing on the subject.
+  // assignment this gate has always implemented — because "the object-literal
+  // spellings derive what the assignment spelling derives" reads exactly the
+  // same when BOTH have stopped working.
   {
     const B = OBJECT_LITERAL_CODE_HELPER_BLINDNESS;
-    const DECISION =
-      'a code-carrying helper that stamps through an OBJECT LITERAL is now visible to a gate. ' +
-      'That is a gate-POPULATION change, and [#13226] re-measured its blast radius on the current tree: ' +
-      `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} newly reached ` +
-      `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows in ` +
-      `${DECLARATION}, and ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} ` +
-      'UNDISCHARGEABLE unresolved findings. Land the rows and the declaration together, and rewrite ' +
-      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust this pin to match.';
+    const REGRESSION =
+      'the object-literal stamp position is UNREACHED again. #13233 closed it (shape `objlithelper`, ' +
+      `guarded by enclosingOpeners + helperCodesFor) at a measured cost of ` +
+      `${B.measured.newVerdictRows} verdict rows and ${B.measured.unresolvedHelpers} classified helpers in ` +
+      `${DECLARATION}. If that closure is being reverted, the rows and UNRESOLVED_CODE_HELPERS go with ` +
+      'it — a half-revert leaves the table asserting sites no shape derives. ⛔ Do not adjust this pin ' +
+      'to match a regression.';
 
     const helper = (body, probe) =>
       `export function postureError(code: string, message: string) {\n${body}\n}\n` +
@@ -3050,34 +3062,40 @@ function selfTest() {
       return n + findViolations(source, REL).length;
     };
 
-    // ① BLINDNESS ①, the stamp POSITION. The control fires; the two
-    //    object-literal spellings of the same helper are seen by NOTHING —
-    //    not matched, so not reported, and not unresolved either.
+    // ① BLINDNESS ① — CLOSED. The control fires, and so do BOTH object-literal
+    //    spellings, in BOTH casings, deriving the SAME code the assignment
+    //    spelling derives. The equivalence is the assertion; a shape that
+    //    matched but resolved to something else would pass a "did it match"
+    //    test and fail this one.
     const control = helper(B.control, B.probe);
-    ok(matched(control) > 0, `the same-genre control matches no recognizer at all — the pin below cannot read as a zero`);
+    ok(matched(control) > 0, `the same-genre control matches no recognizer at all — the comparison below is dead`);
     ok(
       derive(control).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
-      'the assignment-spelled code helper no longer derives a `codehelper` site — the control for #13131 is dead',
+      'the assignment-spelled code helper no longer derives a `codehelper` site — the control for #13233 is dead',
     );
     for (const [name, body] of [['shorthand', B.shorthand], ['longhand', B.longhand]]) {
       for (const probe of [B.probe, B.probeLowercase]) {
         const source = helper(body, probe);
-        ok(matched(source) === 0, `a recognizer now MATCHES the ${name} object-literal code helper ('${probe}') — ${DECISION}`);
+        ok(matched(source) > 0, `no recognizer matches the ${name} object-literal code helper ('${probe}') — ${REGRESSION}`);
         const { sites, unresolved } = derive(source);
         ok(
-          sites.length === 0 && unresolved.length === 0,
-          `the ${name} object-literal code helper ('${probe}') now derives ${sites.length} site(s) and ` +
-            `${unresolved.length} unresolved — ${DECISION}`,
+          sites.some((s) => s.shape === 'objlithelper' && s.code === probe),
+          `the ${name} object-literal code helper ('${probe}') derives no \`objlithelper\` site — ${REGRESSION}`,
+        );
+        ok(
+          unresolved.length === 0,
+          `the ${name} object-literal code helper ('${probe}') reduced to nothing though its caller ` +
+            `spells a literal — the call scan, not the recognizer, is what broke`,
         );
       }
     }
-    // [#13226] The BOUNDARY between the two blindnesses, pinned as its own
-    // case because closing ② made it reachable to reason about for the first
-    // time. A class method that stamps through an OBJECT LITERAL is the card's
-    // live instance (`Parser#error`), and it must STILL derive nothing: the
-    // declaration form is now seen, the stamp POSITION is not. This is the
-    // assertion that says which half of the work is done — if it starts
-    // failing, ① was widened, and the rows and the declaration owe an update.
+    // [#13233] The BOUNDARY between the two blindnesses. This case asserted for
+    // one round that a class-method-through-object-literal helper derives
+    // NOTHING — it was the tripwire that said which half of the work was done,
+    // and #13233 is the half that makes it fire. It is kept, inverted, because
+    // the card's live instance (`Parser#error`) is exactly this shape and needs
+    // BOTH closures: the declaration form (#13226) and the position (#13233).
+    // Either one regressing puts this back to zero.
     {
       const methodObjLit =
         `class Thing {\n  private fail(code: string, message: string) {\n` +
@@ -3087,13 +3105,116 @@ function selfTest() {
       ok(
         decl && decl.isMethod && parseParamNames(decl.params).includes('code'),
         'the declaration half of the boundary case is dead — `enclosingDeclaration` cannot see the method, ' +
-          'so the zero below would be blindness ② again rather than blindness ①',
+          'so the site below would be arriving through some other form than the one this case is about',
       );
-      const { sites, unresolved } = derive(methodObjLit);
+      const { sites } = derive(methodObjLit);
       ok(
-        sites.length === 0 && unresolved.length === 0,
-        `a CLASS-METHOD helper stamping through an OBJECT LITERAL now derives ${sites.length} site(s) and ` +
-          `${unresolved.length} unresolved — ${DECISION}`,
+        sites.some((s) => s.shape === 'objlithelper' && s.code === B.probe),
+        `a CLASS-METHOD helper stamping through an OBJECT LITERAL derives no site — ${REGRESSION}`,
+      );
+    }
+
+    // [#13233] The STRUCTURAL guard, which is the whole difference between this
+    // shape and the regex instrument #13131 discarded. `objlithelper`'s pattern
+    // has to admit a leading `,` to reach a property that is not the first one,
+    // and that same `,` appears in an ARGUMENT LIST and an ARRAY. Only the
+    // enclosing bracket tells them apart, so each non-`{` bracket is pinned
+    // against the identical helper body — measured on the real tree as six
+    // false helpers out of nineteen before the guard.
+    {
+      const argList =
+        `export function ship(a: string, code: string, b: string) {\n` +
+        `  return send(a, code, b);\n}\n` +
+        `export function go() { return ship('x', '${B.probe}', 'y'); }\n`;
+      const array =
+        `export function ship(a: string, code: string) {\n` +
+        `  return [a, code];\n}\n` +
+        `export function go() { return ship('x', '${B.probe}'); }\n`;
+      for (const [what, source] of [['an argument list', argList], ['an array literal', array]]) {
+        const { sites, unresolved } = derive(source);
+        ok(
+          !sites.some((s) => s.shape === 'objlithelper') && unresolved.length === 0,
+          `\`code\` passed through ${what} was read as an object-literal stamp — the enclosing-bracket ` +
+            'guard is gone, and every `f(a, code, b)` in the repo is now a finding',
+        );
+      }
+      // The positive half of the same guard: the identical parameter in a real
+      // object literal IS a stamp. Without this, deleting the shape entirely
+      // would pass the two assertions above.
+      const objLit =
+        `export function ship(a: string, code: string) {\n` +
+        `  return { a, code };\n}\n` +
+        `export function go() { return ship('x', '${B.probe}'); }\n`;
+      ok(
+        derive(objLit).sites.some((s) => s.shape === 'objlithelper' && s.code === B.probe),
+        'the enclosing-bracket guard rejects a genuine object literal too — the pins above are passing ' +
+          'because nothing is recognised at all',
+      );
+    }
+
+    // [#13233] The DISCHARGE path, and the restriction that keeps it from being
+    // an exemption. A `helper` unresolved is answerable by a row; a `constant`
+    // unresolved is NOT, because its remedy is in the source.
+    {
+      const opaque =
+        `export function fail(code: string, message: string) {\n` +
+        `  return { severity: 'error', code, message };\n}\n` +
+        `export function go(x: unknown) { return fail(readCode(x), 'm'); }\n`;
+      const { unresolved } = derive(opaque);
+      ok(
+        unresolved.length === 1 && unresolved[0].reason === 'helper' && unresolved[0].helper === 'fail',
+        `a helper whose caller passes a runtime value produced ${JSON.stringify(unresolved)} rather than one ` +
+          'unresolved entry naming the helper — the discharge table cannot key on what is not recorded',
+      );
+      const row = {
+        file: REL,
+        helper: 'fail',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+      };
+      const args = { sites: [], declared: [], registered: new Set(), unresolved };
+      ok(
+        reconcile({ ...args, declaredHelpers: [row] }).length === 0,
+        'a declared UNRESOLVED_CODE_HELPERS row did not discharge its unresolved helper — the red it ' +
+          'exists to clear is unclearable',
+      );
+      ok(
+        reconcile({ ...args, declaredHelpers: [] }).some((f) => f.kind === 'unresolved-constant'),
+        'an UNDECLARED unresolved helper produced no finding — the discharge is unconditional, which ' +
+          'makes the whole position invisible again',
+      );
+      ok(
+        reconcile({ ...args, declaredHelpers: [{ ...row, helper: 'somethingElse' }] }).some(
+          (f) => f.kind === 'unresolved-constant',
+        ) &&
+          reconcile({ ...args, declaredHelpers: [{ ...row, helper: 'somethingElse' }] }).some(
+            (f) => f.kind === 'stale-helper-row',
+          ),
+        'a row naming a DIFFERENT helper still discharged this one (and did not report itself stale) — ' +
+          'one row would then cover every helper in the file',
+      );
+      // ⛔ The restriction. `constant` and `reassigned` name a remedy the author
+      // can carry out, so a row must NOT buy an exemption from doing it.
+      const constUnresolved = [{ file: REL, shape: 'classconst', value: 'SOME_CONST', reason: 'constant' }];
+      ok(
+        reconcile({
+          sites: [],
+          declared: [],
+          registered: new Set(),
+          unresolved: constUnresolved,
+          declaredHelpers: [{ ...row, shape: 'classconst', param: 'SOME_CONST', helper: '' }],
+        }).some((f) => f.kind === 'unresolved-constant'),
+        'a declaration row discharged an UNRESOLVABLE CONSTANT — the discharge is meant only for the ' +
+          'one reason with no source-side remedy, and it has become a general exemption',
+      );
+      // Both directions: a row whose helper the scan no longer reports is stale.
+      ok(
+        reconcile({ sites: [], declared: [], registered: new Set(), unresolved: [], declaredHelpers: [row] }).some(
+          (f) => f.kind === 'stale-helper-row',
+        ),
+        'a row for a helper the scan no longer reports did not go stale — the list can only ever grow',
       );
     }
 
@@ -3279,18 +3400,21 @@ function main() {
     `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
     `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
     `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.` +
-    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) is outside ` +
-    `this gate: no shape matches, so there is no site AND no unresolved. Coverage of it is zero BY ` +
-    `DECLARATION, not by accident. [#13226] the CLASS-METHOD declaration form is no longer part of ` +
-    `that bound — it is recognised, so a method helper stamping in the ASSIGNMENT position resolves ` +
-    `like any other; what still drops the method helpers in this tree is the stamp POSITION above. ` +
-    `Of the declaration forms, only the ANONYMOUS ARROW remains unseen (it has no name for a call ` +
-    `scan to anchor on). ` +
-    `Measured blast radius of closing the position: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
-    `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
-    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} undischargeable unresolved, ` +
+    `\n  [#13233] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) IS now in ` +
+    `this gate's population — the \`objlithelper\` shape, guarded structurally (the enclosing bracket ` +
+    `must be a \`{\`, and the identifier must be a parameter). With [#13226]'s class-method form, the ` +
+    `card's live instance (Parser#error) is reached. What it cost on this tree: ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} call sites, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unresolvedHelpers} helper(s) reducing to nothing ` +
+    `(all classified in UNRESOLVED_CODE_HELPERS), ` +
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unregisteredWireCodesHiding} unregistered wire code(s) ` +
-    `hiding today — see OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.`;
+    `hiding. ⚠️ Its precision is lower than the assignment position's: ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.nonErrorCodeHelpersReached} of the ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.helpers} helpers reached carry no error code at ` +
+    `all, and no sibling-key test separates them (measured). Still unseen: a \`code:\` fed by a ` +
+    `lower-case LOCAL in an object literal, and the ANONYMOUS ARROW declaration form — see ` +
+    `OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');
