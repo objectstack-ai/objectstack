@@ -54,24 +54,135 @@ interface ObjectDef {
 }
 
 /**
- * Names of tools that are read-only (no side effects).
- * Kept as a module-level constant for easy extension.
+ * PLATFORM tool names whose safety class is known from the platform's own
+ * registration rather than from anything the definition carries — the
+ * last-resort fallback inside {@link safetyAnnotations}, and deliberately NOT
+ * a general classifier.
+ *
+ * Every name here is a tool the cloud AI runtime registers statically
+ * (`PLATFORM_TOOLS_BY_PACKAGE` in `@objectstack/spec/system`) and hands to
+ * this bridge through the AI service's `ToolRegistry` carrying no
+ * `requiresConfirmation`. A sibling pin holds both sets to that registry, so
+ * the lists cannot drift back into folklore: a name the platform does not
+ * register is a name this bridge knows nothing about.
+ *
+ * ⛔ What the fallback must never do again is answer for tools it does NOT
+ * contain. These two sets used to be the ONLY source of both hints, so the
+ * `else` branch of the membership tests asserted
+ * `readOnlyHint: false, destructiveHint: false` — "not read-only and not
+ * destructive", the most permissive pair the annotation can express — for
+ * every app-registered and every action-backed tool, and inverted the
+ * protocol's own conservative default while doing it.
+ *
+ * `aggregate_records` left the read-only half because it was never a platform
+ * tool name (`aggregate_data` is): it belongs to the object-CRUD bridge, which
+ * registers it — annotated `readOnlyHint: true` — at its own registration site
+ * in `mcp-http-tools.ts`, and never reaches this path.
  */
-const READ_ONLY_TOOLS = new Set([
+const PLATFORM_READ_ONLY_TOOL_NAMES = new Set([
   'list_objects',
   'describe_object',
   'query_records',
   'get_record',
-  'aggregate_records',
   'aggregate_data',
 ]);
 
 /**
- * Names of tools that perform destructive mutations.
+ * The destructive half of the same platform-name fallback — see
+ * {@link PLATFORM_READ_ONLY_TOOL_NAMES} for what it is and is not for.
  */
-const DESTRUCTIVE_TOOLS = new Set([
+const PLATFORM_DESTRUCTIVE_TOOL_NAMES = new Set([
   'delete_field',
 ]);
+
+/** The safety hints this bridge can source, as MCP spells them. */
+interface ToolSafetyHints {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+}
+
+/**
+ * The `readOnlyHint` / `destructiveHint` an {@link AIToolDefinition} can
+ * actually SOURCE — and nothing else.
+ *
+ * THE DEFECT. Both hints used to be membership tests against the two name sets
+ * above, so a bridged tool outside those seven literals was served to every
+ * MCP client as `readOnlyHint: false, destructiveHint: false`. That is not a
+ * missing annotation, it is a positive claim of "not read-only, and not
+ * destructive" — asserted over every tool an app registers under its own name
+ * and every action-backed tool (`delete_opportunity`, `void_invoice`, …).
+ * `destructiveHint` is what a host reads to decide whether to interrupt the
+ * user before a call, so a destructive action-backed tool arrived flagged as
+ * safe.
+ *
+ * THE DECLARED SOURCE is `AIToolDefinition.requiresConfirmation`
+ * (`@objectstack/spec/contracts`), documented on the member itself as carried
+ * by action-backed tools "from the action's confirmation policy
+ * (`action.ai.requiresConfirmation`, or the destructive-action default)".
+ *
+ * ⛔ NOT the retired metadata key. `ToolSchema.requiresConfirmation` was
+ * removed by ADR-0033 §2 and still hard-REJECTS with a prescription; nothing
+ * here asks for it back and no metadata author can reach the member read
+ * below. The two live on different objects at different layers: the retired
+ * one was authorable `tool` metadata, this one is the runtime contract the AI
+ * service registers, which the retirement never touched.
+ *
+ * ⛔ NOT a second definition of "destructive" either. The framework already
+ * has one, maintainer-ruled (`actionLooksDestructive` in
+ * `@objectstack/runtime`, #7828 Option A: `mode: 'delete'` / `variant:
+ * 'danger'` are the closed declared signals and `confirmText` deliberately is
+ * not), and `requiresConfirmation` is literally that function's output —
+ * `summarizeAction` fills the field by calling it. So the reuse this bridge
+ * owes the ruling is to READ the verdict it is handed, not to re-derive one:
+ * an MCP bridge never sees an action, and `@objectstack/mcp` does not depend
+ * on `@objectstack/runtime`. The same verdict already travels to MCP on the
+ * other path, as `requiresConfirmation` on each `list_actions` entry.
+ *
+ * WHY A TOOL THAT DECLARES NOTHING GETS NO HINT AT ALL. Measured in the
+ * pinned SDK (`@modelcontextprotocol/sdk` 1.30.0, `ToolAnnotationsSchema`):
+ * `readOnlyHint` documents `Default: false` and `destructiveHint` documents
+ * `Default: true`. Omitting a hint therefore hands the question to the
+ * protocol's own conservative default — "may perform destructive updates" —
+ * while claiming nothing this framework cannot source, and it is the same
+ * treatment the annotation vocabulary has no other word for: MCP has no
+ * spelling for "unknown" other than absence. Asserting `false` was the
+ * inversion; asserting `true` here would be a property presented as the
+ * tool's when it is really this bridge's ignorance.
+ *
+ * WHY `readOnlyHint` KEEPS A NAME FALLBACK AND NOTHING ELSE. There is no
+ * declared source for it at all: `AIToolDefinition` has no member expressing
+ * "this tool only reads". The asymmetry with `destructiveHint` is the MCP
+ * defaults' own asymmetry — a missing `readOnlyHint` reads as "not read-only",
+ * which is the conservative answer, so omission loses only information and
+ * never safety. The platform's own readers are the one place that information
+ * exists, so they keep it; every other tool is served no `readOnlyHint`
+ * rather than a fabricated `false`.
+ *
+ * PRECEDENCE: what the definition declares outranks what the name suggests.
+ */
+function safetyAnnotations(tool: AIToolDefinition): ToolSafetyHints {
+  if (tool.requiresConfirmation !== undefined) {
+    // A tool whose invocation is gated on human confirmation is by
+    // construction not a read (`readOnlyHint` is stated so the destructive
+    // hint is unambiguously meaningful — MCP reads it only when read-only is
+    // false). `false` is the action's declared "no confirmation needed", the
+    // one thing that legitimately sources a non-destructive claim.
+    return tool.requiresConfirmation
+      ? { readOnlyHint: false, destructiveHint: true }
+      : { destructiveHint: false };
+  }
+
+  if (PLATFORM_READ_ONLY_TOOL_NAMES.has(tool.name)) {
+    // Read-only entails non-destructive; both come from the one fact.
+    return { readOnlyHint: true, destructiveHint: false };
+  }
+
+  if (PLATFORM_DESTRUCTIVE_TOOL_NAMES.has(tool.name)) {
+    return { readOnlyHint: false, destructiveHint: true };
+  }
+
+  return {};
+}
 
 // ── AIToolDefinition.parameters → MCP inputSchema ────────────────────────────
 
@@ -813,8 +924,9 @@ export class MCPServerRuntime {
    * Each registered tool becomes an MCP tool with the same name, description
    * and declared arguments: `AIToolDefinition.parameters` is JSON Schema, and
    * {@link toolInputSchema} converts it into the Zod schema the SDK requires
-   * for `inputSchema`. The handler delegates to the ToolRegistry's execute
-   * path.
+   * for `inputSchema`. Its safety annotations come from what the definition
+   * declares — see {@link safetyAnnotations}. The handler delegates to the
+   * ToolRegistry's execute path.
    */
   bridgeTools(toolRegistry: ToolRegistry): void {
     const tools = toolRegistry.getAll();
@@ -876,6 +988,12 @@ export class MCPServerRuntime {
    * with no `arguments` anywhere on that `extra` (`RequestHandlerExtra` has no
    * such member), which is why a bridged tool used to execute with `{}` no
    * matter what the client sent.
+   *
+   * The safety annotations come from {@link safetyAnnotations}, which reads
+   * what the definition DECLARES and omits the hints it cannot source; the
+   * name-derived `readOnlyHint: false, destructiveHint: false` this call used
+   * to assert over every unlisted tool is gone. `openWorldHint` is untouched
+   * by that change and still asserted for every bridged tool.
    */
   private registerToolFromDefinition(tool: AIToolDefinition, toolRegistry: ToolRegistry): void {
     const logger = this.config.logger;
@@ -886,9 +1004,9 @@ export class MCPServerRuntime {
         description: tool.description,
         inputSchema: toolInputSchema(tool, logger),
         annotations: {
-          // Mark tools with write side-effects for destructive operations
-          destructiveHint: this.isDestructiveTool(tool.name),
-          readOnlyHint: this.isReadOnlyTool(tool.name),
+          // Only the hints {@link safetyAnnotations} can source — a tool that
+          // declares nothing is served neither, so the MCP defaults apply.
+          ...safetyAnnotations(tool),
           openWorldHint: false,
         },
       },
@@ -923,20 +1041,6 @@ export class MCPServerRuntime {
         }
       },
     );
-  }
-
-  /**
-   * Check if a tool is read-only (data query tools).
-   */
-  private isReadOnlyTool(name: string): boolean {
-    return READ_ONLY_TOOLS.has(name);
-  }
-
-  /**
-   * Check if a tool performs destructive operations.
-   */
-  private isDestructiveTool(name: string): boolean {
-    return DESTRUCTIVE_TOOLS.has(name);
   }
 
   // ── Resource Bridge ────────────────────────────────────────────
