@@ -612,6 +612,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "チャート",
         description: "チャート専用設定。"
       },
+      page: {
+        label: "Page",
+        description: "The published page this view mounts."
+      },
       end_user_controls: {
         label: "エンドユーザー操作",
         description: "このビューでエンドユーザーが行える操作——クイックフィルター、フィルタータブ、可視化切り替え（ADR-0047、Airtable Interface 互換）。"
@@ -692,6 +696,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       chart: {
         label: "チャート"
+      },
+      pageName: {
+        label: "Page Name",
+        helpText: "Name of an already-published page (lowercase snake_case). The page renders in place of the record list, so leave Columns empty."
       },
       userFilters: {
         label: "ユーザーフィルター",

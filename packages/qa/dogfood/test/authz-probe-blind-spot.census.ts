@@ -24,6 +24,15 @@
 // Reading every probe as "route discovery" is the mistake this file exists to
 // prevent; the table mixes three instruments with three different promises.
 //
+// ⭐ These kinds are no longer prose. Each `PROBES` entry now DECLARES its
+// `kind`, `deriveProbeFileCensus()` reads the declarations back out of the
+// companion test's source, and the census test holds the `kinds` recorded
+// below equal to them — so the taxonomy is a checked artifact rather than a
+// comment two files away from the thing it describes. The declaration also
+// earns its keep at runtime: a ROUTE_ENUMERATION or GATE_PIN probe minting
+// ZERO keys now fails as a DEAD PROBE, which is the mechanism row 7 below was
+// measured losing.
+//
 //   ROUTE_ENUMERATION — the probe is pattern-based over a route/handler
 //     population, and its stated promise is auto-discovery: "ANY new route
 //     matching this pattern mints a new key". For these, "entry points outside
@@ -72,18 +81,76 @@
 // protocol). The static reading is the one pinned because it is the one this
 // package can re-derive without depending on `@objectstack/rest`.
 //
-// ── A COMPLETE ROUTE ENUMERATION ALREADY EXISTS ELSEWHERE ─────────────────
+// ── THE POPULATION SOURCE: measured, and still an OPEN CONTRACT DECISION ──
 //
-// Recorded because the repair this census sizes should start from it rather
-// than from a wider regex: `packages/rest/src/rest-route-ledger.ts` holds 94
-// audited rows over every route `@objectstack/rest` mounts, enumerated through
-// `RestServer.getRoutes()` and guarded by `rest-route-ledger.conformance.test.ts`
-// (measured green, 7/7, at the time of writing), and
-// `packages/runtime/src/route-ledger.ts` does the same for the dispatcher with
-// 80 rows. The authz ratchet's route population is a regex table that reaches 1
-// of 17 registrars; a complete, runtime-derived, already-guarded enumeration of
-// the same surface is sitting one package away. Choosing between them is the
-// follow-up card's decision, not this file's.
+// The obvious repair is to source this ratchet's route population from the
+// route ledgers instead of from a regex table, and that was measured before
+// anything was written. The reading, in full, because it is the kind of
+// conclusion that gets re-derived from scratch otherwise:
+//
+// WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
+//   `packages/rest/src/rest-route-ledger.ts`: 94 audited rows over 19 families,
+//     every route `@objectstack/rest` mounts, enumerated through
+//     `RestServer.getRoutes()` on a booted server and guarded per route by
+//     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
+//     this table reaches 1.
+//   `packages/runtime/src/route-ledger.ts`: 80 rows over 21 domains. Its
+//     machine contract is DOMAIN-level, by live registry introspection
+//     (`domainRegistry.list()`), the per-route rows being documentation. It
+//     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
+//     16 `DomainRoute` prefixes declared by the 15 domain files.
+//   Nine more ledgers exist repo-wide (290 rows in total).
+//
+// ⭐ On FILE SELECTION the ledgers are simply the right answer, and that is
+// worth stating separately: a domain file that no probe names emits no signal
+// at all today — no key, no STALE, no UNCLASSIFIED — so its absence is
+// structurally unobservable, and a probe table naming 4 of 17 domain files
+// cannot see the other 13. Ledger domains are enumerated from the LIVE
+// registry, so a new domain file cannot be silently absent from them.
+//
+// ⛔ WHAT THEY CANNOT SUPPLY IS THIS RATCHET'S GUARANTEE. Three measured
+// blockers, each independently sufficient:
+//
+//  1. NO NOTION OF "GATED", and this ratchet's promise is about UNGATED
+//     routes. Ledger dispositions grade SDK expressibility, not authorization:
+//     REST reads `sdk` 84 / `server-only` 7 / `public` 3. Cross-checked
+//     directly rather than assumed — of the 8 REST route mounts measured to
+//     carry no `enforceAuth`, the ledger grades 3 `server-only`, 3 `public`
+//     and 2 `sdk`; and one of those two `sdk` rows is
+//     `GET /api/v1/ui/view/:object/:type`, the single route in this whole
+//     population ever measured unguarded. Its ledger row is shape-identical to
+//     the 83 `sdk` rows that ARE gated. `public` states INTENT for 3
+//     browser-facing form routes; it is not a gate measurement and was never
+//     built as one.
+//
+//  2. DERIVING "gated" FROM SOURCE SYNTAX IS UNSAFE — measured, not assumed.
+//     Scanning each of the 80 `this.routeManager.register(` call sites in
+//     `rest-server.ts` for `enforceAuth` reads 50 gated / 30 ungated, and 22 of
+//     those 30 are FALSE, in two structural shapes: `registerMetadataEndpoints`
+//     installs a wrapping `guardedRouteManager` so its 19 inner routes are
+//     gated with no `enforceAuth` at the call site, and
+//     `registerSecurityExplainEndpoints` shares one `handler` const declared
+//     outside its 3 `register(` calls. A 73% false-ungated rate, concentrated
+//     on the largest registrar, and hand-annotating the exceptions is the same
+//     rot this instrument already has.
+//
+//  3. A LEDGER IS A DERIVED DATA FILE, ONE GUARDED STEP BEHIND THE SOURCE.
+//     Adding a route to a registrar in `rest-server.ts` does not touch
+//     `rest-route-ledger.ts`, so a ledger-sourced population mints no new key
+//     and this ratchet stays GREEN on exactly the mutation it should catch.
+//     The red lands in `rest-route-ledger.conformance.test.ts` instead — a
+//     different gate, in a different package, promising something else. A
+//     COMPOSED guarantee (no route without a ledger row; no ledger row without
+//     a classification) is a defensible design, but it is a different promise
+//     from the one this matrix header states, and adopting it is a contract
+//     decision rather than a repair.
+//
+// ⇒ ⛔ NOT DECIDED HERE, and deliberately not worked around: widening the
+// regex is the rot this instrument already has, and inventing a syntactic
+// "gated" reading would convert a visible gap into a written-down false
+// assurance — strictly worse than an honest UNCLASSIFIED. What this file does
+// instead is close the mechanism that was SILENT (the dead probe), leave the
+// population untouched, and hand the decision on with the reading attached.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -136,14 +203,23 @@ export interface ProbeTableReading {
 export const PROBE_TABLE: ProbeTableReading = { entries: 16, files: 11, keys: 9 };
 
 /**
- * ⚠️ RECORDED DRIFT, deliberately not repaired here. `authz-conformance.matrix.ts`'s
- * header says "`discover()`: 15 probes over 11 named source files". The table
- * has held 16 entries since a 16th probe landed on 2026-08-18 without the prose
- * moving; the "15" was accurate when written two days earlier. Pinned so the
- * next author meets the discrepancy instead of inheriting it — this card is a
- * measurement, and correcting the sentence belongs to whoever repairs the probe.
+ * The probe count `authz-conformance.matrix.ts`'s header states.
+ *
+ * ⭐ REPAIRED, and the pin INVERTED with it. This was recorded drift: the
+ * header said "15 probes" from 2026-08-16, when it was true, and the table has
+ * held 16 since a 16th probe landed on 2026-08-18 without the sentence moving.
+ * A measurement pinned the discrepancy deliberately rather than fixing it, so
+ * that its own no-repair fence stayed unambiguous; the repair belonged with
+ * whoever touched the probe table, and this is that change.
+ *
+ * ⚠️ The assertion that reads this constant flipped from "these must DIFFER"
+ * (drift pinned) to "these must be EQUAL" (drift closed). That inversion is
+ * the point: the sentence is now held equal to the table by a test, so the
+ * next probe added without moving the prose is RED instead of a fact recorded
+ * in a third file. ⛔ Do not re-point this at a hand-written number — it is
+ * read out of the matrix header's own text.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 15;
+export const MATRIX_HEADER_PROBE_CLAIM = 16;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   {
@@ -230,7 +306,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   },
   {
     file: 'packages/plugins/plugin-hono-server/src/hono-plugin.ts',
-    kinds: ['ROUTE_ENUMERATION'],
+    // Re-declared from ROUTE_ENUMERATION: the probe's population was deleted
+    // and the probe stayed, which is the dead-probe mechanism this census
+    // measured. It is re-aimed as an armed tripwire, NOT deleted — deleting it
+    // would make the ratchet see less.
+    kinds: ['TRIPWIRE'],
     probes: 1,
     keys: 0,
     population: 6,
@@ -239,13 +319,17 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     populationRule: '`rawApp.<verb>(` mount sites',
     controls: { rawApp: 11, 'rawApp.get(': 3, serveStatic: 3 },
     note:
-      'A DEAD PROBE, dated. Its comment claims live discovery ("ANY new rawApp.<verb>(`${prefix}/data...`) ' +
-      'mints a new key"), but that spelling occurs ZERO times in this file: commit e5a4d26901 (2026-07-31) ' +
-      'deleted the plugin CRUD/discovery surface — 3 matching mounts before, 0 after — and the probe stayed. ' +
-      'It has minted nothing since, in silence, because STALE only fires for a key some row COVERS and no row ' +
-      'ever covered a data:hono-plugin.ts key. The spelling it watches is alive one file away, in ' +
-      'current-user-endpoints.ts (3 mounts, none of them /data), which the table does not name. The 6 mounts ' +
-      'counted here are middleware, static-asset and SPA-fallback routes, not data surfaces.',
+      'WAS a dead probe, dated; now a declared TRIPWIRE. Its comment claimed live discovery ("ANY new ' +
+      'rawApp.<verb>(`${prefix}/data...`) mints a new key"), but that spelling occurs ZERO times in this ' +
+      'file: commit e5a4d26901 (2026-07-31) deleted the plugin CRUD/discovery surface — 3 matching mounts ' +
+      'before, 0 after — and the probe stayed. It minted nothing for the whole time since, in silence, ' +
+      'because STALE only fires for a key some row COVERS and no row ever covered a data:hono-plugin.ts key. ' +
+      'That silence is now closed generically: a non-tripwire probe minting zero keys fails as a DEAD PROBE, ' +
+      'so this probe had to be either repaired or honestly re-declared, and re-declaring is what its measured ' +
+      'population supports. The spelling it watches is alive one file away, in current-user-endpoints.ts ' +
+      '(3 mounts, none of them /data), which the table does not name — naming it is a POPULATION decision, ' +
+      'recorded below and not taken here. The 6 mounts counted here are middleware, static-asset and ' +
+      'SPA-fallback routes, not data surfaces.',
   },
   {
     file: 'packages/services/service-realtime/src/in-memory-realtime-adapter.ts',
@@ -317,8 +401,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 export const BLIND_SPOT_TOTAL_STATIC = 75;
 export const BLIND_SPOT_TOTAL_RUNTIME = 80;
 
-/** Re-measure every row above from the same sources the probes read. */
-export function deriveProbeFileCensus(): { table: ProbeTableReading; files: Map<string, { population: number; reachable: number; controls: Record<string, number> }> } {
+/**
+ * Re-measure every row above from the same sources the probes read.
+ *
+ * `kinds` comes back from the companion test's OWN source: each `PROBES` entry
+ * declares its instrument kind, and reading the declarations back is what makes
+ * the taxonomy recorded above a checked artifact instead of a comment that can
+ * quietly stop describing the table.
+ */
+export function deriveProbeFileCensus(): {
+  table: ProbeTableReading;
+  files: Map<string, { population: number; reachable: number; controls: Record<string, number> }>;
+  kinds: Map<string, ProbeKind[]>;
+} {
   const files = new Map<string, { population: number; reachable: number; controls: Record<string, number> }>();
 
   // ── rest-server.ts ──────────────────────────────────────────────────────
@@ -427,6 +522,23 @@ export function deriveProbeFileCensus(): { table: ProbeTableReading; files: Map<
   const to = testSrc.indexOf('\n];', from);
   const block = testSrc.slice(from, to);
   const probeFiles = [...block.matchAll(/^\s*file: '([^']+)'/gm)].map((m) => m[1]);
+
+  // Kind ↔ file pairing, read in DOCUMENT ORDER. Every entry spells `kind`
+  // immediately before `file`, so walking both tokens in order pairs them
+  // without parsing TypeScript. The pairing is self-checking: if the two counts
+  // ever disagree, an entry is missing one of them and the census test's
+  // `entries` assertion catches it rather than a silently short map.
+  const kinds = new Map<string, ProbeKind[]>();
+  const tokens = [...block.matchAll(/^\s*(kind|file): '([^']+)'/gm)];
+  let pendingKind: ProbeKind | undefined;
+  for (const t of tokens) {
+    if (t[1] === 'kind') { pendingKind = t[2] as ProbeKind; continue; }
+    const file = t[2];
+    const list = kinds.get(file) ?? [];
+    if (pendingKind && !list.includes(pendingKind)) list.push(pendingKind);
+    kinds.set(file, list.sort());
+    pendingKind = undefined;
+  }
   const matrixSrc = readFileSync(join(HERE, 'authz-conformance.matrix.ts'), 'utf8');
   const coverKeys = [...matrixSrc.matchAll(/covers: \[([^\]]*)\]/g)]
     .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((k) => k[1]));
@@ -434,5 +546,6 @@ export function deriveProbeFileCensus(): { table: ProbeTableReading; files: Map<
   return {
     table: { entries: probeFiles.length, files: new Set(probeFiles).size, keys: new Set(coverKeys).size },
     files,
+    kinds,
   };
 }

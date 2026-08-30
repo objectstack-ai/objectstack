@@ -612,6 +612,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Gráfico",
         description: "Configuración específica de gráfico."
       },
+      page: {
+        label: "Page",
+        description: "The published page this view mounts."
+      },
       end_user_controls: {
         label: "Controles de usuario final",
         description: "Lo que los usuarios finales pueden hacer en esta vista: filtros rápidos, pestañas de filtro, cambio de visualización (ADR-0047, paridad con Airtable Interface)."
@@ -692,6 +696,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       chart: {
         label: "Gráfico"
+      },
+      pageName: {
+        label: "Page Name",
+        helpText: "Name of an already-published page (lowercase snake_case). The page renders in place of the record list, so leave Columns empty."
       },
       userFilters: {
         label: "Filtros de usuario",

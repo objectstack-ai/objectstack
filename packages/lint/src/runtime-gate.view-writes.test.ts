@@ -166,11 +166,23 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     expect(result.rulesRun).toContain('validateReferenceIntegrity');
   });
 
-  it('pins the member surface: exactly the two list-view field rules declare `view`', () => {
+  it('pins the member surface: exactly the crossed members declare `view`', () => {
     const crossed = REFERENCE_INTEGRITY_RULES
       .filter((r) => (r.runtimeTypes ?? ['flow']).includes('view'))
       .map((r) => r.name);
-    expect(crossed).toEqual(['validateSearchableFields', 'validateSortableFields']);
+    // [#13216] `validateViewPageRefs` is the third crossing, and the first that
+    // is not a field-existence question: a `type: 'page'` view's `pageName`,
+    // resolved against `stack.pages` — a collection the per-write snapshot
+    // gained in the same change (`RuntimeStackContext.pages`), which is the
+    // precondition every crossing owes. The list is written out, not derived,
+    // precisely so a fourth crossing has to be argued here; this one's
+    // false-positive measurement is `runtime-gate.view-page-refs.test.ts`,
+    // which reproduces the phantom findings the collection removes.
+    expect(crossed).toEqual([
+      'validateSearchableFields',
+      'validateSortableFields',
+      'validateViewPageRefs',
+    ]);
     // And every member still judges flow snapshots — the #4463 P1 surface is
     // not narrowed by the member axis existing.
     const offFlow = REFERENCE_INTEGRITY_RULES

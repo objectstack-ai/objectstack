@@ -88,6 +88,92 @@
 // and for why the exclusion's width deliberately differs from the extractor's.
 import { isRelationSubObjectPhrase } from '@objectstack/types';
 
+/**
+ * The relation name each missing-table phrase puts on display, one capture per
+ * dialect spelling in {@link MISSING_TABLE.message}.
+ *
+ * Extraction is deliberately partial. A phrase whose name cannot be read back
+ * out — `unknown table` with nothing quoted after it, a bare SQLSTATE, an
+ * errno — yields nothing, and yielding nothing must stay *silent* rather than
+ * become evidence: see {@link phraseNamesAnotherRelation}.
+ */
+const RELATION_IN_PHRASE: readonly RegExp[] = [
+    // SQLite / libsql: `no such table: sys_metadata_history`, and the
+    // schema-qualified `no such table: main.orders` it uses when it resolved
+    // the name itself (views, triggers) or the caller qualified it.
+    /no such table:\s*([^\s'"`;,()]+)/i,
+    // PostgreSQL: `relation "sys_metadata_history" does not exist`
+    /relation\s+["'`]([^"'`]+)["'`]\s+does not exist/i,
+    // MySQL / MariaDB: `Table 'app.sys_metadata_history' doesn't exist`
+    /table\s+["'`]([^"'`]+)["'`]\s+doesn'?t exist/i,
+    // MySQL / MariaDB: `Unknown table 'app.t'`
+    /unknown table\s+["'`]([^"'`]+)["'`]/i,
+];
+
+/**
+ * Reduce a relation name to the part two dialects can be expected to agree on.
+ *
+ * Drops a leading qualifier (`main.orders`, `app.orders` — SQLite's schema,
+ * MySQL's database) and the legacy `{namespace}__{shortName}` prefix that
+ * `StorageNameMapping.resolveTableName` strips to get from an object name to
+ * its physical table, then case-folds.
+ *
+ * Every step here makes the comparison MORE likely to match, and that
+ * direction is chosen on purpose: a match keeps today's benign verdict, so an
+ * over-eager normaliser can only ever leave the gap open, while an over-strict
+ * one would manufacture a loud verdict for a genuine missing table — the one
+ * regression this repair is not allowed to cause.
+ */
+function normaliseRelationName(name: string): string {
+    const afterQualifier = name.slice(name.lastIndexOf('.') + 1);
+    const namespaceEnd = afterQualifier.lastIndexOf('__');
+    const bare = namespaceEnd === -1 ? afterQualifier : afterQualifier.slice(namespaceEnd + 2);
+    return bare.toLowerCase();
+}
+
+/**
+ * Does this message name a relation OTHER than the one the caller read?
+ *
+ * The gap this closes: the message test recognises the *shape* of "no such
+ * table" and never asks WHICH table. A view over a dropped base table answers
+ * the shape perfectly — measured on libsql, reading a view named `sys_metadata`
+ * whose base table is gone raises `no such table: main.<base>` — so a read of a
+ * relation that very much exists was classified as "not provisioned yet", and
+ * every fail-soft consumer took the empty answer as the truth. That is a false
+ * *benign*, the direction the module docblock calls far more expensive than a
+ * false "real".
+ *
+ * ⛔ Not answerable from the phrase's shape alone, and that is why this channel
+ * takes the read's name rather than a regex. Measured on libsql, a view over a
+ * missing base table and a genuine missing table the caller happened to qualify
+ * produce byte-identical spellings (`no such table: main.absent_base` vs
+ * `no such table: main.orders`); the only thing that separates them is whether
+ * the name in the phrase is the name that was asked for.
+ *
+ * Conservative in the direction the rest of the module already errs in — it
+ * can only ever SUBTRACT benign verdicts, never add one:
+ *   - no name extractable, or no name supplied  -> `false` (stay as we were)
+ *   - any extracted name matches the read       -> `false` (a true positive)
+ *   - names found, none of them the read's      -> `true`  (the phrase is about
+ *                                                  something else; be loud)
+ */
+function phraseNamesAnotherRelation(message: string, readObject: string): boolean {
+    const expected = normaliseRelationName(readObject);
+    if (expected === '') return false;
+
+    let named = false;
+    for (const pattern of RELATION_IN_PHRASE) {
+        const captured = pattern.exec(message)?.[1];
+        if (captured === undefined) continue;
+        const candidate = normaliseRelationName(captured);
+        if (candidate === '') continue;
+        // One agreeing name is enough to keep the benign verdict.
+        if (candidate === expected) return false;
+        named = true;
+    }
+    return named;
+}
+
 /** One "which errors mean X?" vocabulary, in the three forms drivers use. */
 interface DriverErrorSignature {
     /** `error.code` — Postgres SQLSTATE, or mysql2's symbolic name. */
@@ -108,6 +194,20 @@ interface DriverErrorSignature {
     readonly excludes?: {
         /** SQLSTATEs / driver codes that positively mean "**not** this case". */
         readonly codes: ReadonlySet<string>;
+        /**
+         * Message shapes whose named relation is not the one that was READ.
+         *
+         * The third exclusion channel, and the only one that needs a fact from
+         * the caller: the message alone cannot say whether the relation it
+         * names is the one the caller asked for. Given the read's own object
+         * name, it answers "this phrase is about something else" — which is
+         * the same not-X-first move {@link matchesMessage} makes, one step out.
+         *
+         * Absent (or given no object name) it never fires, so a signature that
+         * does not carry it, and a caller that cannot name what it read, both
+         * keep the pure-shape behaviour.
+         */
+        readonly namesAnotherRelation?: (message: string, readObject: string) => boolean;
         /**
          * Message shapes that carry a legal match for this case as a substring.
          *
@@ -235,11 +335,42 @@ const MISSING_TABLE: DriverErrorSignature = {
          * one, which is the direction this whole module already errs in.
          */
         matchesMessage: isRelationSubObjectPhrase,
+        /**
+         * [#13324] "…and the relation it names is not the one you read."
+         *
+         * The sibling of the phrase above, reached one step further out. That
+         * one recognises a failure about something INSIDE a relation, which
+         * therefore says the relation is present; this one recognises a failure
+         * about a DIFFERENT relation, which says nothing at all about the one
+         * the caller read. Both end the question with `false` for the same
+         * reason: the licence this predicate grants — "there are no rows, so
+         * there is nothing to be inconsistent with" — is about the table that
+         * was READ, and neither phrase is evidence about it.
+         */
+        namesAnotherRelation: phraseNamesAnotherRelation,
     },
 };
 
 /** How far to follow an `error.cause` chain — drivers wrap, but not deeply. */
 const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * The {@link DriverErrorSignature.excludes.namesAnotherRelation} channel, in the
+ * one place both the string and the object node reach it.
+ *
+ * Guards the caller-supplied half rather than trusting it: the parameter is
+ * optional on the public predicate, so `undefined` (a caller that cannot name
+ * what it read) and a non-string (a stale positional `depth` argument from
+ * before this parameter existed) must both mean "no evidence", never "loud".
+ */
+function excludedByReadObject(
+    message: string,
+    signature: DriverErrorSignature,
+    readObject: string | undefined,
+): boolean {
+    if (typeof readObject !== 'string' || readObject === '') return false;
+    return signature.excludes?.namesAnotherRelation?.(message, readObject) === true;
+}
 
 /**
  * The single matcher both predicates run on: exclusions, then code, then errno,
@@ -259,11 +390,13 @@ function matchesDriverError(
     error: unknown,
     signature: DriverErrorSignature,
     depth: number,
+    readObject?: string,
 ): boolean {
     if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return false;
 
     if (typeof error === 'string') {
         if (signature.excludes?.matchesMessage(error)) return false;
+        if (excludedByReadObject(error, signature, readObject)) return false;
         return signature.message.test(error);
     }
     if (typeof error !== 'object') return false;
@@ -279,6 +412,8 @@ function matchesDriverError(
     if (excludes) {
         if (typeof err.code === 'string' && excludes.codes.has(err.code)) return false;
         if (typeof err.message === 'string' && excludes.matchesMessage(err.message)) return false;
+        if (typeof err.message === 'string' && excludedByReadObject(err.message, signature, readObject))
+            return false;
     }
 
     if (typeof err.code === 'string' && signature.codes.has(err.code)) return true;
@@ -286,7 +421,7 @@ function matchesDriverError(
     if (typeof err.message === 'string' && signature.message.test(err.message)) return true;
 
     // Drivers commonly re-throw with the original attached as `cause`.
-    return matchesDriverError(err.cause, signature, depth + 1);
+    return matchesDriverError(err.cause, signature, depth + 1, readObject);
 }
 
 /**
@@ -317,11 +452,30 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * Postgres' two phrasings — the relation is right there in the message because
  * it exists (#6347). See {@link MISSING_TABLE}'s `excludes`.
  *
+ * [#13324] Neither is a failure that names a **different relation**, and that
+ * one cannot be seen without `readObject`. The message test asks what the
+ * phrase LOOKS like and never which table it names, so a read of a view whose
+ * base table has been dropped — `no such table: main.<base>`, measured on
+ * libsql for a view that itself exists — answered benign for a relation that is
+ * present and may be backed by rows. Naming the read closes it: the phrase must
+ * be about the table the caller asked for, or it is not evidence about it.
+ *
+ * Pass `readObject` from every in-repo call site. It is **optional** so that
+ * omitting it is exactly the pre-#13324 behaviour rather than a new loud
+ * failure — this is a published export (`@objectstack/metadata/errors`), and a
+ * required parameter would be a breaking change to it. The cost of the choice
+ * is that the narrowing is opt-in per call site: a new caller that forgets it
+ * silently gets the old, wider verdict.
+ *
  * @param error - The value thrown by a driver/engine read (`find`, `findOne`, …).
+ * @param readObject - The object/table whose emptiness the caller is about to
+ *          treat as the truth — its own API name is fine, the comparison folds
+ *          away schema qualifiers, the legacy `ns__short` prefix and case.
+ *          Omitted (or not a string) means "cannot say", never "be loud".
  * @param depth - Internal `cause`-chain recursion counter; callers pass nothing.
  * @returns `true` only when the error positively identifies as
- *          table/relation-does-not-exist.
+ *          table/relation-does-not-exist **for `readObject`**.
  */
-export function isMissingTableError(error: unknown, depth = 0): boolean {
-    return matchesDriverError(error, MISSING_TABLE, depth);
+export function isMissingTableError(error: unknown, readObject?: string, depth = 0): boolean {
+    return matchesDriverError(error, MISSING_TABLE, depth, readObject);
 }

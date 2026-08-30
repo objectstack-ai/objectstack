@@ -4418,6 +4418,11 @@ export class ObjectStackProtocolImplementation implements
         // dashboard publish — without it every legitimate board reads as
         // dangling (see RuntimeStackContext.datasets).
         const datasets = listCollection('dataset', 'datasets');
+        // [#13216] The resolution universe validateViewPageRefs needs for a
+        // `type: 'page'` view publish — without it every legitimate page mount
+        // reads as dangling (see RuntimeStackContext.pages). Gathered on the
+        // same terms as the four above: per write, on an `active` publish only.
+        const pages = listCollection('page', 'pages');
 
         // [#9612] The closure this write is judged against. Resolved from the
         // package registry — the impure read — and handed to the pure gate as
@@ -4433,7 +4438,8 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            // [#10377] The batch's own pending drafts join the four
+            pages,
+            // [#10377] The batch's own pending drafts join the five
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
@@ -5792,8 +5798,16 @@ export class ObjectStackProtocolImplementation implements
      * @returns normally ONLY for the benign case, licensing the caller to treat
      *          the overlay as absent.
      */
-    private rethrowUnlessMetadataStoreUnprovisioned(error: unknown): void {
-        if (isMissingTableError(error)) return;
+    private rethrowUnlessMetadataStoreUnprovisioned(error: unknown, readObject: string): void {
+        // [#13324] `readObject` is REQUIRED, deliberately. This helper serves
+        // callers that read four different tables (`sys_metadata`,
+        // `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history`),
+        // so a default would silently answer about the wrong one for three of
+        // them — measured, not hypothetical: the first draft of this repair
+        // hardcoded `sys_metadata` and turned `diffMetaItem`'s genuinely
+        // unprovisioned `sys_metadata_history` into a loud failure. A required
+        // parameter makes the compiler ask the question at every new call site.
+        if (isMissingTableError(error, readObject)) return;
         // [#12536] CLASSIFY, do not assume. A read can fail because the store
         // is unreachable OR because a metadata app's hook refused it in its
         // own words — see {@link metadataReadFailureError}.
@@ -6398,7 +6412,7 @@ export class ObjectStackProtocolImplementation implements
             // answer with whatever we already have. Any other read failure
             // means overlay rows may exist and were not seen — serving the
             // registry-only set would report them as never declared.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
 
         // ADR-0033 draft-overlay preview: when the caller opts in (admin-gated
@@ -6457,7 +6471,7 @@ export class ObjectStackProtocolImplementation implements
                 // the active result "unchanged" is a lie to a caller that asked
                 // for a draft preview: it renders the published world while the
                 // pending edits it asked to see were never read.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error);
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             }
         }
 
@@ -6686,7 +6700,7 @@ export class ObjectStackProtocolImplementation implements
                 // [#5532] Falling through to the active read here would answer
                 // "there is no draft for this item" from a read that never
                 // reached the table the drafts live in.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error);
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             }
         }
 
@@ -6751,7 +6765,7 @@ export class ObjectStackProtocolImplementation implements
             // let a storage outage arrive at the client as `not found` (active
             // read) or `NO_DRAFT` (draft read) — both of them claims about
             // authorship, made from a read that never happened.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
 
         // Draft reads stop here — they intentionally do NOT fall through
@@ -7176,7 +7190,7 @@ export class ObjectStackProtocolImplementation implements
             // overlay row, so `overlay: null` / `effective = code` IS the truth
             // and first boot still renders the code layer.
             // See {@link rethrowUnlessMetadataStoreUnprovisioned}.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
 
         // [#4513] `effective` is documented above as "what `getMetaItem` would
@@ -7516,7 +7530,7 @@ export class ObjectStackProtocolImplementation implements
             // The second cause the old comment named — a host engine with no
             // `find` — is decided by the precondition probe above the `try`, so
             // it never reaches here and this arm has exactly ONE benign cause.
-            this.rethrowUnlessMetadataStoreUnprovisioned(err);
+            this.rethrowUnlessMetadataStoreUnprovisioned(err, 'sys_metadata_audit');
             console.warn(
                 `[Protocol] auditMetaItem read failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
@@ -10337,7 +10351,7 @@ export class ObjectStackProtocolImplementation implements
                 //
                 // No new response field and no new error code — the caller
                 // receives the read's own failure, envelope intact.
-                if (isMissingTableError(error)) continue;
+                if (isMissingTableError(error, obj.name)) continue;
                 throw error;
             }
         }
@@ -12042,7 +12056,7 @@ export class ObjectStackProtocolImplementation implements
             // `rollback` / `delete` now fail with 503 when the lock state
             // cannot be read, instead of proceeding as if unlocked. Refusing
             // one uncertain write beats performing one that had to be refused.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
         return { lock: 'none', lockReason: undefined, lockSource: undefined };
     }
@@ -13428,7 +13442,7 @@ export class ObjectStackProtocolImplementation implements
             const row = await this.engine.findOne('sys_metadata', { where: { type } });
             return row != null;
         } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             return false;
         }
     }
@@ -15808,9 +15822,19 @@ export class ObjectStackProtocolImplementation implements
     private async collectBatchPendingDeclarations(
         drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
-        const pending: {
-            objects: unknown[]; permissions: unknown[]; books: unknown[]; datasets: unknown[];
-        } = { objects: [], permissions: [], books: [], datasets: [] };
+        // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
+        // with `-?`, not as a hand-listed literal. The literal it replaces was
+        // the third place the collection set is written down, and the only one
+        // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
+        // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
+        // accumulated here, so a package publishing a page beside the view that
+        // mounts it would keep being refused for the sibling in its own batch —
+        // the `shyx_customer_ds` shape #10377 was filed for. `-?` makes every
+        // key REQUIRED, so the next widening is a compile error at this line
+        // instead.
+        const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
+            objects: [], permissions: [], books: [], datasets: [], pages: [],
+        };
         let any = false;
         for (const d of drafts) {
             // The canonical fold, same boundary the promote applies: a stored
@@ -16335,7 +16359,7 @@ export class ObjectStackProtocolImplementation implements
                 //
                 // No new error code and no new response field: the caller
                 // receives the read's own failure, envelope intact.
-                if (!isMissingTableError(error)) throw error;
+                if (!isMissingTableError(error, 'sys_metadata')) throw error;
                 commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
             }
         }
@@ -17784,7 +17808,7 @@ export class ObjectStackProtocolImplementation implements
             // the turn is unrevertible is a separate question (a response-field
             // change the #8896 ruling forbids for this family) and deliberately
             // NOT decided here.
-            if (isMissingTableError(error)) {
+            if (isMissingTableError(error, 'sys_metadata_commit')) {
                 if (!this.commitStoreUnprovisionedNoted) {
                     this.commitStoreUnprovisionedNoted = true;
                     console.info(
@@ -17935,7 +17959,7 @@ export class ObjectStackProtocolImplementation implements
         } catch (error) {
             // [#5980] Benign (the table has not been provisioned) falls through;
             // everything else is a read that did not happen and leaves as a 503.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata_commit');
             return [];
         }
     }
@@ -18933,7 +18957,7 @@ export class ObjectStackProtocolImplementation implements
             // ⛔ A `historyUnavailable: true` response key (the card's option B) was
             // DECLINED in the same ruling — a new published key with no consumer, on
             // the manual floor. Do not reintroduce it as "more informative".
-            this.rethrowUnlessMetadataStoreUnprovisioned(error);
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata_history');
         }
         const byVersion = new Map<number, Record<string, unknown> | null>();
         for (const r of histRows) byVersion.set(r.version, r.body);
@@ -19684,7 +19708,7 @@ export class ObjectStackProtocolImplementation implements
             // `error` names what the outage COSTS and how to fix it. Keeping
             // the technical line here at `warn` is what lets the consumer's
             // line stay the single loud statement of consequence.
-            if (!isMissingTableError(e)) {
+            if (!isMissingTableError(e, 'sys_metadata')) {
                 storeUnavailable = true;
                 console.warn(
                     `[Protocol] DB hydration skipped: ${e instanceof Error ? e.message : String(e)}`,

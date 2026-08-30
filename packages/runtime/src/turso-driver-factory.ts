@@ -41,15 +41,21 @@
  * duplicate:
  *
  *  - **{@link LoadTursoDriverFactoryOptions.importDriverPackage} — the module
- *    resolution root.** `@objectstack/driver-turso` is an optional PEER of
- *    `@objectstack/cli` and is not declared by `@objectstack/runtime` at all.
- *    A bare `import('@objectstack/driver-turso')` resolves from the node_modules
- *    tree of the module that *evaluates* it, so moving the CLI's import into
- *    this file would look for the package under `@objectstack/runtime` — which
- *    under pnpm's strict layout does not link it. An operator who ran the
- *    install command the error tells them to run would still be told the package
- *    is missing. The CLI therefore keeps passing its own thunk; the default
- *    below is this package's own root, for the standalone stack.
+ *    resolution root.** `@objectstack/driver-turso` is an OPTIONAL PEER of
+ *    `@objectstack/cli` and, since #12943, of `@objectstack/runtime` too. An
+ *    optional peer NAMES the relationship and installs nothing, so the package
+ *    still sits in whichever tree the operator installed it into — and a bare
+ *    `import('@objectstack/driver-turso')` resolves from the node_modules tree
+ *    of the module that *evaluates* it. That is what keeps this a host-supplied
+ *    input rather than a duplicate: an operator who installed the package next
+ *    to the CLI put it in the CLI's tree, so moving the CLI's import into this
+ *    file would look for it under `@objectstack/runtime` and tell them it is
+ *    missing right after they ran the exact command the error printed. The CLI
+ *    therefore keeps passing its own thunk; the default below is this package's
+ *    own root, for the standalone stack.
+ *    ⚠️ Inside THIS workspace pnpm links an optional peer, so the default thunk
+ *    resolves here. Every test covering the missing-package arm therefore stages
+ *    the absence rather than relying on the layout to supply it (#12943).
  *  - **{@link LoadTursoDriverFactoryOptions.missingUrlError} — the error TYPE
  *    for a config with no url.** The CLI raises its own `UnsupportedDriverError`
  *    (a CLI-only semantic: `serve.ts` re-throws it as a fatal boot error), which
@@ -149,15 +155,17 @@ export interface LoadTursoDriverFactoryOptions {
    *
    * NOT merely a test seam: the specifier resolves from the node_modules tree of
    * whichever module evaluates the `import()`, and the package is an optional
-   * peer of `@objectstack/cli` while `@objectstack/runtime` does not declare it.
-   * The CLI passes its own thunk so its operators keep resolving the package
-   * they installed next to the CLI (see the module docstring). The default is
-   * this package's own root, which is what the standalone stack wants.
+   * peer of BOTH `@objectstack/cli` and `@objectstack/runtime` (#12943) — a
+   * declaration that installs nothing, so which tree actually holds the package
+   * is still decided by where the operator installed it. The CLI passes its own
+   * thunk so its operators keep resolving the package they installed next to the
+   * CLI (see the module docstring). The default is this package's own root,
+   * which is what the standalone stack wants.
    *
    * Tests pass a stub module (dispatch WITH the package) or a rejecting thunk
    * (dispatch WITHOUT it) — neither needs a real Turso endpoint, and the
-   * missing-package path must stay testable in a workspace where the package
-   * happens to be installed.
+   * missing-package path must stay testable in a workspace where the package IS
+   * installed, which since the optional peer landed is every workspace.
    */
   importDriverPackage?: () => Promise<unknown>;
   /**
@@ -193,10 +201,12 @@ export interface LoadTursoDriverFactoryOptions {
 export async function loadTursoDriverFactory(
   opts: LoadTursoDriverFactoryOptions = {},
 ): Promise<IDatasourceDriverFactory> {
-  // `as any` on the specifier: the package is deliberately NOT a dependency of
-  // `@objectstack/runtime` (that is what "optional" means here), so the literal
-  // must not be type-resolved. Same shape the shared factory uses for the other
-  // optional drivers (`default-datasource-driver-factory.ts`).
+  // `as any` on the specifier: the package is an OPTIONAL PEER of
+  // `@objectstack/runtime`, never a dependency (that is what "optional" means
+  // here — #12943 declared the relationship, and an optional peer installs
+  // nothing), so the literal must not be type-resolved: a consumer who did not
+  // install it must still compile. Same shape the shared factory uses for the
+  // other optional drivers (`default-datasource-driver-factory.ts`).
   const load = opts.importDriverPackage ?? (() => import('@objectstack/driver-turso' as any));
   const missingUrlError =
     opts.missingUrlError ?? ((message: string) => new Error(`[StandaloneStack] ${message}`));

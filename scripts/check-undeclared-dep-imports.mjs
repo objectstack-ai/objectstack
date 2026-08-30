@@ -271,19 +271,6 @@ const MIN_SPECIFIERS = 1200;
 
 const LEDGER = [
   {
-    pkg: '@objectstack/runtime',
-    dep: '@objectstack/driver-turso',
-    file: 'packages/runtime/src/turso-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The tree already carries the decision NOT to declare this, with its reason: #6268\'s header '
-      + 'on that file states that `@objectstack/driver-turso` is an optional PEER of '
-      + '`@objectstack/cli` and "is not declared by `@objectstack/runtime` at all", because a bare '
-      + '`import()` resolves from the tree of the module that EVALUATES it — so the CLI passes its '
-      + 'own thunk and this bare import is only the standalone stack\'s default. Absence raises '
-      + 'MissingDriverPackageError carrying the install command as data.',
-  },
-  {
     pkg: '@objectstack/rest',
     dep: '@objectstack/objectql',
     file: 'packages/rest/src/rest-server.ts',
@@ -295,50 +282,6 @@ const LEDGER = [
       + 'coupled to the engine — `query-multiplicity.ts` and the rest of `rest-server.ts` duck-type '
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-turso',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The tree carries this decision in an executable form. `default-datasource-driver-factory.'
-      + 'test.ts` reaches the missing-package arm WITHOUT a stub — "deliberately not a dependency '
-      + 'of this package, that is what optional means" — and it fails loudly with a notice naming '
-      + 'the remedy if the package ever resolves from here. Declaring it (even as an optional peer) '
-      + 'links it in the workspace and takes that assertion out; measured on this branch.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-sqlite-wasm',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'Guarded arm: the load sits in try/catch and an absent package answers with '
-      + 'missingSqliteWasmDriverMessage, naming the fault, the consequence and the install command '
-      + '(#7385). The wasm driver rides as an optional install for published consumers, which the '
-      + 'factory header states, so an unconditional dependency would install it for everyone.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-sqlite-wasm',
-    file: 'packages/services/service-datasource/src/sqlite-driver-fallback.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The same optional package on the fallback LADDER: rung 2 is entered inside try/catch and an '
-      + 'absent package simply drops through to the next rung. The whole point of the ladder is that '
-      + 'each rung may be unavailable, so a hard dependency would contradict the module.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-mongodb',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'Guarded arm, same shape and same ruling as the sqlite-wasm arm beside it (#7385): try/catch, '
-      + 'and an absent package answers with the fault, the consequence and the install command. '
-      + '`@objectstack/runtime` declares this one in optionalDependencies for its own reasons; this '
-      + 'package reaches it only through the guarded factory arm.',
   },
   {
     pkg: '@objectstack/rest',

@@ -9,8 +9,25 @@
 // companion test (`authz-conformance.test.ts`) asserts every referenced proof
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
 // ratchets completeness over a CURATED table of HTTP/transport entry points
-// (`discover()`: 15 probes over 11 named source files) — a new ungated route
+// (`discover()`: 16 probes over 11 named source files) — a new ungated route
 // there is UNCLASSIFIED, a deleted guard is STALE, and either breaks CI.
+// The count said 15 from 2026-08-16, when it was true, until a 16th probe
+// landed on 2026-08-18 without the sentence moving; a reach census pinned the
+// drift rather than repairing it, and the sentence is now held EQUAL to the
+// table by `authz-probe-blind-spot.test.ts` instead of restated by hand.
+// Each of those 16 probes now DECLARES its instrument kind
+// (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
+// non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
+// blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
+// keyed on a KEY, so a probe whose population is deleted before any row
+// covered it goes quiet without either firing.
+//
+// ⚠️ What this table's route population is DERIVED FROM remains an open
+// question, deliberately not answered here: the probes reach 1 of the 17 route
+// registrars in `packages/rest/src/rest-server.ts`, a measured gap the reach
+// census sizes in full. Widening the patterns is NOT the repair — it rots
+// again on the next added file — and the alternatives carry a contract
+// decision (see the census's population-source record).
 // [#9083] Classification itself is state-gated for the transport tripwires: a
 // discovered TRANSPORT-WIRED key may be covered ONLY by an `enforced` row, so
 // silencing that particular red costs an enforcement site rather than a

@@ -66,6 +66,10 @@
  * organization-less pass there and never reaps.
  */
 
+import {
+  createSeedWriteRefusals,
+  type SeedWriteRefusals,
+} from './per-organization-catalog.js';
 import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
 import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/spec/security';
 import { EVERYONE_POSITION, AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
@@ -136,6 +140,26 @@ export interface SuggestionSyncOutcome {
   created: number;
   confirmedObserved: number;
   pruned: number;
+  /**
+   * [#12981] Suggestion-row writes the store REFUSED this pass, EXCLUDING the
+   * documented benign race (see below).
+   *
+   * ⚠️ Not the complement of the three counters above — those count writes that
+   * LANDED. Without this one, the reconciliation reported `{ created: 0,
+   * confirmedObserved: 0, pruned: 0 }` both when the declarations were already
+   * in sync (the steady-state boot, which is the common case) and when every
+   * single write was refused, and the summary line is suppressed on that same
+   * zero, so the second case printed nothing at all.
+   *
+   * ⛔ A refusal classified as a `unique-violation` is NOT counted here. On
+   * this object that class is the concurrent-sync race the insert site has
+   * always documented as benign: two passes raced, the other one created the
+   * row, and the end state is the row this pass wanted. Counting it would
+   * report a degradation that did not happen — the over-application AGENTS.md
+   * warns about, and the reason the shared accumulator classifies at all
+   * rather than counting raw failures.
+   */
+  refused: number;
 }
 
 /** What one whole-installation reconciliation did. */
@@ -300,6 +324,82 @@ async function bindingExists(
 }
 
 /**
+ * [#12981] Report, ONCE per pass, the suggestion-row writes the store refused
+ * — and answer how many of them were real.
+ *
+ * ## The classification is the point, not a detail
+ *
+ * Returns the `other`-class total and NOT `refusals.total`. On
+ * `sys_audience_binding_suggestion` a `unique-violation` is the concurrent-sync
+ * race the insert site has always documented as benign: the object's key is
+ * (package_id, permission_set_name, anchor) scoped to the organization, so a
+ * collision means another pass created the very row this one wanted and the end
+ * state is correct. Reporting that as a degradation would be the
+ * over-application AGENTS.md warns against, and it would fire on healthy
+ * deployments that simply reconcile from two entry points at once (boot and a
+ * package-door publish). The update and delete sites cannot produce that class
+ * at all — both address a row by id and neither touches a keyed column — so
+ * every refusal they contribute lands in `other` and is reported.
+ *
+ * ## Why `warn` and not `error`
+ *
+ * ⚠️ A decision, not an oversight, and the same one the `plugin-sharing`
+ * repair recorded in this card's batch 1. AGENTS.md "Degradation log levels"
+ * puts a report of this shape at `error`. The sink here is
+ * `SuggestionDeps['logger']`, which is EXPORTED from this package's
+ * `index.ts` and declares `warn` as optional. Adding `error?` to it would
+ * enrol the type into `scripts/check-optional-error-sink-contract.mjs`'
+ * population, which requires a NON-optional `warn` of any sink declaring
+ * `error` — and making `warn` required on a published type is a contract call
+ * above this repair. What this change fixes is the SILENCE, which needed no
+ * contract; the LEVEL is recorded on #12981 for a `CONTRACT_REVIEW_TIER` seat.
+ *
+ * ⚠️ `check:durability-log-level` does not vouch for either choice: `ql.insert`
+ * / `ql.update` / `ql.delete` are not in its `DURABILITY_CRITICAL_CALLEES`
+ * vocabulary, so its green over this file means NOT MEASURED, never approval
+ * (#12981's standing premise).
+ */
+function reportSuggestionWriteRefusals(
+  logger: SuggestionDeps['logger'],
+  refusals: SeedWriteRefusals,
+  organizationId?: string,
+  leg: 'sync' | 'reap' = 'sync',
+): number {
+  const entries = refusals.report();
+  const real = entries.filter((e) => e.class !== 'unique-violation');
+  const refused = real.reduce((n, e) => n + e.count, 0);
+  if (refused === 0) return 0;
+  const scope = organizationId ? { organization: organizationId } : {};
+  const consequence = leg === 'reap'
+    ? 'those organization-less rows SURVIVE. Each one is readable by EVERY tenant through the ' +
+      'ADR-0120 D3 platform bucket and carries one confirm/dismiss decision on behalf of all of ' +
+      'them, and while one stands the per-organization passes that follow create NOTHING for any ' +
+      'organization — every one of them sees the key as already represented — so no tenant gets ' +
+      'its own row and the first tenant to have answered goes on answering for everyone'
+    : "those suggestion rows do NOT reflect the declarations. A refused CREATE leaves a declared " +
+      "isDefault set with no suggestion at all, so no admin is ever prompted to bind it; a refused " +
+      'CONFIRM leaves a pending prompt over a binding that already exists, so the console nags for ' +
+      'a decision already made; a refused PRUNE leaves a pending prompt for a declaration that is ' +
+      'GONE, so an admin can accept a binding no installed package declares any more';
+  logger?.warn?.(
+    `[security] ${refused} sys_audience_binding_suggestion write(s) were REFUSED during the ` +
+      `${leg === 'reap' ? 'organization-less reap' : 'suggestion reconciliation'} — ${consequence}. ` +
+      `THE DEPLOYMENT WILL GO ON LOOKING HEALTHY: this pass is convergent, so it reports what it ` +
+      `wrote and nothing else fails. Refusals that were unique-constraint violations are EXCLUDED ` +
+      `from this count on purpose — on this object that is the benign race with a concurrent ` +
+      `reconciliation, which ends with the row present either way. What the store actually said is ` +
+      `in the query engine's operation-failed entries logged just before this one, which keep the ` +
+      `driver's own identifier with the bound statement and its values cut. Remedy: none by hand — ` +
+      `the reconciliation is idempotent and re-runs at every boot, after each package-door ` +
+      `permission publish and on every list, so a store that accepts writes again converges on the ` +
+      `next pass. If this line repeats across boots the store is not accepting these writes at all, ` +
+      `and that is a deployment defect to chase in those engine entries.`,
+    { ...scope, refused, refusals: real },
+  );
+  return refused;
+}
+
+/**
  * Reconcile ONE organization's `sys_audience_binding_suggestion` rows against
  * the current declarations. Idempotent; system-context **scoped to
  * `organizationId`**; never touches confirmed or dismissed rows except to
@@ -315,8 +415,14 @@ export async function syncAudienceBindingSuggestions(
   logger?: SuggestionDeps['logger'],
   organizationId?: string,
 ): Promise<SuggestionSyncOutcome> {
-  const out: SuggestionSyncOutcome = { created: 0, confirmedObserved: 0, pruned: 0 };
+  const out: SuggestionSyncOutcome = { created: 0, confirmedObserved: 0, pruned: 0, refused: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
+
+  // [#12981] ONE refusal log for the whole pass, reported once at the end.
+  // Every write below used to answer a bare `catch`, so a pass in which the
+  // store refused everything returned the same all-zero outcome as the
+  // steady-state boot — and the summary line is gated on that same zero.
+  const refusals = createSeedWriteRefusals();
 
   const declared = collectDeclaredSuggestions(ql, metadata);
   const declaredKeys = new Set(declared.map((d) => suggestionKey(d.packageId, d.set.name, d.anchor)));
@@ -342,7 +448,13 @@ export async function syncAudienceBindingSuggestions(
             id: row.id, status: 'confirmed', resolved_at: new Date().toISOString(),
           }, { context: scopedSystemCtx(organizationId) });
           out.confirmedObserved += 1;
-        } catch { /* non-fatal */ }
+        } catch (e) {
+          // [#12981] Still non-fatal — one row must not abort the pass — but
+          // counted. A refused observation leaves a `pending` row over a
+          // binding that already exists, so the console goes on prompting an
+          // admin to accept something already in force.
+          refusals.record(SUGGESTION_OBJECT, e);
+        }
       }
       continue;
     }
@@ -377,7 +489,22 @@ export async function syncAudienceBindingSuggestions(
         ...(observed ? { resolved_at: new Date().toISOString() } : {}),
       }, { context: scopedSystemCtx(organizationId) });
       out.created += 1;
-    } catch { /* unique-index race with a concurrent sync — benign */ }
+    } catch (e) {
+      // [#12981] The comment this replaces named ONE cause — "unique-index
+      // race with a concurrent sync — benign" — and then absorbed EVERY cause
+      // into it. The race is real and genuinely benign (the other pass created
+      // the row this one wanted), but a store outage, a missing table or a
+      // rejected column reach this same `catch`, and under the old spelling
+      // they were all filed as the benign race and never counted.
+      //
+      // ⭐ This is where the shared accumulator earns its keep instead of a
+      // blanket escalation: it classifies with the SHIPPED
+      // `isUniqueViolationError` predicate, so the documented race is still
+      // recognised as benign and excluded from `refused` (see
+      // {@link SuggestionSyncOutcome.refused}), while everything else is
+      // counted and reported.
+      refusals.record(SUGGESTION_OBJECT, e);
+    }
   }
 
   // Prune PENDING rows whose declaration is gone (package uninstalled or the
@@ -389,10 +516,21 @@ export async function syncAudienceBindingSuggestions(
     try {
       await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, context: scopedSystemCtx(organizationId) });
       out.pruned += 1;
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      // [#12981] Still non-fatal, now counted. A refused prune leaves a
+      // `pending` row for a declaration that is GONE (package uninstalled, or
+      // the flag dropped on upgrade), so the console keeps offering an admin a
+      // binding no installed package declares any more.
+      refusals.record(SUGGESTION_OBJECT, e);
+    }
   }
 
-  if (out.created + out.confirmedObserved + out.pruned > 0) {
+  out.refused = reportSuggestionWriteRefusals(logger, refusals, organizationId);
+  // [#12981] `|| out.refused > 0` is the widening. The gate was written for a
+  // convergent pass with nothing to do — the common boot — and a wholly
+  // refused pass hit it identically, so the one boot that needed a line was
+  // the one boot that printed none.
+  if (out.created + out.confirmedObserved + out.pruned > 0 || out.refused > 0) {
     logger?.info?.('[security] audience-binding suggestions reconciled (ADR-0090 D5/D9)', {
       ...out, ...(organizationId ? { organization: organizationId } : {}),
     });
@@ -478,14 +616,27 @@ export async function reapOrganizationLessSuggestions(
   // else in this module: it is the only scope that can see rows belonging to
   // no organization, which is exactly the set being reaped.
   const orphans = await tryFind(ql, SUGGESTION_OBJECT, { organization_id: null }, 1000);
+  // [#12981] One refusal log for the reap, reported once below. ⛔ The return
+  // value stays `Promise<number>` — `reapOrganizationLessSuggestions` is
+  // exported from this package's `index.ts`, so widening it to an object is a
+  // published-shape change this repair has no mandate for. The refusal is
+  // reported on the log channel instead, which is what the silence cost.
+  const refusals = createSeedWriteRefusals();
   let reaped = 0;
   for (const row of orphans) {
     if (!row?.id) continue;
     try {
       await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, context: scopedSystemCtx() });
       reaped += 1;
-    } catch { /* non-fatal — the next reconciliation retries */ }
+    } catch (e) {
+      // [#12981] Still non-fatal and the next reconciliation still retries —
+      // but counted, because "retried later" and "reported never" are
+      // different promises and only the first was kept. See the report below
+      // for what an unreported failure here leaves standing.
+      refusals.record(SUGGESTION_OBJECT, e);
+    }
   }
+  reportSuggestionWriteRefusals(logger, refusals, undefined, 'reap');
   if (reaped > 0) {
     logger?.warn?.(
       '[security] reaped organization-less audience-binding suggestion rows — they were readable by ' +
@@ -513,7 +664,7 @@ export async function reconcileAudienceBindingSuggestions(
   scope: SuggestionReconcileScope,
 ): Promise<SuggestionReconcileOutcome> {
   const out: SuggestionReconcileOutcome = {
-    created: 0, confirmedObserved: 0, pruned: 0, organizations: 0, reaped: 0,
+    created: 0, confirmedObserved: 0, pruned: 0, refused: 0, organizations: 0, reaped: 0,
   };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
@@ -534,6 +685,10 @@ export async function reconcileAudienceBindingSuggestions(
     out.created += one.created;
     out.confirmedObserved += one.confirmedObserved;
     out.pruned += one.pruned;
+    // [#12981] Summed across the passes like every other counter — a whole-
+    // installation reconcile that refused every write in every organization
+    // must not report a clean zero at the top level either.
+    out.refused += one.refused;
     out.organizations += 1;
   }
   return out;
