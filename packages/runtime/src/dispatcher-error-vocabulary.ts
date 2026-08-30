@@ -1151,9 +1151,10 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
         door: 'none',
         verdict: 'foreign-vocabulary',
         why:
-            "#13131's headline live instance, and it needed BOTH blindnesses closed to be reachable: " +
-            '`Parser#error(code, message, start?, tag?)` is a class method (#13226) that stamps through an ' +
-            'object literal (#13233). Its sixteen in-file callers all pass KEBAB literals — `no-root`, ' +
+            'The live instance the whole object-literal enquiry was opened for, and it needed BOTH ' +
+            'blindnesses closed to be reachable: `Parser#error(code, message, start?, tag?)` is a class ' +
+            'method (the declaration form) that stamps through an object literal (the position). Its ' +
+            'sixteen in-file callers all pass KEBAB literals — `no-root`, ' +
             "`multiple-roots`, `bad-tag` — which this gate's literal grammar refuses by design, so the " +
             'helper reduces to nothing. That silence is already declared: `KEBAB_DIAGNOSTIC_VOCABULARY` ' +
             'puts the ADR-0112 D6c author-time diagnostic family outside BOTH vocabulary gates, and ' +
@@ -1187,8 +1188,8 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
             'and it AUTHORS no code. Of its seven in-file callers, six pass no fourth argument at all and ' +
             'the seventh passes `thrown.code`, a value read off a caught error at runtime. Every producer ' +
             'that put that string there is a stamp site this gate scans under its own shape, so covering ' +
-            'it here would double-count them rather than add reach; and since #9106 the door narrows what ' +
-            'it emits, demoting an unregistered spelling to the wire\'s `declaredCode`. The #9460 ' +
+            'it here would double-count them rather than add reach; and the door narrows what it emits, ' +
+            'demoting an unregistered spelling to the wire\'s `declaredCode`. This is the declared ' +
             'runtime-value bound, arriving one indirection later than usual.',
     },
 ];
