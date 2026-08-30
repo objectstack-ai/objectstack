@@ -1,6 +1,6 @@
 # ADR-0004: Cloud Control Plane + Per-Project Kernels
 
-> **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See ADR-0006 for the rationale and `.changeset/v5-project-to-environment-rename.md` for the breaking-change list. The body below is preserved verbatim for historical context.
+> **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See [ADR-0006 v4 — the v5.0 rename and its no-alias decision](./0006-project-environment-split.v4.md#the-v50-rename-and-its-no-alias-decision) for the rationale. The body below is preserved verbatim for historical context.
 
 
 **Status**: Superseded (2026-04-23) — the physical split between `apps/cloud`
