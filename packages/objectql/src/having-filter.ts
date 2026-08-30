@@ -37,12 +37,9 @@
 //    the same vocabulary and was not in that PR's inventory, which left this
 //    file as the lone holdout (#5905) — and the only face no conformance table
 //    covers, since `FILTER_LOGIC_CASES` does not drive the HAVING path.
-//    driver-memory / driver-mongodb still answer the old way. That was because
-//    #5499 froze them — the divergence was against a frozen face, not against
-//    the ruling — but the freeze dissolved 2026-08-11 (head note of
-//    `@objectstack/spec`'s `aggregation-conformance.ts`), so the divergence is
-//    now unexcused rather than deferred. Nothing has been triaged against it
-//    yet, and disposing of it is not this file's call.
+//    driver-memory / driver-mongodb still answer the old way only because
+//    #5499 freezes them; the divergence is against a frozen face, not against
+//    the ruling.
 //
 // [#7158] A THIRD divergence has been REMOVED rather than added: this face had
 // no comparand-shape gate, which is what the five sibling faces refuse an
