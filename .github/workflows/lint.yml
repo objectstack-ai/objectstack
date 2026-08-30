@@ -532,6 +532,27 @@ jobs:
       - name: Widget `options` census derived from the spec, not pinned
         run: pnpm check:widget-option-census
 
+      # The sdui-parser LOCKSTEP invariant (#12719 / #13150). Two copies of the
+      # constrained-JSX parser exist: objectui's runs in the RENDERER, this one
+      # runs in the SAVE GATE, and #12719 states that they must byte-agree on
+      # the accepted grammar and on the diagnostic codes — an invariant that had
+      # been enforced by NOTHING through three manual ports, two of which landed
+      # only because someone happened to file a card naming the drift.
+      #
+      # Compared against a VENDORED RECORD of objectui's side, so this step
+      # needs no network, no build and no objectui checkout. Read the gate's
+      # header for what that buys and what it costs: it sees this copy moving
+      # away from the recorded objectui state; it does NOT see objectui moving
+      # afterwards, and only a `.objectui-sha` bump — the moment a divergence
+      # starts SHIPPING — brings that direction back into view.
+      #
+      # Unfiltered on purpose. The record lives under packages/sdui-parser/, the
+      # pin is a root dotfile, and this workflow declares no paths: filtering it
+      # to the parser subtree would go dormant on exactly the PR that moves the
+      # pin. Cost is one TypeScript parse of seven small files, ~0.4 s.
+      - name: sdui-parser stays in lockstep with objectui's copy
+        run: pnpm check:sdui-lockstep
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved
