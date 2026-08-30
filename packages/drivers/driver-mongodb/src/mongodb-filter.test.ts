@@ -156,9 +156,13 @@ describe('MongoDB Filter Translator', () => {
       });
     });
 
-    it('translates $exists', () => {
+    it('translates $exists to the nullness test — has-value, not key-presence', () => {
+      // [#13195, ruled 2026-08-30] Was `{avatar: {$exists: true}}`, a
+      // passthrough, which is key-presence at the wire level. `$exists` means
+      // HAS A VALUE (`!= null`) — #5298 leg 3 / #5369 — and the lowering is the
+      // one the `$null` arm in the same file already emits.
       expect(translateFilter({ avatar: { $exists: true } })).toEqual({
-        avatar: { $exists: true },
+        avatar: { $ne: null },
       });
     });
 

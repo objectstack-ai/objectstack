@@ -208,7 +208,11 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    *
    *   `$exists`      REFERENCE is correct. `$exists` means "has a value"
    *                  (#5298 ③ / #5369, PR #5962), so mingo's key-presence
-   *                  reading is the divergent one. STILL OPEN — #13195.
+   *                  reading was the divergent one. CLOSED by #13195: the live
+   *                  path stopped handing `$exists` to mingo under its own name
+   *                  and lowers it to `{$ne: null}` / `{$eq: null}` — the
+   *                  spelling `$null` in the same method already used — so the
+   *                  two faces agree. Ruled 2026-08-30.
    *   `$nin`         LIVE was correct. Negative operators MATCH no-value rows —
    *                  #5146, extended by #5298, re-affirmed 2026-08-10 — so a
    *                  missing key satisfying `$nin` is the affirmed answer, and
@@ -235,23 +239,43 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * matcher began printing — the target was the live path's pre-existing
    * answer, named as correct in this very note before the fix existed.
    *
-   * ⛔ The `$exists` row is untouched and stays a pinned divergence. It is a
-   * different cell with a different backend list (`driver-mongodb` reads
-   * key-presence too), and it belongs to #13195. What that row still shows is
-   * why this pin exists — this package answers with two faces, so a statement
-   * like "driver-memory already reads has-value" is true of the reference
-   * matcher and FALSE of the live query path users actually reach.
+   * ⚠️ [#13195, ruled 2026-08-30] The third cell has now converged too, and by
+   * the same discipline: the target was the REFERENCE column, which this note
+   * named correct before the fix existed, not whatever the live path began
+   * printing. `driver-mongodb` — which read key-presence for its own,
+   * wire-level reason — moved in the same change, so the statement this row
+   * used to disprove is finally true of the whole package AND of the other
+   * document-shaped backend.
+   *
+   * ⛔ What the row still shows, and why the pin stays: this package answers
+   * with two faces. "driver-memory reads has-value" was true of the reference
+   * matcher and FALSE of the live query path users actually reach, for the
+   * three months between #5962 and #13195. Asserting the two columns against
+   * each other — rather than each against a literal — is what makes a future
+   * one-sided edit fail here.
    */
-  describe('[#5299] the settled cells, live vs reference — $nin / $notContains converged (#13166), $exists still open (#13195)', () => {
+  describe('[#5299] the settled cells, live vs reference — $nin / $notContains converged (#13166), $exists converged (#13195)', () => {
     const liveVsReference = async (where: unknown) => ({
       live: await idsFrom(nulled, where),
       reference: NULLED.filter((r) => match(r, where)).map((r) => r.id),
     });
 
-    it('$exists on a present-but-null field: mingo says "the key is there", the matcher says "no value"', async () => {
+    it('$exists on a present-but-null field: the two faces now AGREE (#13195)', async () => {
+      // Was `live: ['1','2','3','4']` — mingo said "the key is there" while the
+      // matcher said "no value". The REFERENCE column is unchanged, and it is
+      // the column this note already named correct.
       expect(await liveVsReference({ stage: { $exists: true } })).toEqual({
-        live: ['1', '2', '3', '4'],
+        live: ['1', '2'],
         reference: ['1', '2'],
+      });
+    });
+
+    it('$exists: false on a present-but-null field: the two faces agree there too (#13195)', async () => {
+      // The direction the old pin never recorded, and the worse one: the live
+      // path returned NOTHING for the query asking for the rows with no value.
+      expect(await liveVsReference({ stage: { $exists: false } })).toEqual({
+        live: ['3', '4'],
+        reference: ['3', '4'],
       });
     });
 

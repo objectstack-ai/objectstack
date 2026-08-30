@@ -200,8 +200,17 @@ describe('#9276 an own key holding `undefined` is not a row state this driver em
     // Measured identical on `origin/main` before the repair.
     expect(await ids({ status: { $null: true } })).toEqual(['a1', 'a2', 'a3']);
     expect(await ids({ status: { $null: false } })).toEqual(['a4']);
-    expect(await ids({ status: { $exists: true } })).toEqual(['a3', 'a4']);
-    expect(await ids({ status: { $exists: false } })).toEqual(['a1', 'a2']);
+    // [#13195] `$exists` was ['a3','a4'] / ['a1','a2'] — it read KEY PRESENCE,
+    // so a3 (which stores an explicit `null`) counted as existing. Ruled
+    // 2026-08-30: `$exists` means HAS A VALUE (`!= null`), #5298 leg 3 / #5369.
+    // ⚠️ The consequence is visible right here and is deliberate, not
+    // incidental: the two lines now answer exactly as the `$null` lines above
+    // do, inverted. Whether one predicate should keep two authorable spellings
+    // is NOT settled by that ruling — it is the consumer census, #13492.
+    expect(await ids({ status: { $exists: true } })).toEqual(['a4']);
+    expect(await ids({ status: { $exists: false } })).toEqual(['a1', 'a2', 'a3']);
+    expect(await ids({ status: { $exists: true } })).toEqual(await ids({ status: { $null: false } }));
+    expect(await ids({ status: { $exists: false } })).toEqual(await ids({ status: { $null: true } }));
     expect(await ids({ status: 'draft' })).toEqual(['a4']);
   });
 
