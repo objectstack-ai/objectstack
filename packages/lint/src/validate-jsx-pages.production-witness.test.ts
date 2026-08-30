@@ -29,9 +29,21 @@ import { CapabilityMapPage } from '../../../examples/app-showcase/src/ui/pages/c
 import { CommandCenterJsxPage } from '../../../examples/app-showcase/src/ui/pages/command-center-jsx.page.js';
 import { StartHerePage } from '../../../examples/app-showcase/src/ui/pages/start-here.page.js';
 
-import ledger from './sdui-jsx-baseline.json';
-
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+interface LedgerRow {
+  page: string;
+  rule: string;
+  severity: string;
+  tag: string;
+  count: number;
+}
+// readFileSync rather than a JSON module import: under NodeNext the latter
+// needs an import attribute (TS1543), which would add to this package's frozen
+// TEST_DEBT tsc count for no behavioral gain.
+const ledger = JSON.parse(readFileSync(join(HERE, 'sdui-jsx-baseline.json'), 'utf8')) as {
+  findings: LedgerRow[];
+};
 
 /** Walk up to the workspace root — the directory holding pnpm-workspace.yaml. */
 function findUp(predicate: (dir: string) => boolean): string {
@@ -119,7 +131,7 @@ describe('first-wiring ratchet: the shipped pages against the wired gate (ui#677
     }
 
     const recorded = new Map<string, number>(
-      ledger.findings.map((r) => [`${r.page}|${r.rule}|${r.severity}|${r.tag}`, r.count]),
+      ledger.findings.map((r): [string, number] => [`${r.page}|${r.rule}|${r.severity}|${r.tag}`, r.count]),
     );
 
     const newViolations: string[] = [];
