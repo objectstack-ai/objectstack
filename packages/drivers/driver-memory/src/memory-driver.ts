@@ -202,12 +202,26 @@ interface MemoryTransaction {
  * (`createWithAutonumberResync`) is triggered by the STORE rejecting the
  * duplicate and this store rejected nothing.
  *
+ * Since #13340 a batch write is also ALL-OR-NOTHING: {@link bulkCreate} builds
+ * and checks every row — against the table AND against the rest of the batch —
+ * before it pushes any of them, so a refused row leaves the table exactly as
+ * it found it. That is the posture {@link updateMany} has had since #13197,
+ * and the one `driver-sql` gets from sending a batch as a single insert.
+ * `bulkCreate` used to be `Promise.all(map(create))`, where a refusal left
+ * every row accepted BEFORE it standing — a refused 2-row batch on a 2-row
+ * table left THREE rows — which made a caller's retry of the same array
+ * unsafe for reasons that had nothing to do with constraints.
+ *
  * Everything else is still unenforced. {@link syncSchema} allocates an array,
  * indexes temporal fields and records those unique constraints — and nothing
  * more — so there is no primary key, no `NOT NULL`, no foreign key and no
- * column typing. `bulkCreate` will still happily land two rows with the same
- * `id` (unless `id` itself declares `unique`, or a declared index lists it)
- * where a SQL driver raises a constraint violation, and a read returns both.
+ * column typing. Two rows with the same `id` still land — through `create` and
+ * `bulkCreate` alike, unless `id` itself declares `unique` or a declared index
+ * lists it — where a SQL driver raises a constraint violation, and a read
+ * returns both. ⚠️ Read that as the missing primary key, NOT as a batch that
+ * half-applied: an undeclared duplicate is not a refusal at all, so there is
+ * nothing to refuse and the whole batch lands (pinned in
+ * `memory-bulk-create-atomicity.test.ts`).
  * A declared index WITHOUT `unique` is an access path and buys nothing here:
  * this store is a linear scan.
  *
@@ -611,9 +625,46 @@ export class InMemoryDriver implements IDataDriver {
 
   async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions): Promise<Record<string, any>[]> {
     this.logger.debug('BulkCreate operation', { object, count: dataArray.length });
-    const results = await Promise.all(dataArray.map(data => this.create(object, data, options)));
-    this.logger.debug('BulkCreate completed', { object, count: results.length });
-    return results;
+
+    const table = this.getTable(object);
+
+    // [#13340] Build and CHECK every row before pushing ANY of them — the
+    // posture `updateMany` took in #13197, one method over. This used to be
+    // `Promise.all(dataArray.map(data => this.create(...)))`, and `create`
+    // writes into the table synchronously, so every row accepted BEFORE a
+    // refusal stayed in the store: the caller got a rejection describing a
+    // batch that had partly landed, and retrying the same array was unsafe
+    // for reasons that had nothing to do with constraints. Measured on a
+    // 2-row table, a refused 2-row batch left THREE rows behind.
+    //
+    // The pending rows are checked against the table AND against each other,
+    // which a per-row check against `table` alone would miss — nothing is
+    // written yet, so a duplicate WITHIN the batch is invisible to the live
+    // table. Same reason `updateMany` projects its own pending set.
+    //
+    // This is the batch posture of the family this driver stands in for:
+    // `driver-sql` sends the whole batch as one insert, so a constraint
+    // failure there leaves the table untouched. ⭐ `create`'s own single-row
+    // path is unchanged — the record-building expression below is a copy of
+    // it on purpose, so the two doors cannot drift on what a row looks like
+    // (own-key-`undefined` included).
+    const pending: Record<string, any>[] = [];
+    for (const data of dataArray) {
+      const newRecord = this.toStoredRecord(object, {
+        id: data.id || this.generateId(object),
+        ...data,
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: data.updated_at || new Date().toISOString(),
+      });
+      this.assertUnique(object, newRecord, undefined, [...table, ...pending]);
+      pending.push(newRecord);
+    }
+
+    for (const row of pending) table.push(row);
+
+    if (pending.length > 0) this.markDirty();
+    this.logger.debug('BulkCreate completed', { object, count: pending.length });
+    return pending.map((row) => ({ ...row }));
   }
   
   async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
