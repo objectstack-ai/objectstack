@@ -94,6 +94,21 @@ name: Merged-Branch Reaper (report-only)
 #      assume.
 # The grace period below should stay in place when that happens.
 
+# ## Why this workflow declares no check family
+#
+# `dispatch-gates` requires every paths-filtered workflow to either discover a
+# `check:*` family or declare why it has none. This one genuinely has none: its
+# single step is an API sweep run through `actions/github-script`, not a named
+# local verification, so there is no `check:*` script a card's file surface
+# could ever schedule. The `pull_request` filter below is not a verification
+# step either — it exists so that edits to this file exercise the sweep before
+# they merge, and that is not decoration: it is what produced this workflow's
+# first real dry-run list ("111 of 335 ... would be deleted", run 33318728567),
+# which is the one human look the 2026-08-28 ruling requires before deletion is
+# ever enabled. Removing the filter to satisfy the gate would delete that.
+#
+# dispatch-gates: no-check-families -- the only step is an API sweep via actions/github-script; no named local check exists to run
+
 on:
   schedule:
     # Weekly, Monday 04:37 UTC. Calibrated to the 0.07% native leak rate above:
