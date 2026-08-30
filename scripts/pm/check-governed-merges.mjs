@@ -28,7 +28,9 @@
  *      Zero entries and forty entries both exit 0; the list is the product.
  *   1  could not sweep at all — bad args, unreadable `--since-ref`.
  *   2  swept, but INCOMPLETE — at least one repo unaudited (no checkout, wrong
- *      origin, unreadable `origin/main`) and/or at least one entry's
+ *      origin, unreadable `origin/main`, a remote that could not be REACHED,
+ *      or a local mirror behind the remote it claims to audit — #13307)
+ *      and/or at least one entry's
  *      attribution unresolved on every channel. Incomplete must never read as
  *      clean (#4690): an unaudited repo is not a repo with nothing to report,
  *      and a list whose whole point is "does the maintainer recognise every
@@ -258,6 +260,64 @@
  * Deepening is never done here: this sweep reads four checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
  *
+ * ## And a DEAD MIRROR is the same fact again, in the direction that reads as
+ * ## safety (#13307)
+ *
+ * "Nothing was looked at" has a fourth form, and it is the worst of them: the
+ * checkout is present, its origin remote is the right slug, its history is
+ * complete, `origin/main` resolves, its tip carries a real date — and the
+ * remote it mirrors is GONE, or has simply moved on without it. Enumeration
+ * succeeds. Every clause the row prints is literally TRUE about the local
+ * snapshot. Only the conclusion a reader draws from it — no governed merge
+ * happened there in this window — is unsupported, and nothing on the row marks
+ * that.
+ *
+ * Measured 2026-08-30, three independent probes in the same minute:
+ * `objectstack-ai/cloud` answered `Could not resolve to a Repository` on the
+ * API, was absent from the account's visible repository list, and
+ * `git fetch origin main` in the surviving local clone answered
+ * `fatal: repository ... not found`; `objectos`, `hotcrm`, `objectui` and
+ * `objectstack` all resolved in the same batch, so this was a scope change for
+ * one repo and not a broken channel. Wherever that clone survives, this sweep
+ * printed `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline
+ * commit(s) in window` and exited 0 — and would have printed it FOREVER, since
+ * the row's own prescribed remedy (`git fetch origin main`) is exactly the
+ * command that 404s. The control had not degraded; it had been silently
+ * switched off for one of the four repos it covers while continuing to print a
+ * tick for it.
+ *
+ * So reachability is a MEASURED PRECONDITION, asked of every governed repo in
+ * every window mode before enumeration begins: one `git ls-remote --exit-code`
+ * per repo (git wire protocol, zero API calls). It answers both halves at once
+ * and the second half is the sharper one:
+ *
+ *   - UNREACHABLE ⇒ the repo is UNAUDITED and its reason opens `NOT MEASURED`.
+ *     ⛔ A local tip is not evidence the remote was consulted.
+ *   - REACHED, but the remote names a DIFFERENT commit ⇒ also UNAUDITED. This
+ *     is the bounded-staleness requirement, answered by identity rather than
+ *     by dates: a tip DATE older than the window cannot separate a quiet repo
+ *     from a dead mirror (which is why the row used to be able to do no better
+ *     than hedge — "if that tip predates your last fetch, run `git fetch`"),
+ *     while tip IDENTITY separates them exactly.
+ *   - REACHED and MATCHING ⇒ the row audits, and its zero is now a MEASURED
+ *     zero that says so. ⭐ This direction is not a nicety: a fix that turned
+ *     every zero into NOT MEASURED would be exactly as useless as the false
+ *     zero it replaced, so being able to say a true zero is part of the
+ *     contract and is pinned by `--self-test` alongside the refusals.
+ *
+ * ⛔ The fix this is NOT: dropping `cloud` from `GOVERNED_REPOS`. That trades
+ * a loud hole for a silent one. Whether the repo is still in this platform's
+ * scope is a maintainer question; until it is answered the audit's honest
+ * reading of it is NOT MEASURED, and the sweep is INCOMPLETE while it stands.
+ *
+ * ⚠️ Consequence, stated rather than discovered: this sweep now requires
+ * network reachability to each governed remote, and an offline run refuses
+ * every repo (exit 1, "no governed repo could be audited"). That is the
+ * intended reading — an audit run with no way to consult any remote has not
+ * swept a clean window — and there is deliberately NO flag to suppress the
+ * probe, because a flag that let the rows read `✓ audited` without it would
+ * reintroduce precisely the false green this leg exists to remove.
+ *
  * Queue-batch TOPOLOGY (#11996) is a separate question from the window below,
  * and it is answered: measured NON-BLIND 2026-08-27 (six batch topologies plus
  * a live batch replay) — re-measure if the repo's merge method changes, or if
@@ -472,12 +532,16 @@
  *
  * Enumeration and diff-path reading are pure LOCAL git over each repo's
  * `origin/main` — zero API calls; the sweep header prints every audited
- * repo's tip and date so a stale local fetch is visible rather than silently
- * under-reporting (run `git fetch origin main` in each first). A repo with no
- * mainline commit in the window prints a note naming its tip date: local git
- * cannot distinguish "quiet repo" from "stale mirror", so the note is
- * informational and does not change the exit code — read the tip date, and
- * fetch if it predates your last one. The GitHub API is consulted only for
+ * repo's tip and date. The one network cost before attribution is the #13307
+ * reachability probe: ONE `git ls-remote --exit-code` per otherwise-auditable
+ * repo, over the git wire protocol rather than the REST API, so the sweep's
+ * API budget is unchanged. That probe is what upgraded the old stale-mirror
+ * HEDGE into a reading: a repo with no mainline commit in the window used to
+ * print an informational note naming its tip date, because local git cannot
+ * distinguish "quiet repo" from "stale mirror" — it can now, by comparing tip
+ * IDENTITY with the remote, so that case is either a MEASURED zero or an
+ * UNAUDITED row, and never an advisory the reader has to act on. The GitHub
+ * API is consulted only for
  * ATTRIBUTION, one `GET /pulls/{n}` per governed entry — on the ordinary day
  * with no governed merges the sweep costs ZERO lookups. `--test` never
  * touches the network, and spends anything at all in exactly one case: a hit
@@ -1150,6 +1214,162 @@ export function describeHorizon(horizon) {
   return horizon.shallow ? `shallow, oldest visible ${horizon.floor} (predates the window)` : 'complete clone';
 }
 
+// ── remote reachability + mirror freshness (#13307) ─────────────────────────
+
+/**
+ * The third form of "nothing was looked at", and the one that reads as the
+ * loudest possible green: the checkout is present, healthy, complete, its
+ * `origin/main` resolves, its tip has a real date — and the remote it mirrors
+ * is GONE, or has simply moved on without it. Every clause the row prints is
+ * literally true ABOUT THE LOCAL SNAPSHOT, and the conclusion a reader draws —
+ * no governed merge happened there in this window — is unsupported.
+ *
+ * Measured 2026-08-30 (#13307): `objectstack-ai/cloud` left this fleet's
+ * GitHub scope — the API answers `Could not resolve to a Repository`, the repo
+ * is absent from the account's visible list, and `git fetch origin main` in
+ * the local clone answers `fatal: repository ... not found`. Wherever that
+ * clone survives, this sweep printed
+ * `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline commit(s) in
+ * window` and exited 0, and it would have printed that FOREVER: the remediation
+ * the row itself prescribes is exactly the command that 404s. Reproduced
+ * synthetically on this branch against the unmodified script (a checkout whose
+ * origin bare repo was deleted): `✓ audited ... 2 mainline commit(s) in window`
+ * followed by `✅ clean window`, exit 0.
+ *
+ * ⚠️ This is a PARALLEL LEG in the same refusal register, not an extension of
+ * the #9902 horizon guard, and the difference is load-bearing rather than
+ * stylistic. Three reasons, in the order that decided it:
+ *
+ *   1. THE HORIZON GUARD IS NOT ASKED OF EVERY REPO. `historyHorizon` runs
+ *      only where a DATE window is in force (`if (!base)` — a topological
+ *      `--since-ref` window answers its own completeness question and skips
+ *      it). Reachability has to be asked of every repo in every window mode;
+ *      keyed onto that branch it would be silently absent from exactly the
+ *      invocation this card's own re-check command uses.
+ *   2. `historyHorizon` LIVES IN `git-history.mjs`, shared with other adopters
+ *      precisely so the predicate cannot drift. It is zero-network by
+ *      construction; teaching it to reach the network would change every
+ *      adopter's cost and failure surface for one caller's question.
+ *   3. THE QUESTIONS ARE DIFFERENT. "Does my local history reach back far
+ *      enough" and "is my local history the remote's history at all" fail
+ *      independently: a complete clone can be a dead mirror, and a fresh
+ *      mirror can be too shallow.
+ *
+ * What is REUSED — and it is the part that matters — is the refusal register
+ * itself: `status: 'unaudited'` plus a stated reason, rendered `⚠️ UNAUDITED`,
+ * counted by the `#4690` note, and classified INCOMPLETE (exit 2) by the exit
+ * contract. No second mechanism, no new exit code, no new report section.
+ *
+ * ⛔ Deliberately NOT the fix: dropping `cloud` from `GOVERNED_REPOS`. That
+ * converts a loud hole into a silent one — whether the repo is still in scope
+ * is a maintainer question, and until it is answered the honest reading is
+ * NOT MEASURED, which is what this leg produces.
+ */
+export const REMOTE_PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * `origin/main` → `{ remote: 'origin', branch: 'main' }`, or null for a ref
+ * this cannot probe. Null is a REFUSAL upstream, never a skip: a ref whose
+ * remote cannot be named is a ref whose remote was never consulted.
+ */
+export function remoteRefParts(ref) {
+  const m = /^([^/]+)\/(.+)$/.exec(typeof ref === 'string' ? ref : '');
+  return m ? { remote: m[1], branch: m[2] } : null;
+}
+
+/** A 40-hex object id and nothing else. Empty is NOT a value — it is a failure. */
+function isObjectId(value) {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value.trim());
+}
+
+/**
+ * Is this checkout a live mirror of the repo it claims to audit? Pure — the
+ * probe RESULT arrives as data, so every branch is offline-testable and
+ * `--self-test` pins all of them. Answers null when the mirror is provably
+ * current (the only branch that lets the row stay `audited`), or
+ * `{ reason }` — the words the UNAUDITED row prints.
+ *
+ * ⚠️ THE SHAPE CHECKS COME BEFORE THE EQUALITY TEST, and that ordering is the
+ * whole guard. `local === remote` is the SUCCESS condition; two unreadable
+ * shas are also equal, so a total failure of both readings would satisfy it
+ * and certify a dead mirror as verified — a guard whose success condition
+ * equals its total-failure condition must refuse instead. So an absent,
+ * empty, or non-object-id sha on EITHER side is a stated failure, never a
+ * match, and the equality test is only ever reached with two real object ids.
+ *
+ * The freshness half also subsumes, more sharply, the "bound the staleness"
+ * requirement the card states in terms of dates. A tip DATE older than the
+ * window cannot distinguish a quiet repo from a dead mirror — local git has
+ * no way to tell them apart, which is why the old row could only hedge
+ * ("if that tip predates your last fetch, run `git fetch origin main`"). Tip
+ * IDENTITY can: the mirror is behind exactly when the remote names a
+ * different commit, whatever the dates say. So a genuinely quiet repo still
+ * says a TRUE ZERO — required, since a fix that turns every zero into NOT
+ * MEASURED is as useless as the false zero it replaced — and a stale one
+ * refuses.
+ */
+export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
+  const parts = remoteRefParts(ref);
+  if (!parts) {
+    return {
+      reason:
+        `NOT MEASURED: '${ref}' does not name a remote-tracking ref, so this sweep cannot establish that ` +
+        `any remote was consulted for ${path}. A local ref is not evidence of a remote reading (#13307).`,
+    };
+  }
+  if (!remote || remote.reachable !== true) {
+    return {
+      reason:
+        `NOT MEASURED: the remote '${parts.remote}' could not be reached from ${path} ` +
+        `(${remote?.error ?? 'no probe result'}). ⛔ A local tip is NOT evidence the remote was consulted: ` +
+        `a clone of a repo that has left this fleet's scope still resolves '${ref}', still reports a real ` +
+        `tip and date, and would print \`✓ audited … 0 mainline commit(s) in window\` forever, because the ` +
+        `remedy such a row prescribes is the very command that fails (#13307). "I looked and found nothing" ` +
+        `and "I could not look" are different facts and this sweep is required to keep them apart (#4690). ` +
+        `Remedy: establish whether ${parts.remote} is still in scope for this fleet — if the repo was ` +
+        `retired deliberately that is a maintainer decision to record, and ⛔ not something this audit may ` +
+        `assume by dropping the repo from its list.`,
+    };
+  }
+  if (!isObjectId(remote.sha)) {
+    return {
+      reason:
+        `NOT MEASURED: the remote '${parts.remote}' answered for ${path} but named no commit on ` +
+        `'${parts.branch}' (read: ${JSON.stringify(remote.sha ?? null)}). An unreadable remote tip is a ` +
+        `FAILED reading, never a match — comparing it to an equally unreadable local tip would certify a ` +
+        `dead mirror as verified (#13307).`,
+    };
+  }
+  if (!isObjectId(localSha)) {
+    return {
+      reason:
+        `NOT MEASURED: '${ref}' in ${path} did not resolve to a commit id (read: ` +
+        `${JSON.stringify(localSha ?? null)}), so there is nothing to compare the remote tip against. ` +
+        `Remedy: git -C ${path} fetch ${parts.remote} ${parts.branch}`,
+    };
+  }
+  if (localSha.trim() !== remote.sha.trim()) {
+    return {
+      reason:
+        `NOT MEASURED: this mirror is BEHIND its remote — '${ref}' here is ${localSha.trim().slice(0, 9)} ` +
+        `but ${parts.remote} names ${remote.sha.trim().slice(0, 9)} on '${parts.branch}'. Enumerating ` +
+        `anyway would answer over a snapshot rather than over the branch, and it would UNDER-report by ` +
+        `exactly the merges this checkout has not fetched — a short governed-merge list reads as ` +
+        `COMPLIANCE (#9902). Remedy: git -C ${path} fetch ${parts.remote} ${parts.branch}`,
+    };
+  }
+  return null;
+}
+
+/**
+ * The words an audited row prints once its mirror is PROVEN live — the other
+ * half of the same measurement, and the reason a zero from this sweep is now
+ * stronger than it was. Pure, so `--self-test` pins them.
+ */
+export function describeRemote(remote) {
+  return `${remote.ref} reached at ${remote.remoteName}, tip ${remote.sha.slice(0, 9)} matches this mirror`;
+}
+
 // ── the window (#12633): landing order, not committer dates ─────────────────
 
 /**
@@ -1338,6 +1558,57 @@ function probeCheckout(path) {
     return { exists: true, slug: slugFromRemote(git(path, ['remote', 'get-url', 'origin']).trim()) };
   } catch {
     return { exists: true, slug: null };
+  }
+}
+
+/**
+ * The real remote reading behind `remoteFreshnessVerdict` (#13307): one
+ * `git ls-remote` per otherwise-auditable repo. Zero API calls — this is the
+ * git wire protocol, not the REST API — and it answers BOTH halves of the
+ * question in one round trip: whether the remote resolves at all, and which
+ * commit it names on the branch this sweep enumerates.
+ *
+ * `--exit-code` is not decoration. WITHOUT it, a remote that resolves but
+ * carries no such branch exits 0 with EMPTY output, so "reachable, tip
+ * unknown" would arrive at the call site wearing the same clothes as success.
+ * With it, that answer is a non-zero exit and reaches the verdict as a
+ * failure. `GIT_TERMINAL_PROMPT=0` so a credential prompt can never block a
+ * sweep, and a timeout so an unresponsive host cannot either — a probe that
+ * hangs is a sweep that never reports, which is its own kind of silence.
+ */
+function probeRemoteTip(root, ref) {
+  const parts = remoteRefParts(ref);
+  if (!parts) return { reachable: false, sha: null, error: `'${ref}' does not name a remote-tracking ref`, ref, remoteName: null };
+  try {
+    const out = execFileSync('git', ['ls-remote', '--exit-code', parts.remote, `refs/heads/${parts.branch}`], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: REMOTE_PROBE_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const first = out.split('\n').map((l) => l.trim()).filter((l) => l !== '')[0] ?? '';
+    return { reachable: true, sha: first.split(/\s+/)[0] || null, error: null, ref, remoteName: parts.remote };
+  } catch (error) {
+    // The DIAGNOSIS line, not the last line. git's remote failures end on
+    // boilerplate — "Please make sure you have the correct access rights / and
+    // the repository exists." — and the tail of that, quoted inside a NOT
+    // MEASURED row, reads as an assertion that the repository DOES exist.
+    // Measured on this branch's fixture before the fix: the row's reason ended
+    // `(and the repository exists.)`. Prefer the first line git marks as the
+    // fault; fall back to the first non-empty line, never the last.
+    const stderr = String(error?.stderr ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '');
+    const diagnosis = stderr.find((l) => /^(fatal|error|remote):/i.test(l)) ?? stderr[0];
+    return {
+      reachable: false,
+      sha: null,
+      error: diagnosis ?? `git ls-remote failed: ${String(error?.message ?? error).split('\n')[0]}`,
+      ref,
+      remoteName: parts.remote,
+    };
   }
 }
 
@@ -1546,7 +1817,7 @@ export function renderReport({ window, repos, scanned, entries, lookups }) {
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
     describeWindow(window);
   const auditedLines = audited.map(
-    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.windowMode ? `; window ${r.windowMode}${r.windowBase ? ` from ${r.windowBase.sha.slice(0, 9)}` : ''}${r.windowFellBack ? ` (fell back — ${r.windowFellBack})` : ''}${r.straddlers ? `, ${r.straddlers} boundary re-listing(s)` : ''}` : ''}${r.horizon ? `; history ${r.horizon}` : ''}${r.quiet ? ' — none in window; if that tip predates your last fetch, run `git fetch origin main` there' : ''}`,
+    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.windowMode ? `; window ${r.windowMode}${r.windowBase ? ` from ${r.windowBase.sha.slice(0, 9)}` : ''}${r.windowFellBack ? ` (fell back — ${r.windowFellBack})` : ''}${r.straddlers ? `, ${r.straddlers} boundary re-listing(s)` : ''}` : ''}${r.horizon ? `; history ${r.horizon}` : ''}${r.remote ? `; remote ${describeRemote(r.remote)}` : ''}${r.quiet ? (r.remote ? ' — none in window, and the remote tip was reached and matches this mirror: a MEASURED zero, not an unread one' : ' — none in window; ⚠️ no remote reading is recorded for this row, so the zero is not a measured one') : ''}`,
   );
   const unauditedLines = unaudited.map((r) => `  ⚠️  UNAUDITED  ${r.slug} — ${r.reason}`);
   const edgeLines = edged.map((r) => `  ⚠️  WINDOW EDGE  ${r.slug} — ${r.windowIncomplete}`);
@@ -1717,6 +1988,19 @@ async function main() {
     try {
       const [sha, date] = git(repo.path, ['log', '-1', '--format=%H%x09%cI', ref]).trim().split('\t');
       repo.tip = { sha, date };
+      // Before enumerating anything: is this checkout a LIVE mirror of the
+      // repo it claims to audit? (#13307) Asked of every repo in every window
+      // mode, and asked FIRST — a horizon reading over a dead snapshot is a
+      // true statement about the wrong tree. One `git ls-remote`, zero API
+      // calls, and it answers reachability and freshness together.
+      const remote = probeRemoteTip(repo.path, ref);
+      const stale = remoteFreshnessVerdict({ ref, path: repo.path, localSha: sha, remote });
+      if (stale) {
+        repo.status = 'unaudited';
+        repo.reason = stale.reason;
+        continue;
+      }
+      repo.remote = remote;
       // Before enumerating: can this checkout SEE the whole window? A short
       // answer here reads as compliance, so it must not be produced at all. A
       // TOPOLOGICAL window answers that itself — the range is complete exactly
@@ -1804,6 +2088,7 @@ async function main() {
             status: r.status,
             reason: r.reason,
             tip: r.tip ?? null,
+            remote: r.remote ? { ref: r.remote.ref, remote: r.remote.remoteName, sha: r.remote.sha, matchesLocalTip: true } : null,
             horizon: r.horizon ?? null,
             scanned: r.scanned ?? 0,
             windowMode: r.windowMode ?? null,
@@ -2106,6 +2391,128 @@ async function selfTest() {
   const overridden = resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w/objectstack', siblingDir: '/w', overrides: { cloud: '/srv/cloud' }, probe: (p) => (p === '/srv/cloud' ? { exists: true, slug: 'objectstack-ai/cloud' } : { exists: false, slug: null }) })[0];
   assert('--repo-root-relocates-a-checkout', overridden.status === 'audited' && overridden.path === '/srv/cloud');
 
+  // ── remote reachability + mirror freshness (#13307) ───────────────────────
+  //
+  // The leg that answers "is this checkout a live mirror at all". Every branch
+  // is pinned because the defect it replaces was a row every clause of which
+  // was literally TRUE about the local snapshot.
+  assert('a-remote-tracking-ref-splits-into-remote-and-branch', JSON.stringify(remoteRefParts('origin/main')) === '{"remote":"origin","branch":"main"}', JSON.stringify(remoteRefParts('origin/main')));
+  assert('a-ref-that-names-no-remote-does-not-parse', remoteRefParts('main') === null && remoteRefParts('') === null && remoteRefParts(null) === null);
+
+  const liveTip = 'a'.repeat(40);
+  const otherTip = 'b'.repeat(40);
+  const reached = { reachable: true, sha: liveTip, error: null, ref: 'origin/main', remoteName: 'origin' };
+  const fresh = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/objectos', localSha: liveTip, remote: reached });
+  assert('a-live-mirror-whose-tip-matches-the-remote-is-the-ONLY-verdict-that-audits', fresh === null, JSON.stringify(fresh));
+
+  // The card's live case: the repo left the fleet's GitHub scope, and the
+  // clone that outlives it still resolves origin/main and still has a tip.
+  const gone = remoteFreshnessVerdict({
+    ref: 'origin/main',
+    path: '/w/cloud',
+    localSha: liveTip,
+    remote: { reachable: false, sha: null, error: "fatal: repository 'https://github.com/objectstack-ai/cloud/' not found", ref: 'origin/main', remoteName: 'origin' },
+  });
+  assert('an-unreachable-remote-is-NOT-MEASURED-never-a-zero',
+    gone !== null && gone.reason.includes('NOT MEASURED') && gone.reason.includes('not found') && gone.reason.includes('A local tip is NOT evidence'), JSON.stringify(gone));
+
+  // ⭐ The degenerate guard, and the reason the shape checks precede the
+  // equality test: `local === remote` is the success condition, and two
+  // FAILED readings are also equal. A guard whose success condition equals its
+  // total-failure condition must refuse — so both empty and both null refuse,
+  // in the same words a single failed reading would earn.
+  const bothEmpty = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: '', remote: { reachable: true, sha: '', error: null, ref: 'origin/main', remoteName: 'origin' } });
+  const bothNull = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: null, remote: { reachable: true, sha: null, error: null, ref: 'origin/main', remoteName: 'origin' } });
+  assert('two-unreadable-shas-are-a-FAILED-reading-never-a-match', bothEmpty !== null && bothNull !== null && bothEmpty.reason.includes('NOT MEASURED') && bothNull.reason.includes('NOT MEASURED'), JSON.stringify([bothEmpty, bothNull]));
+  assert('a-remote-that-answers-with-no-commit-says-so-rather-than-matching', bothEmpty.reason.includes('named no commit'), bothEmpty.reason);
+  const noLocal = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: 'not-a-sha', remote: reached });
+  assert('an-unreadable-LOCAL-tip-refuses-too-not-only-the-remote-one', noLocal !== null && noLocal.reason.includes('did not resolve to a commit id'), JSON.stringify(noLocal));
+  assert('a-short-or-abbreviated-sha-is-not-an-object-id', remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: liveTip.slice(0, 9), remote: reached }) !== null);
+
+  // Staleness, bounded by IDENTITY rather than by dates — the sharper form of
+  // the card's requirement 3, and the one local git can actually answer.
+  const behind = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/objectos', localSha: liveTip, remote: { ...reached, sha: otherTip } });
+  assert('a-mirror-BEHIND-its-remote-is-NOT-MEASURED-and-names-both-tips',
+    behind !== null && behind.reason.includes('BEHIND') && behind.reason.includes(liveTip.slice(0, 9)) && behind.reason.includes(otherTip.slice(0, 9)) && behind.reason.includes('git -C /w/objectos fetch origin main'), JSON.stringify(behind));
+  const badRef = remoteFreshnessVerdict({ ref: 'main', path: '/w/x', localSha: liveTip, remote: reached });
+  assert('a-ref-whose-remote-cannot-be-named-refuses-rather-than-skipping', badRef !== null && badRef.reason.includes('NOT MEASURED'), JSON.stringify(badRef));
+  assert('the-verified-row-says-what-was-reached-and-what-matched', describeRemote(reached) === `origin/main reached at origin, tip ${liveTip.slice(0, 9)} matches this mirror`, describeRemote(reached));
+
+  // ── the REAL prober, on real git fixtures (#13307) ────────────────────────
+  //
+  // The verdicts above are pure and take the probe result as data, so all of
+  // them would stay green while `probeRemoteTip` answered `reachable: true`
+  // for a remote that is gone — the pure half cannot pin the half that
+  // actually reads the world. These fixtures are local bare repos over the
+  // FILE transport: real `git ls-remote`, no network, ~1 s, so `--self-test`
+  // stays offline exactly as its usage line claims.
+  const fxRoot = mkdtempSync(join(tmpdir(), 'governed-merges-remote-'));
+  try {
+    const g = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    const seed = join(fxRoot, 'seed');
+    g(fxRoot, 'init', '-q', seed);
+    execFileSync('sh', ['-c', `printf 'x\\n' > "${join(seed, 'README.md')}"`]);
+    g(seed, 'add', '-A');
+    g(seed, 'commit', '-qm', 'chore: seed');
+    const bareLive = join(fxRoot, 'live.git');
+    const bareGone = join(fxRoot, 'gone.git');
+    g(fxRoot, 'clone', '-q', '--bare', seed, bareLive);
+    g(fxRoot, 'clone', '-q', '--bare', seed, bareGone);
+    const coLive = join(fxRoot, 'co-live');
+    const coGone = join(fxRoot, 'co-gone');
+    g(fxRoot, 'clone', '-q', bareLive, coLive);
+    g(fxRoot, 'clone', '-q', bareGone, coGone);
+    rmSync(bareGone, { recursive: true, force: true }); // the repo leaves the fleet's scope
+
+    const liveProbe = probeRemoteTip(coLive, 'origin/main');
+    const localTip = g(coLive, 'rev-parse', 'origin/main').trim();
+    assert('the-real-prober-reaches-a-live-remote-and-names-its-tip',
+      liveProbe.reachable === true && /^[0-9a-f]{40}$/.test(String(liveProbe.sha)) && liveProbe.sha === localTip, JSON.stringify(liveProbe));
+    assert('a-live-matching-mirror-audits-end-to-end',
+      remoteFreshnessVerdict({ ref: 'origin/main', path: coLive, localSha: localTip, remote: liveProbe }) === null);
+
+    const goneProbe = probeRemoteTip(coGone, 'origin/main');
+    assert('the-real-prober-REFUSES-a-remote-that-no-longer-exists',
+      goneProbe.reachable === false && goneProbe.sha === null && typeof goneProbe.error === 'string' && goneProbe.error !== '', JSON.stringify(goneProbe));
+    assert('and-the-diagnosis-quoted-is-the-fault-line-not-gits-closing-boilerplate',
+      !/the repository exists\.?$/.test(goneProbe.error), goneProbe.error);
+    const goneVerdict = remoteFreshnessVerdict({ ref: 'origin/main', path: coGone, localSha: g(coGone, 'rev-parse', 'origin/main').trim(), remote: goneProbe });
+    assert('a-dead-mirror-with-a-perfectly-good-local-tip-is-still-NOT-MEASURED',
+      goneVerdict !== null && goneVerdict.reason.includes('NOT MEASURED'), JSON.stringify(goneVerdict));
+
+    // ⭐ The `--exit-code` claim itself. WITHOUT that flag a reachable remote
+    // carrying no such branch exits 0 with empty output, and this would come
+    // back `{ reachable: true, sha: null }` — "reachable, tip unknown" wearing
+    // the clothes of success. Pin it against the same live remote, so the only
+    // difference from the passing case is the branch name.
+    const noSuchBranch = probeRemoteTip(coLive, 'origin/no-such-branch-here');
+    assert('a-reachable-remote-that-lacks-the-branch-is-a-FAILED-reading-not-a-null-tip',
+      noSuchBranch.reachable === false, JSON.stringify(noSuchBranch));
+
+    // Freshness by IDENTITY: advance the remote, leave the mirror untouched.
+    const pusher = join(fxRoot, 'pusher');
+    g(fxRoot, 'clone', '-q', bareLive, pusher);
+    execFileSync('sh', ['-c', `printf 'y\\n' >> "${join(pusher, 'README.md')}"`]);
+    g(pusher, 'add', '-A');
+    g(pusher, 'commit', '-qm', 'chore: landed after the mirror was taken');
+    g(pusher, 'push', '-q', 'origin', 'main');
+    const behindProbe = probeRemoteTip(coLive, 'origin/main');
+    const behindVerdict = remoteFreshnessVerdict({ ref: 'origin/main', path: coLive, localSha: localTip, remote: behindProbe });
+    assert('a-mirror-the-remote-has-moved-past-is-NOT-MEASURED-on-a-real-repo',
+      behindProbe.reachable === true && behindProbe.sha !== localTip && behindVerdict !== null && behindVerdict.reason.includes('BEHIND'), JSON.stringify({ behindProbe, behindVerdict }));
+  } catch (error) {
+    // ⛔ Never a silent skip: an environment that cannot run these is an
+    // environment where this leg is unpinned, and that must read as red.
+    assert('the-live-remote-prober-fixtures-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    rmSync(fxRoot, { recursive: true, force: true });
+  }
+
   // ── the report words an operator reads ────────────────────────────────────
   const allAudited = resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 }));
   const clean = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited, scanned: 12, entries: [], lookups: 0 });
@@ -2118,6 +2525,42 @@ async function selfTest() {
   assert('an-unaudited-repo-never-renders-as-a-clean-window', !withAbsent.includes('✅') && withAbsent.includes('UNAUDITED') && withAbsent.includes('NOT a clean window'), withAbsent);
   assert('and-the-clean-case-does-print-the-tick', clean.includes('✅'), clean);
   assert('the-unaudited-line-names-the-repo-and-the-reason', withAbsent.includes('objectstack-ai/cloud') && withAbsent.includes('no git checkout'), withAbsent);
+
+  // ── an unreachable remote never renders as a clean window (#13307) ────────
+  //
+  // Same register, same words, same suppressed tick as an absent checkout —
+  // that sameness IS the fix: no second mechanism was introduced, so this row
+  // cannot drift away from the #4690 rule the others obey. Assert on the TICK
+  // (the phrase "NOT a clean window" contains "clean window").
+  const deadMirror = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: [
+      ...allAudited.slice(0, 3),
+      { ...byId.cloud, path: '/w/cloud', status: 'unaudited', reason: remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/cloud', localSha: 'a'.repeat(40), remote: { reachable: false, sha: null, error: 'fatal: repository not found', ref: 'origin/main', remoteName: 'origin' } }).reason },
+    ],
+    scanned: 9,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-repo-whose-remote-is-unreachable-never-renders-the-green-tick',
+    !deadMirror.includes('✅') && deadMirror.includes('UNAUDITED') && deadMirror.includes('NOT MEASURED') && deadMirror.includes('NOT a clean window'), deadMirror);
+
+  // ⭐ Non-vacuity, in the report words: a fix that turned every zero into NOT
+  // MEASURED would be as useless as the false zero it replaced. A repo whose
+  // remote WAS reached and matches still says a zero — and now says it is a
+  // measured one — while a row carrying no remote reading must ⛔ not claim it.
+  const measuredZero = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: allAudited.map((r) => ({ ...r, scanned: 4, quiet: true, remote: { ...reached, sha: 'c'.repeat(40) } })),
+    scanned: 16,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-reachable-repo-with-no-governed-merge-still-says-a-TRUE-ZERO',
+    measuredZero.includes('✅') && measuredZero.includes('clean window') && measuredZero.includes('a MEASURED zero'), measuredZero);
+  assert('the-audited-row-names-the-remote-tip-it-verified', measuredZero.includes('remote origin/main reached at origin'), measuredZero);
+  const unmeasuredZero = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited.map((r) => ({ ...r, scanned: 0, quiet: true })), scanned: 0, entries: [], lookups: 0 });
+  assert('a-row-with-no-remote-reading-does-NOT-claim-one', !unmeasuredZero.includes('a MEASURED zero') && unmeasuredZero.includes('no remote reading is recorded'), unmeasuredZero);
 
   // ── an unproven window boundary never renders as a clean window (#12633) ──
   //
@@ -2593,7 +3036,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, and the report wording pins).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
