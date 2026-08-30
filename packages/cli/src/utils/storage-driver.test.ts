@@ -563,17 +563,22 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
 
   // The one thing the convergence deliberately did NOT move: the dynamic
   // import's specifier, whose RESOLUTION ROOT is the module that evaluates it.
-  // `@objectstack/driver-turso` is an optional PEER of `@objectstack/cli` and is
-  // not declared by `@objectstack/runtime` at all, so under pnpm's strict layout
-  // it is linked into the CLI's node_modules and not the runtime's. Had the CLI
-  // taken the runtime's default thunk, an operator who ran the exact install
-  // command this error prints would still be told the package was missing.
+  // `@objectstack/driver-turso` is an optional PEER of `@objectstack/cli` and,
+  // since #12943, of `@objectstack/runtime` too — an optional peer names the
+  // relationship and installs nothing, so the package still sits in whichever
+  // tree the operator installed it into. Had the CLI taken the runtime's default
+  // thunk, an operator who ran the exact install command this error prints would
+  // still be told the package was missing.
   //
-  // This case pins the CLI half — the default thunk finds the package that is
-  // installed next to the CLI. The runtime half is pinned from the other side by
+  // This case pins the CLI half — the default thunk finds the package installed
+  // next to the CLI, through the CLI's own `devDependencies` entry. ⚠️ The
+  // runtime half USED to be pinned from the other side by
   // `standalone-stack.libsql.test.ts`, where a `libsql://` boot with no injected
-  // thunk takes the missing-package arm precisely because the runtime does not
-  // declare it. Together they assert that the two roots are still distinct.
+  // thunk took the missing-package arm because nothing linked the package under
+  // the runtime. #12943's optional peer makes pnpm link it there too, so that
+  // case now STAGES the absence rather than relying on the layout to supply it.
+  // The pair still asserts that the two roots are distinct; what neither can
+  // assert any more is that one of them is empty.
   it('resolves the optional package from the CLI’s own node_modules by default', async () => {
     const factory = await loadTursoDriverFactory();
     expect(factory.supports('turso')).toBe(true);
