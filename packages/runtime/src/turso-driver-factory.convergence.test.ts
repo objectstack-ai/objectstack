@@ -35,7 +35,7 @@
 // No test here touches a real libSQL endpoint: the optional package is
 // substituted through `importDriverPackage`.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   buildTursoDriverConfig,
   createDefaultDatasourceDriverFactory,
@@ -167,22 +167,46 @@ describe('#7314 point 2 — one MissingDriverPackageError class across the seam'
   // Until #7314 that arm raised a plain `Error` and this assertion could not
   // have been written.
   it('the open-core arm raises an error the runtime binding matches', async () => {
-    // `@objectstack/driver-turso` is deliberately not a dependency of
-    // `@objectstack/service-datasource` — that is what "optional" means — so its
-    // missing-package arm is reachable here without a stub.
+    // ⭐ STAGED absence since #12943. `@objectstack/driver-turso` is now an
+    // OPTIONAL PEER of `@objectstack/service-datasource` and of this package —
+    // the honest install-time declaration of a relationship the source already
+    // had. It installs nothing for a consumer, but pnpm LINKS an optional
+    // workspace peer, so the package resolves here and the bare form stopped
+    // entering the missing-package arm. That is precisely the transition this
+    // pin's old notice named, and this is it carried out.
+    //
+    // ⛔ Mocked WITHOUT `vi.resetModules()`, and that is load-bearing rather
+    // than a shortcut: this pin is about CLASS IDENTITY ACROSS THE SEAM, and a
+    // reset re-evaluates `missing-driver-package-error.js` inside
+    // `@objectstack/service-datasource`. The arm would then raise a fresh class
+    // object, `instanceof` against the runtime binding would be FALSE for a
+    // perfectly correct error, and the reset would have destroyed the very fact
+    // under test. No reset is needed here: nothing in this file imports the
+    // driver package before this point, so the factory's lazy
+    // `await import(...)` is the first one and the mock is what it finds.
+    vi.doMock('@objectstack/driver-turso', () => {
+      throw Object.assign(
+        new Error("Cannot find package '@objectstack/driver-turso' imported from /app/node_modules/x.mjs"),
+        { code: 'ERR_MODULE_NOT_FOUND' },
+      );
+    });
     let err: unknown = null;
     try {
       await createDefaultDatasourceDriverFactory()
         .create({ name: 'warehouse', driver: 'turso', config: { url: 'libsql://my-db.turso.io' } });
     } catch (e) {
       err = e;
+    } finally {
+      vi.doUnmock('@objectstack/driver-turso');
     }
 
     if (err === null) {
       throw new Error(
-        '@objectstack/driver-turso resolved from @objectstack/service-datasource, so this case no '
-        + 'longer exercises the missing-package arm. If the package was made a dependency, this '
-        + 'assertion is the notice that the pin needs a stubbed import instead.',
+        'staging @objectstack/driver-turso as absent no longer makes the open-core turso arm '
+        + 'raise, so this case has stopped exercising the missing-package arm. ⛔ Do not delete '
+        + 'it and do not weaken it: find out why the stub stops short of the arm. An arm no test '
+        + 'can enter is a decoration, and this one is the whole reason serve.ts can decide boot '
+        + 'fatality on a failure the OPEN-CORE factory raised.',
       );
     }
     expect(err).toBeInstanceOf(MissingDriverPackageError);
