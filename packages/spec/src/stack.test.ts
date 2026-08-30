@@ -1514,7 +1514,12 @@ describe('defineStack - `type: page` view → page cross-reference (#13216)', ()
     version: '1.0.0',
     type: 'app' as const,
   };
-  const account = { name: 'account', fields: { name: { type: 'text' } } };
+  // `as const` on the field type is load-bearing, not style: hoisted into a
+  // shared const, the object literal widens `type` to `string`, which
+  // `ObjectStackDefinitionInput` refuses — and this package's test typecheck is
+  // a shrink-only ratchet (`check:test-typecheck`), so a new widened literal
+  // reads as a debt INCREASE rather than as a red the suite would show.
+  const account = { name: 'account', fields: { name: { type: 'text' as const } } };
   const dashboard = {
     name: 'account_dashboard',
     label: 'Account Dashboard',
