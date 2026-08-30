@@ -109,7 +109,7 @@ async function boot(schemas: Record<string, any>) {
 
 /** Every alias-carrying warn this suite cares about, in call order. */
 const aliasWarns = (warn: ReturnType<typeof vi.fn>) =>
-  warn.mock.calls.filter((c) => String(c[0]).includes('#11567'));
+  warn.mock.calls.filter((c) => String(c[0]).includes('[security/reference-spelling]'));
 
 describe('resolveCbpRelation — the rejected `reference` alias still RESOLVES (#13250)', () => {
   it('`reference_to` resolves the relation — narrowing it would deny access, so it must not be narrowed', async () => {

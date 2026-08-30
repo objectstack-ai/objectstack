@@ -5968,6 +5968,17 @@ export class SecurityPlugin implements Plugin {
    *     invalidation to stay correct, and would silently rot the day another
    *     cache-clearing door was added.
    *
+   * ## Why this is not a duplicate of the registry's own diagnostic
+   *
+   * `SchemaRegistry.registerObject` already prints a functional-completeness
+   * line for such a field — `field/relationship-without-reference`, "the
+   * consumer silently skips each one, so it reads 0/null/never-resolves". For
+   * THIS consumer that is measurably false: the relation resolves, and the
+   * object is enforced normally. So the registry's line is not the report this
+   * seam needs — it fires at registration rather than at resolution, and it
+   * describes a behaviour that is not the one this reader has. Correcting the
+   * record where the resolution actually happens is the point.
+   *
    * Reported through `this.logger`, the plugin's own {@link SecurityReportSink}
    * — the same channel and the same `warn?.(…)` spelling as every other report
    * site here, so an un-injected host still hears it on the console-backed
@@ -5985,8 +5996,12 @@ export class SecurityPlugin implements Plugin {
     alias: string,
     master: string,
   ): void {
+    // The tag is a resolvable NAME, not a tracker id: this string reaches
+    // operators and generated surfaces, and `#NNNN` means nothing to any of
+    // them (`check:doc-authoring`). The anchor for a reader who CAN resolve it
+    // is this comment — the ruling is #11567, and git history keeps it.
     this.logger.warn?.(
-      `[security/#11567] object "${object}": its controlled_by_parent master relation resolved ` +
+      `[security/reference-spelling] object "${object}": its controlled_by_parent master relation resolved ` +
         `only from the REJECTED alias \`${alias}\` on field "${field}" — \`reference\` is the one ` +
         'relationship spelling @objectstack/spec declares, and this object reached the registry ' +
         'without being parsed (a raw registerObject skips Zod by design). Access is UNAFFECTED: ' +
