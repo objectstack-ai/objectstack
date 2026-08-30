@@ -27,6 +27,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { loadExcelJs } from './xlsx-module.js';
 
 // ---------------------------------------------------------------------------
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -322,7 +323,7 @@ describe('import route — real engine + protocol integration', () => {
   });
 
   it('parses a native xlsx workbook server-side and coerces cells like csv', async () => {
-    const ExcelJS: any = (await import('exceljs')).default ?? (await import('exceljs'));
+    const ExcelJS = await loadExcelJs();
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Sheet1');
     ws.addRow(['ID', '标题', '完成', '优先级', '分数', '截止', '负责人']);
@@ -344,7 +345,7 @@ describe('import route — real engine + protocol integration', () => {
   });
 
   it('reads xlsxBase64 without an explicit format and honors the sheet selector', async () => {
-    const ExcelJS: any = (await import('exceljs')).default ?? (await import('exceljs'));
+    const ExcelJS = await loadExcelJs();
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet('Empty'); // decoy first sheet
     const ws = wb.addWorksheet('Data');

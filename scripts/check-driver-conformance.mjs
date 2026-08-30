@@ -381,10 +381,12 @@ const CASE_SETS = [
 // archive and the loser's `rename` blew up an all-green run as an unhandled
 // rejection, ejecting unrelated PRs from the merge queue. The maintainer retired
 // the download rather than fund single-flight/prewarm for a family whose
-// investment is frozen (#5499). Un-freezing it is what should re-run these cells
-// in CI; until then, this note is the honest state of the mongo column.
+// investment was frozen at the time (#5499, 2026-08-05). ⚠️ That freeze was
+// dissolved on 2026-08-11 and the download was NOT restored: what these cells
+// wait on now is someone funding the provisioning, not an unfreeze. Until then,
+// this note is the honest state of the mongo column.
 
-// ## FILTER_TEXT_CASES: ONE DEBT row left of the five #5701 opened
+// ## FILTER_TEXT_CASES: the five DEBT rows #5701 opened, and how each cleared
 //
 // The ledger was EMPTY (see the note above) until `FILTER_TEXT_CASES` arrived.
 // Those five rows were not a regression in coverage: the case-set is the
@@ -405,8 +407,11 @@ const CASE_SETS = [
 // opt-in, so a suite needing a server would not run in CI — and it evaluates
 // the emitted documents rather than pinning their spelling.
 //
-// What remains is `driver-memory`, still in the #5499 frozen family, where the
-// freeze rather than the difficulty is why the cell is open.
+// [#6682] `driver-memory`'s row is GONE too, and it was the LAST of the five —
+// requirement 2 below records the nine sites the `i` flag came off. ⚠️ The
+// #5499 freeze, not the difficulty, is why this cell stayed open longest; the
+// maintainer dissolved that freeze on 2026-08-11 and the cell cleared the same
+// day. `LEDGER` is empty again — see its steady-state note.
 //
 // What the case-set demands, and where each requirement stands:
 //

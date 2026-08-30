@@ -1,0 +1,18 @@
+{
+  "//": [
+    "Provenance record for the repo-root `sdui.manifest.json` (ADR-0080; #12924 wiring ruling 2026-08-29).",
+    "The artefact is objectui's public-tier component manifest, generated from the PUBLISHED",
+    "@object-ui/* packages at the version `.objectui-sha` ships, via scripts/gen-sdui-manifest-node.mjs",
+    "(same enumeration as objectui's apps/console/dev/manifest-dump.tsx: eager-import the 16 registry",
+    "modules, ComponentRegistry.getPublicConfigs(), manifestFromConfigs from @objectstack/sdui-parser).",
+    "`scripts/check-sdui-manifest.mjs` holds this record equal to the artefact and to the live pin:",
+    "a pin bump without regeneration goes RED there — that is the anti-rot half of the freshness gate.",
+    "Regenerate + re-record: node scripts/gen-sdui-manifest-node.mjs (see its header for the offline mode)."
+  ],
+  "objectuiSha": "9602dc820450dda956843c6cfe5b329bcf88c757",
+  "objectuiPackagesVersion": "17.6.0",
+  "generator": "scripts/gen-sdui-manifest-node.mjs",
+  "generatedAt": "2026-08-30",
+  "sha256": "49211fee7792cf51174930dc2c1be2169d5175f77a83491f68f90b3f0c19e69d",
+  "components": 57
+}

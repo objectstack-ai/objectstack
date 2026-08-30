@@ -855,8 +855,8 @@ MongoDB), the analytics preview evaluator, and `formula`'s write-side `check`.
 > surfaced as an unhandled rejection that turned all-green runs into `exit 1`
 > and ejected unrelated PRs from the merge queue. The maintainer retired the
 > download rather than fund single-flight or prewarm infrastructure for a
-> driver family whose investment is frozen (#5499); `test-mongod.ts` in that
-> package documents the mechanism.
+> driver family whose investment was frozen at the time (#5499);
+> `test-mongod.ts` in that package documents the mechanism.
 >
 > `scripts/check-driver-conformance.mjs` still reports these cells CONSUMED,
 > because that gate judges coverage by *import* and the files still import the
@@ -864,8 +864,10 @@ MongoDB), the analytics preview evaluator, and `formula`'s write-side `check`.
 > day of the change — read it before treating the mongo column as executed
 > coverage.
 >
-> Restoring these cells to CI hangs on #5499: whatever decision un-freezes that
-> family and provisions a mongod binary again also retires this note.
+> ⚠️ Restoring these cells to CI used to hang on two things: the #5499 freeze
+> lifting, and a mongod binary being provisioned again. The maintainer dissolved
+> the freeze on 2026-08-11; the provisioning half was never funded, and nothing
+> re-ran. So only the second half is left, and whoever funds it retires this note.
 
 It is modelled on `filter-logic-conformance.ts`, which exists for the same
 reason one layer down (#3774), and lives in `spec` for the D-D2 reason: every
@@ -1013,7 +1015,8 @@ mongod-backed suites are opt-in behind `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`
 `mongodb-temporal-conformance.test.ts` — which carries this axis's
 `TEMPORAL_TIME_CASES` and has no server-free half — skips with a named notice
 on every default run, whether or not a binary is reachable. It runs when a
-human asks for it, and returns to CI only if #5499 is un-frozen and something
-provisions a binary again. The conversion itself is pinned by
+human asks for it, and returns to CI only if something provisions a binary
+again — the #5499 freeze that used to be the other half of this condition was
+dissolved on 2026-08-11. The conversion itself is pinned by
 `mongodb-time-storage.test.ts`, which is unaffected: it is pure, needs no
 server, and still runs everywhere.

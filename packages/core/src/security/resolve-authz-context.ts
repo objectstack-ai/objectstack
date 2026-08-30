@@ -57,7 +57,8 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
-import { isGrantActive } from './grant-validity.js';
+import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
+import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import {
   matchesConfiguredPlatformAdmin,
   reportLegacyPlatformAdminGrant,
@@ -392,6 +393,25 @@ export interface ResolveUserAuthzGrantsOptions {
   seedPermissions?: string[];
   /** A caller-supplied email (e.g. from the session) that wins over the `sys_user` read. */
   seedEmail?: string;
+  /**
+   * ⭐ Force a FRESH resolution even when the #11971 grants cache is enabled
+   * — the ruled bypass list of #11633 (leg B, maintainer acceptance
+   * 2026-08-25). Two call sites carry it, for two ruled reasons:
+   *
+   *  - `plugin-security/src/explain-engine.ts` (`buildContextForUser`): the
+   *    permission explainer is the tool an administrator uses to VERIFY that
+   *    a revocation took effect. An explainer answering from cache would
+   *    explain a state that no longer exists, and would do it at exactly the
+   *    moment someone is checking.
+   *  - `service-automation/src/plugin.ts` (`runAs:'user'` runs): automation
+   *    runs are not request-shaped and can be long-lived; they must not pin
+   *    an envelope.
+   *
+   * Bypassing reads NOTHING from the cache and writes NOTHING into it — a
+   * bypassed resolution must not repopulate an entry the next cached caller
+   * would then trust.
+   */
+  bypassGrantsCache?: boolean;
 }
 
 /**
@@ -427,6 +447,18 @@ export async function resolveUserAuthzGrants(
   userId: string,
   opts: ResolveUserAuthzGrantsOptions = {},
 ): Promise<UserAuthzGrants> {
+  // [#11971 / #11633 leg B] The cross-request grants cache. OFF by default
+  // (`OS_AUTHZ_GRANTS_CACHE_TTL_MS=0`, Fork 4) — `openUserGrantsCache` returns
+  // `undefined` then, with zero side effects, so the shipped default resolves
+  // byte-identically to the uncached implementation below. When enabled, a hit
+  // serves a clone of an envelope this engine resolved earlier, retired by any
+  // watched-object write, any non-`write` epoch bump, the earliest upcoming
+  // ADR-0091 validity boundary, or the TTL — whichever comes first. The
+  // attempt snapshots its generation and clock HERE, before any read is
+  // issued, so a write landing mid-resolution kills the entry on arrival.
+  const grantsCache = openUserGrantsCache(ql, userId, opts);
+  if (grantsCache?.hit) return grantsCache.hit;
+
   const { tenantId } = opts;
   const grants: UserAuthzGrants = {
     positions: [],
@@ -787,6 +819,18 @@ export async function resolveUserAuthzGrants(
     const aiAccess = ((await getUserRow()) as { ai_access?: unknown } | undefined)?.ai_access;
     if (aiAccess === true || aiAccess === 1 || aiAccess === '1') grants.permissions.push('ai_seat');
   }
+
+  // [#11971] Store the fresh envelope (miss path only; the argument list is
+  // not evaluated when the cache is off/bypassed/declined). The boundary scan
+  // covers exactly the rows `isGrantActive` was applied to — own memberships,
+  // position assignments, user-bound set grants — INCLUDING currently-inactive
+  // rows, because a future `valid_from` is a flip the timer must catch too.
+  // Peer rows (`orgMembersLeg`) feed `org_user_ids` with no validity check, so
+  // they contribute no boundary.
+  grantsCache?.commit(
+    grants,
+    nextGrantValidityBoundary([...members, ...userPositionRows, ...upsRowsAll], nowMs),
+  );
 
   return grants;
 }

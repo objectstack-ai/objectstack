@@ -197,6 +197,7 @@ import {
 } from './export-format.js';
 import { runImport } from './import-runner.js';
 import { prepareImportRequest } from './import-prepare.js';
+import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
 import {
@@ -608,11 +609,11 @@ function rowsToCsv(
  * module's static graph.
  */
 async function createXlsxStream(res: any, useStyles = false): Promise<{
-    ws: any;
+    ws: Worksheet;
     finalize: () => Promise<void>;
 }> {
     const { PassThrough } = await import('node:stream');
-    const ExcelJS: any = (await import('exceljs')).default ?? (await import('exceljs'));
+    const ExcelJS = await loadExcelJs();
 
     const passthrough = new PassThrough();
     const done = new Promise<void>((resolve, reject) => {

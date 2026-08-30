@@ -33,7 +33,10 @@
 //
 // So the census stops being prose and becomes this ledger + this gate. The gate
 // polices the RETIREMENT PROGRAMME's bookkeeping; it is not investment in the
-// driver, which stays frozen under #5499.
+// driver. (#5499 froze that investment on 2026-08-05 and the maintainer
+// dissolved the freeze on 2026-08-11 -- in COMMENTS on #5499, which is a
+// `tracking` anchor and is still open. This gate's scope is the same either
+// way: bookkeeping, never investment.)
 //
 // ## What counts as a DECLARATION
 //
@@ -418,8 +421,8 @@ export function reconcile(scan, ledger, read = (f) => readFileSync(join(ROOT, f)
     if (ledgeredM.has(mKey(d))) continue;
     problems.push(
       `LEDGERED: ${d.file} declares ${SPECIFIER} in ${d.field} (${d.range}) and the ledger does not cover it. `
-        + 'A manifest declaration outlives the consumer that justified it — that is exactly how a frozen package '
-        + 'stays installed everywhere after the last real use is gone (#5499). Record which consumer it serves.',
+        + 'A manifest declaration outlives the consumer that justified it — that is exactly how a package nobody '
+        + 'invests in any more stays installed everywhere after the last real use is gone. Record which consumer it serves.',
     );
   }
   for (const e of ledgerManifests) {
@@ -508,7 +511,7 @@ function report({ list = false } = {}) {
   for (const e of ruled) console.log(`  ruled    ${e.file}  (${e.ruling})`);
   console.log(
     `\ncheck-driver-memory-census: OK — every declaration is ledgered, every ledger entry is live, and every `
-      + `ruled file states "${censusMarker(ruled.length)}". Nothing here invests in the driver (#5499 freeze).\n`,
+      + `ruled file states "${censusMarker(ruled.length)}". This gate polices the census, never investment.\n`,
   );
 }
 

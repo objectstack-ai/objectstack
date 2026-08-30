@@ -3118,8 +3118,8 @@ export class AuthManager {
       await this.addOptionalPlugin(plugins, 'sso', async () => {
       const { sso } = await import('@better-auth/sso');
       // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
-      // better-auth adapter / a global model map, not per-plugin here (see
-      // AUTH_SSO_PROVIDER_SCHEMA).
+      // better-auth adapter / a global model map, not per-plugin here (see the
+      // `ssoProvider` NOTE in auth-schema-config.ts).
       //
       // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
       // model and read no `schema` option. Re-measured against the installed
@@ -5821,6 +5821,51 @@ export class AuthManager {
   }
 
   /**
+   * [#12981] One durability-degradation line for an identity write this manager
+   * asked for and did NOT get.
+   *
+   * ## Why every call site below needs this and not a comment
+   *
+   * The eight seams that call this were a bare `catch` carrying only a
+   * "best-effort" comment. That rationale is sound about CONTROL FLOW — a
+   * counter write must never turn a valid sign-in into a 500 — and it is the
+   * durability class exactly as
+   * AGENTS.md → "Degradation log levels" defines it: the write was refused, the
+   * request answered 200, and NOTHING downstream looks wrong. The lockout
+   * counter simply stops counting; the password-history ring simply stops
+   * growing. "Best-effort" is a statement about whether to THROW. It was being
+   * read as a statement about whether to REPORT, and those are different
+   * decisions.
+   *
+   * ## The level is `warn`, and that is deliberately NOT this batch's call
+   *
+   * AGENTS.md rules a lost write is an `error`. `AuthManagerOptions.logger`
+   * (this file, ~line 671) declares `{ info?; warn }` and NO `error`, and it is
+   * re-exported from the package `index.ts`, so adding `error?` is a
+   * published-shape change. #12981's ruling routes that LEVEL question to
+   * #13398 and tells this batch to fix the SILENCE only — the same split
+   * batches 1 and 2 landed for `plugin-security`'s two exported sinks. `warn`
+   * is the guaranteed channel here and the lowest level a reader still reads as
+   * a failure, so nothing is lost but loudness.
+   *
+   * ⛔ Call `warn` through the PROPERTY, never through an extracted reference —
+   * `@objectstack/core`'s `ObjectLogger` is class-based and its `warn` reaches
+   * for `this.write`, so a detached call throws. The hazard and its measured
+   * cost are written up on {@link audienceLogError}; this helper is the same
+   * discipline for the durability channel.
+   */
+  private logDurabilityDegradation(
+    message: string,
+    error: unknown,
+    meta?: Record<string, unknown>,
+  ): void {
+    this.config.logger?.warn(message, {
+      ...meta,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  /**
    * Maintain `sys_user.source` (cloud ADR-0024 D4 provenance) as accounts are linked.
    * Drives the managed-vs-native user-mgmt gating: a managed (`idp-provisioned`)
    * user holds no local credential, so the password / identity-edit actions
@@ -5874,8 +5919,22 @@ export class AuthManager {
       } as any);
       if (typeof credentialCount === 'number' && credentialCount > 0) return;
       await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX } as any);
-    } catch {
-      // Provenance stamp must never break federated login. Leave the prior value.
+    } catch (e) {
+      // Provenance stamp must never break federated login — so the login still
+      // succeeds. [#12981] What it must not do is vanish: the stamp IS the
+      // managed-vs-native gate.
+      this.logDurabilityDegradation(
+        'AuthManager: the sys_user.source provenance stamp was NOT written — the account link '
+          + 'succeeded and the sign-in is fine, so nothing looks broken, but this user keeps the '
+          + 'PREVIOUS source value. A federated user still reading `env_native` is offered the '
+          + 'password / identity-edit actions that are supposed to hide for a managed identity '
+          + '(cloud ADR-0024 D4), which is how a managed user self-mints a local password that '
+          + 'bypasses enforced SSO. Remedy: make the sys_user update land (write permission on '
+          + '`source`, driver connectivity); the stamp is idempotent and the next account link '
+          + 'for this user re-runs it.',
+        e,
+        { object: 'sys_user', field: 'source' },
+      );
     }
   }
 
@@ -6147,8 +6206,20 @@ export class AuthManager {
         { id: userId, password_changed_at: new Date(), must_change_password: false },
         { context: SYSTEM_CTX } as any,
       );
-    } catch {
-      // audit stamp is best-effort — never break a valid password change
+    } catch (e) {
+      // Never break a valid password change — the new password IS set.
+      // [#12981] But this write carries two live flags, not just an audit stamp.
+      this.logDurabilityDegradation(
+        'AuthManager: password_changed_at / must_change_password were NOT written after a '
+          + 'successful password change — the new password works, so the user sees nothing wrong. '
+          + 'Two things are now stale: any admin-issued force-change flag stays SET, so '
+          + 'this user is told to change their password again on the next sign-in even though they '
+          + 'just did; and the password-age policy (ADR-0069 D1) keeps reading the OLD timestamp, '
+          + 'so a rotation deadline is computed from a password that no longer exists. Remedy: '
+          + 'make the sys_user update land; the next successful change re-stamps both.',
+        e,
+        { object: 'sys_user', fields: ['password_changed_at', 'must_change_password'] },
+      );
     }
   }
 
@@ -6308,8 +6379,21 @@ export class AuthManager {
         { id: account.id, previous_password_hashes: JSON.stringify(next) },
         { context: SYSTEM_CTX } as any,
       );
-    } catch {
-      // history maintenance is best-effort — never break a valid password change
+    } catch (e) {
+      // Never break a valid password change. [#12981] But a reuse ring that
+      // silently stops growing is a security control that stops enforcing.
+      this.logDurabilityDegradation(
+        'AuthManager: the password-history ring was NOT extended after a successful password '
+          + 'change — the change itself succeeded, so nothing looks wrong. The password just '
+          + 'replaced was never recorded, so `passwordHistoryCount` (ADR-0069 D1) will NOT refuse '
+          + 'it on the next change: the deployment advertises "you cannot reuse your last N '
+          + 'passwords" and, for this identity, does not enforce it. Remedy: make the sys_account '
+          + 'update land — check the write permission on `previous_password_hashes` and driver '
+          + 'connectivity. The ring is rebuilt from stored history, so it recovers on the next '
+          + 'change that lands; the passwords skipped in between stay reusable.',
+        e,
+        { object: 'sys_account', field: 'previous_password_hashes', ringSize: count },
+      );
     }
   }
 
@@ -6384,8 +6468,20 @@ export class AuthManager {
         patch.locked_until = new Date(Date.now() + mins * 60_000);
       }
       await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-    } catch {
-      // Lockout accounting is best-effort — never break the auth response.
+    } catch (e) {
+      // Never break the auth response. [#12981] But lockout accounting that
+      // silently stops accounting is brute-force protection that is OFF.
+      this.logDurabilityDegradation(
+        'AuthManager: the sign-in lockout counter was NOT written — the auth response is '
+          + 'unaffected, so nothing looks broken. This attempt was not counted, which means '
+          + 'consecutive failures do not accumulate and the account is never locked: '
+          + '`lockoutThreshold` (ADR-0069 D2) is configured and, for this identity, not enforced. '
+          + 'A brute-force run against this account meets no limit while this persists, and the '
+          + 'only notice is this line. Remedy: make the sys_user update land — check the write '
+          + 'permission on `failed_login_count` / `locked_until` and driver connectivity.',
+        e,
+        { object: 'sys_user', threshold, success },
+      );
     }
   }
 
@@ -6467,8 +6563,21 @@ export class AuthManager {
       // forwarded header must not blow up the write.
       if (ip) patch.last_login_ip = ip.slice(0, 45);
       await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-    } catch {
-      // Login audit is best-effort — never break the auth response.
+    } catch (e) {
+      // Never break the auth response. [#12981] But this write is the ONLY
+      // trace the sign-in leaves in the compliance ledger.
+      this.logDurabilityDegradation(
+        'AuthManager: the last-login stamp was NOT written — the sign-in succeeded and the user '
+          + 'holds a valid session, so nothing looks wrong. `last_login_at` / `last_login_ip` keep '
+          + 'their previous values, and because this update is what plugin-audit turns into the '
+          + 'change-trail row, this sign-in leaves NO trace in the compliance ledger at '
+          + 'all: "when did this account last sign in, and from where" now answers with a stale '
+          + 'row, and a login from a new address is exactly what that trail is read for. Remedy: '
+          + 'make the sys_user update land; the next sign-in that lands re-stamps it, but this one '
+          + 'is not recoverable.',
+        e,
+        { object: 'sys_user', fields: ['last_login_at', 'last_login_ip'] },
+      );
     }
   }
 
@@ -6514,8 +6623,21 @@ export class AuthManager {
           { context: SYSTEM_CTX } as any,
         );
       }
-    } catch {
-      // Never turn a successful password-stage unlock into a failure.
+    } catch (e) {
+      // Never turn a successful password-stage unlock into a failure — this
+      // method still returns true, because the password stage IS cleared.
+      // [#12981] That `true` is exactly why the silence had to go: it is the
+      // admin's whole answer, and it was covering a half-completed unlock.
+      this.logDurabilityDegradation(
+        'AuthManager: the SECOND-FACTOR half of an admin unlock was NOT cleared — the '
+          + 'password-stage counters were reset and this unlock reports SUCCESS to the admin, so '
+          + 'the console shows the account unlocked. `sys_two_factor.failed_verification_count` / '
+          + '`locked_until` are untouched, so a user locked at the second factor stays locked and '
+          + 'must wait out the duration with no admin escape hatch at all. Remedy: make the '
+          + 'sys_two_factor update land, then run Unlock again; it is idempotent.',
+        e,
+        { object: 'sys_two_factor', userId },
+      );
     }
     return true;
   }
@@ -6552,21 +6674,58 @@ export class AuthManager {
         if (last && now - new Date(last as any).getTime() > idleMin * 60_000) reason = 'idle_timeout';
       }
       if (reason) {
+        // [#12981] The per-call `.catch` stays — a revocation must not turn the
+        // request it rides on into a 500 — but it no longer swallows. This is
+        // the sharpest write in the file: a refused revocation leaves a session
+        // that IS over its limit fully live.
         await engine.update(
           'sys_session',
           { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
           { context: SYSTEM_CTX } as any,
-        ).catch(() => undefined);
+        ).catch((e: unknown) => this.logDurabilityDegradation(
+          'AuthManager: a session that exceeded its configured limit was NOT revoked — the '
+            + 'revocation write was refused and the request continues normally, so nothing looks '
+            + 'wrong. The session row is unchanged, so better-auth will keep answering with it: '
+            + 'the idle / absolute session limits (ADR-0069 D4) are configured and, for this '
+            + 'session, not enforced. Remedy: make the sys_session update land — check the write '
+            + 'permission on `expires_at` / `revoked_at` / `revoke_reason`. Enforcement is '
+            + 're-attempted on this session\'s next request, so it recovers once the write can '
+            + 'land; until then the session stays usable.',
+          e,
+          { object: 'sys_session', sessionId, reason },
+        ));
         return;
       }
       if (idleMin > 0) {
         const la = srow.last_activity_at ? new Date(srow.last_activity_at as any).getTime() : 0;
         if (now - la > 60_000) {
-          await engine.update('sys_session', { id: sessionId, last_activity_at: new Date(now) }, { context: SYSTEM_CTX } as any).catch(() => undefined);
+          await engine.update('sys_session', { id: sessionId, last_activity_at: new Date(now) }, { context: SYSTEM_CTX } as any)
+            .catch((e: unknown) => this.logDurabilityDegradation(
+              'AuthManager: the session activity heartbeat was NOT written — the request '
+                + 'succeeds and the session stays live, so nothing looks wrong. '
+                + '`last_activity_at` keeps its older value, so the idle-timeout clock (ADR-0069 '
+                + 'D4) keeps measuring from that older instant and this session will be revoked '
+                + 'as idle EARLIER than the configured window — an active user signed out '
+                + 'mid-session for no visible reason. Remedy: make the sys_session update land; '
+                + 'the heartbeat retries on the next request past the one-minute throttle.',
+              e,
+              { object: 'sys_session', sessionId, field: 'last_activity_at' },
+            ));
         }
       }
-    } catch {
-      // session controls are best-effort — never break a request
+    } catch (e) {
+      // Never break a request. [#12981] But a control that silently stops
+      // running is a control the operator still believes is on.
+      this.logDurabilityDegradation(
+        'AuthManager: the per-request session controls did not run to completion — the request '
+          + 'succeeds, so nothing looks wrong. Idle and absolute session limits (ADR-0069 D4) '
+          + 'were not evaluated for this session, so a session past its limit is neither revoked '
+          + 'nor reported by the branch above. Remedy: this is the LOOKUP half failing (the '
+          + 'sys_session read), so check driver connectivity and read permission on sys_session; '
+          + 'the controls re-run on the next request.',
+        e,
+        { object: 'sys_session', sessionId, idleMinutes: idleMin, absoluteHours: absHrs },
+      );
     }
   }
 
@@ -6593,14 +6752,36 @@ export class AuthManager {
         .filter((sn: any) => !sn.revoked_at && (!sn.expires_at || new Date(sn.expires_at).getTime() > now))
         .sort((a: any, b: any) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
       for (const sn of live.slice(cap)) {
+        // [#12981] Per-session `.catch` so one refused revocation does not
+        // abandon the rest of the sweep — but it reports instead of swallowing.
         await engine.update(
           'sys_session',
           { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
           { context: SYSTEM_CTX } as any,
-        ).catch(() => undefined);
+        ).catch((e: unknown) => this.logDurabilityDegradation(
+          'AuthManager: a session over the concurrent-session cap was NOT revoked — the sign-in '
+            + 'that triggered the sweep succeeded, so nothing looks wrong. This older session '
+            + 'stays live, so the account holds MORE simultaneous sessions than '
+            + '`maxConcurrentSessions` (ADR-0069 D4) allows: the cap is configured and, for this '
+            + 'session, not enforced. Remedy: make the sys_session update land; the sweep re-runs '
+            + 'on this user\'s next sign-in and will try this row again.',
+          e,
+          { object: 'sys_session', sessionId: sn.id, cap, userId },
+        ));
       }
-    } catch {
-      // best-effort — never break a successful sign-in
+    } catch (e) {
+      // Never break a successful sign-in. [#12981] But a cap that silently
+      // stops sweeping is a cap the operator still believes is on.
+      this.logDurabilityDegradation(
+        'AuthManager: the concurrent-session cap sweep did not run — the sign-in succeeded, so '
+          + 'nothing looks wrong. Sessions beyond `maxConcurrentSessions` (ADR-0069 D4) were '
+          + 'neither enumerated nor revoked, so the account can hold unbounded simultaneous '
+          + 'sessions while this persists. Remedy: this is the sys_session LOOKUP half failing, '
+          + 'so check driver connectivity and read permission on sys_session; the sweep re-runs '
+          + 'on the next sign-in.',
+        e,
+        { object: 'sys_session', userId, cap },
+      );
     }
   }
 

@@ -1,13 +1,13 @@
 # 入队与落地细则(references —— 按需加载)
 
-出处:主文件「复核」的入队与落地原则。本表是 ACCEPT 之后把 PR 送到 MERGED 的操作
-细则,在落地窗口查阅;⛔ 不引用 issue 编号。
+出处:主文件「复核」的入队与落地原则。
+本表是 ACCEPT 之后把 PR 送到 MERGED 的操作细则,在落地窗口查阅;⛔ 不引用 issue 编号。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
 
 批次选择只保证同批 file-disjoint,管不到先后两单都碰生成物(协议变更几乎必然)。
-`merge=os-regen` 路径清单**当场读**:`grep os-regen .gitattributes`(唯一权威清
-单,⛔ 不抄进派发令当常量 —— 散文没法被类型检查;文档产物同在清单、同样被吞)。
+`merge=os-regen` 路径清单**当场读**:`grep os-regen .gitattributes`(唯一权威清单,
+⛔ 不抄进派发令当常量 —— 散文没法被类型检查;文档产物同在清单、同样被吞)。
 
 四步序已机械化:`bash scripts/pm/os-regen-merge.sh`(⛔ 禁 rebase / force-push;
 步骤以脚本自身为权威)。顺序防的陷阱:
@@ -15,19 +15,19 @@
 - **MERGE 状态下跑 `gen:schema` 会把 authorable-surface 锚点静默倒退回旧分叉点**,
   且全部门放行 ——「先 commit 再重生成」的由来。
 
-重生成后**断言所有兄弟单的条目都还在**;更硬的旁证是查**上一单的实现体**完好(带
-引号精确名 `git grep … origin/main -- <实现文件>`)—— 条目是索引,实现体才是被吞
-的重灾区。**锚点断言的正确措辞**(写错会教唆 dev 手改锚点):断言 `pnpm --filter
-@objectstack/spec check:authorable-surface` **绿**即可;`baseRev` 允许滞后(一行
-提示,不是错误);⛔ 禁为凑「相等」手改锚点,⛔ 不得要求 `baseRev == merge-base`。
+重生成后**断言所有兄弟单的条目都还在**;更硬的旁证是查**上一单的实现体**完好
+(带引号精确名 `git grep … origin/main -- <实现文件>`)—— 条目是索引,
+实现体才是被吞的重灾区。**锚点断言的正确措辞**(写错会教唆 dev 手改锚点):
+断言 `pnpm --filter @objectstack/spec check:authorable-surface` **绿**即可;`baseRev` 允许滞后(一行提示,
+不是错误);⛔ 禁为凑「相等」手改锚点,⛔ 不得要求 `baseRev == merge-base`。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
 车道 PM 的权责:验收(复核清单);**首次入队** —— ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁
-job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhook 不可靠,⛔ 不坐等不忙
-轮询;定点文本照定时器写法纪律;确认 **MERGED** —— 每轮同时读队列分支与 `origin/main` 两个
-读数。**契约复审链 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(清标与落地同一笔,见
-`contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
+job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhook 不可靠,⛔ 不坐等不忙轮询;
+定点文本照定时器写法纪律;确认 **MERGED** —— 每轮同时读队列分支与 `origin/main`
+两个读数。**契约复审链 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(清标与落地同一笔,
+见 `contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 
 **转 ready / 挂 auto-merge 之前先判受管面**:`node scripts/pm/check-governed-merges.mjs --test` 加 PR 变更路
 径,一条命中 ⇒ 整 PR 改走人工合并道(复核照写 + 留 draft + 向授权批准人请审 + 状态评
@@ -49,18 +49,18 @@ job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhoo
 落地后**再核一次落地判据本身**:队列的合并同样走 os-regen 驱动,A 的静默吞并在队
 列合并这一步一样能发生。**MERGED 不是终点**:发版后义务见 `release-aftercare.md`。
 
-**落地窗口给关键 PR 挂 `subscribe_pr_activity`**(会话型座位专用;Routine 座位收不到,维持轮询):⛔
-不订阅 dev 交报告前的 PR —— 双驾驶员互踩;订阅是感知补充,不替代 flip 定点;**MERGED / 关闭
-即退订,同刻把 `mode:cloud` 派的会话 `archive_session`** —— 触发条件是卡终局且报告已收复
-核,⛔ 合并前不归档(活会话是 dirty 自救的执行手;误归档可 unarchive,但容器现场已失,宁晚勿
-早);暂停/交接把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
+**落地窗口给关键 PR 挂 `subscribe_pr_activity`**(会话型座位专用;Routine 座位收不到,
+维持轮询):⛔ 不订阅 dev 交报告前的 PR —— 双驾驶员互踩;订阅是感知补充,
+不替代 flip 定点;**MERGED / 关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`** ——
+触发条件是卡终局且报告已收复核,⛔ 合并前不归档(活会话是 dirty 自救的执行手;误归档可
+unarchive,但容器现场已失,宁晚勿早);暂停/交接把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
 
-**main-red 事故两条约定**:① **p0 fix-forward 允许跳队**(维护者 2026-08-25「同意」):main 红的
-止血 PR(p0、机械、根因已核实)可跳队(GitHub 队列自带 jump-the-queue),或按既有 governed
-例外由维护者人工直合一行修复 —— 排在事故自己堵住的队列后面是具名反模式;仅限
-main-red 修复,⛔ 不放宽其它任何 PR 的 queue-only 落地。② **一个失败 check 只锚一张卡**(维
-护者 2026-08-25「同意」):main-red 事故按失败 check 名锚一张卡,先立者赢;后见者把读数评论
-到锚卡上,⛔ 不另立。
+**main-red 事故两条约定**:① **p0 fix-forward 允许跳队**(维护者 2026-08-25「同意」):main
+红的止血 PR(p0、机械、根因已核实)可跳队(GitHub 队列自带 jump-the-queue),或按既有
+governed 例外由维护者人工直合一行修复 —— 排在事故自己堵住的队列后面是具名反模式;
+仅限 main-red 修复,⛔ 不放宽其它任何 PR 的 queue-only 落地。
+② **一个失败 check 只锚一张卡**(维护者 2026-08-25「同意」):main-red
+事故按失败 check 名锚一张卡,先立者赢;后见者把读数评论到锚卡上,⛔ 不另立。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 

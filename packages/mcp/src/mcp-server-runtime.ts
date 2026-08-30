@@ -5,6 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { Logger, IMetadataService, AIToolDefinition } from '@objectstack/spec/contracts';
 import type { Agent } from '@objectstack/spec/ai';
+import { PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
 import type { ToolRegistry, ToolExecutionResult } from './types.js';
 import { wireBridgeTools } from './mcp-http-tools.js';
 import type {
@@ -182,6 +183,96 @@ function safetyAnnotations(tool: AIToolDefinition): ToolSafetyHints {
   }
 
   return {};
+}
+
+/** The world-domain hint this bridge can source. */
+interface ToolWorldHint {
+  openWorldHint?: boolean;
+}
+
+/**
+ * The `openWorldHint` this bridge can actually SOURCE — for the names the
+ * PLATFORM registers, and for nobody else.
+ *
+ * THE DEFECT. This hint used to be a bare `openWorldHint: false` sitting in
+ * the annotations literal below, asserted over EVERY bridged tool from
+ * nothing at all — every tool an app registers under its own name included.
+ * `AIToolDefinition` has no member expressing it, so that `false` was never a
+ * property of the tool; it was a property of this file. An app can register a
+ * tool that calls a weather API, an LLM, or any outbound service, and this
+ * bridge told every MCP client its domain of interaction was closed. Same
+ * class as the `readOnlyHint` / `destructiveHint` defect described above.
+ *
+ * THE SOURCE is {@link PLATFORM_PROVIDED_TOOL_NAMES}
+ * (`@objectstack/spec/system`) — the canonical registry of the statically
+ * named tools the cloud AI runtime registers (`PLATFORM_TOOLS_BY_PACKAGE`).
+ * Every name in it acts on the ObjectStack environment itself, this stack's
+ * records and its own metadata, which is a closed and well-defined domain in
+ * exactly the sense the SDK gives the word. So `false` for those names is
+ * known rather than assumed, and it is the information option 3 (drop the
+ * hint outright) would have thrown away.
+ *
+ * WHY THE REGISTRY AND NOT THE TWO NAME SETS ABOVE. Same shape — a membership
+ * test against platform-registered names — but a different question.
+ * {@link PLATFORM_READ_ONLY_TOOL_NAMES} and
+ * {@link PLATFORM_DESTRUCTIVE_TOOL_NAMES} answer "what SAFETY class does the
+ * platform know for this name", and they are deliberately partial: they carry
+ * only the platform names whose safety class this bridge knows. The question
+ * here is OWNERSHIP, and the registry is what answers it. Keying the world
+ * hint off the safety lists instead would drop `create_object`, `add_field`,
+ * `list_metadata`, `describe_metadata` and twenty more — platform tools whose
+ * world is just as closed — to the protocol default, reintroducing option 3's
+ * accuracy loss under a narrower name. A sibling pin already holds the two
+ * safety lists to this same registry as a SUBSET, so the hints read one
+ * registry between them rather than three hand lists that can drift apart.
+ *
+ * ⚠️ WHY OMISSION IS NOT THE CONSERVATIVE DIRECTION HERE — AND WHY THE
+ * ASYMMETRY WITH {@link safetyAnnotations} IS DELIBERATE, NOT AN OVERSIGHT
+ * WAITING TO BE TIDIED. Structurally the two functions are one rule: assert
+ * what the platform can source, omit what it cannot, because MCP has no
+ * spelling for "unknown" other than absence. What DIFFERS is the price of
+ * that absence, and the difference is the SDK's own. Measured in the pinned
+ * `@modelcontextprotocol/sdk` 1.30.0 (`ToolAnnotationsSchema`, `dist/esm/types.js`):
+ *
+ * ```
+ *   readOnlyHint     Default: false   ← omission reads "not read-only"
+ *   destructiveHint  Default: true    ← omission reads "may be destructive"
+ *   openWorldHint    Default: true    ← omission reads "OPEN world"
+ * ```
+ *
+ * For the two safety hints, omission lands on the cautious answer and costs
+ * only information — which is why #13318 could move them to omit-when-unsourced
+ * and call it conservative. For this one, omission lands on the LESS cautious
+ * reading: a tool that sources nothing is understood by every conforming host
+ * to reach an open world. That trade is accepted on purpose. For an
+ * app-registered tool this bridge genuinely has no source, and falling to the
+ * protocol's documented default is honest where asserting `false` was a lie.
+ * ⛔ So do not "repair" the asymmetry by re-asserting `false` for everyone:
+ * that IS the defect. The identical STRUCTURE of the two functions is what
+ * keeps the one rule legible; identical consequences were never the point.
+ *
+ * ⛔ NOT the dynamic tool families. `PLATFORM_TOOL_FAMILY_PREFIXES`
+ * (`action_<name>`) names tools the runtime materialises from an app's OWN
+ * declarative actions: the platform registers the wrapper, the app defines the
+ * behaviour, outbound calls included. `mcp-http-tools.ts` asserts
+ * `openWorldHint: true` for `run_action` on exactly that reasoning. Widening
+ * this membership test to the prefixes would re-import the defect under a new
+ * name.
+ *
+ * ⛔ NOT `{ openWorldHint: undefined }`. The no-source answer is an absent
+ * KEY, which is why this returns `{}`: an undefined-valued property is dropped
+ * by JSON serialization but survives a spread, so "omitted" has to be true of
+ * the object as well as of the wire.
+ *
+ * THE FOLLOW-UP THIS IS NOT. Making the hint a property of the TOOL — a
+ * declared member on `AIToolDefinition`, with an action-backed tool inheriting
+ * `run_action`'s `openWorldHint: true` — is the shape that would make it true
+ * rather than merely defensible. That is a public contract extension in
+ * `packages/spec/**` and was ruled a follow-up; this is the zero-contract-change
+ * half, which stops the unsourced assertion now.
+ */
+function worldAnnotation(tool: AIToolDefinition): ToolWorldHint {
+  return PLATFORM_PROVIDED_TOOL_NAMES.has(tool.name) ? { openWorldHint: false } : {};
 }
 
 // ── AIToolDefinition.parameters → MCP inputSchema ────────────────────────────
@@ -992,8 +1083,11 @@ export class MCPServerRuntime {
    * The safety annotations come from {@link safetyAnnotations}, which reads
    * what the definition DECLARES and omits the hints it cannot source; the
    * name-derived `readOnlyHint: false, destructiveHint: false` this call used
-   * to assert over every unlisted tool is gone. `openWorldHint` is untouched
-   * by that change and still asserted for every bridged tool.
+   * to assert over every unlisted tool is gone. `openWorldHint` now goes
+   * through {@link worldAnnotation} on the same principle — asserted `false`
+   * for platform-registered names, omitted for everyone else — but read that
+   * function before assuming the two omissions cost the same thing: the SDK
+   * defaults them in opposite directions.
    */
   private registerToolFromDefinition(tool: AIToolDefinition, toolRegistry: ToolRegistry): void {
     const logger = this.config.logger;
@@ -1004,10 +1098,12 @@ export class MCPServerRuntime {
         description: tool.description,
         inputSchema: toolInputSchema(tool, logger),
         annotations: {
-          // Only the hints {@link safetyAnnotations} can source — a tool that
-          // declares nothing is served neither, so the MCP defaults apply.
+          // Only the hints these two can source — a tool that declares nothing
+          // and is not a platform name is served neither set, so the MCP
+          // defaults apply. Those defaults are NOT symmetrical between them;
+          // {@link worldAnnotation} is where that is written down.
           ...safetyAnnotations(tool),
-          openWorldHint: false,
+          ...worldAnnotation(tool),
         },
       },
       async (args) => {

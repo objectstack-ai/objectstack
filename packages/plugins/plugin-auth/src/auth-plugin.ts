@@ -1168,13 +1168,47 @@ export class AuthPlugin implements Plugin {
             if (u && u.source !== 'idp_provisioned') {
               await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX });
             }
-          } catch {
-            // Provenance must never break account creation.
+          } catch (e) {
+            // Provenance must never break account creation — the sys_account
+            // insert still stands. [#12981] It must not be SILENT either: this
+            // hook is the only stamp on the SCIM path, so nothing re-runs it.
+            ctx.logger.error(
+              '[auth] the SCIM identity-source stamp was NOT written — the sys_account row was '
+                + 'created and provisioning reports success, so nothing looks wrong. The user '
+                + 'keeps their previous `source`, so a SCIM-provisioned identity still reading '
+                + '`env_native` is offered the password / identity-edit actions that are supposed '
+                + 'to hide for a managed identity (cloud ADR-0024 D4) — the path by which a '
+                + 'managed user self-mints a local password that bypasses enforced SSO. '
+                + 'better-auth\'s `account.create.after` is bypassed by adapter-level creates, so '
+                + 'this hook is the ONLY stamp on that path and nothing retries it: the row stays '
+                + 'mis-stamped until the user is re-provisioned. Remedy: make the sys_user update '
+                + 'land (write permission on `source`, driver connectivity), then re-run the SCIM '
+                + 'sync for this user.',
+              e instanceof Error ? e : undefined,
+              { object: 'sys_user', field: 'source' },
+            );
           }
         }, { packageId: 'com.objectstack.plugin-auth' });
         ctx.logger.info('Identity-source afterInsert stamp registered on sys_account (SCIM-safe)');
-      } catch {
-        // Engine not available — skip; OAuth path still stamps via databaseHooks.
+      } catch (e) {
+        // [#12981] Was: "Engine not available — skip". That is one of the two
+        // things this catch actually sees, and the quiet one; `registerHook`
+        // refusing is the other, and it silently un-arms the SCIM stamp for the
+        // whole process while the boot goes on looking healthy.
+        ctx.logger.error(
+          '[auth] the SCIM identity-source stamp was NOT registered — boot continues and every '
+            + 'other auth surface works, so nothing looks wrong. For the rest of this process no '
+            + 'adapter-level `sys_account` insert stamps `source=idp_provisioned`, so every '
+            + 'SCIM-provisioned user is left reading `env_native` and is offered the password / '
+            + 'identity-edit actions that are supposed to hide for a managed identity (cloud '
+            + 'ADR-0024 D4). The OAuth path still stamps via better-auth databaseHooks, which is '
+            + 'why this is invisible on a deployment that also uses OAuth. This line is the only '
+            + 'notice; it is registered once per boot and does NOT retry. Remedy: check that the '
+            + '`objectql` service is registered by kernel:ready and that registerHook is '
+            + 'available, then restart.',
+          e instanceof Error ? e : undefined,
+          { hook: 'afterInsert', object: 'sys_account' },
+        );
       }
     });
 

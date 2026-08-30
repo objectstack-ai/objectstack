@@ -551,11 +551,47 @@ const STRICT_OBJECT_CALLS = new Set(['strictObject', 'strictObjectError']);
 const TOMBSTONE_CALLS = new Set(['retiredKey']);
 
 /**
- * Wrappers that pass their argument through unchanged, so the climb continues
- * rather than stopping. `Object.freeze({ … })` around a guidance table is the
- * measured case; a stop here would drop the whole table.
+ * Wrappers whose VALUE is the text the climb is already carrying, so the climb
+ * continues rather than stopping. `Object.freeze({ … })` around a guidance
+ * table is the original measured case; a stop here would drop the whole table.
+ *
+ * ## The GENERATED table: `Object.fromEntries(keys.map((k) => [k, '…']))`
+ *
+ * A guidance table does not have to be WRITTEN as an object literal. Two in
+ * this tree are BUILT — one prescription filed under each of a list of keys,
+ * because every one of those keys has the same answer:
+ *
+ *   - `SEPARATOR_NAV_ITEM_GUIDANCE` (`ui/app.zod.ts`), spread into the
+ *     `guidance` of the per-variant nav options table;
+ *   - the container-key prescription at `guidance:` in `ui/view.zod.ts`,
+ *     generated inline at the key itself.
+ *
+ * Both are printed verbatim at a refusing author, and both sat OUTSIDE THE
+ * POPULATION ENTIRELY — measured by planting a distinct id in every literal of
+ * the nav options table and the five tables it references: 48 of 49 candidate
+ * ids red, and the whole of `SEPARATOR_NAV_ITEM_GUIDANCE` — four prose
+ * literals — silent. It is the fourth population's defect one shape over: the
+ * factory clause taught the climb to leave a function that BUILDS an options
+ * record, while a table built by a `.map()` INSIDE one stayed unreachable,
+ * because the climb died on the unrecognised `map` / `fromEntries` call sitting
+ * between the callback and its sink.
+ *
+ * ⛔ This does NOT make `.map()` a text position. Transparency only lets the
+ * climb CONTINUE; it must still terminate at a recognised position — a
+ * `message:` / `error:`, a `.describe()`, a tombstone argument, a
+ * STRICT_OPTION_KEYS key under a `strictObject` call, or a
+ * {@link collectTextSinkConsts} sink. A `.map()` in an ordinary helper reaches
+ * none of those and stays silent, exactly as before. What transparency buys is
+ * that a table's SPELLING — literal vs generated — stops deciding whether its
+ * prose is judged, which is the property this rule was missing.
+ *
+ * `flatMap` rides with `map` rather than waiting for a live case: the pair is
+ * one spelling of one idea, and a set that knows only half of it is the next
+ * silent miss (`data/driver/config-registry.zod.ts` builds its alias tables
+ * with `flatMap` today — values, not prose, so it moves no verdict, but it is
+ * the shape arriving).
  */
-const TRANSPARENT_CALLS = new Set(['freeze']);
+const TRANSPARENT_CALLS = new Set(['freeze', 'fromEntries', 'map', 'flatMap']);
 
 /**
  * zod validators whose trailing positional argument is a refusal message.
@@ -1424,6 +1460,70 @@ function findViolations(source, file) {
   return out;
 }
 
+// ── The self-test's own battery registry and floor (#13173) ───────────────
+//
+// `failures.length === 0` used to be the ONLY success condition of the
+// self-test below, so "every case held" and "the cases never ran" produced the
+// same output. Measured on 8fcd0816: an early `return` at the top of
+// `selfTestRule3()` left that entire battery unrun and this file still exited
+// 0, printing the verdict line that asserts those cases hold — in the gate that
+// exists to catch prose claiming more than the code delivers.
+//
+// ⛔ A merely non-zero count is not the repair, and neither is a pinned TOTAL:
+// a battery quietly dropping from 40 cases to 3 keeps a total "right" for the
+// wrong reason as soon as any sibling grows. What is pinned here is the
+// registered NAMES — every battery declares itself with `battery('<name>')`,
+// every `expect()` is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count. A set difference says WHICH battery stopped running;
+// a count says only that something did. (Same lesson, same week, as the
+// dispatcher-error-vocabulary gate, whose `--self-test` iterated its samples
+// map rather than its SHAPES list and printed "8 shapes OK" with 9 published.)
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery falling BELOW its floor means cases stopped running,
+// and the remedy is to find what stopped registering — never to lower the
+// number. See the refusal text beside `RATCHET_AUTHORITY_MARKER` below.
+//
+// Audited on 8fcd0816 by instrumenting `expect` and diffing every executed
+// call site against every static one: 16 batteries, 198 assertions, and every
+// static call site in the file executes — no battery was already dark.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'scope wiring': 9,
+  'docs/ corpus scope': 15,
+  'dead-root hard error': 5,
+  'empty-scan hard error': 8,
+  'published-catalog id rule': 15,
+  'published-catalog id precision': 15,
+  'dispatch-gates declaration': 5,
+  'spec text: core populations': 20,
+  'spec text: folded-in buckets': 23,
+  'spec text: type anchors': 11,
+  'spec text: fourth population': 14,
+  'spec text: fifth population': 14,
+  'spec text: precision': 18,
+  'spec text: boundary output': 8,
+  'cross-package prose ids': 11,
+  'cross-package ledger arithmetic': 7,
+});
+
+// The registry is shrink-only in the same sense its counts are: DELETING an
+// entry silences that battery's floor exactly as effectively as zeroing it, so
+// the registry's own size is pinned too. Adding a battery raises this number;
+// removing one is the same ⛔ MAINTAINER-ONLY edit as lowering a count.
+const SELF_TEST_BATTERY_FLOOR = 16;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// Returned by `selfTest()` only after the floor has been evaluated and the
+// verdict printed. `main()` refuses anything else: a `return` that leaves the
+// function early prints nothing and exits 0, which is the same
+// nothing-ran-nothing-complained pass one level up.
+const SELF_TEST_VERDICT = 'check-doc-authoring self-test reached its verdict';
+
 // The reverse proof, made permanent (#4913). `.claude/` currently holds zero ts
 // code blocks, so adding it to ROOTS leaves the gate green — which is exactly
 // what "added it and it still cannot see the directory" looks like from outside.
@@ -1469,7 +1569,15 @@ function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'doc-authoring-selftest-'));
   const cwd = process.cwd();
   const failures = [];
+  const seen = new Map();
+  let openBattery = null;
+  // Declare the battery the following assertions belong to. The name must be a
+  // key of SELF_TEST_BATTERIES — an unknown one reds by set difference, naming
+  // itself, rather than being counted somewhere it is not floored.
+  const battery = (name) => { openBattery = name; };
   const expect = (label, got, want) => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
     if (got !== want) failures.push(`  ✗ self-test "${label}": expected ${want}, got ${got}`);
   };
 
@@ -1483,6 +1591,7 @@ function selfTest() {
     const files = collectFiles().map(posix);
     const violations = files.flatMap((f) => findViolations(readFileSync(f, 'utf8'), f));
 
+    battery('scope wiring');
     expect('.claude is walked', files.includes('.claude/skills/demo/SKILL.md'), true);
     expect('.claude is not limited to skills/', files.includes('.claude/agents/os-dev.md'), true);
     expect(
@@ -1497,6 +1606,7 @@ function selfTest() {
     expect('defineX factory form passes', violations.some((v) => v.file === 'skills/legit/SKILL.md'), false);
     expect('non-ts fence and prose pass', violations.some((v) => v.file === 'content/docs/ui/pages.mdx'), false);
 
+    battery('docs/ corpus scope');
     // --- #4929: the live docs/ corpus is reachable, the process records are not. ---
     // Stated as two halves of one claim, because either half alone is satisfied by
     // a scope that is simply wrong in the other direction: "docs/adr is red" is
@@ -1517,6 +1627,7 @@ function selfTest() {
 
     expect('total violations', violations.length, 5);
 
+    battery('dead-root hard error');
     // --- Reverse proof for the dead-root hard error (#4916), made permanent. ---
     // Everything above ran green over a tree where all three roots resolve. That
     // observation is worth nothing on its own: the defect being fixed here is a
@@ -1549,6 +1660,7 @@ function selfTest() {
     // by the broken root and nothing else.
     expect('restoring the roots makes the scan green again', collectFiles().length, files.length);
 
+    battery('empty-scan hard error');
     // --- Reverse proof for the empty-scan hard error (#4932), same discipline. ---
     // The direction was decided before it was run: a root that resolves and yields
     // nothing must be RED, and the red must name that root only. This is the case
@@ -1584,6 +1696,7 @@ function selfTest() {
     expect('every empty root is named', allEmptyErr?.roots?.join(',') ?? '<none>', ROOTS.join(','));
     expect('the zero total is reported', allEmptyErr?.total ?? -1, 0);
 
+    battery('published-catalog id rule');
     // ── Rule 2: internal issue ids on the published surface ──────────────
     //
     // The red/green PAIR is the point. "Green on the real corpus" is what a
@@ -1664,6 +1777,7 @@ function selfTest() {
       writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');
       expect('removing the id makes it green again', scan().length, 0);
 
+      battery('published-catalog id precision');
       // ── Precision: the shapes that must NEVER fire ──────────────────────
       // Each is a real spelling from the catalog. A gate that reds on any of
       // them is one authors learn to route around, which costs more than the
@@ -1716,13 +1830,14 @@ function selfTest() {
       rmSync(idDir, { recursive: true, force: true });
     }
 
-    selfTestRule3(expect);
-    selfTestPackagesProse(expect);
+    selfTestRule3(expect, battery);
+    selfTestPackagesProse(expect, battery);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
   }
 
+  battery('dispatch-gates declaration');
   // ── The dispatch-gates declaration (#9964's pattern, sixth instance) ───────
   //
   // Enforcement cannot hold any of these: the declaration is read by another
@@ -1775,11 +1890,60 @@ function selfTest() {
   // The behavioural half is pinned above: the concrete ids the placeholder
   // replaced are RED, with nothing to add them to.
 
+  // ── The floor: every declared battery RAN, and ran its cases ────────────
+  //
+  // Evaluated here, after every battery has had its chance, and BEFORE the
+  // verdict — so the verdict line below can only be printed by a run in which
+  // the set of batteries that registered assertions equals the set declared.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  const totalCases = [...seen.values()].reduce((a, b) => a + b, 0);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    failures.push(
+      `  ✗ SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+      + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the registry takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    failures.push(
+      `  ✗ self-test battery "${name}" registered ${count} case(s) but is not declared in `
+      + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    failures.push(
+      count === 0
+        ? `  ✗ self-test battery "${name}" DID NOT RUN — 0 cases registered, `
+          + `${SELF_TEST_BATTERIES[name]} pinned. The verdict below would have claimed they hold.`
+        : `  ✗ self-test battery "${name}" registered ${count} case(s), below its pinned floor `
+          + `of ${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+
   if (failures.length) {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
+    if (floorBreached) {
+      console.error(
+        'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug,'
+        + '\nnot the number. Find what stopped registering (an early return, a deleted block, a'
+        + '\nguard that now skips, a marker that moved) and restore it. Raising a floor after'
+        + `\nADDING cases is ordinary landing-author work; LOWERING one is ${RATCHET_AUTHORITY_MARKER},`
+        + '\nNOT a co-equal option — "the count legitimately moved" and "something stopped running"'
+        + '\nneed different edits, and only a measurement tells them apart.\n',
+      );
+    }
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.'
+    + ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every`
+    + ' battery at or above its pinned floor.');
+  return SELF_TEST_VERDICT;
 }
 
 /**
@@ -1791,7 +1955,8 @@ function selfTest() {
  * concatenation case is first because it is the one the commissioning card's
  * own census command could not see.
  */
-function selfTestRule3(expect) {
+function selfTestRule3(expect, battery) {
+  battery('spec text: core populations');
   const ts = requireFromHere('typescript');
   const cwd = process.cwd();
   const dir = mkdtempSync(join(tmpdir(), 'doc-authoring-selftest-msg-'));
@@ -1949,6 +2114,7 @@ function selfTestRule3(expect) {
     r = scan();
     expect('the `repo#NNNN` spelling is RED here too', r.violations.length, 1);
 
+    battery('spec text: folded-in buckets');
     // ── The three buckets folded in by the 2026-08-26 triage ────────────────
     //
     // Same discipline as everything above: each is a PAIR, and each is written
@@ -2137,6 +2303,7 @@ function selfTestRule3(expect) {
     expect('the options-table red is bucketed as a strictObject option',
       r.violations[0]?.bucket, 'strictObject');
 
+    battery('spec text: type anchors');
     // ── The TYPE ANCHORS, asserted on the PREDICATE ─────────────────────
     //
     // Not through a scan, and the reason is the whole point of this block: the
@@ -2200,6 +2367,7 @@ function selfTestRule3(expect) {
         declaredTypeText(decl, ts), '');
     }
 
+    battery('spec text: fourth population');
     // ── The FOURTH population: text BUILT INSIDE A FUNCTION ─────────────────
     //
     // Ruled 2026-08-29, verbatim 「同意」 — the inheritance reaches refusal prose
@@ -2310,6 +2478,7 @@ function selfTestRule3(expect) {
     expect('a plain `error:` string is a MESSAGE, not function-built',
       r.violations[0]?.bucket, 'message');
 
+    battery('spec text: fifth population');
     // ── The FIFTH population: plain `function` DECLARATIONS (#13156) ────────
     //
     // Adjudicated 2026-08-29 under the #13002 ruling's own sentence — the ban
@@ -2381,6 +2550,60 @@ function selfTestRule3(expect) {
     expect('the dispatched-const red names the const it travelled through',
       r.violations[0]?.where, 'via RULING_SENTENCE');
 
+    // RED #23 — a GENERATED guidance table: one prescription filed under each
+    // of a list of keys via `Object.fromEntries(keys.map(…))`, hoisted into a
+    // const and spread into an options FACTORY's `guidance`. This is
+    // `SEPARATOR_NAV_ITEM_GUIDANCE` (`ui/app.zod.ts`), reduced. Measured live:
+    // every literal of the surrounding nav options table was reachable and this
+    // whole table was not, because the climb died on `map` / `fromEntries`
+    // between the callback and its sink.
+    const GENERATED_TABLE = (prose) => [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'const SEPARATOR_GUIDANCE: Readonly<Record<string, string>> = Object.fromEntries(',
+      "  ['label', 'icon'].map((key) => [key, `\\`${key}\\` " + prose + '`]),',
+      ');',
+      'const navItemSurface = (variant: string): StrictObjectOptions => ({',
+      '  surface: `this \\`${variant}\\` navigation item`,',
+      "  guidance: { ...(variant === 'separator' ? SEPARATOR_GUIDANCE : {}) },",
+      '});',
+      "export const S = strictObject(navItemSurface('separator'), { id: z.string() });",
+    ].join('\n');
+    writeFileSync(target, GENERATED_TABLE('is not a separator key (#4286).'));
+    r = scan();
+    expect('an id in a GENERATED guidance table reaching an options factory is RED',
+      r.violations.length, 1);
+    expect('the generated-table red names the sink it travelled through',
+      r.violations[0]?.where, 'via SEPARATOR_GUIDANCE (built in a function)');
+    writeFileSync(target, GENERATED_TABLE('is not a separator key.'));
+    expect('...and green once the id is gone', scan().violations.length, 0);
+
+    // RED #24 — the same generation written INLINE at the `guidance:` key
+    // rather than hoisted, so it reaches its position with no sink const in the
+    // path at all. This is `ui/view.zod.ts`'s container-key prescription,
+    // reduced. Both spellings are live, and a fix that closed only one of them
+    // would leave the other silent with nothing to say so.
+    const INLINE_GENERATED = (prose) => [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'export const S = strictObject({',
+      "  surface: 'this view container',",
+      '  guidance: Object.fromEntries(',
+      "    ['type', 'columns'].map((k) => [k, `\\`${k}\\` " + prose + '`]),',
+      '  ),',
+      '}, { name: z.string() });',
+    ].join('\n');
+    writeFileSync(target, INLINE_GENERATED('belongs to a single VIEW (#4286).'));
+    r = scan();
+    expect('an id in a guidance table generated INLINE at the key is RED',
+      r.violations.length, 1);
+    expect('the inline generated-table red names the position',
+      r.violations[0]?.where, 'strictObject guidance (built in a function)');
+    writeFileSync(target, INLINE_GENERATED('belongs to a single VIEW.'));
+    expect('...and green once the id is gone', scan().violations.length, 0);
+
+    battery('spec text: precision');
     // ── Precision: what must NEVER fire ─────────────────────────────────────
     //
     // ⛔ The clause is NOT "climb through function bodies". These three are the
@@ -2400,6 +2623,26 @@ function selfTestRule3(expect) {
       'export const T = legacyToken;',
     ].join('\n'));
     expect('precision — an ordinary helper\'s body is NOT swept', scan().violations.length, 0);
+
+    // ⭐ The precision case the TRANSPARENT_CALLS widening owes: `.map()` is
+    // TRANSPARENT, never a position. The same `Object.fromEntries(keys.map(…))`
+    // generation whose prose is RED above must stay silent when what it builds
+    // is a VALUE table nothing customer-facing consumes — a `.map()` is one of
+    // the commonest expressions in this tree, and a widening that swept every
+    // string returned from one would report identifiers, slugs and enum members
+    // as refusal prose. The climb terminating at a recognised position is the
+    // only thing holding that line, so it is pinned rather than assumed.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "const SLUGS: Readonly<Record<string, string>> = Object.fromEntries(",
+      "  ['draft', 'live'].map((k) => [k, `${k}-#4286`]),",
+      ');',
+      "const TOKENS = ['a', 'b'].flatMap((k) => [`${k}#4286`]);",
+      'export const S = z.object({ a: z.string() });',
+      'export const T = { SLUGS, TOKENS };',
+    ].join('\n'));
+    expect('precision — a generated VALUE table reaching no sink is NOT swept',
+      scan().violations.length, 0);
 
     // The same boundary, declaration form (#13156). ⛔ The widening is NOT an
     // unconditional crawl of function bodies: a plain `function` DECLARATION
@@ -2580,6 +2823,7 @@ function selfTestRule3(expect) {
     expect('a tree with no recognised customer-facing string reports every bucket 0 (main reds)',
       Object.values(r.seen).reduce((a, b) => a + b, 0), 0);
 
+    battery('spec text: boundary output');
     // ── The C half of the 2026-08-29 adjudication: the boundary is STATED ───
     //
     // Asserted derived-vs-derived, never re-spelled: the root from the constant
@@ -2622,9 +2866,10 @@ function selfTestRule3(expect) {
 
 // The #8435 authority token, verbatim — check-ratchet-remedy-authority.mjs
 // sweeps author-facing text for an offer that expands a registry and requires
-// this marker (or an outright refusal) beside it. The prose-id baseline below
-// is exactly such a registry: shrink is the landing author's to take, growth
-// is not.
+// this marker (or an outright refusal) beside it. Two registries here are
+// exactly that. The prose-id baseline below: shrink is the landing author's to
+// take, growth is not. And SELF_TEST_BATTERIES: raising a floor after adding
+// cases is the landing author's, lowering one is not.
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
 
 /**
@@ -2683,7 +2928,8 @@ function census(ledgerOnly) {
  * leaves `packages/spec/src` behind — deliberately reused here as the
  * exclusion case).
  */
-function selfTestPackagesProse(expect) {
+function selfTestPackagesProse(expect, battery) {
+  battery('cross-package prose ids');
   const ts = requireFromHere('typescript');
   const write = (rel, body) => {
     const full = join(...rel.split('/'));
@@ -2742,6 +2988,7 @@ function selfTestPackagesProse(expect) {
     r.sites.every((s) => PACKAGES_PROSE_PREFILTER.test(s.text)), true);
   expect('strings were seen at all (the walker is not dormant)', r.stringsSeen > 0, true);
 
+  battery('cross-package ledger arithmetic');
   // ── The ledger arithmetic, all three verdicts from one measurement ────────
   const exact = packageProseLedgerShape(r.counts);
   const green = comparePackageProseLedger(r.counts, exact);
@@ -2763,7 +3010,20 @@ function selfTestPackagesProse(expect) {
 }
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+    // ⛔ Never `return selfTest()`. A `return` anywhere above that verdict prints
+    // nothing, evaluates no floor and exits 0 — the same nothing-ran-nothing-
+    // complained pass the battery floor refuses, one level up (#13173).
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-doc-authoring self-test: selfTest() returned without reaching its verdict, so'
+        + '\nno battery floor was evaluated and no success line was printed. Exiting 0 here would'
+        + '\nreport a self-test that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return;
+  }
   if (process.argv.includes('--census')) return census(false);
   if (process.argv.includes('--census-ledger')) return census(true);
 

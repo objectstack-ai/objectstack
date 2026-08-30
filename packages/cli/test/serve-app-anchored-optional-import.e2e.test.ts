@@ -289,12 +289,18 @@ function frameworkClusterEsmEntry(): string {
   const clusterEntry = createRequire(runtimeEntry).resolve(CLUSTER);
   let dir = dirname(clusterEntry);
   for (;;) {
-    let manifest: { name?: string; exports?: Record<string, { import?: string }> } | undefined;
+    let manifest: { name?: string; exports?: Record<string, { import?: string | { default?: string } }> } | undefined;
     try {
       manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     } catch { /* not a package root, or unreadable — keep climbing */ }
     if (manifest?.name === CLUSTER) {
-      const entry = manifest.exports?.['.']?.import;
+      // [#13112] The `import` condition is EITHER the ESM target itself or a
+      // nested conditions object carrying it under `default` (the
+      // per-condition `types` shape). Both spellings ship in this repo, so the
+      // entry is read through the nesting; the refusal below still fires when
+      // neither yields a path, which is the fact this guard exists to state.
+      const importCondition = manifest.exports?.['.']?.import;
+      const entry = typeof importCondition === 'string' ? importCondition : importCondition?.default;
       if (typeof entry !== 'string') {
         throw new Error(
           `${CLUSTER} at ${dir} declares no \`exports["."].import\` — there is no ESM entry to `

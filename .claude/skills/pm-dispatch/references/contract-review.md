@@ -9,10 +9,10 @@
   席账号 request review(同裁决:「也可以直接要求复审」—— 仅通知,载体仍是标签)、停手。
 - ⛔ **不预挂**(维护者 2026-08-28 裁定):可复审增量存在前永不挂标,队列/受阻卡的提前挂已废
   止 —— 前瞻条款②事实走主文件闸门段的三条既有通道;开载体恒 = 真实待审。
-- **载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得
-  没必要」): 闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门。
-- **重挂前先查裁决**:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论 —— PASS + 无标 + head 未
-  动 = 已清标非被剥;head 后移或无结论才重挂(`get_reviews` 读空 ≠ 未复审)。
+- **载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes
+  上 我觉得没必要」): 闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门。
+- **重挂前先查裁决**:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论 —— PASS +
+  无标 + head 未动 = 已清标非被剥;head 后移或无结论才重挂(`get_reviews` 读空 ≠ 未复审)。
 
 ## 复审资格与归属
 
@@ -38,9 +38,9 @@
 - 每场开场**必调一次 `get_session`**(claude-code-remote MCP,无参)读 `external_metadata.last_served_model`,⛔
   自述档位不是读数(静默降档腐蚀的恰是自述;实测与配置档陷阱见 platform-readings);读数 ≠
   `CONTRACT_REVIEW_TIER` ⇒ 该场整体跳过、标签原样留置 —— 卡在队列外等待是安全态。
-- **保险丝只测座位自会话**:`mode:subagent` 里的 `get_session` 量的是**派发会话**(实测:钉在地板
-  档的子代理读回父档,⛔ 不作互证),传参只是配置 ⛔ 不作达档读数;条款②的 `mode:subagent`
-  派发照旧恒保留 `needs:contract-review`,免审跳过仅座位自会话成立。
+- **保险丝只测座位自会话**:`mode:subagent` 里的 `get_session` 量的是**派发会话**(实测:
+  钉在地板档的子代理读回父档,⛔ 不作互证),传参只是配置 ⛔ 不作达档读数;
+  条款②的 `mode:subagent` 派发照旧恒保留 `needs:contract-review`,免审跳过仅座位自会话成立。
 - **转录档位核验**(维护者 2026-08-27 裁)——「派更高档位子代理复审」仅核验通过才合法:采
   信/清标前 grep 子代理 transcript 中 harness 逐消息盖章的 `model` 字段,产出裁决的每轮都须读
   到契约复审档位,见回退证据 ⇒ 裁决整体作废;父会话仅两个合法动作 —— **逐字采纳或

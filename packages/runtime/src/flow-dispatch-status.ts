@@ -4,15 +4,28 @@
  * The #9378 status table for a flow dispatched through
  * `IAutomationService.execute` — ONE definition, read by every door.
  *
- * | engine exit            | reality          | answer                     |
- * |------------------------|------------------|----------------------------|
- * | flow not found         | never dispatched | `404`                      |
- * | flow disabled          | never dispatched | `409` `FLOW_DISABLED`      |
- * | flow has no start node | never dispatched | `422` `FLOW_NO_START_NODE` |
- * | ran and failed         | ran, rejected    | `400` `FLOW_FAILED`        |
- * | ran and PAUSED         | ran, suspended   | not a refusal — see below  |
+ * | engine exit              | reality          | answer                              |
+ * |--------------------------|------------------|-------------------------------------|
+ * | flow not found           | never dispatched | `404`                               |
+ * | flow disabled            | never dispatched | `409` `FLOW_DISABLED`               |
+ * | flow has no start node   | never dispatched | `422` `FLOW_NO_START_NODE`          |
+ * | node config violates its | never dispatched | `422` `FLOW_INPUT_SCHEMA_INVALID`   |
+ * | declared `inputSchema`   |                  | (#10025 — non-retryable)            |
+ * | ran and failed           | ran, rejected    | `400` `FLOW_FAILED`                 |
+ * | ran and PAUSED           | ran, suspended   | not a refusal — see below           |
  *
- * ## The fifth row is NON-TERMINAL, and it is written down on purpose (#9510)
+ * The `FLOW_INPUT_SCHEMA_INVALID` row TRANSCRIBES the #10025 ruling's
+ * spec-recorded contract (registered by the spec seat via #11504 — see
+ * `ERROR_CODE_LEDGER['@objectstack/runtime']` and `AutomationResult.code`):
+ * the definition-level guard's verdict is a pure function of the flow
+ * definition, so the engine refuses ONCE, never enters its retry loop, and
+ * stamps the code with NO `status` — the #9378 never-dispatched class. `422`
+ * exactly as `FLOW_NO_START_NODE` (understood request, existing flow,
+ * unexecutable definition), and deliberately distinct from it: that one says
+ * the definition has nothing to dispatch, this one says a node's config
+ * contradicts the schema the definition itself declares.
+ *
+ * ## The PAUSED row is NON-TERMINAL, and it is written down on purpose (#9510)
  *
  * A run that reaches a pausing node suspends: its continuation is persisted
  * (ADR-0019), it answers `{ success: true, status: 'paused', runId }`, and it
@@ -92,12 +105,14 @@
 import type { AutomationResult } from '@objectstack/spec/contracts';
 
 /**
- * The codes this table answers with. All three are ADR-0112 registered under
+ * The codes this table answers with. All four are ADR-0112 registered under
  * `@objectstack/runtime` in `ERROR_CODE_LEDGER` — ⛔ nothing here mints one,
- * and a fourth row would be a spec-seat widening, never a call-site decision
- * (the #9384 ruling).
+ * and a fifth row would be a spec-seat widening, never a call-site decision
+ * (the #9384 ruling). `FLOW_INPUT_SCHEMA_INVALID` is the worked example:
+ * registered by the spec seat first (#11504, under the #10025 ruling), and
+ * only then transcribed here.
  */
-export type FlowRefusalCode = 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED';
+export type FlowRefusalCode = 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID' | 'FLOW_FAILED';
 
 /** One row of the table, resolved against a real result. */
 export interface FlowRefusal {
@@ -166,7 +181,7 @@ export function isPausedRun(result: AutomationResult | null | undefined): boolea
 }
 
 /**
- * The three result-borne REFUSAL rows: which HTTP answer this engine result
+ * The four result-borne REFUSAL rows: which HTTP answer this engine result
  * declares, or `undefined` when the producer classified nothing (see the module
  * note on why that is deliberately not a row) — and `undefined` for a PAUSED
  * run too, which is not a refusal at all (#9510).
@@ -190,7 +205,7 @@ export function classifyFlowRefusal(
     if (result.success !== false) return undefined;
     const message = typeof result.error === 'string' && result.error ? result.error : undefined;
 
-    // ── never dispatched: the producer says WHICH refusal (#9415) ──────────
+    // ── never dispatched: the producer says WHICH refusal (#9415, #10025) ──
     if (result.code === 'FLOW_DISABLED') {
         return {
             status: 409,
@@ -203,6 +218,16 @@ export function classifyFlowRefusal(
             status: 422,
             code: 'FLOW_NO_START_NODE',
             message: message ?? `Flow '${flowName}' has no start node`,
+        };
+    }
+    if (result.code === 'FLOW_INPUT_SCHEMA_INVALID') {
+        // [#10025] The engine's guard message names the offending NODE and
+        // parameter, so the producer's own words are always the better answer;
+        // the default names the flow, as this table's other defaults do.
+        return {
+            status: 422,
+            code: 'FLOW_INPUT_SCHEMA_INVALID',
+            message: message ?? `Flow '${flowName}' has a node whose config violates its declared inputSchema`,
         };
     }
 

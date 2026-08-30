@@ -160,7 +160,10 @@
  *       the same TWO channels — body OR comment, the H4/H14 contract; a
  *       comment-parked exit fired and sat unnoticed ~2 days under the old
  *       body-only read) or a one-line executable predicate. A hold nothing can fire
- *       is indistinguishable from an abandoned card. `Restart-when: manual — …`
+ *       is indistinguishable from an abandoned card. ⚠️ A `closed …#N` exit
+ *       fires only if #N CAN close — a `tracking` anchor stays open by design,
+ *       so a ruling landing in its COMMENTS never fires it; see H9's section.
+ *       `Restart-when: manual — …`
  *       counts as MISSING, deliberately: the protocol says a card no mechanism
  *       can revive is closed `not planned` (reason + provenance in the closing
  *       comment), so accepting a `manual` line here would hand every seat a
@@ -1660,6 +1663,35 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // and H9 counts a comment-channel line as a line. Widening H9 alone would
 // have made the gauge claim coverage the machinery lacked — the split #10102
 // existed to prevent, run in the opposite direction.
+//
+// ## ⚠️ A `closed …#N` exit is only fireable if #N CAN close
+//
+// H9 judges the line's PRESENCE, never its target's REACHABILITY. So the one
+// shape it cannot see is an exit that is well-formed and unreachable, and the
+// measured specimen is `Restart-when: closed objectstack-ai/objectstack#5499`.
+// #5499 is a `tracking` ruling anchor: that state stays OPEN by design, and the
+// card's own thread says so. The freeze it anchors was dissolved on 2026-08-11
+// by two maintainer rulings recorded as COMMENTS on it; the issue never closed,
+// and on the current state never will. A hold written against that exit is
+// parked FOREVER — and H9 stays green the whole time, because a line is there.
+//
+// ⇒ The class, not the instance: ANY machine that encodes "a ruling" as "an
+// issue closing" is silently bypassed by a ruling recorded in a comment.
+// Re-pointing the exit at a different issue number only moves the trap. It is
+// not a machine-only failure either: three human readers took that same string
+// for a live latch in one day, by reading a STATE instead of a THREAD.
+//
+// What to write when the thing waited on is a RULING rather than a closure:
+// name the ruling and where it lands (`Restart-when: #N rules on X`). Any
+// non-`manual` value is fireable, so the vocabulary already admitted that
+// spelling — only the advertised one did not.
+//
+// ⛔ Nothing above changes a verdict. `hasFireableRestartWhen` accepted the
+// ruling spelling before this paragraph existed and accepts it now; the row
+// text gained a warning, not a new predicate. Teaching H9 to REFUSE an
+// unreachable `closed …#N` target would make it fire on an input it ignores
+// today, and that is a behaviour change nobody has ruled on — deliberately NOT
+// made here.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1751,7 +1783,10 @@ export function h9OnHoldNoRestartWhen(issue, commentBodies) {
       : '';
   return (
     `\`pm:on-hold\` with ${shape} — the hold state is legal only with a machine-fireable exit ` +
-    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate).${unreadable}${unparsed} ` +
+    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate). ⚠️ A ` +
+    `\`closed …#N\` exit only fires if #N CAN close: a \`tracking\` ruling anchor stays open by ` +
+    `design, so a ruling recorded in one of its COMMENTS never produces the close event this form ` +
+    `waits for — name the ruling, not the closure.${unreadable}${unparsed} ` +
     `Add or repair the line first. Closing is the LAST resort and applies only to a card that ` +
     `genuinely has no fireable exit: such a card is closed \`not planned\` with reason + ` +
     `provenance in the closing comment (type:Bug holds re-route instead — see the state model's ` +
@@ -11123,6 +11158,12 @@ function selfTest() {
   // clause. Their exits are `Restart-when: closed …#N`, which H9 already
   // judges; H17 must contribute no row for them, or the index would tell a
   // dispatching seat to intersect against files nobody nominated.
+  //
+  // ⚠️ `c9276` is a CAPTURED SPECIMEN, not a live latch: it is fixture bytes,
+  // and its truth changes no assertion here (H17 must extract zero paths from
+  // it either way). Three readers took it for live PM machinery in one day on
+  // #13211; the card it was sampled from closed on 2026-08-27. Its exit is also
+  // this file's example of the unreachable-target class — see H9's header.
   const c9276 =
     'Restart-when: closed objectstack-ai/objectstack#5499\n\n' +
     '(Earlier restart is legitimate only if the freeze ruling is narrowed on #5499 to exclude ' +

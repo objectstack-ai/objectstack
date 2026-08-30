@@ -718,8 +718,9 @@ narrowed one step further here:
 /**
  * What the automation door attaches to `details` on a `FLOW_FAILED`: the run's
  * own artefacts. A flow that never dispatched (`FLOW_DISABLED`,
- * `FLOW_NO_START_NODE`, or an unknown flow's 404) has no author text and no
- * node log to point at, which is why both members are optional.
+ * `FLOW_NO_START_NODE`, `FLOW_INPUT_SCHEMA_INVALID`, or an unknown flow's 404)
+ * has no author text and no node log to point at, which is why both members
+ * are optional.
  */
 interface FlowFailureDetails {
   errorMessage?: string;   // the flow author's own text (`flow.errorMessage`)
@@ -737,7 +738,7 @@ try {
 } catch (err) {
   if (!isApiError(err)) throw err;     // not a server response — rethrow
   console.error(err.httpStatus);       // 409 | 422 | 400 | 404
-  console.error(err.code);             // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'
+  console.error(err.code);             // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID' | 'FLOW_FAILED'
   if (err.code === 'FLOW_FAILED' && hasFlowFailureDetails(err)) {
     console.error(err.details.errorMessage);   // the flow author's own text
     console.error(err.details.summary);        // which node failed

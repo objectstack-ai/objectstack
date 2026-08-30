@@ -12,8 +12,12 @@ export const entry: SemanticMigration = {
     + 'registers them and the kernel runs `init` then `start` in an order topologically '
     + "resolved from each composed plugin's own `dependencies` / `optionalDependencies` "
     + '(`resolvePluginOrder` in `packages/core/src/plugin-order.ts`). For the isolation '
-    + '`loading.sandboxing` appeared to configure, use the plugin trust tier '
-    + '(`manifest.runtime`, ADR-0025 §3.6) and the manifest permission declarations, which '
+    + '`loading.sandboxing` appeared to configure, note that the plugin trust tier '
+    + '(`manifest.runtime`, ADR-0025 §3.6) does not supply it either: that tier is enforced '
+    + 'at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the '
+    + '`node` tier is rejected with HTTP 422 and forced to manual review), while load-side '
+    + 'enforcement is NOT implemented, so a locally installed plugin is not isolated by the '
+    + 'tier it declares. Use the manifest permission declarations, which '
     + 'are the surfaces the platform actually enforces',
   reason:
     'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
