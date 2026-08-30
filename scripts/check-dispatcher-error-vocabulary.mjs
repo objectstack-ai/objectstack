@@ -1232,14 +1232,21 @@ export function parseParamNames(params) {
  * [#13226] Words that open a parenthesised head but are NOT a method name.
  *
  * The list lives INSIDE the regex as a lookahead rather than in a post-match
- * `continue`, and that placement is load-bearing. A consumed match moves
- * `matchAll`'s cursor past it, so rejecting a word in JavaScript would eat the
- * very text a LATER alternative needs: the method form below is anchored at
- * the start of a line, so on `  public constructor(` it starts EARLIER than
- * the `constructor` alternative and wins the position. Reject it in code and
- * the constructor form goes blind the moment a class spells its constructor
- * with an accessibility modifier. Failing the alternative inside the regex
- * lets the engine advance and try the others at the next position.
+ * `continue`, and the difference is real: a consumed match moves `matchAll`'s
+ * cursor past it, so rejecting a word in JavaScript eats the text a LATER
+ * alternative would have matched at a position further right. Failing the
+ * alternative inside the regex lets the engine advance and try the others.
+ *
+ * ⚠️ `constructor` is in the list DEFENSIVELY, and the honest reason is worth
+ * recording because the obvious one is wrong. On `  public constructor(` the
+ * method alternative does start earlier in the line and does win the position —
+ * but nothing breaks, because `isConstructor` is read off the matched TEXT
+ * rather than off which alternative fired, so the header is still classified as
+ * a constructor and still gets the `new Name(` call scan. Measured by ablation:
+ * removing `constructor` from this list leaves `--self-test` fully GREEN. It is
+ * kept so the alternation means what it looks like it means, NOT because a
+ * caller depends on it — ⛔ do not cite this entry as load-bearing, and ⛔ do
+ * not add a pin claiming an ablation that does not fail.
  *
  * Only words that actually produce the `NAME(...) {` shape are listed —
  * `if (x) {`, `return (a) => {`, `} catch (e) {`. `type`, `interface`, `enum`
@@ -1328,7 +1335,12 @@ export function enclosingDeclaration(src, offset) {
     const params = sliceBalanced(src, open);
     if (params === null) continue;
     const isConstructor = /\bconstructor\s*\($/.test(m[0]);
-    const isMethod = m[3] !== undefined;
+    // [#13226] Read off the matched TEXT, not off which alternative fired, so
+    // the two flags cannot both be true: `public constructor(` is matched by
+    // the METHOD alternative (it starts earlier in the line) and is still a
+    // constructor. Every consumer branches on `isConstructor` first, and this
+    // keeps that branch reachable however the header was recognised.
+    const isMethod = m[3] !== undefined && !isConstructor;
     // [#13226] The header must own a BODY. Checked here rather than in the
     // regex because it reads past the balanced parameter list, which is
     // `sliceBalanced`'s job and not a regex's.
@@ -2905,10 +2917,11 @@ function selfTest() {
         `const t = new Thing('${B.probe}', 'x');\n`;
       const decl = enclosingDeclaration(ctor, ctor.indexOf('.code = code'));
       ok(
-        decl && decl.isConstructor && decl.name === 'Thing',
+        decl && decl.isConstructor && !decl.isMethod && decl.name === 'Thing',
         'a modifier-spelled `public constructor(` is no longer read as a CONSTRUCTOR — the class-method ' +
-          `alternative swallowed it (answered ${decl ? `${decl.name}, isConstructor=${decl.isConstructor}` : 'null'}). ` +
-          'The keyword list must fail INSIDE the regex so the constructor form can still match.',
+          `alternative swallowed it (answered ${decl ? `${decl.name}, isConstructor=${decl.isConstructor}, isMethod=${decl.isMethod}` : 'null'}). ` +
+          'The two flags must stay mutually exclusive: every consumer branches on `isConstructor` first, ' +
+          'and a header that is BOTH would take the `this.Name(` call scan instead of `new Name(`.',
       );
       ok(
         siteCodes(ctor).includes(B.probe),
