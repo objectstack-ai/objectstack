@@ -269,7 +269,8 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
     controls: { RealtimeService: 10, 'async init(': 1 },
-    note: 'Tripwire only. Zero keys is the designed reading (#2992): no end-user realtime transport is wired.',
+    // The designed-silence decision is the #2992 realtime-transport tripwire record.
+    note: 'Tripwire only. Zero keys is the designed reading: no end-user realtime transport is wired.',
   },
   {
     file: 'packages/client/src/realtime-api.ts',
@@ -281,10 +282,12 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
     controls: { subscriptions: 14, WebSocket: 7 },
+    // The arming proof is the #9083 measurement, recorded in authz-conformance.test.ts.
     note:
-      'Tripwire only, and the one whose arming was PROVEN: #9083 measured that adding `new EventSource(...)` here ' +
-      'goes red as UNCLASSIFIED. Note the client transport words appear in prose/types here, which is why the ' +
-      'probe keys on `new WebSocket` / `new EventSource` construction rather than on the bare word.',
+      'Tripwire only, and the one whose arming was PROVEN: a recorded measurement wired ' +
+      '`new EventSource(...)` into this file and the ratchet went red as UNCLASSIFIED. Note that the client ' +
+      'transport words appear in prose and types here, which is why the probe keys on `new WebSocket` / ' +
+      '`new EventSource` construction rather than on the bare word.',
   },
   {
     file: 'packages/mcp/src/plugin.ts',
