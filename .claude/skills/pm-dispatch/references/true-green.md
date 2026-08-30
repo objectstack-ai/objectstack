@@ -19,9 +19,8 @@
 
 ## objectui(前端)
 
-- 正典跑法:**仅仓根 `pnpm test`**。vitest 守卫拒绝 package 目录内的运行 —— 那种跑法
-  曾假绿(无关 console 文件通过、目标用例 0 个在跑,被计为通过);守卫的拒绝是保护,
-  ⛔ 不绕。
+- 正典跑法:**仅仓根 `pnpm test`**。vitest 守卫拒绝 package 目录内的运行 —— 那种跑法曾假绿
+  (无关 console 文件通过、目标用例 0 个在跑,被计为通过);守卫的拒绝是保护,⛔ 不绕。
 - typecheck 脚本拼作 `type-check`(连字符);拼错脚本名的 `pnpm --filter` 匹配零脚本、
   **退出码 0**、静默假绿 —— 核对输出确实回显了脚本名再信绿。
 
@@ -29,6 +28,6 @@
 
 - 本地 preflight:`preflight-workspace-dist`(workspace 依赖的 dist 新鲜度守卫)——
   按其自身输出的提示跑,先建再测。
-- 严格区 `check-test-typecheck` 的失败**不以 `error TS` 行出现在 CI 日志**:turbo 汇总
-  只写 `#typecheck` failed —— 要看到台账消息必须本地跑该包自己的 `typecheck` 脚本;对 CI 日志
-  grep `error TS` 的阴性读数在这一族上不成立。
+- 严格区 `check-test-typecheck` 的失败**不以 `error TS` 行出现在 CI 日志**:turbo
+  汇总只写 `#typecheck` failed —— 要看到台账消息必须本地跑该包自己的 `typecheck` 脚本;
+  对 CI 日志 grep `error TS` 的阴性读数在这一族上不成立。

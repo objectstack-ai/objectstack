@@ -16,8 +16,8 @@
   没订阅就取不回,故只作旁证,⛔ 不作决策依据。⛔ `auto_merge` 字段不只是空,是**不稳
   定**:同一 PR 一分钟内先 `set` 后 `None`(2026-08-26 实测),入队后又回落为 off(维护者
   2026-08-11 裁定)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。
-- **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被
-  踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
+- **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢;
+  真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查永远两个
   读数:**队列成员资格 和 `origin/main`**,缺一不可;`origin/main` 那一读**按内容读**(grep 本 PR 该
   产出的产物),⛔ 不按 PR head sha 的祖先性、也不按 `merged` 布尔:队列落的是**另一个提
@@ -30,9 +30,9 @@
   地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`(冲突文件直接列出;随 fetch
   老化,重跑先 fetch;与 enable 序列的队列 ref/update-branch 探针互补,彼答入队与暗冲突、此在挂
   前答头脏)。入队决策点才 `get` 一次:挂了 flip 定点(landing-operations)到点读,⛔ 不又查又等。
-- **状态核验用最小字段**(search/list + `fields`)或等事件,整对象 `get` 留给入队决策点;门禁放行
-  判据 = 承载门禁族 job 的 conclusion,聚合(`blocked`/`dirty`)只作阴性筛查再定位,放行按名定向读
-  单条 job,⛔ 不拉全表(按名定位失败才拉)。
+- **状态核验用最小字段**(search/list + `fields`)或等事件,整对象 `get` 留给入队决策点;
+  门禁放行判据 = 承载门禁族 job 的 conclusion,聚合(`blocked`/`dirty`)
+  只作阴性筛查再定位,放行按名定向读单条 job,⛔ 不拉全表(按名定位失败才拉)。
 - **转 draft 不是可靠的踢队手段 —— 两向相反实测,处置按最坏走**:本仓转 draft 同时掉
   auto-merge 与队列成员资格(均不自动恢复,转正后重挂);objectui 2026-08-25 已入队 PR 转 draft 条目
   保位、~40 分钟后队列照样合并(仓别/时机未分辨)。补救:转 draft + disable 都做(本仓
@@ -40,12 +40,12 @@
   答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论、不据单读数报补救。
 - **`update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 对 draft PR 的任何调用必须显式带
   `draft: true`**(reviewers/title/body/labels 单字段调用同坑;objectui 2026-08-25 实测:一次只传
-  reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路 = REST
-  `POST /pulls/{n}/requested_reviewers`(文档载明、未实测:载荷只有 reviewers/team_reviewers;门开席位优
-  先,MCP-only 席才用 update + 显式 `draft: true`)。undraft 可用路径只有 MCP 这条:传 `draft: false`
-  落地(2026-08-24 三张 PR 逐张回读确认);**裸 GraphQL 会话内被拒**(回「only the pinned set of
-  PR-review operations is served」,它建议的「改用 REST」对 undraft **是错的**);**裸 REST
-  `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作** —— 接口性质 ⇒ 池 0 只能等重置。
+  reviewers 的请审把治理面 draft 发布进合并队列,后果见上条);请审免碰 draft 位的专用路
+  = REST `POST /pulls/{n}/requested_reviewers`(文档载明、未实测:载荷只有 reviewers/team_reviewers;
+  门开席位优先,MCP-only 席才用 update + 显式 `draft: true`)。undraft 可用路径只有 MCP 这条:
+  传 `draft: false` 落地(2026-08-24 三张 PR 逐张回读确认);**裸 GraphQL 会话内被拒**(回「only
+  the pinned set of PR-review operations is served」,它建议的「改用 REST」对 undraft **是错的**);**裸
+  REST `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作** —— 接口性质 ⇒ 池 0 只能等重置。
 - **`enable_pr_auto_merge` 一律显式传 `mergeMethod: "SQUASH"`**(不传时静默退回被禁的 merge-commit =
   无操作);**回显两向不可靠,空回显≠未挂上**:传 SQUASH 后回读 `auto_merge.merge_method` 仍
   `merge`(2026-08-24 两张 PR、一张 disable→enable 复验同值)、队列路径回显空字段而入队照发,落
@@ -64,13 +64,13 @@
   挂 auto-merge。`enable_pr_auto_merge` 回应只答本次调用:时戳形有动作、空字段形无动作;⛔
   enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入队)。**踢出成因两
   则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
-- **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;止血修复合入
-  后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,⛔ 禁止条件反射式重投;第
-  三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run 全部 `success` = 队列重建的
-  连带取消不是红 —— 带签名读数收据重投一次(收据留在 PR 上),⛔ 无收据不重投;同一 PR
-  第二次被踢 ⇒ 停止重投,按签名四分支重判。
-- **实测吞吐两则**:合并队列落地 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没落」提前判异
-  常);单容器重验证(build+test)并发甜点 ≈3,排批按它定上限。
+- **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;
+  止血修复合入后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,
+  ⛔ 禁止条件反射式重投;第三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run
+  全部 `success` = 队列重建的连带取消不是红 —— 带签名读数收据重投一次(收据留在 PR 上),
+  ⛔ 无收据不重投;同一 PR 第二次被踢 ⇒ 停止重投,按签名四分支重判。
+- **实测吞吐两则**:合并队列落地 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没落」
+  提前判异常);单容器重验证(build+test)并发甜点 ≈3,排批按它定上限。
 
 ## API 配额
 
@@ -86,39 +86,39 @@
 - **批量写 ~1 秒一发**:小时池之外还有**分钟级二级限流** —— GraphQL 端点 2,000 点/分、并发
   ≤100,官方指引:**变更类请求间停 ~1 秒**(mutation 按 5× 计)。双载体清标、批量重分诊这类
   把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙(官方文档 2026-08-23 复核)。
-- **REST 可用性是会话属性,⛔ 不是全局事实 —— 开轮探一次,按班存档;探针必须
-  repo-scoped**:直连受会话级授权门钳制(会话起点快照),门关着 repo-scoped 路径**整类**回 403
-  `GitHub access is not enabled for this session`(⛔ 不是限流,重试改不了它),而 `/rate_limit` 照答 200
-  —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后的单调用凭据判别见
+- **REST 可用性是会话属性,⛔ 不是全局事实 —— 开轮探一次,按班存档;探针必须 repo-scoped**:
+  直连受会话级授权门钳制(会话起点快照),门关着 repo-scoped 路径**整类**回
+  403 `GitHub access is not enabled for this session`(⛔ 不是限流,重试改不了它),而 `/rate_limit` 照答
+  200 —— 它兼任不了通道探针;探针 = 一条真 repo-scoped 读。探针 403 后的单调用凭据判别见
   `references/rest-channel.md`。**按班矩阵**:2026-08-25 两车道 5+ dev 席全被门拒(整类 403、读写同门
-  —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发);2026-08-26 反例一席门
-  开,加法 POST 回 200;顶层席同窗分裂(两 403、一 200)⇒ **门态逐容器变**,⛔ 不据他席、他日
-  读数推本席,唯一安全读法即本行 repo-scoped 探针。**门关着时的降级梯**:① git 先行(「零成
-  本等价物」);② 公开仓 payload 档(下方「公开仓」条);③ MCP:search 定向一击、列表**单标
-  签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
+  —— 加法标签 POST、评论 PATCH 同死 ⇒ 无评论编辑通道,更正=重发);2026-08-26 反例一席门开,
+  加法 POST 回 200;顶层席同窗分裂(两 403、一 200)⇒ **门态逐容器变**,⛔ 不据他席、
+  他日读数推本席,唯一安全读法即本行 repo-scoped 探针。**门关着时的降级梯**:
+  ① git 先行(「零成本等价物」);② 公开仓 payload 档(下方「公开仓」条);③
+  MCP:search 定向一击、列表**单标签**读全 + 本地求交(`labels` 是 OR,见 MCP 参数条);④ 等重置。
 - **默认读序 git → payload → REST → MCP/GraphQL**(2026-08-23 策略翻转,2026-08-25 增补 payload 档;
   ⚠️ REST 档以**本班 repo-scoped 探针绿**为前提 —— 前提就住本行,403 会话改按降级梯读)。
   list/查重/卡与 PR 读/标签回读默认走容器 curl 的 REST 通道 —— App installation token,core
-  15,000/时,与 GraphQL 池**独立计**(实测 GraphQL 池两次耗尽时 core 余 14,938);GraphQL 池
-  (5000/时)只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、语义
-  `/search/*`、Projects field_values、`issue transfer`。逐操作通道归属(✓ 按席位类别限定)、写侧配
-  方与队列路由三读法见 `references/rest-channel.md`,⛔ 不在本表复述。
-- **MCP list/search 家族整个走 GraphQL 稀缺池**(反复撞上的限流墙就是它;`issue_write` 连查找半
-  边都吃);配额红时认领类动作排队,评论(REST 桶)先行把结论发出去。
+  15,000/时,与 GraphQL 池**独立计**(实测 GraphQL 池两次耗尽时 core 余 14,938);GraphQL 池(5000/时)
+  只留给**没有 REST 对应物**的那几件:draft 翻转、auto-merge/入队挂载、
+  语义 `/search/*`、Projects field_values、`issue transfer`。逐操作通道归属(✓ 按席位类别限定)、
+  写侧配方与队列路由三读法见 `references/rest-channel.md`,⛔ 不在本表复述。
+- **MCP list/search 家族整个走 GraphQL 稀缺池**(反复撞上的限流墙就是它;
+  `issue_write` 连查找半边都吃);配额红时认领类动作排队,评论(REST 桶)先行把结论发出去。
 - **`gh` CLI 的动词按传输分两桶,池枯竭时只死一半**(2026-08-24 同分钟实测:GraphQL 0 / core
   4987):porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL 当场回限流,同一批事实
   改走 `gh api` 的 REST 路径照常返回(含开 draft PR)。⚠️ 容器无 `gh`,本条只对本机席位适用。
-- **红窗调度**:`until remaining > 阈值` 的守候**只给上面那几件 GraphQL-only 的**(逐件判据与官方
-  文档核对日期住 `references/rest-channel.md`),⛔ 其余一切不为配额空等;走队列的仓落地必经
-  auto-merge ⇒ 红窗里**无退路**,直合仓有(合并本身有 REST 端点)。
-- **`issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的「在目的仓重建」配
-  方**(出处头 + 裸 `#N` 改全名 + 关源单为 moved):纯 REST、配额免疫,⛔ 不为转移空等重置。
+- **红窗调度**:`until remaining > 阈值` 的守候**只给上面那几件 GraphQL-only
+  的**(逐件判据与官方文档核对日期住 `references/rest-channel.md`),⛔ 其余一切不为配额空等;
+  走队列的仓落地必经 auto-merge ⇒ 红窗里**无退路**,直合仓有(合并本身有 REST 端点)。
+- **`issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的「在目的仓重建」
+  配方**(出处头 + 裸 `#N` 改全名 + 关源单为 moved):纯 REST、配额免疫,⛔ 不为转移空等重置。
 - **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓
-  Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串
-  `failed to fetch issue field values: API rate limit already exceeded`);⛔ **`minimal_output: true` 不裁
-  `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`),**永不当省额度手段写进任何
-  skill**;没有参数能关掉 `body`:要么整表 107 点要么换窄接口(点数未测)。⚠️ 站得住的证据
-  是直接观察 `body` 在,不是前后体积对比(两次调用相隔数小时、population 已变)。
+  Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串 `failed to fetch issue field
+  values: API rate limit already exceeded`);⛔ **`minimal_output: true` 不裁 `list_issues` 的 `body`**(2026-08-22
+  实测:返回字段仍含 `body`),**永不当省额度手段写进任何 skill**;没有参数能关掉 `body`:
+  要么整表 107 点要么换窄接口(点数未测)。⚠️ 站得住的证据是直接观察 `body` 在,
+  不是前后体积对比(两次调用相隔数小时、population 已变)。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文
   件读取同走 git(REST PR files 端点实测可瞬态 404)。**零成本等价物四条**(API 两次挂掉期间实
   测可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地
@@ -136,8 +136,8 @@
   只因仓库公开成立;⛔ 覆盖单卡读、**不覆盖 issue search**(搜索页无 SSR 结果);⛔ 永不拿渲染
   列表定规模(静默只显一页,实测 12 vs 权威 147)。渲染层 WebFetch 仍在(~15 分缓存、有损)。
 - **查重先 `search_issues`**(2026-08-18 实测:单次调用按 issue body 内文本命中且 `total_count` 精确;
-  「search 对本会话不可用」的继承说法实测为**假** —— 继承说法不是读数,复述必带实测
-  日期):body 文本匹配是 repo-scoped `list` 做不到的,`list` + 对照组降为回退。
+  「search 对本会话不可用」的继承说法实测为**假** —— 继承说法不是读数,
+  复述必带实测日期):body 文本匹配是 repo-scoped `list` 做不到的,`list` + 对照组降为回退。
 - **`search_issues` 可整会话静默归零 —— 控制词一并归零**(2026-08-23 实测:某会话对**每个**查
   询回 `total_count: 0`,含已知必中的控制词;同时刻另一会话正常 ⇒ 故障是**会话级**)。⛔
   **空查重结果不是读数,除非本会话内一个已知必中的控制词答了** —— ⛔ 不是「可疑时
@@ -164,17 +164,17 @@
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*` 回
   `Streamable HTTP error: invalid session`,只有新会话重绑 —— 轮换前提醒维护者:在飞席位丢整条
   GitHub 通道;配额池按身份计,换身份即清零燃烧,共享身份结构不变。
-- **组织侧授权变更后仓库访问逐步传播**(同一端点数分钟内 403→200);该 403 体同样解析成净
-  零 ⇒ 空车道先对仓库 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
-- **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是 AND —— 混入别车道同状态卡
-  与本车道全状态卡,结果良构、失效全静默;**判据 = 结果比任一输入都宽**(三席独立实测:
-  两标签的「交集」回 135 张,而其中一个车道自身只有 132 张)。正确读法 = **整车道单标签
-  一次读全 + 本地对 labels 求交**,或改走 REST —— **两个通道的 `labels` 语义相反**:REST 列表
-  端点的 `labels=a,b` 是**真 AND**(交集),MCP 的 `labels` 数组是 **OR** ⇒ 要交集按上面的探针与
-  降级梯选档,⛔ 不无条件「改走 REST」。`issue_write` 的 `labels` 是**整组替换**不是追加 ——
-  同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走
-  REST `POST /issues/{n}/labels`,⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;
-  写后照标签纪律回读。
+- **组织侧授权变更后仓库访问逐步传播**(同一端点数分钟内 403→200);该 403
+  体同样解析成净零 ⇒ 空车道先对仓库 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
+- **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是
+  AND —— 混入别车道同状态卡与本车道全状态卡,结果良构、失效全静默;**判据 =
+  结果比任一输入都宽**(三席独立实测:两标签的「交集」回 135 张,而其中一个车道自身只有
+  132 张)。正确读法 = **整车道单标签一次读全 + 本地对 labels 求交**,
+  或改走 REST —— **两个通道的 `labels` 语义相反**:REST 列表端点的 `labels=a,b` 是**真 AND**
+  (交集),MCP 的 `labels` 数组是 **OR** ⇒ 要交集按上面的探针与降级梯选档,⛔ 不无条件「改走
+  REST」。`issue_write` 的 `labels` 是**整组替换**不是追加 —— 同一动作内重读现值合并再写
+  (隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST `POST /issues/{n}/labels`,
+  ⚠️ 同样先过探针 —— 403 会话没有真追加通道,只能整组替换;写后照标签纪律回读。
 - **PR 标签的三条读腿全盲、两条静默**(2026-08-28 同日实测):① `issue_read get_labels` 传 PR 号
   回「Could not resolve to an Issue」—— REST「PR 也是 issue」的惯例在此方法不成立;**响亮失败即
   路由信号**,改走腿③。② `pull_request_read get` 的 `labels` **时缺时滞**:dev 席同一张新 PR 两读
@@ -191,46 +191,46 @@
   原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整
   个丢弃**(不是转义,无从解码回来),判据见「读数陷阱」判截断行。写侧剥除是**真实存储
   损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读必做;实体归属与 `&amp;` 类未实测。
-- **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历史上寄放在评
-  论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫描只 grep body,⛔ 不
-  加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read`
-  读 body)。
-- **`list_issue_types` 对本集成 403,而 `issue_write type:` 正常**(读权限缺口): 直接写已知好
-  值(`Bug`/`Feature`/`Task`),写侧报错才是真信号,⛔ 不先探列表定可用性(列表 403
-  ≠「类型不可用」);非法值是响错还是静默丢弃未实测,写非已知值前先小样验证。
+- **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」
+  执行;历史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);
+  解锁扫描只 grep body,⛔ 不加常设评论读;
+  旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read` 读 body)。
+- **`list_issue_types` 对本集成 403,而 `issue_write type:` 正常**(读权限缺口):
+  直接写已知好值(`Bug`/`Feature`/`Task`),写侧报错才是真信号,⛔ 不先探列表定可用性(列表
+  403 ≠「类型不可用」);非法值是响错还是静默丢弃未实测,写非已知值前先小样验证。
 
 ## 读数陷阱
 
-- **被拦的下载不是缺席证明**:出口策略 403(如 `cdn.playwright.dev`)只说「取不来」不说「没
-  有」—— 先找产物再下结论(实测:Chromium 预装、`PLAYWRIGHT_BROWSERS_PATH` 已设)。
-- **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读数)—— 跨
-  仓一律 `git -C <path>`; `git grep -c <pat> | wc -l` 数文件数不是命中数;裸名 grep 被幸存家族当子
-  串命中 —— 退役核验带引号精确名,更硬判据是查声明
-  式(`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
-  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)——
-  先 `--deepen` 再判,或走 REST `compare`;**容器里没有 `gh`**,于是 `gh … || echo "none"` 是个
-  **不可证伪的否定** —— 127「命令不存在」与「grep 没命中」在输出上同值(实测五张 PR 跑
-  五次「无重叠文件」全部打印安心结论、一次都没检查)。安全拼写:先 `command -v <cmd>` 确认
-  存在,或在 `||` 之前捕获状态;⛔ 一般规则:**任何可能不存在的命令上挂 `|| 回退` 都是不可
-  证伪的否定**,PR / 查重类核验改走 MCP GitHub 工具或 git。
+- **被拦的下载不是缺席证明**:出口策略 403(如 `cdn.playwright.dev`)只说「取不来」
+  不说「没有」—— 先找产物再下结论(实测:Chromium 预装、`PLAYWRIGHT_BROWSERS_PATH` 已设)。
+- **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,
+  产出假读数)—— 跨仓一律 `git -C <path>`; `git grep -c <pat> | wc -l` 数文件数不是命中数;
+  裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,更硬判据是查声明式
+  (`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
+  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains`
+  零输出)—— 先 `--deepen` 再判,或走 REST `compare`;**容器里没有 `gh`**,于是 `gh … || echo "none"`
+  是个**不可证伪的否定** —— 127「命令不存在」与「grep 没命中」在输出上同值
+  (实测五张 PR 跑五次「无重叠文件」全部打印安心结论、一次都没检查)。安全拼写:先
+  `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态;⛔ 一般规则:**任何可能不存在的命令上挂
+  `|| 回退` 都是不可证伪的否定**,PR / 查重类核验改走 MCP GitHub 工具或 git。
 - **auto 档分类器的判定随命令形状变,不随能力变 ⇒ 被拒的复合命令先拆成裸核心动作重试
   再报 blocked**(2026-08-22 同席同分钟:`git rev-parse … && git push origin <分支> 2>&1 | tail` 被拒,裸
   `git push origin <分支>` 放行并成功 —— 只差链接与管道,拒绝文案不点名违规元素;判定还跨
   天翻面)⇒ ⛔ 一次拒绝不是能力边界,`permissions.allow` 条目才是仓库侧唯一确定性通道。
-- `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上缺一个已合
-  修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即
-  是。
-- **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的预期签名,不是
-  选择性失败**(cancel-in-progress 窗口只罩得住跑得慢的载体):先比对 run `head_sha` 与 PR 当前
-  head(取代必有新 head),不开「为何只取消它」调查。
-- **CI 红了先取完整日志归档再下结论 —— 断言文本只在归档里,直读工具拿不到** (2026-08-18
-  实测):`get_check_run` 对本仓 CI job 回空 `output.text`,`get_job_logs` 无论 `tail_lines` 只回占满日志尾
-  部的 post-step service-container teardown ⇒ 两者都答不了「到底挂在哪」;失败 step 名免下载即
-  得(`actions_get method=get_workflow_job`),真实断言文本走 run 日志归
-  档:`actions_get method=get_workflow_run_logs_url` → 下载解压,分步文件在
-  `{Job name}/{step number}_{step name}.txt`。「completeness check 绿」只断言没有 worker 静默死 ≠ 测试
-  通过;并发输出的「相邻」≠「因果」(先查 `turbo.json` 依赖边),⛔ 不只看 tail; 公开发出的
-  诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
+- `rerun_failed_jobs` 复用原 run 的提交与合并 ref,
+  不拿新 main 重算 —— 红因是基上缺一个已合修复时重跑无效,
+  只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即是。
+- **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的预期签名,
+  不是选择性失败**(cancel-in-progress 窗口只罩得住跑得慢的载体):
+  先比对 run `head_sha` 与 PR 当前 head(取代必有新 head),不开「为何只取消它」调查。
+- **CI 红了先取完整日志归档再下结论 —— 断言文本只在归档里,
+  直读工具拿不到** (2026-08-18 实测):`get_check_run` 对本仓 CI job 回空 `output.text`,
+  `get_job_logs` 无论 `tail_lines` 只回占满日志尾部的 post-step service-container teardown
+  ⇒ 两者都答不了「到底挂在哪」;失败 step 名免下载即得(`actions_get method=get_workflow_job`),
+  真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` → 下载解压,分步文件在
+  `{Job name}/{step number}_{step name}.txt`。「completeness check 绿」只断言没有 worker 静默死
+  ≠ 测试通过;并发输出的「相邻」≠「因果」(先查 `turbo.json` 依赖边),⛔ 不只看 tail;
+  公开发出的诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
 - **判「正文被截断」必须双读取**:`.body` 原文 + `Accept: application/vnd.github.full+json` 的
   `.body_html`,两者同一处断掉才算 issue 端截断。读侧实测有确定性触发:正文含字面 script 开
   标记形状的 token(less-than 紧跟 script 字样;doctype 开标记、object 标签形状同触发)时,API/MCP 读
@@ -251,12 +251,12 @@
   紧跟左方括号**即触发(TS 非空断言下标),**无需 less-than**(2026-08-29 PR 正文四处实测,MCP 与渲
   染页双读一致、盘上未变 ⇒ 落库丢字符;围栏/行内代码四处全丢),幸存文本仍像代码但意
   义已变;感叹号不接左方括号则存活。作者侧:运算符**用词拼出**,或占位词定义一次。
-- **写侧实测行为 · 评论(形状是「截断」不是「删片段」)**:sanitizer 从**首个命名 HTML 元素
-  的尖括号片段**起把评论体一路吃到结尾(2026-08-21 实测:一份用**字面文本**标记发出的 dev
-  报告,正文在 `this.error(` 处断掉、JSON 不可解析)⇒ ⛔ **字面文本标记只保住标记、保不住
-  正文** —— 标记扫描照报成功,只有真去解析才发现;引信是普通 TS 形状(泛型一类)不是奇
-  异语法。⚠️ 边界:姊妹仓一次受控探针测到的是**选择性删除**而非截断到尾 ⇒ **写侧按
-  最坏的截断防护**。
+- **写侧实测行为 · 评论(形状是「截断」
+  不是「删片段」)**:sanitizer 从**首个命名 HTML 元素的尖括号片段**起把评论体一路吃到结尾
+  (2026-08-21 实测:一份用**字面文本**标记发出的 dev 报告,正文在 `this.error(` 处断掉、
+  JSON 不可解析)⇒ ⛔ **字面文本标记只保住标记、保不住正文** —— 标记扫描照报成功,
+  只有真去解析才发现;引信是普通 TS 形状(泛型一类)不是奇异语法。⚠️ 边界:
+  姊妹仓一次受控探针测到的是**选择性删除**而非截断到尾 ⇒ **写侧按最坏的截断防护**。
 - **写侧实测行为 · PR 正文(尾部 `---` 与其后的署名页脚一并被吃)**:写调用照报成功;去掉横
   线只写页脚则原样存活(2026-08-28 两仓同轮、两张 PR 全文回读)。**评论不受影响**(两种拼法
   都活)⇒ 失效既**依拼写**又**依载体**:评论里验过页脚**对 PR 正文什么都没证明**。⇒ PR
@@ -264,20 +264,20 @@
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲突两侧收据都
   保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不是历史),⛔ 不从
   两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
-- **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重跑 + 复
-  核,不动代码); ② 死在 regen 中途(未提交全是生成物、merge commit 已在)⇒ PM 直接续作 ——
-  build → 整链 regen → 生成物门禁全绿 → 提交推送,恢复 commit 带 `Recovery commit:` 前缀留审
-  计;⚠️ 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌; ③ 死在源码编辑中途 ⇒ 先
-  读 diff 判完整性 —— docblock 写全动机/失效模式/判据的,PM 可代跑终验后提交,写一半意图
-  不明的 ⛔ 不代提交、记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清
-  掉,⛔ 不进 feature PR。
-- **零提交的探针分支不是在飞工作**:容器发不出分支删除 refspec(实测
-  `git push origin --delete <b>` 回 `send-pack: unexpected disconnect while reading sideband packet`,三次退避全
-  败;**同会话普通 push 正常** ⇒ 不是连通性问题),于是测量型派发留下的探针分支永久堆在
-  origin 上。读法规则:`claude/issue-*` 分支**零提交领先 `origin/main` 且没有开着的 PR** = 不承载
-  任何工作,⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡 —— 失效方向是**活卡被永久读成
-  已被认领**,无红信号、只增不减。判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且
-  分支名下无 open PR。边界:一容器一会话三次,成因未诊断,存量未普查。
+- **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重跑 + 复核,
+  不动代码); ② 死在 regen 中途(未提交全是生成物、
+  merge commit 已在)⇒ PM 直接续作 —— build → 整链 regen → 生成物门禁全绿 → 提交推送,
+  恢复 commit 带 `Recovery commit:` 前缀留审计;⚠️ 有的现场 regen 一件没跑,
+  推送前先跑生成物门禁别赌; ③ 死在源码编辑中途 ⇒ 先读 diff 判完整性 ——
+  docblock 写全动机/失效模式/判据的,PM 可代跑终验后提交,写一半意图不明的 ⛔ 不代提交、
+  记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清掉,⛔ 不进 feature PR。
+- **零提交的探针分支不是在飞工作**:容器发不出分支删除 refspec(实测 `git push origin --delete
+  <b>` 回 `send-pack: unexpected disconnect while reading sideband packet`,三次退避全败;**同会话普通 push
+  正常** ⇒ 不是连通性问题),于是测量型派发留下的探针分支永久堆在 origin 上。读法规则:
+  `claude/issue-*` 分支**零提交领先 `origin/main` 且没有开着的 PR** = 不承载任何工作,⛔
+  不据 `ls-remote | grep issue-` 正命中回避该卡 —— 失效方向是**活卡被永久读成已被认领**,
+  无红信号、只增不减。判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,
+  且分支名下无 open PR。边界:一容器一会话三次,成因未诊断,存量未普查。
 - **会话从上下文检测不到自己的静默降档**(2026-08-20 实测:一次分诊 fire 两级静默降档,横幅
   只在 UI 侧渲染、上下文零信号,子轮开场自述「跑在契约复审档」)——服役档的权威读数
   是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(最近一轮实
@@ -286,10 +286,10 @@
   话** ⇒ 保险丝无输入(2026-08-24),另一台宿主省 `session_id` 正常回两键(2026-08-25)⇒ ⛔ 不据一
   台宿主推全体;无它时的合法替代 = grep 本会话 transcript 里 harness 写的 `"model":`(逐请求写
   入、非模型自述,用时在卡上申报)。
-- **档位额度终止是第三种死法**(2026-08-27 实测):子代理死在编辑中途、宿主报本账户档位
-  额度到顶 —— 有**宿主信号**故非普通子代理死亡,亦非维护者中止:**派发已死、前提完
-  好、卡在资源** ⇒ 死认领回收 + worktree 抢救,⛔ 不重核前提、不升级;⚠️ 无前置探针
-  (只在 dev 死在里面时可观测),缓解只在 dev 侧的早 WIP 提交。
+- **档位额度终止是第三种死法**(2026-08-27 实测):子代理死在编辑中途、
+  宿主报本账户档位额度到顶 —— 有**宿主信号**故非普通子代理死亡,亦非维护者中止:
+  **派发已死、前提完好、卡在资源** ⇒ 死认领回收 + worktree 抢救,⛔ 不重核前提、
+  不升级;⚠️ 无前置探针(只在 dev 死在里面时可观测),缓解只在 dev 侧的早 WIP 提交。
 - **档位不可用时 ⛔ 不凭记忆宣告车道阻塞,逐文件面现推 mandate**:强制档不得因不可用而
   降档(那正是降档保险丝要拒的替换),但「本车道 fable 强制」多是过宽的回忆 ——
   `dispatch-gates.mjs --tier PATH` 逐路径现推(实测:`SKILL.md` 与 `.claude/agents/**` 强制,`scripts/pm/**`
@@ -298,11 +298,11 @@
 ## 闭合关键词解析(PR 正文写侧)
 
 - **PR 正文里「不修某卡」的否定句照样关卡**:闭合关键词解析器匹配
-  `fix/fixes/fixed/close/closes/closed/resolve/resolves/resolved` + `#N`,**不理会前面的否定词** —— 声明
-  不修的那句话恰在合并时关卡;安全写法 = 号码不被关键词打头 (`#N is not addressed here` /
-  `out of scope: #N` / `#N remains open`)。实测边界三条:关键词只绑**同一行**的 `#N`;动名
-  词(closing/fixing)不是关键词;行内反引号里的关键词不触发(code span 实测不建闭合链接;围栏
-  块未独立实测,按同规则对待但留待复测)。
+  `fix/fixes/fixed/close/closes/closed/resolve/resolves/resolved` + `#N`,**不理会前面的否定词** ——
+  声明不修的那句话恰在合并时关卡;安全写法 = 号码不被关键词打头 (`#N is not addressed here`
+  / `out of scope: #N` / `#N remains open`)。实测边界三条:关键词只绑**同一行**的 `#N`;
+  动名词(closing/fixing)不是关键词;行内反引号里的关键词不触发(code span 实测不建闭合链接;
+  围栏块未独立实测,按同规则对待但留待复测)。
 - **PR body 与 squash commit message 是两个独立解析源**(commit 干净 ≠ body 干净,只查 commit 会
   漏);误关的卡以 `completed` 状态对一切「只看 open」的过滤与巡检隐身,无任何机械守卫覆盖
   这条路径 —— 消费侧检查 = 合并后读 `closed_by_pull_requests`(在复核清单)。
