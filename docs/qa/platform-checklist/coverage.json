@@ -32,12 +32,15 @@
         "platform-core.boot-health",
         "platform-core.nav-surfaces-render",
         "access-security.me-permissions-aggregation-parity",
-        "search.command-palette-navigation"
+        "search.command-palette-navigation",
+        "platform-core.marketplace-install-local-lifecycle",
+        "platform-core.marketplace-console-honesty"
       ]
     },
     "book": {
       "items": [
-        "platform-core.docs-audience-gate"
+        "platform-core.docs-audience-gate",
+        "platform-core.docs-portal-render"
       ]
     },
     "dashboard": {
@@ -69,7 +72,8 @@
     },
     "doc": {
       "items": [
-        "platform-core.docs-audience-gate"
+        "platform-core.docs-audience-gate",
+        "platform-core.docs-portal-render"
       ]
     },
     "email_template": {
@@ -132,7 +136,8 @@
       "items": [
         "platform-core.manifest-install-contract",
         "cli.plugin-manifest-build-contract",
-        "api-backend.package-rest-lifecycle"
+        "api-backend.package-rest-lifecycle",
+        "platform-core.marketplace-install-local-lifecycle"
       ]
     },
     "mapping": {
@@ -156,14 +161,16 @@
         "api-backend.formula-stdlib-matrix",
         "api-backend.api-methods-verb-gate",
         "integration-system.external-schema-browser-ui",
-        "search.command-palette-navigation"
+        "search.command-palette-navigation",
+        "platform-core.lifecycle-retention-sweep"
       ]
     },
     "page": {
       "items": [
         "studio-authoring.record-page-roundtrip",
         "platform-core.nav-surfaces-render",
-        "search.command-palette-navigation"
+        "search.command-palette-navigation",
+        "platform-core.marketplace-console-honesty"
       ]
     },
     "permission": {
@@ -215,7 +222,9 @@
     },
     "seed": {
       "items": [
-        "platform-core.seed-integrity"
+        "platform-core.seed-integrity",
+        "platform-core.marketplace-install-local-lifecycle",
+        "platform-core.seed-mode-matrix"
       ]
     },
     "skill": {
@@ -263,7 +272,8 @@
     "capability": {
       "items": [
         "access-security.capability-declaration-lifecycle",
-        "ai.console-ai-surface-gating"
+        "ai.console-ai-surface-gating",
+        "platform-core.marketplace-install-local-lifecycle"
       ]
     }
   }

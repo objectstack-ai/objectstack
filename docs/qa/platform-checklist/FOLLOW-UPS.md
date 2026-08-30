@@ -376,3 +376,158 @@ posture, then decide which shape is wanted).
   hand-enumerated on the row-contract item and flagged un-pinned.
 - **No security-sensitive finding to withhold**: D16–D22 are admin-gated behaviors or
   disclosure-shape issues; nothing here discloses an unfixed privilege escalation.
+
+## 9. Full sweep 2026-08-30 — five-angle re-audit at a286411 (framework) / 1e14d70 (objectui)
+
+Ledger **221 → 260 items** (39 new, 13 revisions); `coverage.json` 31 kinds mapped, **0
+waived** (the first sweep to start from a zero-waiver state — nothing to re-audit there,
+so the stale-claims audit ran against `blocked` refs and item texts instead, and found
+five: §9d/§9e). Five parallel read-only hunters (console UI · spec enums · routes/runtime
+· built-in apps · docs claims), nine per-area writers. Cross-angle hits drove priority:
+`fieldGroups[].visibleWhen` was found by three angles independently, the marketplace
+install-local surface by four. What follows is what is NOT a checklist item.
+
+### 9a. Product defects found while grounding (decide handling)
+
+Each is captured inside a checklist item as an expected-fail probe or knownGap, so a run
+records actual behavior instead of ticking green.
+
+| # | defect | evidence | captured in | sensitivity |
+|---|---|---|---|---|
+| K1 | **KeyboardShortcutsDialog advertises dead accelerators.** Five listed keys have no handler anywhere (⌘/ focus-search, ⌘D dark-mode, N create, R refresh, ⌘E edit — repo-grep; only near-misses are page-scoped `r` in ApprovalsInbox and Ctrl+Shift+D debug); the sidebar row shows bare "B" while the binding requires ⌘/Ctrl+B; ⌘⇧O/⌘⇧S are advertised globally but their handlers are page-scoped to AiChatPage. A help surface teaching no-op keys. | objectui `app-shell/src/chrome/KeyboardShortcutsDialog.tsx:36-74` (only `?` handled at :88); `components/src/ui/sidebar.tsx:116-121` | platform-core.keyboard-shortcut-surface (expected-fail probes) | UX-integrity — safe to file |
+| K2 | **System-hub "AI Approvals" card is not gated on the AI surface, and its inbox is error-blind.** The card renders unconditionally while every sibling AI entry point gates on `useAiSurface`; the page polls `/api/v1/ai/pending-actions` every 5 s forever, and renders a "No actions waiting" empty queue beside the error alert on the open edition's 501 (the remedy message itself does surface — that half is fine). | objectui `SystemHubPage.tsx:258-265`; `AiPendingActionsPage.tsx:45`; `AiPendingActionsInbox.tsx:286-297`; `useAiSurface.ts:24-28` | ai.console-ai-surface-gating (expected-fail clauses) | UX-integrity — safe to file |
+| K3 | **`fieldGroups[].visibleWhen` is inert in the console one day after landing.** #13030 (2026-08-29) shipped the key with "declared = enforced on day one", but BOTH objectui fieldGroups adapters drop it, so the object-level section predicate never reaches the renderer; a separate fail-direction drift exists between the spec (fail-closed) and the view-section renderer (fail-open). | spec commit 53dc739 vs objectui `plugin-form/src/fieldGroups.ts:60-67`, `plugin-detail/src/synth/buildDefaultPageSchema.ts:622-635`; `object.zod.ts:1177` vs `TabbedForm.tsx:62` | records-forms.field-group-visible-when (console clause expected-fail at the exact adapter sites) | correctness — safe to file |
+| K4 | **objectui external-datasource error UX drifted from the server.** The Setup federation UI's 503-detector matches the retired pre-#3843 string body while the server answers the sendError envelope (its own test pins the stale shape); and ValidationPanel's `DIFF_LABEL` covers 9 of 10 `SchemaDiffEntryKind`s — `'unreachable'` (emitted at `external-datasource-service.ts:789`) has no label. The #4115 class recurring until the next objectui spec-pin bump. | objectui `metadata-admin/external/api.ts:101-115` + `api.test.ts:65-70`; framework `external-datasource-routes.ts:383` | integration-system.external-schema-browser-ui (expected-fail + knownGaps) | correctness — safe to file |
+| K5 | **Three raw-`getRawApp` route registrars remain unledgered** (D6/D22 class, and structurally invisible to the #7526 reverse-parity gate): the `/auth/me/permissions` + `/auth/me/localization` + `/me/apps` trio, `/api/v1/approvals/act`, and `/api/v1/webhooks/redeliver`. The trigger-api/metadata precedent (#11863/#11882) gives each such registrar a per-package ledger + conformance guard; these three never got one. (D22's `/automation/:name/clone` re-verified still unledgered at head.) | `plugin-hono-server/src/current-user-endpoints.ts:708,877,902`; `plugin-approvals/src/approvals-plugin.ts:349-361`; `plugin-webhooks/src/webhook-outbox-plugin.ts:386` | items now cover the routes' semantics (access-security.me-permissions-aggregation-parity, approvals.email-action-token-door, webhook-lifecycle rev 5); the ledger gap itself is this row | low — internal discipline |
+| K6 | **Seed mode `replace` is declared≠implemented.** The spec sells it as "Delete ALL records, then insert" but the write arm is a bare insert whose comment says "caller should have cleared the table" — and no clearing caller exists anywhere. An ADR-0049 shape on the most dangerous member of the enum. | `packages/spec/src/data/seed.zod.ts` vs `packages/metadata-protocol/src/seed-loader.ts:2062-2065,2106` | platform-core.seed-mode-matrix (expected-posture clause — a run must not tick "deletion correctly scoped") | correctness — safe to file |
+
+Two design postures recorded inside items rather than as defect rows: scheduled-report
+dispatch is wired **fail-closed** at head (`reports-plugin.ts:137` passes
+`resolveOwnerContext: undefined` pending ADR-0073 M2, so every live scheduled dispatch
+takes the refusal arm — dashboards.report-schedule-dispatch-delivery asserts exactly
+that, with a flip-to-live tripwire); and the theme provider resolves `system` once per
+evaluation with no matchMedia listener (platform-core.theme-mode-persistence asserts
+resolve-at-load only).
+
+### 9b. Docs drift (PD#10 class — file as docs fixes, not checklist items)
+
+- **`content/docs/references/api/export.mdx:41,168,185`** advertises `jsonl`/`parquet`
+  formats and an async export-job vocabulary with **zero consumers** (see §9c); the live
+  door serves exactly csv/json/xlsx and silently coerces any other `?format=` to csv
+  (`rest-server.ts:7891-7892`) — a caller asking for the documented `parquet` gets a CSV
+  with a 200.
+- **`capabilities/approvals.mdx:11`** counts the dead `queue` style among "eight
+  resolution styles" (#3508: resolves to **nobody**, designers must not offer it); same
+  section says department expansion "optionally" includes sub-departments — the spec
+  always includes all descendants.
+- **`capabilities/integrations.mdx:22`** — "one-click record cloning": the server door is
+  real, but **no objectui surface calls `data.clone`** (confirmed independently by the
+  docs hunter and the records-forms writer). Say API/SDK, or ship the affordance.
+- **`capabilities/views.mdx:23`** — "a default can be set per team": no per-team
+  default-view mechanism exists anywhere in the UI spec.
+- **`capabilities/automation.mdx:19`** — notifications "(in-app, email, chat)": registered
+  channels are inbox/email/sms only (`messaging-service-plugin.ts:159,249,267`); a "chat"
+  notify dead-letters honestly, but the doc sells it as a delivery channel.
+- **`capabilities/index.mdx:7,33`** — HotCRM "one-click install from the Marketplace":
+  the install door exists, but whether the public catalog lists HotCRM is unverifiable
+  in-repo — **maintainer check**, not asserted drift.
+
+### 9c. Declared-but-inert surfaces (ADR-0049 enforce-or-remove candidates — none got items)
+
+- **The whole async export-job surface** — `packages/spec/src/api/export.zod.ts`
+  (`ExportFormat` incl. jsonl/parquet, `ExportJobStatus`, job request/response): no
+  `.parse` site, no route, no producer; published by the export.mdx page above.
+- **`ConcurrencyPolicySchema`** and its neighbor **`ScheduleStateSchema.status`**
+  (`automation/execution.zod.ts:368-387,411`): exported, referenced by nothing.
+- **`driver-nosql.zod.ts` enum family** (consistency/read-write concerns/index/sharding):
+  `driver-mongodb` exists but no stock boot or fixture uses it — non-testable open-side.
+- **`sys_notification_subscription` Setup grid** — declared-inert by its own docstring
+  (#9807: no `'subscribers'` audience member, nothing reads the rows).
+- **objectui collaboration presence is unwired** (`PresenceAvatars` mounts but
+  `useRecordPresence` resolves `[]` — no `PresenceProvider` host anywhere; `LiveCursors`
+  and `CommentThread` have zero consumers); `OnboardingWalkthrough` is a deliberate null
+  stub.
+
+### 9d. Resolutions of earlier sections (append-never-rewrite rule)
+
+- **§7c's `datasource.checkOnBoot` design note is RESOLVED** — #13149 (2026-08-29) made
+  the flag enforced (`external-validation-plugin.ts:288-312` drops opted-out rows before
+  any verdict, with a named skip line); integration-system.external-schema-drift-gate
+  rev 2 now asserts the positive instead of the finding.
+- **§7b's `admin-routes.ts:518` row is half-resolved**: the "no such consumer exists in
+  objectui" clause is now stale — objectui ships a live Setup → Datasources consumer of
+  the federation routes (`metadata-admin/external/api.ts`). The comment-accuracy question
+  it raised should be re-checked against that consumer before any cleanup edit.
+- **§8a D16 is FIXED** (#12457): `setup-nav.contributions.ts:63` ships
+  `nav_packaged_automation`, pinned by `setup-packaged-automation-nav.test.ts`;
+  automation.setup-packaged-automation-board rev 2 inverted its expected-fail nav clause
+  to a positive assertion.
+- **Two checklist items were filing-false-findings stale and are fixed in this PR**:
+  api-backend.route-ledger-live-parity (claimed /api/settings and /api/v1/datasources
+  are unledgered — both have ledgers + conformance tests now; rewritten to the real
+  **11-ledger** universe) and integration-system.datasource-admin-lifecycle (same
+  "unledgered" claim, plus its "always-available static catalog" wording predating the
+  #9391/#9593 uniform auth floor).
+
+### 9e. Blocked-item re-audit
+
+- **UNBLOCKED: identity-auth.oauth-app-consent-loop** — its "no stock oidcProvider flow"
+  claim conflated the platform-as-provider (what it tests, and which mounts by default:
+  `resolveOidcProviderEnabled` follows the MCP default TRUE) with an external IdP (what
+  `linked-accounts-social` genuinely needs — that one stays blocked). Every citation
+  verified before flipping; rev 2.
+- **RE-PRICED: approvals.quorum-m-of-n** — the showcase now ships a real quorum flow
+  (`showcase_committee_quorum`, 2-of-3), so the remaining unblock is **one seed line**
+  (give Ada `finance` or `legal` → a live 2-of-2; a third distinct holder completes
+  2-of-3), not the "showcase design call pending" the old ref claimed; rev 3.
+- **Still blocked, re-verified at head**: approvals.sla-escalation (clock-control harness
+  — `timeoutHours` min 1, `runEscalations()` reads `this.clock`, no HTTP door injects);
+  access-security.no-active-org-session-semantics (unchanged; #13180/#13181 are new
+  adjacent instances of its fail-closed doctrine, noted on the item);
+  records-forms.import-job-undo-cancel (`import-console-undo.spec.ts` still self-skips
+  without `IMPORT_CONSOLE_LIVE=1`); identity-auth.linked-accounts-social (external
+  social/OIDC IdP genuinely required).
+
+### 9f. Checked and CLEAN (so the next sweep does not re-derive)
+
+- `data.mdx`'s "days until close date" formula claim is deliverable via
+  `daysBetween(today(), x)` — the build gate refuses only raw date arithmetic; NOT drift.
+- MCP "on by default at /api/v1/mcp" matches `serve.ts:2315-2321`.
+- Flow wait `eventType` members deliberately collapse to one suspend-with-correlation
+  branch (`wait-node.ts:286-289`) — no variants matrix owed; flow boundary events stay
+  waived-with-reasons in the node matrix.
+- objectui's `FeedFilterMode` imports from spec (`RecordActivityTimeline.tsx:31`,
+  objectui#5969 two-directional pin) — an earlier hand-local-type drift concern is moot.
+- The two previously item-unreferenced live objectui e2e specs
+  (`console-boot-indicator.spec.ts` #2628, `console-rendering.spec.ts`) are now cited on
+  platform-core.boot-health rev 5 — no orphan e2e specs remain.
+- `service-knowledge` is composed by no shipped boot path — ai.mdx's "Knowledge answers"
+  rides the commercial assistant per that page's own closing note; nothing open-side to
+  test.
+- cloud-connection's bind family and the marketplace browse proxy are control-plane
+  coupled; the offline arms are now covered
+  (platform-core.marketplace-install-local-lifecycle / marketplace-console-honesty),
+  browse legs blocked(environment/network) honestly.
+- Stage machines (`state_machine` rule + meta legal-next-states), dashboards `compareTo`,
+  and backup-restore.mdx were each re-checked: covered / no runtime surface promised.
+
+### 9g. Fixtures worth adding (would un-block clauses recorded as knownGaps)
+
+Showcase one-liners: a `unique: true` field; a `fieldGroups[].visibleWhen` specimen; an
+authored `deleteBehavior: 'restrict'` spelling; an `approvalStatusField` declaration on
+one approval flow; the Ada `finance`/`legal` position line (§9e). Boot recipes: a
+zero-user boot (`--no-seed-admin`, fresh DB) for the owner-bootstrap item; a
+verification-enabled boot; an `OS_TENANCY_POSTURE=group` boot (also unblocks §8d's
+operator-gate legs); a configured-`AuditPlugin` boot (the read-audit doc's own snippet).
+Harnesses: an echoing upstream stub for connector auth kinds; a drifted scratch-DB recipe
+for autoMigrate; a second verified non-grant user for the owner-email anchor's entitled
+leg; scratch active approver flows + `sys_team` seeds for the resolution matrix. The
+compiled install-local artifact already exists in-repo (`examples/app-crm` build).
+
+### 9h. Security note
+
+Nothing withheld from this PR. The three new auth-adjacent items
+(access-security.platform-owner-email-anchor, approvals.email-action-token-door,
+access-security.me-permissions-aggregation-parity) assert **shipped guards** already
+public in their issues/ADRs; K1–K6 are UX/correctness/discipline findings; no unfixed
+privilege escalation is disclosed anywhere in this sweep.

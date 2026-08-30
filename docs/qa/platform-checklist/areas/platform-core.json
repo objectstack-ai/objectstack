@@ -77,6 +77,12 @@
           "date": "2026-08-21",
           "change": "scoped clause 2's ERROR-line grep to the boot window and said why. A caller-error refusal logs at ERROR level with a full stack before answering its 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER — so any clause grepping the whole log for ERROR reads ordinary, correctly-refused 4xx traffic as a boot failure. The clause now names the window (process start to the first health 200, the instant clause 0 already records), prescribes cutting the log there or capturing it before the first request, and the negatives carry both directions so the false P0 is recognisable from either side. The security property is unchanged: a genuine ERROR-during-boot still fails independently of the probe (#10236 A5, measured #10257)",
           "ref": "#10236"
+        },
+        {
+          "revision": 5,
+          "date": "2026-08-30",
+          "change": "source-ref addition (2026-08-30 sweep, console-UI angle): the two live objectui e2e specs adjacent to this item's console-shell clause were referenced nowhere in the ledger — e2e/console-boot-indicator.spec.ts (objectui#2628, the pre-bundle white-page pin) and e2e/console-rendering.spec.ts (bootstrap/rendering blank-page pin). Added as source entries with the objectui-repo-only caveat (RUNNER.md standing fact), NOT as automated.ref — they pin the console build, not this item's boot protocol, so a run here may cite them as adjacent evidence but is not asked to execute them. No step/clause change",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     },
