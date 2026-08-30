@@ -2744,7 +2744,7 @@ export class RestServer {
         // non-overridable type keeps reading env-wide (see that predicate for
         // why naming the org unconditionally would resurrect #6190's phantoms).
         const layeredCtx = await this.resolveExecCtx(environmentId, req)
-            .catch(() => undefined);
+            .catch(rethrowAuthzStoreUnavailable);
         const layeredOrganizationId = organizationIdForMetaRead(
             // [#10340] FOLDED, not raw — see the PUT door's org-scope comment
             // for the measurement.
@@ -4385,7 +4385,7 @@ export class RestServer {
                         // simply not in the list. Same memoised `resolveExecCtx`
                         // and same registry gate as every other read door here.
                         const listCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(() => undefined);
+                            .catch(rethrowAuthzStoreUnavailable);
                         const listOrganizationId = organizationIdForMetaRead(
                             // [#10340] FOLDED, not raw — see the PUT door's
                             // org-scope comment for the measurement.
@@ -5223,7 +5223,7 @@ export class RestServer {
                         // ⚠️ NOT a new seam: memoised per request, and this
                         // handler resolves the same context again further down.
                         const readCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(() => undefined);
+                            .catch(rethrowAuthzStoreUnavailable);
                         const readOrganizationId = organizationIdForMetaRead(
                             // [#10340] FOLDED, not raw — see the PUT door's
                             // org-scope comment for the measurement.
@@ -6756,7 +6756,7 @@ export class RestServer {
                         if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
                                 const publishedCtx = await this.resolveExecCtx(environmentId, req)
-                                    .catch(() => undefined);
+                                    .catch(rethrowAuthzStoreUnavailable);
                                 const layered = await publishedProtocol.getMetaItemLayered({
                                     type,
                                     name,
