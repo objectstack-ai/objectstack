@@ -738,8 +738,8 @@ ready → 入队(队列是唯一被认可的落地路径,⛔ 永不队列外 `--
 **入队资格 = PR 上每一个 check 全绿,⛔ 不是 required 子集** —— required 集是队列强制的地板,
 不是 PM 放行的门槛;非必查门的红要么是真缺陷要么是坏门,两者都归 PM 入队前处置(实测:
 一张 required 全绿、非必查类型门与一个测试分片红着的 PR 经队列落地,
-该仓 main 红了约一小时,逐 PR 连环红到 fix-forward 才止)。本段只适用本循环派发的 dev
-PR;PM 自己的工具 PR 留维护者。main-red 修复的跳队例外与事故锚卡约定见 landing-operations B。
+该仓 main 红了约一小时,逐 PR 连环红到 fix-forward 才止)。本段只适用本循环派发的 dev PR;
+PM 自己的工具 PR 留维护者。main-red 修复的跳队例外与事故锚卡约定见 landing-operations B。
 
 **入队与落地(细则见 `references/landing-operations.md`,落地窗口查阅)。** 原则:
 
