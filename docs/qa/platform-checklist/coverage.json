@@ -15,18 +15,24 @@
     "agent": {
       "items": [
         "ai.agent-tool-skill-metadata-roundtrip",
-        "ai.open-edition-honest-degradation"
+        "ai.open-edition-honest-degradation",
+        "ai.console-ai-surface-gating"
       ]
     },
     "api": {
       "items": [
-        "api-backend.declarative-endpoint-execution"
+        "api-backend.declarative-endpoint-execution",
+        "records-forms.record-clone-contract",
+        "api-backend.api-methods-verb-gate",
+        "approvals.email-action-token-door"
       ]
     },
     "app": {
       "items": [
         "platform-core.boot-health",
-        "platform-core.nav-surfaces-render"
+        "platform-core.nav-surfaces-render",
+        "access-security.me-permissions-aggregation-parity",
+        "search.command-palette-navigation"
       ]
     },
     "book": {
@@ -41,19 +47,24 @@
         "dashboards.global-filters-rescope",
         "dashboards.chart-first-paint",
         "dashboards.empty-null-bucket-boundaries",
-        "studio-authoring.packaged-display-class-direct-edit"
+        "studio-authoring.packaged-display-class-direct-edit",
+        "search.command-palette-navigation"
       ]
     },
     "dataset": {
       "items": [
-        "dashboards.dataset-report-authoring"
+        "dashboards.dataset-report-authoring",
+        "api-backend.aggregate-contract-matrix"
       ]
     },
     "datasource": {
       "items": [
         "integration-system.external-datasource-federated-read",
         "integration-system.external-schema-introspection",
-        "integration-system.external-schema-drift-gate"
+        "integration-system.external-schema-drift-gate",
+        "records-forms.field-unique-enforcement",
+        "integration-system.external-schema-browser-ui",
+        "cli.dev-automigrate-policy"
       ]
     },
     "doc": {
@@ -63,7 +74,8 @@
     },
     "email_template": {
       "items": [
-        "integration-system.email-template-render"
+        "integration-system.email-template-render",
+        "identity-auth.email-verification-loop"
       ]
     },
     "field": {
@@ -72,7 +84,15 @@
         "records-forms.conditional-rules-header",
         "records-forms.cascading-options",
         "records-forms.lookup-picker-create-new",
-        "attachments-storage.field-accept-maxsize-server-enforced"
+        "attachments-storage.field-accept-maxsize-server-enforced",
+        "records-forms.field-group-visible-when",
+        "records-forms.field-unique-enforcement",
+        "records-forms.delete-behavior-matrix",
+        "records-forms.field-history-tracking",
+        "api-backend.aggregate-contract-matrix",
+        "api-backend.formula-stdlib-matrix",
+        "approvals.status-mirror-field",
+        "cli.dev-automigrate-policy"
       ]
     },
     "flow": {
@@ -90,13 +110,17 @@
         "automation.setup-packaged-automation-board",
         "access-security.activation-write-operator-gate",
         "access-security.packaged-flow-write-door-parity",
-        "studio-authoring.packaged-automation-studio-lock"
+        "studio-authoring.packaged-automation-studio-lock",
+        "approvals.email-action-token-door",
+        "approvals.approver-resolution-matrix",
+        "approvals.status-mirror-field"
       ]
     },
     "hook": {
       "items": [
         "records-forms.object-hook-lifecycle",
-        "cli.hook-body-extraction-gates"
+        "cli.hook-body-extraction-gates",
+        "access-security.record-view-read-audit"
       ]
     },
     "job": {
@@ -113,7 +137,8 @@
     },
     "mapping": {
       "items": [
-        "records-forms.named-import-mapping"
+        "records-forms.named-import-mapping",
+        "records-forms.import-transform-matrix"
       ]
     },
     "object": {
@@ -121,13 +146,24 @@
         "records-forms.crud-roundtrip",
         "platform-core.metadata-authoring-roundtrip",
         "studio-authoring.object-designer-roundtrip",
-        "platform-core.packaged-object-extend-only"
+        "platform-core.packaged-object-extend-only",
+        "records-forms.field-group-visible-when",
+        "records-forms.field-unique-enforcement",
+        "records-forms.delete-behavior-matrix",
+        "records-forms.record-clone-contract",
+        "records-forms.field-history-tracking",
+        "api-backend.aggregate-contract-matrix",
+        "api-backend.formula-stdlib-matrix",
+        "api-backend.api-methods-verb-gate",
+        "integration-system.external-schema-browser-ui",
+        "search.command-palette-navigation"
       ]
     },
     "page": {
       "items": [
         "studio-authoring.record-page-roundtrip",
-        "platform-core.nav-surfaces-render"
+        "platform-core.nav-surfaces-render",
+        "search.command-palette-navigation"
       ]
     },
     "permission": {
@@ -142,7 +178,10 @@
         "access-security.sharing-rule-authoring-ui",
         "access-security.owd-save-gate",
         "access-security.share-link-capability-tokens",
-        "access-security.packaged-permission-set-lifecycle"
+        "access-security.packaged-permission-set-lifecycle",
+        "access-security.platform-owner-email-anchor",
+        "access-security.me-permissions-aggregation-parity",
+        "api-backend.api-methods-verb-gate"
       ]
     },
     "position": {
@@ -150,7 +189,8 @@
         "access-security.scope-depth-asymmetry",
         "approvals.per-group-signoff",
         "approvals.dynamic-approver-routing",
-        "identity-auth.teams-bu-membership"
+        "identity-auth.teams-bu-membership",
+        "approvals.approver-resolution-matrix"
       ]
     },
     "qa": {
@@ -160,14 +200,17 @@
     },
     "query": {
       "items": [
-        "api-backend.query-contract-matrix"
+        "api-backend.query-contract-matrix",
+        "api-backend.aggregate-contract-matrix"
       ]
     },
     "report": {
       "items": [
         "dashboards.dataset-report-authoring",
         "dashboards.drill-through-range",
-        "dashboards.saved-report-ownership"
+        "dashboards.saved-report-ownership",
+        "dashboards.report-schedule-dispatch-delivery",
+        "search.command-palette-navigation"
       ]
     },
     "seed": {
@@ -208,7 +251,8 @@
         "studio-authoring.view-authoring-live",
         "records-forms.gantt-interactions",
         "records-forms.saved-view-management",
-        "studio-authoring.packaged-display-class-direct-edit"
+        "studio-authoring.packaged-display-class-direct-edit",
+        "records-forms.field-history-tracking"
       ]
     },
     "webhook": {
@@ -218,7 +262,8 @@
     },
     "capability": {
       "items": [
-        "access-security.capability-declaration-lifecycle"
+        "access-security.capability-declaration-lifecycle",
+        "ai.console-ai-surface-gating"
       ]
     }
   }
