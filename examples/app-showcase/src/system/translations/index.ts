@@ -893,6 +893,30 @@ export const ShowcaseTranslationBundle = {
           project_picker: { label: '项目', placeholder: '选择项目…' },
         },
       },
+      // Nested per-component copy. These ids sit inside a container's
+      // `properties.children`, which `translatePage` resolves (#12961) but
+      // `os i18n extract` could not see until #13109 matched the extractor's
+      // walk to the resolver's — so they were declared surface that the
+      // ratchet had never counted. Nothing about the AUTHORED metadata changed;
+      // the extractor stopped omitting it.
+      showcase_command_center: {
+        components: {
+          cc_k1: { label: '活跃项目' },
+          cc_k2: { label: '待办任务' },
+          cc_k3: { label: '待复审' },
+          cc_k4: { label: '风险项目' },
+          cc_k5: { label: '客户' },
+          cc_k6: { label: '总预算' },
+        },
+      },
+      showcase_styling_gallery: {
+        components: {
+          cta_Free: { label: '开始使用' },
+          cta_Solo: { label: '升级到 Solo' },
+          cta_Team: { label: '升级到 Team' },
+          cta_Business: { label: '升级到 Business' },
+        },
+      },
     },
   },
 };

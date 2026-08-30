@@ -46,6 +46,11 @@
 //     `use`. A recipe nobody opts into is dead text a runner may still replay.
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
+//   - and no `call` string — the one field in this ledger a runner REPLAYS —
+//     instructs a `/meta/<plural>` URL spelling the boundary merely folds.
+//     `call` ONLY: the fields beside it legitimately quote plural spellings to
+//     narrate the fold (see the meta-URL block below, which also explains why
+//     the fold itself is not this gate's to narrow).
 //
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
@@ -471,6 +476,209 @@ function unreferencedRecipeMessage(area, recipe) {
   );
 }
 
+// ── `/meta` URL spelling inside `call` strings (#13010) ─────────────────────
+// A checklist step's `call` is not prose. RUNNER.md has an operator REPLAY it
+// against a live boot, so a `call` is the one field in this ledger that is an
+// executable instruction — and this repo shipped four steps telling that
+// operator to send `PUT /api/v1/meta/objects/:name`, a plural item write on
+// the metadata write door. The `/meta` type segment is always SINGULAR; those
+// steps answered 200 only because the boundary FOLDS the plural spelling.
+//
+// ## Why a guard and not just a fix
+//
+// The four were measured and repaired (#11042 → #13011). What makes this a
+// gate rather than a sweep is the population's shape: measured at merged
+// `main` 2866d5f97e, `areas/records-forms.json` contained ZERO `meta/objects`
+// occurrences — and four days later a FIFTH site arrived in 5737222b89
+// (#12382), authored, reviewed and merged with nothing in the tree able to
+// see it. The class is not a backlog being drained; it is still being newly
+// introduced, one honest PR at a time. So the deliverable is "what stops the
+// next one", and a sweep — however complete on the day it runs — is by
+// construction the thing that already failed here.
+//
+// ## ⛔ The fold is NOT the defect and is NOT narrowed here
+//
+// `/meta/objects/:name` and `/meta/object/:name` answer identically today and
+// must keep doing so: the plural spellings are a published tolerance, and the
+// sibling gate `check-doc-route-spelling.mjs` carries the same fence in its
+// own header. What this refuses is the repo INSTRUCTING the non-canonical
+// spelling in a step somebody is told to replay. Nothing here reaches the
+// wire, the router, or any accept/reject decision.
+//
+// ## ⛔ `call` ONLY — the boundary that keeps this from redding correct prose
+//
+// The neighbouring fields legitimately CONTAIN plural spellings, because
+// their job is to narrate the fold or the defect: a `why` explaining why the
+// plural door was a hole, a `source` citing the registration that was
+// retired, and `attachments-storage.json`'s `requires` prose correctly naming
+// the parameterized `PUT /api/v1/meta/:type/:name` — a segment-shaped
+// literal, not a plural. That is also precisely why this could not be a root
+// expansion of `check-doc-route-spelling.mjs` instead: that gate scans a
+// file's TEXT against the route ledgers, and text-scanning these files would
+// flag the narration along with the instruction. A gate that reds a correct
+// row costs more than the defect it catches, so the read is field-addressed:
+// values under the key `call`, at any depth, and nothing else.
+//
+// Depth, not a curated path, for the same reason the gate exists: every
+// `call` on the ledger today sits in an AREA-LEVEL `fixtures.<recipe>
+// .sequence[]`, but a path list that matches where they happen to live now
+// can never match the one added tomorrow — which is the exact failure this
+// block is a response to.
+//
+// ## The vocabulary is READ from the contract, never copied
+//
+// The refusal keys on `META_URL_TO_SINGULAR` in
+// `packages/spec/src/meta-spelling/meta-url-data.generated.ts` — the closed
+// set of spellings the boundary folds, DERIVED (Prime Directive #8) by
+// `packages/spec/scripts/build-meta-url-spelling.ts` from `PLURAL_TO_SINGULAR`
+// and `DEFAULT_METADATA_TYPE_REGISTRY`, and re-derived from those live sources
+// on every CI lap by `check:meta-url-spelling` (.github/workflows/lint.yml,
+// "Check the meta-url-spelling data module is current and spellings agree").
+// So the set this guard refuses cannot drift from the set the boundary
+// tolerates: a new metadata type arrives here with its plural already known,
+// and a retired one leaves. Copying the 34 spellings into this file would
+// move the drift one seam up with nothing watching it — the same argument the
+// trap-vocabulary block above makes about RUNNER.md.
+//
+// This is also why keying on the CLOSED SET matters more than it looks. A
+// trailing-`s` heuristic would flag `/meta/positions` (a real fold, fine) and
+// also anything that merely LOOKS plural, while missing every camelCase
+// spelling (`sharingRules`, `analyticsCubes`, `ragPipelines`) that folds just
+// as much. Membership answers both directions exactly.
+//
+// Same refusal discipline as the trap table: an extractor that reads zero
+// pairs would validate every `call` against an empty set and print a green
+// indistinguishable from a working parse (#4690), so it REFUSES rather than
+// returning an empty vocabulary, and the battery below proves the refusal
+// still fires.
+
+const META_URL_DATA_FILE = join(ROOT, 'packages/spec/src/meta-spelling/meta-url-data.generated.ts');
+const META_URL_EXPORT = 'META_URL_TO_SINGULAR';
+
+// Measured floor, not a pin. The live map held 34 spellings at introduction
+// (2026-08-29, `check:meta-url-spelling`: "34 spellings, 27 registry-declared
+// types"). An exact pin would red on every legitimate metadata type the
+// platform adds; a floor only speaks when the PARSE has collapsed — a quoting
+// migration, a reshaped literal — which is the failure that would otherwise be
+// silent. Well below 34 on purpose: this number should never need touching.
+const META_URL_SPELLING_FLOOR = 20;
+
+// The anchor. `objects → object` is the spelling this whole class is about and
+// the one metadata type that reaches the map through BOTH derivation limbs
+// (the manifest map and the registry). Losing it means the derivation moved
+// somewhere this extractor is no longer reading, and a silent green would then
+// be exactly wrong.
+const META_URL_ANCHOR = 'objects';
+
+/**
+ * Extract `META_URL_TO_SINGULAR`'s plural→singular pairs from the generated
+ * spec module, as source text.
+ *
+ * Returns `{ folded, canonical, refusal }`. A non-null `refusal` means the map
+ * could not be read and the caller MUST treat it as a hard failure — never as
+ * "no spellings to check". Read as text rather than imported because this gate
+ * is a zero-dependency `node` script on an unbuilt tree (README "Operating
+ * cadence": zero-dependency, ~1s, no tokens); `extractEnumMembers` below reads
+ * `packages/spec` the same way, for the same reason.
+ */
+function extractMetaUrlSpellings(src) {
+  const no = (refusal) => ({ folded: [], canonical: [], refusal });
+  // Masked first: the file's docblock quotes spellings in prose, and a
+  // comment-blind read would mint vocabulary out of the explanation.
+  const masked = maskComments(String(src));
+
+  const decl = masked.match(new RegExp(`(?:export\\s+)?const\\s+${META_URL_EXPORT}\\b[^=]*=`));
+  if (!decl) {
+    return no(`\`${META_URL_EXPORT}\` is not declared in packages/spec/src/meta-spelling/meta-url-data.generated.ts — renamed, moved, or the generator now emits a different shape. Re-point this extractor at the contract; it will not guess.`);
+  }
+
+  const start = masked.indexOf('{', decl.index + decl[0].length);
+  if (start === -1) return no(`\`${META_URL_EXPORT}\` is declared but no object literal follows it.`);
+
+  let depth = 0;
+  let end = -1;
+  for (let j = start; j < masked.length; j++) {
+    if (masked[j] === '{') depth++;
+    else if (masked[j] === '}' && --depth === 0) {
+      end = j;
+      break;
+    }
+  }
+  if (end === -1) return no(`\`${META_URL_EXPORT}\`'s object literal is never closed — the file is truncated or unparseable.`);
+
+  // Both quoting styles, so a generator that stops quoting its keys reshapes
+  // the file without silently halving what this reads.
+  const pairs = [...masked.slice(start, end + 1).matchAll(/(["']?)([A-Za-z0-9_]+)\1\s*:\s*["']([A-Za-z0-9_]+)["']/g)];
+  if (pairs.length === 0) {
+    return no(`\`${META_URL_EXPORT}\` parsed to ZERO spellings — the literal's shape changed. An empty vocabulary would validate every \`call\` against nothing and print a green identical to a working parse, so this is a refusal.`);
+  }
+  const folded = pairs.map((m) => m[2]);
+  const canonical = pairs.map((m) => m[3]);
+  if (folded.length < META_URL_SPELLING_FLOOR) {
+    return no(`\`${META_URL_EXPORT}\` parsed to only ${folded.length} spellings, below the floor of ${META_URL_SPELLING_FLOOR} (34 at introduction) — a partial parse, not a shrunken contract. Fix the extractor rather than lowering the floor.`);
+  }
+  if (!folded.includes(META_URL_ANCHOR)) {
+    return no(`\`${META_URL_EXPORT}\` parsed ${folded.length} spellings but not the \`${META_URL_ANCHOR}\` anchor — the one spelling reaching the map through both derivation limbs. Its absence means this extractor is reading something other than the live contract.`);
+  }
+  return { folded, canonical, refusal: null };
+}
+
+// A `/meta` or `/metadata` path segment, wherever it appears in the string.
+// Scanned rather than anchored because a `call` is not always a bare URL: the
+// ledger carries steps like "toggle a stock flow OFF for the 409 row: POST
+// /api/v1/automation/…", where the instruction wraps the address in prose.
+// The segment ends at the next path separator, query, fragment or delimiter,
+// so `?package=com.objectstack.qa.feeds` never becomes part of it, and a
+// parameter placeholder (`:type`, `{type}`, `<type>`) is simply never a member
+// of the closed set.
+const META_URL_PATH_SEGMENT = /\/(?:metadata|meta)\/([^/?#\s"'`)\],;]+)/g;
+
+/** The folded spellings one `call` string instructs, deduped. Pure; battery-tested below. */
+function foldedSpellingsInCall(call, folded) {
+  if (typeof call !== 'string') return [];
+  const hits = new Set();
+  for (const m of call.matchAll(META_URL_PATH_SEGMENT)) {
+    if (folded.has(m[1])) hits.add(m[1]);
+  }
+  return [...hits];
+}
+
+/**
+ * Every `call` string in one area document, with a readable path to it.
+ *
+ * Field-addressed at any depth — see the `call` ONLY note above. Array
+ * elements render by their `id` when they carry one, so an item-level `call`
+ * reports as `items[records-forms.foo].call` rather than by ordinal.
+ */
+function collectCalls(node, path = '', out = []) {
+  if (Array.isArray(node)) {
+    node.forEach((v, i) => {
+      const label = v && typeof v === 'object' && typeof v.id === 'string' && v.id ? v.id : i;
+      collectCalls(v, `${path}[${label}]`, out);
+    });
+    return out;
+  }
+  if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) {
+      const p = path ? `${path}.${k}` : k;
+      if (k === 'call' && typeof v === 'string') out.push({ path: p, call: v });
+      collectCalls(v, p, out);
+    }
+  }
+  return out;
+}
+
+/** How a folded `call` spelling is reported — one place, so the battery pins the text a reader gets. */
+function foldedCallMessage(path, call, spelling, singular) {
+  return (
+    `${path} instructs the non-canonical \`/meta/${spelling}\` spelling: ${JSON.stringify(call)}.` +
+    ` The metadata door's type segment is always SINGULAR — write \`/meta/${singular}/…\`.` +
+    ` \`${spelling}\` is a key of \`${META_URL_EXPORT}\` (packages/spec/src/meta-spelling/meta-url-data.generated.ts), i.e. a spelling the boundary FOLDS,` +
+    ' so this step answers 200 today and no run will ever notice — which is why it needs a gate rather than a reviewer.' +
+    ' ⛔ The fold is NOT the defect and is not being narrowed: `call` is the one field here an operator REPLAYS, and the repo must not INSTRUCT the spelling it merely tolerates.'
+  );
+}
+
 /**
  * The positive control. Proves the extractor reads a good table AND refuses an
  * empty / renamed / reshaped one, and that the item-side checker catches both
@@ -748,16 +956,176 @@ function selfTestUnreferencedRecipes() {
   return { checked, failures };
 }
 
+/**
+ * The positive control for the `/meta` call-spelling refusal.
+ *
+ * This direction carries the trap-vocabulary block's silent-success burden and
+ * the unreferenced-recipe block's empty-subject burden AT ONCE, which is why
+ * its battery is the longest here:
+ *
+ *  - its authority is parsed out of another package's generated source, so a
+ *    reshaped literal reads as "no plural spellings exist" and every `call`
+ *    then validates clean (#4690, the direction this tree treats as worse than
+ *    no check at all);
+ *  - and once the ledger is repaired its subject population is ZERO and is
+ *    meant to stay zero, so the real data can never again distinguish "this
+ *    fires" from "this was deleted".
+ *
+ * The FALSE-POSITIVE half is pinned just as hard as the firing half, and
+ * deliberately so: the fields beside `call` narrate the fold in plural, the
+ * ledger's own canonical steps read `/meta/object/…`, and its `requires` prose
+ * names the parameterized `/meta/:type/:name`. A guard that reds any of those
+ * costs more than the defect it catches, so each shape is observed staying
+ * silent — against the REAL corpus at the bottom, not only fixtures.
+ */
+function selfTestMetaCallSpelling() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok, detail = '') => {
+    checked++;
+    if (!ok) failures.push(detail ? `${what} [${detail}]` : what);
+  };
+
+  // ── The extractor reads a good literal ────────────────────────────────────
+  // A miniature of the generated file, in its real shape (frozen object, typed
+  // declaration, a docblock that quotes spellings in prose).
+  const good = `
+/** The map. Prose here says "objects" and "widgets" and must mint nothing. */
+export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.freeze({
+  "objects": "object",
+  "apps": "app",
+  "sharingRules": "sharing_rule",
+  "email_templates": "email_template",
+${Array.from({ length: 20 }, (_, i) => `  "kind${i}s": "kind${i}",`).join('\n')}
+});
+export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze({ "leaked": "leak" });
+`;
+  const okRead = extractMetaUrlSpellings(good);
+  t('M1 a well-formed map is read without refusal', okRead.refusal === null);
+  t('M2 the plural keys are what it returns', okRead.folded.includes('objects') && okRead.folded.includes('apps'));
+  t('M3 camelCase spellings are read too — they fold just as much as the -s ones', okRead.folded.includes('sharingRules'));
+  t('M4 snake_case spellings are read too', okRead.folded.includes('email_templates'));
+  t('M5 the canonical singulars come back alongside, so the message can name the fix', okRead.canonical.includes('object') && okRead.canonical.includes('sharing_rule'));
+  t('M6 prose in the docblock mints no vocabulary — comments are masked before the read', !okRead.folded.includes('widgets'));
+  t('M7 a NEIGHBOURING map in the same file is not swept in — the read is bounded by the literal, not by the file', !okRead.folded.includes('leaked'));
+
+  // Unquoted keys are the shape a generator change would most plausibly take,
+  // and the one that would silently halve a quote-only regex.
+  const unquoted = good.replace(/"(objects|apps)":/g, '$1:');
+  const unquotedRead = extractMetaUrlSpellings(unquoted);
+  t('M8 unquoted keys read identically — a quoting migration reshapes the file, it does not shrink the vocabulary', unquotedRead.refusal === null && unquotedRead.folded.includes('objects') && unquotedRead.folded.includes('apps'));
+
+  // ── ...and REFUSES every way it can fail ──────────────────────────────────
+  const refusalOf = (src) => extractMetaUrlSpellings(src).refusal;
+  t('M9 a missing declaration is a refusal, not an empty vocabulary', typeof refusalOf('export const SOMETHING_ELSE = 1;') === 'string');
+  t('M10 that refusal names the export it could not find', String(refusalOf('export const SOMETHING_ELSE = 1;')).includes('META_URL_TO_SINGULAR'));
+  t('M11 a declaration with no object literal is a refusal', typeof refusalOf('export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = derive();') === 'string');
+  t('M12 an unclosed literal is a refusal, not a partial read', typeof refusalOf('export const META_URL_TO_SINGULAR = Object.freeze({ "objects": "object",') === 'string');
+  t('M13 a literal that parses to ZERO pairs is a refusal — the #4690 direction', typeof refusalOf('export const META_URL_TO_SINGULAR = Object.freeze({});') === 'string');
+  t('M14 a PARTIAL parse is a refusal — the floor speaks before a shrunken authority can', typeof refusalOf('export const META_URL_TO_SINGULAR = Object.freeze({ "objects": "object", "apps": "app" });') === 'string');
+  t('M15 that refusal says fix the extractor, not lower the floor', String(refusalOf('export const META_URL_TO_SINGULAR = Object.freeze({ "objects": "object" });')).includes('rather than lowering the floor'));
+  const anchorless = good.replace(/"objects": "object",/, '"widgets": "widget",');
+  t('M16 losing the `objects` anchor is a refusal even when the count is healthy', typeof extractMetaUrlSpellings(anchorless).refusal === 'string');
+  t('M17 the anchor refusal says the extractor is reading the wrong thing', String(extractMetaUrlSpellings(anchorless).refusal).includes('anchor'));
+
+  // ── The predicate FIRES on the class ──────────────────────────────────────
+  const folded = new Set(['objects', 'apps', 'sharingRules', 'docs', 'positions']);
+  const hits = (call) => foldedSpellingsInCall(call, folded);
+  t('M18 the measured site is flagged — the assertion this whole block exists for',
+    hits('PUT /api/v1/meta/objects/qa_nofeeds?package=com.objectstack.qa.feeds').join() === 'objects');
+  t('M19 a query string is not part of the segment', hits('PUT /api/v1/meta/objects/x?package=a.b.c&overwrite=true').length === 1);
+  t('M20 a plural with NO trailing path segment is still an instruction', hits('GET /api/v1/meta/objects').join() === 'objects');
+  t('M21 a camelCase fold is caught — the half a trailing-`s` heuristic would miss', hits('PUT /api/v1/meta/sharingRules/x').join() === 'sharingRules');
+  t('M22 the `/metadata` prefix is the same door', hits('GET /api/v1/metadata/objects/lead').join() === 'objects');
+  t('M23 an address wrapped in prose is still an address — `call` is not always a bare URL',
+    hits('provision the parent first: PUT /api/v1/meta/objects/qa_thing, then read it back').join() === 'objects');
+  t('M24 two folded spellings in one string are both reported', hits('PUT /api/v1/meta/objects/a then PUT /api/v1/meta/apps/b').length === 2);
+  t('M25 the same spelling twice is reported once', hits('PUT /api/v1/meta/objects/a then /api/v1/meta/objects/b').length === 1);
+
+  // ── ...and stays SILENT on everything correct ─────────────────────────────
+  t('M26 the canonical singular is clean — the shape the fix produces', hits('PUT /api/v1/meta/object/qa_vault?package=com.objectstack.qa.attachments').length === 0);
+  t('M27 `:type` is a parameter, not a plural — the `requires` prose shape', hits('PUT /api/v1/meta/:type/:name').length === 0);
+  t('M28 `{type}` is not a plural either', hits('PUT /api/v1/meta/{type}/{name}').length === 0);
+  t('M29 `<type>` is not a plural either', hits('PUT /api/v1/meta/<type>/<name>').length === 0);
+  t('M30 a segment that merely RESEMBLES a plural is not one — membership of the closed set decides, never a trailing `s`',
+    hits('PUT /api/v1/meta/widgets/x').length === 0 && hits('GET /api/v1/meta/status').length === 0);
+  t('M31 a plural OUTSIDE the /meta door is not this gate\'s business', hits('GET /api/v1/data/showcase_invoice/<id of INV-1003>').length === 0 && hits('POST /api/v1/packages').length === 0);
+  t('M32 a folded word that is not a path segment is not an instruction', hits('confirm the objects list renders').length === 0);
+  t('M33 `/meta` with no type segment matches nothing', hits('GET /api/v1/meta').length === 0);
+  t('M34 a non-string `call` is not a crash and not a finding', foldedSpellingsInCall(undefined, folded).length === 0 && foldedSpellingsInCall(42, folded).length === 0);
+
+  // ── The walk reads `call` and NOTHING else (ruling: `call` only) ──────────
+  const doc = {
+    area: 'demo',
+    fixtures: {
+      $comment: 'a plural here is narration: PUT /api/v1/meta/objects/x',
+      'qa-recipe': {
+        requires: ['PUT /api/v1/meta/:type/:name is capability-gated'],
+        why: 'the plural door /api/v1/meta/objects/x was a hole around the singular lock',
+        sequence: [
+          { step: 1, call: 'POST /api/v1/packages' },
+          {
+            step: 2,
+            call: 'PUT /api/v1/meta/objects/qa_thing?package=a.b',
+            expect: 'the old /api/v1/meta/objects/x spelling answered 200',
+            source: 'retired in #9180: /api/v1/meta/objects/:name/state/:field',
+          },
+        ],
+      },
+    },
+    items: [{ id: 'demo.probe', steps: ['x'], verify: { call: 'GET /api/v1/meta/apps/showcase' } }],
+  };
+  const found = collectCalls(doc);
+  t('M35 every `call` is collected, at any depth', found.length === 3);
+  t('M36 an AREA-LEVEL recipe step is reached — where every call on the real ledger lives today', found.some((c) => c.path === 'fixtures.qa-recipe.sequence[0].call'));
+  t('M37 an ITEM-level `call` is reached too — the path a curated list would miss tomorrow', found.some((c) => c.call === 'GET /api/v1/meta/apps/showcase'));
+  t('M38 an item renders by its id, not its ordinal', found.some((c) => c.path === 'items[demo.probe].verify.call'));
+
+  const docHits = found.flatMap((c) => foldedSpellingsInCall(c.call, folded).map((s) => ({ ...c, s })));
+  t('M39 the document\'s two folded calls are both flagged', docHits.length === 2);
+  // The ruling, asserted where it is decided — at COLLECTION. Each of these
+  // fields carries a plural spelling in the fixture above, on purpose; a walk
+  // that read them would have flagged all four, and every one would be wrong.
+  const read = found.map((c) => c.call);
+  t('M40 only `call` is ever collected', found.every((c) => c.path.endsWith('.call')));
+  t('M41 `why` narrating the plural door is never read', !read.some((c) => c.includes('was a hole')));
+  t('M42 `expect` narrating what the old spelling answered is never read', !read.some((c) => c.includes('answered 200')));
+  t('M43 `source` citing a retired plural registration is never read', !read.some((c) => c.includes('#9180')));
+  t('M44 `requires` prose naming the parameterized `/meta/:type/:name` is never read', !read.some((c) => c.includes('capability-gated')));
+  t('M44b a `$comment` annotation is never read', !read.some((c) => c.includes('narration')));
+
+  // ── The message a reader actually gets ────────────────────────────────────
+  const msg = foldedCallMessage('fixtures.qa-recipe.sequence[1].call', 'PUT /api/v1/meta/objects/x', 'objects', 'object');
+  t('M45 the message names where the string lives', msg.includes('fixtures.qa-recipe.sequence[1].call'));
+  t('M46 it names the canonical spelling to write, not just the offence', msg.includes('/meta/object/'));
+  t('M47 it says the step answers 200 today — why nothing else catches this', msg.includes('200'));
+  t('M48 it carries the fence: the fold is not being narrowed', msg.includes('NOT the defect'));
+
+  // ── The LIVE contract, not a fixture ──────────────────────────────────────
+  // Everything above proves the machinery. These prove it is pointed at the
+  // real thing — the seam the fixtures cannot see, and the one that rots.
+  const live = existsSync(META_URL_DATA_FILE) ? extractMetaUrlSpellings(readFileSync(META_URL_DATA_FILE, 'utf8')) : { refusal: 'the generated spec module is missing', folded: [], canonical: [] };
+  t('M49 the LIVE generated module is readable — this gate is pointed at the real contract', live.refusal === null, live.refusal ?? '');
+  t('M50 the live vocabulary is non-trivial', live.refusal === null && live.folded.length >= META_URL_SPELLING_FLOOR, live.refusal === null ? `${live.folded.length} spellings` : '');
+  t('M51 the live vocabulary carries the anchor', live.folded.includes(META_URL_ANCHOR));
+  t('M52 the live map is a bijection-free lookup: no folded spelling is ALSO a canonical singular — so the refusal can never fire on a canonical `/meta/<type>` segment',
+    live.refusal === null && !live.folded.some((f) => live.canonical.includes(f)));
+
+  return { checked, failures };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
   const unref = selfTestUnreferencedRecipes();
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures];
+  const metaCall = selfTestMetaCallSpelling();
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
-        ' and the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone.',
+        ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
+        ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold.',
     );
     process.exit(0);
   }
@@ -793,6 +1161,33 @@ if (unreferencedControl.failures.length) {
   for (const f of unreferencedControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
+
+// And for the `/meta` call-spelling refusal. Two burdens at once here: the
+// authority is parsed out of another package's source (a reshaped literal
+// reads as "no plural spellings exist"), and once the ledger is repaired the
+// subject population is zero — so nothing but this battery can tell a working
+// direction from a deleted one.
+const metaCallControl = selfTestMetaCallSpelling();
+if (metaCallControl.failures.length) {
+  console.error("check-platform-checklist: the `/meta` call-spelling refusal's own positive control FAILED — an executable step instructing a folded plural spelling would pass unreported, which is the exact defect this check was added to close.\n");
+  for (const f of metaCallControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+// The folded-spelling vocabulary, read from the contract before anything is
+// judged against it. Refused rather than defaulted: with no vocabulary every
+// `call` validates against an empty set and this gate prints the same green it
+// printed before the refusal existed.
+const metaSpellingRead = existsSync(META_URL_DATA_FILE)
+  ? extractMetaUrlSpellings(readFileSync(META_URL_DATA_FILE, 'utf8'))
+  : { folded: [], canonical: [], refusal: 'packages/spec/src/meta-spelling/meta-url-data.generated.ts is not in the tree — run `pnpm --filter @objectstack/spec gen:meta-url-spelling`.' };
+if (metaSpellingRead.refusal) {
+  console.error(`check-platform-checklist: cannot read \`${META_URL_EXPORT}\` — ${metaSpellingRead.refusal}`);
+  console.error('\nThis is a REFUSAL, not a pass: with no folded-spelling vocabulary, every `call` string would validate against an empty set and report zero problems.');
+  process.exit(1);
+}
+const FOLDED_META_SPELLINGS = new Set(metaSpellingRead.folded);
+const CANONICAL_META_SINGULAR = new Map(metaSpellingRead.folded.map((f, i) => [f, metaSpellingRead.canonical[i]]));
 
 if (!existsSync(RUNNER_FILE)) {
   console.error(`check-platform-checklist: missing ${RUNNER_FILE} — the trap vocabulary lives in its "${TRAP_HEADING}" table and \`traps\` has nothing to validate against.`);
@@ -940,6 +1335,21 @@ for (const { file, stem, doc } of parsed) {
       if (typeof es?.file !== 'string' || typeof es?.export !== 'string' || !Number.isInteger(es?.expect)) {
         where('"enumSource" needs { file, export, expect } — the spec enum this item\'s variants matrix was authored against');
       }
+    }
+  }
+}
+
+// ── `/meta` call spelling, over every area document ────────────────────────
+// A separate pass rather than a limb of the item walk above: `call` strings
+// live in the AREA-LEVEL `fixtures` block today, which that loop never
+// descends into, and an item-shaped check would have been blind to all 19 of
+// them. Reported against the file with no item id — the path names the string.
+let metaCallsScanned = 0;
+for (const { file, doc } of parsed) {
+  for (const { path, call } of collectCalls(doc)) {
+    metaCallsScanned++;
+    for (const spelling of foldedSpellingsInCall(call, FOLDED_META_SPELLINGS)) {
+      err(file, null, foldedCallMessage(path, call, spelling, CANONICAL_META_SINGULAR.get(spelling)));
     }
   }
 }
@@ -1120,5 +1530,6 @@ console.log(
   `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe assertions).`,
+    ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling assertions).`,
 );
