@@ -603,14 +603,18 @@ export async function selfTest() {
   // single-file `crosspkg` entry the way #10848's SKILL.md is. Plus, since
   // #12201, the one declaration under the `skills/**` root that card added
   // (the export-list corpus gate reads the published catalog from inside
-  // @objectstack/spec). Ten plus one plus two plus one: the rollback now
-  // uncovers fourteen. This pin is judged over the LIVE declaration table on
+  // @objectstack/spec). Plus, since #12924, the one repo-root declaration that
+  // card added (the checked-in SDUI manifest artefact @objectstack/lint's
+  // production-witness suite reads from the workspace root), covered only
+  // through its own single-file `crosspkg` entry the way #10848's SKILL.md is.
+  // Ten plus one plus two plus one plus one: the rollback now uncovers
+  // fifteen. This pin is judged over the LIVE declaration table on
   // purpose: a declaration added under a root the rollback keeps leaves the
   // count alone, one under a new root moves it and is recorded here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 14,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 15,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     uncoveredGlobs(preFix).includes('skills/**'),
@@ -627,6 +631,10 @@ export async function selfTest() {
   assert(
     uncoveredGlobs(preFix).includes('skills/objectstack-automation/SKILL.md'),
     `-- and #10178 added the automation skill file, by name`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('sdui.manifest.json'),
+    `-- and #12924 added the repo-root SDUI manifest artefact, by name`,
   );
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
@@ -652,7 +660,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one, ` +
       `and the CI wiring read out of lint.yml.`,
   );
   return 0;

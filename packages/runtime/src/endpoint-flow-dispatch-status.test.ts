@@ -131,15 +131,26 @@ const RAN_AND_FAILED: AutomationResult = {
     durationMs: 45,
 };
 
-/** The engine's two never-dispatched exits, each stamped with its own code (#9415). */
+/** The engine's never-dispatched exits, each stamped with its own code (#9415, #10025). */
 const DISABLED: AutomationResult = {
     success: false, code: 'FLOW_DISABLED', error: `Flow '${FLOW}' is disabled`,
 };
 const NO_START_NODE: AutomationResult = {
     success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node',
 };
+/**
+ * [#10025] The definition-level input-schema refusal, ruled NON-RETRYABLE and
+ * classified never-dispatched: the engine refuses once (no retry-loop entry),
+ * stamps the #11504-registered code, and — exactly like its two siblings
+ * above — carries NO `status`.
+ */
+const INPUT_SCHEMA_INVALID: AutomationResult = {
+    success: false,
+    code: 'FLOW_INPUT_SCHEMA_INVALID',
+    error: "Node 'purge_batch' parameter 'count' expected type 'number' but got 'string'",
+};
 
-describe('#9462 — a declared `type: flow` endpoint answers the four-row table', () => {
+describe('#9462 — a declared `type: flow` endpoint answers the status table', () => {
     it('row 1: a flow the service does not hold is 404, and is never dispatched', async () => {
         const { service, execute, getFlow } = automationServiceWith({ flows: [] });
 
@@ -187,7 +198,21 @@ describe('#9462 — a declared `type: flow` endpoint answers the four-row table'
         expect((answer.body as any).data).toBeUndefined();
     });
 
-    it('row 4: a run that dispatched and was rejected is 400 FLOW_FAILED, with the run’s own artefacts', async () => {
+    it('row 4: a node config violating its declared inputSchema is 422 FLOW_INPUT_SCHEMA_INVALID', async () => {
+        const { service } = automationServiceWith({ result: INPUT_SCHEMA_INVALID });
+
+        const answer = await viaEndpoint(service);
+
+        expect(answer.status).toBe(422);
+        const error = expectConformantError(answer);
+        expect(error.code).toBe('FLOW_INPUT_SCHEMA_INVALID');
+        // The engine's own words survive — the guard names the offending node
+        // and parameter, which is what a flow author fixes.
+        expect(error.message).toBe(INPUT_SCHEMA_INVALID.error);
+        expect((answer.body as any).data).toBeUndefined();
+    });
+
+    it('row 5: a run that dispatched and was rejected is 400 FLOW_FAILED, with the run’s own artefacts', async () => {
         const { service } = automationServiceWith({
             result: {
                 ...RAN_AND_FAILED,
@@ -212,7 +237,7 @@ describe('#9462 — a declared `type: flow` endpoint answers the four-row table'
         expect((error.details as any).summary.nodes[0].nodeId).toBe('purge_batch');
     });
 
-    it('the four rows are DISTINGUISHABLE — the half a per-row assertion cannot see', async () => {
+    it('the five rows are DISTINGUISHABLE — the half a per-row assertion cannot see', async () => {
         // A regression that collapsed the table back to one answer would leave
         // every per-row assertion above satisfiable by that one answer if it
         // happened to be the row's own. Asserted as a SET, it cannot.
@@ -221,6 +246,7 @@ describe('#9462 — a declared `type: flow` endpoint answers the four-row table'
                 automationServiceWith({ flows: [] }),
                 automationServiceWith({ result: DISABLED }),
                 automationServiceWith({ result: NO_START_NODE }),
+                automationServiceWith({ result: INPUT_SCHEMA_INVALID }),
                 automationServiceWith({ result: RAN_AND_FAILED }),
             ].map(async ({ service }) => {
                 const answer = await viaEndpoint(service);
@@ -228,11 +254,11 @@ describe('#9462 — a declared `type: flow` endpoint answers the four-row table'
             }),
         );
 
-        expect(answers.map((a) => a.status)).toEqual([404, 409, 422, 400]);
-        expect(new Set(answers.map((a) => a.status)).size).toBe(4);
-        // Codes too: two rows sharing a status would still be two different
-        // facts, and an SDK branches on `code`.
-        expect(new Set(answers.map((a) => a.code)).size).toBe(4);
+        expect(answers.map((a) => a.status)).toEqual([404, 409, 422, 422, 400]);
+        // Codes too: two rows sharing a status are still two different facts —
+        // #10025's row shares 422 with FLOW_NO_START_NODE on purpose (both are
+        // unexecutable stored definitions), and an SDK branches on `code`.
+        expect(new Set(answers.map((a) => a.code)).size).toBe(5);
         // Exactly ONE row may claim the flow ran.
         expect(answers.filter((a) => a.code === 'FLOW_FAILED')).toHaveLength(1);
         // And none of them is the old blanket 200.
@@ -363,6 +389,7 @@ describe('#9462 — all three doors read ONE table, so they cannot drift', () =>
     for (const [label, result, status, code] of [
         ['a disabled flow', DISABLED, 409, 'FLOW_DISABLED'],
         ['a flow with no start node', NO_START_NODE, 422, 'FLOW_NO_START_NODE'],
+        ['a node config violating its inputSchema', INPUT_SCHEMA_INVALID, 422, 'FLOW_INPUT_SCHEMA_INVALID'],
         ['a run that ran and failed', RAN_AND_FAILED, 400, 'FLOW_FAILED'],
     ] as Array<[string, AutomationResult, number, string]>) {
         it(`${label}: the declared endpoint, /actions and /automation/:name/trigger all answer ${String(status)}`, async () => {

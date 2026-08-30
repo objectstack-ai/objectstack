@@ -551,11 +551,47 @@ const STRICT_OBJECT_CALLS = new Set(['strictObject', 'strictObjectError']);
 const TOMBSTONE_CALLS = new Set(['retiredKey']);
 
 /**
- * Wrappers that pass their argument through unchanged, so the climb continues
- * rather than stopping. `Object.freeze({ … })` around a guidance table is the
- * measured case; a stop here would drop the whole table.
+ * Wrappers whose VALUE is the text the climb is already carrying, so the climb
+ * continues rather than stopping. `Object.freeze({ … })` around a guidance
+ * table is the original measured case; a stop here would drop the whole table.
+ *
+ * ## The GENERATED table: `Object.fromEntries(keys.map((k) => [k, '…']))`
+ *
+ * A guidance table does not have to be WRITTEN as an object literal. Two in
+ * this tree are BUILT — one prescription filed under each of a list of keys,
+ * because every one of those keys has the same answer:
+ *
+ *   - `SEPARATOR_NAV_ITEM_GUIDANCE` (`ui/app.zod.ts`), spread into the
+ *     `guidance` of the per-variant nav options table;
+ *   - the container-key prescription at `guidance:` in `ui/view.zod.ts`,
+ *     generated inline at the key itself.
+ *
+ * Both are printed verbatim at a refusing author, and both sat OUTSIDE THE
+ * POPULATION ENTIRELY — measured by planting a distinct id in every literal of
+ * the nav options table and the five tables it references: 48 of 49 candidate
+ * ids red, and the whole of `SEPARATOR_NAV_ITEM_GUIDANCE` — four prose
+ * literals — silent. It is the fourth population's defect one shape over: the
+ * factory clause taught the climb to leave a function that BUILDS an options
+ * record, while a table built by a `.map()` INSIDE one stayed unreachable,
+ * because the climb died on the unrecognised `map` / `fromEntries` call sitting
+ * between the callback and its sink.
+ *
+ * ⛔ This does NOT make `.map()` a text position. Transparency only lets the
+ * climb CONTINUE; it must still terminate at a recognised position — a
+ * `message:` / `error:`, a `.describe()`, a tombstone argument, a
+ * STRICT_OPTION_KEYS key under a `strictObject` call, or a
+ * {@link collectTextSinkConsts} sink. A `.map()` in an ordinary helper reaches
+ * none of those and stays silent, exactly as before. What transparency buys is
+ * that a table's SPELLING — literal vs generated — stops deciding whether its
+ * prose is judged, which is the property this rule was missing.
+ *
+ * `flatMap` rides with `map` rather than waiting for a live case: the pair is
+ * one spelling of one idea, and a set that knows only half of it is the next
+ * silent miss (`data/driver/config-registry.zod.ts` builds its alias tables
+ * with `flatMap` today — values, not prose, so it moves no verdict, but it is
+ * the shape arriving).
  */
-const TRANSPARENT_CALLS = new Set(['freeze']);
+const TRANSPARENT_CALLS = new Set(['freeze', 'fromEntries', 'map', 'flatMap']);
 
 /**
  * zod validators whose trailing positional argument is a refusal message.
@@ -1779,7 +1815,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -2381,6 +2417,59 @@ function selfTestRule3(expect) {
     expect('the dispatched-const red names the const it travelled through',
       r.violations[0]?.where, 'via RULING_SENTENCE');
 
+    // RED #23 — a GENERATED guidance table: one prescription filed under each
+    // of a list of keys via `Object.fromEntries(keys.map(…))`, hoisted into a
+    // const and spread into an options FACTORY's `guidance`. This is
+    // `SEPARATOR_NAV_ITEM_GUIDANCE` (`ui/app.zod.ts`), reduced. Measured live:
+    // every literal of the surrounding nav options table was reachable and this
+    // whole table was not, because the climb died on `map` / `fromEntries`
+    // between the callback and its sink.
+    const GENERATED_TABLE = (prose) => [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      "import type { StrictObjectOptions } from '../shared/strict-object';",
+      'const SEPARATOR_GUIDANCE: Readonly<Record<string, string>> = Object.fromEntries(',
+      "  ['label', 'icon'].map((key) => [key, `\\`${key}\\` " + prose + '`]),',
+      ');',
+      'const navItemSurface = (variant: string): StrictObjectOptions => ({',
+      '  surface: `this \\`${variant}\\` navigation item`,',
+      "  guidance: { ...(variant === 'separator' ? SEPARATOR_GUIDANCE : {}) },",
+      '});',
+      "export const S = strictObject(navItemSurface('separator'), { id: z.string() });",
+    ].join('\n');
+    writeFileSync(target, GENERATED_TABLE('is not a separator key (#4286).'));
+    r = scan();
+    expect('an id in a GENERATED guidance table reaching an options factory is RED',
+      r.violations.length, 1);
+    expect('the generated-table red names the sink it travelled through',
+      r.violations[0]?.where, 'via SEPARATOR_GUIDANCE (built in a function)');
+    writeFileSync(target, GENERATED_TABLE('is not a separator key.'));
+    expect('...and green once the id is gone', scan().violations.length, 0);
+
+    // RED #24 — the same generation written INLINE at the `guidance:` key
+    // rather than hoisted, so it reaches its position with no sink const in the
+    // path at all. This is `ui/view.zod.ts`'s container-key prescription,
+    // reduced. Both spellings are live, and a fix that closed only one of them
+    // would leave the other silent with nothing to say so.
+    const INLINE_GENERATED = (prose) => [
+      "import { z } from 'zod';",
+      "import { strictObject } from '../shared/strict-object';",
+      'export const S = strictObject({',
+      "  surface: 'this view container',",
+      '  guidance: Object.fromEntries(',
+      "    ['type', 'columns'].map((k) => [k, `\\`${k}\\` " + prose + '`]),',
+      '  ),',
+      '}, { name: z.string() });',
+    ].join('\n');
+    writeFileSync(target, INLINE_GENERATED('belongs to a single VIEW (#4286).'));
+    r = scan();
+    expect('an id in a guidance table generated INLINE at the key is RED',
+      r.violations.length, 1);
+    expect('the inline generated-table red names the position',
+      r.violations[0]?.where, 'strictObject guidance (built in a function)');
+    writeFileSync(target, INLINE_GENERATED('belongs to a single VIEW.'));
+    expect('...and green once the id is gone', scan().violations.length, 0);
+
     // ── Precision: what must NEVER fire ─────────────────────────────────────
     //
     // ⛔ The clause is NOT "climb through function bodies". These three are the
@@ -2400,6 +2489,26 @@ function selfTestRule3(expect) {
       'export const T = legacyToken;',
     ].join('\n'));
     expect('precision — an ordinary helper\'s body is NOT swept', scan().violations.length, 0);
+
+    // ⭐ The precision case the TRANSPARENT_CALLS widening owes: `.map()` is
+    // TRANSPARENT, never a position. The same `Object.fromEntries(keys.map(…))`
+    // generation whose prose is RED above must stay silent when what it builds
+    // is a VALUE table nothing customer-facing consumes — a `.map()` is one of
+    // the commonest expressions in this tree, and a widening that swept every
+    // string returned from one would report identifiers, slugs and enum members
+    // as refusal prose. The climb terminating at a recognised position is the
+    // only thing holding that line, so it is pinned rather than assumed.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "const SLUGS: Readonly<Record<string, string>> = Object.fromEntries(",
+      "  ['draft', 'live'].map((k) => [k, `${k}-#4286`]),",
+      ');',
+      "const TOKENS = ['a', 'b'].flatMap((k) => [`${k}#4286`]);",
+      'export const S = z.object({ a: z.string() });',
+      'export const T = { SLUGS, TOKENS };',
+    ].join('\n'));
+    expect('precision — a generated VALUE table reaching no sink is NOT swept',
+      scan().violations.length, 0);
 
     // The same boundary, declaration form (#13156). ⛔ The widening is NOT an
     // unconditional crawl of function bodies: a plain `function` DECLARATION

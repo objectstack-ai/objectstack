@@ -470,7 +470,13 @@ async function collectGrantProvenance(
  * the grant rows.
  */
 export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
-  const grants = await resolveUserAuthzGrants(ql, userId, { nowMs });
+  // [#11971] ⭐ Ruled bypass of the #11633 leg-B grants cache (maintainer
+  // acceptance 2026-08-25): the explainer is the tool an administrator uses to
+  // VERIFY that a revocation took effect. An explainer answering from cache
+  // would explain a state that no longer exists — and would do it at exactly
+  // the moment someone is checking. `explain` therefore takes the force-fresh
+  // path unconditionally, whatever `OS_AUTHZ_GRANTS_CACHE_TTL_MS` says.
+  const grants = await resolveUserAuthzGrants(ql, userId, { nowMs, bypassGrantsCache: true });
   const { droppedGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
   return {
     userId,

@@ -49,8 +49,11 @@
  *    第一步(创业阶段,Salesforce 式)」) — LOCK THE BASE, CLONE TO CUSTOMIZE.
  *    The data door now refuses a save that targets a package-declared set
  *    ITSELF, before translating it, with a message that names the clone path
- *    ({@link createPermissionSetWriteThrough}'s insert and update legs; the
- *    rule and its reasoning live in `packaged-permission-set-lock.ts`). Two
+ *    ({@link createPermissionSetWriteThrough}'s insert and update legs throw
+ *    it; the `restore` leg consults the same lock before its re-author and
+ *    reports the refusal on the durability channel instead — #12020, argued
+ *    at the leg; the rule and its reasoning live in
+ *    `packaged-permission-set-lock.ts`). Two
  *    measured reasons the producer could not carry it alone: the producer's
  *    ADR-0005 tier gate is exactly what the documented
  *    `OS_METADATA_WRITABLE=permission` operator hatch switches off — on a
@@ -77,7 +80,10 @@
  *    durability channel (#4632) and the backfill counts the failure — that is
  *    the degradation report, not a swallow. Neither targets an artifact-backed
  *    name in the first place (a packaged definition cannot be trashed, and the
- *    backfill only runs for names with NO metadata presence at all).
+ *    backfill only runs for names with NO metadata presence at all) — and the
+ *    `restore` leg no longer relies on that fence alone: it consults the
+ *    packaged-permission-set lock before re-authoring, refusing the mint on
+ *    the same durability channel (#12020).
  *
  * Cross-package composition stays a POSITION concern (bind several packages'
  * sets to one position); package-first authoring (ADR-0070) gives
@@ -1056,10 +1062,72 @@ export function createPermissionSetWriteThrough(
     if (op === 'restore') {
       // Let the engine un-trash the record, then re-author its definition
       // into metadata (the delete removed it) so the stores converge live.
+      //
+      // [2026-08-24 ruling — lock the base, clone to customize; #12020] This
+      // leg consults the SAME lock as the insert and update legs — but the
+      // refusal lands on the durability channel instead of being thrown, and
+      // the engine un-trash above it stands. The placement is argued, not
+      // inherited:
+      //
+      //  - the write the ruling locks is the metadata MINT (`saveMetaItem`
+      //    below): hatch open (`OS_METADATA_WRITABLE=permission`), it would
+      //    author an environment overlay of a packaged set, which
+      //    `reconcilePermissionSetProjection` re-projects onto the record on
+      //    every boot, forever. The check runs BEFORE that write — the same
+      //    "refuse before the write" property the insert and update legs
+      //    have, at this leg's own write.
+      //  - refusing BEFORE the un-trash is not honestly implementable: the
+      //    rows are still trashed there, `resolveTargetRows` reads through
+      //    ordinary `find`, and no trash state exists since #2377 retired
+      //    `enable.trash` (#3146, parked, will define whether trashed rows
+      //    are visible to reads — the natural answer is that they are not).
+      //    A pre-pass would resolve nothing on a real engine while unit
+      //    doubles (no trash concept, rows always visible) showed it green —
+      //    coverage certified by a test the real path would not have.
+      //  - refusing AFTER and compensating (re-trash) is structurally
+      //    unavailable: this middleware's own delete leg guarantees a
+      //    packaged row's record survives the data door (the overlay
+      //    tombstones; the driver delete never runs), it holds no raw driver
+      //    handle, and the trash primitive belongs to unlanded #3146. A
+      //    compensation that can fail turns the refusal into a lie — the
+      //    caller is told "refused" while the state says "restored".
+      //  - a THROW here would misreport a completed engine operation and
+      //    half-apply a multi-row restore — the stranding this leg's
+      //    catch-not-throw disposition exists to avoid (see the file header,
+      //    and the RESTORE case in `permission-set-projection.test.ts`).
+      //
+      // With the mint refused, the restored record carries no overlay, so
+      // boot reconciliation re-projects the DECLARED body onto it — the
+      // environment converges to the package truth rather than to a fork.
+      // `unknown` provenance refuses the mint too (fail-closed, the lock's
+      // own three-verdict contract): accepting on a failed read would reopen
+      // exactly the hatch-open gap this closes, on every transient.
       await next();
       const restored = await resolveTargetRows(ql, opCtx);
       for (const row of restored) {
         if (!row?.name) continue;
+        const name = String(row.name);
+        try {
+          // `'update'` for the same reason the metadata-door gate passes it
+          // (`packaged-permission-set-lock-gate.ts`): re-authoring a
+          // package-declared name is an override of the shipped base, so the
+          // remedy the refusal teaches is the clone path.
+          assertPermissionSetNotPackageDeclared(name, ql, 'update', (await probeLayered(protocol, name)).probe);
+        } catch (lockErr) {
+          // A REFUSAL, not a failed write — distinct wording from the catch
+          // below (#5240: one condition, one wording), same channel and the
+          // same #9754 error→warn fallback chain.
+          const message =
+            '[security] restored permission set was deliberately NOT re-authored into metadata — the ' +
+            'packaged-permission-set lock refused the write (2026-08-24 ruling: lock the base, clone to ' +
+            'customize; an environment overlay of a package-declared set would silently fork it from its ' +
+            'package, and provenance that cannot be resolved refuses fail-closed for the same reason). The ' +
+            'record is back and lists normally; for a package-declared set, boot reconciliation re-projects ' +
+            'the declared body onto it. To customize a packaged set, clone it and edit the clone.';
+          if (logger?.error) logger.error(message, lockErr as Error, { name });
+          else logger?.warn?.(message, { name, error: String((lockErr as Error)?.message ?? lockErr) });
+          continue;
+        }
         try {
           await protocol.saveMetaItem({ type: 'permission', name: row.name, item: permissionSetBodyFromRow(row), ...actorArg });
         } catch (e) {

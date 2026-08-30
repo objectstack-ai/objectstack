@@ -1,0 +1,2339 @@
+{
+  "components": {
+    "object-grid": {
+      "type": "object-grid",
+      "namespace": "plugin-grid",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "description": "Columns to show, either field names (`[\"name\", \"email\"]`) or column objects (`[{ field: \"name\", label: \"Full Name\", width: 200 }]`). The canonical spelling — the deprecated `fields` is only read when this is absent."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Filter criteria in JSON-rules form. The canonical spelling — the deprecated `defaultFilters` is only read when this is absent."
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "description": "Grid label, used as the table caption and as the export file title. The canonical spelling — the deprecated `title` is only read when this is absent."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Initial sort order, `[{ field, order }]`. The canonical spelling — the deprecated single-sort `defaultSort` is only read when this is absent."
+        },
+        {
+          "name": "pagination",
+          "type": "object",
+          "description": "Pagination config, `{ pageSize, pageSizeOptions, … }`. Its presence is what enables paging; prefer it over the deprecated flat `pageSize` / `showPagination` pair."
+        },
+        {
+          "name": "searchableFields",
+          "type": "array",
+          "description": "Fields the toolbar search box queries. A non-empty list is what enables search — prefer it over the deprecated boolean `showSearch`, which cannot say WHICH fields to search."
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "Data source configuration — a `ViewData` object discriminated by `provider`: `{ provider: \"object\", object }` (what an omitted `data` falls back to, using `objectName`), `{ provider: \"api\", read, write }`, `{ provider: \"value\", items: [...] }` for inline rows that bypass the object query, or `{ provider: \"schema\", schemaId }`. The canonical spelling — the deprecated `staticData` is the array-only shortcut for the `value` provider, so inline rows go under `items` here rather than in a bare array."
+        },
+        {
+          "name": "rowHeight",
+          "type": "enum",
+          "enum": [
+            "compact",
+            "short",
+            "medium",
+            "tall",
+            "extra_tall"
+          ],
+          "description": "Row density. An unrecognised value falls back to `compact` rather than erroring."
+        },
+        {
+          "name": "frozenColumns",
+          "type": "number",
+          "description": "How many leading columns stay pinned while the grid scrolls horizontally."
+        },
+        {
+          "name": "resizable",
+          "type": "boolean",
+          "description": "Let users drag column borders to resize. The canonical spelling — the deprecated `resizableColumns` is only read when this is absent."
+        },
+        {
+          "name": "reorderableColumns",
+          "type": "boolean",
+          "description": "Let users drag columns into a different order."
+        },
+        {
+          "name": "showColumnTypeIcons",
+          "type": "boolean",
+          "description": "Show a field-type icon in each column header. Off by default — the type is usually obvious from the cell content, and the icons compete with the column labels."
+        },
+        {
+          "name": "rowColor",
+          "type": "object",
+          "description": "Rules that colour whole rows from a field value."
+        },
+        {
+          "name": "conditionalFormatting",
+          "type": "array",
+          "description": "Row/cell styling rules. Accepts both the ObjectUI `{ field, operator, value }` form and the spec expression form `{ condition, style }`."
+        },
+        {
+          "name": "grouping",
+          "type": "object",
+          "description": "Group rows by one or more fields into collapsible sections."
+        },
+        {
+          "name": "aggregations",
+          "type": "array",
+          "description": "Per-group roll-ups shown in group headers, `[{ field, type: \"sum\" | \"count\" | \"avg\" | \"min\" | \"max\" | \"count_distinct\" }]`. Needs `grouping` to have anything to roll up."
+        },
+        {
+          "name": "selection",
+          "type": "object",
+          "description": "Selection config, `{ type: \"none\" | \"single\" | \"multiple\" }`. The canonical spelling — the deprecated boolean/string `selectable` is only read when this is absent."
+        },
+        {
+          "name": "rowActions",
+          "type": "array",
+          "description": "Names of actions offered on each row’s menu."
+        },
+        {
+          "name": "bulkActions",
+          "type": "array",
+          "description": "Names of actions offered once rows are selected. Needs a multi-row `selection` to be reachable."
+        },
+        {
+          "name": "batchActions",
+          "type": "array",
+          "description": "Legacy alias of `bulkActions`, and the one the renderer reads FIRST when both are set. Prefer `bulkActions` in new schemas."
+        },
+        {
+          "name": "bulkActionDefs",
+          "type": "array",
+          "description": "Full inline bulk-action definitions, for actions that are not named entries in the object’s action set. Use `bulkActions` when the action already exists."
+        },
+        {
+          "name": "editable",
+          "type": "boolean",
+          "description": "Enable inline cell editing (double-click or Enter opens a cell)."
+        },
+        {
+          "name": "singleClickEdit",
+          "type": "boolean",
+          "description": "With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a row click does, `{ mode: \"page\" | \"drawer\" | \"modal\" | \"split\" | \"none\", … }`."
+        },
+        {
+          "name": "operations",
+          "type": "object",
+          "description": "Toggles for the built-in create/read/update/delete/export/import affordances, e.g. `{ delete: false }`."
+        },
+        {
+          "name": "exportOptions",
+          "type": "object",
+          "description": "Export config, `{ formats, maxRecords, includeHeaders, fileNamePrefix }`. Needs `operations.export` to be reachable from the toolbar."
+        }
+      ]
+    },
+    "list-view": {
+      "type": "list-view",
+      "namespace": "plugin-list",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "viewType",
+          "type": "enum",
+          "enum": [
+            {
+              "label": "Grid",
+              "value": "grid"
+            },
+            {
+              "label": "Kanban",
+              "value": "kanban"
+            },
+            {
+              "label": "Gallery",
+              "value": "gallery"
+            },
+            {
+              "label": "Calendar",
+              "value": "calendar"
+            },
+            {
+              "label": "Timeline",
+              "value": "timeline"
+            },
+            {
+              "label": "Gantt",
+              "value": "gantt"
+            },
+            {
+              "label": "Map",
+              "value": "map"
+            }
+          ]
+        },
+        {
+          "name": "columns",
+          "type": "array"
+        },
+        {
+          "name": "filter",
+          "type": "array"
+        },
+        {
+          "name": "sort",
+          "type": "array"
+        },
+        {
+          "name": "options",
+          "type": "object"
+        }
+      ]
+    },
+    "object-form": {
+      "type": "object-form",
+      "namespace": "plugin-form",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "fields",
+          "type": "array"
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "enum": [
+            "create",
+            "edit",
+            "view"
+          ]
+        },
+        {
+          "name": "formType",
+          "type": "enum",
+          "enum": [
+            "simple",
+            "tabbed",
+            "wizard",
+            "split",
+            "drawer",
+            "modal"
+          ]
+        },
+        {
+          "name": "sections",
+          "type": "array"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "layout",
+          "type": "enum",
+          "enum": [
+            "vertical",
+            "horizontal",
+            "inline",
+            "grid"
+          ]
+        },
+        {
+          "name": "columns",
+          "type": "number"
+        },
+        {
+          "name": "defaultTab",
+          "type": "string"
+        },
+        {
+          "name": "tabPosition",
+          "type": "enum",
+          "enum": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        },
+        {
+          "name": "allowSkip",
+          "type": "boolean"
+        },
+        {
+          "name": "showStepIndicator",
+          "type": "boolean"
+        },
+        {
+          "name": "splitDirection",
+          "type": "enum",
+          "enum": [
+            "horizontal",
+            "vertical"
+          ]
+        },
+        {
+          "name": "splitSize",
+          "type": "number"
+        },
+        {
+          "name": "splitResizable",
+          "type": "boolean"
+        },
+        {
+          "name": "drawerSide",
+          "type": "enum",
+          "enum": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        },
+        {
+          "name": "drawerWidth",
+          "type": "string"
+        },
+        {
+          "name": "modalSize",
+          "type": "enum",
+          "enum": [
+            "sm",
+            "default",
+            "lg",
+            "xl",
+            "full"
+          ]
+        },
+        {
+          "name": "modalCloseButton",
+          "type": "boolean",
+          "description": "Show the modal presentation’s close button. Read at ObjectForm.tsx:361 and honoured by ModalForm."
+        },
+        {
+          "name": "contentLayout",
+          "type": "enum",
+          "enum": [
+            "simple",
+            "tabbed"
+          ],
+          "description": "How the modal presentation lays out sections. `tabbed` needs more than one section to differ from `simple` (ModalForm.tsx:638)."
+        },
+        {
+          "name": "confirmOnDiscard",
+          "type": "boolean",
+          "description": "Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set `false` to close immediately."
+        },
+        {
+          "name": "recordId",
+          "type": "string",
+          "description": "The record to load in `edit` / `view` mode. Leave unset for `create`."
+        },
+        {
+          "name": "customFields",
+          "type": "array",
+          "description": "Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source."
+        },
+        {
+          "name": "initialValues",
+          "type": "object",
+          "description": "Values to prefill in `create` mode."
+        },
+        {
+          "name": "initialData",
+          "type": "object",
+          "description": "Alternate spelling of `initialValues` that the drawer/modal presentations read FIRST (`schema.initialData || schema.initialValues`). Prefer `initialValues` in new schemas."
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "description": "Render every field read-only, whatever `mode` says."
+        },
+        {
+          "name": "submitText",
+          "type": "string"
+        },
+        {
+          "name": "cancelText",
+          "type": "string"
+        },
+        {
+          "name": "nextText",
+          "type": "string",
+          "description": "Label of the next-step button (wizard)."
+        },
+        {
+          "name": "prevText",
+          "type": "string",
+          "description": "Label of the previous-step button (wizard)."
+        },
+        {
+          "name": "showSubmit",
+          "type": "boolean"
+        },
+        {
+          "name": "showCancel",
+          "type": "boolean"
+        },
+        {
+          "name": "showReset",
+          "type": "boolean"
+        },
+        {
+          "name": "submitBehavior",
+          "type": "object",
+          "description": "Declarative post-submit behaviour, one of `{ kind: \"thank-you\", title?, message? }`, `{ kind: \"redirect\", url, delayMs? }`, `{ kind: \"continue\" }`, `{ kind: \"next-record\" }`. When present it takes precedence over `successMessage` / `navigateOnSuccess` / `resetOnSuccess`."
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set."
+        },
+        {
+          "name": "navigateOnSuccess",
+          "type": "string",
+          "description": "Path to navigate to after a successful create/update. Supports `{id}` / `{recordId}` interpolation from the saved record and is same-origin-guarded. Takes precedence over `successMessage`."
+        },
+        {
+          "name": "resetOnSuccess",
+          "type": "boolean",
+          "description": "Clear the form after a successful submit instead of keeping the saved values."
+        },
+        {
+          "name": "mobile",
+          "type": "object",
+          "description": "Phone-only presentation overrides, e.g. `{ stepper: \"auto\", stepperMinFields: 8, fullscreenLongText: true }`."
+        }
+      ]
+    },
+    "embeddable-form": {
+      "type": "embeddable-form",
+      "namespace": "plugin-form",
+      "inputs": [
+        {
+          "name": "formId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "fields",
+          "type": "array"
+        },
+        {
+          "name": "allowMultiple",
+          "type": "boolean"
+        }
+      ]
+    },
+    "object-master-detail-form": {
+      "type": "object-master-detail-form",
+      "namespace": "plugin-form",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "enum": [
+            "create",
+            "edit"
+          ]
+        },
+        {
+          "name": "sections",
+          "type": "array"
+        },
+        {
+          "name": "details",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "recordId",
+          "type": "string",
+          "description": "The parent record to load in `edit` mode. Leave unset for `create`."
+        },
+        {
+          "name": "formType",
+          "type": "string",
+          "description": "How the PARENT half of the form is presented. The detail grids below it are unaffected."
+        },
+        {
+          "name": "fields",
+          "type": "array",
+          "description": "Which parent fields to show, in order. Ignored when `sections` is given — sections carry their own field lists."
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "submitText",
+          "type": "string",
+          "description": "Label of the button that saves the parent and every detail row in one batch."
+        },
+        {
+          "name": "cancelText",
+          "type": "string"
+        },
+        {
+          "name": "showSubmit",
+          "type": "boolean"
+        },
+        {
+          "name": "initialValues",
+          "type": "object",
+          "description": "Values to prefill on the PARENT record in `create` mode."
+        },
+        {
+          "name": "initialData",
+          "type": "object",
+          "description": "Alternate spelling of `initialValues` the renderer also reads (MasterDetailForm.tsx:602). Prefer `initialValues` in new schemas."
+        },
+        {
+          "name": "taxRateField",
+          "type": "string",
+          "description": "Name of the field ON THE CHILD object that holds each line’s tax rate. Feeds the line-items totals row; leave unset when the detail rows carry no tax."
+        }
+      ]
+    },
+    "object-kanban": {
+      "type": "object-kanban",
+      "namespace": "plugin-kanban",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "columns",
+          "type": "array"
+        }
+      ]
+    },
+    "object-calendar": {
+      "type": "object-calendar",
+      "namespace": "plugin-calendar",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "calendar",
+          "type": "object",
+          "description": "startDateField, endDateField, titleField, colorField"
+        }
+      ]
+    },
+    "object-gantt": {
+      "type": "object-gantt",
+      "namespace": "plugin-gantt",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "gantt",
+          "type": "object",
+          "description": "startDateField, endDateField, titleField, progressField, percentageField, colorField, dependenciesField"
+        }
+      ]
+    },
+    "object-timeline": {
+      "type": "object-timeline",
+      "namespace": "plugin-timeline",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "vertical",
+            "horizontal",
+            "gantt"
+          ]
+        }
+      ]
+    },
+    "object-map": {
+      "type": "object-map",
+      "namespace": "plugin-map",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "map",
+          "type": "object",
+          "description": "latitudeField, longitudeField, titleField"
+        }
+      ]
+    },
+    "object-metric": {
+      "type": "object-metric",
+      "namespace": "plugin-dashboard",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "aggregate",
+          "type": "object",
+          "description": "Aggregation config: { field, function, groupBy }"
+        },
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "Helper text rendered under the value."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "description": "Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Criteria the aggregation is scoped by. The same filter narrows the drill-down list, so the number and the records behind it always agree."
+        },
+        {
+          "name": "colorVariant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "blue",
+            "teal",
+            "orange",
+            "purple",
+            "success",
+            "warning",
+            "danger"
+          ],
+          "description": "Colour of the icon container. Semantic, not decorative: `success` / `warning` / `danger` should track what the number means."
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "card",
+            "bare"
+          ],
+          "description": "`card` draws the tile’s own surface; `bare` drops it, for a metric already sitting inside a card."
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "description": "Numeral-style format pattern, e.g. `0,0`, `$0,0`, `0%`. Use `currency` instead of hard-coding a currency symbol here."
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "description": "ISO 4217 code, e.g. `USD`. Enables locale-aware currency formatting of the value."
+        },
+        {
+          "name": "prefix",
+          "type": "string",
+          "description": "Static text placed before the formatted value."
+        },
+        {
+          "name": "suffix",
+          "type": "string",
+          "description": "Static text placed after the formatted value."
+        },
+        {
+          "name": "invert",
+          "type": "boolean",
+          "description": "Display `1 - value` — for gauges whose good direction is down, such as error rate shown as uptime."
+        },
+        {
+          "name": "fallbackValue",
+          "type": "string",
+          "description": "Value shown when no data source resolves. For static/demo tiles; a bound metric should not need it."
+        },
+        {
+          "name": "trend",
+          "type": "object",
+          "description": "Static trend badge: `{ value, label, direction }`. Use `compareTo` instead when the trend should be computed from data."
+        },
+        {
+          "name": "compareTo",
+          "type": "object",
+          "description": "Period-over-period comparison, `{ kind: \"previousPeriod\" }` or `{ kind: \"previousYear\" }` — the computed alternative to a static `trend`."
+        },
+        {
+          "name": "drillDown",
+          "type": "object",
+          "description": "Click-through config that opens the records behind the number."
+        }
+      ]
+    },
+    "object-chart": {
+      "type": "object-chart",
+      "namespace": "plugin-charts",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Optional static data"
+        },
+        {
+          "name": "filter",
+          "type": "array"
+        },
+        {
+          "name": "aggregate",
+          "type": "object",
+          "description": "Aggregation config: { field, function, groupBy }"
+        },
+        {
+          "name": "drillDown",
+          "type": "object",
+          "description": "Segment drill config: { enabled?, filter?, title?, target?: 'drawer' | 'dialog', columns?, maxRows? }. Present = on; {} is enough. Clicking a segment opens the underlying records filtered by the clicked category."
+        }
+      ]
+    },
+    "dashboard": {
+      "type": "dashboard",
+      "namespace": "view",
+      "inputs": [
+        {
+          "name": "widgets",
+          "type": "array",
+          "description": "The widget tree — the spec’s DashboardWidget[]. Each widget binds a dataset (ADR-0021) and may carry a layout ({ x, y, w, h }) and filterBindings. When omitted the dashboard renders an empty grid."
+        },
+        {
+          "name": "label",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Display name, shown as the header title when `header` is declared — a string or an inline per-locale map such as { en, \"zh-CN\" }. Spec-canonical spelling; the legacy `title` spelling is not authoring surface."
+        },
+        {
+          "name": "description",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Header description shown under the title — a string or an inline per-locale map. Rendered only when `header` is declared and `header.showDescription` is not false."
+        },
+        {
+          "name": "header",
+          "type": "object",
+          "description": "Header block: { showTitle?, showDescription?, actions? }. Strict — the contract rejects any other key. Renders nothing (zero pixels) when everything it would show is suppressed."
+        },
+        {
+          "name": "globalFilters",
+          "type": "array",
+          "description": "Dashboard-level filter bar — the spec’s GlobalFilter[]. Filter values live as dashboard variables (readable in widget expressions as page.<name>) and are AND-merged into each bound widget’s query per its filterBindings."
+        },
+        {
+          "name": "dateRange",
+          "type": "object",
+          "description": "Built-in date-range filter: { field?, defaultRange?, allowCustomRange? }. `defaultRange` takes the spec’s date presets plus \"custom\"; the bound field defaults to created_at."
+        },
+        {
+          "name": "refreshInterval",
+          "type": "number",
+          "description": "Auto-refresh period in seconds. Zero or a negative value disables the timer, and it only runs when the host wires an onRefresh handler."
+        },
+        {
+          "name": "columns",
+          "type": "number"
+        },
+        {
+          "name": "gap",
+          "type": "number"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "object-pivot": {
+      "type": "object-pivot",
+      "namespace": "plugin-dashboard",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "rowField",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "columnField",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "valueField",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "aggregation",
+          "type": "enum",
+          "enum": [
+            {
+              "label": "Sum",
+              "value": "sum"
+            },
+            {
+              "label": "Count",
+              "value": "count"
+            },
+            {
+              "label": "Average",
+              "value": "avg"
+            },
+            {
+              "label": "Min",
+              "value": "min"
+            },
+            {
+              "label": "Max",
+              "value": "max"
+            }
+          ]
+        },
+        {
+          "name": "showRowTotals",
+          "type": "boolean"
+        },
+        {
+          "name": "showColumnTotals",
+          "type": "boolean"
+        },
+        {
+          "name": "filter",
+          "type": "array"
+        },
+        {
+          "name": "format",
+          "type": "string"
+        }
+      ]
+    },
+    "record:details": {
+      "type": "record:details",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "columns",
+          "type": "enum",
+          "enum": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "description": "Number of columns for field layout (1-4)"
+        },
+        {
+          "name": "sections",
+          "type": "array",
+          "description": "Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` (required) are the field names shown in this section, in order. `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.<object>._sections.<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section's field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object's highlightFields."
+        },
+        {
+          "name": "fields",
+          "type": "array",
+          "description": "Explicit field list (overrides highlightFields)"
+        },
+        {
+          "name": "hideFields",
+          "type": "array",
+          "description": "Field names to omit from the body — applied to the top-level `fields` list AND to every section's `fields`. Bare field names only. Authors rarely need it: the synth pipeline fills it with the fields already shown in `record:highlights`, and hand-authored pages get the same dedup live from HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely."
+        },
+        {
+          "name": "inlineEdit",
+          "type": "boolean",
+          "description": "Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body."
+        },
+        {
+          "name": "showHeader",
+          "type": "boolean",
+          "description": "Render the detail body's own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page."
+        }
+      ]
+    },
+    "record:highlights": {
+      "type": "record:highlights",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "fields",
+          "type": "array",
+          "required": true,
+          "description": "Key fields to highlight (1-7), bare names or {name,label?,icon?,type?,readonly?}. Set readonly: true on an entry to render that chip read-only — it suppresses the inline-edit affordance and the HeaderHighlight editability gate enforces it. Use it for hook/automation-maintained columns that must not be hand-edited from the record header; marking the OBJECT field readonly instead would also strip the hook's own write-back."
+        },
+        {
+          "name": "layout",
+          "type": "enum",
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
+          "description": "Layout orientation for highlight fields"
+        }
+      ]
+    },
+    "record:related_list": {
+      "type": "record:related_list",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true,
+          "description": "Related object name (e.g. \"task\")"
+        },
+        {
+          "name": "relationshipField",
+          "type": "string",
+          "required": true,
+          "description": "Field on the related object pointing back to this record"
+        },
+        {
+          "name": "relationshipValueField",
+          "type": "string",
+          "description": "Which field OF THIS PARENT record `relationshipField` stores. Defaults to \"id\"; set it to the field a name-keyed junction points at (e.g. \"name\" when sys_user_position.position holds sys_position.name). The resolved value drives three things at once — the list filter, the Add-picker link value, and the pre-filled create form — so they cannot drift apart. While the parent record is still loading, a non-\"id\" field resolves to null and the list holds its fetch rather than querying on an empty value."
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "required": true,
+          "description": "Fields to display in the related list"
+        },
+        {
+          "name": "sort",
+          "type": "array"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Records to display initially"
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Additional filter criteria, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's children. Also the key a per-element `dataSource` binding's composed filter lands on."
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "showViewAll",
+          "type": "boolean"
+        },
+        {
+          "name": "actions",
+          "type": "array",
+          "description": "Action IDs available for related records"
+        },
+        {
+          "name": "add",
+          "type": "object",
+          "description": "Adds an \"Add\" button that assigns EXISTING records instead of creating one — the m2m/junction case. Shape: `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`. `picker.object` (required) is the object whose records the dialog offers. `picker.valueField` is the field of the picked record used as the link value (default \"id\"); `picker.labelField` is the column shown in the picker rows (default \"name\", and the other columns are derived from that object's schema). With `linkField` set, selecting records CREATES rows in this list's own object as `{ [relationshipField]: parentValue, [linkField]: pickedId }` — the junction case; omit `linkField` and the picked child is RE-PARENTED instead, by setting its own `relationshipField` to this parent. `label` is the button text (default \"Add\", localizable inline). Setting `add` also enables generic link removal on rows when no host delete handler is wired. `picker.filter` restricts which records the dialog offers — a list of `{ field, operator, value }` rules in the same vocabulary as this list's own `filter`, applied as a hard constraint the user cannot widen (it never appears as an editable filter row)."
+        }
+      ]
+    },
+    "record:path": {
+      "type": "record:path",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "statusField",
+          "type": "string",
+          "required": true,
+          "description": "Field representing the current status/stage"
+        },
+        {
+          "name": "stages",
+          "type": "array",
+          "description": "Explicit stage definitions [{ value, label }] (else derived from field metadata)"
+        }
+      ]
+    },
+    "record:line_items": {
+      "type": "record:line_items",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "childObject",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "relationshipField",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "totalField",
+          "type": "string"
+        },
+        {
+          "name": "amountField",
+          "type": "string"
+        }
+      ]
+    },
+    "record:activity": {
+      "type": "record:activity",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "types",
+          "type": "array",
+          "description": "Allow-list of feed item types to show (comment, field_change, task, event, email, call, note, file, record_create, record_delete, approval, sharing, system). Omit for all; unrecognised entries are ignored."
+        },
+        {
+          "name": "filterMode",
+          "type": "enum",
+          "enum": [
+            "all",
+            "comments_only",
+            "changes_only",
+            "tasks_only"
+          ],
+          "description": "Filter the timeline dropdown starts on. The user can still change it; an unrecognised value falls back to \"all\"."
+        },
+        {
+          "name": "showFilterToggle",
+          "type": "boolean",
+          "description": "Expose the activity-type filter dropdown in the panel header"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Items per page. Also caps the scoped sys_activity read; \"Load more\" grows the window by this much."
+        },
+        {
+          "name": "showCompleted",
+          "type": "boolean",
+          "description": "Include completed activities (sys_activity type \"completed\", which surfaces as a task item). Off by default."
+        },
+        {
+          "name": "unifiedTimeline",
+          "type": "boolean",
+          "description": "Mix field changes and comments in one timeline (Airtable style). Off keeps the panel a discussion stream — field changes stay in record:history."
+        },
+        {
+          "name": "showCommentInput",
+          "type": "boolean",
+          "description": "Show the composer. Requires a host discussion context to persist the comment (record detail pages provide one); without it the feed is read-only."
+        },
+        {
+          "name": "enableMentions",
+          "type": "boolean",
+          "description": "Offer @-mention autocomplete in the composer, from the host discussion context's user list. Off withholds the suggestions."
+        },
+        {
+          "name": "enableReactions",
+          "type": "boolean",
+          "description": "Show emoji reactions on feed items. Toggling one requires a host discussion context; without it existing reactions still render, read-only."
+        },
+        {
+          "name": "enableThreading",
+          "type": "boolean",
+          "description": "Group replies under their parent comment. Posting a reply requires a host discussion context."
+        },
+        {
+          "name": "showSubscriptionToggle",
+          "type": "boolean",
+          "description": "NOT IMPLEMENTED — no record-subscription backend exists yet, so this renders nothing whatever it is set to. Declared for spec parity only (objectui#3165)."
+        }
+      ]
+    },
+    "record:discussion": {
+      "type": "record:discussion",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "position",
+          "type": "enum",
+          "enum": [
+            "bottom",
+            "right",
+            "left"
+          ],
+          "description": "Where the panel docks relative to the record body"
+        },
+        {
+          "name": "width",
+          "type": "string",
+          "description": "Panel width as a CSS value (side positions only)"
+        },
+        {
+          "name": "collapsible",
+          "type": "boolean"
+        },
+        {
+          "name": "defaultCollapsed",
+          "type": "boolean"
+        },
+        {
+          "name": "feed",
+          "type": "object",
+          "description": "Activity-feed config nested inside the panel — same shape as record:activity"
+        }
+      ]
+    },
+    "record:history": {
+      "type": "record:history",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Maximum history entries to display"
+        },
+        {
+          "name": "emptyText",
+          "type": "string",
+          "description": "Copy shown when the record has no history"
+        },
+        {
+          "name": "unknownUserText",
+          "type": "string",
+          "description": "Copy substituted when an entry has no resolvable actor"
+        }
+      ]
+    },
+    "record:quick_actions": {
+      "type": "record:quick_actions",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "actionNames",
+          "type": "array",
+          "description": "Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up and the bar renders its empty placeholder"
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "description": "Hide the whole bar unless the user holds these permissions"
+        },
+        {
+          "name": "location",
+          "type": "enum",
+          "enum": [
+            "list_toolbar",
+            "list_item",
+            "record_header",
+            "record_more",
+            "record_related",
+            "record_section"
+          ],
+          "description": "Which declared action location this bar renders"
+        },
+        {
+          "name": "align",
+          "type": "enum",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ]
+        },
+        {
+          "name": "inline",
+          "type": "boolean",
+          "description": "Render in the flow instead of folding into the record header"
+        },
+        {
+          "name": "variant",
+          "type": "string",
+          "description": "Passed to the Button primitive; a per-action variant overrides it"
+        },
+        {
+          "name": "size",
+          "type": "string",
+          "description": "Passed to the Button primitive; a per-action size overrides it"
+        }
+      ]
+    },
+    "record:reference_rail": {
+      "type": "record:reference_rail",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "hideEmpty",
+          "type": "boolean",
+          "description": "Drop the rail entirely when no entries resolve"
+        }
+      ]
+    },
+    "record:alert": {
+      "type": "record:alert",
+      "namespace": "record",
+      "inputs": [
+        {
+          "name": "severity",
+          "type": "enum",
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "success"
+          ]
+        },
+        {
+          "name": "title",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Accepts an inline translation map ({ en, \"zh-CN\", … })"
+        },
+        {
+          "name": "body",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Accepts an inline translation map ({ en, \"zh-CN\", … })"
+        },
+        {
+          "name": "visible",
+          "type": "string",
+          "description": "Expression gating the banner against the current record"
+        },
+        {
+          "name": "icon",
+          "type": "string",
+          "description": "Lucide icon name; defaults to the severity icon"
+        },
+        {
+          "name": "action",
+          "type": "object",
+          "description": "{ actionName, label?, variant? } — the action the banner offers"
+        },
+        {
+          "name": "dismissible",
+          "type": "boolean"
+        },
+        {
+          "name": "dismissKey",
+          "type": "string",
+          "description": "Stable key the dismissal is remembered under"
+        }
+      ]
+    },
+    "page:tabs": {
+      "type": "page:tabs",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "Tab definitions [{ label, value?, icon?, count?, visibleWhen?, children }] — value is the stable ?tab= URL token, count auto-derives from record:related_list descendants when omitted"
+        },
+        {
+          "name": "tabStyle",
+          "type": "enum",
+          "enum": [
+            "line",
+            "card",
+            "pill"
+          ]
+        },
+        {
+          "name": "position",
+          "type": "enum",
+          "enum": [
+            "top",
+            "left"
+          ]
+        },
+        {
+          "name": "alwaysShowStrip",
+          "type": "boolean",
+          "description": "Keep the tab strip visible when only one tab survives. Default false: a lone pill is clutter rather than an affordance, so a one-tab strip is hidden and its panel renders bare. Count the tabs AFTER each item visibleWhen predicate has been evaluated — a page authored with four tabs of which three are conditional reaches this rule whenever the other three are false."
+        }
+      ]
+    },
+    "page:card": {
+      "type": "page:card",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "title",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Accepts an inline translation map ({ en, \"zh-CN\", … })"
+        },
+        {
+          "name": "bordered",
+          "type": "boolean"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Card content components, in order (the card body slot)"
+        },
+        {
+          "name": "footer",
+          "type": "slot"
+        }
+      ]
+    },
+    "page:accordion": {
+      "type": "page:accordion",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "Panel definitions [{ label, icon?, collapsed?, children }] — collapsed: false opens a panel by default"
+        },
+        {
+          "name": "allowMultiple",
+          "type": "boolean"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "flush",
+            "card"
+          ]
+        }
+      ]
+    },
+    "page:section": {
+      "type": "page:section",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Child components rendered inside this container, in order"
+        }
+      ]
+    },
+    "page:footer": {
+      "type": "page:footer",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Child components rendered inside this container, in order"
+        }
+      ]
+    },
+    "page:sidebar": {
+      "type": "page:sidebar",
+      "namespace": "page",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Child components rendered inside this container, in order"
+        }
+      ]
+    },
+    "element:text": {
+      "type": "element:text",
+      "namespace": "element",
+      "inputs": [
+        {
+          "name": "content",
+          "type": [
+            "string",
+            "object"
+          ],
+          "required": true,
+          "description": "Accepts an inline translation map ({ en, \"zh-CN\", … })"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "heading",
+            "subheading",
+            "body",
+            "caption"
+          ]
+        },
+        {
+          "name": "align",
+          "type": "enum",
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        }
+      ]
+    },
+    "element:number": {
+      "type": "element:number",
+      "namespace": "element",
+      "inputs": [
+        {
+          "name": "object",
+          "type": "string",
+          "required": true,
+          "description": "Object the aggregate runs over"
+        },
+        {
+          "name": "aggregate",
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max"
+          ]
+        },
+        {
+          "name": "field",
+          "type": "string",
+          "description": "Measure field (required for every aggregate except count)"
+        },
+        {
+          "name": "filter",
+          "type": "array"
+        },
+        {
+          "name": "format",
+          "type": "enum",
+          "enum": [
+            "number",
+            "currency",
+            "percent"
+          ]
+        },
+        {
+          "name": "prefix",
+          "type": "string"
+        },
+        {
+          "name": "suffix",
+          "type": "string"
+        }
+      ]
+    },
+    "element:button": {
+      "type": "element:button",
+      "namespace": "element",
+      "inputs": [
+        {
+          "name": "label",
+          "type": [
+            "string",
+            "object"
+          ],
+          "required": true,
+          "description": "Accepts an inline translation map ({ en, \"zh-CN\", … })"
+        },
+        {
+          "name": "action",
+          "type": "object",
+          "description": "Inline ActionDef executed on click (url / navigation / api / script / modal / flow); omitted → renders inert"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "primary",
+            "secondary",
+            "danger",
+            "ghost",
+            "link"
+          ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        {
+          "name": "icon",
+          "type": "string",
+          "description": "Lucide icon name"
+        },
+        {
+          "name": "iconPosition",
+          "type": "enum",
+          "enum": [
+            "left",
+            "right"
+          ]
+        },
+        {
+          "name": "disabled",
+          "type": "boolean"
+        }
+      ]
+    },
+    "element:definition-list": {
+      "type": "element:definition-list",
+      "namespace": "element",
+      "inputs": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "Term/description pairs [{ term, description }]"
+        },
+        {
+          "name": "columns",
+          "type": "enum",
+          "enum": [
+            "1",
+            "2"
+          ]
+        },
+        {
+          "name": "inline",
+          "type": "boolean",
+          "description": "Term and description on one baseline-aligned row"
+        }
+      ]
+    },
+    "element:repeater": {
+      "type": "element:repeater",
+      "namespace": "element",
+      "inputs": [
+        {
+          "name": "object",
+          "type": "string",
+          "required": true,
+          "description": "Object whose records the list repeats over"
+        },
+        {
+          "name": "titleField",
+          "type": "string"
+        },
+        {
+          "name": "fields",
+          "type": "array",
+          "description": "Columns per row — bare names or { field, label? }"
+        },
+        {
+          "name": "filter",
+          "type": "array"
+        },
+        {
+          "name": "sort",
+          "type": "array"
+        },
+        {
+          "name": "limit",
+          "type": "number"
+        },
+        {
+          "name": "emptyText",
+          "type": "string"
+        },
+        {
+          "name": "divided",
+          "type": "boolean",
+          "description": "Separator between rows"
+        }
+      ]
+    },
+    "action:button": {
+      "type": "action:button",
+      "namespace": "action",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "type": "enum",
+          "enum": [
+            "script",
+            "url",
+            "modal",
+            "flow",
+            "api"
+          ]
+        },
+        {
+          "name": "target",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "primary",
+            "secondary",
+            "destructive",
+            "outline",
+            "ghost"
+          ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "sm",
+            "md",
+            "lg"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "action:group": {
+      "type": "action:group",
+      "namespace": "action",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "actions",
+          "type": "object"
+        },
+        {
+          "name": "display",
+          "type": "enum",
+          "enum": [
+            "inline",
+            "dropdown"
+          ]
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "secondary",
+            "outline",
+            "ghost"
+          ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "sm",
+            "md",
+            "lg"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "action:menu": {
+      "type": "action:menu",
+      "namespace": "action",
+      "inputs": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "actions",
+          "type": "object"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "secondary",
+            "outline",
+            "ghost"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "action:icon": {
+      "type": "action:icon",
+      "namespace": "action",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "type": "enum",
+          "enum": [
+            "script",
+            "url",
+            "modal",
+            "flow",
+            "api"
+          ]
+        },
+        {
+          "name": "target",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "secondary",
+            "destructive",
+            "outline",
+            "ghost"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "flex": {
+      "type": "flex",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "direction",
+          "type": "enum",
+          "enum": [
+            "row",
+            "col",
+            "row-reverse",
+            "col-reverse"
+          ]
+        },
+        {
+          "name": "justify",
+          "type": "enum",
+          "enum": [
+            "start",
+            "end",
+            "center",
+            "between",
+            "around",
+            "evenly"
+          ]
+        },
+        {
+          "name": "align",
+          "type": "enum",
+          "enum": [
+            "start",
+            "end",
+            "center",
+            "baseline",
+            "stretch"
+          ]
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "description": "Gap between items (0-8)"
+        },
+        {
+          "name": "wrap",
+          "type": "boolean",
+          "description": "Allow flex items to wrap"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "grid": {
+      "type": "grid",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "columns",
+          "type": "number",
+          "description": "Number of columns on mobile devices"
+        },
+        {
+          "name": "smColumns",
+          "type": "number",
+          "description": "Columns at sm breakpoint (>640px)"
+        },
+        {
+          "name": "mdColumns",
+          "type": "number",
+          "description": "Columns at md breakpoint (>768px)"
+        },
+        {
+          "name": "lgColumns",
+          "type": "number",
+          "description": "Columns at lg breakpoint (>1024px)"
+        },
+        {
+          "name": "xlColumns",
+          "type": "number",
+          "description": "Columns at xl breakpoint (>1280px)"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "description": "Gap between items (0-12)"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "stack": {
+      "type": "stack",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "direction",
+          "type": "enum",
+          "enum": [
+            "col",
+            "row",
+            "col-reverse",
+            "row-reverse"
+          ]
+        },
+        {
+          "name": "gap",
+          "type": "number"
+        },
+        {
+          "name": "align",
+          "type": "enum",
+          "enum": [
+            "start",
+            "end",
+            "center",
+            "stretch",
+            "baseline"
+          ]
+        },
+        {
+          "name": "justify",
+          "type": "enum",
+          "enum": [
+            "start",
+            "end",
+            "center",
+            "between",
+            "around",
+            "evenly"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "card": {
+      "type": "card",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "tabs": {
+      "type": "tabs",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "defaultValue",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "className",
+          "type": "string"
+        },
+        {
+          "name": "items",
+          "type": "array"
+        }
+      ]
+    },
+    "accordion": {
+      "type": "accordion",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "accordionType",
+          "type": "enum",
+          "enum": [
+            "single",
+            "multiple"
+          ]
+        },
+        {
+          "name": "collapsible",
+          "type": "boolean"
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "description": "Array of { trigger, content, value }"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "container": {
+      "type": "container",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "maxWidth",
+          "type": "enum",
+          "enum": [
+            {
+              "label": "None (cancel max-width)",
+              "value": false
+            },
+            {
+              "label": "sm",
+              "value": "sm"
+            },
+            {
+              "label": "md",
+              "value": "md"
+            },
+            {
+              "label": "lg",
+              "value": "lg"
+            },
+            {
+              "label": "xl",
+              "value": "xl"
+            },
+            {
+              "label": "2xl",
+              "value": "2xl"
+            },
+            {
+              "label": "3xl",
+              "value": "3xl"
+            },
+            {
+              "label": "4xl",
+              "value": "4xl"
+            },
+            {
+              "label": "5xl",
+              "value": "5xl"
+            },
+            {
+              "label": "6xl",
+              "value": "6xl"
+            },
+            {
+              "label": "7xl",
+              "value": "7xl"
+            },
+            {
+              "label": "full",
+              "value": "full"
+            },
+            {
+              "label": "screen",
+              "value": "screen"
+            }
+          ]
+        },
+        {
+          "name": "padding",
+          "type": "number",
+          "description": "Padding value (0, 1-8, 10, 12, 16)"
+        },
+        {
+          "name": "centered",
+          "type": "boolean"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "page:header": {
+      "type": "page:header",
+      "namespace": "page",
+      "inputs": [
+        {
+          "name": "title",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Supports {field} interpolation and inline translation maps; falls back to the record title"
+        },
+        {
+          "name": "subtitle",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Same interpolation as Title"
+        },
+        {
+          "name": "actions",
+          "type": "array",
+          "description": "Action buttons rendered in the header, before any host-injected system actions"
+        },
+        {
+          "name": "breadcrumb",
+          "type": "boolean"
+        },
+        {
+          "name": "recordChrome",
+          "type": "boolean",
+          "description": "Set false for the bare h1 header on non-record pages"
+        },
+        {
+          "name": "showStar",
+          "type": "boolean"
+        },
+        {
+          "name": "showCopyId",
+          "type": "boolean"
+        },
+        {
+          "name": "maxVisible",
+          "type": "number",
+          "description": "How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu."
+        },
+        {
+          "name": "mobileMaxVisible",
+          "type": "number",
+          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
+        }
+      ]
+    },
+    "text": {
+      "type": "text",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "content",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    "image": {
+      "type": "image",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "src",
+          "type": "string"
+        },
+        {
+          "name": "alt",
+          "type": "string"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "icon": {
+      "type": "icon",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "icon",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "type": "number"
+        },
+        {
+          "name": "color",
+          "type": "string"
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "markdown": {
+      "type": "markdown",
+      "namespace": "plugin-markdown",
+      "inputs": [
+        {
+          "name": "content",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "element:divider": {
+      "type": "element:divider",
+      "namespace": "element",
+      "inputs": []
+    },
+    "badge": {
+      "type": "badge",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "secondary",
+            "destructive",
+            "outline"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "alert": {
+      "type": "alert",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "destructive"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "button": {
+      "type": "button",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "default",
+            "secondary",
+            "destructive",
+            "outline",
+            "ghost",
+            "link"
+          ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "default",
+            "sm",
+            "lg",
+            "icon"
+          ]
+        },
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
+    "html": {
+      "type": "html",
+      "namespace": "ui",
+      "inputs": [
+        {
+          "name": "html",
+          "type": "string",
+          "description": "Raw HTML content"
+        }
+      ]
+    }
+  }
+}

@@ -180,6 +180,13 @@ jobs:
               - 'skills/**'
               - '.github/workflows/scaffold-e2e.yml'
               - '.claude/skills/spec-property-retirement/SKILL.md'
+              # @objectstack/lint's production-witness suite reads the repo-root
+              # SDUI manifest (#12924) — verbatim per the declaration in
+              # scripts/cross-package-test-inputs.mjs (check:ci-filter-parity
+              # holds this list to the declarations; the examples/ page files
+              # the same suite declares are covered by entries the core filter
+              # already carries).
+              - 'sdui.manifest.json'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
