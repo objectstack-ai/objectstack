@@ -63,6 +63,36 @@ export function isSourceAuthoredPage(page: AnyRec): boolean {
  * path and resolved object binding. Source-authored pages yield nothing.
  *
  * `pagePath` is the caller's path prefix for the page (e.g. `pages[3]`).
+ *
+ * The descent is cycle-safe. Every composition slot below is `z.array(z.unknown())`
+ * authored data, so a component that contains itself — directly, or through a
+ * chain of containers — is LEGAL input, and an unguarded walk recurses until the
+ * stack dies. That crash is not scoped to one rule: this is the one shared
+ * traversal under every page-shaped lint rule and the CLI's i18n object-sections
+ * pass, so it takes all of them down in the same process.
+ *
+ * The guard is an ANCESTOR set, not a visited set, and the difference is
+ * load-bearing rather than stylistic — it is the same predicate
+ * `translatePage` (`packages/spec/src/system/i18n-resolver.ts`) settled on. A
+ * component object reused twice as a SIBLING is two legitimate placements at two
+ * distinct config paths, and every rule built on this walk must see both; a
+ * visited set would yield the first and silently drop the second, converting a
+ * crash into missing lint coverage. Only a node that is its own ancestor is a
+ * cycle.
+ *
+ * A cycle stops the descent SILENTLY — the repeated node is not yielded a second
+ * time and no finding is produced. The guard is a safety property of the walk,
+ * not a verdict about the document: deciding that a self-referential page is
+ * itself an authoring error would be new reject behaviour on authored input, and
+ * that is a contract call, not this walk's to make.
+ *
+ * Deliberately NO depth cap, which is a different instrument (`translatePage`
+ * carries both). A cap bounds a legal-but-absurd document; on a resolver it
+ * leaves copy untranslated, but on a LINT walk it would drop real components
+ * from the walk output and every rule would go quiet about them — a silent loss
+ * of coverage that looks exactly like a clean page. With the cycle guard the
+ * descent is bounded by the document's own finite nesting, so the cap would only
+ * ever fire on acyclic input, which is precisely the input it must not truncate.
  */
 export function walkPageComponents(page: AnyRec, pagePath: string): WalkedComponent[] {
   const out: WalkedComponent[] = [];
@@ -70,8 +100,13 @@ export function walkPageComponents(page: AnyRec, pagePath: string): WalkedCompon
 
   const pageObject = strName(page.object);
 
+  // The current descent path — ancestors only, removed again on the way out.
+  const ancestors = new Set<AnyRec>();
+
   const visit = (node: unknown, path: string, inheritedObject?: string) => {
     if (!isRec(node)) return;
+    // Cycle guard: this node is already an ancestor of itself.
+    if (ancestors.has(node)) return;
 
     // Per-element `dataSource` overrides the page object so one page can bind
     // several objects; an inline `properties.object` does the same for the
@@ -85,32 +120,37 @@ export function walkPageComponents(page: AnyRec, pagePath: string): WalkedCompon
 
     if (!props) return;
 
-    // `page:tabs` / `page:accordion` — items[].children[]
-    if (Array.isArray(props.items)) {
-      for (let i = 0; i < props.items.length; i++) {
-        const item = props.items[i];
-        if (!isRec(item) || !Array.isArray(item.children)) continue;
-        for (let c = 0; c < item.children.length; c++) {
-          visit(item.children[c], `${path}.properties.items[${i}].children[${c}]`, objectName);
+    ancestors.add(node);
+    try {
+      // `page:tabs` / `page:accordion` — items[].children[]
+      if (Array.isArray(props.items)) {
+        for (let i = 0; i < props.items.length; i++) {
+          const item = props.items[i];
+          if (!isRec(item) || !Array.isArray(item.children)) continue;
+          for (let c = 0; c < item.children.length; c++) {
+            visit(item.children[c], `${path}.properties.items[${i}].children[${c}]`, objectName);
+          }
         }
       }
-    }
-    // Generic layout nesting — `properties.children[]`. Not in any props
-    // schema, but it is how real pages compose layout containers (`type:
-    // 'flex'` grids in the showcase command-center wrap every chart this way).
-    // Omitting it hides whole sub-trees from every rule built on this walk.
-    if (Array.isArray(props.children)) {
-      for (let i = 0; i < props.children.length; i++) {
-        visit(props.children[i], `${path}.properties.children[${i}]`, objectName);
+      // Generic layout nesting — `properties.children[]`. Not in any props
+      // schema, but it is how real pages compose layout containers (`type:
+      // 'flex'` grids in the showcase command-center wrap every chart this way).
+      // Omitting it hides whole sub-trees from every rule built on this walk.
+      if (Array.isArray(props.children)) {
+        for (let i = 0; i < props.children.length; i++) {
+          visit(props.children[i], `${path}.properties.children[${i}]`, objectName);
+        }
       }
-    }
-    // `page:card` — body[] / footer[]
-    for (const key of ['body', 'footer'] as const) {
-      const slotList = props[key];
-      if (!Array.isArray(slotList)) continue;
-      for (let i = 0; i < slotList.length; i++) {
-        visit(slotList[i], `${path}.properties.${key}[${i}]`, objectName);
+      // `page:card` — body[] / footer[]
+      for (const key of ['body', 'footer'] as const) {
+        const slotList = props[key];
+        if (!Array.isArray(slotList)) continue;
+        for (let i = 0; i < slotList.length; i++) {
+          visit(slotList[i], `${path}.properties.${key}[${i}]`, objectName);
+        }
       }
+    } finally {
+      ancestors.delete(node);
     }
   };
 
