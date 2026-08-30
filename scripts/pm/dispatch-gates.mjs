@@ -7782,14 +7782,25 @@ function selfTest() {
   // — so the gate's own self-test (which derives its declaration from ROOTS)
   // cannot pin it and this case is the only place that does.
   t('and the spec refusal-message population Rule 3 walks', docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/ui/action.zod.ts')));
-  // The negative half, load-bearing for a declaration spanning five roots: a
-  // gate named on EVERY card is the louder version of naming none. `packages/`
-  // is now claimed in ONE place and must stay that narrow — the whole tree is
-  // 78 packages and none of the other 77 is corpus, nor is spec's own build
-  // output, which the walk skips.
-  t('and claims nothing elsewhere under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/runtime/src/index.ts')));
-  t('nor spec outside its source tree', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/package.json')));
-  t('nor under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  // #13297 widened Rule 3's root: the cross-package prose-id leg walks every
+  // sibling package's non-test sources against a pinned baseline, so the gate
+  // now genuinely reads any package edit and declares `packages/**`. The
+  // narrow claim these cases used to pin ("spec/src and nothing else under
+  // packages/") is the boundary the #13179 deferral drew, and the deferral's
+  // own codified revival condition retired it — a sibling package source is
+  // now POSITIVE coverage, not an over-claim.
+  t('and the sibling-package prose population the ledgered leg walks', docAuthoringHints.some((h) => hintCovers(h, 'packages/runtime/src/index.ts')));
+  // The residual over-claim is bounded and known: `packages/**` subsumes
+  // spec's non-src files and every test file, which the leg's own walk skips
+  // (spec belongs to the position-based rule; test bodies are out). That is
+  // the tolerated carve-out-inside-a-walked-root case — the same shape as
+  // check:slot-lookup-ratchet declaring the whole of `packages/**` — pinned
+  // here so it stays a recorded residual rather than an accident.
+  t('spec outside its source tree rides the bounded packages/** over-claim', docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/package.json')));
+  // The negative half that SURVIVES the widening, still load-bearing: a gate
+  // named on EVERY card is the louder version of naming none, and the leg
+  // walks packages/ only — never apps/ or examples/.
+  t('and claims nothing under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !docAuthoringHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
 
   // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
