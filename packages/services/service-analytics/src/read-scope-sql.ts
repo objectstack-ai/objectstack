@@ -177,7 +177,25 @@ import {
  * value as a THIRD semantics ("the key is absent from the record") and is
  * deliberately left alone — deciding it here would settle #5299's
  * key-missing-vs-value-null question as a side effect — and `driver-memory` /
- * `driver-mongodb` stay pin-only under the #5499 freeze.
+ * `driver-mongodb` stay pin-only here.
+ *
+ * ⚠️ [#13166] That last clause used to read "stay pin-only under the #5499
+ * freeze", and it was wrong TWICE. #13166 settled the wording together with the
+ * divergence rather than re-tensing it, because a tense-only rewrite would have
+ * turned an actionable defect into settled-looking prose.
+ *   (a) The #5499 freeze DISSOLVED on 2026-08-11 (head note of
+ *       `@objectstack/spec`'s `aggregation-conformance.ts`), so it stopped
+ *       explaining why anything stayed pinned on that date.
+ *   (b) It named `driver-mongodb` as a holdout beside `driver-memory`, which
+ *       was never true for the negation-carrying operator family:
+ *       `translateFieldOperators` passes `$nin` through and compiles
+ *       `$notContains` to `{ $not: { $regex } }`, both of which match a missing
+ *       or null field. `driver-memory`'s reference matcher was the one real
+ *       holdout, and #13166 aligned it to the include direction this module
+ *       already emits through {@link nullValueSatisfiesOperator}.
+ * ⛔ What these two are still pin-only ON is the `undefined`-COMPARAND question
+ * this section is about, which is a DIFFERENT cell from the null SEMANTICS one
+ * and is not settled by that alignment. Do not read #13166 as having closed it.
  *
  * The eleventh message was measured against `looksLikeInternalErrorLeak` before
  * being added, because the section above turns on that predicate answering FALSE
