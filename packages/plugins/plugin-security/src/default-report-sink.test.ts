@@ -35,13 +35,17 @@
  * it. `start()` binds `ctx.logger` above both of its early bail-outs (#10706),
  * so this holds on a degraded boot too.
  *
- * ⚠️ There is deliberately no `@ts-expect-error` compile-time pin here.
- * `packages/plugins/plugin-security/tsconfig.json` EXCLUDES every `*.test.ts`
- * file under `src`
- * (TEST_DEBT ledger), so a `@ts-expect-error` in this package evaluates never —
- * it is not a weak pin, it is no pin. The compile-time half is carried by
- * `pnpm check:optional-error-sink`, which runs on every PR with no `paths:`
- * filter and turns RED the moment `warn` goes back to optional on this sink.
+ * ⚠️ There is no `@ts-expect-error` compile-time pin here, and [#13176] changed
+ * the REASON rather than the state. Until then `tsconfig.json`'s `**\/*.test.ts`
+ * exclusion was this package's only word on the subject and no tsc program read
+ * this file at all, so a directive here would have evaluated NEVER — not a weak
+ * pin, no pin. The sibling `tsconfig.test.json` compiles this file now, so a
+ * directive WOULD be live; adding one is a real option and no longer a
+ * self-deception. It is still not needed for this contract: the compile-time
+ * half is carried by `pnpm check:optional-error-sink`, which runs on every PR
+ * with no `paths:` filter and turns RED the moment `warn` goes back to optional
+ * on this sink — a gate, not a directive, and it covers every sink rather than
+ * this one call site.
  */
 
 import { describe, expect, it, vi } from 'vitest';

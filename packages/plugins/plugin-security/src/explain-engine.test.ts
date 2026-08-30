@@ -196,7 +196,9 @@ describe('explainAccess (ADR-0090 D6)', () => {
     });
     const principal = d.layers.find((l) => l.layer === 'principal')!;
     // `contributors` is the z.input type (defaulted, so optional pre-parse) —
-    // normalize rather than dereference, keeping the test-layer TEST_DEBT flat.
+    // normalize rather than dereference. Written when this file was outside
+    // every tsc program and the motive was the TEST_DEBT ledger; it is the
+    // right shape either way, and [#13176] made it the compiler's business.
     const dropped = (principal.contributors ?? []).filter((c) => c.state === 'expired' || c.state === 'deactivated');
     expect(dropped).toEqual([
       { kind: 'permission_set', name: 'quarter_close_admin', via: 'held until 2026-06-01T00:00:00Z — expired', state: 'expired' },
