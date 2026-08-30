@@ -155,7 +155,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 19,
     blindSpot: 61,
     populationRule: '`this.routeManager.register(` call sites; reachable = those inside registerMetadataEndpoints',
-    controls: { 'private register*Endpoints(': 17, 'this.routeManager.register(': 80, enforceAuth: 91 },
+    controls: { 'private register*Endpoints(': 17, 'this.routeManager.register(': 80, enforceAuth: 61 },
     note:
       'The single non-tripwire probe names ONE registrar of 17. The other 16 can never mint a key: ' +
       'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, registerReportsEndpoints, ' +
@@ -171,7 +171,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 2,
     blindSpot: 13,
     populationRule: '`async handle*(` methods; reachable = handleMetadata + handleMcp, the two named by probes',
-    controls: { 'async handleMetadata(': 1, 'async handleMcp(': 1, HttpDispatcherResult: 47 },
+    controls: { 'async handleMetadata(': 1, 'async handleMcp(': 1, HttpDispatcherResult: 18 },
     note:
       'The exclusion is ON RECORD in the probe comment ("curated NAME only, NOT handleAI / handleData / ' +
       'handleSecurity, which are separate surfaces/rows") — but "separate rows" is not "separate ratcheted ' +
@@ -237,7 +237,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 6,
     populationRule: '`rawApp.<verb>(` mount sites',
-    controls: { 'rawApp.': 11, 'rawApp.get(': 3 },
+    controls: { rawApp: 11, 'rawApp.get(': 3, serveStatic: 3 },
     note:
       'A DEAD PROBE, dated. Its comment claims live discovery ("ANY new rawApp.<verb>(`${prefix}/data...`) ' +
       'mints a new key"), but that spelling occurs ZERO times in this file: commit e5a4d26901 (2026-07-31) ' +
@@ -256,7 +256,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
-    controls: { 'async publish(': 1, subscriptions: 20 },
+    controls: { 'async publish(': 1, subscriptions: 12 },
     note: 'Mounts no HTTP route. The pin records the trusted-internal-only posture of the fan-out; the tripwire is correctly silent.',
   },
   {
@@ -268,7 +268,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
-    controls: { RealtimeService: 9, 'async init(': 1 },
+    controls: { RealtimeService: 10, 'async init(': 1 },
     note: 'Tripwire only. Zero keys is the designed reading (#2992): no end-user realtime transport is wired.',
   },
   {
@@ -280,7 +280,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
-    controls: { subscriptions: 18, 'disconnect()': 1 },
+    controls: { subscriptions: 14, WebSocket: 7 },
     note:
       'Tripwire only, and the one whose arming was PROVEN: #9083 measured that adding `new EventSource(...)` here ' +
       'goes red as UNCLASSIFIED. Note the client transport words appear in prose/types here, which is why the ' +
@@ -391,8 +391,9 @@ export function deriveProbeFileCensus(): { table: ProbeTableReading; files: Map<
       population: occurrences(src, /rawApp\.(?:get|post|put|patch|delete|all|use|on)\(/g),
       reachable: 0,
       controls: {
-        'rawApp.': occurrences(src, /rawApp\./g),
+        rawApp: occurrences(src, /rawApp/g),
         'rawApp.get(': occurrences(src, /rawApp\.get\(/g),
+        serveStatic: occurrences(src, /serveStatic/g),
       },
     });
   }
@@ -401,7 +402,7 @@ export function deriveProbeFileCensus(): { table: ProbeTableReading; files: Map<
   const noMount: Array<[string, Record<string, RegExp>]> = [
     ['packages/services/service-realtime/src/in-memory-realtime-adapter.ts', { 'async publish(': /async\s+publish\s*\(/g, subscriptions: /subscriptions/g }],
     ['packages/services/service-realtime/src/realtime-service-plugin.ts', { RealtimeService: /RealtimeService/g, 'async init(': /async\s+init\s*\(/g }],
-    ['packages/client/src/realtime-api.ts', { subscriptions: /subscriptions/g, 'disconnect()': /disconnect\(\)/g }],
+    ['packages/client/src/realtime-api.ts', { subscriptions: /subscriptions/g, WebSocket: /WebSocket/g }],
     ['packages/mcp/src/plugin.ts', { 'resolveStdioExecutionContext(': /resolveStdioExecutionContext\s*\(/g, 'async start(': /async\s+start\s*\(/g }],
   ];
   for (const [rel, controlSpec] of noMount) {
