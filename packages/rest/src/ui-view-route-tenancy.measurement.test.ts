@@ -601,32 +601,89 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
         expect(field.type).toBe('text');
     }, 120_000);
 
-    it('⚠️ `hidden` is NOT a uniform floor on the crossed path — measured per field, not assumed', async () => {
-        // ⛔ #13244 measured this single-tenant with ONE hidden field, which was
-        // not a priority name, and reported "hidden is dropped by declaration".
-        // Driven here with both kinds, the answer is not uniform:
-        //   - `beta_secret` (hidden, non-priority) IS dropped from the list;
-        //   - `status`      (hidden, priority name) is NOT.
-        // The producer's list branch applies `!fields[k].hidden` only to the
-        // FILL pass, never to the priority pass. Recorded as a measurement; the
-        // repair is not this card.
+    it('⭐ `hidden` IS a uniform floor on the crossed path — both field kinds measured, not assumed', async () => {
+        // ⚠️ Read the history before the assertions: they were the other way
+        // round two days ago, and that sequence is part of the record.
+        //
+        //   - #13244 measured this SINGLE-TENANT with ONE hidden field, which
+        //     happened not to be a priority name, saw it dropped, and reported
+        //     "hidden is dropped by declaration" — true of the field it drove,
+        //     false of the class.
+        //   - 2026-08-29, HERE: driven with BOTH kinds on the crossed path, the
+        //     answer was NOT uniform. `beta_secret` (hidden, non-priority) was
+        //     dropped; `status` (hidden, priority-named) was SERVED, carrying
+        //     its authored label `Beta Status`. The producer's list branch
+        //     applied `!fields[k].hidden` to the fill pass only and never to
+        //     the priority pass, so two branches of one producer disagreed.
+        //   - 2026-08-30: repaired by #13329 (`2a75270b1e`), which put the same
+        //     filter on the priority pass. ⛔ The 2026-08-29 reading was not
+        //     wrong — it was TRUE WHEN TAKEN and has been made false by a fix.
+        //     Re-measured here on the repaired producer; the asymmetry is gone.
+        //
+        // ⭐ Why the case keeps its place now that it has changed colour.
+        // #13329 ships its own pin
+        // (`packages/metadata-protocol/src/protocol.ui-view-hidden-columns.test.ts`),
+        // and that pin is the authority on the producer: it calls `getUiView`
+        // DIRECTLY, in-package, from source, and sweeps all nine priority
+        // names. ⛔ None of that is re-measured here. What it does not drive is
+        // this file's subject: the CROSSED path — an anonymous request naming
+        // environment B on the unscoped mount, through the REST seam, through
+        // environment resolution and kernel acquisition, into the BUILT
+        // `metadata-protocol` `dist/` (header note on aliasing). This case is
+        // the blast-radius reading for the crossing: what the disclosure this
+        // file measures actually contains. A regression reachable only through
+        // that chain would leave the producer-level pin green.
         const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
         const columns = columnsOf(observed.body);
+        const labels = (observed.body.list.columns as any[]).map((c) => c.label);
 
+        // Pinned to B first: an inventory of what environment B disclosed, not
+        // of whatever the route happened to answer.
+        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
+
+        // Both kinds, named, because the class is what the repair moved:
+        //   - `beta_secret` — hidden, NOT a priority name (dropped before too);
+        //   - `status`      — hidden AND a priority name  (this was the defect).
         expect(columns).not.toContain('beta_secret');
-        expect(columns).toContain('status');
-        // The label of the hidden priority field crosses with it.
-        const statusColumn = (observed.body.list.columns as any[]).find((c) => c.field === 'status');
-        expect(statusColumn.label).toBe('Beta Status');
+        expect(columns).not.toContain('status');
 
-        // The form branch, by contrast, filters ALL hidden fields uniformly —
-        // so the two branches of one producer disagree, which is the finding.
+        // The finding was never "a field name appears" — the emitted column
+        // carried an authored human string. Neither label crosses now.
+        expect(labels).not.toContain('Beta Status');
+        expect(labels).not.toContain('Beta Secret');
+
+        // ⭐ Controls. Without these, a producer that emitted NOTHING at all
+        // would satisfy every assertion above vacuously.
+        expect(columns).toContain('name');
+        expect(columns).toContain('beta_only_field');
+        expect(labels).toContain('Beta Account Name');
+
+        // The name-agnostic form of the same statement, computed from the
+        // fixture rather than from a copy of the producer's priority list: no
+        // column the crossed body emits is declared hidden. A tenth priority
+        // name added without the filter fails this even though nothing here
+        // knows its spelling.
+        const hiddenKeys = Object.keys(SCHEMA_B.fields)
+            .filter((k) => (SCHEMA_B.fields as any)[k].hidden === true);
+        expect(hiddenKeys).toEqual(['status', 'beta_secret']); // the fixture says what it says
+        expect(columns.filter((c) => hiddenKeys.includes(c))).toEqual([]);
+
+        // `searchableFields` is derived from `columns`, so a hidden column that
+        // reached the body also reached the search affordance — a second
+        // user-visible consequence of the same line, read on the crossed path.
+        const searchable = observed.body.list.searchableFields as string[];
+        expect(searchable.filter((f) => hiddenKeys.includes(f))).toEqual([]);
+
+        // The form branch filtered every hidden field all along. Asserting the
+        // two branches now AGREE is the other half of the repair, and it is
+        // what would say so if a future change moved only one of them.
         const form = await drive({
             host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined,
             params: { object: 'account', type: 'form' },
         });
         expect(formFieldsOf(form.body)).not.toContain('status');
         expect(formFieldsOf(form.body)).not.toContain('beta_secret');
+        expect(formFieldsOf(form.body)).toContain('beta_only_field'); // control
     }, 120_000);
 
     it('⚠️ the crossed route is also an OBJECT-EXISTENCE ORACLE for the named environment', async () => {
