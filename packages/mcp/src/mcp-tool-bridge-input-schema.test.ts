@@ -27,7 +27,7 @@
  * about the bridge rather than about the harness.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -178,15 +178,18 @@ async function bridged(tools: AIToolDefinition[]) {
 // ---------------------------------------------------------------------------
 
 describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
-  let session: StdioSession | undefined;
+  let openSession: StdioSession | undefined;
 
-  beforeEach(() => {
-    session = undefined;
+  // Teardown lives here rather than at the end of each case so a failing
+  // assertion still closes the transport it opened.
+  afterEach(async () => {
+    await openSession?.close();
+    openSession = undefined;
   });
 
   it('CONTROL: name and description reach the client', async () => {
     const s = await bridged([QUERY_RECORDS, LIST_OBJECTS]);
-    session = s.session;
+    openSession = s.session;
 
     const listed = (await s.session.rpc('tools/list')).result?.tools ?? [];
     const byName = Object.fromEntries(listed.map((t: any) => [t.name, t]));
@@ -195,12 +198,11 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
     expect(byName.query_records.description).toBe('Query records of an object');
     expect(byName.list_objects.description).toBe('List all objects');
 
-    await s.session.close();
   });
 
   it('forwards `parameters` as the tool inputSchema', async () => {
     const s = await bridged([QUERY_RECORDS]);
-    session = s.session;
+    openSession = s.session;
 
     const listed = (await s.session.rpc('tools/list')).result?.tools ?? [];
     const tool = listed.find((t: any) => t.name === 'query_records');
@@ -213,12 +215,11 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
     expect(tool?.inputSchema?.properties?.limit).toMatchObject({ type: 'number' });
     expect(tool?.inputSchema?.required).toEqual(['objectName']);
 
-    await s.session.close();
   });
 
   it('delivers the client arguments to the ToolRegistry', async () => {
     const s = await bridged([QUERY_RECORDS]);
-    session = s.session;
+    openSession = s.session;
 
     const called = await s.session.rpc('tools/call', {
       name: 'query_records',
@@ -230,12 +231,11 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
     expect(s.registry.calls[0].toolName).toBe('query_records');
     expect(s.registry.calls[0].input).toEqual({ objectName: 'task', limit: 5 });
 
-    await s.session.close();
   });
 
   it('CONTROL: a tool that declares no parameters still registers and still executes', async () => {
     const s = await bridged([LIST_OBJECTS]);
-    session = s.session;
+    openSession = s.session;
 
     const listed = (await s.session.rpc('tools/list')).result?.tools ?? [];
     const tool = listed.find((t: any) => t.name === 'list_objects');
@@ -247,7 +247,6 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
     expect(s.registry.calls).toHaveLength(1);
     expect(s.registry.calls[0].input).toEqual({});
 
-    await s.session.close();
   });
 
   /**
@@ -259,7 +258,7 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
    */
   it('CONSEQUENCE: the SDK rejects arguments that do not match the declared schema', async () => {
     const s = await bridged([QUERY_RECORDS]);
-    session = s.session;
+    openSession = s.session;
 
     const called = await s.session.rpc('tools/call', {
       name: 'query_records',
@@ -270,6 +269,5 @@ describe('bridgeTools — what an AIToolDefinition puts on the wire', () => {
     expect(String(called.result?.content?.[0]?.text)).toContain('objectName');
     expect(s.registry.calls).toHaveLength(0);
 
-    await s.session.close();
   });
 });
