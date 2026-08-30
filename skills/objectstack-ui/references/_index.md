@@ -17,7 +17,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/ui/dataset.zod.ts` — Analytics Dataset — the one semantic layer (ADR-0021).
 - `node_modules/@objectstack/spec/src/ui/page.zod.ts` — Page Region Schema
 - `node_modules/@objectstack/spec/src/ui/report.zod.ts` — Exports: ReportType, ReportChartSchema, ReportSortSchema, JoinedReportBlockSchema, ReportSchema
-- `node_modules/@objectstack/spec/src/ui/view.zod.ts` — HTTP Method Enum & HTTP Request Schema
+- `node_modules/@objectstack/spec/src/ui/view.zod.ts` — View protocol schemas — the `view` metadata type and its three persisted body spellings.
 - `node_modules/@objectstack/spec/src/ui/widget.zod.ts` — Exports: FieldWidgetPropsSchema
 
 ## Transitive dependencies

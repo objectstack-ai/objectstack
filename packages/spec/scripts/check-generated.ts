@@ -194,6 +194,12 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   // above. The audit half is unchanged and is still the bulk of what it reports.
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  // #13086 — the YAML half of the surface `check:skill-examples` covers for
+  // TypeScript: tagged ```yaml blocks in skills/ + content/docs/ are safeParsed
+  // against the live spec schemas. Reads src/ through tsx (no dist), writes
+  // nothing: a failure is a doc example to fix or a marker to move, never a
+  // `gen:` to run.
+  { check: 'check:yaml-examples', why: 'validates tagged prose YAML examples against live spec schemas — no artifact' },
   // #7319. Reads `src/` and the shipped template trees and writes nothing: a
   // failure is either a manifest to fix or a schema to fix, never a `gen:` to
   // run. It audits the inverse direction from everything in GATED — those
