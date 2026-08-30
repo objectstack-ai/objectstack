@@ -280,15 +280,247 @@ class Parser {
 
 /**
  * Interpret a braced attribute value `{...}`.
- * JSON-literal values (numbers, booleans, null, strings, arrays, objects with
- * quoted keys) are materialized. Anything else is kept as a deferred expression
- * marker `{ $expr }` — typed and validated later, NEVER evaluated here.
+ *
+ * Strict-JSON values are materialized by `JSON.parse`, exactly as they always
+ * were. Beyond that, the JS **literal subset** below is materialized too
+ * (objectui#6614 Q1-A, maintainer ruling 2026-08-28). Anything left over — a
+ * genuine expression — is kept as the deferred marker `{ $expr }`: typed and
+ * validated later, drawing `inert-expression`, and NEVER evaluated here.
+ *
+ * ORDER IS LOAD-BEARING. `JSON.parse` runs FIRST and is untouched, so every
+ * input JSON accepts takes byte-identically the path it took before the literal
+ * subset existed. The reader below only ever sees strings `JSON.parse` has
+ * already thrown on, which makes strict-JSON invariance a property of the
+ * structure rather than of a test.
+ *
+ * LOCKSTEP: this grammar is the port of objectui's `packages/sdui-parser` copy
+ * (objectui#6614). The two copies must agree on the accepted grammar AND on
+ * diagnostic codes — if they drift, the save gate and the renderer speak
+ * different dialects and a page can save clean and render inert
+ * (objectstack#12719 states the invariant; #12977 carries this half of it).
+ * Change this block only together with the objectui copy.
  */
 export function interpretBrace(raw: string): unknown {
   const trimmed = raw.trim();
   try {
     return JSON.parse(trimmed);
   } catch {
-    return { $expr: trimmed };
+    const literal = readLiteral(trimmed);
+    return literal === NOT_LITERAL ? { $expr: trimmed } : literal;
+  }
+}
+
+/* ---------------------- the JS literal subset (#6614) ---------------------- */
+
+/**
+ * EXACTLY TWO widenings over JSON, and nothing else:
+ *
+ *   1. **single-quoted strings** — `{'name'}`, `{['name','amount']}`, and in
+ *      key position `{{'pageSize': 25}}`;
+ *   2. **unquoted identifier object keys** — `{{pageSize: 25}}`.
+ *
+ * Everything else JSON refuses is still refused and still becomes `{ $expr }`:
+ * trailing commas, comments, array holes, spreads, `undefined` / `NaN` /
+ * `Infinity`, `+1` / `.5` / `1.` / `0x1f`, template literals, and every genuine
+ * expression — identifiers, member access, calls, operators, ternaries.
+ *
+ * That list is deliberately short. This is a VALUE grammar, not an evaluator:
+ * it contains no identifier lookup and no operator, so there is nothing here to
+ * execute (ADR-0080 — this tier parses, never executes). The widening moves the
+ * spellings an author writes by habit onto the materialized side; it does not
+ * move the boundary between data and code.
+ */
+const NOT_LITERAL = Symbol('not-a-literal');
+
+/** JSON's whitespace set, not JS's — narrower, and one less thing to diverge. */
+const LITERAL_WS = /[ \t\n\r]/;
+const IDENT_START = /[A-Za-z_$]/;
+const IDENT_CHAR = /[A-Za-z0-9_$]/;
+/** JSON's number grammar verbatim: no leading `+`, no `.5`, no `1.`, no hex. */
+const NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/;
+/** JSON's escape set. `\'` is added for single-quoted strings only. */
+const SIMPLE_ESCAPE: Record<string, string> = {
+  '"': '"',
+  '\\': '\\',
+  '/': '/',
+  b: '\b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+};
+
+function readLiteral(src: string): unknown {
+  const reader = new LiteralReader(src);
+  const value = reader.value();
+  if (value === NOT_LITERAL) return NOT_LITERAL;
+  reader.ws();
+  // Trailing anything means the input was an expression that merely STARTS with
+  // a literal (`['a'] + x`, `1 + 2`). Refuse the whole input.
+  return reader.done() ? value : NOT_LITERAL;
+}
+
+class LiteralReader {
+  private pos = 0;
+
+  constructor(private readonly src: string) {}
+
+  done(): boolean {
+    return this.pos >= this.src.length;
+  }
+
+  ws(): void {
+    while (this.pos < this.src.length && LITERAL_WS.test(this.src[this.pos])) this.pos++;
+  }
+
+  value(): unknown {
+    this.ws();
+    const c = this.src[this.pos];
+    if (c === undefined) return NOT_LITERAL;
+    if (c === '"' || c === "'") return this.string(c);
+    if (c === '[') return this.array();
+    if (c === '{') return this.object();
+    if (this.keyword('true')) return true;
+    if (this.keyword('false')) return false;
+    if (this.keyword('null')) return null;
+    return this.number();
+  }
+
+  /** A keyword only when it is not the prefix of a longer identifier. */
+  private keyword(word: string): boolean {
+    if (!this.src.startsWith(word, this.pos)) return false;
+    const after = this.src[this.pos + word.length];
+    if (after !== undefined && IDENT_CHAR.test(after)) return false;
+    this.pos += word.length;
+    return true;
+  }
+
+  private number(): unknown {
+    const m = NUMBER.exec(this.src.slice(this.pos));
+    if (!m) return NOT_LITERAL;
+    this.pos += m[0].length;
+    return Number(m[0]);
+  }
+
+  private string(quote: string): unknown {
+    this.pos++; // opening quote
+    let out = '';
+    for (;;) {
+      const c = this.src[this.pos];
+      if (c === undefined) return NOT_LITERAL; // unterminated
+      if (c === quote) {
+        this.pos++;
+        return out;
+      }
+      if (c === '\\') {
+        const esc = this.src[this.pos + 1];
+        if (esc === undefined) return NOT_LITERAL;
+        if (esc === 'u') {
+          const hex = this.src.slice(this.pos + 2, this.pos + 6);
+          if (!/^[0-9a-fA-F]{4}$/.test(hex)) return NOT_LITERAL;
+          out += String.fromCharCode(parseInt(hex, 16));
+          this.pos += 6;
+          continue;
+        }
+        // `\'` is legal inside a single-quoted string only — JSON's set otherwise.
+        if (esc === "'" && quote === "'") {
+          out += "'";
+          this.pos += 2;
+          continue;
+        }
+        const simple = SIMPLE_ESCAPE[esc];
+        if (simple === undefined) return NOT_LITERAL; // `\x41`, `\0`, line continuation
+        out += simple;
+        this.pos += 2;
+        continue;
+      }
+      // JSON forbids raw control characters inside a string; so does this.
+      if (c < ' ') return NOT_LITERAL;
+      out += c;
+      this.pos++;
+    }
+  }
+
+  private array(): unknown {
+    this.pos++; // '['
+    const out: unknown[] = [];
+    this.ws();
+    if (this.src[this.pos] === ']') {
+      this.pos++;
+      return out;
+    }
+    for (;;) {
+      const item = this.value();
+      if (item === NOT_LITERAL) return NOT_LITERAL;
+      out.push(item);
+      this.ws();
+      const c = this.src[this.pos];
+      // A trailing comma leaves `value()` facing `]`, which it refuses — so
+      // `['a',]` is NOT in the subset. Only two widenings were ruled.
+      if (c === ',') {
+        this.pos++;
+        continue;
+      }
+      if (c === ']') {
+        this.pos++;
+        return out;
+      }
+      return NOT_LITERAL;
+    }
+  }
+
+  private object(): unknown {
+    this.pos++; // '{'
+    const out: Record<string, unknown> = {};
+    this.ws();
+    if (this.src[this.pos] === '}') {
+      this.pos++;
+      return out;
+    }
+    for (;;) {
+      this.ws();
+      const key = this.key();
+      if (key === NOT_LITERAL) return NOT_LITERAL;
+      this.ws();
+      if (this.src[this.pos] !== ':') return NOT_LITERAL;
+      this.pos++;
+      const item = this.value();
+      if (item === NOT_LITERAL) return NOT_LITERAL;
+      // ⚠️ Plain `out[key] = item` would hand an authored `__proto__` key the
+      // prototype SETTER. `JSON.parse` creates an ordinary own data property,
+      // and this path must too: the whole point of this tier is that untrusted
+      // source is safe to parse, so a widening must not open a
+      // prototype-pollution lever the strict-JSON path never had.
+      Object.defineProperty(out, key as string, {
+        value: item,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+      this.ws();
+      const c = this.src[this.pos];
+      if (c === ',') {
+        this.pos++;
+        continue;
+      }
+      if (c === '}') {
+        this.pos++;
+        return out;
+      }
+      return NOT_LITERAL;
+    }
+  }
+
+  /** A quoted string, or a bare identifier — the second ruled widening. */
+  private key(): unknown {
+    const c = this.src[this.pos];
+    if (c === '"' || c === "'") return this.string(c);
+    if (c !== undefined && IDENT_START.test(c)) {
+      const start = this.pos;
+      this.pos++;
+      while (this.pos < this.src.length && IDENT_CHAR.test(this.src[this.pos])) this.pos++;
+      return this.src.slice(start, this.pos);
+    }
+    return NOT_LITERAL;
   }
 }
