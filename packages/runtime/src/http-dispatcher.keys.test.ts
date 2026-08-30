@@ -354,7 +354,7 @@ describe('HttpDispatcher.handleKeys — a refused insert is DELIVERED, never swa
   /** The mint path with a storage layer that refuses every write. */
   function kernelRefusingInsert(driverMessage: string) {
     const { kernel, rows } = makeKernel();
-    const ql: any = kernel.getService('objectql');
+    const ql = kernel.getService('objectql');
     ql.insert = async () => { throw new Error(driverMessage); };
     return { kernel, rows };
   }
