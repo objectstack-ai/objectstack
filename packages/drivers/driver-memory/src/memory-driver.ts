@@ -202,15 +202,20 @@ interface MemoryTransaction {
  * (`createWithAutonumberResync`) is triggered by the STORE rejecting the
  * duplicate and this store rejected nothing.
  *
- * Since #13340 a batch write is also ALL-OR-NOTHING: {@link bulkCreate} builds
- * and checks every row — against the table AND against the rest of the batch —
- * before it pushes any of them, so a refused row leaves the table exactly as
- * it found it. That is the posture {@link updateMany} has had since #13197,
- * and the one `driver-sql` gets from sending a batch as a single insert.
- * `bulkCreate` used to be `Promise.all(map(create))`, where a refusal left
- * every row accepted BEFORE it standing — a refused 2-row batch on a 2-row
- * table left THREE rows — which made a caller's retry of the same array
- * unsafe for reasons that had nothing to do with constraints.
+ * Since #13340 {@link bulkCreate} is ALL-OR-NOTHING: it builds and checks every
+ * row — against the table AND against the rest of the batch — before it pushes
+ * any of them, so a refused row leaves the table exactly as it found it. That
+ * is the posture {@link updateMany} has had since #13197, and the one
+ * `driver-sql` gets from sending a batch as a single insert. `bulkCreate` used
+ * to be `Promise.all(map(create))`, where a refusal left every row accepted
+ * BEFORE it standing — a refused 2-row batch on a 2-row table left THREE rows
+ * — which made a caller's retry of the same array unsafe for reasons that had
+ * nothing to do with constraints.
+ *
+ * ⚠️ That is a statement about those TWO doors, not about batches in general.
+ * {@link bulkUpdate} and {@link bulkDelete} are still `Promise.all(map(...))`
+ * and still leave the rows applied before a refusal standing — #13435. Do not
+ * read the paragraph above as covering them.
  *
  * Everything else is still unenforced. {@link syncSchema} allocates an array,
  * indexes temporal fields and records those unique constraints — and nothing
