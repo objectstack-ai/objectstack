@@ -90,6 +90,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { blank, scanSource } from './js-comment-mask.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * Comments AND string/template/regex content blanked, offsets kept. This gate
@@ -419,5 +420,7 @@ function selfTest() {
   console.log(`self-test OK: ${cases.length} cases + real-tree population floor.`);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
-else main();
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  else main();
+}
