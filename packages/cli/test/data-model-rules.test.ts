@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
+import { FieldSchema } from '@objectstack/spec/data';
 import { lintConfig } from '../src/commands/lint';
 
 const rulesOf = (issues: { rule: string }[]) => issues.map((i) => i.rule);
@@ -694,5 +695,94 @@ describe('lintLegacyOrganizationComposites — S6 respelling nudge (ADR-0120 D5c
     // two rules are complementary, not duplicates: R11 says "say which scope",
     // R12 says "the shape tells me which one you meant".
     expect(has(lintDataModel(objs), 'unique/unscoped-declared-index')).toBe(true);
+  });
+});
+
+/**
+ * [#13250] `reference_to` is a REJECTED alias of `reference` — these rules must
+ * not read it as a target.
+ *
+ * #11567 settled the ruling ("one key, one answer, on both doors") and
+ * `packages/lint/src/validate-security-posture.ts` records the same narrowing
+ * for its own `refOf`, on purpose. `lintDataModel` runs over a schema-parsed
+ * stack, so the alias cannot legitimately appear here at all; tolerating it
+ * made `relationship/missing-reference` — the rule whose whole job is to catch
+ * a relationship with no target — report a valid target for a field that has
+ * none.
+ *
+ * ⚠️ Every assertion below is paired with a POSITIVE CONTROL on the canonical
+ * spelling. A `refOf` that resolved NOTHING would satisfy the alias half on its
+ * own, so the canonical half is what makes these measurements rather than
+ * vacuous passes.
+ */
+describe('lintDataModel — `reference_to` is a rejected alias, not a tolerated one (#13250)', () => {
+  it('upstream control: FieldSchema declares `reference` and refuses `reference_to`', () => {
+    const fieldKeys = Object.keys(FieldSchema.shape);
+    expect(fieldKeys).toContain('reference');
+    expect(fieldKeys).not.toContain('reference_to');
+
+    const rejected = FieldSchema.safeParse({ name: 'project', type: 'lookup', reference_to: 'project' });
+    expect(rejected.success).toBe(false);
+    expect(rejected.error?.issues.map((i) => i.code)).toContain('unrecognized_keys');
+
+    // POSITIVE CONTROL — the canonical spelling parses, so the refusal above is
+    // about the KEY and not about the fixture being malformed some other way.
+    expect(FieldSchema.safeParse({ name: 'project', type: 'lookup', reference: 'project' }).success).toBe(true);
+  });
+
+  it('R1 fires: a relationship whose only target spelling is `reference_to` has no target', () => {
+    const issue = lintDataModel([
+      { name: 'task', fields: { project: { type: 'lookup', reference_to: 'project' } } },
+    ]).find((i) => i.rule === 'relationship/missing-reference');
+    expect(issue?.severity).toBe('error');
+    expect(issue?.message).toContain('is missing a reference target');
+    expect(issue?.path).toBe('objects[0].fields.project.reference');
+  });
+
+  it('POSITIVE CONTROL — canonical `reference` still resolves, so R1 stays silent', () => {
+    expect(
+      has(
+        lintDataModel([
+          { name: 'project', fields: { name: { type: 'text' } } },
+          { name: 'task', fields: { project: { type: 'lookup', reference: 'project' } } },
+        ]),
+        'relationship/missing-reference',
+      ),
+    ).toBe(false);
+  });
+
+  it('the resolved target NAME is read from `reference` (not merely truthiness)', () => {
+    // `relationship/master-detail-required` renders the target it resolved, so
+    // this pins that `refOf` returns the VALUE — a guard that returned `true`
+    // would pass the R1 tests above and fail here.
+    const canonical = lintDataModel([
+      { name: 'invoice_line', fields: { invoice: { type: 'master_detail', reference: 'invoice' } } },
+    ]).find((i) => i.rule === 'relationship/master-detail-required');
+    expect(canonical?.message).toContain('→ invoice');
+
+    // The alias resolves nothing, so the rule that needs a target never runs —
+    // R1 is what the author hears instead, and the schema names the bad key.
+    expect(
+      has(
+        lintDataModel([
+          { name: 'invoice_line', fields: { invoice: { type: 'master_detail', reference_to: 'invoice' } } },
+        ]),
+        'relationship/master-detail-required',
+      ),
+    ).toBe(false);
+  });
+
+  it('a non-string `reference` is not a target either', () => {
+    // `refOf` is declared `string | undefined`; the old `||` chain returned
+    // whatever truthy value was there, so this shape used to be reported as a
+    // resolved target named `[object Object]`.
+    expect(
+      has(
+        lintDataModel([
+          { name: 'task', fields: { project: { type: 'lookup', reference: { object: 'project' } } } },
+        ]),
+        'relationship/missing-reference',
+      ),
+    ).toBe(true);
   });
 });
