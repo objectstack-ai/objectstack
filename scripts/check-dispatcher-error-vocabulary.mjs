@@ -446,18 +446,43 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  *
  * ## TWO blindnesses, not one — and the second is why the first is not enough
  *
- * ① POSITION. The object-literal stamp position has no shape (above).
- * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognises
+ * ① POSITION. The object-literal stamp position has no shape (above). OPEN.
+ * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognised
  *    `function f(`, `constructor(` and `const|let|var f = (` — and NO class
- *    method. So a code-carrying helper that is a METHOD is out of reach even in
- *    the position `codehelper` already implements: the same body that produces
- *    a site as a free function produces nothing as `private error(code, …)`.
- *    Measured with a same-genre positive control, and pinned below.
+ *    method. So a code-carrying helper that is a METHOD was out of reach even
+ *    in the position `codehelper` already implements: the same body that
+ *    produces a site as a free function produced nothing as
+ *    `private error(code, …)`. [#13226] CLOSED — see `METHOD_HEADER` below.
  *
  * These are independent, and the card's own live instance needs BOTH:
  * `Parser#error(code, message, start?, tag?)` in `packages/sdui-parser` is a
  * class method that stamps through an object literal. Widening the position
  * alone would still not reach it.
+ *
+ * ## [#13226] What closing ② cost, and what it did NOT buy
+ *
+ * ⭐ Closing ② moved NOTHING on this tree: sites and `unresolved` are
+ * byte-identical before and after, measured through the real `deriveSites` over
+ * `packages/**` against a worktree at the parent commit. Two independent
+ * reasons, and the second is the one worth carrying forward:
+ *
+ *   · No class-method helper stamps in the ASSIGNMENT position today. Of the 17
+ *     `.code = ident` matches in `packages/**` non-test source, 5 are true
+ *     helpers (the identifier is a parameter) and every one of those is a
+ *     `function` or a `constructor` — 0 are methods.
+ *   · The 4 helpers ② was blocking all stamp through an OBJECT LITERAL, so
+ *     blindness ① still drops them. ⚠️ The 25 call sites and 3 undischargeable
+ *     `unresolved` in the split below are therefore NOT a cost ② paid; they are
+ *     a cost ① will pay, on the day the position widens. Reading them as ②'s is
+ *     the mistake this paragraph exists to prevent.
+ *
+ * What ② bought is that the widening of ① will REACH those helpers when it
+ * lands. `enclosingDeclaration` at the `Parser#error` stamp offset now answers
+ * `error(code, message, start, tag)`; before it answered the Parser
+ * CONSTRUCTOR. (The constructor's parameter names parsed as `["readonly",
+ * "readonly"]` when this was first measured — that half was a separate defect
+ * in `parseParamNames`, since repaired, and it reads `["src","opts"]` now.
+ * Both halves had to be true for the stamp to resolve; neither alone sufficed.)
  *
  * ## The measurement (blast radius), on `packages/**` non-test source
  *
@@ -470,15 +495,27 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  * a template and `f(a, code, b)` inside an argument list, and then LOST a true
  * positive because a bracket inside a regex literal unbalanced its scan.
  *
- *   predicate matches            13 helpers (12 named, 1 anonymous)
- *   (a) call sites newly reached 106   — 76 reduce to a literal, 30 do not
+ *   predicate matches            14 helpers (13 named, 1 anonymous)
+ *   (a) call sites newly reached 116   — 75 reduce to a literal, 41 do not
  *   (b) NEW verdict rows needed   29   — 0 of them already carry a row
- *   (c) undischargeable `unresolved` findings  4
+ *   (c) undischargeable `unresolved` findings  5
  *
- * Split by whether `enclosingDeclaration` can see the declaration at all:
+ * Split by whether `enclosingDeclaration` could see the declaration at all
+ * BEFORE [#13226] — the split is history now that ② is closed, and it is kept
+ * because it is what the ① widening will actually meet:
  *
- *   reachable today (blindness ① only)   9 helpers · 81 call sites · 29 rows · 1 unresolved
- *   blocked by blindness ②               4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *   reachable then (blindness ① only)  10 helpers · 91 call sites · 29 rows · 2 unresolved
+ *   blocked by blindness ②              4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *
+ * ⚠️ [#13226] re-derived these on today's tree and they had DRIFTED — upward,
+ * by exactly one helper. The first census read 13 helpers · 106 call sites · 4
+ * unresolved; a 14th helper (`block` in `packages/spec/scripts/`, 10 call sites,
+ * none reducing) landed between the two readings and accounts for the whole
+ * difference (106 + 10 = 116, 4 + 1 = 5). (b) 29 and the ZERO below did not
+ * move, and the blindness-② line reproduced digit for digit. The lesson is not
+ * that the numbers were wrong — they were right when taken — but that this is a
+ * census of a moving tree, so a reader acting on it re-runs it rather than
+ * quoting it.
  *
  * ⚠️ (b) is not the whole cost, and reading it as the whole cost is the trap
  * this note exists to prevent. All 29 new rows are LOWERCASE `FieldErrorCode`
@@ -491,11 +528,18 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  *
  * ## No victim today — verified, not assumed
  *
- * Of the 33 SCREAMING_SNAKE values reached, 33 are already registered; the
+ * Of the 31 SCREAMING_SNAKE values reached, 31 are already registered; the
  * count of values that are BOTH ADR-0112 D1 shaped AND unregistered — i.e. a
  * real wire code hiding behind this blindness — is ZERO. `check:error-code-casing`
  * likewise reports nothing on any of the files involved. So the value of
  * closing this is preventing a future defect, not fixing a present one.
+ *
+ * ⚠️ [#13226] re-measured this number, because it is the one that grades the
+ * work: a single unregistered D1-shaped code hiding here would make this a live
+ * defect rather than a future one. It is still ZERO (the reached population
+ * drifted 33 → 31; every one of them registered). ⛔ It is a property of the
+ * TREE, not of the gate, so it expires: whoever widens ① re-measures it rather
+ * than citing this line.
  *
  * ⚠️ One bound the measurement does NOT have. `helperCodesFor` scans only the
  * DECLARING file, so every count here is over IN-FILE call sites. An exported
@@ -534,17 +578,49 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
   /** Unregistered in both `StandardErrorCode` and the ledger, in both casings. */
   probe: 'HELPER_SCREAMING',
   probeLowercase: 'helper_lowercase',
-  /** Blindness ②: the declaration forms `enclosingDeclaration` cannot see. */
-  invisibleDeclarationForms: Object.freeze(['class method', 'anonymous arrow']),
+  /**
+   * Blindness ②: the declaration forms `enclosingDeclaration` cannot see.
+   *
+   * [#13226] `class method` came OFF this list — `METHOD_HEADER` recognises it.
+   * The anonymous arrow stays, and stays for a reason that is not laziness: it
+   * has no NAME, and every one of `helperCodesFor`'s call scans is built from
+   * the declaration's name. A nameless helper can therefore produce neither a
+   * site nor an `unresolved` — there is nothing to search for — so admitting it
+   * to `DECL_HEADER_RE` would buy exactly nothing and would cost the header
+   * regex its anchor. Reaching it needs call-graph resolution this textual scan
+   * does not have; it is a DIFFERENT card, not a loose end of this one.
+   *
+   * ⛔ Also still unrecognised, and never on this list because no census has
+   * been run on it: a class PROPERTY holding an arrow, `private fail = (code) =>`.
+   */
+  invisibleDeclarationForms: Object.freeze(['anonymous arrow']),
+  /** [#13226] Declaration forms that ARE recognised, in `DECL_HEADER_RE` order. */
+  recognisedDeclarationForms: Object.freeze(['function', 'constructor', 'const/let/var arrow', 'class method']),
   /** The live instance, read as evidence only — it is NOT edited by this card. */
   liveInstance: 'packages/sdui-parser/src/parse.ts  Parser#error(code, message, start?, tag?)',
-  /** Measured blast radius, `packages/**` non-test source. See the prose above. */
+  /**
+   * Measured blast radius of closing blindness ①, `packages/**` non-test source.
+   * [#13226] re-derived on today's tree — see the drift note in the prose above.
+   */
   measured: Object.freeze({
-    helpers: 13,
-    callSitesNewlyReached: 106,
+    helpers: 14,
+    callSitesNewlyReached: 116,
     newVerdictRows: 29,
-    undischargeableUnresolved: 4,
+    undischargeableUnresolved: 5,
     unregisteredWireCodesHiding: 0,
+  }),
+  /**
+   * [#13226] What closing blindness ② actually moved on the tree: NOTHING.
+   * Kept as a number because "the fix changed no output" is the kind of claim
+   * that rots into "the fix did nothing" — the positive control in `--self-test`
+   * is what says the recognizer fires.
+   */
+  declarationFormClosure: Object.freeze({
+    newSites: 0,
+    newUnresolved: 0,
+    methodHelpersInAssignmentPositionToday: 0,
+    helpersNowVisibleToEnclosingDeclaration: 13,
+    helpersStillInvisible: 1,
   }),
 });
 
@@ -2703,12 +2779,13 @@ function selfTest() {
   {
     const B = OBJECT_LITERAL_CODE_HELPER_BLINDNESS;
     const DECISION =
-      'a code-carrying helper that stamps through an OBJECT LITERAL, or one declared as a CLASS ' +
-      'METHOD, is now visible to a gate. That is a gate-POPULATION change: #13131 measured the ' +
-      'blast radius at 106 newly reached call sites, 29 new verdict rows in ' +
-      `${DECLARATION}, and 4 UNDISCHARGEABLE unresolved findings. Land the rows and the ` +
-      'declaration together, and rewrite OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust ' +
-      'this pin to match.';
+      'a code-carrying helper that stamps through an OBJECT LITERAL is now visible to a gate. ' +
+      'That is a gate-POPULATION change, and [#13226] re-measured its blast radius on the current tree: ' +
+      `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} newly reached ` +
+      `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows in ` +
+      `${DECLARATION}, and ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} ` +
+      'UNDISCHARGEABLE unresolved findings. Land the rows and the declaration together, and rewrite ' +
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust this pin to match.';
 
     const helper = (body, probe) =>
       `export function postureError(code: string, message: string) {\n${body}\n}\n` +
@@ -2745,13 +2822,39 @@ function selfTest() {
         );
       }
     }
+    // [#13226] The BOUNDARY between the two blindnesses, pinned as its own
+    // case because closing ② made it reachable to reason about for the first
+    // time. A class method that stamps through an OBJECT LITERAL is the card's
+    // live instance (`Parser#error`), and it must STILL derive nothing: the
+    // declaration form is now seen, the stamp POSITION is not. This is the
+    // assertion that says which half of the work is done — if it starts
+    // failing, ① was widened, and the rows and the declaration owe an update.
+    {
+      const methodObjLit =
+        `class Thing {\n  private fail(code: string, message: string) {\n` +
+        `    return { severity: 'error', code, message };\n  }\n` +
+        `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+      const decl = enclosingDeclaration(methodObjLit, methodObjLit.indexOf('code, message };'));
+      ok(
+        decl && decl.isMethod && parseParamNames(decl.params).includes('code'),
+        'the declaration half of the boundary case is dead — `enclosingDeclaration` cannot see the method, ' +
+          'so the zero below would be blindness ② again rather than blindness ①',
+      );
+      const { sites, unresolved } = derive(methodObjLit);
+      ok(
+        sites.length === 0 && unresolved.length === 0,
+        `a CLASS-METHOD helper stamping through an OBJECT LITERAL now derives ${sites.length} site(s) and ` +
+          `${unresolved.length} unresolved — ${DECISION}`,
+      );
+    }
 
-    // ② BLINDNESS ②, the DECLARATION FORM — and it is pinned on SITES rather
-    //    than on matches, deliberately. Here the recognizer DOES match: the
-    //    body is the very `.code = code` `codehelper` is written for. What
-    //    drops it is structural — `enclosingDeclaration`'s DECL_HEADER_RE has
-    //    no header for a class method, so the identifier is never recognised
-    //    as a parameter. Same body, same probe, one declaration form apart.
+    // ② BLINDNESS ② — [#13226] CLOSED, and this pin is now the EQUIVALENCE
+    //    rather than the zero it used to be. Same body, same probe, one
+    //    declaration form apart: the method must derive exactly what the free
+    //    function derives. Both halves are asserted, and that is the point —
+    //    a fix that makes the method fire while the free-function control
+    //    silently stopped working reads identically in a summary, so the
+    //    control is checked on every run instead of being trusted.
     const body = B.control.replace(/^/gm, '  ');
     const asFunction =
       `export function fail(code: string, message: string) {\n${body}\n}\n` +
@@ -2759,30 +2862,84 @@ function selfTest() {
     const asMethod =
       `class Thing {\n  private fail(code: string, message: string) {\n${body}\n  }\n` +
       `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+    const siteCodes = (source) =>
+      derive(source).sites.filter((s) => s.shape === 'codehelper').map((s) => s.code).sort();
     ok(
-      derive(asFunction).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
-      'the free-function control for #13131 blindness ② derives no site — the comparison below is dead',
+      siteCodes(asFunction).includes(B.probe),
+      'the free-function control for the declaration-form comparison derives no site — the comparison is dead',
     );
     ok(matched(asMethod) > 0, 'the class-method form matches no recognizer — blindness ② is not what was measured');
     {
-      const { sites, unresolved } = derive(asMethod);
+      const fn = siteCodes(asFunction);
+      const me = siteCodes(asMethod);
       ok(
-        sites.length === 0 && unresolved.length === 0,
-        `a CLASS-METHOD code helper now derives ${sites.length} site(s) and ${unresolved.length} unresolved — ${DECISION}`,
+        me.join(',') === fn.join(',') && me.includes(B.probe),
+        `[#13226] a CLASS-METHOD code helper no longer derives what the identical free FUNCTION derives: ` +
+          `method ${JSON.stringify(me)} vs function ${JSON.stringify(fn)}. The declaration-form blindness is BACK.`,
+      );
+      ok(
+        derive(asMethod).unresolved.length === 0,
+        'the class-method helper reduces to no literal and falls back to `unresolved` — the RECEIVER half of ' +
+          '#13226 is gone: `helperCodesFor` must admit a `this.` receiver, or every method helper reports as ' +
+          'noise instead of resolving.',
       );
     }
-    // The mechanism itself, named so the failure above is diagnosable.
+    // The mechanism itself, named so the failures above are diagnosable.
     {
       const at = asMethod.indexOf('.code = code');
       const decl = enclosingDeclaration(asMethod, at);
       ok(
-        !decl || !parseParamNames(decl.params).includes('code'),
-        'enclosingDeclaration now resolves a CLASS METHOD, so `codehelper` reaches method helpers — ' + DECISION,
+        decl && decl.isMethod && decl.name === 'fail' && parseParamNames(decl.params).includes('code'),
+        '`enclosingDeclaration` no longer resolves a CLASS METHOD at a stamp inside one — it answered ' +
+          `${decl ? `${decl.name}(${decl.params})` : 'null'}. #13226 is regressed at the recognizer.`,
+      );
+    }
+    // ③ [#13226] The method form must not eat what the OTHER forms own. A
+    //    line-initial `constructor(` is the sharp case: the method alternative
+    //    is anchored at the start of the line, so it starts EARLIER than the
+    //    `constructor` alternative and would win the position — which is why
+    //    the keyword list is a lookahead inside the regex and not a `continue`.
+    {
+      const ctor =
+        `class Thing {\n  public constructor(code: string, message: string) {\n${body}\n  }\n}\n` +
+        `const t = new Thing('${B.probe}', 'x');\n`;
+      const decl = enclosingDeclaration(ctor, ctor.indexOf('.code = code'));
+      ok(
+        decl && decl.isConstructor && decl.name === 'Thing',
+        'a modifier-spelled `public constructor(` is no longer read as a CONSTRUCTOR — the class-method ' +
+          `alternative swallowed it (answered ${decl ? `${decl.name}, isConstructor=${decl.isConstructor}` : 'null'}). ` +
+          'The keyword list must fail INSIDE the regex so the constructor form can still match.',
+      );
+      ok(
+        siteCodes(ctor).includes(B.probe),
+        'the constructor-helper control derives no site — the `new Thing(` call scan is broken',
+      );
+    }
+    // ④ [#13226] Shapes that LOOK like a method header and are not. A
+    //    statement keyword (`if (x) {`) and a body-less SIGNATURE must both
+    //    stay unrecognised — the first would make `enclosingDeclaration`
+    //    answer with a control-flow head, the second with a declaration no
+    //    stamp can live inside.
+    for (const [name, source] of [
+      ['a control-flow head', `function outer(code: string) {\n  if (code) {\n    const e = new Error('x');\n    (e as any).code = code;\n  }\n}\n`],
+      ['an interface signature', `interface Thing {\n  fail(code: string, message: string): void;\n}\nfunction outer(code: string) {\n  const e = new Error('x');\n  (e as any).code = code;\n}\n`],
+    ]) {
+      const decl = enclosingDeclaration(source, source.indexOf('.code = code'));
+      ok(
+        decl !== null && decl.name === 'outer' && !decl.isMethod,
+        `${name} is now read as a method header — \`enclosingDeclaration\` answered ` +
+          `${decl ? `${decl.name} (isMethod=${decl.isMethod})` : 'null'} instead of the enclosing function \`outer\`.`,
       );
     }
     ok(
-      B.invisibleDeclarationForms.includes('class method'),
-      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS no longer declares the class-method form out',
+      !B.invisibleDeclarationForms.includes('class method') &&
+        B.recognisedDeclarationForms.includes('class method'),
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS still declares the class-method form OUT, but #13226 closed it',
+    );
+    ok(
+      B.invisibleDeclarationForms.includes('anonymous arrow'),
+      'the anonymous-arrow form is no longer declared out — #13226 deliberately left it out of scope, so ' +
+        'either it was closed without rewriting this declaration, or the declaration lost its last entry',
     );
   }
 
@@ -2845,10 +3002,14 @@ function main() {
     `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
     `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
     `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.` +
-    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) — and one ` +
-    `declared as a CLASS METHOD, in either stamp position — is outside this gate: no shape matches, so ` +
-    `there is no site AND no unresolved. Coverage of them is zero BY DECLARATION, not by accident. ` +
-    `Measured blast radius of closing it: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
+    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) is outside ` +
+    `this gate: no shape matches, so there is no site AND no unresolved. Coverage of it is zero BY ` +
+    `DECLARATION, not by accident. [#13226] the CLASS-METHOD declaration form is no longer part of ` +
+    `that bound — it is recognised, so a method helper stamping in the ASSIGNMENT position resolves ` +
+    `like any other; what still drops the method helpers in this tree is the stamp POSITION above. ` +
+    `Of the declaration forms, only the ANONYMOUS ARROW remains unseen (it has no name for a call ` +
+    `scan to anchor on). ` +
+    `Measured blast radius of closing the position: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
     `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} undischargeable unresolved, ` +
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unregisteredWireCodesHiding} unregistered wire code(s) ` +
