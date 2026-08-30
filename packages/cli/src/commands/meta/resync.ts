@@ -12,6 +12,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { bootstrapPlatformAdmin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
@@ -130,7 +131,7 @@ export default class MetaResync extends Command {
     try {
       stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'] });
     } catch (error: any) {
-      if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
+      if (flags.json) await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
       else printError(error.message || String(error));
       process.exit(1);
     }
@@ -215,7 +216,7 @@ export default class MetaResync extends Command {
       console.log('');
     } catch (error: any) {
       exitCode = 1;
-      if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
+      if (flags.json) await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
       else printError(error.message || String(error));
     } finally {
       await stack.shutdown();

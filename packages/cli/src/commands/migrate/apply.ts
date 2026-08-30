@@ -12,6 +12,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  errorCodeFields,
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
@@ -180,7 +181,7 @@ export default class MigrateApply extends Command {
         composeHostStack: true,
       });
     } catch (error: any) {
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -371,7 +372,7 @@ export default class MigrateApply extends Command {
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
     } finally {

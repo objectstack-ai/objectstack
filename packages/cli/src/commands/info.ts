@@ -14,6 +14,7 @@ import {
   collectMetadataStats,
   printMetadataStats,
   emitJson,
+  errorCodeFields,
 } from '../utils/format.js';
 
 export default class Info extends Command {
@@ -115,7 +116,7 @@ export default class Info extends Command {
 
     } catch (error: any) {
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

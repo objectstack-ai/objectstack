@@ -23,6 +23,7 @@ import {
   createTimer,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -636,7 +637,7 @@ export default class Lint extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

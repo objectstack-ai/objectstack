@@ -73,7 +73,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { Command, Flags } from '@oclif/core';
 import type { CliExitCode } from '../../utils/format.js';
-import { printHeader, printKV, printSuccess, printError, emitJson } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, emitJson, errorCodeFields } from '../../utils/format.js';
 import { loginWithBrowser, loginWithPassword } from '../../utils/auth-flows.js';
 import { DEFAULT_CLOUD_URL, readCloudConfig, writeCloudConfig } from '../../utils/cloud-config.js';
 
@@ -246,7 +246,7 @@ export default class CloudLogin extends Command {
         // written (an expired code, a denied approval, a poll failure), so an
         // indented payload here would recreate a two-document stream on the
         // path a consumer is least able to recover from.
-        await emitRecord({ success: false, error: error.message });
+        await emitRecord({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

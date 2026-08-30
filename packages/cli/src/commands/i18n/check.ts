@@ -14,6 +14,7 @@ import {
   createTimer,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { computeI18nCoverage } from '../../utils/i18n-coverage.js';
 
@@ -158,7 +159,7 @@ export default class I18nCheck extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

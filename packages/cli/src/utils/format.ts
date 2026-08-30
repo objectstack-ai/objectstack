@@ -132,6 +132,118 @@ export function isExitSignal(error: unknown): boolean {
 }
 
 /**
+ * [#13347] The ADR-0112 carriers a `--format json` failure envelope adds
+ * beside its `error` sentence — `{ code, httpStatus }`, and only the ones the
+ * thrown error actually carries.
+ *
+ * ## The defect this closes
+ *
+ * Every machine-readable failure this CLI emits was built the same way:
+ *
+ *     await emitJson({ success: false, error: error.message });
+ *
+ * — 48 sites under `commands/`, and the payload carried the human sentence and
+ * nothing else. The error reaching those `catch` blocks from
+ * `@objectstack/client` is not a bare `Error`: the SDK's `fetch` wrapper
+ * attaches `err.code` (the semantic ADR-0112 string, normalized to the SAME
+ * spelling across the flat `@objectstack/rest` envelope and the wrapped
+ * runtime-dispatcher one — #3842 / #4007) and `err.httpStatus`. Both were
+ * dropped at the CLI boundary, so the one outcome a script most needs to
+ * branch on — *someone else edited it, re-read and retry* vs *you are not
+ * allowed* vs *the server is down* — was separable only by substring-matching
+ * an English sentence that no contract pins.
+ *
+ * ## Why the keys are OMITTED rather than emitted as `undefined`
+ *
+ * `JSON.stringify` drops an `undefined` value, so `{ code: undefined }` and an
+ * absent `code` are byte-identical on `emitJson`'s own output — which is
+ * exactly why building the former is unsafe: the difference is invisible where
+ * an author would look for it, and NOT invisible everywhere.
+ *
+ * Measured, rather than assumed. `yaml.stringify` drops it too (checked: both
+ * `{ success, error, code: undefined }` and `{ success, error }` serialize to
+ * `success: false\nerror: boom\n`). `formatOutput`'s `table` branch does not:
+ * `printKeyValue` walks `Object.entries`, which yields the key, and its
+ * `value === undefined` arm prints `code: null` outright; `printTable` derives
+ * its columns from `Object.keys` and grows an empty `code` column the same way.
+ * A payload meaning "this failure carried no code" would there assert a code
+ * whose value is null.
+ *
+ * So this returns a partial object with the keys ABSENT — the spread adds
+ * nothing at all when there is nothing to add — and the pin asserts the
+ * emitted BYTES rather than the object, because on two of the three emitters
+ * the object's own shape is what the bytes cannot show.
+ *
+ * ## What counts as "carrying" one — per key, not as a pair
+ *
+ * The two keys are decided INDEPENDENTLY, and that is a measurement rather
+ * than a preference: the SDK sets `error.httpStatus = res.status` on every
+ * non-2xx, while `error.code` comes from `asSemanticCode(...)` and is
+ * `undefined` whenever the server sent no code. Coupling them ("emit both or
+ * neither") would therefore discard a status that IS in hand, on exactly the
+ * responses whose envelope is thinnest.
+ *
+ *  - `code` — a non-empty STRING. A numeric `code` is deliberately rejected
+ *    rather than coerced: the pre-#3842 wrapped envelope parked the HTTP
+ *    STATUS in `error.code`, and re-publishing a number under the name the
+ *    semantic vocabulary uses would reintroduce, at this boundary, the exact
+ *    confusion that producer-side fix removed.
+ *  - `httpStatus` — a finite integer. `NaN` and fractional values are not
+ *    statuses.
+ *
+ * ⛔ No value is INVENTED. A locally-thrown plain `Error` — every one of this
+ * CLI's own input refusals — carries neither key and gets neither key. That
+ * was option **B** of the card and it was not chosen: ADR-0112's ledger is the
+ * authority on who may mint a code, and this card mints nothing. The accepted
+ * cost, recorded so it is not re-opened as a defect: the payload is
+ * POLYMORPHIC — a consumer cannot distinguish "this failure carried no code"
+ * from "an older CLI". That was weighed against breaking every existing
+ * consumer and the non-breaking side won.
+ *
+ * ⛔ Nor is the value FILTERED against a catalog. The codes actually in flight
+ * here are broader than `StandardErrorCode`'s enum — `METADATA_CONFLICT`,
+ * `FORBIDDEN` and `VALIDATION_FAILED` are all absent from it — so a membership
+ * check would drop precisely the code this card exists to surface. Passing a
+ * producer's code through is not minting one; narrowing the field to a
+ * vocabulary no ledger declares would be.
+ *
+ * ## The one exclusion, and why it is not a filter
+ *
+ * oclif's `this.exit(n)` THROWS an `ExitError` whose `code` is the string
+ * `'EEXIT'`. It is a control-flow signal from our own code, not a failure with
+ * a vocabulary, and several of these `catch` blocks do not re-throw it first
+ * (`os migrate meta` carries a comment about the "EEXIT: 1" it would otherwise
+ * report). Publishing `code: "EEXIT"` into a machine-readable envelope would
+ * hand consumers a branch on our own stack unwinding. {@link isExitSignal} is
+ * reused rather than re-spelled so the judgement "this is a signal, not an
+ * error" stays single-sourced.
+ *
+ * @example
+ *     } catch (error: any) {
+ *       if (flags.format === 'json') {
+ *         await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
+ *         this.exit(1);
+ *       }
+ */
+export interface ErrorCodeFields {
+  /** The semantic ADR-0112 code the failure carried, when it carried one. */
+  code?: string;
+  /** The HTTP status the failure carried, when it carried one. */
+  httpStatus?: number;
+}
+
+export function errorCodeFields(error: unknown): ErrorCodeFields {
+  const fields: ErrorCodeFields = {};
+  if (isExitSignal(error)) return fields;
+  const e = error as { code?: unknown; httpStatus?: unknown } | null | undefined;
+  if (typeof e?.code === 'string' && e.code !== '') fields.code = e.code;
+  if (typeof e?.httpStatus === 'number' && Number.isInteger(e.httpStatus)) {
+    fields.httpStatus = e.httpStatus;
+  }
+  return fields;
+}
+
+/**
  * The drain-aware write `emitJson` is built on, for machine payloads that are
  * not JSON — `formatOutput`'s `--format yaml` truncates on a pipe exactly like
  * the JSON one, and for the same reason.

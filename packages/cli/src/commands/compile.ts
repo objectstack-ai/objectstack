@@ -39,6 +39,7 @@ import {
   printMetadataStats,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../utils/format.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 
@@ -720,7 +721,7 @@ export default class Compile extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ success: false, error: error.message, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
       console.log('');

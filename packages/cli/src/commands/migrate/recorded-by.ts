@@ -24,6 +24,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -100,7 +101,7 @@ export default class MigrateRecordedBy extends Command {
         extraPlugins: await buildDataMigrationPlugins(),
       });
     } catch (error: any) {
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;

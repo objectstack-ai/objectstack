@@ -2,7 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import type { DeleteMetaItemOptions } from '@objectstack/client';
-import { printError, printSuccess, emitJson } from '../../utils/format.js';
+import { printError, printSuccess, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -183,6 +183,7 @@ export default class MetaDelete extends Command {
         await emitJson({
           success: false,
           error: error.message,
+          ...errorCodeFields(error),
         });
         this.exit(1);
       }
