@@ -690,11 +690,48 @@ export class SettingsService {
    * So the residual is made AUDIBLE rather than fatal, and the line names the
    * repair rather than the symptom: the reader declares
    * `optionalDependencies: ['com.objectstack.service.settings']` and the kernel
-   * orders it after the bind (ADR-0116). The three shipped always-on readers
-   * (`plugin-email`, `service-sms`, `service-storage`) declare exactly that as
-   * of this change, so on a correct boot this reporter never fires — see
-   * `settings-prebind-read-warning.test.ts`, whose load-bearing half is the
-   * SILENCE on an ordinary boot.
+   * orders it after the bind (ADR-0116). On a correct boot this reporter never
+   * fires — see `settings-prebind-read-warning.test.ts`, whose load-bearing
+   * half is the SILENCE on an ordinary boot.
+   *
+   * ## What that claim rests on is COUNTED, not listed here
+   *
+   * "Never fires on a correct boot" is only as true as the state of EVERY
+   * in-window settings reader, so that population is the thing to check when a
+   * `Pre-bind READ` line is observed and you need to know whether it is a real
+   * defect or expected noise. It is measured, not remembered:
+   * `pnpm check:settings-bind-window` (`scripts/check-settings-bind-window.mjs`,
+   * an AST sweep over every plugin unit, and the fuller statement of the two
+   * remedies) prints the population as its verdict line.
+   *
+   * ⛔ Do not re-derive that count by hand here. This paragraph used to name
+   * three readers as if they were the population; the population had grown
+   * twice before anyone noticed, and nothing failed in the interval — which is
+   * the argument for citing the gate instead of keeping a list. The names below
+   * are EXAMPLES OF EACH SHAPE, because the shape is what tells you which
+   * repair applies; the gate is what tells you the count. (Snapshot at the time
+   * of writing, for orientation only — `4 declared / 0 self / 1 structurally
+   * upstream / 0 ledgered (69 plugin unit(s) scanned)`.)
+   *
+   *  - `declared` — the read is in a `kernel:ready` hook registered from
+   *    `start()`, which is exactly the sub-window the declaration above repairs.
+   *    `plugin-email`, `service-sms`, `service-storage`, `plugin-auth`. Only the
+   *    first three are on the always-on slate, which is the NARROWER set
+   *    `serve-settings-ordering.pin.test.ts` pins at three — a pin on the slate,
+   *    not on this population, so its three and the gate's four are both right.
+   *  - `structurally upstream` (the gate's `cycle` verdict) — the settings
+   *    plugin itself depends on it, so no ordering edge can ever move it later:
+   *    `ObjectQLPlugin`. It is quiet for a reason no declaration could supply —
+   *    its in-window use of the handle is `registerManifest`, a registry-only
+   *    call that never reaches {@link loadRows}. A plugin in this position must
+   *    not read settings VALUES in the window.
+   *  - counted by nothing — a reader that takes the OTHER remedy this warning
+   *    names, moving its read to `kernel:bootstrapped`, leaves the window and
+   *    therefore leaves this population altogether. `@objectstack/mcp` is the
+   *    shipped case: its `localization` read sat in a `start()` body, where no
+   *    ordering edge could reach it. ⚠️ So a hand count keyed on
+   *    `optionalDependencies` is not a cheap substitute for the gate's — it is
+   *    blind to this shape and to the one above it.
    *
    * ## When it stays quiet, and why each case is not the window
    *
