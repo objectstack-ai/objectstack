@@ -871,6 +871,30 @@ describe('FieldSchema', () => {
       expect(() => FieldSchema.parse(field)).toThrow();
     });
 
+    // [#13294, following #11345's browser-verified acceptance run] the
+    // derived related list's sort-inheritance rule, pinned as contract text
+    // the same way #8704 pinned relatedListFilter below. POSITIVE half (the
+    // inheritance statement + wire spelling) and NEGATIVE half (no
+    // list-view sort ⇒ no ordering parameter) both live in the same
+    // `.describe()`, so this pin asserts both — a one-directional assertion
+    // here would leave the other half free to drift silently.
+    it('relatedList contract text states DEFAULT-list-view sort inheritance and its wire spelling', () => {
+      const description = FieldSchema.shape.relatedList.description ?? '';
+      expect(description).toContain('DEFAULT list view sort');
+      // Wire shape is the REST shorthand `sort=`, never the OData `$orderby`
+      // token — assert the affirmative spelling directly rather than a bare
+      // absence check, since the contract text also names `$orderby` (in a
+      // "never" clause) to steer authors away from it.
+      expect(description).toContain('sort=<field>');
+      expect(description).toContain('never $orderby');
+    });
+
+    it('relatedList contract text states the negative half: no list-view sort ⇒ no ordering parameter', () => {
+      const description = FieldSchema.shape.relatedList.description ?? '';
+      expect(description).toContain('no ordering parameter');
+      expect(description).toContain('record-id order');
+    });
+
     // [#8704] relatedListFilter — the fourth member of the related-list family.
     it('should accept relatedListFilter (canonical Query-DSL FilterCondition) and round-trip it', () => {
       const field: Field = {
