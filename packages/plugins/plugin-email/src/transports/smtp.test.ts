@@ -267,5 +267,58 @@ describe('smtpOptionsFromMailSettings', () => {
       expect(() => new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '99999' })))
         .toThrow(formatInvalidSmtpPortNotice(99999));
     });
+
+    it('refuses a READABLE but FRACTIONAL port by name, without a second door (#13189)', () => {
+      // The bucket #13190 never had to name, because the guard below it
+      // admitted the value: `'587.5'` is present, readable, finite and inside
+      // `1-65535`, so it mapped straight through and died at SEND time under
+      // `RangeError: Port should be >= 0 and < 65536` — a TCP rule, naming no
+      // part of Settings → Mail → Port. #13189 made the guard test
+      // integrality, so it is refused at construction now, in this
+      // transport's own sentence, carrying what the operator actually typed.
+      const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '587.5' });
+
+      // ⛔ The mapping still PASSES IT THROUGH. #13190's rule is that this
+      // function hides nothing from the guard and adds no parallel refusal of
+      // its own; #13189 changed which numbers the guard refuses, not where
+      // the refusal lives. A repair that started rejecting here instead would
+      // pass the next line and quietly rebuild the second door.
+      expect(opts, 'the mapping dropped the key instead of passing it down')
+        .toHaveProperty('port');
+      expect(opts.port).toBe(587.5);
+
+      expect(() => new SmtpTransport(opts)).toThrow(formatInvalidSmtpPortNotice(587.5));
+    });
+
+    it('leaves the three buckets #13190 pinned exactly where they were (#13189)', () => {
+      // Narrowing WHICH numbers the guard accepts must not move a value out
+      // of the fall-back buckets — that is the interaction between the two
+      // cards, and getting it wrong breaks working deployments rather than
+      // fixing anything. Absent and `''` still mean "not set"; unreadable is
+      // still refused; a readable in-range INTEGER still maps.
+      expect(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x' })).not.toHaveProperty('port');
+      expect(new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x' }))
+        .describe().port).toBe(587);
+
+      expect(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '' }))
+        .not.toHaveProperty('port');
+      expect(new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '' }))
+        .describe().port).toBe(587);
+
+      expect(() => new SmtpTransport(
+        smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: 'abc' }),
+      )).toThrow(formatInvalidSmtpPortNotice(NaN));
+
+      expect(new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '2525' }))
+        .describe().port).toBe(2525);
+
+      // ⭐ And the default this all falls back to is itself an integer, so
+      // the narrowing cannot have made the out-of-the-box state refuse
+      // itself — the one way a change like this bricks every deployment at
+      // once, asserted rather than assumed.
+      expect(Number.isInteger(
+        new SmtpTransport({ host: 'smtp.x' }).describe().port,
+      ), 'the built-in default port is not an integer').toBe(true);
+    });
   });
 });

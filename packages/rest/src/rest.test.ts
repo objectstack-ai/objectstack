@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
-import { RouteManager, RouteGroupBuilder } from './route-manager';
+import { RouteManager } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
 import type { RestApiPluginConfig } from './rest-api-plugin';
