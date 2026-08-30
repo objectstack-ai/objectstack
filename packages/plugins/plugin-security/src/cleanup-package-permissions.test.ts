@@ -55,7 +55,7 @@ describe('cleanupPackagePermissions (#2747)', () => {
     const ql = makeQl();
     const out = await cleanupPackagePermissions(ql, 'com.example.crm');
 
-    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2 });
+    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2, refused: 0 });
 
     // no ghost grants: nothing referencing the removed sets survives
     expect(ql.tables.sys_permission_set.map((r: any) => r.id)).toEqual(['ps_other', 'ps_env', 'ps_legacy']);
@@ -77,11 +77,76 @@ describe('cleanupPackagePermissions (#2747)', () => {
     const ql = makeQl();
     await cleanupPackagePermissions(ql, 'com.example.crm');
     const second = await cleanupPackagePermissions(ql, 'com.example.crm');
-    expect(second).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0 });
+    expect(second).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
   });
 
   it('no-ops safely on a missing package id or a non-engine handle', async () => {
-    expect(await cleanupPackagePermissions(makeQl(), '')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0 });
-    expect(await cleanupPackagePermissions(null, 'x')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0 });
+    expect(await cleanupPackagePermissions(makeQl(), '')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
+    expect(await cleanupPackagePermissions(null, 'x')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
+  });
+
+  // [#12981] The swallow family. `deleteRows` absorbs a refused delete so one
+  // bad row cannot abort the sweep — correct, and it used to be the whole
+  // story: the refusal reached no counter and no log, so an uninstall that
+  // revoked NOTHING was byte-identical to an uninstall of a package that
+  // granted nothing. ADR-0090 D5 promises an ABSENCE ("no ghost grants"), and
+  // an absence cannot be read off a count of successes.
+  describe('[#12981] a wholly refused sweep is distinguishable from a clean one', () => {
+    function refusingQl() {
+      const ql = makeQl();
+      ql.delete = async () => { throw new Error('store is refusing writes'); };
+      return ql;
+    }
+
+    it('counts the refusals instead of reporting a silent zero', async () => {
+      const refused = await cleanupPackagePermissions(refusingQl(), 'com.example.crm');
+      const nothingToDo = await cleanupPackagePermissions(makeQl(), 'com.unknown.pkg');
+
+      // Both revoked nothing. ⛔ Before the repair these two were EQUAL, and
+      // that equality is the defect — the assertion below is the pin.
+      expect(refused.sets + refused.positionBindings + refused.userGrants + refused.suggestions).toBe(0);
+      expect(nothingToDo.sets + nothingToDo.positionBindings + nothingToDo.userGrants + nothingToDo.suggestions).toBe(0);
+      expect(refused).not.toEqual(nothingToDo);
+
+      // 2 sets + 2 position bindings + 1 user grant + 2 suggestion rows.
+      expect(refused.refused).toBe(7);
+      expect(nothingToDo.refused).toBe(0);
+    });
+
+    it('reports the surviving grants once, naming the consequence and the remedy', async () => {
+      const warns: Array<{ msg: string; meta?: any }> = [];
+      const out = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', {
+        warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
+      });
+
+      // ONE line for the whole sweep, not one per refused row.
+      expect(warns).toHaveLength(1);
+      expect(warns[0].msg).toContain('REFUSED');
+      // The CONSEQUENCE — the grants are still live — in the line itself.
+      expect(warns[0].msg).toContain('SURVIVE the uninstall');
+      expect(warns[0].msg).toContain('No ghost grants');
+      // ...and the REMEDY.
+      expect(warns[0].msg).toContain('re-run the uninstall');
+      expect(warns[0].meta).toMatchObject({ packageId: 'com.example.crm', refused: out.refused });
+    });
+
+    it('says nothing when every delete lands — the repair adds no steady-state noise', async () => {
+      const warns: string[] = [];
+      const infos: string[] = [];
+      const out = await cleanupPackagePermissions(makeQl(), 'com.example.crm', {
+        warn: (m: string) => { warns.push(m); },
+        info: (m: string) => { infos.push(m); },
+      });
+      expect(out.refused).toBe(0);
+      expect(warns).toEqual([]);
+      expect(infos).toHaveLength(1);
+    });
+
+    it('survives a host sink that has no warn at all', async () => {
+      // The `?.` on `warn` is the backstop for hosts the TYPE cannot reach.
+      // A refusal report must never become the thing that breaks an uninstall.
+      const out = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', {});
+      expect(out.refused).toBe(7);
+    });
   });
 });
