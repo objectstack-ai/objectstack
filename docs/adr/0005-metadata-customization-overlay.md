@@ -1,6 +1,6 @@
 # ADR-0005: Metadata Customization Overlay (Artifact + sys_metadata Delta)
 
-> **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See ADR-0006 for the rationale and `.changeset/v5-project-to-environment-rename.md` for the breaking-change list. The body below is preserved verbatim for historical context.
+> **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See [ADR-0006 v4 — the v5.0 rename and its no-alias decision](./0006-project-environment-split.v4.md#the-v50-rename-and-its-no-alias-decision) for the rationale. The body below is preserved verbatim for historical context.
 
 
 **Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted")
@@ -121,6 +121,23 @@ Three different things were tangled into one place:
 1. **One Zod schema per metadata type.** Every metadata type (`view`, `dashboard`, `flow`, `agent`, `tool`, `object`, `report`, `skill`, `rag-pipeline`, `action`, ...) has exactly one definition source: the Zod schema in `@objectstack/spec`. **No mirrored `*.object.ts` is permitted in `packages/platform-objects/src/metadata/`.**
 2. **Artifact is immutable at runtime.** Out-of-box defaults always come from the compiled artifact, never written back to.
 3. **Customizations are full-JSON deltas, not field-level patches.** Phase 1 stores the entire item document. A finer-grained patch model (RFC 7396, 3-way merge) is out of scope — `MetadataOverlaySchema` in `metadata-customization.zod.ts` already specifies it; we keep that model available for future phases but do **not** implement merge yet.
+
+   ⚠️ **Correction (#13185, 2026-08-29):** the second half of this principle — that a specified patch
+   model is "kept available for future phases" — no longer holds. `MetadataOverlaySchema` and the
+   module that declared it, `packages/spec/src/kernel/metadata-customization.zod.ts`, were **retired
+   and deleted whole** under ADR-0049 enforce-or-remove: maintainer ruling of 2026-08-29 on
+   [#12057](https://github.com/objectstack-ai/objectstack/issues/12057#issuecomment-5459699497)
+   (verbatim 「同意」), executed by PR
+   [#13186](https://github.com/objectstack-ai/objectstack/pull/13186) (merged 2026-08-29). The future
+   phase the model was held for is itself ruled out by
+   [ADR-0126](./0126-packaged-metadata-customization-model.md) §6: wall 3 separates upgrades from
+   choices — a package upgrade rewrites the packaged **base**, and the customer's choices live in the
+   activation ledger, which no upgrade merges into or un-makes — and wall 4 supersedes the paper
+   protocol outright ("nothing may build against it"). ⛔ **This principle's own decision is
+   unaffected** — customizations are still full-JSON deltas, field-level patches are still not
+   implemented, and the stored unit is still the entire item document. What changed is only the
+   reserve this sentence pointed at: the RFC 7396 / 3-way-merge direction is **closed, not
+   deferred**, and ADR-0126 §6 is the model that replaced it.
 4. **Forms render from Zod, not from physical tables.** Studio's view/dashboard editors generate their forms from `@objectstack/spec` Zod schemas through `z.toJSONSchema()`. Forms never reflect a `*.object.ts` shape.
 5. **Whitelist by type.** Only types explicitly enabled for overlay can be saved through `PUT /api/v1/meta/*`. Phase 1 ships with `view` and `dashboard` enabled; other types return `400 customization_not_allowed`.
 
@@ -218,7 +235,7 @@ Five files in `packages/platform-objects/src/metadata/` duplicate a Zod schema t
 - `packages/rest/src/rest-server.ts` — `PUT/GET/DELETE /api/v1/meta/:type/:name` routes
 - `packages/spec/src/api/protocol.zod.ts` — `ObjectStackProtocol` interface (`deleteMetaItem` added)
 - `packages/spec/src/kernel/metadata-plugin.zod.ts` — `MetadataTypeRegistryEntrySchema.supportsOverlay` (future hook for the whitelist)
-- `packages/spec/src/kernel/metadata-customization.zod.ts` — pre-existing `MetadataOverlaySchema` (kept; field-level patches are a future phase, not implemented here)
+- `packages/spec/src/kernel/metadata-customization.zod.ts` — pre-existing `MetadataOverlaySchema` (kept; field-level patches are a future phase, not implemented here) — ⚠️ **retired; this file no longer exists** (#13185, 2026-08-29). Deleted whole by PR [#13186](https://github.com/objectstack-ai/objectstack/pull/13186) under ADR-0049 enforce-or-remove; the correction is recorded once, under *Design principles (binding)* item 3 above.
 - `packages/platform-objects/src/metadata/sys-{view,flow,agent,tool,object}.object.ts` — files marked `@deprecated` by this ADR
 - [HotCRM reference app](https://github.com/objectstack-ai/hotcrm) — primary E2E reference workspace
 

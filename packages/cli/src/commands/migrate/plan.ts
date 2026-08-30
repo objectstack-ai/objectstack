@@ -25,6 +25,11 @@ import {
   type SchemaMigrationComposition,
 } from '../../utils/schema-migration-plugins.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import {
+  collectUnmanagedTables,
+  renderUnmanagedTables,
+  type UnmanagedTablesReport,
+} from '../../utils/unmanaged-tables.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import {
   resolveTenancyPosture,
@@ -165,6 +170,27 @@ export default class MigratePlan extends Command {
       const drift = await stack.driver.detectManagedDrift();
       const pending = stack.pendingSchemaWork;
 
+      // [#13204] What EXISTS that nothing declares. Deliberately computed
+      // BEFORE the "in sync" early return below: a stranded table is exactly
+      // the finding a drift-free plan is otherwise structurally blind to, and
+      // retiring an object is how one gets there.
+      //
+      // ⛔ Informational only. It proposes no drop and reaches no DDL path —
+      // dropping an existing physical table is destructive and hard to
+      // reverse, so that decision stays with a human.
+      //
+      // ⛔ And it is NOT `composition.coverage`: coverage says what this plan
+      // EXAMINED of what the deployment declares, this says what exists that
+      // no declaration accounts for. Merged, "examined and clean" would be
+      // indistinguishable from "never looked at". See `../../utils/unmanaged-tables.ts`.
+      const { normalizeRows } = await import('@objectstack/metadata-protocol');
+      const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
+        driver: stack.driver,
+        declaredObjects: stack.allObjects(),
+        composition: stack.composition,
+        normalize: normalizeRows,
+      });
+
       // [ADR-0120 D5e, advisory form] Installation-wide uniques on app objects
       // are a decision point under the `isolated` posture — organizations there
       // are separate CUSTOMERS. The HARD gate runs at app install; this covers
@@ -182,6 +208,13 @@ export default class MigratePlan extends Command {
           total: drift.length,
           changes: drift,
           pending,
+          // [#13204] Always present once a SQL driver was found, including
+          // when the sweep found nothing (`tables: []`) and when it could not
+          // run (`status: 'unreadable'`). A consumer must be able to tell
+          // "swept, everything is declared" from "never swept" — omitting the
+          // key on the clean case would make those two byte-identical, which
+          // is the blind spot this section exists to remove.
+          unmanagedTables,
           ...(uniqueScopeAdvisory.length > 0
             ? {
                 uniqueScopeAdvisory: {
@@ -246,6 +279,18 @@ export default class MigratePlan extends Command {
       // when there was no deployment to compose.
       for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
       console.log('');
+
+      // [#13204] Its own block, above the drift verdict and never folded into
+      // the "Examined N managed table(s)" line — it is a statement about a
+      // DIFFERENT population (what exists) than every other line here (what is
+      // declared). Silent when the sweep ran and found nothing; loud when it
+      // could not run, because "did not look" must never read as "found none".
+      const unmanagedLines = renderUnmanagedTables(unmanagedTables);
+      if (unmanagedLines.length > 0) {
+        printInfo(unmanagedLines[0]!);
+        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${line}`));
+        console.log('');
+      }
 
       if (drift.length === 0 && pending.length === 0) {
         // [#13028] "In sync" is a claim about the objects this plan EXAMINED.

@@ -7537,7 +7537,26 @@ export class ObjectStackProtocolImplementation implements
             // 2. Limit to 6 columns by default
             const priorityFields = ['name', 'title', 'label', 'subject', 'email', 'status', 'type', 'category', 'created_at'];
             
-            let columns = fieldKeys.filter(k => priorityFields.includes(k));
+            // [#13259] `!fields[k].hidden` belongs on BOTH passes. It used to
+            // sit on the fill pass alone, so a field declared `hidden: true`
+            // was dropped for eight of nine spellings and SERVED — label and
+            // all — for the ninth: whenever the author happened to name it one
+            // of `priorityFields`. `email`, `status`, `type`, `category`,
+            // `subject`, `title` are exactly the names an author reaches for,
+            // so the failing case was the ordinary one, and nothing at
+            // authoring time said otherwise. `hidden` is declared "Hidden from
+            // default UI" (`FieldSchema`, `packages/spec/src/data/field.zod.ts`)
+            // and this function IS the default UI, so the declaration is a
+            // floor here or it is a floor nowhere.
+            //
+            // The `form` branch below already filtered every hidden field
+            // uniformly, so the two branches of ONE producer disagreed about
+            // what `hidden` means. This brings the priority pass to the side
+            // that already honoured the declaration — restoring a stated
+            // invariant, ⛔ not redesigning what `hidden` governs. Dropping a
+            // hidden column also removes it from `searchableFields` below,
+            // which is derived from `columns`.
+            let columns = fieldKeys.filter(k => priorityFields.includes(k) && !fields[k].hidden);
             
             // If few priority fields, add others until 5
             if (columns.length < 5) {

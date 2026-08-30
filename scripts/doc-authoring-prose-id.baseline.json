@@ -1,0 +1,1096 @@
+{
+ "packages/cli/src/commands/compile.ts": {
+  "#3366": 1,
+  "#3786": 1
+ },
+ "packages/cli/src/commands/db/clean.ts": {
+  "#6469": 1
+ },
+ "packages/cli/src/commands/dev.ts": {
+  "#5148": 1
+ },
+ "packages/cli/src/commands/doctor.ts": {
+  "#2377": 1,
+  "#5397": 1,
+  "#5673": 1
+ },
+ "packages/cli/src/commands/i18n/extract.ts": {
+  "#11671": 1
+ },
+ "packages/cli/src/commands/meta/resync.ts": {
+  "#2705": 1,
+  "#8692": 1
+ },
+ "packages/cli/src/commands/migrate/duplicates.ts": {
+  "#8686": 1,
+  "#8725": 1,
+  "#8928": 1
+ },
+ "packages/cli/src/commands/migrate/multi-value-columns.ts": {
+  "#11535": 1
+ },
+ "packages/cli/src/commands/migrate/recorded-by.ts": {
+  "#4556": 1
+ },
+ "packages/cli/src/commands/migrate/summary-nulls.ts": {
+  "#5749": 1
+ },
+ "packages/cli/src/commands/serve.ts": {
+  "#111": 1,
+  "#3963": 1,
+  "#444": 1,
+  "#4719": 1,
+  "#4818": 1,
+  "#666": 1
+ },
+ "packages/cli/src/commands/storage/orphans.ts": {
+  "#10950": 1
+ },
+ "packages/cli/src/commands/validate.ts": {
+  "#3366": 1
+ },
+ "packages/cli/src/utils/i18n-extract.ts": {
+  "#11671": 1,
+  "#12069": 1,
+  "#8765": 1
+ },
+ "packages/cli/src/utils/storage-driver.ts": {
+  "#3276": 2
+ },
+ "packages/cli/test/helpers/serve-process.ts": {
+  "#12525": 1,
+  "#13062": 1
+ },
+ "packages/cloud-connection/src/cloud-connection-route-ledger.ts": {
+  "#11863": 1,
+  "#8976": 4,
+  "#9011": 1
+ },
+ "packages/connectors/connector-mcp/src/mcp-provider.ts": {
+  "#3055": 2
+ },
+ "packages/core/src/health-monitor.ts": {
+  "#12032": 3
+ },
+ "packages/core/src/metadata-service-contract.ts": {
+  "#7378": 2
+ },
+ "packages/core/src/plugin-order.ts": {
+  "#4131": 3
+ },
+ "packages/core/src/plugin-registration.ts": {
+  "#9864": 1
+ },
+ "packages/core/src/security/admin-standing-surface.ts": {
+  "#11663": 1,
+  "#11970": 1,
+  "#8613": 1
+ },
+ "packages/core/src/security/authz-cache-posture.ts": {
+  "#4785": 1
+ },
+ "packages/drivers/driver-memory/src/filter-refusal.ts": {
+  "#10413": 1,
+  "#3948": 2,
+  "#4286": 1,
+  "#5158": 1,
+  "#5240": 1,
+  "#5324": 2,
+  "#5328": 1,
+  "#5345": 2,
+  "#5347": 1
+ },
+ "packages/drivers/driver-mongodb/src/mongodb-aggregation.ts": {
+  "#10413": 1,
+  "#12818": 1,
+  "#5907": 3,
+  "#6188": 1,
+  "#6212": 1
+ },
+ "packages/drivers/driver-mongodb/src/mongodb-filter.ts": {
+  "#5158": 1,
+  "#5240": 1,
+  "#5346": 2,
+  "#5347": 1
+ },
+ "packages/drivers/driver-mongodb/src/test-mongod.ts": {
+  "#5517": 3
+ },
+ "packages/drivers/driver-sql/src/cross-field-conformance-cases.ts": {
+  "#1051": 1,
+  "#5041": 1,
+  "#5146": 2,
+  "#7398": 1,
+  "#7597": 1
+ },
+ "packages/drivers/driver-sql/src/live-dialect-matrix.testkit.ts": {
+  "#9350": 1
+ },
+ "packages/drivers/driver-sql/src/schema-drift.ts": {
+  "#11535": 1,
+  "#12121": 1,
+  "#3696": 1,
+  "#4560": 1
+ },
+ "packages/drivers/driver-sql/src/sql-driver.ts": {
+  "#10413": 1,
+  "#11067": 1,
+  "#11374": 2,
+  "#11541": 1,
+  "#11565": 1,
+  "#11567": 1,
+  "#11627": 7,
+  "#12380": 1,
+  "#12999": 1,
+  "#13015": 3,
+  "#13056": 3,
+  "#3896": 1,
+  "#3912": 1,
+  "#3942": 1,
+  "#3994": 2,
+  "#4363": 1,
+  "#5030": 5,
+  "#5158": 1,
+  "#5240": 2,
+  "#5347": 2,
+  "#5348": 1,
+  "#5369": 1,
+  "#5907": 2,
+  "#6050": 1,
+  "#6212": 1,
+  "#6409": 1,
+  "#7398": 2,
+  "#7929": 7,
+  "#8197": 5,
+  "#8220": 1,
+  "#8790": 1,
+  "#8931": 1
+ },
+ "packages/drivers/driver-turso/src/remote-canonical-backfill.ts": {
+  "#1005": 1,
+  "#5770": 1
+ },
+ "packages/drivers/driver-turso/src/remote-transport.ts": {
+  "#1003": 1,
+  "#1004": 6,
+  "#10413": 1,
+  "#1051": 1,
+  "#1058": 6,
+  "#1066": 3,
+  "#1073": 2,
+  "#1075": 1,
+  "#1076": 1,
+  "#1116": 1,
+  "#5347": 2,
+  "#5348": 2,
+  "#5368": 1,
+  "#5369": 1,
+  "#5769": 3,
+  "#5903": 1,
+  "#5907": 2,
+  "#6050": 1,
+  "#6212": 1,
+  "#6409": 1,
+  "#7929": 1,
+  "#8197": 1
+ },
+ "packages/drivers/driver-turso/src/turso-driver.ts": {
+  "#6944": 1,
+  "#7099": 1
+ },
+ "packages/formula/src/matches-filter.ts": {
+  "#5240": 1
+ },
+ "packages/lint/src/authoring-rules.ts": {
+  "#4463": 4,
+  "#4716": 2,
+  "#4717": 1,
+  "#7220": 2,
+  "#8309": 2,
+  "#8310": 2,
+  "#9698": 1
+ },
+ "packages/lint/src/data-model-rules.ts": {
+  "#5030": 1,
+  "#5082": 1
+ },
+ "packages/lint/src/lint-flow-patterns.ts": {
+  "#1315": 2,
+  "#1870": 1,
+  "#1874": 2,
+  "#1888": 1,
+  "#3760": 1,
+  "#3801": 1,
+  "#3810": 1,
+  "#3823": 1,
+  "#3863": 1,
+  "#4414": 6,
+  "#5393": 1,
+  "#5482": 1
+ },
+ "packages/lint/src/lint-liveness-properties.ts": {
+  "#11384": 1
+ },
+ "packages/lint/src/lint-startup-registry-verdict.ts": {
+  "#4769": 1,
+  "#4771": 7,
+  "#4772": 3
+ },
+ "packages/lint/src/validate-action-body-writes.ts": {
+  "#4271": 1,
+  "#4345": 1
+ },
+ "packages/lint/src/validate-approval-approvers.ts": {
+  "#3424": 1,
+  "#3508": 1
+ },
+ "packages/lint/src/validate-component-props.ts": {
+  "#5068": 1
+ },
+ "packages/lint/src/validate-dashboard-action-refs.ts": {
+  "#6739": 1
+ },
+ "packages/lint/src/validate-empty-combinators.ts": {
+  "#5134": 1,
+  "#5297": 1,
+  "#5322": 3,
+  "#5330": 1
+ },
+ "packages/lint/src/validate-expressions.ts": {
+  "#4343": 1,
+  "#4889": 2,
+  "#4977": 1,
+  "#6010": 2,
+  "#6146": 1
+ },
+ "packages/lint/src/validate-flow-template-paths.ts": {
+  "#3475": 2,
+  "#3810": 3
+ },
+ "packages/lint/src/validate-flow-trigger-readiness.ts": {
+  "#3427": 3,
+  "#3457": 1
+ },
+ "packages/lint/src/validate-hook-body-writes.ts": {
+  "#4271": 3
+ },
+ "packages/lint/src/validate-nav-object-servability.ts": {
+  "#7912": 1
+ },
+ "packages/lint/src/validate-null-guards.ts": {
+  "#4649": 2,
+  "#4763": 1,
+  "#4811": 1
+ },
+ "packages/lint/src/validate-predicate-path-refs.ts": {
+  "#4049": 2,
+  "#5149": 2,
+  "#6254": 1,
+  "#7696": 1
+ },
+ "packages/lint/src/validate-react-page-props.ts": {
+  "#11284": 1,
+  "#5583": 1
+ },
+ "packages/lint/src/validate-readonly-flow-writes.ts": {
+  "#2948": 1,
+  "#3042": 1
+ },
+ "packages/lint/src/validate-rule-schema-formats.ts": {
+  "#5029": 1
+ },
+ "packages/lint/src/validate-searchable-fields.ts": {
+  "#4254": 4,
+  "#6674": 1
+ },
+ "packages/lint/src/validate-security-posture.ts": {
+  "#2348": 1,
+  "#7474": 1
+ },
+ "packages/lint/src/validate-seed-state-machine.ts": {
+  "#3433": 1
+ },
+ "packages/lint/src/validate-sortable-fields.ts": {
+  "#6994": 3,
+  "#7095": 2
+ },
+ "packages/lint/src/validate-view-containers.ts": {
+  "#5320": 1
+ },
+ "packages/lint/src/validate-visibility-predicates.ts": {
+  "#5149": 3
+ },
+ "packages/lint/src/validate-widget-bindings.ts": {
+  "#2501": 1
+ },
+ "packages/metadata-core/src/contract-suite.ts": {
+  "#7856": 1
+ },
+ "packages/metadata-core/src/engine-delete-dispatch.ts": {
+  "#11009": 4
+ },
+ "packages/metadata-core/src/engine-dispatch-unhonoured-predicate.ts": {
+  "#11009": 1
+ },
+ "packages/metadata-core/src/engine-findone-predicate.ts": {
+  "#11767": 1,
+  "#3896": 1,
+  "#4346": 1,
+  "#4419": 1
+ },
+ "packages/metadata-core/src/engine-update-dispatch.ts": {
+  "#11009": 6,
+  "#11142": 5,
+  "#11230": 6,
+  "#5748": 4
+ },
+ "packages/metadata-core/src/object-schema-fls-contract.ts": {
+  "#3545": 1,
+  "#6603": 1,
+  "#7020": 1
+ },
+ "packages/metadata-protocol/src/migrations/live-mysql-database.testkit.ts": {
+  "#10382": 1
+ },
+ "packages/metadata-protocol/src/migrations/overlay-index.ts": {
+  "#6418": 3,
+  "#8725": 1
+ },
+ "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts": {
+  "#8686": 9,
+  "#9261": 1,
+  "#9451": 4
+ },
+ "packages/metadata-protocol/src/migrations/sys-setting-identity-index.ts": {
+  "#8629": 4
+ },
+ "packages/metadata-protocol/src/migrations/view-definition-active-index.ts": {
+  "#5839": 3,
+  "#6417": 3,
+  "#8725": 1
+ },
+ "packages/metadata-protocol/src/plugin.ts": {
+  "#5839": 1,
+  "#8629": 1,
+  "#8686": 1
+ },
+ "packages/metadata-protocol/src/protocol.ts": {
+  "#10377": 1,
+  "#3043": 1,
+  "#3172": 1,
+  "#3493": 1,
+  "#3770": 1,
+  "#4196": 1,
+  "#4432": 1,
+  "#6190": 3,
+  "#6640": 1,
+  "#6992": 1,
+  "#7894": 2,
+  "#8502": 1,
+  "#8586": 1,
+  "#8957": 2
+ },
+ "packages/metadata-protocol/src/runtime-authoring-gate.ts": {
+  "#6153": 1
+ },
+ "packages/metadata-protocol/src/sys-metadata-repository.ts": {
+  "#4867": 1
+ },
+ "packages/metadata/src/endpoint-matcher.ts": {
+  "#5040": 1
+ },
+ "packages/metadata/src/loaders/database-loader.ts": {
+  "#4825": 1
+ },
+ "packages/metadata/src/metadata-manager.ts": {
+  "#5184": 1
+ },
+ "packages/metadata/src/metadata-route-ledger.ts": {
+  "#12140": 2
+ },
+ "packages/metadata/src/plugin.ts": {
+  "#4246": 1
+ },
+ "packages/objectql/src/engine.ts": {
+  "#2982": 2,
+  "#3171": 1,
+  "#3438": 2,
+  "#3617": 2,
+  "#4371": 1,
+  "#4419": 1,
+  "#4626": 1,
+  "#4639": 2,
+  "#4769": 2,
+  "#4797": 2,
+  "#5158": 2,
+  "#5351": 1,
+  "#7413": 1,
+  "#7922": 1
+ },
+ "packages/objectql/src/having-filter.ts": {
+  "#4286": 1
+ },
+ "packages/objectql/src/hook-binder.ts": {
+  "#4001": 1
+ },
+ "packages/objectql/src/hook-target-rebind-errors.ts": {
+  "#5574": 1,
+  "#5846": 1,
+  "#6752": 1,
+  "#9719": 1,
+  "#9974": 1
+ },
+ "packages/objectql/src/integrity/dangling-reference-audit.ts": {
+  "#4551": 1
+ },
+ "packages/objectql/src/lifecycle/lifecycle-settings.ts": {
+  "#5195": 1
+ },
+ "packages/objectql/src/plugin.ts": {
+  "#2462": 1
+ },
+ "packages/objectql/src/readonly-strict-errors.ts": {
+  "#3407": 1,
+  "#3493": 1
+ },
+ "packages/objectql/src/registry.ts": {
+  "#3543": 1
+ },
+ "packages/objectql/src/search-companion.ts": {
+  "#2486": 1
+ },
+ "packages/objectql/src/tenancy/system-write-organization.ts": {
+  "#8844": 1
+ },
+ "packages/objectql/src/validation/rule-validator.ts": {
+  "#2948": 1,
+  "#3407": 2,
+  "#3493": 2,
+  "#4649": 2,
+  "#5126": 2,
+  "#5503": 1
+ },
+ "packages/platform-objects/src/apps/translations/en.objects.generated.ts": {
+  "#7987": 3,
+  "#8149": 1
+ },
+ "packages/platform-objects/src/apps/translations/es-ES.objects.generated.ts": {
+  "#7987": 3
+ },
+ "packages/platform-objects/src/apps/translations/ja-JP.objects.generated.ts": {
+  "#7987": 3
+ },
+ "packages/platform-objects/src/apps/translations/zh-CN.objects.generated.ts": {
+  "#7987": 3
+ },
+ "packages/platform-objects/src/audit/sys-email.object.ts": {
+  "#8149": 1
+ },
+ "packages/platform-objects/src/identity/sys-account.object.ts": {
+  "#7987": 3
+ },
+ "packages/platform-objects/src/identity/sys-scim-connection-credential.object.ts": {
+  "#3653": 1
+ },
+ "packages/platform-objects/src/plugin.ts": {
+  "#4795": 2
+ },
+ "packages/plugins/plugin-approvals/src/approval-service.ts": {
+  "#10153": 1,
+  "#10230": 1,
+  "#10547": 2,
+  "#3424": 1,
+  "#3447": 2,
+  "#3508": 1,
+  "#3807": 1,
+  "#3823": 1
+ },
+ "packages/plugins/plugin-approvals/src/sys-approval-action.object.ts": {
+  "#3266": 1,
+  "#3424": 1
+ },
+ "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts": {
+  "#1322": 1
+ },
+ "packages/plugins/plugin-approvals/src/translations/en.objects.generated.ts": {
+  "#1322": 1,
+  "#3266": 1,
+  "#3424": 1
+ },
+ "packages/plugins/plugin-approvals/src/translations/es-ES.objects.generated.ts": {
+  "#1322": 1,
+  "#3266": 1,
+  "#3424": 1
+ },
+ "packages/plugins/plugin-approvals/src/translations/ja-JP.objects.generated.ts": {
+  "#1322": 1,
+  "#3266": 1,
+  "#3424": 1
+ },
+ "packages/plugins/plugin-approvals/src/translations/zh-CN.objects.generated.ts": {
+  "#1322": 1,
+  "#3266": 1,
+  "#3424": 1
+ },
+ "packages/plugins/plugin-audit/src/audit-writers.ts": {
+  "#5226": 1
+ },
+ "packages/plugins/plugin-audit/src/objects/sys-activity.object.ts": {
+  "#11507": 1
+ },
+ "packages/plugins/plugin-audit/src/translations/en.objects.generated.ts": {
+  "#11507": 1
+ },
+ "packages/plugins/plugin-audit/src/translations/es-ES.objects.generated.ts": {
+  "#11507": 1
+ },
+ "packages/plugins/plugin-audit/src/translations/ja-JP.objects.generated.ts": {
+  "#11507": 1
+ },
+ "packages/plugins/plugin-audit/src/translations/zh-CN.objects.generated.ts": {
+  "#11507": 1
+ },
+ "packages/plugins/plugin-auth/src/adopt-membership.ts": {
+  "#7725": 1
+ },
+ "packages/plugins/plugin-auth/src/audience-posture.ts": {
+  "#5205": 1
+ },
+ "packages/plugins/plugin-auth/src/auth-manager.ts": {
+  "#3585": 1
+ },
+ "packages/plugins/plugin-auth/src/auth-plugin.ts": {
+  "#2780": 1,
+  "#4790": 1
+ },
+ "packages/plugins/plugin-auth/src/auth-route-ledger.ts": {
+  "#2766": 1,
+  "#7735": 2,
+  "#8019": 1,
+  "#9653": 2,
+  "#9941": 1
+ },
+ "packages/plugins/plugin-auth/src/internal-field-readback.ts": {
+  "#8118": 1
+ },
+ "packages/plugins/plugin-auth/src/last-admin-guard.ts": {
+  "#10982": 1,
+  "#11663": 1,
+  "#6084": 1
+ },
+ "packages/plugins/plugin-auth/src/member-role-canonical.ts": {
+  "#8317": 4
+ },
+ "packages/plugins/plugin-auth/src/objectql-adapter.ts": {
+  "#5813": 1,
+  "#5814": 1
+ },
+ "packages/plugins/plugin-auth/src/otp-send-guard.ts": {
+  "#4808": 1
+ },
+ "packages/plugins/plugin-auth/src/sso-client-secret.ts": {
+  "#8009": 1
+ },
+ "packages/plugins/plugin-auth/src/two-factor-reenrollment-verified-reset.ts": {
+  "#10700": 3
+ },
+ "packages/plugins/plugin-auth/src/walled-owner-verification-path.ts": {
+  "#12751": 1
+ },
+ "packages/plugins/plugin-dev/src/dev-plugin.ts": {
+  "#3963": 1,
+  "#4818": 2
+ },
+ "packages/plugins/plugin-email/src/email-service.ts": {
+  "#5172": 1
+ },
+ "packages/plugins/plugin-email/src/internal-header-readback.ts": {
+  "#8149": 1
+ },
+ "packages/plugins/plugin-email/src/templates/auth-templates.ts": {
+  "#8019": 4
+ },
+ "packages/plugins/plugin-hono-server/src/hono-plugin.ts": {
+  "#4073": 1
+ },
+ "packages/plugins/plugin-reports/src/report-service.ts": {
+  "#2849": 2,
+  "#2980": 2
+ },
+ "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
+  "#5876": 1,
+  "#8552": 2
+ },
+ "packages/plugins/plugin-security/src/cleanup-package-permissions.ts": {
+  "#2747": 1
+ },
+ "packages/plugins/plugin-security/src/delegated-admin-gate.ts": {
+  "#830": 2
+ },
+ "packages/plugins/plugin-security/src/explain-engine.ts": {
+  "#4647": 3
+ },
+ "packages/plugins/plugin-security/src/normalize-managed-by.ts": {
+  "#2920": 1
+ },
+ "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts": {
+  "#2920": 1
+ },
+ "packages/plugins/plugin-security/src/objects/sys-position.object.ts": {
+  "#2920": 1
+ },
+ "packages/plugins/plugin-security/src/permission-evaluator.ts": {
+  "#2565": 2
+ },
+ "packages/plugins/plugin-security/src/security-plugin.ts": {
+  "#11082": 2,
+  "#12699": 3,
+  "#12974": 1,
+  "#2852": 1,
+  "#3022": 1,
+  "#3544": 1,
+  "#3547": 1,
+  "#4467": 1,
+  "#5386": 2,
+  "#5492": 1,
+  "#5493": 2,
+  "#7616": 1,
+  "#8552": 1,
+  "#8993": 1
+ },
+ "packages/plugins/plugin-security/src/translations/en.objects.generated.ts": {
+  "#2920": 2
+ },
+ "packages/plugins/plugin-security/src/unresolved-posture.ts": {
+  "#10401": 1,
+  "#10424": 1,
+  "#3545": 6
+ },
+ "packages/plugins/plugin-sharing/src/share-link-service.ts": {
+  "#5190": 1
+ },
+ "packages/plugins/plugin-sharing/src/sharing-rule-service.ts": {
+  "#7795": 1,
+  "#8158": 1
+ },
+ "packages/plugins/plugin-sharing/src/sharing-service.ts": {
+  "#5103": 1,
+  "#5493": 1,
+  "#5973": 1,
+  "#6428": 1
+ },
+ "packages/plugins/plugin-webhooks/src/auto-enqueuer.ts": {
+  "#3196": 1,
+  "#7799": 3,
+  "#7986": 3,
+  "#8022": 4,
+  "#8069": 3
+ },
+ "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts": {
+  "#7799": 1
+ },
+ "packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts": {
+  "#7799": 2,
+  "#7986": 2
+ },
+ "packages/plugins/plugin-webhooks/src/redeliver-guard.ts": {
+  "#7799": 1,
+  "#8069": 2
+ },
+ "packages/plugins/plugin-webhooks/src/webhook-headers-gate.ts": {
+  "#7986": 1,
+  "#8558": 1,
+  "#8566": 1
+ },
+ "packages/plugins/plugin-webhooks/src/webhook-headers.ts": {
+  "#7986": 3,
+  "#8558": 2
+ },
+ "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts": {
+  "#7799": 1,
+  "#8069": 1
+ },
+ "packages/plugins/plugin-webhooks/src/webhook-secret.ts": {
+  "#7799": 2,
+  "#8542": 1
+ },
+ "packages/qa/dogfood/test/armed.ts": {
+  "#8074": 2
+ },
+ "packages/qa/dogfood/test/authz-conformance.matrix.ts": {
+  "#10145": 1,
+  "#10243": 1,
+  "#10982": 3,
+  "#11089": 1,
+  "#11373": 1,
+  "#11757": 1,
+  "#12176": 1,
+  "#12497": 1,
+  "#1883": 2,
+  "#1884": 1,
+  "#1888": 2,
+  "#1901": 2,
+  "#1994": 1,
+  "#2077": 1,
+  "#2567": 3,
+  "#2698": 1,
+  "#2937": 6,
+  "#2948": 2,
+  "#2956": 1,
+  "#2982": 1,
+  "#2992": 1,
+  "#3003": 3,
+  "#3004": 3,
+  "#3022": 1,
+  "#3043": 2,
+  "#3167": 1,
+  "#3801": 1,
+  "#3963": 1,
+  "#4983": 1,
+  "#5519": 4,
+  "#5561": 1,
+  "#5591": 1,
+  "#7023": 1,
+  "#7033": 1,
+  "#7665": 4,
+  "#7685": 3,
+  "#7792": 1,
+  "#7807": 1,
+  "#7900": 1,
+  "#7976": 2,
+  "#8613": 3,
+  "#8710": 1,
+  "#8711": 1,
+  "#8811": 1,
+  "#9083": 2,
+  "#9377": 1
+ },
+ "packages/qa/dogfood/test/build-shaped-artifact.ts": {
+  "#6293": 3
+ },
+ "packages/qa/dogfood/test/enterprise-organizations.ts": {
+  "#4719": 1
+ },
+ "packages/qa/dogfood/test/expression-conformance.ledger.ts": {
+  "#1887": 1,
+  "#2614": 2,
+  "#3067": 1,
+  "#5016": 1,
+  "#7310": 1,
+  "#7327": 1
+ },
+ "packages/qa/dogfood/test/fixtures/attachments-fixture.ts": {
+  "#2755": 1
+ },
+ "packages/qa/dogfood/test/fixtures/comments-fixture.ts": {
+  "#4630": 1
+ },
+ "packages/qa/dogfood/test/fixtures/email-template-materialization-fixture.ts": {
+  "#4509": 1
+ },
+ "packages/qa/dogfood/test/fixtures/flow-durable-suspend-fixture.ts": {
+  "#4470": 1
+ },
+ "packages/qa/dogfood/test/fixtures/flow-function-effect-fixture.ts": {
+  "#4396": 1
+ },
+ "packages/qa/dogfood/test/fixtures/flow-runas-fixture.ts": {
+  "#1888": 1
+ },
+ "packages/qa/dogfood/test/fixtures/label-scope-fixture.ts": {
+  "#3602": 1
+ },
+ "packages/qa/dogfood/test/fixtures/rls-owner-fixture.ts": {
+  "#1994": 2
+ },
+ "packages/qa/dogfood/test/fixtures/webhook-materialization-fixture.ts": {
+  "#3461": 1
+ },
+ "packages/qa/dogfood/test/search-conformance.ledger.ts": {
+  "#4254": 1
+ },
+ "packages/qa/dogfood/test/showcase-security.ts": {
+  "#5491": 1
+ },
+ "packages/qa/downstream-contract/src/stack.ts": {
+  "#2035": 1
+ },
+ "packages/rest/src/import-mapping.ts": {
+  "#2611": 1
+ },
+ "packages/rest/src/openapi-builtin-paths.ts": {
+  "#5588": 2
+ },
+ "packages/rest/src/rest-api-plugin.ts": {
+  "#3963": 1
+ },
+ "packages/rest/src/rest-route-ledger.ts": {
+  "#10179": 1,
+  "#11678": 2,
+  "#11924": 2,
+  "#12038": 9,
+  "#12702": 4,
+  "#2747": 1,
+  "#3610": 1,
+  "#3611": 1,
+  "#4327": 1,
+  "#5682": 1,
+  "#5950": 1,
+  "#6603": 1,
+  "#7019": 1,
+  "#7526": 1,
+  "#7563": 1,
+  "#8140": 1,
+  "#9180": 1
+ },
+ "packages/rest/src/rest-server.ts": {
+  "#1604": 1,
+  "#7912": 1
+ },
+ "packages/runtime/src/action-execution.ts": {
+  "#11519": 1,
+  "#5933": 1
+ },
+ "packages/runtime/src/api-endpoint-step.ts": {
+  "#5040": 3
+ },
+ "packages/runtime/src/api-mapping.ts": {
+  "#5040": 2
+ },
+ "packages/runtime/src/app-plugin.ts": {
+  "#8686": 1
+ },
+ "packages/runtime/src/dispatcher-error-vocabulary.ts": {
+  "#12772": 1,
+  "#3724": 1,
+  "#5085": 2,
+  "#8035": 6,
+  "#8885": 1,
+  "#9106": 1,
+  "#9223": 1,
+  "#9232": 1,
+  "#9460": 2,
+  "#9968": 1
+ },
+ "packages/runtime/src/domains/activation-gate.ts": {
+  "#10243": 1
+ },
+ "packages/runtime/src/domains/auth.ts": {
+  "#5085": 1
+ },
+ "packages/runtime/src/endpoint-executor.ts": {
+  "#5040": 2
+ },
+ "packages/runtime/src/endpoint-policy.ts": {
+  "#5040": 1
+ },
+ "packages/runtime/src/resolve-project-database.ts": {
+  "#6469": 1
+ },
+ "packages/runtime/src/route-ledger.ts": {
+  "#10145": 4,
+  "#10179": 1,
+  "#10243": 2,
+  "#12038": 11,
+  "#12160": 1,
+  "#12702": 1,
+  "#3584": 2,
+  "#3656": 1,
+  "#3718": 2,
+  "#3801": 1,
+  "#3913": 1,
+  "#4327": 1,
+  "#5040": 2,
+  "#5519": 2,
+  "#5561": 1,
+  "#5682": 1,
+  "#6593": 1,
+  "#7019": 1,
+  "#7526": 2,
+  "#9180": 2,
+  "#9406": 2
+ },
+ "packages/runtime/src/sandbox/body-runner.ts": {
+  "#4345": 1,
+  "#4352": 1,
+  "#7448": 1
+ },
+ "packages/runtime/src/standalone-stack.ts": {
+  "#3276": 3
+ },
+ "packages/services/service-analytics/src/analytics-service.ts": {
+  "#3867": 1,
+  "#5222": 1,
+  "#5918": 1,
+  "#7598": 1
+ },
+ "packages/services/service-analytics/src/comparand-shape.ts": {
+  "#5222": 3,
+  "#7596": 1,
+  "#7598": 3
+ },
+ "packages/services/service-analytics/src/read-scope-sql.ts": {
+  "#5347": 1,
+  "#5369": 1,
+  "#6050": 1,
+  "#6125": 1,
+  "#6387": 1
+ },
+ "packages/services/service-analytics/src/strategies/filter-normalizer.ts": {
+  "#3650": 2,
+  "#5158": 2,
+  "#5240": 1,
+  "#5334": 2,
+  "#6050": 1,
+  "#6386": 1,
+  "#6444": 1
+ },
+ "packages/services/service-analytics/src/strategies/native-sql-strategy.ts": {
+  "#5222": 1,
+  "#7598": 1
+ },
+ "packages/services/service-analytics/src/strategies/objectql-strategy.ts": {
+  "#3601": 1,
+  "#3602": 1,
+  "#3650": 1,
+  "#5222": 1,
+  "#5333": 1,
+  "#7598": 1
+ },
+ "packages/services/service-automation/src/builtin/connector-nodes.ts": {
+  "#3017": 1
+ },
+ "packages/services/service-automation/src/builtin/parse-config.ts": {
+  "#4277": 1
+ },
+ "packages/services/service-automation/src/builtin/screen-nodes.ts": {
+  "#1870": 1
+ },
+ "packages/services/service-automation/src/builtin/template.ts": {
+  "#11060": 1
+ },
+ "packages/services/service-automation/src/engine.ts": {
+  "#1888": 1,
+  "#2419": 2,
+  "#3017": 1,
+  "#3528": 1,
+  "#3760": 1,
+  "#3801": 1,
+  "#3823": 1,
+  "#4045": 1,
+  "#4277": 1,
+  "#4414": 1,
+  "#5393": 4,
+  "#5561": 4
+ },
+ "packages/services/service-automation/src/plugin.ts": {
+  "#1928": 1,
+  "#2612": 1,
+  "#2977": 1,
+  "#3017": 4,
+  "#3356": 1,
+  "#3475": 1
+ },
+ "packages/services/service-automation/src/runtime-identity.ts": {
+  "#1888": 1,
+  "#3760": 1
+ },
+ "packages/services/service-automation/src/sys-automation-run.object.ts": {
+  "#2585": 1,
+  "#3801": 1,
+  "#7533": 2
+ },
+ "packages/services/service-automation/src/sys-flow-dispatch.object.ts": {
+  "#10220": 1
+ },
+ "packages/services/service-datasource/src/datasource-credential-migration.ts": {
+  "#8078": 1,
+  "#8081": 1
+ },
+ "packages/services/service-datasource/src/datasource-route-ledger.ts": {
+  "#3827": 1,
+  "#4249": 1,
+  "#7744": 1,
+  "#7955": 1,
+  "#8155": 1
+ },
+ "packages/services/service-datasource/src/external-datasource-service.ts": {
+  "#10997": 1,
+  "#11000": 1
+ },
+ "packages/services/service-i18n/src/i18n-route-ledger.ts": {
+  "#3636": 2
+ },
+ "packages/services/service-knowledge/src/knowledge-service-plugin.ts": {
+  "#4639": 1,
+  "#4672": 1
+ },
+ "packages/services/service-knowledge/src/knowledge-service.ts": {
+  "#2981": 1
+ },
+ "packages/services/service-messaging/src/http-outbox.ts": {
+  "#7799": 1,
+  "#8069": 3
+ },
+ "packages/services/service-messaging/src/objects/http-delivery.object.ts": {
+  "#8069": 2,
+  "#8118": 1
+ },
+ "packages/services/service-messaging/src/outbox.ts": {
+  "#11453": 2,
+  "#11859": 1
+ },
+ "packages/services/service-messaging/src/sql-http-outbox.ts": {
+  "#8118": 1
+ },
+ "packages/services/service-messaging/src/translations/en.objects.generated.ts": {
+  "#8069": 2,
+  "#8118": 1
+ },
+ "packages/services/service-messaging/src/translations/es-ES.objects.generated.ts": {
+  "#8069": 2,
+  "#8118": 1
+ },
+ "packages/services/service-messaging/src/translations/ja-JP.objects.generated.ts": {
+  "#8069": 2,
+  "#8118": 1
+ },
+ "packages/services/service-messaging/src/translations/zh-CN.objects.generated.ts": {
+  "#8069": 2,
+  "#8118": 1
+ },
+ "packages/services/service-queue/src/db-queue-adapter.ts": {
+  "#5179": 1
+ },
+ "packages/services/service-queue/src/queue-service-plugin.ts": {
+  "#5195": 1
+ },
+ "packages/services/service-sms/src/sms-daily-quota.ts": {
+  "#2814": 1
+ },
+ "packages/services/service-sms/src/sms-plugin.ts": {
+  "#2814": 1
+ },
+ "packages/services/service-storage/src/attachment-lifecycle.ts": {
+  "#4797": 1
+ },
+ "packages/services/service-storage/src/storage-route-ledger.ts": {
+  "#3584": 1,
+  "#3689": 2
+ },
+ "packages/triggers/trigger-record-change/src/record-change-trigger.ts": {
+  "#3457": 1
+ },
+ "packages/types/src/node.ts": {
+  "#10943": 1,
+  "#4719": 1
+ },
+ "packages/verify/src/harness.ts": {
+  "#4719": 1
+ },
+ "packages/verify/src/rls.ts": {
+  "#1994": 3,
+  "#7685": 3,
+  "#7978": 3
+ }
+}

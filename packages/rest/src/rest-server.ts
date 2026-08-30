@@ -8875,17 +8875,50 @@ export class RestServer {
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
                             // [#7486] `reference` FIRST — it is the canonical
-                            // key on `FieldSchema`, and `data/field.zod.ts`
-                            // folds `relatedTo` / `referenceTo` / `target` /
-                            // `targetObject` / `lookupObject` all onto it at
-                            // parse. Reading only the legacy spellings meant a
-                            // well-formed object schema carried NONE of them,
-                            // the chain resolved `undefined`, and the route
-                            // answered 500 — making `publicPicker.object`
+                            // key on `FieldSchema`, and the ONLY spelling that
+                            // schema accepts. Reading only the legacy spellings
+                            // meant a well-formed object schema carried NONE of
+                            // them, the chain resolved `undefined`, and the
+                            // route answered 500 — making `publicPicker.object`
                             // de-facto required while the schema and docs
-                            // present it as an optional override. The legacy
-                            // spellings stay after it for stored pre-fold rows,
-                            // which never went through the alias table.
+                            // present it as an optional override.
+                            //
+                            // ⛔ [#13137] `data/field.zod.ts` does NOT fold the
+                            // legacy spellings onto `reference`. An earlier
+                            // version of this comment said it did, and that
+                            // sentence is precisely what invited consumers to
+                            // be lenient. Its `aliases` table is a RENAME HINT
+                            // ON A REJECTED KEY, not a normaliser:
+                            // `strictObject` consults `aliases` only from the
+                            // `unrecognized_keys` path (the semantics are
+                            // stated in `spec/src/shared/strict-object.ts`), so
+                            // `relatedTo` / `referenceTo` / `target` /
+                            // `targetObject` / `lookupObject` are REFUSED by
+                            // `FieldSchema` — answered with *"Did you mean
+                            // `referenceTo` → `reference`?"* and never
+                            // rewritten. Pinned three ways (accept /
+                            // alias-refusal-with-hint / unknown-key-refusal
+                            // -without-hint) in
+                            // `public-form-lookup-picker.test.ts`.
+                            // ⇒ ⛔ this chain is NOT licence to be lenient
+                            // anywhere else: nothing upstream folds for you,
+                            // and a producer emitting a legacy spelling emits a
+                            // document the spec refuses by name.
+                            //
+                            // The tail below reads exactly three spellings —
+                            // `referenceTo`, `target`, `options.objectName` —
+                            // which is NOT the spec's five-entry hint list:
+                            // only the first two appear on it, and
+                            // `options.objectName` appears on no list at all.
+                            // They can reach here only on a STORED row that
+                            // never went through `FieldSchema`, which is
+                            // possible because the serving read path replays
+                            // ADR-0087 conversions
+                            // (`applyConversionsToStoredItem`) and performs no
+                            // schema validation. ⚠️ Whether such a row is still
+                            // reachable in production is #12920's OPEN census —
+                            // ⛔ do not widen this chain here, and do not narrow
+                            // it here either; #12920 decides its fate.
                             referenceTo = def?.reference
                                 ?? def?.referenceTo
                                 ?? def?.target
@@ -10865,6 +10898,13 @@ export class RestServer {
                 // server-side inconsistency, but named, so the client can say
                 // which run needs an operator instead of showing a bare 500.
                 [/^RESUME_FAILED/, 500, 'RESUME_FAILED'],
+                // The write IS recorded and NOT rolled back, but the updated
+                // row is invisible inside the caller's organization scope, so
+                // the result envelope cannot be built. Same class as
+                // RESUME_FAILED — a genuine server-side inconsistency, named
+                // (#13182): read the request back with a system or
+                // matching-organization context.
+                [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {

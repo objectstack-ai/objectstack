@@ -1,52 +1,52 @@
 {
   "type": "skill",
-  "_note": "SkillSchema. Seeded from docs/audits/2026-06-skillschema-property-liveness.md. skill-registry.ts + agent-runtime.ts are the runtime consumers. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). 2026-08-06 (#3905): that used to be the WHOLE story — the open framework consumed nothing here. It now consumes the INSTRUCTIONS half: `packages/mcp/src/skill-prompts.ts` projects every active skill carrying `instructions` onto the MCP `prompts` primitive (name/label/description/instructions/active are read there, in-repo and testable). The TOOL-BINDING half (`tools`, `surface`, `triggerConditions`) stays cloud-runtime-only and now says so in the schema's own JSDoc. See content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
+  "_note": "SkillSchema. Seeded from docs/audits/2026-06-skillschema-property-liveness.md. skill-registry.ts + agent-runtime.ts are the runtime consumers. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `cloud: packages/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code. 2026-08-30 (#13272): the previous wording of this sentence was false in BOTH halves. (a) It called the framework's own service-ai tree “a stale build artifact with no src/” — there is no tree at all: `packages/services/` holds every sibling service EXCEPT service-ai, and `git ls-files | grep -ic service-ai` returns 0. Absent, not stale. (b) The citations spelled `packages/services/service-ai/...`, a path present in NEITHER repo; cloud's real layout, measured at cloud@15f55df (#13042), is `packages/service-ai/...`. Every citation below now carries the explicit `cloud` realm marker, so it is attributed by the marker `scanEvidence` reads rather than riding the `FOREIGN_PATH_PREFIXES` special case that silently exempted the stale spelling from resolution — which is why 22 dead pointers sat green. ⚠ NOT RE-VERIFIED: this repair corrected the package root from that recorded measurement ONLY. No consumer below was re-read against a cloud checkout, so no `verifiedAt` was stamped and no `#symbol` anchor was added — the gate never resolves a foreign anchor, so an unchecked one would re-create the unfalsifiable pointer this repair removes. Re-verifying these consumers against a live cloud checkout is still open (#13272). 2026-08-06 (#3905): that used to be the WHOLE story — the open framework consumed nothing here. It now consumes the INSTRUCTIONS half: `packages/mcp/src/skill-prompts.ts` projects every active skill carrying `instructions` onto the MCP `prompts` primitive (name/label/description/instructions/active are read there, in-repo and testable). The TOOL-BINDING half (`tools`, `surface`, `triggerConditions`) stays cloud-runtime-only and now says so in the schema's own JSDoc. See content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
       "note": "also the MCP prompt name in the open framework (#3905).",
       "verifiedAt": "2026-08-06"
     },
     "surface": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
       "note": "ADR-0063 §3 / ADR-0064 — skill↔agent affinity. resolveActiveSkills hard-fails when a bound skill's surface ('ask'|'build'|'both') is incompatible with the agent's surface; the union of surface-compatible skills' tools IS the agent's tool set (no global fall-through). CLOUD-RUNTIME-ONLY (#3905) — the open framework has no agent to bind to.",
       "verifiedAt": "2026-08-06"
     },
     "label": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
       "note": "injected into the agent system prompt (cloud); the MCP prompt `title` in the open framework (#3905).",
       "verifiedAt": "2026-08-06"
     },
     "description": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
       "note": "injected into prompt (cloud); the MCP prompt `description` in the open framework (#3905).",
       "verifiedAt": "2026-08-06"
     },
     "instructions": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (skillPromptResult)",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:247; packages/mcp/src/skill-prompts.ts (skillPromptResult)",
       "note": "injected into prompt (cloud); served as the MCP `prompts/get` message body in the open framework (#3905) — a skill without it is not projected at all.",
       "verifiedAt": "2026-08-06"
     },
     "tools": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:206",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:206",
       "note": "tool-contribution path incl. action_* wildcard. CLOUD-RUNTIME-ONLY (#3905): MCP exposes one flat tool list to a client-side model, so there is nothing to bind server-side; still validated at authoring time in both distributions.",
       "verifiedAt": "2026-08-06"
     },
     "triggerConditions": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:153",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:153",
       "note": "THE activation gate — AND of {field,operator,value}. CLOUD-RUNTIME-ONLY (#3905): MCP has no server-side activation step; a client lists every projected prompt and chooses.",
       "verifiedAt": "2026-08-06"
     },
     "active": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/skill-registry.ts:93; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
+      "evidence": "cloud: packages/service-ai/src/skill-registry.ts:93; packages/mcp/src/skill-prompts.ts (projectSkillPrompt)",
       "note": "inactive skills dropped — by the cloud registry, and not projected as an MCP prompt either (#3905).",
       "verifiedAt": "2026-08-06"
     },

@@ -532,6 +532,27 @@ jobs:
       - name: Widget `options` census derived from the spec, not pinned
         run: pnpm check:widget-option-census
 
+      # The sdui-parser LOCKSTEP invariant (#12719 / #13150). Two copies of the
+      # constrained-JSX parser exist: objectui's runs in the RENDERER, this one
+      # runs in the SAVE GATE, and #12719 states that they must byte-agree on
+      # the accepted grammar and on the diagnostic codes — an invariant that had
+      # been enforced by NOTHING through three manual ports, two of which landed
+      # only because someone happened to file a card naming the drift.
+      #
+      # Compared against a VENDORED RECORD of objectui's side, so this step
+      # needs no network, no build and no objectui checkout. Read the gate's
+      # header for what that buys and what it costs: it sees this copy moving
+      # away from the recorded objectui state; it does NOT see objectui moving
+      # afterwards, and only a `.objectui-sha` bump — the moment a divergence
+      # starts SHIPPING — brings that direction back into view.
+      #
+      # Unfiltered on purpose. The record lives under packages/sdui-parser/, the
+      # pin is a root dotfile, and this workflow declares no paths: filtering it
+      # to the parser subtree would go dormant on exactly the PR that moves the
+      # pin. Cost is one TypeScript parse of seven small files, ~0.4 s.
+      - name: sdui-parser stays in lockstep with objectui's copy
+        run: pnpm check:sdui-lockstep
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved
@@ -3470,6 +3491,46 @@ jobs:
       - name: Stall-guard budget invariant
         run: pnpm check:stall-guard-budget
 
+      # The third member of the stall-guard family, and the only one that was
+      # never wired (#13246). `measure-stall-guard-headroom.mjs` re-derives the
+      # one term the budget gate above cannot read statically -- `p + s`, the
+      # job's prep plus the healthy run length -- by joining that gate's own
+      # sweep against GitHub's runner timestamps.
+      #
+      # ONLY THE `--self-test` LEG, and the asymmetry with the two steps above is
+      # deliberate: they run `--self-test && the gate`, this one must never
+      # append a bare invocation. The measurement path fetches
+      # `GET /actions/runs/{id}/jobs` and reads GITHUB_TOKEN/GH_TOKEN, so a bare
+      # run reds the farm on a token-less runner. "Consistency with the sibling"
+      # is the tidy-up that breaks this step.
+      #
+      # The `--self-test` half is a different animal, and conflating the two is
+      # exactly why this sat unrun: it takes no `--run`, so `fetchRunJobs` is
+      # unreachable from it. Measured with `net.Socket.connect`, `net.connect`,
+      # `dns.lookup` and `globalThis.fetch` all armed to throw, and with
+      # GITHUB_TOKEN/GH_TOKEN unset: 32 assertions passed, ~1.5s, no build. It
+      # drives the real `main()` over fixture payloads and fixture workflow trees
+      # in a temp dir, and asserts all three exit codes -- 0 covered, 1 a step
+      # that cannot deliver a verdict, 2 REFUSED -- so a tool that can only print
+      # "covered" cannot pass.
+      #
+      # Why it is worth a step rather than a note: #13121 gave the tool refusal
+      # branches (an unattributable observation refuses; an observation matching
+      # no guarded site is EXCLUDED and reported, never dropped), and every proof
+      # that those branches fire lives here. A refusal branch nobody exercises
+      # decays into decoration -- the same silence #13121 was filed about, one
+      # level up. The collision refusal in particular is unreachable from this
+      # tree, where all seven guarded steps carry distinct names, so only the
+      # synthetic `--root` fixtures can exercise it at all.
+      #
+      # WHAT REDDENS IT: its own script's code, and the guarded-site population
+      # this repo's workflows declare. Measured adversarially -- inverting the
+      # `attribute` NONE branch to attribute rather than exclude reds this step
+      # alone, naming the assertion. It reads `.github/workflows/**` plus temp
+      # fixtures; no network, no token, no build.
+      - name: Stall-guard headroom self-test (self-test half only, never the measurement)
+        run: pnpm check:stall-guard-headroom
+
       # The dev-preflight gate's self-test — and deliberately only HALF of that
       # gate (#8170, the second and only other member of #8110's split-gate
       # family). Same neighbour as the step above for the same reason: both are
@@ -4636,6 +4697,24 @@ jobs:
       # into a false red. Self-test first, both directions.
       - name: Check docs object examples pass the os validate security posture
         run: pnpm --filter @objectstack/lint run check:doc-security-posture
+
+      # The YAML half of the same surface (#13086, ruled 2026-08-29).
+      # check:skill-examples reads only ts/tsx fences — while metadata
+      # AUTHORING examples are written in YAML, so the format carrying most of
+      # what an author copies was in no gate's population at all
+      # (layout-dsl.mdx taught a phantom field-level `visible` map through two
+      # hand sweeps of the same page, #8251/#8306/#12935). Each ```yaml block
+      # tagged `os:check-yaml <schema>` is safeParsed against the LIVE spec
+      # schema it declares — resolved through the same registry
+      # `PUT /api/v1/meta/:type/:name` validates with — so a rejection here is
+      # the one a runtime save would print, rename hint included. Also prints
+      # the tagged/untagged fence census so opt-in adoption stays visible
+      # rather than becoming a permanent excuse. Reads src/ through tsx (no
+      # dist), so its place in this job is cohesion with the example-gate
+      # cluster above, not a build dependency. Self-tests first, like its
+      # neighbours.
+      - name: Check docs YAML examples parse against live spec schemas
+        run: pnpm --filter @objectstack/spec run check:yaml-examples
 
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing

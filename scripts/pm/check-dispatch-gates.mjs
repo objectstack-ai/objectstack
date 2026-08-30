@@ -29,10 +29,27 @@
  * and exits 0 on any completed run. There is no verdict in it for CI to hold —
  * gating on it would buy a slow read of the whole workflow tree whose exit code
  * is 0 by construction. What CI can hold is the half that HAS a verdict, the
- * self-test. That self-test is not fixture-only either: it reads the real
- * pr-automation.yml and walks the real packages tree in the cases where a
- * fixture cannot prove the point, so the derivation's contact with reality is
- * covered by this gate too.
+ * self-test. That self-test is not fixture-only either. In the cases where a
+ * fixture cannot prove the point it runs the same discovery the tool does —
+ * every workflow file in the tree, and then the source of every gate that
+ * discovery finds — sweeps the tracked corpus, builds temporary git
+ * repositories with real history and drives changedPathsFromGit against them,
+ * and re-runs the tool's own CLI as a child process against the real checkout:
+ * invoked directly, through a symlink to it, and imported by a consumer
+ * module, plus a spawned import that reads a sibling gate's live table. So the
+ * derivation's contact with reality is covered by this gate too — and most of
+ * what the paragraph above calls a slow read is already paid for here, with a
+ * verdict attached to it.
+ *
+ * ⛔ That description carries no figures, deliberately. The count of workflows,
+ * of gate sources, of files swept and of temporary repositories all move with
+ * the tree, and one frozen in a comment goes stale without anything failing —
+ * which is exactly how the older spelling of this paragraph ("it reads the
+ * real pr-automation.yml and walks the real packages tree") came to describe a
+ * self-test far smaller than the one CI runs, in the file the lint workflow
+ * sends readers to for the measured argument. A reading belongs to a named
+ * commit, not to a header. Same repair, and the same reason, as the cost note
+ * in the workflow comment that points here (#12831).
  *
  * ## Why this file exists instead of pointing the script at the tool directly
  *
@@ -66,8 +83,20 @@
  *
  * A separate gate file is also what the other two pm gates look like
  * (check-skill-line-ratchet.mjs, check-skill-id-lint.mjs). Its watch hints are
- * the one constant below: this gate is matched for a card that edits the tool,
- * and for nothing else — which is the blind spot #8162 is about.
+ * the module-body constants below — the tool it runs, plus every module whose
+ * edits move this gate's verdict without leaving a hint the extractor can find.
+ * Two routes reach this gate and there is no third: a card editing any of those
+ * constants, through the hint; a card editing this file, through identity. The
+ * step is invoked with no job filter and lint.yml declares no trigger paths, so
+ * there is no third provenance to inherit — which is the blind spot #8162 is
+ * about.
+ *
+ * ⛔ That sentence names the constants' SHAPE, not their number, for the reason
+ * the ⛔ note above gives. Written as a count it said "the one constant" across
+ * two later declarations (#9116) and stayed green the whole time: the self-test
+ * pins the SET with containment assertions, and nothing counts the prose. Each
+ * constant carries its own reason at its declaration below, which is where a
+ * fourth one would be read and where the enumeration therefore lives.
  *
  * ## Why the paths above are unquoted, and why that is no longer required
  *
@@ -82,10 +111,12 @@
  *
  * The extractor no longer works that way: extractWatchHints opens with
  * maskComments, whose own docblock names this file as the specimen it retires.
- * Measured on this tree, with every repo path this header names rewritten into
- * backticks: 1 hint under today's extractor — scripts/pm/dispatch-gates.mjs,
- * the same single hint the file ships with — against 10 under the pre-masking
- * one, reaching spec, objectql, plugins, drivers, .claude/agents and .changeset
+ * Re-measured on 74049254d4, the parent of the commit that rewrote this
+ * paragraph, with every repo path this header names rewritten into backticks:
+ * today's extractor returns exactly the hints the file ships with — the
+ * module-body constants below, and nothing out of the header — against the ten
+ * the pre-masking extractor returned when this section was first written,
+ * reaching spec, objectql, plugins, drivers, .claude/agents and .changeset
  * exactly as the incident describes. Comment masking alone accounts for the
  * difference: masking self-test bodies instead changes nothing here, because
  * this file has none.
@@ -93,9 +124,12 @@
  * So the unquoting is no longer load-bearing, and this section is history
  * rather than an instruction: quoting a path in a comment here is now free, and
  * the paths stay unquoted because rewriting them buys nothing. What is NOT free
- * is a path literal in a module body — masking cannot reach one — so the one
- * quoted path below is still the one input this gate genuinely has, and that is
- * the rule to carry into a new gate's header rather than the unquoting.
+ * is a path literal in a module body — masking cannot reach one — so the quoted
+ * paths below are still exactly this gate's watch hints, each one deliberate
+ * rather than a by-product of how a sentence was typed. Only TOOL is a file this
+ * gate itself reads; the other two are declared couplings, named because an edit
+ * to them moves this gate's verdict with no hint to derive it from. That is the
+ * rule to carry into a new gate's header rather than the unquoting.
  *
  * Nothing else belongs in this file. Assertions go in the tool's own self-test,
  * beside the code they judge; this is the CI invocation and its reason.
@@ -107,7 +141,10 @@ import process from 'node:process';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
-/** The tool under test, repo-relative — and one of this gate's two watch hints. */
+/**
+ * The tool under test, repo-relative — the one path declared here that this gate
+ * actually reads, and one of its watch hints.
+ */
 const TOOL = 'scripts/pm/dispatch-gates.mjs';
 
 /**

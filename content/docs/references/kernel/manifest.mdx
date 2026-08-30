@@ -39,11 +39,11 @@ const result = ManifestSchema.parse(data);
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
-| **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
 | **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
 | **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
-| **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
-| **extensions** | `Record<string, any>` | optional | Extension points and contributions |
+| **capabilities** | `never` | optional | [REMOVED] `manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no discovery path ever consulted the block: nothing read `implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the declared "interoperability and automatic discovery" never happened. Delete the key. Real dependency resolution runs off top-level `manifest.dependencies`, which stays. Capability-based discovery must be designed with an enforcing reader first, not revived here. |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
 | **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
 | **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
@@ -62,13 +62,6 @@ Structured plugin permission grants (ADR-0025 §3.2)
 | **hooks** | `string[]` | optional | Lifecycle hooks the plugin may register (e.g. "record.beforeInsert") |
 | **network** | `string[]` | optional | Network hosts the plugin may reach (e.g. "api.acme.com") |
 | **fs** | `string[]` | optional | Filesystem paths the plugin may access |
-
-### Nested Shape: `Manifest.configuration`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **title** | `string` | optional |  |
-| **properties** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'array' \| 'object'>; default?: any; description?: string; required?: boolean; … }>` | ✅ | Map of configuration keys to their definitions |
 
 ### Nested Shape: `Manifest.contributes`
 
@@ -102,16 +95,6 @@ Structured plugin permission grants (ADR-0025 §3.2)
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-
-### Nested Shape: `Manifest.capabilities`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **implements** | `{ protocol: object; conformance?: Enum<'full' \| 'partial' \| 'experimental' \| 'deprecated'>; implementedFeatures?: string[]; features?: object[]; … }[]` | optional | List of protocols this plugin conforms to |
-| **provides** | `{ id: string; name: string; description?: string; version: object; … }[]` | optional | Services/APIs this plugin offers to others |
-| **requires** | `{ pluginId: string; version: string; optional?: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
-| **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
-| **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority?: integer }[]` | optional | Extensions contributed to other plugins |
 
 ### Nested Shape: `Manifest.navigationContributions[number]`
 

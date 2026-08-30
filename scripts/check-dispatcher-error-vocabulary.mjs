@@ -421,6 +421,133 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
   governedBy: 'neither — an author-time diagnostic vocabulary, ADR-0112 D6c genre',
 });
 
+/**
+ * ## [#13131] A code-carrying helper that stamps through an OBJECT LITERAL is
+ * ## invisible to `codehelper` — MEASURED, and deliberately NOT closed here
+ *
+ * `codehelper` above is anchored on an ASSIGNMENT: its regex is `.code = ident`.
+ * The reasoning it implements — "the identifier is a PARAMETER, so the literals
+ * live at the CALL SITES" — is a property of the HELPER, not of the assignment
+ * operator, and it holds just as well for the equally ordinary helper that
+ * builds an object literal:
+ *
+ *     function postureError(code: string, message: string) {
+ *       return { severity: 'error', code, message };   // <- nothing matches
+ *     }
+ *
+ * No shape in either gate anchors there. `objlit` needs a quote, `objlitconst`
+ * needs a SCREAMING_SNAKE identifier after the colon (and the conventional
+ * parameter name is `code`), `objlittemplate` needs backticks, and `codehelper`
+ * needs the `.code =`. So this is worse than a wrong verdict: no pattern fires
+ * at all, which means there is no site AND no unresolved entry either — nothing
+ * is reported, and nothing says so. That is precisely the bound this gate
+ * states for itself ("a value it cannot reduce is REPORTED, never dropped")
+ * failing in the one way the bound cannot notice.
+ *
+ * ## TWO blindnesses, not one — and the second is why the first is not enough
+ *
+ * ① POSITION. The object-literal stamp position has no shape (above).
+ * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognises
+ *    `function f(`, `constructor(` and `const|let|var f = (` — and NO class
+ *    method. So a code-carrying helper that is a METHOD is out of reach even in
+ *    the position `codehelper` already implements: the same body that produces
+ *    a site as a free function produces nothing as `private error(code, …)`.
+ *    Measured with a same-genre positive control, and pinned below.
+ *
+ * These are independent, and the card's own live instance needs BOTH:
+ * `Parser#error(code, message, start?, tag?)` in `packages/sdui-parser` is a
+ * class method that stamps through an object literal. Widening the position
+ * alone would still not reach it.
+ *
+ * ## The measurement (blast radius), on `packages/**` non-test source
+ *
+ * Method: the predicate — a `code` property of an object literal whose value is
+ * an identifier that is a PARAMETER of the enclosing function — evaluated on
+ * the real TypeScript AST, with call-site arguments reduced by THIS gate's own
+ * literal grammar (`/^[A-Za-z][A-Za-z0-9_]*$/`, so a hyphen does not reduce)
+ * and checked against the registered vocabulary and the declaration table.
+ * A regex instrument was tried first and discarded: it matched `${code}` inside
+ * a template and `f(a, code, b)` inside an argument list, and then LOST a true
+ * positive because a bracket inside a regex literal unbalanced its scan.
+ *
+ *   predicate matches            13 helpers (12 named, 1 anonymous)
+ *   (a) call sites newly reached 106   — 76 reduce to a literal, 30 do not
+ *   (b) NEW verdict rows needed   29   — 0 of them already carry a row
+ *   (c) undischargeable `unresolved` findings  4
+ *
+ * Split by whether `enclosingDeclaration` can see the declaration at all:
+ *
+ *   reachable today (blindness ① only)   9 helpers · 81 call sites · 29 rows · 1 unresolved
+ *   blocked by blindness ②               4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *
+ * ⚠️ (b) is not the whole cost, and reading it as the whole cost is the trap
+ * this note exists to prevent. All 29 new rows are LOWERCASE `FieldErrorCode`
+ * diagnostics (`required`, `invalid_type`, `min_value`, …) in four files —
+ * ADR-0112 D6 genre, not wire codes. The four `unresolved` findings are the
+ * expensive half: an `unresolved` entry is pushed UNCONDITIONALLY and no
+ * declaration row discharges it (see `reconcile`), so each one is a RED gate
+ * with no verdict available — including `Parser#error`, whose 16 call sites all
+ * pass kebab literals that this gate's grammar refuses to reduce.
+ *
+ * ## No victim today — verified, not assumed
+ *
+ * Of the 33 SCREAMING_SNAKE values reached, 33 are already registered; the
+ * count of values that are BOTH ADR-0112 D1 shaped AND unregistered — i.e. a
+ * real wire code hiding behind this blindness — is ZERO. `check:error-code-casing`
+ * likewise reports nothing on any of the files involved. So the value of
+ * closing this is preventing a future defect, not fixing a present one.
+ *
+ * ⚠️ One bound the measurement does NOT have. `helperCodesFor` scans only the
+ * DECLARING file, so every count here is over IN-FILE call sites. An exported
+ * helper called from other packages contributes 0 — `sendError` in
+ * `packages/types/src/response-envelope.ts` has 0 in-file calls and is one of
+ * the four `unresolved`. Counting cross-file callers needs resolution this
+ * source scan does not have; that number is UNMEASURED, and it is a lower bound
+ * on (a), never an upper one.
+ *
+ * ## ⛔ What this declaration deliberately does NOT do
+ *
+ * ⛔ It does not widen `codehelper`. Triage ruled the measuring round scoped to
+ * measurement: 「先量出加宽后的爆炸半径, ⛔ 不先加宽。数没量出来之前,"该不该加宽"
+ * 不是一个可裁的问题。」 The numbers above are that measurement; whether to
+ * widen is now a decidable question and belongs on its own card, with the
+ * verdict rows (`domain:cli`) as a rider on the same change.
+ *
+ * ⛔ It does not add verdict rows. A row for a site no shape derives is a
+ * `stale-row` finding, so the rows cannot land before the widening.
+ */
+export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
+  /**
+   * The two spellings of the unseen position. Each is a complete helper whose
+   * only difference from `SAME_GENRE_CONTROL` is the stamping line.
+   */
+  shorthand: `  return { severity: 'error', code, message };`,
+  longhand: `  return { severity: 'error', code: code, message };`,
+  /**
+   * The SAME-GENRE POSITIVE CONTROL: the identical helper stamping through the
+   * assignment `codehelper` does implement. `--self-test` runs both, so the
+   * zero on the object-literal spellings is a READING rather than a harness
+   * that stopped working — the discipline `KEBAB_DIAGNOSTIC_VOCABULARY` above
+   * records, applied to a different axis.
+   */
+  control: `  const e = new Error(message);\n  (e as any).code = code;\n  return e;`,
+  /** Unregistered in both `StandardErrorCode` and the ledger, in both casings. */
+  probe: 'HELPER_SCREAMING',
+  probeLowercase: 'helper_lowercase',
+  /** Blindness ②: the declaration forms `enclosingDeclaration` cannot see. */
+  invisibleDeclarationForms: Object.freeze(['class method', 'anonymous arrow']),
+  /** The live instance, read as evidence only — it is NOT edited by this card. */
+  liveInstance: 'packages/sdui-parser/src/parse.ts  Parser#error(code, message, start?, tag?)',
+  /** Measured blast radius, `packages/**` non-test source. See the prose above. */
+  measured: Object.freeze({
+    helpers: 13,
+    callSitesNewlyReached: 106,
+    newVerdictRows: 29,
+    undischargeableUnresolved: 4,
+    unregisteredWireCodesHiding: 0,
+  }),
+});
+
 const isTestFile = (rel) =>
   /\.(test|spec)\.[cm]?tsx?$/.test(rel) || /(^|\/)(__tests__|__mocks__|fixtures)\//.test(rel);
 
@@ -958,12 +1085,69 @@ export function splitTopLevel(args) {
   return out;
 }
 
-/** Parameter NAMES, in order: `readonly a: T = x` → `a`. */
+/**
+ * [#13227] The leading MODIFIER RUN of a TypeScript parameter, enumerated from
+ * the grammar rather than approximated.
+ *
+ * A parameter property admits an accessibility modifier, then `override`, then
+ * `readonly` — in that fixed order, up to THREE of them, and the compiler
+ * rejects any other order (`readonly public x` → "'public' modifier must
+ * precede 'readonly' modifier"; `readonly override x` → "'override' modifier
+ * must precede 'readonly' modifier"). Measured against the repo's own
+ * TypeScript 6.0.3 on a derived class, because `override` is only legal where a
+ * base class exists and a check on a standalone class reports it as a class
+ * error rather than as a parameter one. `static` and `abstract` are rejected on
+ * a parameter outright, and `in`/`out` are TYPE-parameter modifiers, which
+ * never appear in the value-parameter slice `enclosingDeclaration` hands over.
+ *
+ * The order is encoded rather than looped deliberately: a "strip any word in
+ * this set, repeatedly" loop accepts spellings TypeScript does not, which is
+ * the match-everything direction this gate has paid for before.
+ */
+const PARAM_MODIFIER_RUN = /^(?:(?:public|private|protected)\s+)?(?:override\s+)?(?:readonly\s+)?/;
+
+/**
+ * Parameter NAMES, in order: `readonly a: T = x` → `a`,
+ * [#13227] `private readonly code: string` → `code`.
+ *
+ * The strip used to be a single anchored alternation carrying a `g` flag. The
+ * flag reads as "strip them all", but `^` with no `m` matches at position 0
+ * once, so exactly ONE modifier came off: `private readonly code: string`
+ * parsed as a parameter literally named `readonly`, and `helperCodesFor`'s
+ * `indexOf(ident)` then answered -1 — no site, no unresolved, the whole helper
+ * dropped in silence, one layer inside the same failure class as #9223 /
+ * #9460 / #10918 / #13131.
+ *
+ * ⚠️ A modifier word is only a modifier when a NAME follows it. `readonly`,
+ * `override` and the accessibility words are not reserved, so each is a legal
+ * parameter name in its own right — `override: MetricsRegistry | undefined` is
+ * live in this tree three times over. `override:` / `override?:` never enter
+ * the run (no whitespace follows the word), and the guard below covers the
+ * spaced spelling `readonly : T`, where the run would otherwise eat the
+ * parameter's own name and report nothing.
+ *
+ * ⛔ Textual on purpose, and the reason is measured rather than inherited.
+ * `enclosingDeclaration`'s `DECL_HEADER_RE` also matches `const x = someCall(`,
+ * so of the 7646 slices this function is handed on `packages/**` non-test
+ * source, 1218 are not a valid parameter list at all — they are ARGUMENT
+ * lists — and on 1072 of those a recovering TypeScript parse invents MORE THAN
+ * ONE parameter: `authService as any` becomes three confident parameters named
+ * `authService`, `as` and `any`; `await res.json()` becomes `await`, `res`,
+ * `json`. Those names are exactly what `helperCodesFor` searches with
+ * `indexOf(ident)`, so an AST route would MANUFACTURE the wrong-INDEX hazard
+ * this card only warns about — a finding that reads as ordinary while naming a
+ * value from another argument position — across a thousand slices. A textual
+ * reader degrades to one bad name instead of several. The over-matching header
+ * regex is #13226's subject and is deliberately untouched here.
+ */
 export function parseParamNames(params) {
   if (!params.trim()) return [];
   return splitTopLevel(params).map((raw) => {
-    const cleaned = raw.replace(/^\s*(?:readonly|public|private|protected|\.\.\.)\s+/g, '').trim();
-    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned.replace(/^\.\.\./, ''));
+    const rest = raw.trim().replace(/^\.\.\.\s*/, '');
+    const run = PARAM_MODIFIER_RUN.exec(rest)[0];
+    const tail = rest.slice(run.length);
+    const cleaned = /^[A-Za-z_$]/.test(tail) ? tail : rest;
+    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned);
     return m ? m[1] : '';
   });
 }
@@ -1717,6 +1901,78 @@ function selfTest() {
       'splitTopLevel counted a nested or templated comma as a separator',
     );
     ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
+
+    // [#13227] The MODIFIER RUN, pinned at every length TypeScript admits and
+    // in the order it admits them. `private readonly code: string` parsed as a
+    // parameter named `readonly` because the strip was anchored-plus-`g`,
+    // which takes exactly ONE modifier off. The run is up to three long
+    // (accessibility → `override` → `readonly`), measured against the repo's
+    // own TypeScript rather than assumed from the card's two-modifier example.
+    for (const [params, expected, note] of [
+      ['code: string, msg: string', 'code,msg', 'no modifier'],
+      ['readonly code: string', 'code', 'one modifier'],
+      ['private code: string', 'code', 'one modifier, accessibility'],
+      ['private readonly code: string, private readonly msg: string', 'code,msg', 'two modifiers, both parameters'],
+      ['public readonly code: string, msg: string', 'code,msg', 'two modifiers, mixed list'],
+      ['protected readonly code: string', 'code', 'two modifiers, protected'],
+      ['override readonly code: string', 'code', 'two modifiers, no accessibility'],
+      ['private override readonly code: string', 'code', 'THREE modifiers — the maximum'],
+      ['public override readonly code: string, msg: string', 'code,msg', 'three modifiers, mixed list'],
+      ['private readonly code: Map<string, number> = x, b?: string', 'code,b', 'modifier run plus a generic default'],
+      ['...rest: string[]', 'rest', 'rest parameter, unchanged by the run'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames mis-read a parameter list (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // ⛔ The NEGATIVE half — the strip must not become a match-everything.
+    // None of these words is reserved, so each is a legal parameter name, and
+    // `override` is one THREE TIMES in this repo's own `packages/**` source
+    // (`observability-service-plugin.ts`, `cache-service-plugin.ts`,
+    // `storage-service-plugin.ts`). A run that ate them would rename a real
+    // parameter and hand `helperCodesFor` a wrong INDEX — a finding that reads
+    // as ordinary while naming a value from another argument position.
+    for (const [params, expected, note] of [
+      ['ctx: PluginContext, override?: ErrorReporter', 'ctx,override', 'a parameter named `override`'],
+      ['override: MetricsRegistry | undefined', 'override', '`override` alone'],
+      ['readonly: string, message: string', 'readonly,message', 'a parameter named `readonly`'],
+      ['public: number', 'public', 'a parameter named `public`'],
+      ['readonly : string', 'readonly', '`readonly` spaced off its own colon — no name follows the run'],
+      ['private: string, readonly: string', 'private,readonly', 'two modifier-WORDS used as names'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames ate a real parameter name (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // [#13227] End to end through the real `deriveSites`, because the parse is
+    // only interesting for what it costs downstream: the whole helper was
+    // DROPPED — no site AND no unresolved — which is the silent-drop class this
+    // gate exists to refuse. Paired with the single-modifier POSITIVE CONTROL,
+    // so the zero on `main` was a reading rather than a dead harness.
+    {
+      const helper = (params, arg) =>
+        `class E {\n  constructor(${params}) {\n    (this as any).code = code;\n  }\n}\n` +
+        `throw new E('${arg}', 'x');\n`;
+      const derive = (source) =>
+        deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+      for (const [params, probe, note] of [
+        ['readonly code: string, readonly message: string', 'ONE_MODIFIER_HELPER', 'the single-modifier positive control'],
+        ['private readonly code: string, readonly message: string', 'PARAM_PROPERTY_HELPER', 'the two-modifier parameter property'],
+      ]) {
+        const { sites, unresolved } = derive(helper(params, probe));
+        ok(
+          sites.some((s) => s.shape === 'codehelper' && s.code === probe),
+          `a constructor code helper was dropped — ${note} derived ${sites.length} site(s) and ` +
+            `${unresolved.length} unresolved, neither naming ${probe}`,
+        );
+      }
+    }
   }
 
   // [#9568] The value-level reduction: a constant holding a TERNARY or a
@@ -2330,6 +2586,104 @@ function selfTest() {
     }
   }
 
+  // [#13131] The OBJECT-LITERAL stamp position inside a code-carrying helper,
+  // and the CLASS-METHOD declaration form, are both outside this gate —
+  // MEASURED (see OBJECT_LITERAL_CODE_HELPER_BLINDNESS above) and declared out
+  // rather than closed, because the round that measured them was scoped to
+  // measurement. Pinned HERE, in the one place the declaration lives, so a
+  // later widening of either half cannot land silently: something fails, and
+  // what fails names the decision.
+  //
+  // ⚠️ Nothing below asserts a bare zero. Every zero is paired with the
+  // SAME-GENRE POSITIVE CONTROL — the identical helper stamping through the
+  // assignment this gate does implement — so a harness that stopped working
+  // fails on the control instead of passing on the subject.
+  {
+    const B = OBJECT_LITERAL_CODE_HELPER_BLINDNESS;
+    const DECISION =
+      'a code-carrying helper that stamps through an OBJECT LITERAL, or one declared as a CLASS ' +
+      'METHOD, is now visible to a gate. That is a gate-POPULATION change: #13131 measured the ' +
+      'blast radius at 106 newly reached call sites, 29 new verdict rows in ' +
+      `${DECLARATION}, and 4 UNDISCHARGEABLE unresolved findings. Land the rows and the ` +
+      'declaration together, and rewrite OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust ' +
+      'this pin to match.';
+
+    const helper = (body, probe) =>
+      `export function postureError(code: string, message: string) {\n${body}\n}\n` +
+      `export function deny() { throw postureError('${probe}', 'x'); }\n`;
+    const REL = 'packages/x/src/a.ts';
+    const derive = (source) =>
+      deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: REL, source }], readFile: () => '' });
+    // Population = MATCHES across BOTH gates' recognizers, never the finding
+    // list — the lesson the kebab pin above paid for in an ablation.
+    const matched = (source) => {
+      let n = 0;
+      for (const shape of SHAPES) n += [...source.matchAll(new RegExp(shape.re.source, shape.re.flags))].length;
+      return n + findViolations(source, REL).length;
+    };
+
+    // ① BLINDNESS ①, the stamp POSITION. The control fires; the two
+    //    object-literal spellings of the same helper are seen by NOTHING —
+    //    not matched, so not reported, and not unresolved either.
+    const control = helper(B.control, B.probe);
+    ok(matched(control) > 0, `the same-genre control matches no recognizer at all — the pin below cannot read as a zero`);
+    ok(
+      derive(control).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
+      'the assignment-spelled code helper no longer derives a `codehelper` site — the control for #13131 is dead',
+    );
+    for (const [name, body] of [['shorthand', B.shorthand], ['longhand', B.longhand]]) {
+      for (const probe of [B.probe, B.probeLowercase]) {
+        const source = helper(body, probe);
+        ok(matched(source) === 0, `a recognizer now MATCHES the ${name} object-literal code helper ('${probe}') — ${DECISION}`);
+        const { sites, unresolved } = derive(source);
+        ok(
+          sites.length === 0 && unresolved.length === 0,
+          `the ${name} object-literal code helper ('${probe}') now derives ${sites.length} site(s) and ` +
+            `${unresolved.length} unresolved — ${DECISION}`,
+        );
+      }
+    }
+
+    // ② BLINDNESS ②, the DECLARATION FORM — and it is pinned on SITES rather
+    //    than on matches, deliberately. Here the recognizer DOES match: the
+    //    body is the very `.code = code` `codehelper` is written for. What
+    //    drops it is structural — `enclosingDeclaration`'s DECL_HEADER_RE has
+    //    no header for a class method, so the identifier is never recognised
+    //    as a parameter. Same body, same probe, one declaration form apart.
+    const body = B.control.replace(/^/gm, '  ');
+    const asFunction =
+      `export function fail(code: string, message: string) {\n${body}\n}\n` +
+      `export function run() { throw fail('${B.probe}', 'x'); }\n`;
+    const asMethod =
+      `class Thing {\n  private fail(code: string, message: string) {\n${body}\n  }\n` +
+      `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+    ok(
+      derive(asFunction).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
+      'the free-function control for #13131 blindness ② derives no site — the comparison below is dead',
+    );
+    ok(matched(asMethod) > 0, 'the class-method form matches no recognizer — blindness ② is not what was measured');
+    {
+      const { sites, unresolved } = derive(asMethod);
+      ok(
+        sites.length === 0 && unresolved.length === 0,
+        `a CLASS-METHOD code helper now derives ${sites.length} site(s) and ${unresolved.length} unresolved — ${DECISION}`,
+      );
+    }
+    // The mechanism itself, named so the failure above is diagnosable.
+    {
+      const at = asMethod.indexOf('.code = code');
+      const decl = enclosingDeclaration(asMethod, at);
+      ok(
+        !decl || !parseParamNames(decl.params).includes('code'),
+        'enclosingDeclaration now resolves a CLASS METHOD, so `codehelper` reaches method helpers — ' + DECISION,
+      );
+    }
+    ok(
+      B.invisibleDeclarationForms.includes('class method'),
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS no longer declares the class-method form out',
+    );
+  }
+
   if (fail.length) {
     console.error('check-dispatcher-error-vocabulary --self-test FAILED:');
     for (const f of fail) console.error(`  - ${f}`);
@@ -2388,7 +2742,15 @@ function main() {
     `${KEBAB_DIAGNOSTIC_VOCABULARY.owner}) are a SEPARATE vocabulary, governed by `+
     `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
     `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
-    `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.`;
+    `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.` +
+    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) — and one ` +
+    `declared as a CLASS METHOD, in either stamp position — is outside this gate: no shape matches, so ` +
+    `there is no site AND no unresolved. Coverage of them is zero BY DECLARATION, not by accident. ` +
+    `Measured blast radius of closing it: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
+    `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} undischargeable unresolved, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unregisteredWireCodesHiding} unregistered wire code(s) ` +
+    `hiding today — see OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');

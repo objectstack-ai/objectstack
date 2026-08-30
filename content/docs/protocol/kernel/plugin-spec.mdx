@@ -20,7 +20,7 @@ A **plugin** is the unit of distribution in ObjectStack. It packages ObjectQL sc
 
 ## Plugin Manifest
 
-Every plugin **must** have a manifest file that declares its identity, dependencies, and capabilities.
+Every plugin **must** have a manifest file that declares its identity, dependencies, and contributions.
 
 ### Manifest Location
 
@@ -170,17 +170,21 @@ export default definePlugin({
 (`packages/spec/src/kernel/manifest.zod.ts`): `id`, `version`, `type` and `name` are
 required; the optional fields are `namespace`, `defaultDatasource`, `scope`,
 `description`, `permissions`, `objects`, `datasources`, `dependencies`,
-`configuration`, `contributes`, `data`, `capabilities`, `extensions`,
-`navigationContributions`, `loading`, `engine`, `engines`, `runtime`, `packaging`
-and `integrity`.
+`contributes`, `data`, `navigationContributions`, `engine`, `engines`, `runtime`,
+`packaging` and `integrity`. The `configuration`, `capabilities`, `extensions` and
+`loading` keys are **retired tombstones** (ADR-0049 enforce-or-remove): nothing ever
+read any of them, so authoring one is now a compile error and a parse error carrying
+the migration prescription.
 
 The `displayName` / `author` / `license` / `homepage` / `optionalDependencies` /
 `peerDependencies` / `metadata` / `config` / `marketplace` keys above are
 **proposal-only** — the schema declares none of them. Notably: compatibility ranges
 live in `engines: { platform, protocol }` (or the legacy `engine: { objectstack }`),
-not `marketplace.compatibility`; config defaults live in
-`configuration: { title, properties }` (a simplified JSON-Schema map with a per-key
-`secret` flag), not `config.defaults` / `config.secrets`; and metadata globs are the
+not `marketplace.compatibility`; plugin settings are **not** declared in the manifest
+at all — the retired `configuration` block (whose per-key `secret` flag promised
+encryption/masking that nothing implemented) configured nothing, and a plugin is
+configured by the host that composes it, via the options object passed to its
+constructor in `defineStack({ plugins: [...] })`; and metadata globs are the
 top-level `objects` / `datasources` arrays, not a `metadata` block.
 </Callout>
 

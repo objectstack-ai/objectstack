@@ -73,6 +73,14 @@ import {
 } from '@objectstack/metadata-core';
 import { RestServer } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
+// [#13023] The reset door's response contract. Every `deleteItem` result below
+// is bound to it instead of `any`: these reads used to be `const r: any`
+// PRECISELY because the declared return (`{ type, name, deleted }`) named none
+// of the fields the door actually sends, so reading the truth required dodging
+// the type. With the declaration corrected the cast is not merely unnecessary,
+// it would hide the fix — and `reset`, the flag this file already asserts in
+// BOTH directions against the real door, is now a typed read.
+import type { DeleteMetaItemResponse } from '@objectstack/spec/api';
 
 // ---------------------------------------------------------------------------
 // Part 1 — what the CLIENT puts on the wire (both declarations)
@@ -467,11 +475,28 @@ describe('[#12181] the real reset door: a concurrent edit is destroyed unpinned,
         // A resets, holding a version that is no longer current. This is the
         // BEFORE state of the card: with no options bag there was no other
         // call to make.
-        const reset: any = await client.meta.deleteItem('view', 'race_probe');
+        const reset: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'race_probe');
 
         // Silently destroyed: success, and B's edit is gone from the store.
+        // These two are TYPED reads since #13023 — under the phantom
+        // `{ type, name, deleted }` declaration they were TS2339 and this
+        // binding had to be `any` to compile at all.
         expect(reset.success).toBe(true);
         expect(reset.reset).toBe(true);
+
+        // [#13023] The phantom shape, refuted on the REAL door rather than
+        // argued from the schema. `deleted` — the flag the declaration told
+        // every caller to branch on — is not a key on this body, and neither
+        // are `type` and `name`. A first-party consumer writing
+        // `if (r.deleted)` took the FALSE branch here, on the reset that
+        // really did destroy a row.
+        expect('deleted' in (reset as object)).toBe(false);
+        expect('type' in (reset as object)).toBe(false);
+        expect('name' in (reset as object)).toBe(false);
+        // The positive control that keeps those three absences honest: the
+        // same instrument, same body, sees the keys that ARE there.
+        expect('success' in (reset as object)).toBe(true);
+        expect('reset' in (reset as object)).toBe(true);
         expect(await overlayRows(engine, 'race_probe')).toHaveLength(0);
         // The probe: no pin ever reached the protocol.
         expect(deleteRequests).toHaveLength(1);
@@ -514,7 +539,7 @@ describe('[#12181] the real reset door: a concurrent edit is destroyed unpinned,
         // write. Without this, "always 409" would pass the case above.
         const { engine, client } = await bootDoor();
         const saved: any = await client.meta.saveItem('view', 'fresh_probe', VIEW('fresh_probe', 'A'));
-        const reset: any = await client.meta.deleteItem('view', 'fresh_probe', { ifMatch: saved.version });
+        const reset: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'fresh_probe', { ifMatch: saved.version });
         expect(reset.success).toBe(true);
         expect(await overlayRows(engine, 'fresh_probe')).toHaveLength(0);
     }, 60_000);
@@ -542,7 +567,7 @@ describe('[#12181] the real reset door: a concurrent edit is destroyed unpinned,
 
         // …and unpinned, the scoped twin destroys it exactly like the
         // unscoped one — same handler, same last-write-wins default.
-        const reset: any = await scoped.deleteItem('view', 'scoped_race');
+        const reset: DeleteMetaItemResponse = await scoped.deleteItem('view', 'scoped_race');
         expect(reset.success).toBe(true);
         expect(await overlayRows(engine, 'scoped_race')).toHaveLength(0);
     }, 60_000);
@@ -561,7 +586,7 @@ describe('[#12181] the real reset door: `?state=draft` discards ONLY the pending
         expect(before.map((r: any) => r.state).sort()).toEqual(['active', 'draft']);
 
         // The narrow reset — unreachable from this SDK before this card.
-        const discarded: any = await client.meta.deleteItem('view', 'draft_probe', { state: 'draft' });
+        const discarded: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'draft_probe', { state: 'draft' });
         expect(discarded.success).toBe(true);
         // The door parsed `?state=draft` and threaded it into the protocol
         // call. (Positive control for the sibling case below, where the same
@@ -576,14 +601,14 @@ describe('[#12181] the real reset door: `?state=draft` discards ONLY the pending
 
         // A second draft discard has nothing left to discard — the door says
         // so rather than falling through to the active row.
-        const again: any = await client.meta.deleteItem('view', 'draft_probe', { state: 'draft' });
+        const again: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'draft_probe', { state: 'draft' });
         expect(again.reset).toBe(false);
         expect(await overlayRows(engine, 'draft_probe')).toHaveLength(1);
 
         // …and the FULL reset — the only one the SDK could express before —
         // takes the published overlay with it. This is why withholding
         // `?state=draft` did not make the client safer.
-        const full: any = await client.meta.deleteItem('view', 'draft_probe');
+        const full: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'draft_probe');
         expect(full.reset).toBe(true);
         expect(await overlayRows(engine, 'draft_probe')).toHaveLength(0);
         // The probe again: `state` is absent on the full reset — measured on
@@ -598,7 +623,7 @@ describe('[#12181] the real reset door: `?state=draft` discards ONLY the pending
         await scoped.saveItem('view', 'scoped_draft', VIEW('scoped_draft', 'published'));
         await scoped.saveItem('view', 'scoped_draft', VIEW('scoped_draft', 'pending'), { mode: 'draft' });
 
-        const discarded: any = await scoped.deleteItem('view', 'scoped_draft', { state: 'draft' });
+        const discarded: DeleteMetaItemResponse = await scoped.deleteItem('view', 'scoped_draft', { state: 'draft' });
         expect(discarded.success).toBe(true);
         expect(deleteRequests[0].state).toBe('draft');
         const after = await overlayRows(engine, 'scoped_draft');

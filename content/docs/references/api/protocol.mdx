@@ -688,7 +688,16 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
 | **reset** | `boolean` | optional |  |
+| **seq** | `integer` | optional | Monotonic sequence number of the metadata event this delete appended to the item history (sys_metadata_history.event_seq) — the ordering token the history/audit trail is read by, and the same key both write-verb siblings declare. Unlike `version` it is not an OCC token. Optional HERE, unlike on those siblings, because only the repository path's delete-ful branch appends an event: a no-op reset (no overlay row existed) and the control-plane legacy raw-engine path both answer without one. Absence means "this branch appended no history event", never "nothing was deleted" — read `reset` for that. |
+| **projectionApplied** | `{ success: boolean; error?: string }` | optional | Outcome of the awaited ADR-0094 mutation projector — the post-persist step that materializes this metadata into its derived data-plane read model. The same receipt `{@link SaveMetaItemResponseSchema}` and `{@link PublishMetaItemResponseSchema}` carry, because the projector runs on all three verbs of this door: on a delete it re-reads the layered state and either retires the derived record or resets it to the artifact baseline. Present ONLY when a projector is registered for this metadata type AND a row was actually deleted, which is why it is optional: its absence means "no projector ran", never "the projection failed". Best-effort by design — a projector failure is reported here and logged, never thrown, so a caller that needs the read model to be live must check `projectionApplied.success` rather than rely on the 200. |
 | **message** | `string` | optional |  |
+
+### Nested Shape: `DeleteMetaItemResponse.projectionApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when the projector threw; the metadata delete itself still succeeded. |
+| **error** | `string` | optional | Projector failure message, present only when `success` is false. |
 
 
 ---
@@ -1828,11 +1837,11 @@ Install package request
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
-| **configuration** | `{ title?: string; properties: Record<string, object> }` | optional | Plugin configuration settings |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
 | **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
 | **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
-| **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
-| **extensions** | `Record<string, any>` | optional | Extension points and contributions |
+| **capabilities** | `never` | optional | [REMOVED] `manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no discovery path ever consulted the block: nothing read `implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the declared "interoperability and automatic discovery" never happened. Delete the key. Real dependency resolution runs off top-level `manifest.dependencies`, which stays. Capability-based discovery must be designed with an enforcing reader first, not revived here. |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
 | **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
 | **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced. |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |

@@ -149,6 +149,88 @@ describe('walled posture + declared owner — only the owner elevates', () => {
     expect(ql.grants()[0]?.user_id).toBe('u_owner');
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // [#13147] `OS_PLATFORM_OWNER_EMAIL` takes a comma-separated LIST (#11663
+  // Choice 2B). Before this card the gate held the operator's whole value as
+  // ONE address: a list matched no account, so it logged "will be promoted when
+  // that account registers" forever and the deployment never got its platform
+  // admin. Fail-closed, and silent — the shape the card exists to close.
+  it('[#13147] a comma-separated list promotes a declared member, whichever one holds an account', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'first@corp.example, second@corp.example';
+    const ql = makeQl({
+      users: [
+        user('u_stranger', 'stranger@evil.example', '2026-08-29T01:00:00Z'),
+        // Only the SECOND declared administrator has registered.
+        user('u_two', 'second@corp.example', '2026-08-29T02:00:00Z', { email_verified: true }),
+      ],
+    });
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
+    expect(r.adminPromoted).toBe(true);
+    expect(ql.grants()).toHaveLength(1);
+    expect(ql.grants()[0].user_id).toBe('u_two');
+  });
+
+  it('[#13147] list entries keep their case-insensitive match, per entry', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'First@Corp.EXAMPLE , Second@Corp.Example';
+    const ql = makeQl({
+      users: [user('u_two', 'second@corp.example', '2026-08-29T02:00:00Z', { email_verified: true })],
+    });
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
+    expect(r.adminPromoted).toBe(true);
+    expect(ql.grants()[0]?.user_id).toBe('u_two');
+  });
+
+  it('[#13147] ONE grant row even when several declared administrators are verified', async () => {
+    // Deliberately unchanged, not widened: the row written here is the LEGACY
+    // `admin_full_access` anchor #11663 is retiring. Standing for every
+    // declared+verified administrator comes from the configuration anchor in
+    // the one derivation site, so a row per list member would only add rows to
+    // retire. The oldest wins, exactly as with a single declared address.
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'first@corp.example,second@corp.example';
+    const ql = makeQl({
+      users: [
+        user('u_two', 'second@corp.example', '2026-08-29T02:00:00Z', { email_verified: true }),
+        user('u_one', 'first@corp.example', '2026-08-29T01:00:00Z', { email_verified: true }),
+      ],
+    });
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
+    expect(r.adminPromoted).toBe(true);
+    expect(ql.grants()).toHaveLength(1);
+    expect(ql.grants()[0].user_id).toBe('u_one');
+  });
+
+  it('[#13147] ⛔ a REFUSED list declares nobody — the elevation is refused, not narrowed', async () => {
+    // Choice 2B: one unparseable entry fails the WHOLE variable closed. The
+    // valid entry must NOT be promoted — a silently narrower administrator set
+    // is the outcome the refusal exists to prevent.
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'first@corp.example,not-an-email';
+    const ql = makeQl({
+      users: [user('u_one', 'first@corp.example', '2026-08-29T01:00:00Z', { email_verified: true })],
+    });
+    const log = logger();
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
+    expect(r.adminPromoted).toBe(false);
+    expect(r.reason).toBe('walled_owner_email_undeclared');
+    expect(ql.grants()).toHaveLength(0);
+    expect(String(log.error.mock.calls[0]?.[0] ?? '')).toContain('OS_PLATFORM_OWNER_EMAIL');
+  });
+
+  it('[#13147] ⛔ a stranger is never promoted just because a list was declared', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'first@corp.example,second@corp.example';
+    const ql = makeQl({
+      users: [user('u_stranger', 'stranger@evil.example', '2026-08-29T01:00:00Z', { email_verified: true })],
+    });
+    const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
+    expect(r.adminPromoted).toBe(false);
+    expect(r.reason).toBe('walled_owner_not_registered');
+    expect(ql.grants()).toHaveLength(0);
+  });
+
   it('owner not registered yet: refuses with the exact reason and writes NO grant', async () => {
     process.env.OS_TENANCY_POSTURE = 'isolated';
     process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';

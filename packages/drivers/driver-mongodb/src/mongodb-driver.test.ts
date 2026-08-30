@@ -344,7 +344,7 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
         fields: {
           name: { type: 'string', unique: true },
           email: { type: 'email' },
-          company_id: { type: 'lookup', reference_to: 'company' },
+          company_id: { type: 'lookup', reference: 'company' },
         },
         // [#6810] `email` used to carry a field-level `indexed: true` here. That
         // was never a `FieldSchema` key (#2377 / ADR-0049); the index is
@@ -361,7 +361,32 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
       expect(indexNames).toContain('idx_id_unique');
       expect(indexNames).toContain('idx_name_unique');
       expect(indexNames).toContain('idx_email');
-      expect(indexNames).toContain('idx_company_id_lookup');
+      /**
+       * ⚠️ [#12252] DIVERGENCE PINNED, DISPOSITION OPEN (#13222) — a
+       * canonically-spelled lookup gets NO join index here.
+       *
+       * This fixture used to spell the field `reference_to: 'company'` and
+       * assert `idx_company_id_lookup` was CREATED. `reference_to` is a key
+       * `FieldSchema` REFUSES (`unrecognized_keys`), so the object it described
+       * was one no author could publish — and the assertion passed only because
+       * this fixture was the sole thing in the tree reaching the lookup arm of
+       * `mongodb-schema.ts`, which gates on `field.reference_to` and reads no
+       * other relationship key.
+       *
+       * So correcting the spelling does not leave the outcome alone. Measured
+       * differentially against the real `syncCollectionSchema`,
+       * `idx_company_id_lookup` is the ONE index that disappears; a
+       * `type: 'user'` field still gets its index, so the gate is live rather
+       * than dead code. The consequence in production is that EVERY authored
+       * lookup on MongoDB is unindexed — 57/57 relationship fields across the
+       * 44 exported platform objects (#13222).
+       *
+       * ⛔ This records what the driver DOES, not what it SHOULD do. Whether
+       * the lookup arm learns to read `reference` is #13222's to settle, ⛔ not
+       * this pin's — when it lands, this line flips back to `toContain`
+       * deliberately rather than the divergence reopening in silence.
+       */
+      expect(indexNames).not.toContain('idx_company_id_lookup');
     });
 
     it('should be idempotent (safe to call multiple times)', async () => {

@@ -74,9 +74,10 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         for (const field of gated) expect(field.visibleWhen.source).not.toContain('record.');
         // …and the fixture also carries the SILENT controls: a `record.`-rooted
         // predicate whose string literal contains identifier-shaped text, a
-        // FIELD-level `current_user` predicate (which resolves at that level
-        // since objectui#6010 and must never be flagged), and a second view
-        // that is entirely healthy.
+        // FIELD-level `current_user` predicate (which resolves there since
+        // objectui#6010 — and, since objectui#6110 + #6111, resolves at SECTION
+        // level too — so it must never be flagged), and a second view that is
+        // entirely healthy.
         expect(leadFields.at(-2).visibleWhen.source).toBe('record.note != "status unqualified"');
         expect(leadFields.at(-1).visibleWhen.source).toBe('current_user.role == "admin"');
         expect(fixture.views[1].form.sections[0].fields[1].visibleWhen.source)
@@ -165,10 +166,11 @@ describe('artifact door — unbound form-predicate roots are announced to the op
     });
 
     it('says NOTHING about an old artifact whose only predicates are field-level current_user tests', async () => {
-        // The regression this patch exists for. `current_user` and its ADR-0068
-        // alias roots resolve at FIELD level (objectui#6010), so a legacy
-        // artifact using them is healthy on this surface — flagging it would be
-        // the cry-wolf class the card forbids.
+        // The regression the first correction existed for. `current_user` and
+        // its ADR-0068 alias roots resolve at FIELD level (objectui#6010), so a
+        // legacy artifact using them is healthy on this surface — flagging it
+        // would be the cry-wolf class the card forbids. The section half of the
+        // same claim is two cases below.
         for (const source of [
             'current_user.role == "admin"',
             'user.roles.size() > 0',
@@ -196,9 +198,18 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         }
     });
 
-    it('DOES flag the same root at section level, and prints the section vocabulary there', async () => {
-        // The other half of the split: the contract says `current_user` is
-        // unbound on a SECTION predicate and faults open.
+    it('says NOTHING about a SECTION-level current_user predicate either', async () => {
+        // ⚠️ INVERTED IN PLACE (#13072). This case read "DOES flag the same
+        // root at section level, and prints the section vocabulary there", and
+        // asserted one warning quoting `bound roots on a form SECTION:
+        // 'record', 'previous', 'parent', 'data'`. That vocabulary was derived
+        // from the section contract sentence #12914 replaced: objectui#6110
+        // threads the host shell's predicate scope into `isSectionVisible`
+        // where it used to pass `undefined`, and objectui#6111 evaluates the
+        // authored section `visibleWhen` on the `section-divider` pseudo-field
+        // with the same scope bound. The predicate RESOLVES, so a notice about
+        // it would be a false operator signal on a healthy legacy artifact —
+        // the cry-wolf class this suite is deliberately weighted against.
         const fixture = loadFixture();
         fixture.views = [{
             form: {
@@ -216,11 +227,38 @@ describe('artifact door — unbound form-predicate roots are announced to the op
         const ctx = fakeCtx();
         await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-section-cu');
 
+        expect(unboundRootWarnings(ctx)).toEqual([]);
+    });
+
+    it('still flags a genuinely unbound SECTION root, and prints the section rule', async () => {
+        // The control the inversion above needs: the section arm of the scan
+        // still reports, so "no warning" up there is a verdict about
+        // `current_user` and not a section traversal that quietly stopped
+        // running. It also keeps the printed section vocabulary pinned at the
+        // door, which is where an operator reads it.
+        const fixture = loadFixture();
+        fixture.views = [{
+            form: {
+                type: 'simple',
+                data: { provider: 'object', object: 'crm_lead' },
+                sections: [{
+                    name: 'lead',
+                    visibleWhen: { dialect: 'cel', source: 'stage == "closed"' },
+                    fields: [{ field: 'internal_note' }],
+                }],
+            },
+        }];
+
+        const plugin = newPlugin();
+        const ctx = fakeCtx();
+        await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-section-bare');
+
         const warnings = unboundRootWarnings(ctx);
         expect(warnings).toHaveLength(1);
-        expect(warnings[0]!).toContain("'current_user'");
+        expect(warnings[0]!).toContain("'stage'");
         expect(warnings[0]!).toContain(
-            "bound roots on a form SECTION: 'record', 'previous', 'parent', 'data'",
+            "bound roots on a form SECTION: 'record', 'previous', 'parent', 'data', "
+            + "'current_user', 'user', 'ctx', 'os'",
         );
         // No field findings here, so the field rule is not quoted.
         expect(warnings[0]!).not.toContain('form FIELD');

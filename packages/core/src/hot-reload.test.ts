@@ -256,11 +256,14 @@ describe('[#12340] stateStrategy refusal', () => {
       // doors (parse vs registration) and are deliberately not shared.
       const m = caught?.message ?? '';
       expect(m).toContain(retired);
-      expect(m).toContain('#12340');
-      expect(m).toContain('ADR-0049');
+      expect(m).toContain('ADR-0049 enforce-or-remove');
       expect(m).toContain('were removed');
       expect(m).toContain("Use 'memory'");
       expect(m).toContain('p'); // locates the offending plugin
+      // The negative twin (#13179's strip): the prescription anchors on the
+      // ADR and the version — never on a tracker id the refused author
+      // cannot resolve. Mirrors the spec-side door's own pin.
+      expect(m).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     });
   }
 
@@ -299,15 +302,16 @@ describe('[#12340] stateStrategy refusal', () => {
     expect(caught?.code).toBe('VALIDATION_ERROR');
     expect(caught?.status).toBe(400);
     expect(caught?.message).toContain('distributedConfig');
-    expect(caught?.message).toContain('#12340');
+    expect(caught?.message).toContain('ADR-0049 enforce-or-remove');
     expect(caught?.message).toContain('nothing ever read it');
+    expect(caught?.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   });
 
   it('refuses even when hot reload is disabled', () => {
     // The door must not depend on `enabled`: a false declaration is false
     // whether or not the feature is switched on.
     const cfg = { ...configWith('disk'), enabled: false } as HotReloadConfigParsed;
-    expect(() => mgr.registerPlugin('p', cfg)).toThrow(/#12340/);
+    expect(() => mgr.registerPlugin('p', cfg)).toThrow(/were removed/);
   });
 
   for (const live of ['memory', 'none'] as const) {
@@ -377,18 +381,20 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
     // The prescription's load-bearing facts, by CONTENT — this message is the
     // whole migration document for whoever hits it.
     const m = caught?.message ?? '';
-    expect(m).toContain('#12428');
-    expect(m).toContain('ADR-0049');
+    expect(m).toContain('ADR-0049 enforce-or-remove');
     expect(m).toContain('never watched');
     expect(m).toContain('scheduleReload');
     expect(m).toContain('p'); // locates the offending plugin
+    // The negative twin (#13179's strip, extended to this door's sibling id):
+    // anchored on the ADR and the migration call, never on a tracker id.
+    expect(m).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   });
 
   it('refuses startWatching for an UNREGISTERED plugin too', () => {
     // The old body early-returned when the plugin was unknown or disabled, so
     // the lie was conditional. The refusal must not be: the method never
     // worked for anyone, in any state.
-    expect(() => mgr.startWatching('never-registered')).toThrow(/#12428/);
+    expect(() => mgr.startWatching('never-registered')).toThrow(/never watched/);
   });
 
   it('refuses a leftover watchPatterns at registration', () => {
@@ -406,8 +412,9 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
     expect(caught?.code).toBe('VALIDATION_ERROR');
     expect(caught?.status).toBe(400);
     expect(caught?.message).toContain('watchPatterns');
-    expect(caught?.message).toContain('#12428');
+    expect(caught?.message).toContain('ADR-0049 enforce-or-remove');
     expect(caught?.message).toContain('nothing ever read it');
+    expect(caught?.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   });
 
   it('refuses watchPatterns even when hot reload is disabled', () => {
@@ -415,7 +422,7 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
     // whether or not the feature is switched on.
     expect(() =>
       mgr.registerPlugin('p', liveConfig({ enabled: false, watchPatterns: ['a/**'] }))
-    ).toThrow(/#12428/);
+    ).toThrow(/nothing ever read it/);
   });
 
   it('still registers a config that does not carry the retired key', () => {

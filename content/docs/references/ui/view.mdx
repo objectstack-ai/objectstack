@@ -5,8 +5,51 @@ description: View protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-HTTP Method Enum & HTTP Request Schema
-Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here for backward compatibility.
+View protocol schemas — the `view` metadata type and its three persisted body spellings.
+
+Covers the authoring surfaces (`defineView`, `defineViewItem`), the wire
+doors Studio and the REST layer write through, and
+`ViewMetadataSchema` — the union every persisted `view` body is judged
+by.
+
+## Name grammar depends on the body spelling
+
+`ViewMetadataSchema` is a union over three persisted body shapes, and
+they do not share one `name` grammar. Which grammar applies is decided by the
+shape of the body — something an author never names explicitly — so neither
+failure direction below is discoverable from the key being written:
+
+| body spelling | recognised by | `name` is declared as | flat (undotted) name |
+|:---|:---|:---|:---|
+| standalone **ViewItem record** | a nested `config` | `ViewItemNameSchema` — `QUALIFIED_ITEM_NAME_PATTERN`, dot REQUIRED | **rejected**, located at `["name"]` |
+| flattened runtime **overlay** | an inline view config; no `config`, no container slot | `z.string().optional()` — no grammar at all | accepted |
+| `defineView` **container** | a container slot (`list` / `form` / `listViews` / `formViews`) | `z.string().optional()` on `ViewSchema` — no grammar at all | accepted, and normally IS flat |
+
+The two permissive rows are deliberate, not gaps left to tighten later:
+
+- A container's own name is the **bare object key**. ADR-0017 §3.2's
+  dual-read loader registers the aggregated container under `<object>` and
+  each expanded item under `<object>.<viewKey>`, so an object-scoped
+  container is named `crm_lead` — a name with no dot to carry.
+- An overlay's name is **stamped by the write path**, not authored:
+  `normalizeViewMetadata` puts it on every view body at the single write
+  chokepoint, and a personalization PUT inherits the identity of the entry it
+  shadows.
+
+So both of the readings an author naturally forms are wrong:
+
+- *"the dot is mandatory on every view row"* — read off
+  `ViewItemNameSchema` alone. It is not: overlay and container rows
+  accept flat names, and rows in this repo legitimately use them
+  (`case_grid`, `cases`, the container row `crm_lead`). Those rows are
+  correct as written, not defects awaiting a dotted rewrite.
+- *"flat names are fine generally"* — read off one of those flat-named rows.
+  It is not: put the same name on a standalone ViewItem record and it is
+  refused, on the one field the flat-named row told you to fill.
+
+This describes what the three shapes already do; it widens and narrows
+nothing. The one item-name grammar itself lives in
+`shared/identifiers.zod.ts` — grammar changes belong there, not here.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/view.zod.ts`

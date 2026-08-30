@@ -63,9 +63,9 @@ import { SystemUserId } from '@objectstack/spec/system';
 import {
   PLATFORM_OWNER_EMAIL_ENV,
   isEmailVerifiedUserRow,
-  resolvePlatformOwnerEmail,
   resolveTenancyPosture,
 } from '@objectstack/types';
+import { resolvePlatformAdminEmails } from '@objectstack/core';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
   createSeedWriteRefusals,
@@ -400,14 +400,30 @@ export async function bootstrapPlatformAdmin(
   // bootstrap without that guard (`os meta resync`, embeddings without
   // plugin-auth): it refuses the ELEVATION, loudly, and never silently
   // reverts to promoting the first registrant.
+  //
+  // [#13147] `OS_PLATFORM_OWNER_EMAIL` takes one address OR a comma-separated
+  // list (#11663 Choice 2B), so this gate reads the PARSED config from the one
+  // shared parser (`@objectstack/core`) rather than the raw string. Before, it
+  // held the operator's whole value as if it were a single address: a list
+  // matched no account at all, and this gate logged "will be promoted when
+  // that account registers" forever — fail-closed, but the deployment silently
+  // never got its platform admin.
+  //
+  // "Declared" is now `emails.length > 0`, which folds in the third state the
+  // raw read could not see: a list REFUSED for an unparseable entry yields zero
+  // administrators, and refusing the elevation is the same correct answer as
+  // for an unset variable. The parser has already said WHY, loudly and once
+  // per process, so the refusal below does not have to distinguish them.
   const walled = postureEnforcesWall(resolveTenancyPosture());
-  const declaredOwnerEmail = walled ? resolvePlatformOwnerEmail() : undefined;
-  if (walled && !declaredOwnerEmail) {
+  const platformAdminConfig = walled ? resolvePlatformAdminEmails() : undefined;
+  if (walled && platformAdminConfig!.emails.length === 0) {
     const message =
-      `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} is not set — ` +
+      `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
+      'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
       'REFUSING platform-admin elevation. Under walled postures the first registrant is ' +
-      'never promoted; platform admin is granted only to the account matching the declared ' +
-      `owner email. Set ${PLATFORM_OWNER_EMAIL_ENV} to the operator's email address.`;
+      'never promoted; platform admin is granted only to an account matching a declared ' +
+      `owner email. Set ${PLATFORM_OWNER_EMAIL_ENV} to the operator's email address ` +
+      '(or a comma-separated list of addresses).';
     if (logger?.error) logger.error(message);
     else logger?.warn?.(message);
     return {
@@ -458,8 +474,13 @@ export async function bootstrapPlatformAdmin(
     // Email comparison is case-insensitive; better-auth stores sign-up emails
     // lowercased, but imported/legacy rows may not be, so both the lowercased
     // and the verbatim spellings are queried and matches are de-duplicated.
-    const wanted = declaredOwnerEmail!.toLowerCase();
-    const spellings = [...new Set([wanted, declaredOwnerEmail!])];
+    //
+    // [#13147] Both spellings, now for EVERY declared administrator. The
+    // as-typed spellings come from the parser's own `declaredSpellings` — ⛔ the
+    // raw value is never split a second time here, which is the whole point of
+    // the card: one separator, one normalization, one meaning.
+    const config = platformAdminConfig!;
+    const spellings = [...new Set([...config.emails, ...config.declaredSpellings])];
     const byId = new Map<string, any>();
     for (const spelling of spellings) {
       for (const u of await tryFind(ql, 'sys_user', { email: spelling }, 5)) {
@@ -470,12 +491,13 @@ export async function bootstrapPlatformAdmin(
     // predicate the Layer 0 owner wall bypass keys on (see
     // `platform-owner-wall-bypass.ts`, which names this gate as its twin).
     const owners = [...byId.values()].filter(
-      (u) => isHumanUser(u) && matchesDeclaredOwnerEmail(u, declaredOwnerEmail!),
+      (u) => isHumanUser(u) && matchesDeclaredOwnerEmail(u, config),
     );
     if (owners.length === 0) {
       logger?.info?.(
-        `[security] walled posture — platform admin will be granted to the declared owner ` +
-          `(${PLATFORM_OWNER_EMAIL_ENV}) when that account registers; self-registrants are never promoted`,
+        `[security] walled posture — platform admin will be granted to a declared owner ` +
+          `(${PLATFORM_OWNER_EMAIL_ENV}=${config.declaredSpellings.join(', ')}) when that account ` +
+          `registers; self-registrants are never promoted`,
       );
       return {
         seeded: seededCount,
@@ -496,10 +518,19 @@ export async function bootstrapPlatformAdmin(
     // verifying write is a sys_user UPDATE, and the bootstrap-replay middleware
     // (security-plugin.ts, via `shouldReplayBootstrapFor`) re-runs this
     // function on exactly that update.
+    //
+    // [#13147] With a comma-separated list, several declared administrators may
+    // hold verified accounts. Exactly ONE grant row is still written, and it is
+    // the oldest — unchanged, and deliberately not widened to "grant every
+    // declared owner". The row written here is `admin_full_access`, the LEGACY
+    // anchor that #11663 is retiring; standing for every declared+verified
+    // administrator already comes from the configuration anchor in the one
+    // derivation site (`resolve-authz-context.ts` section 6b-config), so minting
+    // one legacy row per list member would add nothing but rows to retire.
     const verifiedOwners = owners.filter(isEmailVerified);
     if (verifiedOwners.length === 0) {
       logger?.warn?.(
-        `[security] walled posture — an account matching the declared owner email ` +
+        `[security] walled posture — an account matching a declared owner email ` +
           `(${PLATFORM_OWNER_EMAIL_ENV}) exists but its email is NOT VERIFIED; ` +
           `REFUSING platform-admin elevation until the owner account verifies its address. ` +
           `Unverified accounts are never promoted, whoever registered them. If this ` +
@@ -537,7 +568,7 @@ export async function bootstrapPlatformAdmin(
   }
   logger?.info?.(
     walled
-      ? `[security] declared platform owner (${PLATFORM_OWNER_EMAIL_ENV}) promoted to platform admin: ${target.email ?? target.id}`
+      ? `[security] a declared platform owner (${PLATFORM_OWNER_EMAIL_ENV}) promoted to platform admin: ${target.email ?? target.id}`
       : `[security] first user promoted to platform admin: ${target.email ?? target.id}`,
   );
 
