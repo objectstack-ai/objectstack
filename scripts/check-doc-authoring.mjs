@@ -1507,6 +1507,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'cross-package ledger arithmetic': 7,
 });
 
+// The registry is shrink-only in the same sense its counts are: DELETING an
+// entry silences that battery's floor exactly as effectively as zeroing it, so
+// the registry's own size is pinned too. Adding a battery raises this number;
+// removing one is the same ⛔ MAINTAINER-ONLY edit as lowering a count.
+const SELF_TEST_BATTERY_FLOOR = 16;
+
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
 // inflating whichever battery happened to run last.
@@ -1892,6 +1898,13 @@ function selfTest() {
   const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
   const totalCases = [...seen.values()].reduce((a, b) => a + b, 0);
   let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    failures.push(
+      `  ✗ SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+      + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the registry takes its own floor with it.`,
+    );
+  }
   for (const [name, count] of seen) {
     if (declaredBatteries.includes(name)) continue;
     floorBreached = true;
