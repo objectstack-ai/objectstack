@@ -75,14 +75,39 @@ export const PluginEnginesSchema = z
 export type PluginEngines = z.input<typeof PluginEnginesSchema>;
 
 /**
- * Trust / isolation tier the plugin runs under (ADR-0025 §3.6):
+ * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6):
  * - `node`    — in-process, full PluginContext (first-party / verified only)
  * - `sandbox` — QuickJS-WASM, capability-gated surface
  * - `worker`  — out-of-process (reserved)
+ *
+ * ⚠️ WHERE THIS IS ENFORCED, AND WHERE IT IS NOT — the two halves are not the
+ * same answer, so read both before treating a declared tier as isolation.
+ *
+ * ENFORCED at the cloud marketplace **publish gate**: an unverified publisher
+ * requesting the `node` tier is hard-rejected (HTTP 422) and the submission is
+ * forced to manual review. That gate is a real consumer of this key, which is
+ * why the tier is not a candidate for retirement.
+ *
+ * NOT ENFORCED at load. Load-side enforcement is **not implemented** — nothing
+ * dispatches on the tier (its only reads are two CLI progress lines that echo
+ * the value), so a locally installed plugin runs in-process with a full
+ * PluginContext whatever tier it declares. `sandbox` and `worker` therefore
+ * name the isolation the publish gate assumes, not isolation the loader
+ * applies; a local install is not confined by this field. The QuickJS runner
+ * under `packages/runtime/src/sandbox/` is the hook / action SCRIPT-BODY
+ * sandbox and is never reached from a plugin's declared tier.
+ *
+ * Enforcing the tier at load is tracked as its own decision (v18 direction);
+ * do not read this field as an isolation guarantee until it lands.
  */
 export const PluginRuntimeSchema = z
   .enum(['node', 'sandbox', 'worker'])
-  .describe('Plugin trust tier (ADR-0025 §3.6)');
+  .describe(
+    'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
+    + 'marketplace publish gate (an unverified publisher requesting `node` is rejected with '
+    + 'HTTP 422 and forced to manual review); load-side enforcement is NOT implemented, so a '
+    + 'locally installed plugin is not isolated by the tier it declares',
+  );
 
 export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
 
@@ -567,8 +592,12 @@ export const ManifestSchema = z.object({
     '(`resolvePluginOrder`); the set is fixed until the process restarts. ' +
     '⚠️ `loading.sandboxing` in particular never isolated anything: it did not run ' +
     'plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no ' +
-    'call. If you were relying on it for isolation, you had none — use the plugin trust ' +
-    'tier (`manifest.runtime`) and the permission declarations, which are enforced.',
+    'call. If you were relying on it for isolation, you had none — and the plugin trust ' +
+    'tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud ' +
+    'marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is ' +
+    'rejected with HTTP 422 and forced to manual review), while load-side enforcement is ' +
+    'NOT implemented, so a locally installed plugin is not isolated by the tier it ' +
+    'declares. Use the permission declarations, which are enforced.',
   ),
 
   /**
@@ -598,11 +627,22 @@ export const ManifestSchema = z.object({
     .describe('Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`)'),
 
   /**
-   * Trust / isolation tier the plugin runs under (ADR-0025 §3.6).
+   * Trust / isolation tier the plugin DECLARES (ADR-0025 §3.6).
    * Unset implies a pure-metadata package (no executable code).
+   *
+   * ⚠️ Enforced at the cloud marketplace **publish gate** only — an unverified
+   * publisher requesting the `node` tier is hard-rejected (HTTP 422) and forced
+   * to manual review. **Load-side enforcement is not implemented**: a locally
+   * installed plugin is not isolated by the tier it declares. See
+   * {@link PluginRuntimeSchema} for the full split.
    */
   runtime: PluginRuntimeSchema.optional()
-    .describe('Plugin trust tier (ADR-0025 §3.6)'),
+    .describe(
+      'Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud '
+      + 'marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual '
+      + 'review); load-side enforcement is NOT implemented, so a locally installed plugin is '
+      + 'not isolated by the tier it declares',
+    ),
 
   /**
    * Dependency packaging strategy for code-bearing plugins (ADR-0025 §3.3).

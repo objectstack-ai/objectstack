@@ -1,0 +1,39 @@
+{
+  "//": [
+    "RATCHET-TO-ZERO ledger for the first live run of the wired SDUI JSX gate (#12924,",
+    "ruled 2026-08-29: wire it; first-wiring noise handled per ui#6779's ratchet-to-zero —",
+    "itemized, dated, visible, and NOT an exemption). Every row is a diagnostic the wired",
+    "`validateJsxPages` (real repo-root sdui.manifest.json, real shipped pages) emits TODAY.",
+    "",
+    "Direction 1 — a finding NOT covered by a row is a NEW violation: fix the page (or, if",
+    "the vocabulary legitimately grew, regenerate the manifest); never grow this file.",
+    "Direction 2 — a row the live run no longer produces is a STALE entry: delete it in the",
+    "same PR that fixed the page (or that landed the vocabulary the tags were waiting for).",
+    "The ledger only shrinks. Zero rows = delete the file and the census assertion inverts",
+    "to 'wired run is clean'.",
+    "",
+    "Why these 232 exist at all: the public tier deliberately declares no intrinsic HTML",
+    "tags (57 curated blocks; div/a/p absent; `html` is the tier-C escape hatch), while the",
+    "three shipped html pages author with div/a — every error below is a plain HTML tag,",
+    "none is a real authoring mistake (measured 2026-08-29, re-measured 2026-08-30). The",
+    "not-a-container rows are objectui#6740 (flex registers without isContainer). What the",
+    "html tier's legal vocabulary IS remains a producer-side question (objectui); this",
+    "ledger keeps the gate live and honest while that question settles."
+  ],
+  "recordedAt": "2026-08-30",
+  "findings": [
+    { "page": "showcase_capability_map", "rule": "jsx-forbidden-tag", "severity": "error", "tag": "a", "count": 17 },
+    { "page": "showcase_capability_map", "rule": "jsx-forbidden-tag", "severity": "error", "tag": "div", "count": 23 },
+    { "page": "showcase_capability_map", "rule": "jsx-not-a-container", "severity": "warning", "tag": "flex", "count": 14 },
+    { "page": "showcase_capability_map", "rule": "jsx-unknown-component", "severity": "error", "tag": "a", "count": 17 },
+    { "page": "showcase_capability_map", "rule": "jsx-unknown-component", "severity": "error", "tag": "div", "count": 23 },
+    { "page": "showcase_command_center_jsx", "rule": "jsx-forbidden-tag", "severity": "error", "tag": "div", "count": 29 },
+    { "page": "showcase_command_center_jsx", "rule": "jsx-not-a-container", "severity": "warning", "tag": "flex", "count": 12 },
+    { "page": "showcase_command_center_jsx", "rule": "jsx-unknown-component", "severity": "error", "tag": "div", "count": 29 },
+    { "page": "showcase_start_here", "rule": "jsx-forbidden-tag", "severity": "error", "tag": "a", "count": 4 },
+    { "page": "showcase_start_here", "rule": "jsx-forbidden-tag", "severity": "error", "tag": "div", "count": 27 },
+    { "page": "showcase_start_here", "rule": "jsx-not-a-container", "severity": "warning", "tag": "flex", "count": 6 },
+    { "page": "showcase_start_here", "rule": "jsx-unknown-component", "severity": "error", "tag": "a", "count": 4 },
+    { "page": "showcase_start_here", "rule": "jsx-unknown-component", "severity": "error", "tag": "div", "count": 27 }
+  ]
+}

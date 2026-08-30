@@ -105,7 +105,36 @@ export type CodeStampShape =
      * batches. The scan joins the two halves through the PARAMETER, whose index
      * names the argument to read at each call site.
      */
-    | 'codehelper';
+    | 'codehelper'
+    /**
+     * [#13233] The SAME code-carrying helper, stamping through an OBJECT
+     * LITERAL instead of an assignment: `return { severity, code, message }`
+     * (shorthand) or `{ code: errCode }` (longhand).
+     *
+     * `codehelper` was anchored on `.code =`, but the reasoning it implements —
+     * the identifier is a PARAMETER, so the literals live at the CALL SITES —
+     * belongs to the HELPER, not to the assignment operator. Until this shape
+     * landed, no pattern in this gate or in `check:error-code-casing` fired
+     * here at all: `objlit` needs a quote, `objlitconst` needs a
+     * SCREAMING_SNAKE identifier (the conventional parameter name is `code`),
+     * `objlittemplate` needs backticks. So there was no site AND no unresolved
+     * entry — the one way "reported, never dropped" can fail without anything
+     * saying so.
+     *
+     * ⚠️ Its precision is measurably lower than the assignment position's, and
+     * a reader of these rows should know why. `.code = ident` needs a property
+     * named `code` on a value being mutated, which is nearly always an error;
+     * `{ code }` is simply how any record carries any field called `code`. Of
+     * the 13 helpers this shape reaches on `packages/**`, two carry no error
+     * code at all — an SMS one-time password and a YAML fence body — and no
+     * sibling-key test separates them (measured: the largest true positive,
+     * `record-validator`'s `fail`, stamps `{ field, code, def, constraint,
+     * messageKey, options, value }` with no `message` at all). Both are
+     * classified in {@link UNRESOLVED_CODE_HELPERS} rather than filtered out,
+     * because a filter drawn around the inconvenient cases is an exemption
+     * wearing a predicate's clothes.
+     */
+    | 'objlithelper';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
@@ -593,6 +622,575 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
             'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
             'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
+    },
+    // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
+    //
+    // The 29 rows below are the whole verdict cost of widening `codehelper` to
+    // the object-literal stamp position, and they are one genre from end to
+    // end: ADR-0114 D2 `FieldErrorCode` members, stamped by four validation
+    // helpers that take the code as a PARAMETER and build a field-error record
+    // around it. Nothing here reaches `error.code`.
+    //
+    // ⭐ The evidence is stronger than a reading of the call sites, and that is
+    // why this whole block can share one argument. Each helper's `code`
+    // parameter is TYPED to `FieldErrorCode` — the closed `z.enum` in
+    // `packages/spec/src/api/errors.zod.ts`, which `FieldErrorSchema.code`
+    // parses and which ADR-0114 D2 governs. So the vocabulary these sites stamp
+    // is already compiler-enforced against a catalog that is not the ledger's,
+    // and it lands at `ApiError.details.fields[].code`, one level below
+    // `error.code`. ADR-0112 D6 draws exactly this line: a field-level code is
+    // not wire vocabulary and is not #8846's business.
+    //
+    // ⚠️ `door: 'none'` here means "does not reach `error.code`", not "never
+    // leaves the process" — these DO travel to a client, inside
+    // `details.fields[]`. The door this table asks about is the `error.code`
+    // door, and the enum above is what guards the other one.
+    // fail() — record-validator.ts
+    {
+        code: 'required',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'required\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_type',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_type\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_boolean',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_boolean\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_number',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_number\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_date',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_date\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_time',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_time\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_email',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_email\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_url',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_url\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_phone',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_phone\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, ' +
+            'so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_option',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'invalid_option\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'min_length',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'min_length\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'max_length',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'max_length\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'min_value',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'min_value\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'max_value',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'max_value\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'max_scale',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'max_scale\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
+            'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    // fallback() — rule-validator.ts
+    {
+        code: 'invalid_initial_state',
+        file: 'packages/objectql/src/validation/rule-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'rule-validator\'s `fallback(code, …)` builds the state-machine field error `{ field, code, ' +
+            'message, label }`. Its `code` parameter is typed `code: \'invalid_initial_state\' | ' +
+            '\'invalid_transition\'`, so the value is a member of the closed ADR-0114 D2 catalog by ' +
+            'construction; \'invalid_initial_state\' is one of them. It reaches ' +
+            '`ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for it ' +
+            '(ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_transition',
+        file: 'packages/objectql/src/validation/rule-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'rule-validator\'s `fallback(code, …)` builds the state-machine field error `{ field, code, ' +
+            'message, label }`. Its `code` parameter is typed `code: \'invalid_initial_state\' | ' +
+            '\'invalid_transition\'`, so the value is a member of the closed ADR-0114 D2 catalog by ' +
+            'construction; \'invalid_transition\' is one of them. It reaches `ApiError.details.fields[].code`, ' +
+            'never `error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    // coerceError() — import-coerce.ts
+    {
+        code: 'invalid_boolean',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_boolean\' is ' +
+            'one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row ' +
+            'can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_date',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_date\' is ' +
+            'one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row ' +
+            'can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_number',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_number\' is ' +
+            'one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row ' +
+            'can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_option',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_option\' is ' +
+            'one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row ' +
+            'can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'reference_ambiguous',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'reference_ambiguous\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'reference_not_found',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'reference_not_found\' is one of them. It reaches `ApiError.details.fields[].code`, never ' +
+            '`error.code`, so no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    // invalidQueryParam() — query-param.ts
+    {
+        code: 'invalid_boolean',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_boolean\' is one of ' +
+            'them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be ' +
+            'owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_number',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_number\' is one of ' +
+            'them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be ' +
+            'owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_option',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_option\' is one of ' +
+            'them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be ' +
+            'owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_type',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_type\' is one of ' +
+            'them. It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be ' +
+            'owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'max_value',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'max_value\' is one of them. ' +
+            'It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed ' +
+            'for it (ADR-0112 D6).',
+    },
+    {
+        code: 'min_value',
+        file: 'packages/runtime/src/query-param.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'query-param\'s `invalidQueryParam(param, code: FieldErrorCode, …)` hands `validationFailure` a ' +
+            'single `{ field, code, message }`. Its `code` parameter is typed `code: FieldErrorCode`, so the ' +
+            'value is a member of the closed ADR-0114 D2 catalog by construction; \'min_value\' is one of them. ' +
+            'It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed ' +
+            'for it (ADR-0112 D6).',
+    },
+];
+
+/**
+ * [#13233] Why a helper's codes cannot be read from source, and whether that
+ * matters. A DIFFERENT question from {@link CodeVerdict}, so a different
+ * vocabulary — a site row answers "does this code reach a wire and is it
+ * registered", and none of its members can answer "we never learn the value".
+ *
+ * ⛔ Deliberately not merged into `CodeVerdict`: a member that says "no row is
+ * owed here" is safe on a helper whose codes are unknown and would be a
+ * blanket exemption on a site that spells a literal — the hole this gate
+ * exists to close.
+ */
+export type UnresolvedHelperVerdict =
+    /**
+     * The parameter is not an ADR-0112 `error.code` at all — it belongs to
+     * another vocabulary that merely spells itself `code`. The same line
+     * `foreign-vocabulary` draws for a site, one indirection earlier.
+     */
+    | 'foreign-vocabulary'
+    /**
+     * The parameter is TYPED to the closed `ErrorCode` union, so the compiler
+     * already enforces exactly what a registry check would — better, and at
+     * every call site including the ones in other packages that this in-file
+     * scan cannot see. The principle is already on the record above: the REST
+     * door's author-side responder takes `code: ErrorCode` and therefore "can
+     * never be a finding here".
+     */
+    | 'compiler-narrowed'
+    /**
+     * The helper does not AUTHOR a code; it re-stamps one that arrived on a
+     * caught value. The authoring sites are scanned in their own right, under
+     * their own shapes, and #9106 demotes anything unregistered to the wire's
+     * `declaredCode` at the door. Reading a runtime value here is the #9460
+     * bound, not a gap.
+     */
+    | 'restamped-elsewhere';
+
+/**
+ * [#13233] A code-carrying helper this scan can SEE but cannot READ: the stamp
+ * resolves to a parameter, and no in-file call site passes a value that reduces
+ * to a literal.
+ *
+ * ## Why this list exists at all
+ *
+ * `check-dispatcher-error-vocabulary` pushes an `unresolved` entry for any
+ * value it cannot reduce, and — for every other reason it does so — that entry
+ * is an unconditional RED with a remedy the author can carry out: resolve the
+ * constant, or spell the `let` as a `const`. A HELPER has no such remedy. Its
+ * callers may live in another package (`sendError` has zero in-file calls), or
+ * pass a vocabulary this gate has declared out of its own population
+ * (`Parser#error`'s sixteen kebab diagnostics), or pass a genuine runtime value
+ * (`http-dispatcher`'s `thrown.code`). Left undischargeable, each is a red
+ * nobody CAN clear — which is not a gate, it is a broken build.
+ *
+ * So the helper is classified here instead, with a door, a verdict and its
+ * evidence, and the gate reconciles this list in BOTH directions: an entry the
+ * scan no longer reports goes stale and REDS, exactly like a site row. ⭐ That
+ * is what makes it a widening rather than an exemption — before #13233 none of
+ * these helpers produced a site OR an unresolved, because no shape reached
+ * them; now every one is recorded, evidenced, and ratcheted.
+ *
+ * ⛔ Not a parking space. A helper belongs here only when the codes genuinely
+ * cannot be read from this repo's source. If its callers CAN spell literals,
+ * the fix is to make them spell literals — then the codes become ordinary
+ * sites with ordinary rows, and the gate reds until this entry is deleted.
+ *
+ * MEASURED, not chosen. Re-derive with:
+ *   node scripts/check-dispatcher-error-vocabulary.mjs
+ */
+export interface UnresolvedCodeHelper {
+    /** Repo-relative file. No line number — line numbers rot, files do not. */
+    readonly file: string;
+    /** The declaring function, constructor or method, by name. */
+    readonly helper: string;
+    /** Which of its parameters the stamp reads. */
+    readonly param: string;
+    readonly shape: CodeStampShape;
+    readonly door: CodeDoor;
+    readonly verdict: UnresolvedHelperVerdict;
+    /** Why this verdict — the evidence, not a restatement of the verdict. */
+    readonly why: string;
+}
+
+export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
+    {
+        file: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+        helper: 'deliverPhoneOtp',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The `code` here is an SMS ONE-TIME PASSWORD, not an error code. `deliverPhoneOtp(phone, code)` ' +
+            'renders it into the notification-template payload `{ code, appName, minutes }` and into the ' +
+            "provider's `templateParams: { code }` — the digits a user types back in. It never reaches an " +
+            'error envelope in any field. Its two in-file callers are better-auth `sendOTP` hooks that pass ' +
+            'the library\'s generated value, so nothing reduces and nothing should: this is the shape of ' +
+            'false positive the object-literal position cannot filter structurally, recorded rather than ' +
+            'silently excluded by a predicate drawn around it.',
+    },
+    {
+        file: 'packages/spec/scripts/check-yaml-examples.ts',
+        helper: 'block',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The `code` here is a raw YAML FENCE BODY. `block(code, decl)` is a self-test fixture factory ' +
+            'building a `TaggedBlock` — `{ source, fenceLine, bodyStartLine, code, decl }` — whose `code` ' +
+            'field is the text inside a documentation ```yaml fence, and its eleven callers pass multi-line ' +
+            'YAML documents. `TaggedBlock.code` is declared "Raw fence body" in the same file. The second ' +
+            'of the two non-error `code` parameters this position reaches, and the reason the widening ' +
+            'declares its precision limit instead of claiming it has none.',
+    },
+    {
+        file: 'packages/sdui-parser/src/parse.ts',
+        helper: 'error',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The live instance the whole object-literal enquiry was opened for, and it needed BOTH ' +
+            'blindnesses closed to be reachable: `Parser#error(code, message, start?, tag?)` is a class ' +
+            'method (the declaration form) that stamps through an object literal (the position). Its ' +
+            'sixteen in-file callers all pass KEBAB literals — `no-root`, ' +
+            "`multiple-roots`, `bad-tag` — which this gate's literal grammar refuses by design, so the " +
+            'helper reduces to nothing. That silence is already declared: `KEBAB_DIAGNOSTIC_VOCABULARY` ' +
+            'puts the ADR-0112 D6c author-time diagnostic family outside BOTH vocabulary gates, and ' +
+            'widening the grammar to reduce these would move that boundary rather than honour it.',
+    },
+    {
+        file: 'packages/types/src/response-envelope.ts',
+        helper: 'sendError',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'rest',
+        verdict: 'compiler-narrowed',
+        why:
+            'The signature is `sendError(res, status, code: ErrorCode, message, extra)` — the parameter is ' +
+            'typed to the CLOSED union, so an unregistered spelling cannot reach `error: { code, message }` ' +
+            'without failing the build first. The scan reports it only because the check it wants is ' +
+            'already made somewhere it cannot look: `helperCodesFor` scans the DECLARING file and this ' +
+            'helper has zero in-file callers, being the shared envelope responder other packages import. ' +
+            'The same reasoning `CodeDoor` above already records for the REST door\'s author-side ' +
+            'responder, which takes the identical parameter type.',
+    },
+    {
+        file: 'packages/runtime/src/http-dispatcher.ts',
+        helper: 'error',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'dispatcher',
+        verdict: 'restamped-elsewhere',
+        why:
+            'This is the dispatcher door itself — `error(message, httpStatus, details?, code?, extra?)` — ' +
+            'and it AUTHORS no code. Of its seven in-file callers, six pass no fourth argument at all and ' +
+            'the seventh passes `thrown.code`, a value read off a caught error at runtime. Every producer ' +
+            'that put that string there is a stamp site this gate scans under its own shape, so covering ' +
+            'it here would double-count them rather than add reach; and the door narrows what it emits, ' +
+            'demoting an unregistered spelling to the wire\'s `declaredCode`. This is the declared ' +
+            'runtime-value bound, arriving one indirection later than usual.',
     },
 ];
 

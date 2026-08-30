@@ -64,7 +64,7 @@ not on any flag.
 ## How the flag is set
 
 `isSystem` is **server-constructed and never client-supplied**. Inbound HTTP
-cannot set it (`packages/rest/src/rest-server.ts:1234`, `:1263`), and neither
+cannot set it (`packages/rest/src/rest-server.ts:1235`, `:1264`), and neither
 can an action body (`packages/runtime/src/domains/actions.ts:404`). It is
 written by internal callers only, as an option on the engine call:
 
@@ -96,14 +96,14 @@ that silently does not happen.
 | 7 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `object-schema-fls.ts:228` |
 | 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3808` |
 | 9 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `anonymous-deny.ts:154` |
-| 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:1009` |
+| 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:1015` |
 | 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1254` |
 | 12 | Per-request performance timings disclosed | observability | Get: timing headers a normal caller cannot pull | `perf-timing.ts:474` |
 | 13 | Permission-set **overlay discard** skips the tenant-admin assertion | plugin-security | Get: an overlay can be discarded with no authenticated tenant administrator | `permission-set-overlay-discard.ts:142` |
 | 14 | MCP stdio bridge skips the object API-exposure gate | mcp | Get: the bridge reaches objects whose `apiEnabled` / `apiMethods` would refuse an external caller | `stdio-data-bridge.ts:246` |
 | 15 | **Read-audit rows are not written** | plugin-audit | Lose: the "a person opened this record" trail. `sudo()` keeps the caller's `userId`, so this flag is the only thing separating a human read from a platform one | `read-audit.ts:556` |
 | 16 | Approval snapshot payload redaction skipped | plugin-approvals | Get: the whole snapshot on `find` / `findOne` — the audit/replay channel. Lose: field-visibility redaction over approval payloads | `payload-redaction-middleware.ts:115` |
-| 17 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `rest-server.ts:1266` |
+| 17 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `rest-server.ts:1267` |
 
 ### 2. Write pipeline and data integrity
 
@@ -158,9 +158,9 @@ The largest single consumer — **20 of the 109 sites**.
 |:--|:---|:---|:---|:---|
 | 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:136` |
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:399` |
-| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4270`, `:5633`, `:5865`, `:6210`, `:6403` |
+| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4271`, `:5634`, `:5866`, `:6211`, `:6404` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
-| 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:982`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:246`, `external-datasource-routes.ts:302`, `package-routes.ts:92` |
+| 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:246`, `external-datasource-routes.ts:302`, `package-routes.ts:92` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
 | 54 | Package REST route capability gate bypassed | rest | Get: package read/write over REST without `manage_metadata` / `studio.access` / `setup.access` | `package-routes.ts:97` |
 | 55 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `domains/packages.ts:95`, `:128` |
@@ -199,7 +199,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1451` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:273` |
-| "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1234`, `:1263`; `domains/actions.ts:404` |
+| "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1235`, `:1264`; `domains/actions.ts:404` |
 
 ---
 

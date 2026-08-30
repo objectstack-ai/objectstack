@@ -6,6 +6,7 @@ import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
 import type { RestApiPluginConfig } from './rest-api-plugin';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
+import { httpRequestForRoute } from './http-request-test-builder.js';
 
 // ---------------------------------------------------------------------------
 // Mocks & Helpers
@@ -2060,7 +2061,7 @@ describe('RestServer project-scoped routing', () => {
 
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
     await listRoute!.handler(
-      { params: { environmentId: 'proj-123', object: 'task' }, query: {} },
+      httpRequestForRoute(listRoute!, { params: { environmentId: 'proj-123', object: 'task' } }),
       res,
     );
 
@@ -2085,7 +2086,7 @@ describe('RestServer project-scoped routing', () => {
 
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
     await unscoped!.handler(
-      { params: { object: 'task' }, query: {} },
+      httpRequestForRoute(unscoped!, { params: { object: 'task' } }),
       res,
     );
 

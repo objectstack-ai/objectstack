@@ -552,10 +552,14 @@ pin 前置等运维细则见 `references/seat-post-protocol.md`)。** 判据二�
 
 dev 侧早推分支 —— 远程分支是在飞工作最硬的证据。**死认领回收(stale-claim reclaim)**:
 认领 >~24h、承诺分支不存在、无 PR ⇒ 死认领 —— **回收前先救工作树**:
-派发 worktree 的未提交改动先 WIP commit 到派发分支并 push,sha 记进回收评论、
-标 INCOMPLETE AND UNREVIEWED(续派者 diff 它,⛔ 不无审续建;
-死在编辑中途的 dev 没来得及自己 WIP 推,这一步是最后防线)—— 再评论询问,
-静默一窗后摘 assignee(注明原因)回队;有带提交活分支的认领永不回收。
+**存活前置**:向任何派发 worktree 提交前(任何 actor)先过存活/所有权检查,
+或对树最新 mtime 过明确年龄阈值;⛔ 不凭 GitHub 侧静默动手 —— 零提交、零推送、无 PR,
+在干活但未推的席位给出同一组信号:未提交改动是在飞工作的证据,不是死亡的证据。
+过栏后,派发 worktree 的未提交改动先 WIP commit 到派发分支并 push,sha 记进回收评论、
+标 INCOMPLETE AND UNREVIEWED(抬头限救树者行为,保留;续派者 diff 它,⛔ 不无审续建);
+**消息边界**:WIP 信息只写观察到的(脏路径/行数/sha),⛔ 不写席位行为的现在时断言。
+再评论询问,静默一窗后摘 assignee(注明原因)回队;有带提交活分支的认领永不回收。
+**误伤补救**:误伤活席位 ⇒ 令其追加式更正,落 PR 正文不落分支历史(dev 禁 force-push)。
 
 ### 派发
 

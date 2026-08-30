@@ -100,6 +100,38 @@
  * itself and the handler's `try` catches it) — and the production wrapper
  * above has no statement that can make one.
  *
+ * ⭐ WHICH `.catch` is load-bearing: NEITHER of the two named above. A
+ * production fault never arrives at either one AS A REJECTION.
+ * `computeExecCtx` — the private body behind `resolveExecCtx` — wraps its
+ * WHOLE body in `try { … } catch { return undefined; }`, so a faulting
+ * resolve FULFILS with `undefined` rather than rejecting, and the
+ * fault-to-anonymous conversion has already happened one level BELOW by the
+ * time either `.catch(() => undefined)` is reached. ⇒ removing either of them
+ * would not by itself surface a production fault: a reader who deletes one
+ * expecting a 5xx to appear measures no change and concludes the wrong thing
+ * about where the conversion lives. That is the whole reason this paragraph
+ * exists.
+ *
+ * ⚠️ And that first net is NOT per-door, unlike the two above it.
+ * `resolveExecCtx(environmentId, req).catch(() => undefined)` is written
+ * per-consumer — 16 times in `rest-server.ts` as this file is written — while
+ * `computeExecCtx`'s catch is ONE site whose conversion every one of those
+ * consumers inherits. So what this door reads is not a property OF this door,
+ * and a census of the other consumers is a separate file rather than a
+ * section here.
+ *
+ * ⛔ Both facts are MEASURED ELSEWHERE and cited here rather than restated —
+ * a second copy is a second thing to drift, and this file's own convention is
+ * to state a reason once and point at it:
+ *   - `package-door-execctx-fault-reading.test.ts` — that the production
+ *     supplier really does fulfil rather than reject, read per class.
+ *   - `package-door-execctx-fault-reachability.test.ts` — that no degraded
+ *     class reaches the wrapper as a rejection, against a control showing the
+ *     witness CAN report one.
+ *   - `execctx-consumer-census.test.ts` — the per-site census over every
+ *     `resolveExecCtx` consumer, each row DRIVEN rather than read off the
+ *     shape.
+ *
  * ⚠️ Nor can an embedder reach it: `registerPackageRoutes` and
  * `PackageRoutesOptions` are NOT exported from `packages/rest/src/index.ts`
  * (the package publishes a single `.` entry, and `direct-mount-composition.ts`
@@ -116,8 +148,11 @@
  * ⛔ Whether that double swallow SHOULD exist at all is a different
  * question — it would change what a public door emits — and it is open
  * at #12537, deliberately not answered here. Note for whoever takes it: the
- * swallow is documented at NEITHER site, so "deliberate" is not established by
- * the code as it stands.
+ * swallow is now documented at ONE of the two sites, not neither —
+ * `rest-server.ts`'s `resolvePackageRouteExecutionContext` carries the
+ * reading, the second-net correction above included — while the
+ * `package-routes.ts` site still carries none. So "deliberate" is established
+ * by the code for the first site and still is not for the second.
  *
  * Section 5 is the second fact stated as a test: a REAL `ObjectQL`, a REAL
  * `ObjectStackProtocolImplementation` and a failing driver, driven through the
