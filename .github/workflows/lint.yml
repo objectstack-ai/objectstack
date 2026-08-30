@@ -2692,6 +2692,26 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # Console-intercept disarm (#10374). vitest's worker forwards every
+      # console.* write to the main thread over RPC and DISCARDS the promise;
+      # a write that lands after teardown's `rpcDone()` snapshot is rejected
+      # into an unhandled error, failing a fully green suite (signature:
+      # `EnvironmentTeardownError: [vitest-worker]: Closing rpc while
+      # "onUserConsoleLog" was pending` — the file it names is where the
+      # worker WAS, not where the bug is). The window is load-width, so it
+      # presents as a merge-queue flake nobody can reproduce. The one general
+      # defence is `disableConsoleIntercept: true` in every package-root
+      # vitest config — it removes the mechanism (no RPC, nothing to reject)
+      # — and the population it must cover MOVES: five new vitest configs
+      # arrived in the nine days before this gate, every one with the
+      # intercept armed. This asserts every vitest-running package carries
+      # the disarm; the mechanism docblock lives in
+      # examples/app-showcase/vitest.config.ts and the teardown-race pin in
+      # that app proves the defect is still live in the installed vitest.
+      # Self-test first, then the real scan; reads ~72 manifests; sub-second.
+      - name: Console-intercept disarm
+        run: node scripts/check-console-intercept-disarm.mjs --self-test && node scripts/check-console-intercept-disarm.mjs
+
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live
       # leg at them, and every live suite in the repo issues a `drop` when it
