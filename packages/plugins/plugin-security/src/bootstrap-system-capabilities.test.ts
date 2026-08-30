@@ -1260,3 +1260,115 @@ describe('#11518 — a page that could not fit the answer must not report "absen
     expect(warn.mock.calls[0][1]).toMatchObject({ organization: 'org_jia' });
   });
 });
+
+/**
+ * [#12981] The `catch { return null; }` / `catch { return false; }` swallow
+ * family — this file is where the card quotes its shape from.
+ *
+ * ⚠️ The engines below THROW where `makeQl` returns `null`. That is not a
+ * harsher double for its own sake: a SQL driver signals a refused write by
+ * throwing, and `makeQl`'s unique-key model answers `null` instead, so nothing
+ * in this file previously exercised the `catch` arms at all. Every assertion
+ * here is about what the seeder does with a thrown refusal.
+ */
+describe('[#12981] a wholly refused seeding pass is distinguishable from a quiet one', () => {
+  const CURATED = KNOWN_CAPABILITIES[0];
+
+  /** A store that accepts reads and refuses every write. */
+  function refuseWrites(ql: any) {
+    ql.insert = async () => { throw new Error('store is refusing writes'); };
+    ql.update = async () => { throw new Error('store is refusing writes'); };
+    return ql;
+  }
+
+  it('counts refused INSERTS on the derived half, which reported nothing at all before', async () => {
+    // The derived half falls through `else if (!isDerived)`, so a refused
+    // derived insert hit no counter and no log — total silence.
+    const refused = await bootstrapSystemCapabilities(
+      refuseWrites(makeQl()), [{ systemPermissions: ['export_data'] }], { logger: { warn: () => {} } },
+    );
+    expect(refused.seeded).toBe(0);
+    expect(refused.refused).toBeGreaterThan(0);
+
+    // The steady-state comparison: a pass with nothing to do also seeds 0.
+    const settled = makeQl();
+    await bootstrapSystemCapabilities(settled, [{ systemPermissions: ['export_data'] }]);
+    const quiet = await bootstrapSystemCapabilities(settled, [{ systemPermissions: ['export_data'] }]);
+    expect(quiet.seeded).toBe(0);
+    expect(quiet.refused).toBe(0);
+
+    // ⛔ Before the repair these two agreed on every field they reported.
+    expect(refused.refused).not.toBe(quiet.refused);
+  });
+
+  it('counts a refused UPDATE, which was silent on BOTH halves', async () => {
+    // A platform row that exists but has drifted from the curated definition:
+    // the seeder reaches `tryUpdate`, and `tryUpdate` answered `false` for
+    // "refused" and for "nothing to do" alike.
+    const ql = makeQl();
+    ql.rows.push({
+      id: 'cap_drifted', name: CURATED.name, label: 'STALE', description: 'STALE',
+      scope: CURATED.scope, managed_by: 'platform', organization_id: null, active: true,
+    });
+    ql.update = async () => { throw new Error('store is refusing writes'); };
+
+    const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn: () => {} } });
+    expect(out.updated).toBe(0);
+    expect(out.unchanged).toBe(0);
+    expect(out.refused).toBeGreaterThan(0);
+    // The row is still stale — the point of counting.
+    expect(ql.rows.find((r: any) => r.id === 'cap_drifted').label).toBe('STALE');
+  });
+
+  it('reports ONCE on the durability channel, with the consequence and the remedy', async () => {
+    const errors: Array<{ msg: string; meta?: any }> = [];
+    const warns: string[] = [];
+    const out = await bootstrapSystemCapabilities(
+      refuseWrites(makeQl()), [{ systemPermissions: ['export_data'] }],
+      {
+        logger: {
+          warn: (m: string) => { warns.push(m); },
+          error: (msg: string, _e?: Error, meta?: any) => { errors.push({ msg, meta }); },
+        },
+      },
+    );
+
+    // ONE line for the whole pass, on `error` — a refused registry write is a
+    // durability degradation (AGENTS.md "Degradation log levels").
+    expect(errors).toHaveLength(1);
+    expect(errors[0].msg).toContain('REFUSED');
+    expect(errors[0].msg).toContain('WILL GO ON LOOKING');
+    // The CONSEQUENCE is stated without overclaiming: registry state, not authz.
+    expect(errors[0].msg).toContain('resolve capabilities BY NAME');
+    // ...and the REMEDY, both classes named.
+    expect(errors[0].msg).toContain('os migrate');
+    expect(errors[0].meta).toMatchObject({ refused: out.refused });
+  });
+
+  it('falls back to `warn` when the host injected a sink with no `error`', async () => {
+    // `logSeedDurabilityFailure`'s contract: an absent `error` has a declared
+    // destination. ⛔ Never `logger?.error?.(…)`, which prints nothing here.
+    const warns: string[] = [];
+    await bootstrapSystemCapabilities(
+      refuseWrites(makeQl()), [{ systemPermissions: ['export_data'] }],
+      { logger: { warn: (m: string) => { warns.push(m); } } },
+    );
+    expect(warns.filter((m) => m.includes('REFUSED'))).toHaveLength(1);
+  });
+
+  it('adds no steady-state noise — a settled pass reports nothing new', async () => {
+    const errors: string[] = [];
+    const warns: string[] = [];
+    const ql = makeQl();
+    await bootstrapSystemCapabilities(ql, []);
+    const out = await bootstrapSystemCapabilities(ql, [], {
+      logger: {
+        warn: (m: string) => { warns.push(m); },
+        error: (m: string) => { errors.push(m); },
+      },
+    });
+    expect(out.refused).toBe(0);
+    expect(errors).toEqual([]);
+    expect(warns.filter((m) => m.includes('REFUSED'))).toEqual([]);
+  });
+});
