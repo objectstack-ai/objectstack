@@ -240,6 +240,7 @@
  *     node scripts/check-durability-degradation-log-level.mjs             # audit (both rules)
  *     node scripts/check-durability-degradation-log-level.mjs --list      # every seam found, both rules
  *     node scripts/check-durability-degradation-log-level.mjs --self-test # verify the checker
+ *     node scripts/check-durability-degradation-log-level.mjs --depth-cost # price MAX_READ_WRAPPER_DEPTH
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -1268,6 +1269,142 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // costs the census 6 further seams) is a SEPARATE card on this same file and is
 // deliberately not touched here.
 
+// ── THE DEPTH BOUND'S COST — MEASURED, NOT CHANGED (#12360) ─────────────────
+//
+// The block above ends by naming this card and leaving it alone. This block is
+// that card. Its subject is a sentence at the top of this file: the walk
+// "cannot DISCOVER a seam whose read runs outside the try block, or more than
+// `MAX_READ_WRAPPER_DEPTH` hops away. A ratchet, not a proof". The bound has
+// been documented since the day it was written. What was never written down is
+// what it COSTS — and a documented constant whose price nobody has measured is
+// held in place by inertia, not by a reason.
+//
+// RE-DERIVED, not inherited. The filing's figures (64 -> 70 at depth 6, "+8/-2",
+// "5 of the 8 deltas") were taken on `origin/main` @ 3ddad51b5c, five days and
+// two recognizer changes ago; the denominator has since moved 64 -> 66. Every
+// number below was re-run on `origin/main` @ 71627f7b4e, i.e. AFTER #12358
+// landed in this same file.
+//
+//   | recognizer                                  |      read seams |
+//   |---------------------------------------------|----------------:|
+//   | same-tick walk, depth 1                     |              58 |
+//   | today — same-tick walk, depth 2             |              66 |
+//   | same-tick walk, depth 3                     |              72 |
+//   | same-tick walk, depths 4 … 50               |  72 (saturated) |
+//
+// THE COST IS 6 SEAMS — the filing's headline number reproduces exactly. What
+// did NOT reproduce is the route to it, and both corrections matter to the next
+// person who re-runs this:
+//
+//   - SATURATION IS AT DEPTH 3, not 6. All six chains are exactly three hops.
+//     The filing probed 6 and could only read saturation as "at or below 6"; it
+//     is one hop past the bound, for every one of them.
+//   - THE ADMITTING STEP IS +6 / -0, not "+8 / -2". The 2 in the filing were
+//     two `try` lines re-attributed to a different first-matching callee, never
+//     seams leaving the population. That re-attribution still happens here —
+//     `engine.ts:9741` and `:10906` move from `resolveMasterDetailParent(s)` to
+//     `mediaValueShapeStrictFor` — but at depth 4, one level ABOVE the level
+//     that admits anything, and it moves no count. The admitting step is clean.
+//
+// THE SIX, each verified at its call site rather than inferred: an unbroken
+// chain of `await`s on the caller's own tick, ending in a driver read this
+// rule's vocabulary names. Chains as the recognizer actually resolves them —
+// two of them are NOT the tails the filing predicted:
+//
+//   | # | seam (try line -> first wrapper)                    | chain to the read |
+//   |--:|-----------------------------------------------------|-------------------|
+//   | 1 | metadata-protocol protocol.ts:10497 getMetaItemCached | getMetaItem -> findDraft -> lookup -> engine.findOne |
+//   | 2 | metadata-protocol protocol.ts:13874 saveMetaItem      | getMetaItem -> findDraft -> lookup -> engine.findOne |
+//   | 3 | metadata-protocol protocol.ts:14850 migrateStoredMetadata | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
+//   | 4 | metadata-protocol protocol.ts:16502 publishPackageDrafts  | promoteDraftForPublish -> lockWriteRefusal -> getEffectiveLock -> engine.findOne |
+//   | 5 | metadata-protocol protocol.ts:17565 duplicatePackage      | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
+//   | 6 | objectql lifecycle-service.ts:664 sweep                   | reapObject -> archiveObject -> archivePass -> hot.find |
+//
+// (3 and 5 reach a read through `saveMetaItem`'s OWN precondition check, not
+// through the `getMetaItem` tail the filing assigned them. Same verdict, and
+// the difference is the point of reading chains instead of assuming them: the
+// walk stops at the FIRST read it finds, which is not always the one a human
+// tracing the call by hand would land on.)
+//
+// WHAT ADMITTING THEM WOULD AND WOULD NOT DO. Nothing, to the findings. All six
+// carry `no invented answer`, and every parenthetical in this rule's verdict
+// line — 8 type-discriminated, 1 pass-through, 1 answer-by-assignment, 1
+// baselined — is byte-identical at depth 2 and at depth 50. Only the
+// DENOMINATOR moves, 66 -> 72, and that denominator is what #5186, #6451,
+// #9165, #8845 and #8901 are quoted against. The bound is not buying
+// correctness on this tree; it is holding a published number still.
+//
+// WHICH HALF OF "5 OF THE 8" SURVIVED. The filing's second claim is that 5 of
+// the 8 deltas #12138 attributed to the wrapper recursion's CALLBACK refusal
+// are really this bound. Re-derived with the `walkAll` probe run beside the
+// depth probe, both compared to today's 66 by try line:
+//
+//   walkAll @ depth 2 admits   7   (was 8 — #12358's guard deleted the fake seam)
+//   depth 3 admits             6
+//   BOTH                       5   <- the claim, reproduced exactly
+//   depth only                 1   protocol.ts:16502 publishPackageDrafts
+//   walkAll only               2   sys-metadata-repository.ts:883, engine.ts:9571
+//
+// So the NUMBER 5 survives and its DENOMINATOR does not: read it as "5 of 7",
+// the eighth having been the fake seam #12358 removed. And one correction the
+// filing could not have made: `walkAll` is only a PARTIAL mask for this bound.
+// `publishPackageDrafts` is admitted by depth and by depth alone — counting
+// call hops reaches its read, descending lexically through nested declarations
+// does not.
+//
+// INTERACTION WITH #12358's `contradictsWrapperResolution` — MEASURED, AND THE
+// TWO ARE INDEPENDENT ALONG THIS AXIS. The hypothesis worth testing was that a
+// deeper hop is where a wrong-receiver resolution compounds, so the new guard
+// might already be refusing some of the six. It refuses none of them: the FULL
+// checker output is byte-identical with the guard enabled and disabled at
+// depths 2, 3, 6 and 50. Its subject is the WALK, not the DEPTH:
+//
+//   | walk      | depth | guard on | guard off | guard removes |
+//   |-----------|------:|---------:|----------:|--------------:|
+//   | same-tick |     2 |       66 |        66 |             0 |
+//   | same-tick |     3 |       72 |        72 |             0 |
+//   | same-tick |    50 |       72 |        72 |             0 |
+//   | walkAll   |     2 |       73 |        74 |             1 |
+//   | walkAll   |     3 |       74 |        76 |             2 |
+//   | walkAll   |    50 |       75 |        77 |             2 |
+//
+// Two readings, and the second is the one to carry forward. The depth axis
+// never arms the defect #12358 closed, so a depth raise is safe FROM THAT
+// DEFECT. But if the walk is ever widened as well, raising the depth DOUBLES
+// what that guard has to catch (1 fake seam -> 2). The two widenings cost
+// independently and risk multiplicatively.
+//
+// ⚠️ AND A RESOLUTION HAZARD THE GUARD CANNOT SEE, found while verifying the
+// six rather than looked for. `functionBodies` is keyed by BARE NAME and is
+// LAST-WINS. `protocol.ts` declares `lookup` three times (bodies at 6657, 6717,
+// 7129), and the hop in seams 1 and 2 resolves the call at 6674 to the
+// declaration at 7129 — not the one lexically enclosing it.
+// `contradictsWrapperResolution` admits it and is right to: the receiver is a
+// bare identifier and the arity matches, because the three declarations are
+// near-copies of one another. Both seams are real anyway — all three `lookup`
+// bodies read `sys_metadata` through `this.engine.findOne` — so nothing is
+// miscounted today. But the verdict is right by luck, and each additional hop
+// multiplies the number of names that must be unique for it to stay right.
+// That is the strongest argument on this tree for leaving the bound alone, and
+// it is an argument no seam COUNT can make.
+//
+// ⛔ THE BOUND IS NOT RAISED, and the reason is measurement rather than
+// caution. Three of them: admitting the six changes no finding, only a number;
+// that number is quoted by five other cards and #8901's restart conjunct (b)
+// reserves the census re-run; and the resolution hazard above grows with depth.
+// What lands instead is what the filing asked for and a comment cannot give —
+// the price is now RE-DERIVABLE on demand (`--depth-cost`, which prints the
+// admitted seams by name) and the bound is PINNED FROM ABOVE in the self-test,
+// so it can never again be raised silently.
+//
+// ⚠️ WHY A PIN AND NOT ONLY THIS BLOCK. Measured, and it is the finding that
+// made this card worth landing: before this change the self-test constrained
+// `MAX_READ_WRAPPER_DEPTH` from BELOW only. Lowering it to 1 reddens exactly
+// one fixture (#12358's `this`-rooted chain, which needs two hops). Raising it
+// to 3, 4, 6 or 50 left all 51 read-seam fixtures green and every gate in this
+// file green — the denominator would have moved 66 -> 72 with nothing anywhere
+// saying so. That is this card's own numbers going stale twice, one level down.
+
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
  *
@@ -1458,6 +1595,29 @@ function contradictsWrapperResolution(node, body) {
     return node.arguments.length < required;
 }
 
+/**
+ * How far a same-file wrapper chain is followed — the bound, and its price.
+ *
+ * WHY wrappers are followed at all is argued with `DRIVER_READ_CALLEES` above
+ * (`_find` -> `engine.find`, and why a vocabulary of wrapper NAMES would be
+ * unenforceable). This is the half that was missing: what stopping at 2 costs.
+ *
+ * Measured on `origin/main` @ 71627f7b4e — 6 real read seams the census does
+ * not count, all six admitted at depth 3, unchanged from there to depth 50, and
+ * all six carrying `no invented answer`, so the rule's FINDINGS do not move
+ * with the bound; only its denominator does. The enumeration, the chains, the
+ * `walkAll` decomposition and the reasons the bound is nevertheless held are in
+ * "THE DEPTH BOUND'S COST" in the header.
+ *
+ * ⛔ Raising this constant moves the read-seam denominator #5186, #6451, #9165,
+ * #8845 and #8901 are quoted against, and #8901's restart conjunct (b) reserves
+ * that census re-run. It is a maintainer's decision, not a passing edit. The
+ * self-test pins the value in BOTH directions so a raise fails a named fixture
+ * instead of moving a published number quietly. Re-derive the current price —
+ * never quote the one above without checking it — with:
+ *
+ *     node scripts/check-durability-degradation-log-level.mjs --depth-cost
+ */
 const MAX_READ_WRAPPER_DEPTH = 2;
 
 /**
@@ -2426,8 +2586,13 @@ function unwrapExpression(expr) {
 /**
  * Does this call perform a storage READ — directly, or through a same-file
  * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed.
+ *
+ * `maxDepth` defaults to that constant and is a parameter for exactly two
+ * callers: the self-test fixtures that pin the bound from above, and
+ * `--depth-cost`, which prices it. Nothing in the audit path passes it, so the
+ * shipped verdict is the constant's, unchanged (#12360).
  */
-function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
+function isReadCall(node, functionBodies, seen = new Set(), depth = 0, maxDepth = MAX_READ_WRAPPER_DEPTH) {
     const name = calleeName(node);
     if (!name) return false;
     if (DRIVER_READ_CALLEES.has(name) && !contradictsDriverReadShape(node)) return true;
@@ -2435,7 +2600,7 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
     // treated as a dead end: it falls through to the wrapper recursion, so a
     // same-file helper that happens to be called `find` is still followed. The
     // shape test subtracts a false positive; it must not subtract a real read.
-    if (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;
+    if (depth >= maxDepth || seen.has(name)) return false;
     const body = functionBodies.get(name);
     if (!body) return false;
     // #12358: the hop's own shape check. Without it a callee NAME that merely
@@ -2445,7 +2610,7 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
     seen.add(name);
     let found = false;
     walkSameTickInclusive(body, (child) => {
-        if (!found && ts.isCallExpression(child) && isReadCall(child, functionBodies, seen, depth + 1)) {
+        if (!found && ts.isCallExpression(child) && isReadCall(child, functionBodies, seen, depth + 1, maxDepth)) {
             found = true;
         }
     });
@@ -2645,6 +2810,8 @@ function establishesBenign(expr, ctx) {
  */
 function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
     const discriminators = options.discriminators ?? READ_FAILURE_DISCRIMINATORS;
+    // #12360. Undefined everywhere in the audit path — see `isReadCall`.
+    const maxReadWrapperDepth = options.maxReadWrapperDepth ?? MAX_READ_WRAPPER_DEPTH;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
     const logAliases = indexLogAliases(sf, functionBodies);
@@ -2675,7 +2842,7 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
         const reads = [];
         const inspect = (child) => {
             if (!ts.isCallExpression(child)) return;
-            if (!isReadCall(child, functionBodies)) return;
+            if (!isReadCall(child, functionBodies, new Set(), 0, maxReadWrapperDepth)) return;
             reads.push({ callee: calleeName(child), line: lineOf(child) });
         };
         const walk = (n) => {
@@ -3205,7 +3372,15 @@ function readInventionBaselineOffer() {
 }
 
 /** Run the read-seam invention rule (#5186) over its narrowed scan scope. */
-function runReadSeamRule({ list = false } = {}) {
+/**
+ * The census itself, with no verdict attached: scan the three roots and return
+ * everything the read-seam rule found.
+ *
+ * Split out of `runReadSeamRule` so `--depth-cost` can run the SAME scan at a
+ * different `maxReadWrapperDepth` (#12360). `runReadSeamRule` passes no
+ * options, so the audit path is the constant's, byte for byte.
+ */
+function collectReadSeams(options = {}) {
     const findings = [];
     const seams = [];
     const usedDiscriminators = new Set();
@@ -3217,9 +3392,16 @@ function runReadSeamRule({ list = false } = {}) {
             const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
             analyzeReadSeams(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
                 usedDiscriminators,
+                maxReadWrapperDepth: options.maxReadWrapperDepth,
             });
         }
     }
+
+    return { findings, seams, usedDiscriminators };
+}
+
+function runReadSeamRule({ list = false } = {}) {
+    const { findings, seams, usedDiscriminators } = collectReadSeams();
 
     if (list) {
         console.log(
@@ -3696,6 +3878,114 @@ function run({ list = false } = {}) {
     const readSeamStatus = runReadSeamRule({ list });
 
     return failed || readSeamStatus !== 0 ? 1 : 0;
+}
+
+/**
+ * `--depth-cost`: re-derive what `MAX_READ_WRAPPER_DEPTH` costs this census.
+ *
+ * A DIAGNOSTIC, not a verdict. It always exits 0, CI never runs it, and it
+ * reports no violation — its whole output is a price.
+ *
+ * It exists because the number it prints has already gone stale twice while
+ * living in a comment: measured once on a tree two recognizer changes old, then
+ * quoted forward into a block that inherited the staleness. Both readings were
+ * produced by hand-patching the constant and re-running, which is exactly the
+ * step this replaces. Anyone re-running the census for #8901's restart
+ * conjunct (b) needs to read the denominator as bound-dependent, and this is
+ * how they get the current dependence instead of a remembered one.
+ *
+ * Three things are reported that a single number cannot say, each of which was
+ * a wrong reading of an earlier measurement:
+ *
+ *   ADMITTED / REMOVED per step, BY NAME — so "+6" can be checked seam by seam
+ *   rather than trusted.
+ *
+ *   RE-ATTRIBUTED per step — a `try` line that stays in the census but is
+ *   credited to a different first-matching callee. This is invisible in any
+ *   count, and reading it as a removal is what produced the filing's "-2".
+ *
+ *   The probe CEILING, stated rather than implied. Saturation is reported as
+ *   "unchanged up to the ceiling probed", never as proof that no deeper chain
+ *   exists — the same honest bound the rule being measured states about itself.
+ */
+function reportDepthCost() {
+    const CEILING = MAX_READ_WRAPPER_DEPTH + 6;
+    const key = (seam) => `${seam.file}:${seam.catchLine}`;
+    const label = (seam) =>
+        `${seam.file}:${seam.catchLine}  guards ${seam.callee}()@${seam.calleeLine} in ` +
+        `${seam.fn ?? '<anonymous>'}()`;
+
+    const runs = [];
+    for (let depth = 1; depth <= CEILING; depth++) {
+        const { seams } = collectReadSeams({ maxReadWrapperDepth: depth });
+        runs.push({ depth, byKey: new Map(seams.map((seam) => [key(seam), seam])) });
+    }
+
+    console.log(
+        `\nDepth cost of MAX_READ_WRAPPER_DEPTH (shipped value: ${MAX_READ_WRAPPER_DEPTH}), ` +
+            `probed 1..${CEILING}\nScan roots: ${READ_SEAM_SCAN_ROOTS.join(', ')}\n`,
+    );
+
+    for (let i = 0; i < runs.length; i++) {
+        const { depth, byKey } = runs[i];
+        const prev = i === 0 ? undefined : runs[i - 1].byKey;
+        const added = prev ? [...byKey.keys()].filter((k) => !prev.has(k)) : [];
+        const removed = prev ? [...prev.keys()].filter((k) => !byKey.has(k)) : [];
+        const moved = prev
+            ? [...byKey.keys()].filter(
+                  (k) => prev.has(k) && prev.get(k).callee !== byKey.get(k).callee,
+              )
+            : [];
+        console.log(
+            `  depth ${String(depth).padStart(2)}: ${String(byKey.size).padStart(3)} seam(s)` +
+                (prev ? `  +${added.length} -${removed.length} ~${moved.length}` : '') +
+                (depth === MAX_READ_WRAPPER_DEPTH ? '   <- shipped' : ''),
+        );
+        for (const k of added) console.log(`      + ${label(byKey.get(k))}`);
+        for (const k of removed) console.log(`      - ${label(prev.get(k))}`);
+        for (const k of moved) {
+            console.log(
+                `      ~ ${k}  re-attributed ${prev.get(k).callee}() -> ${byKey.get(k).callee}()`,
+            );
+        }
+    }
+
+    const last = runs[runs.length - 1].byKey;
+    const sameAsLast = (m) => m.size === last.size && [...m.keys()].every((k) => last.has(k));
+    let saturatedAt = runs[runs.length - 1].depth;
+    for (let i = runs.length - 1; i >= 0 && sameAsLast(runs[i].byKey); i--) {
+        saturatedAt = runs[i].depth;
+    }
+
+    const shipped = runs.find((r) => r.depth === MAX_READ_WRAPPER_DEPTH)?.byKey ?? new Map();
+    const uncounted = [...last.keys()].filter((k) => !shipped.has(k));
+    const onlyAtBound = [...shipped.keys()].filter((k) => !last.has(k));
+
+    console.log(
+        `\n  Seam set unchanged from depth ${saturatedAt} up to the probe ceiling ` +
+            `${CEILING}. That is saturation OBSERVED, not proved: a chain longer than ` +
+            `${CEILING} hops would not be seen by this probe either.`,
+    );
+    console.log(
+        `\n  COST OF THE SHIPPED BOUND: ${uncounted.length} read seam(s) the census does not count.`,
+    );
+    for (const k of uncounted) console.log(`      ${label(last.get(k))}`);
+    if (onlyAtBound.length > 0) {
+        console.log(
+            `\n  ⚠️  ${onlyAtBound.length} seam(s) present at the shipped bound and ABSENT at the ` +
+                'ceiling. A deeper walk should only ever ADD, so this is a recognizer defect, not ' +
+                'a price:',
+        );
+        for (const k of onlyAtBound) console.log(`      ${label(shipped.get(k))}`);
+    }
+    console.log(
+        '\n  ⛔ A price, not a proposal. Raising the constant moves the denominator #5186, ' +
+            '#6451, #9165, #8845 and #8901 are quoted against, and every newly admitted seam ' +
+            'must be shown REAL at its call site first — see "THE DEPTH BOUND\'S COST" in the ' +
+            'header for the last time that was done, and for what the count alone cannot tell ' +
+            'you (#12360).\n',
+    );
+    return 0;
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -5608,6 +5898,60 @@ function selfTestReadSeams() {
             expectViolation: true,
             expectSeams: 1,
         },
+
+        // ── The depth bound, pinned from ABOVE (#12360) ──────────────────────
+        //
+        // Until this pair, `MAX_READ_WRAPPER_DEPTH` was constrained from BELOW
+        // only. Measured: lowering it to 1 reddens exactly one fixture (the
+        // #12358 case above, which needs two hops); raising it to 3, 4, 6 or 50
+        // left every fixture here green and every gate in this file green,
+        // while the census denominator moved 66 -> 72. A tunable that five
+        // other cards quote must not be movable in silence.
+        //
+        // The ladder is one hop PAST the bound, so the first case goes red the
+        // moment the constant is raised. Raising it is a real option — six real
+        // seams are measured behind it, enumerated in "THE DEPTH BOUND'S COST"
+        // — but it is a maintainer's decision that re-prices #5186, #6451,
+        // #9165, #8845 and #8901, so it has to be spelled out here in the same
+        // edit rather than discovered later from a moved number.
+        {
+            name: 'BOUND (#12360): the THIRD wrapper hop is refused — a raise must fail here before it moves the denominator',
+            code: `
+                class L {
+                    private async lookup(t: string) { return await this.driver.find(t, {}); }
+                    private async findOverlay(t: string) { return await this.lookup(t); }
+                    private async getItem(t: string) { return await this.findOverlay(t); }
+                    async list(type: string) {
+                        try { return await this.getItem(type); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // The discrimination test, and the reason the case above is not
+            // vacuous. `expectViolation: false` is also what a fixture that
+            // reaches nothing at all reports — a typo in the ladder, a receiver
+            // the vocabulary does not know, a walk that stopped for an unrelated
+            // reason. The SAME source one hop deeper must find exactly one seam.
+            // If it does not, the pin above is asserting nothing and says so
+            // here, by name, instead of passing quietly forever.
+            name: 'BOUND (#12360): the same ladder IS a seam one hop deeper — the pin above is not vacuous',
+            code: `
+                class L {
+                    private async lookup(t: string) { return await this.driver.find(t, {}); }
+                    private async findOverlay(t: string) { return await this.lookup(t); }
+                    private async getItem(t: string) { return await this.findOverlay(t); }
+                    async list(type: string) {
+                        try { return await this.getItem(type); }
+                        catch { return []; }
+                    }
+                }`,
+            maxReadWrapperDepth: MAX_READ_WRAPPER_DEPTH + 1,
+            expectViolation: true,
+            expectSeams: 1,
+        },
     ];
 
     let failures = 0;
@@ -5616,7 +5960,12 @@ function selfTestReadSeams() {
         const findings = [];
         const seams = [];
         const usedDiscriminators = new Set();
-        analyzeReadSeams(sf, 't.ts', findings, seams, { usedDiscriminators });
+        // #12360: a fixture may pin the bound by asking for a DIFFERENT depth.
+        // Undefined for every other case, which is the shipped constant.
+        analyzeReadSeams(sf, 't.ts', findings, seams, {
+            usedDiscriminators,
+            maxReadWrapperDepth: c.maxReadWrapperDepth,
+        });
         const got = findings.length > 0;
         const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
         const seamMismatch = c.expectSeams !== undefined && seams.length !== c.expectSeams;
@@ -5644,7 +5993,11 @@ function selfTestReadSeams() {
         if (got !== c.expectViolation || countMismatch || seamMismatch || discriminatorMismatch || inventsMismatch) {
             failures++;
             console.error(
-                `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
+                `  ✗ ${c.name}` +
+                    (c.maxReadWrapperDepth !== undefined
+                        ? ` [at maxReadWrapperDepth=${c.maxReadWrapperDepth}]`
+                        : '') +
+                    `: expected violation=${c.expectViolation}` +
                     (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
                     (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
                     (c.expectInvents !== undefined ? ` invents=${JSON.stringify([...c.expectInvents].sort())}` : '') +
@@ -5734,6 +6087,9 @@ if (args.includes('--self-test')) {
     const logLevelStatus = selfTest();
     const readSeamStatus = selfTestReadSeams();
     process.exit(logLevelStatus || readSeamStatus ? 1 : 0);
+} else if (args.includes('--depth-cost')) {
+    // A diagnostic, deliberately not part of any verdict — see `reportDepthCost`.
+    process.exit(reportDepthCost());
 } else {
     process.exit(run({ list: args.includes('--list') }));
 }
