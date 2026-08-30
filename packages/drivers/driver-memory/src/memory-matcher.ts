@@ -163,6 +163,65 @@ function noValueSatisfiesNegation(op: string): boolean {
 }
 
 /**
+ * [#13495/#13549] Is `value` inside the closed range `[min, max]`?
+ *
+ * `$between` is the conjunction of `$gte min` and `$lte max`. That is not an
+ * interpretation of the operator, it is what this package's LIVE path compiles
+ * it to — `memory-driver.ts`'s `$between` arm writes `$gte`/`$lte` and hands
+ * them to mingo — so this face has to compute the same predicate.
+ *
+ * The arm used to be written the other way round, as an EXCLUSION test:
+ * `if (value < min || value > max) return false`. The two are equivalent only
+ * while both comparisons are MEANINGFUL, and against a null they are not: JS
+ * answers a relational comparison between a null and a string `false` in both
+ * directions (`null` coerces to `0`, the string to `NaN`). Neither disjunct
+ * fired, nothing returned false, and a bounded range silently stopped bounding
+ * — the WIDENING direction, which on an RLS read scope is a permission bypass
+ * rather than a degraded filter (#3948, and the identical notes this file
+ * already carries for the malformed `$between` shape and for `$null`). Two
+ * cards measured the two ways in:
+ *
+ * - #13495, the COMPARAND axis: `{$between: [null, null]}` matched every
+ *   VALUED row, because `'a' < null` and `'a' > null` are both false.
+ * - #13549, the VALUE axis: a null-valued row sat inside a well-formed bounded
+ *   range, because `null < '2026-07-01'` and `null > '2026-07-15'` are both
+ *   false.
+ *
+ * ⚠️ Flipping the test to `!(value >= min && value <= max)` repairs the
+ * string cells and NOT the numeric ones — measured, not reasoned: `null`
+ * coerces to `0`, so `null >= -1 && null <= 1` is `true` and a null-valued row
+ * stays inside a numeric range while looking repaired on every string fixture
+ * the cards used. Comparability has to be decided BEFORE the comparison, which
+ * is what this function does:
+ *
+ * - a no-value row is not inside a range with a real bound, and a valued row is
+ *   not inside a range whose bound is no value — that comparison is not
+ *   meaningful, and JS answers it anyway;
+ * - the degenerate range whose BOTH ends are no value selects the no-value
+ *   rows, and only those.
+ *
+ * Every one of those answers is the one this package's live mingo path already
+ * gives, cell for cell — the tie-break this file has used since #5240, #5324,
+ * #5328 and #5374, each of which closed a "this face and the live one answer
+ * one filter two ways" divergence. No new reading of "no value" is asserted
+ * here: what a stored null MEANS is #13357's question and it is the
+ * maintainer's.
+ */
+function valueWithinRange(value: any, min: any, max: any): boolean {
+    const valueIsNoValue = value === null || value === undefined;
+    const minIsNoValue = min === null || min === undefined;
+    const maxIsNoValue = max === null || max === undefined;
+
+    // Mixed: one side is a value and the other is an absence. Not comparable.
+    if (valueIsNoValue !== minIsNoValue || valueIsNoValue !== maxIsNoValue) return false;
+
+    // Both ends and the value are absences: the degenerate null-to-null range.
+    if (valueIsNoValue) return true;
+
+    return value >= min && value <= max;
+}
+
+/**
  * Evaluate a specific condition against a value
  */
 function checkCondition(value: any, condition: any): boolean {
@@ -207,7 +266,30 @@ function checkCondition(value: any, condition: any): boolean {
         // match" for `$nin` and `$notContains` before their arms ever ran — one
         // of the two independent causes of the divergence #13166 measured, and
         // the only one this guard can reach.
-        if (value === undefined && op !== '$exists' && op !== '$null' && !noValueSatisfiesNegation(op)) {
+        //
+        // [#13494] `$eq` joins them, and for the SAME reason its complement
+        // `$ne` was already here: its arm decides the no-value case itself,
+        // in one place, with the loose `!=` that reads `undefined` and `null`
+        // as one absence. This guard was deciding it FIRST and differently, so
+        // one operator answered the two readings of "no value" two ways — a
+        // NULLED row reached the arm and matched `$eq: null`, a MISSING row
+        // short-circuited to "no match" before the arm ever ran. #5332 ruled
+        // that `$eq: null` IS the null predicate, and every other surface that
+        // can express the MISSING reading already answers it so — including
+        // this package's own live mingo path, measured: `['3']` where this
+        // face said `[]`.
+        //
+        // A non-null comparand keeps the answer it had, because the arm
+        // reaches the same verdict the guard did: `undefined != 'a'` is true,
+        // so the row is excluded one line further down.
+        //
+        // ⚠️ `$eq` ONLY, deliberately. The exemption is written over the
+        // OPERATOR and not over "the comparand is null", because the latter
+        // spelling would have moved `$in: [null]` / `$nin: [null]` with it —
+        // and those are #13357's cells, `needs-user-decision`, held for the
+        // maintainer. They are measured byte-identical across this change.
+        if (value === undefined && op !== '$exists' && op !== '$null' && op !== '$eq'
+            && !noValueSatisfiesNegation(op)) {
             return false; 
         }
 
@@ -239,7 +321,14 @@ function checkCondition(value: any, condition: any): boolean {
                 // no longer this face's ANSWER to a malformed range: it used to
                 // skip the comparison entirely, which meant "matches EVERY row"
                 // — the opposite of what the live query path silently answered.
-                if (Array.isArray(target) && (value < target[0] || value > target[1])) return false;
+                //
+                // [#13495/#13549] The comparison is {@link valueWithinRange}
+                // now, and no longer an EXCLUSION test spelled with `<` and
+                // `>`. Against a null comparand or a null value that test was
+                // false in BOTH directions, so nothing returned false and the
+                // range stopped bounding — the same widening this arm's note
+                // above records for the malformed SHAPE.
+                if (Array.isArray(target) && !valueWithinRange(value, target[0], target[1])) return false;
                 break;
 
             // Sets

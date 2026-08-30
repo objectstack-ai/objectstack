@@ -32,14 +32,21 @@
  * express this defect, and it is the face #5962 aligned. Every cell below is
  * scored against it.
  *
- * ⚠️ With ONE measured exception, kept deliberately and NOT repaired here:
- * `$between` ALONE already disagrees with the reference matcher on a row whose
- * value is `null` (live `['1','2']`, matcher `['1','2','4']` on the enumeration
- * fixture). That is the reference matcher's own `$between` defect — a
- * separately queued card — so the sweep below scores the live path against
- * ITSELF (the composition law) rather than against the matcher, and the
- * matcher is the oracle for the named cells, where the two agree operator by
- * operator.
+ * ⚠️ That exception is now CLOSED, and this note records it rather than
+ * repeating it. `$between` ALONE used to disagree with the reference matcher on
+ * a row whose value is `null` (live `['1','2']`, matcher `['1','2','4']` on the
+ * enumeration fixture) — the matcher's own `$between` defect, which #13549
+ * repaired together with #13494 and #13495. The two faces answer that filter
+ * identically now, and `memory-matcher-null-value-and-comparand.test.ts` holds
+ * them there.
+ *
+ * The sweep below still scores the live path against ITSELF (the composition
+ * law) rather than against the matcher, and that is deliberate: it is a
+ * statement about what a CLOBBER test measures — two constraints on one field
+ * select exactly the rows both select alone — and it keeps this file's verdict
+ * independent of the matcher's own cells. It was never a workaround for the
+ * divergence, so closing the divergence does not change it. The matcher remains
+ * the oracle for the named cells, where the two agree operator by operator.
  *
  * ## Why the sweep ranges over the vocabulary and not over three operators
  *
