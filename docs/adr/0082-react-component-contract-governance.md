@@ -152,6 +152,36 @@ This is Prime Directive #10 (declared ≠ enforced) landing on a gate — the sa
 1. **The file name.** Decision 4, its TL;DR line, the chain diagram and the **Consumers** row all said the ratchet runs inside `scripts/build-console.sh`. It did when this ADR was written; #4472 moved it into `scripts/gen-sdui-manifest.sh` (`pnpm sdui:manifest`) and nothing came back to correct the ADR. `build-console.sh` now *deliberately* produces no manifest — dumping one needs a real browser, and the console build must not drag a browser dependency in — so a reader following this ADR opened a file whose closing comment says the opposite of what the ADR sent them there for. `docs/audits/2026-06-react-blocks-conformance.md` carried the same stale pointer and is corrected with it.
 2. **The trigger was never stated.** "Not every PR" is a statement about where the check does *not* run. Decision 4 never said where it *does*, and the measured answer (#4690, #5960) was: nowhere automatic. No workflow runs `pnpm sdui:manifest`; no workflow installs Playwright for it; `packages/console/dist/` is gitignored; the published `@objectstack/console` tarball ships no `sdui.manifest.json`. The ratchet ran exactly when a human chose to run it, and no procedure told anyone to.
 
+   ⚠️ **Correction (#13091, 2026-08-30):** the first two clauses of this paragraph — "No workflow runs
+   `pnpm sdui:manifest`; no workflow installs Playwright for it" — stopped being true on **2026-08-10**,
+   three days after the ruling below and two after this addendum landed. `.github/workflows/cut-rc.yml`
+   arrived whole that day (PR [#7453](https://github.com/objectstack-ai/objectstack/pull/7453) for
+   [#7447](https://github.com/objectstack-ai/objectstack/issues/7447)) already carrying both steps, one
+   after the other: `Install a Playwright browser for the manifest dump` (`playwright install
+   chromium-headless-shell`, run against objectui's build tree because playwright is not a framework
+   dependency), then `Declaration-parity ratchet at the committed pin (ADR-0082 D4)`
+   (`run: pnpm sdui:manifest`). It was deliberate rather than an oversight — that step's own comment
+   cites #5960 and argues the carve-out: *"Installing a Playwright browser is fine HERE. The #5960
+   ruling that keeps the ratchet off CI is about not putting an objectui build plus a browser download
+   on every matching PR."* Nobody came back to this paragraph.
+
+   ⛔ **Nothing below is reversed; the on-demand verdict stands.** `cut-rc.yml` is
+   `workflow_dispatch`-only by construction — no `push:`, no `schedule:`, plus a guard step that fails
+   the run if the triggering event is anything else — and a human types the version they expect, which
+   is Prime Directive #15's manual release lane. So "nowhere automatic" and "the ratchet ran exactly
+   when a human chose to run it" both still hold; what went false is the *absolute form* of the
+   evidence, not the finding it supported. **The durable test, in place of a census:** before reading
+   any run of the ratchet as automatic coverage, read that workflow's `on:` block — a
+   `workflow_dispatch` lane is a human choosing, and the decision below already covers it. ⚠️ One
+   workflow does this today; ⛔ do not re-record that as the fact — "no workflow does X" is precisely
+   the shape that rotted here. The paragraph's other two clauses are unchanged: `packages/console/.gitignore`
+   still ignores `dist/`, and the published tarball still ships no `sdui.manifest.json` (verified
+   2026-08-30 against `@objectstack/console@17.2.0` on npm — the cut's own `pnpm run release` re-runs
+   `scripts/build-console.sh`, which `rm -rf`s `packages/console/dist` before packing, so the manifest
+   that step dumped never reaches the tarball). "Why not produce the manifest in CI" below is untouched
+   too: the cost it declined was per matching PR, and this lane runs a handful of times a month by
+   design.
+
 **Decision (maintainer, 2026-08-07).** The ratchet is an **on-demand gate**, and its trigger is the **objectui pin bump**:
 
 > `sdui.manifest.json` only changes when the objectui pin moves, so the correct trigger has always been the pin-update flow, not every PR. The procedure gains one line: run `pnpm sdui:manifest` when bumping the objectui pin, and the ratchet runs there. #4690 already guarantees this cannot go falsely green — a missing manifest fails loudly — so honest on-demand coverage beats expensive full coverage.
