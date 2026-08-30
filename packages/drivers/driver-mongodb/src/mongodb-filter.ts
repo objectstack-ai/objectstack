@@ -45,6 +45,9 @@ import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // live in the pattern source — see its docblock for why `$options: 'i'` is the
 // wrong tool.
 import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
+// [#13524] The declared authorable field vocabulary, IN DECLARATION ORDER —
+// the canonical order `FIELD_OPERATOR_RANK` below reads.
+import { FILTER_OPERATORS } from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -663,14 +666,17 @@ function translateCondition(
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
           if (hasOps) {
             const translated = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
-            // [#13195] A lowered `$exists` whose MongoDB key was already taken
-            // by a sibling operator on the same field. Merging it would drop one
-            // of the two constraints silently, so it becomes its own `$and`
-            // branch — see the merge in translateFieldOperators().
-            const presenceAnd = translated._presenceAnd as Record<string, unknown> | undefined;
-            if (presenceAnd) {
-              delete translated._presenceAnd;
-              andClauses.push({ [key]: presenceAnd } as Filter<any>);
+            // [#13524] Lowered writes whose MongoDB key was already taken by a
+            // sibling operator on the same field. Merging one would drop a
+            // constraint silently, so each becomes its own `$and` branch — see
+            // `assembleLoweredWrites()`. This consumed a single `_presenceAnd`
+            // when the guard covered `$exists` alone (#13195); it is a LIST now
+            // because the class has several members and one field constraint
+            // can contest more than one key.
+            const extraAnd = translated._extraAnd as Record<string, unknown>[] | undefined;
+            if (extraAnd) {
+              delete translated._extraAnd;
+              for (const branch of extraAnd) andClauses.push({ [key]: branch } as Filter<any>);
             }
             mongoFilter[key] = translated;
           } else {
@@ -698,6 +704,122 @@ function translateCondition(
 }
 
 /**
+ * [#13524] The canonical rank of an authorable field operator — the tie-break
+ * that decides which writer of a CONTESTED lowered key keeps the inline slot.
+ *
+ * Read straight off the spec's `FILTER_OPERATORS` declaration order rather than
+ * hand-copied, so a seventeenth operator is ranked the day it is declared. The
+ * rank of `$exists` (last in that list) is what makes this generalisation emit,
+ * byte for byte, the documents #13195's guard already emits for the one
+ * operator it moved. `$like` / `$ilike` are declared but NOT translated by this
+ * driver — the `default:` arm refuses them before the assembly runs — so the
+ * fallback below is a totality floor, never a live path.
+ */
+const FIELD_OPERATOR_RANK: ReadonlyMap<string, number> = new Map(
+  FILTER_OPERATORS.map((op, index) => [op as string, index] as const),
+);
+
+/** One write of one lowered key, tagged with the operator that produced it. */
+interface LoweredWrite {
+  /** The AUTHORABLE operator this write came from — what ranks it. */
+  readonly op: string;
+  /** The key MongoDB understands, which is NOT always `op`. */
+  readonly key: string;
+  readonly value: unknown;
+}
+
+/**
+ * [#13524] Assemble lowered writes into one operator document, promoting every
+ * write whose key is already TAKEN into its own condition instead of letting it
+ * overwrite the sitting one.
+ *
+ * ## The defect this closes — a CLASS, not an instance
+ *
+ * Several authorable operators do not translate to a key of their own name.
+ * They write keys an author can ALSO write on the same field constraint, so two
+ * constraints land on one key of one object literal and the second assignment
+ * wins. One constraint disappears — no error, no warning, and nothing in the
+ * emitted document to see it by — and WHICH one disappears is decided by the
+ * author's key order, because that is the order `Object.entries` walks.
+ *
+ * Enumerated over the whole declared vocabulary (probed one operator at a time
+ * and intersected, not reasoned), the contested keys on this face are:
+ *
+ * | lowered key | written by |
+ * |---|---|
+ * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$gte` | `$gte`, `$between` |
+ * | `$lte` | `$lte`, `$between` |
+ * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
+ * | `$regex` | `$contains`, `$startsWith`, `$endsWith`, `$icontains` |
+ *
+ * Two of those rows had not been named anywhere. `$lte` → `$lt` is a clobber on
+ * a bare `YYYY-MM-DD` upper bound. And the `$regex` row is this driver's alone:
+ * `driver-memory` promotes its string family to `$and` branches already
+ * (`_multiRegex`), while here `{name: {$startsWith: 'a', $endsWith: 'z'}}`
+ * emitted `{name: {$regex: 'z$'}}` and its key-swapped twin `{name: {$regex:
+ * '^a'}}` — measured, one anchor silently gone in each direction. `$not` is
+ * written by `$notContains` and by nothing else, so it is covered here by
+ * construction rather than curatively.
+ *
+ * ## The rule, and why it is this one
+ *
+ * Free key → merge inline (the overwhelmingly common case). Taken key → the
+ * write becomes its own `$and` branch on the same field, where both constraints
+ * survive. That is exactly the guard #13195 landed for `$exists` alone,
+ * generalised to every writer rather than restated once per operator.
+ * `driver-memory`'s reference matcher loops the operators and therefore cannot
+ * express this defect at all; it is the oracle both drivers agree with.
+ *
+ * ## Why rank, and not author order
+ *
+ * The inline slot goes to the LOWEST-RANKED writer, never to the first one the
+ * author happened to type. Author order would keep the ANSWER correct — `$and`
+ * is commutative — while leaving the emitted DOCUMENT a function of key order,
+ * which is the property this card exists to remove. Ranking makes which
+ * constraint sits inline, and which branches are promoted, a pure function of
+ * the constraint SET: the two key orders of one predicate emit DEEP-EQUAL
+ * documents, and a test asserts exactly that.
+ *
+ * ⚠️ Deep-equal, not byte-identical, and the difference is deliberate. Writes
+ * are COLLECTED in author order and only assembled here, so refusals still fire
+ * in the order the author wrote them and an UNCONTESTED key still lands in its
+ * original insertion position — `{$between: […], $lte: x}` and its twin emit
+ * `{$gte, $lte}` with the two keys in opposite insertion order, carrying the
+ * same constraints. A filter with no contested key emits exactly what it
+ * emitted before.
+ *
+ * The promotion travels to `translateCondition` as an `_extraAnd` sentinel,
+ * which lifts each branch into its `$and` list — the shape `_presenceAnd` used
+ * before this subsumed it.
+ */
+function assembleLoweredWrites(writes: readonly LoweredWrite[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const byKey = new Map<string, LoweredWrite[]>();
+  for (const write of writes) {
+    const group = byKey.get(write.key);
+    if (group) group.push(write);
+    else byKey.set(write.key, [write]);
+  }
+  const extraAnd: Record<string, unknown>[] = [];
+  for (const [key, group] of byKey) {
+    // Single writer is the common case and must not be perturbed at all.
+    if (group.length > 1) {
+      group.sort(
+        (a, b) =>
+          (FIELD_OPERATOR_RANK.get(a.op) ?? Number.MAX_SAFE_INTEGER) -
+          (FIELD_OPERATOR_RANK.get(b.op) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+    result[key] = group[0]!.value;
+    for (let i = 1; i < group.length; i++) extraAnd.push({ [key]: group[i]!.value });
+  }
+  if (extraAnd.length > 0) result._extraAnd = extraAnd;
+  return result;
+}
+
+/**
  * Translate ObjectStack field-level operators into MongoDB operators.
  *
  * `kind` is the declared temporal type of the field these operators apply to,
@@ -719,12 +841,22 @@ function translateFieldOperators(
   field = '<field>',
   path = 'filter',
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
   const store = (v: unknown) => coerceTemporalValue(v, kind);
-  /** [#13195] `$exists`, lowered — see the merge at the end of this function. */
-  let presence: Record<string, unknown> | undefined;
+  /**
+   * [#13524] Every lowered write, collected in AUTHOR order and assembled by
+   * {@link assembleLoweredWrites} after the loop. Collected rather than
+   * assigned because an arm cannot know whether the key it wants is already
+   * spoken for by a sibling operator the author wrote LATER — which is the
+   * whole of the defect this replaces. It subsumes #13195's single-operator
+   * `presence` collection: `$exists` is one writer among the rest now.
+   */
+  const writes: LoweredWrite[] = [];
 
   for (const [op, value] of Object.entries(ops)) {
+    /** Record one lowered write for the operator this iteration is on. */
+    const put = (loweredKey: string, loweredValue: unknown): void => {
+      writes.push({ op, key: loweredKey, value: loweredValue });
+    };
     switch (op) {
       // Direct mappings (ObjectStack → MongoDB are identical)
       case '$eq':
@@ -734,7 +866,7 @@ function translateFieldOperators(
       case '$lt':
       case '$in':
       case '$nin':
-        result[op] = store(value);
+        put(op, store(value));
         break;
 
       // [#13195] Value-independent — a presence predicate takes a boolean, not
@@ -759,9 +891,11 @@ function translateFieldOperators(
       // already agreed, is unmoved. Measured on a real mongod 8.2.6 while this
       // cell was pinned.
       case '$exists':
-        // Collected, not assigned: the merge at the end of this function has to
-        // know whether the key this lowers to is already spoken for.
-        presence = value === true ? { $ne: null } : { $eq: null };
+        // Collected, not assigned: the assembly has to know whether the key
+        // this lowers to is already spoken for. [#13524] Since the class was
+        // generalised this arm is no longer special — it `put`s like every
+        // other writer and the shared rule ranks it.
+        put(value === true ? '$ne' : '$eq', null);
         break;
 
       case '$lte': {
@@ -769,9 +903,12 @@ function translateFieldOperators(
         // driver-sql twin is #3777): `<= '2026-07-28'` compiles half-open
         // (`< '2026-07-29'`) so instants on the final day stay in;
         // order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
+        // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is a
+        // member of the clobber class that no card had named. See
+        // {@link assembleLoweredWrites}.
         const nextDay = nextUtcCalendarDay(value);
-        if (nextDay != null) result.$lt = store(nextDay);
-        else result.$lte = store(value);
+        if (nextDay != null) put('$lt', store(nextDay));
+        else put('$lte', store(value));
         break;
       }
 
@@ -794,7 +931,7 @@ function translateFieldOperators(
       // metacharacters. The deliberate case-insensitive spelling is
       // `$icontains` below — one operator, one answer, per #5374.
       case '$contains':
-        result.$regex = escapeRegex(String(value));
+        put('$regex', escapeRegex(String(value)));
         break;
 
       case '$notContains':
@@ -802,15 +939,20 @@ function translateFieldOperators(
         // pattern under `$not` is the same predicate, so a flag left here would
         // have excluded rows the positive form includes — the negation widening
         // rather than mirroring.
-        result.$not = { $regex: escapeRegex(String(value)) };
+        put('$not', { $regex: escapeRegex(String(value)) });
         break;
 
+      // [#13524] These four all write `$regex`, so before the assembly below
+      // two of them on one field left only the LAST — `driver-memory` promoted
+      // its string family to `$and` branches years earlier and this face never
+      // did. Measured: `{$startsWith:'a', $endsWith:'z'}` emitted
+      // `{$regex:'z$'}` and the key-swapped twin `{$regex:'^a'}`.
       case '$startsWith':
-        result.$regex = `^${escapeRegex(String(value))}`;
+        put('$regex', `^${escapeRegex(String(value))}`);
         break;
 
       case '$endsWith':
-        result.$regex = `${escapeRegex(String(value))}$`;
+        put('$regex', `${escapeRegex(String(value))}$`);
         break;
 
       // [#6520] `$icontains` — case-insensitive over ASCII and nothing else.
@@ -830,7 +972,7 @@ function translateFieldOperators(
       // to keep: `$options` is a RETIRED operator (#5702), and the only
       // sanctioned case-insensitive answer on this driver is the pattern below.
       case '$icontains':
-        result.$regex = asciiCaseInsensitiveRegexSource(String(value));
+        put('$regex', asciiCaseInsensitiveRegexSource(String(value)));
         break;
 
       // Range operator → $gte + upper bound (half-open on a bare-day max,
@@ -854,10 +996,10 @@ function translateFieldOperators(
       // path spelling, so the wire answer is identical whichever fires.
       case '$between': {
         if (!isBetweenRange(value)) throw malformedBetweenError(field, value, `${path}.$between`);
-        result.$gte = store(value[0]);
+        put('$gte', store(value[0]));
         const betweenNextDay = nextUtcCalendarDay(value[1]);
-        if (betweenNextDay != null) result.$lt = store(betweenNextDay);
-        else result.$lte = store(value[1]);
+        if (betweenNextDay != null) put('$lt', store(betweenNextDay));
+        else put('$lte', store(value[1]));
         break;
       }
 
@@ -885,9 +1027,9 @@ function translateFieldOperators(
       case '$null':
         if (typeof value !== 'boolean') throw nonBooleanNullComparandError(field, value, `${path}.$null`);
         if (value === true) {
-          result.$eq = null;
+          put('$eq', null);
         } else {
-          result.$ne = null;
+          put('$ne', null);
         }
         break;
 
@@ -935,35 +1077,15 @@ function translateFieldOperators(
     }
   }
 
-  // [#13195] Merge the lowered `$exists`, and do NOT let it clobber a sibling.
+  // [#13524] Assemble every lowered write, and do NOT let one clobber another.
   //
-  // The lowering reuses `$ne` / `$eq` — MongoDB keys an AUTHOR can also write
-  // on the same field. `{name: {$exists: true, $ne: 'b'}}` would assign `$ne`
-  // twice into one object, and whichever ran last would win: one constraint
-  // vanishes, and WHICH one depends on the author's key order. Measured before
-  // this guard existed: that filter emitted `{name: {$ne: 'b'}}` and the
-  // key-swapped `{name: {$ne: 'b', $exists: true}}` emitted `{name: {$ne:
-  // null}}` — one predicate, two different documents, neither carrying both
-  // constraints.
-  //
-  // Free key → merge inline (the common case, `$exists` alone on a field).
-  // Taken → hand the caller a `_presenceAnd` sentinel, which `translateCondition`
-  // lifts into its `$and` list, where both constraints survive.
-  //
-  // ⚠️ Scope: this guards the operator #13195 moved, and only it. The identical
-  // clobber is reachable today through `$null` (`$eq`/`$ne`) and `$between`
-  // (`$gte`/`$lte`/`$lt`) — measured, pre-existing, filed separately rather
-  // than half-fixed here.
-  if (presence) {
-    const presenceKey = Object.keys(presence)[0]!;
-    if (Object.prototype.hasOwnProperty.call(result, presenceKey)) {
-      result._presenceAnd = presence;
-    } else {
-      Object.assign(result, presence);
-    }
-  }
-
-  return result;
+  // #13195 landed this rule for `$exists` alone and said in this spot that the
+  // identical clobber was reachable through `$null` and `$between`. Enumerating
+  // the declared vocabulary instead of the noticed operators found two more on
+  // this face: `$lte` on a bare calendar day (it lowers onto `$lt`), and the
+  // whole `$regex` string family, which `driver-memory` had promoted for years
+  // and this driver never did. See {@link assembleLoweredWrites}.
+  return assembleLoweredWrites(writes);
 }
 
 /**

@@ -675,6 +675,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const normalizedFilters = this.normalizeFilters(query);
     if (normalizedFilters.length > 0) {
       const matchStage: Record<string, any> = {};
+      /**
+       * [#13524] Predicates for a member that already has one — see the
+       * promotion below the loop for why they cannot be assigned.
+       */
+      const contested: Record<string, any>[] = [];
       for (const filter of normalizedFilters) {
         const fieldPath = this.resolveFieldPath(cube, filter.member);
         // [#5374] The operator decides the WHOLE predicate, not just its name —
@@ -687,7 +692,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
         // predicate over `is_active` or `closed_at` selects the same rows
         // `find()` selects instead of none / all of them.
-        matchStage[fieldPath] = this.mongoPredicateBuilder(filter.operator)({
+        const predicate = this.mongoPredicateBuilder(filter.operator)({
           comparands: this.comparandsFor(cube, filter.member, filter.values),
           raw: filter.values,
           substring: (value) => this.driver.filterSubstringPattern(value),
@@ -695,7 +700,33 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // than from the driver's Unicode-folding `filterSubstringPattern`.
           asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
         });
+        // [#13524] This was `matchStage[fieldPath] = …`, and the assignment was
+        // a WHOLESALE clobber — the widest member of this card's class. The two
+        // document-shaped translators lose a constraint only when two operators
+        // happen to lower onto the SAME key; here the stage is keyed by field
+        // path alone, so the second predicate on a member replaced the first
+        // ENTIRELY, for every operator pair. And `flattenFilterCondition` folds
+        // `$and` into this same flat list, so `{$and: [{name: {$contains:'a'}},
+        // {name: {$ne:'b'}}]}` — two separate nodes, not one operator map —
+        // lost a constraint too. Measured on a three-row fixture:
+        // `{name: {$contains:'a', $ne:'b'}}` aggregated ['1','3'] and its
+        // key-swapped twin ['1'], while the reference matcher said ['1'].
+        //
+        // Same rule as the translators: free member merges inline, a taken one
+        // becomes its own `$and` branch of the SAME `$match`, where both
+        // predicates survive. No ranking is needed here — unlike a contested
+        // operator key, nothing is overwritten, so which predicate sits inline
+        // changes the document's shape but never its answer.
+        if (Object.prototype.hasOwnProperty.call(matchStage, fieldPath)) {
+          contested.push({ [fieldPath]: predicate });
+        } else {
+          matchStage[fieldPath] = predicate;
+        }
       }
+      // A field path can never BE `$and` — `resolveFieldPath` resolves cube
+      // members, and `flattenFilterCondition` refuses `$or` / `$not` and folds
+      // `$and` away before this runs — so this cannot collide with a member.
+      if (contested.length > 0) matchStage.$and = contested;
       if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
       }
