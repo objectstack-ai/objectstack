@@ -4418,6 +4418,11 @@ export class ObjectStackProtocolImplementation implements
         // dashboard publish — without it every legitimate board reads as
         // dangling (see RuntimeStackContext.datasets).
         const datasets = listCollection('dataset', 'datasets');
+        // [#13216] The resolution universe validateViewPageRefs needs for a
+        // `type: 'page'` view publish — without it every legitimate page mount
+        // reads as dangling (see RuntimeStackContext.pages). Gathered on the
+        // same terms as the four above: per write, on an `active` publish only.
+        const pages = listCollection('page', 'pages');
 
         // [#9612] The closure this write is judged against. Resolved from the
         // package registry — the impure read — and handed to the pure gate as
@@ -4433,7 +4438,8 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            // [#10377] The batch's own pending drafts join the four
+            pages,
+            // [#10377] The batch's own pending drafts join the five
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),

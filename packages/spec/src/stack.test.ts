@@ -1506,3 +1506,63 @@ describe('defineStack — ADR-0087 D2 conversion notices', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe('defineStack - `type: page` view → page cross-reference (#13216)', () => {
+  const baseManifest = {
+    id: 'com.example.test',
+    name: 'test-project',
+    version: '1.0.0',
+    type: 'app' as const,
+  };
+  const account = { name: 'account', fields: { name: { type: 'text' } } };
+  const dashboard = {
+    name: 'account_dashboard',
+    label: 'Account Dashboard',
+    type: 'app' as const,
+    kind: 'html' as const,
+    source: '<Block type="element:text" text="hi" />',
+  };
+  const mount = (pageName: string) => ({ type: 'page' as const, pageName, columns: [] });
+
+  it('accepts a mount whose page the stack declares', () => {
+    expect(() => defineStack({
+      manifest: baseManifest,
+      objects: [account],
+      pages: [dashboard],
+      views: [{ name: 'account', object: 'account', list: mount('account_dashboard') }],
+    })).not.toThrow();
+  });
+
+  it('detects a mount naming a page that does not exist', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [account],
+      pages: [dashboard],
+      views: [{ name: 'account', object: 'account', list: mount('ghost_dashboard') }],
+    };
+    expect(() => defineStack(config)).toThrow('ghost_dashboard');
+    expect(() => defineStack(config)).toThrow('cross-reference validation failed');
+  });
+
+  it('detects it on `objects[].listViews.<key>` too', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ ...account, listViews: { dash: mount('ghost_dashboard') } }],
+      pages: [dashboard],
+    };
+    expect(() => defineStack(config)).toThrow('ghost_dashboard');
+  });
+
+  // The deliberate size gate, shared with the nav / modal-action page checks in
+  // the same function: a stack declaring NO pages may be mounting one another
+  // package provides, so the build-time check stands down and lint's
+  // `validateViewPageRefs` is what speaks. Pinning it here keeps the three page
+  // references on ONE policy instead of three.
+  it('stands down when the stack declares no pages at all (lint reports it instead)', () => {
+    expect(() => defineStack({
+      manifest: baseManifest,
+      objects: [account],
+      views: [{ name: 'account', object: 'account', list: mount('provided_elsewhere') }],
+    })).not.toThrow();
+  });
+});
