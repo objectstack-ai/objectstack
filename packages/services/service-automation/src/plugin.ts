@@ -866,7 +866,12 @@ export class AutomationServicePlugin implements Plugin {
             if (ql && typeof ql.find === 'function') {
                 const engineQl = ql;
                 this.engine.setUserGrantsResolver(async (userId, tenantId) => {
-                    const grants = await resolveUserAuthzGrants(engineQl, userId, { tenantId });
+                    // [#11971] ⭐ Ruled bypass of the #11633 leg-B grants cache
+                    // (maintainer acceptance 2026-08-25): `runAs:'user'` runs
+                    // are not request-shaped and can be long-lived — they must
+                    // not pin a cached envelope, whatever
+                    // `OS_AUTHZ_GRANTS_CACHE_TTL_MS` says.
+                    const grants = await resolveUserAuthzGrants(engineQl, userId, { tenantId, bypassGrantsCache: true });
                     return {
                         positions: grants.positions,
                         permissions: grants.permissions,

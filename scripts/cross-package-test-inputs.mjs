@@ -441,6 +441,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/data/objects/contact.object.ts',
       'examples/app-showcase/src/system/translations/index.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
+      //   src/validate-jsx-pages.production-witness.test.ts (#12924) imports the
+      //     three shipped html pages LIVE and holds the wired gate's census over
+      //     them equal to the ratchet-to-zero ledger (sdui-jsx-baseline.json), so
+      //     an edit to any page — or to the repo-root manifest whose vocabulary
+      //     judges them — must re-run this package's suite. The manifest is the
+      //     checked-in producer artefact `resolveSduiManifest()` picks up from
+      //     the repo root; regenerating it moves the census, so it is an input
+      //     in exactly the #7802 sense.
+      'examples/app-showcase/src/ui/pages/capability-map.page.ts',
+      'examples/app-showcase/src/ui/pages/command-center-jsx.page.ts',
+      'examples/app-showcase/src/ui/pages/start-here.page.ts',
+      'sdui.manifest.json',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`

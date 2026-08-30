@@ -36,6 +36,26 @@
  * omission, and the SDK's own `ToolAnnotationsSchema` documents the defaults
  * that then apply (`readOnlyHint` false, `destructiveHint` **true**), which is
  * the conservative reading the old `false` inverted.
+ *
+ * THE SECOND DEFECT, PINNED HERE TOO. `openWorldHint: false` was asserted for
+ * every bridged tool from no source at all — the sibling of the above, one
+ * hint later. It is now sourced the same way the `readOnlyHint` fallback is,
+ * from platform-registered names (`PLATFORM_PROVIDED_TOOL_NAMES`), and
+ * omitted for everyone else.
+ *
+ * ⚠️ AND ITS OMISSION IS PINNED DIFFERENTLY, ON PURPOSE. The same SDK schema
+ * documents `openWorldHint` as **`Default: true`**, so an omitted world hint
+ * is read as an OPEN world — the one place in this file where absence is not
+ * the cautious answer, only the honest one. A future reader tempted to make
+ * the three hints behave alike has to make these pins red first, which is the
+ * point of stating it here as well as at the call site.
+ *
+ * ⚠️ ABSENCE MEANS AN ABSENT KEY, and these cases say so with
+ * `Object.hasOwn`, not with `toBeUndefined()`. A spread of
+ * `{ openWorldHint: undefined }` would satisfy `toBeUndefined()` while still
+ * putting the property on the object; every such case below carries a
+ * same-object positive control (a platform tool listed in the same call) so a
+ * `false` from {@link hasHint} is a reading rather than a typo'd key name.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -155,6 +175,19 @@ async function annotationsOf(
   return { session, byName: Object.fromEntries(listed.map((t: any) => [t.name, t])) };
 }
 
+/**
+ * Own-property presence on the PARSED WIRE object.
+ *
+ * ⚠️ Not `toBeUndefined()`, which a spread of `{ openWorldHint: undefined }`
+ * would also satisfy while still putting the property on the object — the
+ * distinction these cases exist to make. ⛔ And not `Object`.`hasOwn` either:
+ * that is ES2022 and this repo compiles at `lib: ["ES2020"]`, so it type-errors
+ * where the runtime (Node 22) would have run it happily — a gap this package's
+ * own `typecheck` cannot report, because its tsconfig excludes test files.
+ */
+const hasHint = (annotations: Record<string, unknown> | undefined, hint: string): boolean =>
+  Object.prototype.hasOwnProperty.call(annotations ?? {}, hint);
+
 const tool = (name: string, extra: Partial<AIToolDefinition> = {}): AIToolDefinition => ({
   name,
   description: `the ${name} tool`,
@@ -215,11 +248,13 @@ describe('bridgeTools — the safety annotations a client receives', () => {
     const s = await annotationsOf([tool('send_invoice_email')]);
     openSession = s.session;
 
-    const annotations = s.byName.send_invoice_email.annotations;
+    const annotations = s.byName.send_invoice_email.annotations ?? {};
     expect(annotations.destructiveHint).toBeUndefined();
     expect(annotations.readOnlyHint).toBeUndefined();
-    // The hint the bridge does still assert for every tool, unchanged here.
-    expect(annotations.openWorldHint).toBe(false);
+    // ...and no world hint either. `send_invoice_email` is the case in the
+    // name: an app tool that reaches an outbound service was being told to
+    // every client as closed-world.
+    expect(hasHint(annotations, 'openWorldHint')).toBe(false);
   });
 
   it('what the definition declares outranks what its name suggests', async () => {
@@ -237,6 +272,9 @@ describe('bridgeTools — the safety annotations a client receives', () => {
     expect(PLATFORM_PROVIDED_TOOL_NAMES.has('aggregate_records')).toBe(false);
     expect(s.byName.aggregate_records.annotations.readOnlyHint).toBeUndefined();
     expect(s.byName.aggregate_records.annotations.destructiveHint).toBeUndefined();
+    // Nor a world hint from this bridge. It gets one at its OWN registration
+    // site in `mcp-http-tools.ts`, which is where that fact is known.
+    expect(hasHint(s.byName.aggregate_records.annotations, 'openWorldHint')).toBe(false);
   });
 
   /**
@@ -273,5 +311,96 @@ describe('bridgeTools — the safety annotations a client receives', () => {
       expect(s.byName[stranger.name].annotations.readOnlyHint).toBeUndefined();
       expect(s.byName[stranger.name].annotations.destructiveHint).toBeUndefined();
     }
+  });
+
+  // ── openWorldHint ────────────────────────────────────────────────────────
+
+  it('CONTROL: a platform-registered name still receives `openWorldHint: false`', async () => {
+    const s = await annotationsOf([
+      tool('query_records'),
+      tool('list_objects'),
+      // Platform names OUTSIDE the two safety-class sets. These are the tools
+      // a fallback keyed on those sets instead of the registry would have
+      // silently flipped to the protocol's open-world default.
+      tool('create_object'),
+      tool('list_metadata'),
+      tool('describe_metadata'),
+    ]);
+    openSession = s.session;
+
+    for (const name of ['query_records', 'list_objects', 'create_object', 'list_metadata', 'describe_metadata']) {
+      expect(PLATFORM_PROVIDED_TOOL_NAMES.has(name)).toBe(true);
+      expect(s.byName[name].annotations.openWorldHint).toBe(false);
+    }
+    // The safety hints are sourced separately: `create_object` is a platform
+    // name in NEITHER safety set, so it keeps the world hint and no other.
+    expect(s.byName.create_object.annotations.readOnlyHint).toBeUndefined();
+    expect(s.byName.create_object.annotations.destructiveHint).toBeUndefined();
+  });
+
+  it('an app-registered tool receives NO `openWorldHint` KEY — absence, not `undefined`', async () => {
+    const s = await annotationsOf([
+      tool('check_weather'),
+      tool('ask_llm', { requiresConfirmation: false }),
+      tool('delete_opportunity', { requiresConfirmation: true }),
+      // Positive control in the same `tools/list` answer: `hasOwn` must be
+      // able to say `true` about this exact wire object, or the `false`s
+      // below would be indistinguishable from a misspelled key.
+      tool('query_records'),
+    ]);
+    openSession = s.session;
+
+    expect(hasHint(s.byName.query_records.annotations, 'openWorldHint')).toBe(true);
+
+    for (const name of ['check_weather', 'ask_llm', 'delete_opportunity']) {
+      const annotations = s.byName[name].annotations ?? {};
+      expect(hasHint(annotations, 'openWorldHint')).toBe(false);
+      expect(annotations.openWorldHint).toBeUndefined();
+    }
+
+    // Independently sourced: declaring `requiresConfirmation` buys the SAFETY
+    // hints and buys nothing about the world, which is the whole point of the
+    // two derivations being separate.
+    expect(s.byName.delete_opportunity.annotations.destructiveHint).toBe(true);
+    expect(s.byName.ask_llm.annotations.destructiveHint).toBe(false);
+  });
+
+  /**
+   * The world-hint counterpart of the fallback invariant above, driven across
+   * the whole registry at once: `openWorldHint: false` is a claim the platform
+   * can source about the tools it registers, and about nothing else.
+   */
+  it('exactly the platform-registered names carry `openWorldHint`, and every one of them carries `false`', async () => {
+    const platform = [...PLATFORM_PROVIDED_TOOL_NAMES].map((name) => tool(name));
+    const strangers = [
+      'aggregate_records',
+      'action_close_deal',
+      'check_weather',
+      'send_invoice_email',
+      'void_invoice',
+    ].map((name) => tool(name));
+
+    const s = await annotationsOf([...platform, ...strangers]);
+    openSession = s.session;
+
+    const withWorldHint = Object.values(s.byName)
+      .filter((t: any) => hasHint(t.annotations, 'openWorldHint'))
+      .map((t: any) => t.name)
+      .sort();
+
+    // ⚠️ Non-vacuity first: `toEqual` between two empty arrays passes, so an
+    // unbuilt or empty registry would make every assertion below say nothing.
+    expect(PLATFORM_PROVIDED_TOOL_NAMES.size).toBeGreaterThan(0);
+    expect(withWorldHint.length).toBe(PLATFORM_PROVIDED_TOOL_NAMES.size);
+    expect(withWorldHint).toEqual([...PLATFORM_PROVIDED_TOOL_NAMES].sort());
+    for (const name of withWorldHint) {
+      expect(s.byName[name].annotations.openWorldHint).toBe(false);
+    }
+
+    // `action_close_deal` is the family case stated explicitly: the runtime
+    // materialises `action_<name>` wrappers around an app's OWN actions, so a
+    // membership test widened to `PLATFORM_TOOL_FAMILY_PREFIXES` would put
+    // this bridge back to claiming a closed world over app-defined behaviour.
+    expect(hasHint(s.byName.action_close_deal.annotations, 'openWorldHint')).toBe(false);
   });
 });

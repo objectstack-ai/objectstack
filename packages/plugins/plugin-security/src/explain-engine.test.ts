@@ -1154,3 +1154,80 @@ describe('explainAccess — export axis (#3544)', () => {
     expect(d.allowed).toBe(false);
   });
 });
+
+// ─── #11971 — pin 6: the explainer bypasses the leg-B grants cache ──────────
+//
+// The ruled bypass list of #11633 (maintainer acceptance 2026-08-25): the
+// explainer is the tool an administrator uses to VERIFY that a revocation took
+// effect, so an explainer answering from cache would explain a state that no
+// longer exists at exactly the moment someone is checking. This pin makes the
+// cache demonstrably STALE first (the control), then asserts the explainer
+// does not repeat it — the end of the chain, not "the flag was passed".
+
+describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass list)', () => {
+  const TTL_ENV = 'OS_AUTHZ_GRANTS_CACHE_TTL_MS';
+
+  /**
+   * `makeGrantQl` plus the #11968 seams (write epoch + `registerMiddleware`),
+   * so the grants cache WOULD engage for this ql if the explainer let it —
+   * a seamless double would make this pin pass vacuously (the cache declines
+   * to cache against a ql whose writes it cannot see).
+   */
+  function makeSeamGrantQl(tables: Rows) {
+    type Listener = (epoch: number, reason: string) => void;
+    type Middleware = (
+      ctx: { object: string; operation: string },
+      next: () => Promise<void>,
+    ) => Promise<void>;
+    const middlewares: Middleware[] = [];
+    const listeners = new Set<Listener>();
+    const epoch = {
+      current: 0,
+      bump(reason: string): number {
+        epoch.current += 1;
+        for (const l of [...listeners]) l(epoch.current, reason);
+        return epoch.current;
+      },
+      subscribe(l: Listener): () => void {
+        listeners.add(l);
+        return () => { listeners.delete(l); };
+      },
+    };
+    return {
+      ...makeGrantQl(tables),
+      writeEpoch: epoch,
+      registerMiddleware(fn: Middleware): void { middlewares.push(fn); },
+    };
+  }
+
+  it('with the cache ON and provably stale, the explainer still observes the revocation immediately', async () => {
+    const saved = process.env[TTL_ENV];
+    process.env[TTL_ENV] = '3600000'; // one hour — nothing here may pass by expiry
+    try {
+      const tables: Rows = {
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+        sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+      };
+      const ql = makeSeamGrantQl(tables);
+
+      // Populate the cache through the SAME resolver every request uses.
+      const cached = await resolveUserAuthzGrants(ql, 'u2', { nowMs: NOW });
+      expect(cached.permissions).toContain('admin_full_access');
+
+      // Revoke WITHOUT an engine write: no seam reports it, so nothing
+      // retires the entry and the cached path keeps the old answer…
+      tables.sys_user_permission_set = [];
+      const stale = await resolveUserAuthzGrants(ql, 'u2', { nowMs: NOW });
+      expect(stale.permissions).toContain('admin_full_access'); // control: cache IS stale
+
+      // …and the explainer must not repeat it: force-fresh, whatever the TTL.
+      const ctx = await buildContextForUser(ql, 'u2', NOW);
+      expect(ctx.permissions).not.toContain('admin_full_access');
+      expect(ctx.hasPlatformAdminGrant).toBe(false);
+      expect(ctx.posture).not.toBe('PLATFORM_ADMIN');
+    } finally {
+      if (saved === undefined) delete process.env[TTL_ENV];
+      else process.env[TTL_ENV] = saved;
+    }
+  });
+});
