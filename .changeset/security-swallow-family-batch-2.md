@@ -50,3 +50,13 @@ repair. The **silence** is what is fixed here and it needed no contract; the
 ⛔ No entry was added to `scripts/durability-degradation.baseline.json` and the
 gate vocabulary is untouched in either direction, as the 2026-08-29 ruling
 requires until the family is repaired.
+
+⭐ One file outside the package changed, declared on #12981 before editing:
+`scripts/measure-durability-swallow-family.mjs` (the census instrument, wired
+into no workflow) pinned its `dark` positive control to
+`bootstrap-system-capabilities.ts` — one of the seven — so repairing it turned
+the instrument's own `--self-test` red. The control now names
+`plugin-sharing`'s `share-link-service.ts`, which batch 1 judged permanently
+OUT of the programme (a `use_count` telemetry stamp), because any tier-1 DARK
+member still ON the worklist is a control the programme is designed to destroy.
+No predicate, tier or vocabulary change; `--self-test` is green.

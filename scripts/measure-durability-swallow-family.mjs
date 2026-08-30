@@ -282,10 +282,22 @@ const POSITIVE_CONTROLS = [
     tier: 'carries-error',
   },
   {
-    file: 'packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts',
+    file: 'packages/plugins/plugin-sharing/src/share-link-service.ts',
     why:
-      'The unrepaired per-file copies: `async function tryInsert(...) { try { return await ql.insert(...); } '
-      + 'catch { return null; } }` and its `tryUpdate` sibling. The card\'s shape, verbatim, still standing.',
+      '`resolveToken`\'s usage stamp: `try { await this.engine.update(\'sys_share_link\', ...) } '
+      + 'catch { /* best-effort -- usage telemetry is a nice-to-have */ }`. Silent by the log axis, an '
+      + 'awaited write in the try, and nothing bound -- the dark shape exactly.\n\n'
+      + 'CHOSEN FOR ITS STABILITY, which is the property a dark control needs and the previous one '
+      + 'lacked. This control used to name `bootstrap-system-capabilities.ts`, whose `why` read "the '
+      + 'card\'s shape, verbatim, still standing" -- and #12981 batch 2 repaired it, which turned this '
+      + 'self-test red for doing exactly what the ruling asked. ANY tier-1 DARK member of the worklist '
+      + 'is a control the repair programme is designed to destroy, so repointing at another one only '
+      + 'moves the breakage to the batch that repairs THAT file. This member is different: batch 1 '
+      + 'judged it OUT of the programme on the merits -- the swallowed write is a `use_count` / '
+      + '`last_used_at` telemetry stamp, and escalating a FUNCTIONAL degradation to `error` is the '
+      + 'over-application AGENTS.md forbids -- so it is a genuine dark member with a recorded reason '
+      + 'to stay one. ⛔ If a later card ever does repair it, repoint this control at another member '
+      + 'ruled OUT rather than at a member merely not repaired YET.',
     tier: 'dark',
   },
 ];
