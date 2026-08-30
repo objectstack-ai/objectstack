@@ -426,7 +426,14 @@ describe('the walker recognizes shapes rather than guessing at them', () => {
   });
 
   it('returns the SAME row reference when nothing converts (copy-on-write)', () => {
-    const row = { name: 'clean', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } };
+    // The name is DOTTED because this is the file's only record-shaped fixture
+    // that reads as a template. The conversion chain never looks at `name` —
+    // measured: flat and dotted both return the same reference with zero
+    // notices — so the dot changes nothing this case proves. It exists so a
+    // reader copying this row does not inherit a body `ViewMetadataSchema`
+    // would reject: a record's `name` is the one spelling where the dot is
+    // required (`ui/view.zod.ts`'s header block states the three-way rule).
+    const row = { name: 'crm_lead.clean', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } };
     expect(applyConversionsToStoredItem('view', row)).toBe(row);
   });
 });
