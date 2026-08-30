@@ -352,9 +352,30 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/spec',
   ],
+  // #13176 re-baseline, on the onboarding limb above. The five deps after
+  // `@objectstack/metadata-core` here arrive from `tsconfig.test.json` — a
+  // program this repo had no equivalent of in this package until that card, and
+  // whose 89 test files were read by NO tsc program at all (measured per program
+  // with `--listFiles`: 0 of them in `tsconfig.json`, 0 in
+  // `tsconfig.scripts.json`). Every one of the five is annotated `via
+  // tsconfig.test.json` by this gate's own failure text, which is condition 1:
+  // none is newly reached through a program that was already counted.
+  // `paths` is not the tool here, by the doc-block's own measurement on
+  // PR #12570 rather than by preference — and `vitest.config.ts` aliases four of
+  // these to source already, so the RUNTIME axis is covered where it matters.
+  // The numbers, as condition 2 requires them stated in place (`--list`,
+  // workspace closure built):
+  //
+  //   before  94 programs / 77 packages, 54 entries, 238 package-dep pairs
+  //   after   95 programs / 77 packages, 54 entries, 243 package-dep pairs
+  //
+  // so +1 program, +0 entries (this package already had one) and +5 pairs — the
+  // five below and nothing else.
   '@objectstack/plugin-security': [
-    '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core',
-    '@objectstack/platform-objects', '@objectstack/spec',
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula',
+    '@objectstack/metadata-core', '@objectstack/metadata-protocol', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/plugin-sharing', '@objectstack/service-i18n',
+    '@objectstack/spec',
   ],
   // #11490 re-baseline: a NEW entry — reached only through `tsconfig.scripts.json`.
   '@objectstack/plugin-webhooks': ['@objectstack/spec'],

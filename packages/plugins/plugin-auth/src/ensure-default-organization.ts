@@ -36,7 +36,65 @@
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
+  /**
+   * The GUARANTEED channel. Required, which is what makes the `error` fallback
+   * below real rather than aspirational — see {@link logDurabilityFailure}.
+   */
   warn: (message: string, meta?: Record<string, any>) => void;
+  /**
+   * Durability-degradation channel (AGENTS.md "Degradation log levels", #4632).
+   * A bootstrap write that was supposed to land and did not is an `error`, not a
+   * `warn`: nothing looks broken afterwards, which is exactly why it has to be
+   * loud.
+   *
+   * OPTIONAL, deliberately (#9754): hosts do inject reduced sinks, and forcing
+   * this member would foreclose them. The fallback to the REQUIRED `warn` is
+   * therefore mandatory at every call site and lives in
+   * {@link logDurabilityFailure} so no site can forget it. That pairing —
+   * optional `error` beside a required `warn` — is the shape
+   * `check:optional-error-sink-contract` is satisfied by; an optional `error`
+   * beside an optional `warn` is the shape it exists to refuse.
+   *
+   * Signature matches `Logger.error` in `@objectstack/spec/contracts` (the CAUSE
+   * is its own second argument, meta is third), so the kernel logger satisfies
+   * this as-is. Getting the arity wrong would put the meta object in the error
+   * slot, where a `Logger` neither reads nor serializes it.
+   */
+  error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
+}
+
+/**
+ * Emit one durability-degradation line, falling back to `warn` when the host
+ * injected a sink with no `error`.
+ *
+ * The spelling is `logSeedDurabilityFailure` in `plugin-security`'s
+ * `per-organization-catalog.ts`, re-derived here rather than imported: that
+ * helper is deliberately absent from `plugin-security`'s `index.ts` (an
+ * intra-package helper, not public API), and `plugin-auth` does not depend on
+ * `plugin-security` at runtime. Its two prohibitions are the measured part and
+ * they carry across unchanged:
+ *
+ * ⛔ NOT `logger?.error?.(...)` — that prints NOTHING against a reduced sink,
+ * silently dropping the loudest line in this module in order to look tidy,
+ * which is the exact failure the rule exists to prevent.
+ *
+ * ⛔ NOT `(logger.error ?? logger.warn)(...)` — that evaluates to a bare
+ * FUNCTION and calls it with `this === undefined`; `@objectstack/core`'s
+ * `ObjectLogger` is a class whose `error` reaches for `this.writeErrorLike`, so
+ * a detached call throws. Plain-closure sinks — every double in this package's
+ * tests — survive it perfectly, which is why no suite would catch it. The
+ * property-access call form below keeps the receiver.
+ */
+function logDurabilityFailure(
+  logger: BootstrapLogger | undefined,
+  message: string,
+  meta?: Record<string, any>,
+): void {
+  // No single cause is in scope here: `tryInsert` answers `null`, not the
+  // thrown error, so the cause slot is `undefined` and the detail travels in
+  // meta — the same shape the sibling reporter in `plugin-security` uses.
+  if (logger?.error) logger.error(message, undefined, meta);
+  else logger?.warn?.(message, meta);
 }
 
 export interface EnsureDefaultOrganizationOptions {
@@ -160,7 +218,23 @@ export async function ensureDefaultOrganization(
       metadata: null,
     });
     if (!orgRow) {
-      logger?.warn?.('[default-org] failed to create default organization for platform admin');
+      // ⛔ `warn` was wrong here, and #12981 is why. `tryInsert` answers `null`
+      // for a refused write, the boot continues, and nothing downstream fails —
+      // which is the definition of the durability class in AGENTS.md, not the
+      // functional one.
+      logDurabilityFailure(
+        logger,
+        '[default-org] the Default Organization row was NOT created — the platform admin has no '
+          + 'organization, so under multi-org the default tenant_isolation RLS policy filters their '
+          + 'console to zero rows, and under single-org better-auth has no active org to resolve, so '
+          + 'there is no way to add a user at all (ADR-0081 D1). NOTHING ELSE FAILS AND THE BOOT GOES '
+          + 'ON LOOKING HEALTHY: this line is the only notice. Remedy: make the sys_organization '
+          + 'insert land — check the write permission and driver connectivity, and whether a legacy '
+          + 'unique index on `slug` is refusing `default`; the bootstrap re-runs on every '
+          + 'kernel:ready and after every sys_user_permission_set insert, so no manual repair is '
+          + 'needed once the write can land.',
+        { object: 'sys_organization', slug: 'default' },
+      );
       return { defaultOrgCreated: false, memberCreated: false, reason: 'org_insert_failed' };
     }
     defaultOrgId = orgRow?.id ?? newOrgId;
@@ -175,7 +249,17 @@ export async function ensureDefaultOrganization(
     role: 'owner',
   });
   if (!memRow) {
-    logger?.warn?.('[default-org] failed to bind platform admin to default organization');
+    logDurabilityFailure(
+      logger,
+      '[default-org] the platform admin was NOT bound to the Default Organization — the sys_member '
+        + 'row did not land, so their sessions carry no activeOrganizationId and the console stays '
+        + 'empty exactly as if no organization existed. The organization row itself IS present, so '
+        + 'the deployment looks healthier than it is and this line is the only notice. Remedy: make '
+        + 'the sys_member insert land — check the write permission, driver connectivity, and any '
+        + 'unique index over (organization_id, user_id); the bootstrap re-runs on every kernel:ready '
+        + 'and after every sys_user_permission_set insert, so the next pass binds it.',
+      { object: 'sys_member', organization: defaultOrgId, user: adminUserId },
+    );
     return {
       defaultOrgCreated,
       defaultOrgId,
