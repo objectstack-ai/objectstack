@@ -410,7 +410,7 @@ change isn't there"*, a confidently wrong verdict on someone else's work, worst 
 restore against that commit, never a moving ref name; verify a named remote-tracking
 ref's content by occurrence counts on disk; fetch into a ref you own (`git fetch origin
 <branch>:refs/<ns>/<id> -f`) and read that; diff restored paths against `BASE` before
-staging. ⛔ **No hook backs this one** — safe and unsafe spellings are both ordinary
+staging. ⛔ **No hook backs the moving-ref half** — safe and unsafe spellings are both ordinary
 `git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
 
 **⛔ Nor the build cache** — turbo resolves the repo root through the **common** dir, so every
