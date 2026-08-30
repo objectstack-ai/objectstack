@@ -40,6 +40,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { parsePlatformAdminEmails } from '@objectstack/core';
 import { SecurityPlugin } from './security-plugin.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import {
@@ -49,6 +50,19 @@ import {
 } from './platform-owner-wall-bypass.js';
 
 const OWNER_EMAIL = 'operator@corp.example';
+/**
+ * [#13147] The SECOND declared administrator, and the comma-separated value
+ * that declares both. `OS_PLATFORM_OWNER_EMAIL` takes a list (#11663 Choice
+ * 2B); every reader of it must answer for EVERY member, and before this card
+ * this one answered for none of them — it compared the whole raw list to one
+ * candidate address, so nobody crossed the wall.
+ */
+const SECOND_OWNER = 'ops@corp.example';
+const OWNER_LIST = `${OWNER_EMAIL}, ${SECOND_OWNER}`;
+/** The parsed config the predicates now take — never a raw operator string. */
+const cfg = (raw: string) => parsePlatformAdminEmails(raw);
+const SOLO = cfg(OWNER_EMAIL);
+const LIST = cfg(OWNER_LIST);
 
 /** A member with plain CRUD and NO row-level policies, so the only thing
  *  `getReadFilter` can return is Layer 0 — the layer under test. */
@@ -305,22 +319,89 @@ describe('[#12974] audit — the ruled floor', () => {
 
 describe('[#12974] the shared row predicate (the elevation gate’s twin)', () => {
   it('matchesDeclaredOwnerEmail — canonical comparison: trimmed, case-insensitive', () => {
-    expect(matchesDeclaredOwnerEmail({ email: 'Operator@Corp.Example' }, OWNER_EMAIL)).toBe(true);
-    expect(matchesDeclaredOwnerEmail({ email: '  operator@corp.example  ' }, OWNER_EMAIL)).toBe(true);
-    expect(matchesDeclaredOwnerEmail({ email: OWNER_EMAIL }, 'Operator@CORP.example')).toBe(true);
-    expect(matchesDeclaredOwnerEmail({ email: 'other@corp.example' }, OWNER_EMAIL)).toBe(false);
-    expect(matchesDeclaredOwnerEmail({ email: '' }, OWNER_EMAIL)).toBe(false);
-    expect(matchesDeclaredOwnerEmail({ email: 42 }, OWNER_EMAIL)).toBe(false);
-    expect(matchesDeclaredOwnerEmail({}, OWNER_EMAIL)).toBe(false);
-    expect(matchesDeclaredOwnerEmail(null, OWNER_EMAIL)).toBe(false);
+    expect(matchesDeclaredOwnerEmail({ email: 'Operator@Corp.Example' }, SOLO)).toBe(true);
+    expect(matchesDeclaredOwnerEmail({ email: '  operator@corp.example  ' }, SOLO)).toBe(true);
+    expect(matchesDeclaredOwnerEmail({ email: OWNER_EMAIL }, cfg('Operator@CORP.example'))).toBe(true);
+    expect(matchesDeclaredOwnerEmail({ email: 'other@corp.example' }, SOLO)).toBe(false);
+    expect(matchesDeclaredOwnerEmail({ email: '' }, SOLO)).toBe(false);
+    expect(matchesDeclaredOwnerEmail({ email: 42 }, SOLO)).toBe(false);
+    expect(matchesDeclaredOwnerEmail({}, SOLO)).toBe(false);
+    expect(matchesDeclaredOwnerEmail(null, SOLO)).toBe(false);
   });
 
   it('isVerifiedPlatformOwnerRow — match AND verified, fail-closed on every other shape', () => {
-    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: true }, OWNER_EMAIL)).toBe(true);
-    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: 1 }, OWNER_EMAIL)).toBe(true);
-    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL }, OWNER_EMAIL)).toBe(false);
-    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: false }, OWNER_EMAIL)).toBe(false);
-    expect(isVerifiedPlatformOwnerRow({ email: 'other@corp.example', email_verified: true }, OWNER_EMAIL)).toBe(false);
-    expect(isVerifiedPlatformOwnerRow(null, OWNER_EMAIL)).toBe(false);
+    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: true }, SOLO)).toBe(true);
+    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: 1 }, SOLO)).toBe(true);
+    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL }, SOLO)).toBe(false);
+    expect(isVerifiedPlatformOwnerRow({ email: OWNER_EMAIL, email_verified: false }, SOLO)).toBe(false);
+    expect(isVerifiedPlatformOwnerRow({ email: 'other@corp.example', email_verified: true }, SOLO)).toBe(false);
+    expect(isVerifiedPlatformOwnerRow(null, SOLO)).toBe(false);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  it('[#13147] a comma-separated LIST matches EVERY member — the defect, at the predicate', () => {
+    // Red before the fix in the loudest possible way: the comparator held the
+    // whole raw value as one address, so BOTH of these answered false and the
+    // Layer 0 wall stayed armed against both declared administrators.
+    expect(matchesDeclaredOwnerEmail({ email: OWNER_EMAIL }, LIST)).toBe(true);
+    expect(matchesDeclaredOwnerEmail({ email: SECOND_OWNER }, LIST)).toBe(true);
+    expect(isVerifiedPlatformOwnerRow({ email: SECOND_OWNER, email_verified: true }, LIST)).toBe(true);
+    // Still every fail-closed direction: a stranger, and the raw list itself
+    // (which is not an address and must never be treated as one).
+    expect(matchesDeclaredOwnerEmail({ email: 'stranger@corp.example' }, LIST)).toBe(false);
+    expect(matchesDeclaredOwnerEmail({ email: OWNER_LIST }, LIST)).toBe(false);
+    // A REFUSED list confers nothing on anybody (Choice 2B: the WHOLE variable
+    // fails closed, never the one bad entry).
+    expect(matchesDeclaredOwnerEmail({ email: OWNER_EMAIL }, cfg(`${OWNER_EMAIL},nonsense`))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('[#13147] the Layer 0 wall bypass under a comma-separated OS_PLATFORM_OWNER_EMAIL', () => {
+  it('the SECOND declared administrator crosses the wall (before: a list let nobody across)', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_LIST;
+    const { plugin } = await boot({
+      users: { u_two: { id: 'u_two', email: SECOND_OWNER, email_verified: true } },
+    });
+    const filter = await readFilter(plugin, sessionCtx({ userId: 'u_two', email: SECOND_OWNER }));
+    // No Layer 1 policies and Layer 0 lifted → nothing to AND at all.
+    expect(filter).toBeUndefined();
+  });
+
+  it('the FIRST declared administrator still crosses it', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_LIST;
+    const { plugin } = await boot({
+      users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
+    });
+    expect(await readFilter(plugin, sessionCtx())).toBeUndefined();
+  });
+
+  it('⛔ nobody else does: a stranger is still walled, and the fast negative still spends no row read', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_LIST;
+    const { plugin, findOne } = await boot({
+      users: { u_member: { id: 'u_member', email: 'member@corp.example', email_verified: true } },
+    });
+    const filter = await readFilter(plugin, sessionCtx({ userId: 'u_member', email: 'member@corp.example' }));
+    expect(filter).toEqual({ organization_id: 'org-1' });
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('⛔ a list member whose account is NOT verified is still walled', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_LIST;
+    const { plugin } = await boot({ users: { u_two: { id: 'u_two', email: SECOND_OWNER } } });
+    const filter = await readFilter(plugin, sessionCtx({ userId: 'u_two', email: SECOND_OWNER }));
+    expect(filter).toEqual({ organization_id: 'org-1' });
+  });
+
+  it('⛔ a REFUSED list declares nobody: an unparseable entry walls every member', async () => {
+    // Choice 2B's whole-variable refusal reaching the wall — the operator gets
+    // the parser's one loud line, and NOT a silently narrower admin set.
+    process.env.OS_PLATFORM_OWNER_EMAIL = `${OWNER_EMAIL},not-an-email`;
+    const { plugin, findOne } = await boot({
+      users: { u_owner: { id: 'u_owner', email: OWNER_EMAIL, email_verified: true } },
+    });
+    const filter = await readFilter(plugin, sessionCtx());
+    expect(filter).toEqual({ organization_id: 'org-1' });
+    expect(findOne).not.toHaveBeenCalled();
   });
 });

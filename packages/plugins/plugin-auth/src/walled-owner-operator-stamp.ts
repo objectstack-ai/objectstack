@@ -90,10 +90,8 @@
  * `bootstrapPlatformAdmin` (`shouldReplayBootstrapFor`, `create` arm).
  */
 
-import {
-  resolvePlatformOwnerEmail,
-  resolveTenancyPosture,
-} from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { AudienceCreationClass } from './audience-posture.js';
 
@@ -115,11 +113,15 @@ export function isOperatorProvisionedCreation(
  * including every shape on an unwalled deployment, where elevation never
  * demands a verified owner and the stamp would be an unearned state change.
  *
- * The email comparison mirrors `bootstrapPlatformAdmin`'s owner match
- * (candidate: `String(email).trim().toLowerCase()`; declared: already
- * trimmed by `resolvePlatformOwnerEmail`, lowercased here) — the two MUST
- * agree, or an account this module stamps is one the gate then fails to
- * elevate.
+ * [#13147] The email comparison does not mirror `bootstrapPlatformAdmin`'s
+ * owner match by re-spelling it — it IS that match: both ask the one shared
+ * parser (`resolvePlatformAdminEmails()` / {@link isConfiguredPlatformAdminEmail}
+ * from `@objectstack/core`). They MUST agree, or an account this module stamps
+ * is one the gate then fails to elevate. Before this card they agreed only for
+ * a single-address value: `OS_PLATFORM_OWNER_EMAIL` takes a comma-separated
+ * LIST too (#11663 Choice 2B), and comparing a candidate against the whole raw
+ * list as if it were one address matched nobody — so no member of a declared
+ * list was ever stamped, silently.
  */
 export function shouldStampOwnerVerifiedAtCreation(input: {
   email: string | undefined;
@@ -128,9 +130,5 @@ export function shouldStampOwnerVerifiedAtCreation(input: {
 }): boolean {
   if (!isOperatorProvisionedCreation(input.creationClass, input.isBootstrap)) return false;
   if (!postureEnforcesWall(resolveTenancyPosture())) return false;
-  const declared = resolvePlatformOwnerEmail();
-  if (!declared) return false;
-  const candidate = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
-  if (!candidate) return false;
-  return candidate === declared.toLowerCase();
+  return isConfiguredPlatformAdminEmail(input.email, resolvePlatformAdminEmails());
 }

@@ -83,6 +83,17 @@ const walledWithOwner = (owner = OWNER, posture = 'isolated') => {
   process.env.OS_PLATFORM_OWNER_EMAIL = owner;
 };
 
+/**
+ * [#13147] The comma-separated value and its second member.
+ * `OS_PLATFORM_OWNER_EMAIL` takes one address OR a list (#11663 Choice 2B).
+ * Before this card the stamp compared a candidate against the operator's WHOLE
+ * raw value as one address, so under a list no member was ever stamped — the
+ * account was born unverified and the elevation gate then refused it
+ * (`walled_owner_not_verified`), silently.
+ */
+const SECOND_OWNER = 'ops@corp.example';
+const OWNER_LIST = `${OWNER}, ${SECOND_OWNER}`;
+
 // ── the real-engine harness (the audience-bootstrap-seam shape) ─────────────
 
 const AUTH_OBJECTS = [
@@ -285,6 +296,56 @@ describe('#12751 — shouldStampOwnerVerifiedAtCreation, the contract as a matri
 // 2. The store probe, over the real engine.
 // ────────────────────────────────────────────────────────────────────────────
 
+describe('[#13147] shouldStampOwnerVerifiedAtCreation under a comma-separated OS_PLATFORM_OWNER_EMAIL', () => {
+  const operator = (email: string | undefined) =>
+    shouldStampOwnerVerifiedAtCreation({ email, creationClass: 'operator', isBootstrap: false });
+
+  it('EVERY declared member is stamped, not just the first', () => {
+    walledWithOwner(OWNER_LIST);
+    expect(operator(OWNER)).toBe(true);
+    expect(operator(SECOND_OWNER)).toBe(true);
+  });
+
+  it('per-entry case-insensitivity and trimming survive the list', () => {
+    walledWithOwner(`  First.Op@Corp.EXAMPLE , ${SECOND_OWNER} `);
+    expect(operator('first.op@corp.example')).toBe(true);
+    expect(operator('  OPS@Corp.Example  ')).toBe(true);
+  });
+
+  it('⛔ a stranger is never stamped, and the raw list is not itself an address', () => {
+    walledWithOwner(OWNER_LIST);
+    expect(operator('stranger@corp.example')).toBe(false);
+    expect(operator(OWNER_LIST)).toBe(false);
+    expect(operator(undefined)).toBe(false);
+    expect(operator('')).toBe(false);
+  });
+
+  it('⛔ a REFUSED list stamps nobody — the whole variable fails closed', () => {
+    walledWithOwner(`${OWNER},not-an-email`);
+    expect(operator(OWNER)).toBe(false);
+  });
+
+  it('the other bounds are untouched: unwalled and non-operator creations still never stamp', () => {
+    walledWithOwner(OWNER_LIST, 'single');
+    expect(operator(SECOND_OWNER)).toBe(false);
+    walledWithOwner(OWNER_LIST);
+    expect(
+      shouldStampOwnerVerifiedAtCreation({
+        email: SECOND_OWNER,
+        creationClass: 'self-serve',
+        isBootstrap: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStampOwnerVerifiedAtCreation({
+        email: SECOND_OWNER,
+        creationClass: 'provider',
+        isBootstrap: true,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe('#12751 — probeWalledOwnerAccountState over a real ObjectQL engine', () => {
   it('an empty store is `no-human-users`', async () => {
     walledWithOwner();
@@ -313,6 +374,39 @@ describe('#12751 — probeWalledOwnerAccountState over a real ObjectQL engine', 
       { context: { isSystem: true } } as never,
     );
     expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-verified');
+  });
+
+  it('[#13147] a comma-separated list: the probe answers about the DECLARED SET, over the real engine', async () => {
+    // Before this card the probe queried `where email = '<the whole raw list>'`,
+    // matched no row, and answered `owner-absent` for a deployment whose
+    // administrator was registered and verified — a boot warning that named a
+    // dead end that did not exist.
+    walledWithOwner(OWNER_LIST);
+    const engine = await bootEngine();
+    const manager = makeManager(engine);
+    expect((await signUp(manager, 'bystander@corp.example')).status).toBe(200);
+    expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-absent');
+
+    // The SECOND declared member registers (invited ⇒ arrives unverified).
+    await inviteForAudienceGate(manager, SECOND_OWNER);
+    expect((await signUp(manager, SECOND_OWNER)).status).toBe(200);
+    expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-unverified');
+
+    // One verified member is all the elevation gate needs, so it is all the
+    // probe reports — the gate's own three outcomes, mirrored.
+    const row = await userRow(engine, SECOND_OWNER);
+    await engine.update(
+      'sys_user',
+      { id: row.id, email_verified: true } as never,
+      { context: { isSystem: true } } as never,
+    );
+    expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-verified');
+  });
+
+  it('[#13147] a REFUSED list declares nobody ⇒ `unknown`, like an unset variable', async () => {
+    walledWithOwner(`${OWNER},not-an-email`);
+    const engine = await bootEngine();
+    expect(await probeWalledOwnerAccountState(engine as never)).toBe('unknown');
   });
 
   it('a populated store with no owner account is `owner-absent`', async () => {

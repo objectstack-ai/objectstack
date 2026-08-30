@@ -175,6 +175,7 @@ export {
   resolvePlatformAdminEmails,
   resetPlatformAdminEmailMemo,
   matchesConfiguredPlatformAdmin,
+  isConfiguredPlatformAdminEmail,
   reportLegacyPlatformAdminGrant,
   resetLegacyPlatformAdminGrantReport,
   setPlatformAdminConfigSink,
