@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createPrebuiltDriverFactory } from '../prebuilt-driver-factory.js';
 import { DatasourceConnectionService } from '../datasource-connection-service.js';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 
 // The fail-fast case below asserts the default (no-escape-hatch) verdict.
 const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
@@ -91,7 +92,12 @@ describe('createPrebuiltDriverFactory — through DatasourceConnectionService (t
           drivers.set(d.name, d);
           if (isDefault) defaultName = d.name;
         },
-        getDriverByName: (n: string) => drivers.get(n),
+        // [#12010] The double deliberately stores MINIMAL stand-ins (a bare
+        // `{ name }` is how these tests simulate an `onEnable`-registered
+        // driver), while the derived seam member answers the contract's
+        // `IDataDriver | undefined`. Narrowing on the way out keeps the double
+        // loose where it is meant to be loose without re-widening the seam.
+        getDriverByName: (n: string) => drivers.get(n) as IDataDriver | undefined,
         getDefaultDriverName: () => defaultName,
       }),
       logger: { warn() {} },

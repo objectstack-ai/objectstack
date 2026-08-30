@@ -100,7 +100,11 @@ const invoiceAuditor: PermissionSet = {
 } as any;
 
 const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, memberBaseline, publicReader, invoiceAuditor];
-const DENY = RLS_DENY_FILTER.id; // the fail-closed sentinel's marker value
+// The fail-closed sentinel's marker value. `RLS_DENY_FILTER` is declared
+// `Record<string, unknown>`, so the member arrives as `unknown` and the `rank()`
+// substring probe below cannot take it; converted once here rather than at each
+// use, and it is a string at run time (`__rls_deny__:00000000-…`).
+const DENY = String(RLS_DENY_FILTER.id);
 
 // ── Minimal middleware harness ──────────────────────────────────────────────
 // Drives the REAL security CRUD middleware against a single-object schema whose

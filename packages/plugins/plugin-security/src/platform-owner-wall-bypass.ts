@@ -23,16 +23,25 @@
  *    stands (director's correction on the same card: lifting the write twin
  *    would mint the NULL-organization rows the platform is eliminating).
  *
- * The comparison itself mirrors the elevation gate's owner match, which
- * `walled-owner-operator-stamp.ts` (plugin-auth) already mirrors for the
- * creation-time stamp: candidate `String(email).trim().toLowerCase()`;
- * declared already trimmed by `resolvePlatformOwnerEmail()`, lowercased
- * here. The three sites MUST agree — an account the stamp verifies is one
- * the gate must elevate and the wall must recognise.
+ * [#13147] The comparison is no longer spelled here at all. `OS_PLATFORM_OWNER_EMAIL`
+ * takes ONE address **or a comma-separated list** of them (#11663 Choice 2B),
+ * so this module takes the PARSED config — `resolvePlatformAdminEmails()` from
+ * `@objectstack/core`, the same one the authorization derivation reads — and
+ * asks it. It does not receive, and can no longer be handed, a raw operator
+ * string: the type is `PlatformAdminEmailConfig`, so the dialect that read a
+ * two-address list as one impossible address cannot be reintroduced by passing
+ * the wrong thing. The candidate normalization is the config's own
+ * (`normalizePlatformAdminEmail`: trim, then lowercase) — identical in effect to
+ * the `String(email).trim().toLowerCase()` this used to spell inline.
+ *
+ * `walled-owner-operator-stamp.ts` (plugin-auth) and the elevation gate ask the
+ * same parser for the same reason. The sites MUST agree — an account the stamp
+ * verifies is one the gate must elevate and the wall must recognise.
  *
  * Fail-closed by construction, both directions the ruling pins:
- *  - no declared owner (env unset/blank) ⇒ `false` for every row — nobody
- *    bypasses, the wall arms exactly as today;
+ *  - no declared owner (env unset/blank, or a list REFUSED for an unparseable
+ *    entry — `config.emails` is empty in all three) ⇒ `false` for every row —
+ *    nobody bypasses, the wall arms exactly as today;
  *  - email mismatch, missing row, or an email match whose row is NOT
  *    verified (`isEmailVerifiedUserRow`'s allow-list, absent-means-
  *    unverified) ⇒ `false` — still walled. There is no shape in which a
@@ -40,6 +49,7 @@
  */
 
 import { isEmailVerifiedUserRow } from '@objectstack/types';
+import { isConfiguredPlatformAdminEmail, type PlatformAdminEmailConfig } from '@objectstack/core';
 
 /**
  * The stable audit event name stamped on every wall-bypassing computation
@@ -50,17 +60,17 @@ import { isEmailVerifiedUserRow } from '@objectstack/types';
 export const PLATFORM_OWNER_WALL_BYPASS_EVENT = 'platform_owner_wall_bypass';
 
 /**
- * Does this `sys_user` row's email match the env-declared platform owner —
- * the canonical #11184/#11343 comparison (trimmed, case-insensitive), spelled
- * once. `declaredEmail` is `resolvePlatformOwnerEmail()`'s output (already
- * trimmed); a row with no/blank email never matches.
+ * Does this `sys_user` row's email match ONE OF the env-declared platform
+ * administrators — the canonical #11184/#11343 comparison (trimmed,
+ * case-insensitive), asked of the ONE parser.
+ *
+ * [#13147] `config` is `resolvePlatformAdminEmails()`'s output, never a raw
+ * string. A row with no/blank email never matches, and an empty or refused
+ * config matches nothing.
  */
-export function matchesDeclaredOwnerEmail(row: unknown, declaredEmail: string): boolean {
+export function matchesDeclaredOwnerEmail(row: unknown, config: PlatformAdminEmailConfig): boolean {
   const email = (row as { email?: unknown } | null | undefined)?.email;
-  if (typeof email !== 'string') return false;
-  const candidate = email.trim().toLowerCase();
-  if (candidate === '') return false;
-  return candidate === declaredEmail.toLowerCase();
+  return isConfiguredPlatformAdminEmail(email, config);
 }
 
 /**
@@ -69,6 +79,6 @@ export function matchesDeclaredOwnerEmail(row: unknown, declaredEmail: string): 
  * match AND the #11343 verified-email allow-list. Server-side row facts
  * only; never a client-supplied claim.
  */
-export function isVerifiedPlatformOwnerRow(row: unknown, declaredEmail: string): boolean {
-  return matchesDeclaredOwnerEmail(row, declaredEmail) && isEmailVerifiedUserRow(row);
+export function isVerifiedPlatformOwnerRow(row: unknown, config: PlatformAdminEmailConfig): boolean {
+  return matchesDeclaredOwnerEmail(row, config) && isEmailVerifiedUserRow(row);
 }

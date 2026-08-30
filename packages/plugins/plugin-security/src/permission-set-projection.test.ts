@@ -1162,17 +1162,19 @@ describe('reconcilePermissionSetProjection', () => {
     // on `ProjectionLogger` (#9754), so no TS caller can build the sink above
     // without saying `as unknown as` out loud.
     //
-    // ⚠️ Deliberately NOT pinned here with `@ts-expect-error`. This package's
-    // tsconfig excludes `**/*.test.ts` (it carries a TEST_DEBT ledger entry in
-    // scripts/check-type-check-coverage.mjs), so no tsc program compiles this
-    // file and the directive would evaluate NEVER — a phantom check that reads
-    // like proof, which is the failure AGENTS.md → "Build & Test" names and
-    // `pnpm check:type-check-coverage` refuses. The compile-time half of this
-    // contract is pinned in plugin-email's `outbox-sweep.test.ts`, whose
-    // package DOES compile its tests (observed: reverting `warn` there turns
-    // that directive into `error TS2578: Unused '@ts-expect-error' directive`),
-    // and the type half of BOTH sinks is held by
-    // `pnpm check:optional-error-sink`.
+    // ⚠️ Not pinned here with `@ts-expect-error`, and [#13176] moved the reason
+    // out from under that sentence. It used to be that this package's tsconfig
+    // excluded `**/*.test.ts` (it carried a TEST_DEBT ledger entry in
+    // scripts/check-type-check-coverage.mjs), so no tsc program compiled this
+    // file and a directive here would have evaluated NEVER — a phantom check
+    // that reads like proof, the failure AGENTS.md → "Build & Test" names. The
+    // sibling `tsconfig.test.json` compiles this file now and that ledger entry
+    // is gone, so a directive here would be LIVE. The compile-time half of this
+    // contract is pinned in plugin-email's `outbox-sweep.test.ts` (observed:
+    // reverting `warn` there turns that directive into `error TS2578: Unused
+    // '@ts-expect-error' directive`), and the type half of BOTH sinks is held by
+    // `pnpm check:optional-error-sink` — so the pin is redundant here rather
+    // than impossible, which is a different sentence and the true one.
   });
 
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {

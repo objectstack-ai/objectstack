@@ -70,7 +70,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { resolvePlatformOwnerEmail } from '@objectstack/types';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -5645,19 +5645,28 @@ export class SecurityPlugin implements Plugin {
    * Server-side facts only, fail-closed at every rung (each `false` below is
    * "still walled", never an error):
    *
-   *  1. `resolvePlatformOwnerEmail()` unset/blank ⇒ `false` for everyone —
-   *     read live per call (cheap), before any I/O, so an undeclared owner
-   *     costs nothing and bypasses nobody.
+   *  1. [#13147] NO declared administrator ⇒ `false` for everyone. The
+   *     variable takes one address OR a comma-separated list (#11663 Choice
+   *     2B), so this asks the ONE shared parser
+   *     (`resolvePlatformAdminEmails()` from `@objectstack/core`, memoized on
+   *     the raw string) rather than holding the operator's whole value as if it
+   *     were a single address — which is what it used to do, and which meant a
+   *     LIST let nobody across the wall. Unset, blank and refused all land here
+   *     as an empty list, read live per call (cheap), before any I/O, so an
+   *     undeclared owner costs nothing and bypasses nobody.
    *  2. No authenticated `userId` on the context ⇒ `false`. System contexts
    *     never reach this method (the middleware's `isSystem` skip and
    *     `getReadFilter`'s mirror both return earlier), and carry no `userId`
    *     anyway.
    *  3. Fast NEGATIVE on the context's server-resolved session email
    *     (`resolveAuthzContext`: the better-auth session record or the
-   *     `sys_user` read — never a client-supplied header): a normalized
-   *     mismatch walls without touching the row store, which keeps the wall's
-   *     hot path free of per-request I/O for every non-owner session. Only
-   *     narrowing — a MATCH (or an absent email) still requires the row.
+   *     `sys_user` read — never a client-supplied header): an email that is on
+   *     no declared list walls without touching the row store, which keeps the
+   *     wall's hot path free of per-request I/O for every non-owner session.
+   *     Only narrowing — a MATCH (or an absent email) still requires the row.
+   *     The membership test is the parser's own
+   *     ({@link isConfiguredPlatformAdminEmail}), never a hand-rolled
+   *     lowercase compare.
    *  4. The authoritative answer is the `sys_user` ROW (system-context by-id
    *     read, memoized per request-context like `__rlsMembershipStaged` /
    *     `__preImage`): {@link isVerifiedPlatformOwnerRow} = the canonical
@@ -5670,14 +5679,14 @@ export class SecurityPlugin implements Plugin {
    * short-circuit the security middleware before any RLS computation.
    */
   private async isVerifiedPlatformOwnerSession(context: any): Promise<boolean> {
-    const declared = resolvePlatformOwnerEmail();
-    if (!declared) return false;
+    const declared = resolvePlatformAdminEmails();
+    if (declared.emails.length === 0) return false;
     if (!context || typeof context !== 'object') return false;
     const userId = context.userId;
     if (typeof userId !== 'string' || userId === '') return false;
     if (typeof context.__verifiedPlatformOwner === 'boolean') return context.__verifiedPlatformOwner;
     if (typeof context.email === 'string' && context.email.trim() !== '') {
-      if (context.email.trim().toLowerCase() !== declared.toLowerCase()) {
+      if (!isConfiguredPlatformAdminEmail(context.email, declared)) {
         context.__verifiedPlatformOwner = false;
         return false;
       }

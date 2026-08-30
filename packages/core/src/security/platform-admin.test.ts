@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import {
+  isConfiguredPlatformAdminEmail,
   matchesConfiguredPlatformAdmin,
   normalizePlatformAdminEmail,
   parsePlatformAdminEmails,
@@ -98,6 +99,31 @@ describe('[Choice 2B] parsePlatformAdminEmails', () => {
       expect(parsed.refusal, `bad=${JSON.stringify(bad)}`).toContain(ENV);
       expect(parsed.refusal).toContain(bad);
       expect(parsed.raw).toContain('good@corp.example');
+    }
+  });
+
+  it('[#13147] declaredSpellings: the as-typed form of every entry, index-aligned with emails', () => {
+    // The reason the field exists: two readers need the operator's own spelling
+    // (the by-email `sys_user` lookup, whose driver `where` is an exact match,
+    // and the boot diagnostic that quotes the addresses back) and NEITHER may
+    // split `raw` a second time to get it.
+    const parsed = parsePlatformAdminEmails(' Ops@Corp.example , second@corp.example ,OPS@corp.EXAMPLE ');
+    expect(parsed.emails).toEqual(['ops@corp.example', 'second@corp.example']);
+    expect(parsed.declaredSpellings).toEqual(['Ops@Corp.example', 'second@corp.example']);
+    // Trimmed but NOT lowercased — byte-for-byte what `resolvePlatformOwnerEmail()`
+    // used to hand a single-value reader, which is what makes this a
+    // behaviour-preserving substitution at those call sites.
+    expect(parsed.declaredSpellings[0]).toBe('Ops@Corp.example');
+    // The duplicate collapsed on the NORMALIZED form, and the spelling that
+    // survives is the one that won the position — so the arrays cannot drift.
+    expect(parsed.declaredSpellings).toHaveLength(parsed.emails.length);
+  });
+
+  it('[#13147] declaredSpellings is empty for every zero-administrator outcome', () => {
+    for (const raw of [undefined, '', '   ', 'good@corp.example,nonsense']) {
+      const parsed = parsePlatformAdminEmails(raw);
+      expect(parsed.emails, `raw=${JSON.stringify(raw)}`).toEqual([]);
+      expect(parsed.declaredSpellings, `raw=${JSON.stringify(raw)}`).toEqual([]);
     }
   });
 
@@ -234,5 +260,52 @@ describe('[#11663 P5] reportLegacyPlatformAdminGrant', () => {
     // there. A fully-seeded API-key principal has no row loaded.
     reportLegacyPlatformAdminGrant({ userId: 'usr_1' });
     expect(sink.warns[0]).toContain(`${ENV}=<the administrator's verified email address>`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('[#13147] isConfiguredPlatformAdminEmail — the ONE membership expression', () => {
+  const LIST = parsePlatformAdminEmails('ops@corp.example, Second@Corp.Example');
+
+  it('answers for EVERY member of a comma-separated list, not just the first', () => {
+    // The defect this predicate closes: the five single-value readers held the
+    // operator's whole raw value as ONE address, so `'a@b.c,d@e.f'` could never
+    // equal any single candidate and matched NOBODY.
+    expect(isConfiguredPlatformAdminEmail('ops@corp.example', LIST)).toBe(true);
+    expect(isConfiguredPlatformAdminEmail('second@corp.example', LIST)).toBe(true);
+    expect(isConfiguredPlatformAdminEmail('stranger@corp.example', LIST)).toBe(false);
+    // ⛔ And the raw list is not itself an address.
+    expect(isConfiguredPlatformAdminEmail('ops@corp.example, Second@Corp.Example', LIST)).toBe(false);
+  });
+
+  it('applies the ONE normalization to the candidate — trim AND lowercase', () => {
+    expect(isConfiguredPlatformAdminEmail('  OPS@Corp.EXAMPLE  ', LIST)).toBe(true);
+    // The trim is the half a hand-rolled `.toLowerCase()` compare drops, which
+    // is exactly how a seventh dialect would be born.
+    expect(isConfiguredPlatformAdminEmail(' second@corp.example', LIST)).toBe(true);
+  });
+
+  it('fail-closed on every other shape', () => {
+    for (const empty of [
+      parsePlatformAdminEmails(undefined),
+      parsePlatformAdminEmails('   '),
+      parsePlatformAdminEmails('ops@corp.example,nonsense'), // REFUSED
+    ]) {
+      expect(isConfiguredPlatformAdminEmail('ops@corp.example', empty)).toBe(false);
+    }
+    for (const candidate of [undefined, null, '', '   ', 42, {}]) {
+      expect(isConfiguredPlatformAdminEmail(candidate, LIST), String(candidate)).toBe(false);
+    }
+  });
+
+  it('is the membership half of matchesConfiguredPlatformAdmin — one expression, not two', () => {
+    // Same list, same address: the row predicate adds the verified check and
+    // nothing else. If these two ever disagree about membership, the config
+    // anchor and the plugin readers have split again.
+    expect(matchesConfiguredPlatformAdmin({ email: 'second@corp.example', email_verified: true }, LIST)).toBe(true);
+    expect(isConfiguredPlatformAdminEmail('second@corp.example', LIST)).toBe(true);
+    // Verified is the ONLY difference.
+    expect(matchesConfiguredPlatformAdmin({ email: 'second@corp.example' }, LIST)).toBe(false);
+    expect(isConfiguredPlatformAdminEmail('second@corp.example', LIST)).toBe(true);
   });
 });

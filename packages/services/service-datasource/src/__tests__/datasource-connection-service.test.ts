@@ -8,6 +8,7 @@ import {
   type ConnectionEngineLike,
 } from '../datasource-connection-service.js';
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 import type { DatasourceConnectPolicy } from '../contracts/connect-policy.js';
 import {
   GENERIC_CONNECT_FAILURE_REMEDY,
@@ -44,7 +45,12 @@ function fakeEngine() {
     registerDatasourceDef: (def) => {
       defs.push(def);
     },
-    getDriverByName: (name) => drivers.get(name),
+    // [#12010] The double deliberately stores MINIMAL stand-ins (a bare
+    // `{ name }` is how these tests simulate an `onEnable`-registered
+    // driver), while the derived seam member answers the contract's
+    // `IDataDriver | undefined`. Narrowing on the way out keeps the double
+    // loose where it is meant to be loose without re-widening the seam.
+    getDriverByName: (name) => drivers.get(name) as IDataDriver | undefined,
     syncObjectSchema: async (name) => {
       synced.push(name);
     },

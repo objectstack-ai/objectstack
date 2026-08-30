@@ -21,7 +21,7 @@
  * because the deny sentinel lives here and nowhere else.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { setCelPushdownLimitsModeForTests, __resetPushdownLimitWarnings } from '@objectstack/formula';
 
@@ -53,7 +53,11 @@ function compilerWithLogger() {
   return { compiler, logger };
 }
 
-let consoleWarn: ReturnType<typeof vi.spyOn>;
+// [#13176] `ReturnType<typeof vi.spyOn>` instantiates that generic's own type
+// parameters, so `mock.calls` came back untyped and every callback over it was
+// an implicit `any` — invisible while no tsc program read this file. Naming the
+// spied signature types the call records instead of annotating each callback.
+let consoleWarn: MockInstance<typeof console.warn>;
 
 beforeEach(() => {
   __resetPushdownLimitWarnings();

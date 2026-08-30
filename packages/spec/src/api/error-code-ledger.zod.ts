@@ -669,6 +669,32 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],
+  '@objectstack/driver-memory': [
+    // [#13254] Provenance for the in-memory driver's uniqueness refusal, which
+    // #13197 (field-level `unique`) and #13239 (declared `indexes[]` entries)
+    // made real: a colliding write is REFUSED rather than landed. Stamped in
+    // ONE place for both declaration surfaces — `conflictRefusal`
+    // (`packages/drivers/driver-memory/src/memory-unique-constraint.ts`),
+    // `code: 'UNIQUE_VIOLATION'` / `status: 409` via the package's exported
+    // `UNIQUE_VIOLATION_CODE` / `UNIQUE_VIOLATION_STATUS`.
+    //
+    // Second EMITTER of the code `@objectstack/rest` already registers for the
+    // SQL conflict; the wire identity is deliberately the SAME, so a suite that
+    // swaps this driver for SQLite sees ONE envelope. Per this file's header, a
+    // code emitted by several packages is listed once per emitting package —
+    // provenance, not identity.
+    //
+    // Wire-reachable by the test the "Retiring a code" section above applies
+    // (#8035): an ordinary create/update on an object with a `unique` field
+    // reaches `InMemoryDriver.create` on a server already serving HTTP, and
+    // `resolveThrownHttpError` puts the driver's `code`/`status` on the
+    // envelope. This row adds provenance ONLY: the code was already registered,
+    // so the union, its casing and every other package's rows are unchanged.
+    // Registered late for exactly the reason the row is worth having — no
+    // admission rule checks WHO emits, so an unlisted emitter is invisible to
+    // every gate the repo has.
+    'UNIQUE_VIOLATION',
+  ],
   '@objectstack/driver-sql': [
     // [#11991] The #11756 ruling's refusal (maintainer, 2026-08-25, verbatim
     // 「同意」 on 「C，但 pgnative 归入 Postgres 家族」): a knex client this
