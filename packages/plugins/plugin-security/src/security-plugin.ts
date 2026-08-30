@@ -5852,7 +5852,56 @@ export class SecurityPlugin implements Plugin {
       : fields && typeof fields === 'object'
         ? (Object.entries(fields) as Array<[string, any]>)
         : [];
-    const ref = (f: any) => f?.reference ?? f?.reference_to ?? f?.referenceTo;
+    // ── The reference spelling: TOLERANT HERE, and deliberately so ───────────
+    //
+    // `@objectstack/spec` declares `reference` as the ONLY relationship
+    // spelling, and `FieldSchema` REJECTS `reference_to` / `referenceTo` with
+    // *"Did you mean `reference_to` → `reference`?"* (#11567, "one key, one
+    // answer"). Two sibling readers were narrowed to canonical-only on that
+    // ruling — `refOf` in `packages/lint/src/validate-security-posture.ts`
+    // (which records its reasoning in full) and `refOf` in
+    // `packages/lint/src/data-model-rules.ts`. This reader is the DELIBERATE
+    // INVERSE of both, and the asymmetry is the answer rather than an
+    // oversight (maintainer ruling, 2026-08-30):
+    //
+    //   • Those two read a stack that WENT THROUGH the parse, so the alias
+    //     cannot legitimately reach them — narrowing there costs nothing and
+    //     the schema names the real defect (the alias key) itself.
+    //   • This one reads `ql.getSchema()`, i.e. the `SchemaRegistry`, and a
+    //     raw `registerObject` SKIPS Zod by design (#3896 — the registry's own
+    //     header names those doors). So here the alias is genuinely REACHABLE.
+    //   • And here a miss is not a quiet wrong answer, it is a DENIAL.
+    //     `resolveCbpRelation` returning null is FAIL-CLOSED: the read leg
+    //     answers `{ ...RLS_DENY_FILTER }` (zero rows for every non-admin
+    //     caller) and the write leg throws `MasterDetailRelationMissingError`.
+    //     Narrowing this reader would take a raw-registered, alias-spelled
+    //     `controlled_by_parent` object from "access derived from its master"
+    //     to "everything denied, and writes throw" — an availability outage on
+    //     a population that provably exists, not a spelling correction.
+    //
+    // So the tolerance STAYS, and is made LOUD instead: the alias still
+    // resolves — no deployment loses access — and the author hears about it,
+    // once per object, through `reportRejectedReferenceAlias` below. ⛔ Do not
+    // narrow this in place. Narrowing is only honest behind a migration that
+    // sweeps stored / raw-registered metadata first, and that is a separate
+    // card rather than a rider on the one that made this loud.
+    //
+    // `refKey` exists so the diagnostic and the resolution cannot disagree
+    // about WHICH key was read: `ref` is derived from it rather than spelling
+    // the `??` chain a second time. The mirror is exact for every shape either
+    // call site can observe — `??` falls through on null/undefined only, which
+    // is what `!= null` tests. The one difference is unobservable: with EVERY
+    // spelling present-but-null the old chain evaluated to `null` and this
+    // returns `undefined`, and both call sites below take `ref` as a
+    // truthiness test or read it only after one (`pick` requires `ref(f)`, and
+    // `String(ref(def))` runs only on what `pick` returned). Pinned in
+    // `controlled-by-parent-reference-alias.test.ts`.
+    const REFERENCE_SPELLINGS = ['reference', 'reference_to', 'referenceTo'] as const;
+    const refKey = (f: any) => REFERENCE_SPELLINGS.find((k) => f?.[k] != null);
+    const ref = (f: any) => {
+      const k = refKey(f);
+      return k === undefined ? undefined : f[k];
+    };
     const pick = (pred: (f: any) => boolean) => entries.find(([, f]) => pred(f) && ref(f));
     const found =
       pick((f) => f?.type === 'master_detail' && f?.required) ??
@@ -5860,6 +5909,13 @@ export class SecurityPlugin implements Plugin {
       pick((f) => f?.type === 'lookup' && f?.required);
     if (found) {
       const def = found[1];
+      // Resolved from the SAME field def the relation itself came from, and
+      // from the same `refKey`, so the report can never name a different field
+      // or a different key than the one that actually answered.
+      const spelling = refKey(def);
+      if (spelling !== undefined && spelling !== 'reference') {
+        this.reportRejectedReferenceAlias(object, String(found[0]), spelling, String(ref(def)));
+      }
       rel = {
         fk: String(found[0]),
         master: String(ref(def)),
@@ -5882,6 +5938,63 @@ export class SecurityPlugin implements Plugin {
     }
     this.cbpRelCache.set(object, rel);
     return rel;
+  }
+
+  /**
+   * Report that a `controlled_by_parent` master relation resolved ONLY because
+   * {@link SecurityPlugin.resolveCbpRelation} still accepts a spelling
+   * `@objectstack/spec` rejects (#11567) — the loud half of the deliberate
+   * tolerance documented at that reader.
+   *
+   * ## Granularity: once per object, per cache generation — and that is the
+   * ## cache's lifecycle rather than a second one invented here
+   *
+   * The only call site is inside `resolveCbpRelation`'s resolution body, which
+   * runs ONLY on a `cbpRelCache` miss: every later read of the same object is
+   * served from the cache and reports nothing. Two consequences, both of them
+   * the reason this is the right granularity:
+   *
+   *   • ⛔ NOT per read. This sits under the RLS path, which runs per request
+   *     per object — a per-read report would be a noise defect of its own, and
+   *     a noisy channel is a channel operators filter out, which would make
+   *     the tolerance silent again by a longer route.
+   *   • It RE-ARMS on a metadata change, because `start()`'s
+   *     `metadata.watch('*')` subscription clears `cbpRelCache` alongside the
+   *     other metadata-derived caches. That is exactly when an author wants to
+   *     hear it: they just edited the metadata (Studio / AI authoring), so the
+   *     next resolution reports the verdict on what they changed instead of
+   *     staying quiet because a process-lifetime "already warned" set had been
+   *     ticked at boot. A hand-rolled set would have to reproduce this
+   *     invalidation to stay correct, and would silently rot the day another
+   *     cache-clearing door was added.
+   *
+   * Reported through `this.logger`, the plugin's own {@link SecurityReportSink}
+   * — the same channel and the same `warn?.(…)` spelling as every other report
+   * site here, so an un-injected host still hears it on the console-backed
+   * default (#10556, maintainer ruling 2026-08-24). ⛔ No new channel: a
+   * diagnostic surface invented for one message is a surface of its own.
+   *
+   * The text names the SPELLING as the defect and states that access is
+   * unaffected, because both halves are load-bearing: an operator who reads
+   * "rejected alias" and assumes something was denied would go looking for an
+   * outage that did not happen.
+   */
+  private reportRejectedReferenceAlias(
+    object: string,
+    field: string,
+    alias: string,
+    master: string,
+  ): void {
+    this.logger.warn?.(
+      `[security/#11567] object "${object}": its controlled_by_parent master relation resolved ` +
+        `only from the REJECTED alias \`${alias}\` on field "${field}" — \`reference\` is the one ` +
+        'relationship spelling @objectstack/spec declares, and this object reached the registry ' +
+        'without being parsed (a raw registerObject skips Zod by design). Access is UNAFFECTED: ' +
+        'this reader keeps accepting the alias precisely so no deployment loses access, and the ' +
+        'relation still derives from the master. Rename the key to `reference` — every parsed ' +
+        'authoring path already refuses this shape, so the two answers disagree until you do.',
+      { object, field, alias, master },
+    );
   }
 
   /**
