@@ -208,28 +208,41 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    *
    *   `$exists`      REFERENCE is correct. `$exists` means "has a value"
    *                  (#5298 ③ / #5369, PR #5962), so mingo's key-presence
-   *                  reading is the divergent one.
-   *   `$nin`         LIVE is correct. Negative operators MATCH no-value rows —
+   *                  reading is the divergent one. STILL OPEN — #13195.
+   *   `$nin`         LIVE was correct. Negative operators MATCH no-value rows —
    *                  #5146, extended by #5298, re-affirmed 2026-08-10 — so a
    *                  missing key satisfying `$nin` is the affirmed answer, and
-   *                  the reference matcher's early-exit guard is the divergence.
-   *   `$notContains` LIVE is correct, for the same reason.
+   *                  the reference matcher's early-exit guard was the
+   *                  divergence. CLOSED by #13166: the guard now exempts the
+   *                  negation-carrying operators, and the two faces agree.
+   *   `$notContains` LIVE was correct, for the same reason. CLOSED by #13166,
+   *                  through a SECOND and independent cause — the arm's
+   *                  `typeof value !== 'string'` test, which rejected a `null`
+   *                  on its type rather than on the predicate.
    *
    * A ruling that morning (07:33Z) would have made the REFERENCE column the
    * target on all three rows. Cells 1 and 3 of it were WITHDRAWN the same day,
    * once the reversal's cross-backend cost had been measured, and the include
-   * direction was re-affirmed — which leaves the split above.
+   * direction was re-affirmed — which left the split above.
    *
-   * ⛔ Nothing is flipped in either direction. The #5499 investment freeze was
-   * the reason while it stood; it dissolved 2026-08-11 (head note of
-   * `@objectstack/spec`'s `aggregation-conformance.ts`), so that excuse has
-   * lapsed and the direction is now #13166's and #13195's to settle — ⛔ not
-   * this pin's, and ⛔ not a sweep's. What the round trip confirmed is exactly
-   * why this pin exists — this package answers with two different faces, so a
-   * statement like "driver-memory already reads has-value" is true of the
-   * reference matcher and FALSE of the live query path users actually reach.
+   * ⚠️ Two of the three cells are no longer a divergence, and this block was
+   * built for exactly that edit. It used to say "⛔ Nothing is flipped in either
+   * direction. The #5499 investment freeze was the reason while it stood; it
+   * dissolved 2026-08-11 …, so that excuse has lapsed and the direction is now
+   * #13166's and #13195's to settle." #13166 settled its two: the `$nin` and
+   * `$notContains` rows below now assert live and reference AGREEING, on the
+   * affirmed include answer. They were not re-baselined onto whatever the
+   * matcher began printing — the target was the live path's pre-existing
+   * answer, named as correct in this very note before the fix existed.
+   *
+   * ⛔ The `$exists` row is untouched and stays a pinned divergence. It is a
+   * different cell with a different backend list (`driver-mongodb` reads
+   * key-presence too), and it belongs to #13195. What that row still shows is
+   * why this pin exists — this package answers with two faces, so a statement
+   * like "driver-memory already reads has-value" is true of the reference
+   * matcher and FALSE of the live query path users actually reach.
    */
-  describe('[#5299] the settled cells, live vs reference — divergence pinned, disposition open (#13166/#13195)', () => {
+  describe('[#5299] the settled cells, live vs reference — $nin / $notContains converged (#13166), $exists still open (#13195)', () => {
     const liveVsReference = async (where: unknown) => ({
       live: await idsFrom(nulled, where),
       reference: NULLED.filter((r) => match(r, where)).map((r) => r.id),
@@ -242,16 +255,22 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
       });
     });
 
-    it('$nin on an ABSENT field', async () => {
+    it('$nin on an ABSENT field: the two faces now AGREE (#13166)', async () => {
+      // Was `reference: ['2']` — the matcher's `value === undefined` guard
+      // short-circuited before the `$nin` arm ran. The LIVE column is unchanged,
+      // and it is the column this note already named correct.
       const live = await idsFrom(missing, { stage: { $nin: ['won'] } });
       const reference = MISSING.filter((r) => match(r, { stage: { $nin: ['won'] } })).map((r) => r.id);
-      expect({ live, reference }).toEqual({ live: ['2', '3', '4'], reference: ['2'] });
+      expect({ live, reference }).toEqual({ live: ['2', '3', '4'], reference: ['2', '3', '4'] });
     });
 
-    it('$notContains on a null field', async () => {
+    it('$notContains on a null field: the two faces now AGREE (#13166)', async () => {
+      // Was `reference: ['1', '3', '4']` — `typeof null !== 'string'` failed the
+      // TYPE test, so the negation readmitted the null rows. The LIVE column is
+      // unchanged here too.
       expect(await liveVsReference({ $not: { stage: { $notContains: 'w' } } })).toEqual({
         live: ['1'],
-        reference: ['1', '3', '4'],
+        reference: ['1'],
       });
     });
   });

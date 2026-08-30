@@ -97,6 +97,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
+import { blank, scanSource } from './js-comment-mask.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -156,70 +157,54 @@ export function sliceBody(source, anchor, from = 0) {
  *
  * String DELIMITERS survive (their contents do not), so a quoted object key and
  * an array of string literals are both still locatable by index.
+ *
+ * ## CONVERTED onto the shared scanner (#13143)
+ *
+ * This body used to be a private left-to-right scanner written out here, and it
+ * was the one piece of comment-scanning code in this directory that no gate
+ * could see. `check-comment-mask-adoption.mjs` watches for exactly this shape
+ * and walks `packages` + `examples` only; `check-parse-guard.mjs` walks this
+ * directory for a different subject (the three TypeScript parser entry points).
+ * A private stripper here sits inside one gate's population and outside its
+ * subject, and inside the other's subject and outside its population, so
+ * nothing reds. Routing through the shared module is the half of that gap a
+ * caller can close on its own.
+ *
+ * A conversion is a MEASUREMENT rather than a mechanical edit, so here is the
+ * reading. The private scanner against `scanSource()`'s `comment | literal`
+ * projection, over THE POPULATION THIS GATE ACTUALLY READS (the seven SITE
+ * files plus `stack.zod.ts`, 1,028,984 chars): 3 of the 8 files disagree, 49
+ * spans, 247 characters. Two classes, and only one of them is a defect.
+ *
+ *   - 18 spans are a PROJECTION difference and nothing else: the private copy
+ *     blanked a regex literal's slash delimiters, the shared scanner keeps them
+ *     as code. No bracket is a slash, so no caller here could ever see it.
+ *   - 31 spans are the private scanner mis-reading a NESTED TEMPLATE. It closed
+ *     an outer template at the first backtick inside a `${...}`, which flipped
+ *     the parity of every backtick after it and handed the bracket counter 20
+ *     bracket characters out of the interiors of string and template literals.
+ *     Both files it happens in are live SITE files: `packages/objectql/src/
+ *     engine.ts` and `packages/metadata/src/plugin.ts`. That is the same family
+ *     as the `(ADR-0019)` incident above, arriving through a different door.
+ *
+ * Both directions of that defect are pinned in `--self-test` on synthetic
+ * bodies, because today's tree happens to punish neither: a nested template
+ * holding a `]` makes `stringArrayItems` DROP a real key, and one holding a
+ * quote makes it FABRICATE `${v}` as an enumerated key. The gate's verdict does
+ * NOT move on this tree -- `--list` is byte for byte identical before and after
+ * -- which is a fact about where this tree's nested templates sit, not a reason
+ * the private copy was safe.
+ *
+ * The instrument was shown able to fail before its empty results were read as
+ * agreement: the naive two-regex pair diffed against the shared scanner over
+ * the same eight files disagrees on 8 of 8, and the shared scanner diffed
+ * against itself returns nothing.
  */
 export function maskLiterals(source) {
-  const out = source.split('');
-  const blank = (from, to, keepDelimiters = false) => {
-    for (let i = from; i < to && i < out.length; i++) {
-      if (keepDelimiters && (i === from || i === to - 1)) continue;
-      if (out[i] !== '\n') out[i] = ' ';
-    }
-  };
-  // A `/` opens a regex literal only where a value may start; anywhere else it
-  // is division, and treating `a / b` as a regex would swallow the rest of the
-  // file.
-  const REGEX_PRECEDER = /[(,=:[!&|?{};+\-*%<>~^]$/;
-
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === '/' && source[i + 1] === '/') {
-      const nl = source.indexOf('\n', i);
-      const stop = nl === -1 ? source.length : nl;
-      blank(i, stop);
-      i = stop;
-      continue;
-    }
-    if (ch === '/' && source[i + 1] === '*') {
-      const end = source.indexOf('*/', i + 2);
-      const stop = end === -1 ? source.length : end + 2;
-      blank(i, stop);
-      i = stop;
-      continue;
-    }
-    if (ch === "'" || ch === '"' || ch === '`') {
-      let j = i + 1;
-      while (j < source.length) {
-        if (source[j] === '\\') { j += 2; continue; }
-        if (source[j] === ch) break;
-        j++;
-      }
-      blank(i, Math.min(j + 1, source.length), true);
-      i = j + 1;
-      continue;
-    }
-    if (ch === '/') {
-      const before = source.slice(0, i).replace(/\s+$/, '');
-      if (before === '' || REGEX_PRECEDER.test(before)) {
-        let j = i + 1;
-        let inClass = false;
-        while (j < source.length && source[j] !== '\n') {
-          if (source[j] === '\\') { j += 2; continue; }
-          if (source[j] === '[') inClass = true;
-          else if (source[j] === ']') inClass = false;
-          else if (source[j] === '/' && !inClass) break;
-          j++;
-        }
-        if (source[j] === '/') {
-          blank(i, j + 1);
-          i = j + 1;
-          continue;
-        }
-      }
-    }
-    i++;
-  }
-  return out.join('');
+  const { comment, literal } = scanSource(source);
+  const both = new Uint8Array(source.length);
+  for (let i = 0; i < source.length; i++) both[i] = comment[i] | literal[i];
+  return blank(source, both);
 }
 
 /**
@@ -899,6 +884,21 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     stringArrayItems(`'a', /* 'x' */ 'b', ['c'], // 'd'\n 'e',`),
     ['a', 'b', 'e'],
   );
+  // Both directions of the defect the #13143 conversion measured. The private
+  // scanner this file used to carry closed an outer template at the FIRST
+  // backtick inside a `${...}`, which flipped the parity of every backtick
+  // after it. Today's tree punishes neither direction -- the gate's verdict is
+  // byte for byte identical either way -- so the pins are synthetic on purpose.
+  eq(
+    'stringArrayItems() keeps the key AFTER a nested template holding a bracket',
+    stringArrayItems("'a', `${cond ? `]` : ''}`, 'b',"),
+    ['a', 'b'],
+  );
+  eq(
+    'stringArrayItems() fabricates NO key out of a nested interpolation',
+    stringArrayItems("'a', `${x.map((v) => `'${v}'`).join()}`, 'b',"),
+    ['a', 'b'],
+  );
   eq(
     'tupleFirstItems() takes the head of each tuple, not every string',
     tupleFirstItems(`['a', 'x'], /* ['q', 'q'] */ ['b', 'y'], // ['d', 'd']\n ['c', 'z'],`),
@@ -956,7 +956,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     for (const f of failures) console.error(`  • ${f}\n`);
     return 1;
   }
-  console.log('✓ check-stack-collection-maps --self-test: 13 assertions over synthetic sources');
+  console.log('✓ check-stack-collection-maps --self-test: 15 assertions over synthetic sources');
   return 0;
 }
 
