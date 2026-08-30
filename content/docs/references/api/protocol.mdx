@@ -1797,7 +1797,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
-| **organizationId** | `string` | optional | Organization (tenant) partition the change log is read from. Absent means the env-wide partition (the implementation resolves the overlay repository as `organizationId ?? null`, keyed `org: 'env'`). Declared because the implementation declares and reads it; plain `string`, not nullable, because that is the implementation's parameter type — unlike the audit twin, whose door always sends `ctx?.tenantId ?? null` and whose implementation declares `string \| null`. The REST history door currently sends no organization at all (the #8747-family tenant-scoping question is a separate measurement for that door — declaring the member records the implementation contract, it does not answer that question). |
+| **organizationId** | `string` | optional | Organization (tenant) partition the change log is read from. Absent means the env-wide partition (the implementation resolves the overlay repository as `organizationId ?? null`, keyed `org: 'env'`). Declared because the implementation declares and reads it; plain `string`, not nullable, because that is the implementation's parameter type — unlike the audit twin, whose door always sends `ctx?.tenantId ?? null` and whose implementation declares `string \| null`. The REST history door currently sends no organization at all (whether it should is a tenant-scoping question measured separately for that door — declaring the member records the implementation contract, it does not answer that question). |
 | **sinceSeq** | `number` | optional | Exclusive lower bound on `seq` for pagination: only events with `seq > sinceSeq` are returned. Absent means "from the beginning". |
 | **limit** | `number` | optional | Maximum events to return, oldest first. Forwarded to the repository unclamped and with NO default — absent means the full remaining change log. (Deliberately no declared bounds: unlike the audit twin's [1, 500] clamp, nothing on this path clamps or refuses, so declaring `.min()`/`.max()` here would refuse values the shipped verb accepts.) |
 
@@ -1823,7 +1823,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **parentHash** | `string \| null` | ✅ | Hash the written version was derived from; `null` for a first version. |
 | **version** | `integer` | optional | Per-(org,type,name) monotonic lineage counter at this event — the token `rollbackMetaItem({ toVersion })` pins. Absent when the row recorded none. |
 | **previousName** | `string` | optional | Set on op="rename": the old machine name. |
-| **actor** | `string \| null` | ✅ | Who wrote this. `null` = system-initiated (boot sync, migration, scheduled job) — never a sentinel string (#4556): consumers that resolve this against `sys_user` must be able to tell "nobody" from "a user id". |
+| **actor** | `string \| null` | ✅ | Who wrote this. `null` = system-initiated (boot sync, migration, scheduled job) — never a sentinel string: consumers that resolve this against `sys_user` must be able to tell "nobody" from "a user id". |
 | **message** | `string` | optional | Optional commit message recorded with the write. |
 | **ts** | `string` | ✅ | When the write happened (ISO-8601 string). |
 | **source** | `string` | ✅ | Origin label of the write: "fs", "studio", "rest", "ai", "git-import", … |

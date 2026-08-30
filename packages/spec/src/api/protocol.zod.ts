@@ -1409,8 +1409,8 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'parameter type — unlike the audit twin, whose door always sends '
     + '`ctx?.tenantId ?? null` and whose implementation declares '
     + '`string | null`. The REST history door currently sends no '
-    + 'organization at all (the #8747-family tenant-scoping question is a '
-    + 'separate measurement for that door — declaring the member records '
+    + 'organization at all (whether it should is a tenant-scoping question '
+    + 'measured separately for that door — declaring the member records '
     + 'the implementation contract, it does not answer that question).',
   ),
   sinceSeq: z.number().optional().describe(
@@ -1499,7 +1499,7 @@ export const HistoryMetaItemResponseSchema = lazySchema(() => z.object({
     previousName: z.string().optional().describe('Set on op="rename": the old machine name.'),
     actor: z.string().nullable().describe(
       'Who wrote this. `null` = system-initiated (boot sync, migration, '
-      + 'scheduled job) — never a sentinel string (#4556): consumers that '
+      + 'scheduled job) — never a sentinel string: consumers that '
       + 'resolve this against `sys_user` must be able to tell "nobody" from '
       + '"a user id".',
     ),
