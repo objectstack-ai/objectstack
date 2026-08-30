@@ -403,15 +403,15 @@ newer than your base: another agent's merged work entering your tree under the n
 the last fetch in this checkout wins** (⚠️ not per worktree: measured on git 2.43, a
 linked worktree has its own, so a sibling's fetch does **not** move yours and the hazard
 is the **shared primary checkout**, where every agent's first fetch lands before it builds
-one). It fails by **absence**, not wrong content: split from its `git fetch` by any intervening fetch, `git diff
-…FETCH_HEAD` **exits 0 printing nothing** — read as *"the change isn't there"*, a confidently wrong verdict on
-someone else's work, worst for **reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at worktree
-creation and restore against that commit, never a moving ref name; verify a named remote-tracking ref's content by
-occurrence counts on disk; fetch into a ref you own (`git fetch origin <branch>:refs/<ns>/<id> -f`) and read that;
-diff restored paths against `BASE` before staging; **enumerate from the ref you read** — `git ls-tree --name-only
-origin/main <dir>`, never a working-tree glob feeding per-file `origin/main` reads, whose misses cannot appear in
-its own output (`guard-tree-enum.sh`). ⛔ **No hook backs the moving-ref half** — safe and unsafe spellings are
-both ordinary `git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
+one). It fails by **absence**, not wrong content: split from its `git fetch` by any
+intervening fetch, `git diff …FETCH_HEAD` **exits 0 printing nothing** — read as *"the
+change isn't there"*, a confidently wrong verdict on someone else's work, worst for
+**reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at worktree creation and
+restore against that commit, never a moving ref name; verify a named remote-tracking
+ref's content by occurrence counts on disk; fetch into a ref you own (`git fetch origin
+<branch>:refs/<ns>/<id> -f`) and read that; diff restored paths against `BASE` before
+staging. ⛔ **No hook backs the moving-ref half** — safe and unsafe spellings are both ordinary
+`git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
 
 **⛔ Nor the build cache** — turbo resolves the repo root through the **common** dir, so every
 worktree replays ONE `.turbo/cache`. Symptom: a typecheck failing on a package your diff never
