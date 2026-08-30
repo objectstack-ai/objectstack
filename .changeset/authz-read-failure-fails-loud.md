@@ -37,12 +37,39 @@ code an outage selects. Doors that map thrown errors through
 
 **What did NOT change**, and is pinned:
 
-- A reachable, genuinely EMPTY store still resolves to zero capabilities.
+- A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+  zero capabilities.
 - A genuine capability denial still answers `403 FORBIDDEN` with its message.
-- An ABSENT engine (`ql` unwired) still resolves to an empty-but-valid envelope
-  — "no engine" is not a failed read, and embedders without a data plane are
-  unaffected.
+- An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+  an empty-but-valid envelope.
 - Anonymous requests never reach the store, so an outage cannot make them loud.
+
+⛔ **NOT YET TRUE, and this is why the PR is blocked.** An earlier revision of
+this changeset claimed "embedders without a data plane are unaffected". That
+claim was too broad and is retracted. The pinned cases above cover an *unwired*
+engine and an *empty* one; they do NOT cover the far commoner unprovisioned
+shape — a REAL engine whose `sys_*` tables were never created, where `find` is
+issued and THROWS `no such table`. That is currently treated as an outage, and
+it must not be: with no permission tables provisioned, "zero capabilities" is
+the TRUE answer, not a fabrication. Only an UNREACHABLE store — the ruling's own
+word — leaves the capability set unknown.
+
+Measured cost of the conflation, all from `no such table` on `sys_user`,
+`sys_member`, `sys_user_position`, `sys_user_permission_set`: ordinary CRUD in
+`@objectstack/client` answers `503`, batch validation errors that owe `400`
+answer `503` because authorization refuses before validation runs, and two
+`.integration.test.ts` noise guards report that the driver and engine
+diagnostics for `sys_position` stopped being emitted — the eager throw aborts
+the resolution before that later read is ever issued, so a change made to stop a
+failed read being silent made two other channels silent.
+
+The classifier that draws the boundary correctly already exists and is exactly
+right — `isMissingTableError(error, readObject)`, driver-code based rather than
+prose-sniffing, documented so that "cannot say" never means "be loud" — but it
+lives in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`, so the
+resolver cannot import it; and the SQL driver's `backendStatementFaultError`
+deliberately withholds the distinction from the thrown error. Resolving that is
+a maintainer decision, not an implementation detail.
 
 **All-transport, not just REST.** Every transport authorizing through
 `resolveAuthzContext` inherits this. Six of the eight production transports
