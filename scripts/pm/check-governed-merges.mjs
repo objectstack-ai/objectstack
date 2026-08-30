@@ -2494,6 +2494,34 @@ async function selfTest() {
     assert('a-reachable-remote-that-lacks-the-branch-is-a-FAILED-reading-not-a-null-tip',
       noSuchBranch.reachable === false, JSON.stringify(noSuchBranch));
 
+    // ⭐ The CALL SITE, end to end — and this one is not belt-and-braces.
+    // Every assertion above is on a pure verdict or on the prober; not one of
+    // them fails if `main()` simply stops CONSULTING them. Measured on this
+    // branch by deleting the four-line call site in the sweep loop: all of the
+    // pins above stayed GREEN while the live sweep went straight back to
+    // `✓ audited … ✅ clean window` over a dead remote, exit 0. An instrument
+    // that structurally cannot fail in the direction it exists to detect is
+    // this card's own subject, so the wiring is pinned by RUNNING the sweep
+    // rather than by trusting it — both directions, against the same fixtures.
+    const sweepEnv = { ...process.env, [PROXY_REARM_GUARD]: '1' };
+    const deadSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coGone}`], { encoding: 'utf8', env: sweepEnv });
+    const deadOut = `${deadSweep.stdout ?? ''}${deadSweep.stderr ?? ''}`;
+    // ⚠️ The audited-row test is LINE-ANCHORED, and finding that out cost a
+    // red run worth keeping: the refusal's own reason QUOTES the string
+    // `✓ audited … 0 mainline commit(s) in window` while explaining what it is
+    // refusing to print, so a bare substring test reads the explanation as the
+    // symptom. Same trap as the `✅` / "NOT a clean window" pin above — assert
+    // on the ROW, not on the phrase.
+    const auditedRow = /^\s*✓ audited/m;
+    assert('the-SWEEP-itself-refuses-a-dead-mirror-not-merely-its-helpers',
+      deadSweep.status !== 0 && deadOut.includes('NOT MEASURED') && !auditedRow.test(deadOut) && !deadOut.includes('✅'),
+      `status=${deadSweep.status} out=${deadOut.slice(0, 500)}`);
+    const liveSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLive}`], { encoding: 'utf8', env: sweepEnv });
+    const liveOut = `${liveSweep.stdout ?? ''}${liveSweep.stderr ?? ''}`;
+    assert('and-the-same-sweep-over-a-LIVE-mirror-still-audits-and-still-says-a-true-zero',
+      liveSweep.status === 0 && auditedRow.test(liveOut) && liveOut.includes('✅'),
+      `status=${liveSweep.status} out=${liveOut.slice(0, 500)}`);
+
     // Freshness by IDENTITY: advance the remote, leave the mirror untouched.
     const pusher = join(fxRoot, 'pusher');
     g(fxRoot, 'clone', '-q', bareLive, pusher);
