@@ -60,7 +60,13 @@ import {
 export interface SmtpTransportOptions {
   /** SMTP server hostname, e.g. `smtp.exmail.qq.com`. Required. */
   host: string;
-  /** SMTP port. Default 587 (submission). 465 selects implicit TLS. */
+  /**
+   * SMTP port. Default 587 (submission). 465 selects implicit TLS.
+   *
+   * ⚠️ An **integer** in `1-65535`, refused at construction otherwise —
+   * `number` cannot say that in the type, and a fractional port is not a
+   * near miss but an address `net.connect` will never accept (#13189).
+   */
   port?: number;
   /**
    * Require TLS. Default `true`. Implicit TLS on port 465, otherwise a
@@ -114,10 +120,14 @@ export class SmtpTransport implements IEmailTransport {
     }
     this.opts = opts;
     const port = Number(opts.port ?? DEFAULT_PORT);
-    // The range is declared ONCE, in `smtp-port-contract.ts`, and the sentence
+    // The rule is declared ONCE, in `smtp-port-contract.ts`, and the sentence
     // below is GENERATED from it. A hand-written `(expected 1-65535)` on this
     // line is exactly the drift #12993 removed: it sat next to the check it
-    // described, so the two could disagree and nothing would fail.
+    // described, so the two could disagree and nothing would fail — which is
+    // not hypothetical. They DID disagree until #13189: the check admitted
+    // `587.5` and the sentence said `1-65535`, a range `587.5` satisfies. The
+    // guard tests integrality now and the generated sentence says so, so the
+    // two still cannot drift apart without one of them being rewritten.
     if (!isValidSmtpPort(port)) {
       throw new Error(formatInvalidSmtpPortNotice(opts.port));
     }
