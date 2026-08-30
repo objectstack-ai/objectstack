@@ -128,7 +128,10 @@ export function bindPrimaryBuHooks(engine: MinimalEngine, logger?: OptionalShari
  * `is_primary` member row, so pre-existing memberships (seeds, prior data)
  * project even though their inserts pre-dated the hooks. Idempotent.
  */
-export async function backfillPrimaryBu(engine: MinimalEngine, logger?: OptionalSharingLogger): Promise<{ updated: number }> {
+export async function backfillPrimaryBu(
+  engine: MinimalEngine,
+  logger?: OptionalSharingLogger,
+): Promise<{ updated: number; refused: number }> {
   let rows: any[] = [];
   try {
     rows = await engine.find('sys_business_unit_member', {
@@ -139,16 +142,54 @@ export async function backfillPrimaryBu(engine: MinimalEngine, logger?: Optional
     });
   } catch (err: any) {
     logger?.warn?.('[primary-bu] backfill scan failed', { error: err?.message });
-    return { updated: 0 };
+    return { updated: 0, refused: 0 };
   }
   let updated = 0;
+  // [#12981] Refused row writes are COUNTED, never swallowed. `catch { }` alone
+  // made a backfill in which EVERY row was refused byte-identical to one with
+  // nothing to do: `updated` stayed 0, the `updated > 0` gate below skipped the
+  // report, and the boot printed nothing at all while every user kept a stale
+  // or absent projection. That `updated > 0` suppressor is the same one
+  // `permission-set-drift.ts` carried before #12970 repaired it, and it is
+  // repaired here the same way.
+  let refused = 0;
   for (const m of rows ?? []) {
     if (!m?.user_id) continue;
     try {
       await engine.update('sys_user', { id: m.user_id, primary_business_unit_id: m.business_unit_id }, { context: SYSTEM_CTX });
       updated++;
-    } catch { /* skip one bad row, keep going */ }
+    } catch {
+      refused++;
+    }
   }
-  if (updated > 0) logger?.info?.('[primary-bu] backfilled projection', { updated });
-  return { updated };
+  // Before the counts, so an operator reads WHY the count is short in the same
+  // place they read the count.
+  //
+  // ⚠️ `warn`, and AGENTS.md's "Degradation log levels" wants `error` for this
+  // consequence. The level is NOT deferred out of doubt: `OptionalSharingLogger`
+  // declares no `error` and its own header ⛔ forbids growing one (adding
+  // `error?` there enrols every module on that type into
+  // `check:optional-error-sink-contract`'s population at once), while giving
+  // THIS function a stricter sink means requiring `warn` on a publicly exported
+  // shape — which `scripts/optional-error-sink-contract.baseline.json` records
+  // in as many words as #10556's contract call, already ruled on that card and
+  // shipped there as a `minor` naming the break for external hosts. Re-deciding
+  // it inside this repair would be re-litigating another card's ruling. What is
+  // fixed here is the SILENCE, which needed no contract at all; the LEVEL
+  // belongs to #10556.
+  if (refused > 0) {
+    logger?.warn?.(
+      `[primary-bu] ${refused} user row(s) were REFUSED while backfilling the primary-business-unit `
+        + 'projection — those users keep a stale or absent sys_user.primary_business_unit_id, and '
+        + 'every sharing rule keyed on the primary business unit evaluates against the wrong value '
+        + 'for them. Nothing else fails, so this line is the only notice. The projection self-heals '
+        + 'for a user on their next sys_business_unit_member write; a full repair is another boot '
+        + 'once the sys_user write can land.',
+      { refused, updated, scanned: rows?.length ?? 0 },
+    );
+  }
+  if (updated > 0 || refused > 0) {
+    logger?.info?.('[primary-bu] backfilled projection', { updated, refused });
+  }
+  return { updated, refused };
 }

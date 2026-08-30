@@ -450,7 +450,7 @@ export const CEILINGS = new Map([
 export const MAX_TABLE_ROW_BYTES = new Map([
   // The five files that carry a table row today, each seeded at its own widest.
   // The corpus's #1 longest LINE of any shape is the AGENTS.md row below.
-  ['.claude/skills/pm-dispatch/SKILL.md', 765],
+  ['.claude/skills/pm-dispatch/SKILL.md', 642],
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 0],
   ['.claude/skills/pm-dispatch/references/state-machine.md', 0],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],

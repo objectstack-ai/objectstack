@@ -10,7 +10,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Driver Identifier
-- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Seed Import Strategy
+- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/kernel/context.zod.ts` — Exports: RuntimeMode, KernelContextSchema, TenantRuntimeContextSchema
 - `node_modules/@objectstack/spec/src/kernel/manifest.zod.ts` — Exports: PluginPermissionsSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginRuntimeSchema, PluginPackagingSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-plugin.zod.ts` — Metadata Plugin Protocol
@@ -31,15 +31,15 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/driver/sqlite.zod.ts` — SQLite driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/driver/turso.zod.ts` — Turso / libSQL Driver Protocol.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/kernel/cluster.zod.ts` — Cluster Protocol
 - `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Manager Configuration
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
-- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Supported metadata file formats
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
+- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Exports: MetadataFormatSchema, BaseMetadataRecordSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/system/tenant.zod.ts` — Tenant Schema (Multi-Tenant Architecture)

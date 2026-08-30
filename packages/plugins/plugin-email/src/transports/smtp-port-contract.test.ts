@@ -31,6 +31,17 @@
  * mechanism `mail-manifest-providers.contract.test.ts` already uses for the
  * provider dropdown over that same devDependency.
  *
+ * ## #13189 — the accept set narrowed, and this file is where that is visible
+ *
+ * `isValidSmtpPort` now tests INTEGRALITY. That is a deliberate narrowing of
+ * the set #12993 pinned, and the pin below was written to make exactly this
+ * kind of change loud rather than to forbid it — so it was UPDATED, never
+ * deleted: the legacy oracle stays, an exhaustive integer sweep says the
+ * integer accept set did not move at all, and the one axis that did move is
+ * named value by value. The sentence moved with the guard (`expected an
+ * integer 1-65535`), because `587.5` is inside `1-65535` and a door that
+ * refuses it while saying only that is stating a rule it does not enforce.
+ *
  * ## ⛔ The floor is 1 and must never become 0
  *
  * The CLI's listen range floors at 0 ("let the OS choose"). This one floors at
@@ -181,7 +192,7 @@ describe('#12993 — one SMTP port range, every door states it from there', () =
     // independent spelling, so there is nothing left to drift.
     expect(SMTP_PORT_RANGE_TEXT).toBe(`${SMTP_PORT_MIN}-${SMTP_PORT_MAX}`);
     expect(formatInvalidSmtpPortNotice('abc'))
-      .toBe(`SmtpTransport: invalid port 'abc' (expected ${SMTP_PORT_MIN}-${SMTP_PORT_MAX})`);
+      .toBe(`SmtpTransport: invalid port 'abc' (expected an integer ${SMTP_PORT_MIN}-${SMTP_PORT_MAX})`);
 
     // The ceiling is typed exactly once even inside its own module — if the
     // notice re-spelled the range, this would be 2.
@@ -211,27 +222,146 @@ describe('#12993 — one SMTP port range, every door states it from there', () =
       .toBe(true);
   });
 
-  it('refactors the enforcement without narrowing what it accepts', () => {
-    // The predicate `smtp.ts` had before this card, kept verbatim as the
-    // oracle. Reading the bound from the module here would assert `x === x`;
-    // the point is that the OLD expression and the NEW function agree.
+  it('narrows the accept set in exactly ONE dimension — integrality — and nowhere else (#13189)', () => {
+    // ⚠️ This case was `refactors the enforcement without narrowing what it
+    // accepts` when #12993 moved the predicate here, and `587.5` sat in its
+    // table as MEASURED, not endorsed. #13189 is the card that SPENDS that
+    // pin: the accept set really does narrow now, and the pin's job was always
+    // to make such a change visible rather than to prevent one. So the oracle
+    // and the values stay exactly where they were; what changed is that the
+    // two are now expected to disagree on ONE axis, asserted term by term so
+    // that a second narrowing — or any widening — still fails right here.
     const legacyAccepts = (port: number): boolean =>
       !(!Number.isFinite(port) || port < 1 || port > 65535);
 
-    const table = [
+    const integers = [
       1, 25, 465, 587, 2525, 65535, // inside
       0, -1, 65536, 99999, // outside
-      Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, // not finite
-      587.5, 0.5, 65535.5, // non-integers: accepted iff they were accepted before
     ];
-    for (const port of table) {
+    const nonIntegers = [
+      587.5, 1.5, 2525.25, 65534.5, // INSIDE the range — accepted until this card
+      0.5, 65535.5, -0.5, 65536.5, // outside it — the old bounds refused these too
+      Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, // not finite
+    ];
+
+    // ── UNCHANGED: on every integer the predicate is still, bound for bound,
+    // the expression `smtp.ts` carried before #12993.
+    for (const port of integers) {
       expect(isValidSmtpPort(port), `accept set changed for ${String(port)}`)
         .toBe(legacyAccepts(port));
     }
 
-    // The table is not vacuous in either direction.
-    expect(table.filter(legacyAccepts).length).toBeGreaterThan(0);
-    expect(table.filter((p) => !legacyAccepts(p)).length).toBeGreaterThan(0);
+    // ⭐ …and the strongest available form of "and nowhere else": EVERY
+    // integer from below the floor to above the ceiling, not ten sampled
+    // ones. 65k comparisons of two cheap predicates costs milliseconds and
+    // closes the gap a table cannot.
+    let divergences = 0;
+    for (let port = -2; port <= SMTP_PORT_MAX + 2; port += 1) {
+      if (isValidSmtpPort(port) !== legacyAccepts(port)) divergences += 1;
+    }
+    expect(divergences, 'the integer accept set moved somewhere the table does not sample')
+      .toBe(0);
+
+    // Control for that zero — the same sweep against a floor deliberately one
+    // too high, which MUST find the one integer it disagrees about. Without
+    // this the loop above could be counting nothing at all.
+    let seen = 0;
+    for (let port = -2; port <= SMTP_PORT_MAX + 2; port += 1) {
+      if ((port >= 2 && port <= SMTP_PORT_MAX) !== legacyAccepts(port)) seen += 1;
+    }
+    expect(seen, 'the integer sweep is a dead loop').toBe(1);
+
+    // ── THE ONE CHANGE: nothing non-integral is accepted any more.
+    for (const port of nonIntegers) {
+      expect(isValidSmtpPort(port), `${String(port)} is still accepted`).toBe(false);
+    }
+
+    // …and exactly WHICH values this card moved, spelled out rather than
+    // summarised: accepted yesterday, refused today, and not one of them could
+    // ever have completed a connection.
+    //
+    // ⚠️ MEASURED, and it corrected a first draft of this very list: a
+    // fraction only moved if it was INSIDE the range, so `0.5` and `65535.5`
+    // belong in the half below, not here. `0.5 < SMTP_PORT_MIN` and
+    // `65535.5 > SMTP_PORT_MAX`, so the old bounds already refused both — and
+    // listing them as "narrowed by this card" would have overstated the
+    // change while still passing a weaker assertion.
+    const moved = [587.5, 1.5, 2525.25, 65534.5];
+    expect(moved.filter(legacyAccepts), 'these were not accepted before, so nothing moved')
+      .toEqual(moved);
+    expect(moved.filter((port) => isValidSmtpPort(port)), 'a fractional port is accepted again')
+      .toEqual([]);
+
+    // The other half, asserted rather than left implied: every remaining
+    // non-integer was ALREADY refused, so this card narrowed the in-range
+    // fractions and nothing else.
+    const unmoved = nonIntegers.filter((port) => !moved.includes(port));
+    expect(unmoved.filter(legacyAccepts), 'this card narrowed more than the in-range fractions')
+      .toEqual([]);
+    expect(unmoved.length, 'the unmoved half is empty — it asserts nothing').toBeGreaterThan(0);
+
+    // The tables are not vacuous in either direction.
+    expect(integers.filter(legacyAccepts).length).toBeGreaterThan(0);
+    expect(integers.filter((p) => !legacyAccepts(p)).length).toBeGreaterThan(0);
+    expect(nonIntegers.filter(legacyAccepts).length).toBeGreaterThan(0);
+  });
+
+  it('⭐ states the rule it enforces — the sentence and the guard cannot disagree (#13189)', () => {
+    // The defect this card repairs, in one line: `587.5` **is** inside
+    // `1-65535`, so a refusal reading `(expected 1-65535)` described a door
+    // that had just let it through. The sentence is the operator's only view
+    // of the rule, so a guard that tests integrality without saying so would
+    // have moved the lie rather than removed it.
+    const notice = formatInvalidSmtpPortNotice(587.5);
+    expect(notice, 'the refusal states a range the guard no longer enforces alone')
+      .toContain('integer');
+
+    // ⭐ The mechanical form, and the reason this is not a `toContain` on a
+    // word: read the range back OUT of the rendered sentence and confirm that
+    // a value satisfying it is refused anyway — which is precisely why the
+    // range can no longer be the whole sentence.
+    const rendered = notice.match(/\((?:[^()]*?)(\d+)-(\d+)\)/);
+    expect(rendered, 'the refusal no longer renders the range at all').not.toBeNull();
+    const low = Number(rendered![1]);
+    const high = Number(rendered![2]);
+    expect(low, 'the rendered floor drifted from the constant').toBe(SMTP_PORT_MIN);
+    expect(high, 'the rendered ceiling drifted from the constant').toBe(SMTP_PORT_MAX);
+    expect(587.5 >= low && 587.5 <= high, 'the example stopped being inside the stated range')
+      .toBe(true);
+    expect(isValidSmtpPort(587.5), '587.5 is accepted again').toBe(false);
+
+    // ⛔ The range is still GENERATED, never re-typed — the word added above
+    // is prose about the predicate and must not have dragged a literal in
+    // with it. (`SMTP_PORT_RANGE_TEXT` is asserted against the constants two
+    // cases up; this holds the notice to that same construct.)
+    expect(notice).toContain(SMTP_PORT_RANGE_TEXT);
+  });
+
+  it('refuses a fractional port AT CONSTRUCTION, under its own name (#13189)', () => {
+    // BEFORE, MEASURED on `origin/main@56c5b1dbe` through the built
+    // `dist/index.js`: construction ACCEPTED `587.5`, `describe().port` read
+    // it straight back, and the operator's first sight of the problem came at
+    // SEND time as a bare `RangeError` — `code: 'ECONNECTION'` once nodemailer
+    // has re-coded `ERR_SOCKET_BAD_PORT` — reading `Port should be >= 0 and <
+    // 65536. Received type number (587.5).`, which names a TCP rule and no
+    // part of the Settings field the operator typed in.
+    expect(() => new SmtpTransport({ host: 'smtp.example.test', port: 587.5 }))
+      .toThrow(formatInvalidSmtpPortNotice(587.5));
+
+    // The refusal carries the operator's OWN value. Asserted through the
+    // contract's generator above and then, separately, on the spelling — a
+    // bare `.toThrow()` here would also pass on the `host is required`
+    // refusal that guards the line before it.
+    expect(() => new SmtpTransport({ host: 'smtp.example.test', port: 587.5 }))
+      .toThrow(/invalid port '587\.5'/);
+
+    // ⛔ The fence on the repair: integer ports still construct, at both
+    // bounds. A guard that refused `587.5` by refusing everything would
+    // satisfy every line above this one.
+    for (const port of [SMTP_PORT_MIN, 25, 465, 587, SMTP_PORT_MAX]) {
+      expect(new SmtpTransport({ host: 'smtp.example.test', port }).describe().port)
+        .toBe(port);
+    }
   });
 
   it('⛔ floors at 1, not at 0 — this range is not the CLI listen range', () => {

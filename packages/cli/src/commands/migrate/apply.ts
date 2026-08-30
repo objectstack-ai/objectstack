@@ -23,6 +23,7 @@ import {
 } from '../../utils/schema-migrate.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import {
+  describeUnloadableHostConfig,
   refuseWhenHostConfigUnloadable,
   type SchemaMigrationComposition,
 } from '../../utils/schema-migration-plugins.js';
@@ -56,6 +57,14 @@ async function confirm(question: string): Promise<boolean> {
  * 2. **A database somebody else is using is not migrated by accident.** The
  *    SQLite target is probed for other attached connections before boot, and a
  *    busy database refuses without `--force`.
+ *
+ * A third, added by #13118 (maintainer ruling 2026-08-29, verbatim 「同意」):
+ *
+ * 3. **An UNMEASURED run does not write.** When the host
+ *    `objectstack.config.{ts,js,mjs}` exists and could not be loaded, the object
+ *    set this command can see is the data stack plus the platform floor — not
+ *    the deployment's. #12953 made that run exit non-zero; it still applied its
+ *    DDL first. It now refuses above every write, and says so in the refusal.
  */
 export default class MigrateApply extends Command {
   static override description =
@@ -99,7 +108,13 @@ export default class MigrateApply extends Command {
     // reconcile an operator confirms has to be judged the same way as the plan
     // they read. Applied after `apply()` for the same reason it is there: the
     // report is already written and must survive the non-zero exit.
-    if (this.composition) refuseWhenHostConfigUnloadable(this.composition);
+    // [#13118] `noDdlExecuted` is true because `apply()` above RETURNS on this
+    // path before `flushSchemaDdl()` / `applyMigrationEntries()` — see the
+    // refusal gate there. The two must move together: the sentence is a claim
+    // about this run, not a label on the command.
+    if (this.composition) {
+      refuseWhenHostConfigUnloadable(this.composition, { noDdlExecuted: true });
+    }
     await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
   }
 
@@ -251,6 +266,61 @@ export default class MigrateApply extends Command {
         if (allowDestructive && grouped.destructive.length > 0) {
           printWarning('Destructive changes assume your full app/plugin set is loaded. A column that looks "orphaned" here may belong to a plugin that is not part of this build.');
         }
+      }
+
+      // ── [#13118] REFUSE BEFORE ANY DDL ──────────────────────────────
+      //
+      // Maintainer ruling 2026-08-29, verbatim 「同意」, option 2: when the host
+      // config EXISTS and could not be loaded, `os migrate apply` refuses
+      // WITHOUT writing DDL, and exits non-zero. #12953 had ruled only the exit
+      // status, so until this gate the same run said "this result is UNMEASURED,
+      // not in sync" and reconciled the operator's schema against that very
+      // set — nine platform/data-stack tables, none of them the deployment's.
+      //
+      // Placement is the whole change, and it is exact:
+      //
+      //   • BELOW the report. Everything above this line is read-only — the
+      //     boot deferred its DDL (#3917), `detectManagedDrift()` only reads the
+      //     catalog — and #12953 pinned that the refusal replaces the STATUS,
+      //     not the document. The plan and the `--json` payload still reach
+      //     their reader, `composition.hostConfigLoaded` included.
+      //   • ABOVE the confirmation gate. An operator must not be asked to
+      //     confirm a reconcile this command has already decided to refuse.
+      //   • ABOVE `flushSchemaDdl()` and `applyMigrationEntries()` — the two
+      //     calls in this file that write. That is what makes `run()`'s
+      //     `noDdlExecuted: true` a true sentence rather than a hopeful one.
+      //
+      // ⛔ No flag, env var or escape hatch: option 3 was refused in the same
+      // ruling ("需求未测不加面"). The path back to a working apply is to fix the
+      // config — which is also the only path back to a bootable deployment, as
+      // `os serve` refuses the identical shape.
+      //
+      // Convergence, measured for the ruling before this gate was written: a
+      // partial apply over the reduced set then a repaired full apply DOES
+      // converge to the schema a never-degraded run produces. So this refusal
+      // is contract honesty, not data rescue — which is exactly the outcome the
+      // ruling said to implement anyway, at low cost.
+      if (describeUnloadableHostConfig(stack.composition) !== null) {
+        if (flags.json) {
+          // `skipped`/`pending` carry what was NOT done, in the vocabulary the
+          // other "we did not apply" payloads above already use. `created` and
+          // `applied` are empty because nothing was created or applied — a
+          // consumer must be able to read "no DDL" off the document too, not
+          // only off stderr.
+          await emitJson({
+            database: stack.dbLabel,
+            created: [],
+            applied: [],
+            skipped: drift,
+            pending,
+            message: 'refused_unloadable_host_config',
+            ...compositionPayload,
+          }, 0, { compact: true });
+          return;
+        }
+        // The refusal sentence itself is printed once, on stderr, by `run()`'s
+        // shared choke point — not duplicated here.
+        return;
       }
 
       const totalIntended = intended.length + pending.length;

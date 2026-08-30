@@ -437,9 +437,40 @@ describe('createDefaultDatasourceDriverFactory — the missing libSQL package is
   });
 
   it('is what the turso arm actually raises when the optional package is absent', async () => {
-    // `@objectstack/driver-turso` is deliberately not a dependency of this
-    // package — that is what "optional" means — so the missing-package path is
-    // reachable here for a real reason and needs no stub.
+    // ⭐ STAGED absence since #12943 — this case used to reach the arm with NO
+    // stub, and that is no longer possible. `@objectstack/driver-turso` is now
+    // an OPTIONAL PEER of `@objectstack/service-datasource`
+    // (`peerDependencies` + `peerDependenciesMeta.optional`): the honest
+    // install-time declaration of a relationship this file's subject already
+    // had. It installs nothing for a consumer, but pnpm LINKS an optional
+    // workspace peer (measured: `pnpm-lock.yaml` gains
+    // `link:../../drivers/driver-turso`), so the package resolves from here and
+    // the bare form stopped entering the missing-package arm.
+    //
+    // ⛔ The assertion is NOT deleted. Its old notice said exactly what to do
+    // when the package became declared — "the pin above needs a stubbed import
+    // instead" — and this is that, done.
+    //
+    // ⛔ Mocked WITHOUT `vi.resetModules()`, unlike `raiseWithPackageAbsent`
+    // below, and the difference is load-bearing rather than stylistic. A reset
+    // re-evaluates `missing-driver-package-error.js` along with the factory, so
+    // the arm raises a DIFFERENT class object and the `instanceof` at the bottom
+    // is false for a perfectly correct error — measured, before this form
+    // replaced it: "expected MissingDriverPackageError … to be an instance of
+    // MissingDriverPackageError". The siblings need the reset because this
+    // file's construction suites import their packages for real first; nothing
+    // imports the libSQL package before this point, so the factory's lazy
+    // `await import(...)` is the first one and the mock is what it finds. That
+    // keeps the identity assertion pointed at the binding `serve.ts` holds,
+    // which is the only reason it is worth asserting.
+    //
+    // Proof the arm is still ENTERED rather than decorated: only `create()`'s
+    // turso catch builds a `MissingDriverPackageError` carrying
+    // `driverType: 'turso'` and the install command as DATA. A stub that missed
+    // the arm leaves `raised` undefined and trips the notice below.
+    vi.doMock(TURSO_DRIVER_PACKAGE, () => {
+      throw notInstalled;
+    });
     let raised: unknown;
     try {
       await factory().create({
@@ -449,12 +480,15 @@ describe('createDefaultDatasourceDriverFactory — the missing libSQL package is
       });
     } catch (err) {
       raised = err;
+    } finally {
+      vi.doUnmock(TURSO_DRIVER_PACKAGE);
     }
     if (raised === undefined) {
       throw new Error(
-        `${TURSO_DRIVER_PACKAGE} resolved from @objectstack/service-datasource, so this case no `
-        + 'longer exercises the missing-package arm. If the package was made a dependency, this '
-        + 'assertion is the notice that the pin above needs a stubbed import instead.',
+        `staging ${TURSO_DRIVER_PACKAGE} as absent no longer makes the turso arm raise, so this `
+        + 'case has stopped exercising the missing-package arm. ⛔ Do not delete it and do not '
+        + 'weaken it: find out why the stub stops short of the arm. An arm no test can enter is a '
+        + 'decoration, and this one decides whether an operator is told how to fix their boot.',
       );
     }
     expect((raised as Error).message).toContain(TURSO_DRIVER_INSTALL_COMMAND);

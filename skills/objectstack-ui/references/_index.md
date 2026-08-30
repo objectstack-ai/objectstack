@@ -13,10 +13,10 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Base Navigation Item Schema
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/component.zod.ts` — Empty Properties Schema
-- `node_modules/@objectstack/spec/src/ui/dashboard.zod.ts` — Color variant for dashboard widgets (e.g., KPI cards).
+- `node_modules/@objectstack/spec/src/ui/dashboard.zod.ts` — Exports: WidgetColorVariantSchema, WidgetActionTypeSchema, DashboardHeaderActionSchema, DashboardHeaderSchema, DashboardWidgetOptionsSchema
 - `node_modules/@objectstack/spec/src/ui/dataset.zod.ts` — Analytics Dataset — the one semantic layer (ADR-0021).
 - `node_modules/@objectstack/spec/src/ui/page.zod.ts` — Page Region Schema
-- `node_modules/@objectstack/spec/src/ui/report.zod.ts` — Report Type Enum
+- `node_modules/@objectstack/spec/src/ui/report.zod.ts` — Exports: ReportType, ReportChartSchema, ReportSortSchema, JoinedReportBlockSchema, ReportSchema
 - `node_modules/@objectstack/spec/src/ui/view.zod.ts` — View protocol schemas — the `view` metadata type and its three persisted body spellings.
 - `node_modules/@objectstack/spec/src/ui/widget.zod.ts` — Exports: FieldWidgetPropsSchema
 
@@ -26,7 +26,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — Sort Node
@@ -34,7 +34,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and

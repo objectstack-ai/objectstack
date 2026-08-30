@@ -85,7 +85,8 @@
 // It lives in `collectFiles`, not in `main`, so the self-test drives the
 // invariant itself rather than a proxy for it.
 import {
-  mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -226,7 +227,13 @@ const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);
  * not exist — since #4916 a hard refusal rather than a silent skip, but one
  * that fails naming the wrong problem. The self-test pins both halves.
  */
-const ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**'];
+// `packages/**` joined on #13297: the cross-package prose-id leg walks every
+// sibling package, so the gate genuinely reads any package edit. The same
+// precedent as `check:slot-lookup-ratchet` declaring the whole of
+// `packages/**`; the over-claim (test files, `packages/spec` — which the SPEC
+// leg of this same gate reads anyway) is carve-outs inside a walked root, the
+// tolerated case argued above.
+const ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**', 'packages/**'];
 
 const DOMAINS = [
   'Datasource', 'Connector', 'Policy', 'SharingRule', 'Position', 'PermissionSet',
@@ -585,9 +592,12 @@ const POSITIONAL_MESSAGE_CALLS = new Set([
  */
 function scanBoundaryLines() {
   return [
-    `ℹ Rule 3 scan boundary — root: ${SPEC_SOURCE_ROOT}/ only (*.ts|*.mts, test/spec/bench`
-    + ' files excluded; customer-facing refusal prose in SIBLING PACKAGES is NOT scanned —'
-    + ' root extension deferred on #13179, revival condition codified there).',
+    `ℹ Rule 3 scan boundary — root: ${SPEC_SOURCE_ROOT}/ (position-based, no exemption;`
+    + ' *.ts|*.mts, test/spec/bench files excluded). SIBLING PACKAGES are scanned by the'
+    + ` LEDGERED total-string leg — root: ${PACKAGES_PROSE_ROOT}/ (${PACKAGES_PROSE_EXCLUDED}/`
+    + ' excluded there, it belongs to the position-based rule; baseline:'
+    + ` ${PACKAGES_PROSE_LEDGER}) — the #13179 root-extension deferral revived by its own`
+    + ' codified condition (#13297).',
     '  recognised sink shapes: `message:` / `error:` properties · positional messages on'
     + ` ${POSITIONAL_MESSAGE_CALLS.size} zod validators · strictObject option keys`
     + ` (${[...STRICT_OPTION_KEYS].join(', ')}) · ${[...TOMBSTONE_CALLS].join('/')}()`
@@ -595,6 +605,210 @@ function scanBoundaryLines() {
     + ' per module) · text built inside functions sitting in recognised positions — arrows/'
     + 'expressions (functionBuilt) and named function declarations (functionDeclared).',
   ];
+}
+
+// ── Rule 3b: the CROSS-PACKAGE leg — every sibling package, ledgered ────────
+//
+// The #13179 adjudication deferred extending Rule 3's root beyond
+// `packages/spec/src` and codified its own revival condition: a later census
+// finding same-audience tracker ids outside the root reopens the question as an
+// instrument card. #13297 is that card, and this leg is the answer, sized by
+// the AST re-census the card demanded (2026-08-30, this file's `--census`):
+//
+//   grep-shaped estimate on the card:      ~11 candidate sites
+//   AST census, strings only, spec out:    831 sites · 974 id occurrences ·
+//                                          231 files · 632 (file,id) pairs
+//
+// The grep census was ~75× under — this tree's prose is concatenation-split,
+// exactly the shape a line-oriented pattern cannot see (proven in --self-test
+// for the spec leg, re-proven here for a package file).
+//
+// ## Why ROOT WIDENING and not per-package guards
+//
+// One criterion (INTERNAL_ID_SOURCE), one walker, one ledger — a new package
+// is covered the day it appears, and the audience rule cannot drift into N
+// spellings. Per-package guards would copy the id regex and the string walk
+// into ~20 packages and each copy would rot on its own schedule; the family
+// lesson ("a second source of truth while the first is still reachable") is
+// the whole argument, and it is why this leg lives HERE rather than in a new
+// script.
+//
+// ## Why TOTAL string coverage here, when the spec leg is position-based
+//
+// The spec leg's closed position list exists to keep VALUES from being
+// reported as prose (`.default('draft')` is not a message). An INTERNAL_ID
+// match has no such ambiguity: a tracker-shaped token is one wherever it
+// sits, and the audience question that positions cannot answer — the
+// 2026-08-29 triage boundary is "can the reader change what they authored",
+// NOT throw-vs-logger call shape — is not mechanizable from the AST at all.
+// So this leg does not try: it counts every id in every non-test string and
+// holds the count against a pinned baseline. The audience judgment lives in
+// the BASELINE DIFF, where a reviewer can see it, instead of in a heuristic
+// that would silently misfile the next warn-at-authors site. Known residual
+// false-positive family, measured: 3-digit all-numeric CSS colours (`#111`) —
+// 3 strings in one file at census time, absorbed by the baseline; a NEW one
+// reds and the remedy is the 6-digit colour spelling.
+//
+// ## The ratchet
+//
+//   growth (actual > pinned)  → red. Strip the id or move it to a `//` comment
+//                               (comments are the sanctioned home for internal
+//                               anchors — the audience that can resolve #NNNN
+//                               reads the source, not the string at runtime).
+//   shrink (actual < pinned)  → red, stale baseline: regenerate with
+//                               `--census-ledger` in the same PR, so burn-down
+//                               is recorded where review can see it.
+//
+// While the baseline is non-empty, the ratchet IS this leg's blindness floor:
+// a walker or prefilter that goes blind reads 0 sites against 632 pinned
+// pairs and reds as stale. The id regex itself is shared with the spec leg,
+// whose per-bucket floors guard it independently. If the baseline is ever
+// burned to empty, add an explicit seen-floor here in the same PR — at that
+// point the stale arm can no longer catch a dormant walker.
+//
+// ## What this leg deliberately does NOT do
+//
+// It does not judge packages/spec (the position-based rule owns it, with the
+// stricter no-exemption regime), test/spec/bench files (internal audience,
+// and two deliberate test twins pin id-bearing text as range evidence), or
+// comments (the prescribed destination for the ids this rule strips).
+const PACKAGES_PROSE_ROOT = 'packages';
+const PACKAGES_PROSE_EXCLUDED = 'packages/spec';
+const PACKAGES_PROSE_LEDGER = 'scripts/doc-authoring-prose-id.baseline.json';
+
+/**
+ * Cheap byte-level prefilter: a SUPERSET of {@link INTERNAL_ID} (no
+ * lookarounds), deliberately non-global so `.test()` is stateless. A file this
+ * does not match cannot contain a string the real regex matches, so it is
+ * skipped unparsed — the difference is ~4s vs the whole tree parsed for
+ * nothing. The superset property is pinned in --self-test.
+ */
+const PACKAGES_PROSE_PREFILTER = /#[0-9]{3,5}/;
+
+/** Non-test TS sources of every sibling package, spec's subtree excluded. */
+function collectPackageProseFiles(root = PACKAGES_PROSE_ROOT) {
+  assertRootsResolvable([root]);
+  const files = [];
+  (function descend(dir) {
+    for (const e of readdirSync(dir)) {
+      if (e === 'node_modules' || e === '.git' || e === 'dist' || e === '.turbo') continue;
+      const p = join(dir, e);
+      if (posix(p) === PACKAGES_PROSE_EXCLUDED) continue;
+      if (statSync(p).isDirectory()) descend(p);
+      else if (/\.m?tsx?$/.test(e) && !/\.(test|spec|bench)\.m?tsx?$/.test(e)) files.push(posix(p));
+    }
+  })(root);
+  if (files.length === 0) throw new EmptyRootError([root], 0);
+  return files.sort();
+}
+
+/**
+ * A rough consumer classification for ONE literal, census output only — never
+ * enforcement. The climb records what consumes the string (a throw, a callee,
+ * a property key) so a triage reading the census can bucket sites by audience
+ * family; the LEDGER stays classification-free on purpose (a stored verdict
+ * would drift, a recomputed shape cannot).
+ */
+function packageProseShape(node, ts) {
+  let thrown = false;
+  let consumer = '';
+  const props = [];
+  let cur = node;
+  for (let hops = 0; cur.parent && hops < 120; hops++) {
+    const p = cur.parent;
+    if (ts.isThrowStatement(p)) { thrown = true; break; }
+    if (ts.isPropertyAssignment(p) && p.initializer === cur) { props.push(p.name.getText()); cur = p; continue; }
+    if (ts.isCallExpression(p)) {
+      if (!consumer && p.arguments.includes(cur)) consumer = `call:${calleeName(p, ts)}`;
+      cur = p; continue;
+    }
+    if (ts.isNewExpression(p)) { if (!consumer) consumer = `new:${p.expression.getText().slice(0, 40)}`; cur = p; continue; }
+    if (ts.isVariableDeclaration(p)) { if (!consumer) consumer = `const:${p.name.getText()}`; cur = p; continue; }
+    if (ts.isSourceFile(p) || isFunctionLike(p, ts)) break;
+    cur = p;
+  }
+  return { thrown, consumer, prop: props.length ? props[props.length - 1] : '' };
+}
+
+/**
+ * Every INTERNAL_ID occurrence in every string literal of the given sources.
+ *
+ * Template expressions are matched on their FULL source text and never
+ * descended into — an id inside an embedded expression is covered by the
+ * outer `getText()`, and visiting the inner literal too would double-count
+ * it, which a ratchet compared run-to-run cannot afford. Deterministic by
+ * construction: same tree, same counts.
+ *
+ * @returns {{sites: Array<object>, counts: Map<string, Map<string, number>>,
+ *   stringsSeen: number, filesParsed: number}}
+ */
+function scanPackageProseIds(files, ts) {
+  const sites = [];
+  const counts = new Map();
+  let stringsSeen = 0;
+  let filesParsed = 0;
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    if (!PACKAGES_PROSE_PREFILTER.test(source)) continue;
+    const sf = parseSourceFile(file, source);
+    filesParsed += 1;
+    const visit = (node) => {
+      if (
+        ts.isStringLiteral(node)
+        || ts.isNoSubstitutionTemplateLiteral(node)
+        || ts.isTemplateExpression(node)
+      ) {
+        stringsSeen += 1;
+        const text = node.getText(sf);
+        const ids = text.match(INTERNAL_ID);
+        if (ids) {
+          const shape = packageProseShape(node, ts);
+          sites.push({
+            file,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            ids,
+            ...shape,
+            text: text.replace(/\s+/g, ' ').slice(0, 160),
+          });
+          const m = counts.get(file) ?? new Map();
+          counts.set(file, m);
+          for (const id of ids) m.set(id, (m.get(id) ?? 0) + 1);
+        }
+        return; // never descend: see the docblock.
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sf, visit);
+  }
+  return { sites, counts, stringsSeen, filesParsed };
+}
+
+/** `counts` as the baseline's JSON shape: {file: {id: n}}, both levels sorted. */
+function packageProseLedgerShape(counts) {
+  const out = {};
+  for (const file of [...counts.keys()].sort()) {
+    out[file] = Object.fromEntries([...counts.get(file)].sort(([a], [b]) => (a < b ? -1 : 1)));
+  }
+  return out;
+}
+
+/** Growth and shrink of the measured counts against the pinned baseline. */
+function comparePackageProseLedger(counts, ledger) {
+  const growth = [];
+  const stale = [];
+  const files = new Set([...Object.keys(ledger), ...counts.keys()]);
+  for (const file of [...files].sort()) {
+    const actual = counts.get(file) ?? new Map();
+    const pinned = ledger[file] ?? {};
+    const ids = new Set([...Object.keys(pinned), ...actual.keys()]);
+    for (const id of [...ids].sort()) {
+      const a = actual.get(id) ?? 0;
+      const p = pinned[id] ?? 0;
+      if (a > p) growth.push({ file, id, actual: a, pinned: p });
+      else if (a < p) stale.push({ file, id, actual: a, pinned: p });
+    }
+  }
+  return { growth, stale };
 }
 
 const posix = (p) => p.split(sep).join('/');
@@ -1503,6 +1717,7 @@ function selfTest() {
     }
 
     selfTestRule3(expect);
+    selfTestPackagesProse(expect);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1516,13 +1731,16 @@ function selfTest() {
   // missing from the brief — which is exactly how it stood before this block.
   // Both sides are derived from ROOTS rather than re-spelled, so renaming or
   // widening a root cannot leave the declaration describing the old population.
-  const separatorless = ROOTS.filter((r) => !r.includes('/'));
-  expect('the declaration exists for every ROOT the hint extractor cannot see (a root with no '
-    + 'path separator is refused as too generic, so it needs the subtree spelling)',
+  // The walked roots are the four Markdown ROOTS plus the cross-package leg's
+  // — both sides of the derivation below read the same constants the scans do.
+  const walkedRoots = [...ROOTS, PACKAGES_PROSE_ROOT];
+  const separatorless = walkedRoots.filter((r) => !r.includes('/'));
+  expect('the declaration exists for every walked root the hint extractor cannot see (a root with '
+    + 'no path separator is refused as too generic, so it needs the subtree spelling)',
     separatorless.every((r) => ROOT_WATCH_HINTS.includes(`${r}/**`)), true);
   expect('and it declares no root this gate does not walk (a declaration that can drift from the '
     + 'scan is worse than none — it replaces a silent gate with a lying one)',
-    ROOT_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))), true);
+    ROOT_WATCH_HINTS.every((h) => walkedRoots.includes(h.replace(/\/\*+$/, ''))), true);
   // Provenance, never a lookup key: the glob form appearing in ROOTS would send
   // `walk()` at a directory that does not exist. Since #4916 that is a hard
   // refusal rather than a silent skip, but it fails naming the wrong problem.
@@ -1561,7 +1779,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the Rule 3 boundary OUTPUT (names the scanned root, says sibling packages are not scanned, and lists every floored bucket — derived from the same constants the scan reads) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -2374,8 +2592,15 @@ function selfTestRule3(expect) {
       const boundary = scanBoundaryLines().join('\n');
       expect('the boundary output names Rule 3\'s scanned root',
         boundary.includes(SPEC_SOURCE_ROOT), true);
-      expect('the boundary output says sibling packages are NOT scanned',
-        boundary.includes('SIBLING PACKAGES is NOT scanned'), true);
+      // #13297 flipped the deferral: the boundary now STATES the sibling
+      // packages are covered by the ledgered leg, and names root and baseline
+      // derived from the same constants that leg reads — never re-spelled.
+      expect('the boundary output no longer claims sibling packages are unscanned',
+        boundary.includes('is NOT scanned'), false);
+      expect('the boundary output names the cross-package leg\'s root',
+        boundary.includes(`${PACKAGES_PROSE_ROOT}/`), true);
+      expect('...its exclusion', boundary.includes(`${PACKAGES_PROSE_EXCLUDED}/`), true);
+      expect('...and its baseline', boundary.includes(PACKAGES_PROSE_LEDGER), true);
       expect('the boundary output names every bucket the per-bucket floor guards',
         Object.keys(r.seen).every((b) => boundary.includes(b)), true);
       expect('...and the strictObject option keys, derived from the same set the scan reads',
@@ -2395,8 +2620,152 @@ function selfTestRule3(expect) {
   }
 }
 
+// The #8435 authority token, verbatim — check-ratchet-remedy-authority.mjs
+// sweeps author-facing text for an offer that expands a registry and requires
+// this marker (or an outright refusal) beside it. The prose-id baseline below
+// is exactly such a registry: shrink is the landing author's to take, growth
+// is not.
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * `--census`: the #13297 instrument. Prints every id-bearing string site of
+ * the cross-package leg as JSON — file, line, ids, consumer shape — for
+ * triage to bucket by audience. `--census-ledger` prints the baseline shape
+ * instead, and REFUSES to print one that grows any (file,id) pair beyond the
+ * checked-in baseline: regeneration exists for burn-down, and a grown pair
+ * arriving through a blind regen is the one thing diff review reliably
+ * misses. (Bootstrap — no baseline on disk yet — prints freely.)
+ */
+function census(ledgerOnly) {
+  const ts = requireFromHere('typescript');
+  const { sites, counts, stringsSeen, filesParsed } = scanPackageProseIds(collectPackageProseFiles(), ts);
+  if (!ledgerOnly) {
+    console.log(JSON.stringify({
+      root: PACKAGES_PROSE_ROOT,
+      excluded: PACKAGES_PROSE_EXCLUDED,
+      filesParsed,
+      stringsSeen,
+      sites,
+    }, null, 1));
+    return;
+  }
+  const shape = packageProseLedgerShape(counts);
+  // A BLANK file is the bootstrap/regeneration path itself: `--census-ledger >
+  // baseline` truncates the target before node runs, so "exists but empty"
+  // means this very command's own redirection, not a baseline to defend.
+  const onDisk = existsSync(PACKAGES_PROSE_LEDGER) ? readFileSync(PACKAGES_PROSE_LEDGER, 'utf8') : '';
+  if (onDisk.trim() !== '') {
+    const pinned = JSON.parse(onDisk);
+    const { growth } = comparePackageProseLedger(counts, pinned);
+    if (growth.length > 0) {
+      console.error(
+        `\n✗ --census-ledger refused: the regenerated baseline would GROW ${growth.length} `
+        + `(file,id) pair(s) beyond ${PACKAGES_PROSE_LEDGER}:\n`,
+      );
+      for (const g of growth) console.error(`  ${g.file}  ${g.id}  ${g.pinned} -> ${g.actual}`);
+      console.error(
+        `\nRegeneration exists for BURN-DOWN. Strip the new id(s) first — or, for prose a`
+        + `\nmaintainer has adjudicated ops-facing, ${RATCHET_AUTHORITY_MARKER}: hand-edit the`
+        + `\nbaseline entry. That file is otherwise shrink-only.\n`,
+      );
+      process.exit(1);
+      return;
+    }
+  }
+  console.log(JSON.stringify(shape, null, 1));
+}
+
+/**
+ * Rule 3b's red/green battery, over a real temporary `packages/` tree — the
+ * walker, the prefilter, the count determinism and the ledger arithmetic are
+ * each asserted from the real entry points, never re-derived. Runs with cwd
+ * already inside {@link selfTest}'s temp dir, after the Rule 3 battery (which
+ * leaves `packages/spec/src` behind — deliberately reused here as the
+ * exclusion case).
+ */
+function selfTestPackagesProse(expect) {
+  const ts = requireFromHere('typescript');
+  const write = (rel, body) => {
+    const full = join(...rel.split('/'));
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, body);
+    return full;
+  };
+  const scan = () => scanPackageProseIds(collectPackageProseFiles(), ts);
+
+  // RED — the census's founding shape: a concatenation-split message whose id
+  // sits on a LATER line than any `message:`/callee anchor, inside a plain
+  // helper the spec leg's position climb would never recognise. Total-string
+  // coverage is the whole point of this leg: the site is counted anyway.
+  write('packages/widgets/src/refuse.ts', [
+    "export function refuseWidget(kind: string): string {",
+    "  return 'The widget kind \"' + kind + '\" was retired ' +",
+    "    'and is refused (#4242).';",
+    "}",
+  ].join('\n'));
+  // A comment is the SANCTIONED home for an internal anchor — never counted.
+  write('packages/widgets/src/ops.ts', [
+    '// #4242 explains this workaround, and belongs exactly here.',
+    'export const N = 1;',
+  ].join('\n'));
+  // Test bodies are out (two deliberate test twins pin id-bearing text as
+  // range evidence, and their audience is internal).
+  write('packages/widgets/src/pin.test.ts', "export const T = 'pinned (#4242)';\n");
+  // The spec subtree belongs to the position-based rule, not this leg.
+  write('packages/spec/src/data/excluded.ts', "export const S = 'spec-only (#4242)';\n");
+  // Determinism: an id inside a template's EMBEDDED expression is covered by
+  // the outer getText() and must be counted exactly ONCE.
+  write('packages/widgets/src/tmpl.ts',
+    "export const T = (flag: boolean) => `outer ${flag ? 'inner (#5151)' : ''} tail`;\n");
+  // A 6-digit colour never matches; the cross-repo spelling matches its #NNNN.
+  write('packages/widgets/src/edge.ts', [
+    "export const COLOUR = '#123456';",
+    "export const CROSS = 'tracked in objectui#7777';",
+    "export const THROWN = () => { throw new Error('nope (#6161)'); };",
+  ].join('\n'));
+
+  const r = scan();
+  const byFile = (f) => r.sites.filter((s) => s.file === f);
+  expect('a concatenation-split id in a plain helper is counted', byFile('packages/widgets/src/refuse.ts').length, 1);
+  expect('...and the recorded id is the one planted', byFile('packages/widgets/src/refuse.ts')[0]?.ids.join(','), '#4242');
+  expect('a `//` comment is never counted — it is the remedy, not a violation',
+    byFile('packages/widgets/src/ops.ts').length, 0);
+  expect('test bodies are not scanned', byFile('packages/widgets/src/pin.test.ts').length, 0);
+  expect('the spec subtree is excluded from this leg', byFile('packages/spec/src/data/excluded.ts').length, 0);
+  expect('an id inside a template\'s embedded expression is counted exactly once',
+    r.counts.get('packages/widgets/src/tmpl.ts')?.get('#5151'), 1);
+  expect('a 6-digit colour does not match', r.counts.get('packages/widgets/src/edge.ts')?.has('#12345'), false);
+  expect('the cross-repo spelling matches its id half', r.counts.get('packages/widgets/src/edge.ts')?.get('#7777'), 1);
+  expect('a thrown literal records the throw in its census shape',
+    byFile('packages/widgets/src/edge.ts').find((s) => s.ids.includes('#6161'))?.thrown, true);
+  expect('the prefilter is a SUPERSET of the id regex on every counted site',
+    r.sites.every((s) => PACKAGES_PROSE_PREFILTER.test(s.text)), true);
+  expect('strings were seen at all (the walker is not dormant)', r.stringsSeen > 0, true);
+
+  // ── The ledger arithmetic, all three verdicts from one measurement ────────
+  const exact = packageProseLedgerShape(r.counts);
+  const green = comparePackageProseLedger(r.counts, exact);
+  expect('an exact baseline is green — no growth', green.growth.length, 0);
+  expect('an exact baseline is green — no staleness', green.stale.length, 0);
+
+  const empty = comparePackageProseLedger(r.counts, {});
+  expect('every measured (file,id) pair is GROWTH against an empty baseline',
+    empty.growth.length, [...r.counts.values()].reduce((a, m) => a + m.size, 0));
+  expect('...and none of it reads as staleness', empty.stale.length, 0);
+
+  const overPinned = JSON.parse(JSON.stringify(exact));
+  overPinned['packages/widgets/src/gone.ts'] = { '#9999': 2 };
+  const stale = comparePackageProseLedger(r.counts, overPinned);
+  expect('a pinned pair the tree no longer carries is STALE (the burn-down/blindness arm)',
+    stale.stale.length, 1);
+  expect('...named precisely', stale.stale[0]?.file, 'packages/widgets/src/gone.ts');
+  expect('...without inventing growth', stale.growth.length, 0);
+}
+
 function main() {
   if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--census')) return census(false);
+  if (process.argv.includes('--census-ledger')) return census(true);
 
   let files;
   try {
@@ -2473,6 +2842,31 @@ function main() {
   }
   const blindBuckets = Object.keys(seenByBucket).filter((b) => seenByBucket[b] === 0);
   const totalTextSeen = Object.values(seenByBucket).reduce((a, b) => a + b, 0);
+
+  // ── Rule 3b: the cross-package ledgered leg ───────────────────────────────
+  if (!existsSync(PACKAGES_PROSE_LEDGER)) {
+    console.error(
+      `\n✗ doc authoring guard: the prose-id baseline (${PACKAGES_PROSE_LEDGER}) is missing,`
+      + `\nso the cross-package leg has nothing to hold its measurement against. Restore it`
+      + `\nfrom git — deleting the baseline is not a remedy this gate offers.\n`,
+    );
+    process.exit(1);
+    return;
+  }
+  let packageProse;
+  try {
+    packageProse = scanPackageProseIds(collectPackageProseFiles(), ts);
+  } catch (err) {
+    console.error(
+      `\n✗ doc authoring guard: the sibling-package root (${PACKAGES_PROSE_ROOT}/) could not be`
+      + `\nscanned for internal issue-id references in string prose, so this run cannot vouch`
+      + `\nfor it:\n\n  ${err.message}\n`,
+    );
+    process.exit(1);
+    return;
+  }
+  const prosePinned = JSON.parse(readFileSync(PACKAGES_PROSE_LEDGER, 'utf8'));
+  const { growth: proseGrowth, stale: proseStale } = comparePackageProseLedger(packageProse.counts, prosePinned);
 
   // The boundary is stated on EVERY verdict, red or green — a reader of the
   // green line must be able to see what the clean bill covers, and a reader of
@@ -2578,6 +2972,46 @@ function main() {
     );
   }
 
+  if (proseGrowth.length > 0) {
+    failed = true;
+    console.error(`\n✗ NEW internal issue-id reference(s) in sibling-package string prose:\n`);
+    for (const g of proseGrowth) {
+      console.error(`  ${g.file}  ${g.id}  (${g.pinned} pinned, ${g.actual} measured)`);
+      for (const s of packageProse.sites.filter((s2) => s2.file === g.file && s2.ids.includes(g.id))) {
+        console.error(`    :${s.line}  ${s.text}`);
+      }
+    }
+    console.error(
+      `\n${proseGrowth.length} (file,id) pair(s) above ${PACKAGES_PROSE_LEDGER}. A runtime string`
+      + `\nreaches authors, operators and generated surfaces — none of whom can resolve \`#NNNN\``
+      + `\n(no tracker, no git log, no ADRs). Strip the id from the string, or move it to an`
+      + `\nadjacent \`//\` comment — the reader who CAN resolve it reads the source, and git`
+      + `\nhistory keeps the anchor either way. A 3-digit all-numeric CSS colour tripped this?`
+      + `\nSpell it 6-digit. Keep customer-resolvable references (an ADR id, a protocol version,`
+      + `\nan error code) — only the tracker id goes.`
+      + `\n\nAdding a baseline entry instead is ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option:`
+      + `\nthat file pins the adjudicated pre-#13297 population and is otherwise shrink-only, so`
+      + `\nan entry weakens a ratchet and needs a maintainer to agree first — do not take this`
+      + `\npath to get CI green.`
+      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
+    );
+  }
+
+  if (proseStale.length > 0) {
+    failed = true;
+    console.error(`\n✗ doc authoring guard: the prose-id baseline is STALE — pinned entries exceed the tree:\n`);
+    for (const s of proseStale) console.error(`  ${s.file}  ${s.id}  (${s.pinned} pinned, ${s.actual} measured)`);
+    console.error(
+      `\n${proseStale.length} (file,id) pair(s) in ${PACKAGES_PROSE_LEDGER} now over-pin the tree.`
+      + `\nThis is the ratchet recording burn-down — regenerate the baseline in this same PR:`
+      + `\n\n  node scripts/check-doc-authoring.mjs --census-ledger > ${PACKAGES_PROSE_LEDGER}`
+      + `\n\n(That command refuses to GROW the baseline, so it is safe to run as the shrink`
+      + `\nremedy. While the baseline is non-empty this staleness check doubles as the leg's`
+      + `\nblindness floor: a walker that goes blind measures 0 against every pinned pair and`
+      + `\nlands here rather than printing green.)\n`,
+    );
+  }
+
   if (failed) process.exit(1);
 
   console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
@@ -2588,6 +3022,12 @@ function main() {
     + `(message ${seenByBucket.message} · strictObject ${seenByBucket.strictObject} · `
     + `tombstone ${seenByBucket.tombstone} · describe ${seenByBucket.describe} · `
     + `functionBuilt ${seenByBucket.functionBuilt} · functionDeclared ${seenByBucket.functionDeclared}).`,
+  );
+  console.log(
+    `✓ doc authoring guard: sibling-package prose ids hold the baseline — `
+    + `${packageProse.sites.length} pinned site(s) across ${packageProse.counts.size} file(s), `
+    + `${packageProse.stringsSeen} string(s) read in ${packageProse.filesParsed} parsed source(s), `
+    + `no growth, no burn-down unrecorded.`,
   );
 }
 

@@ -105,10 +105,21 @@
  * folded silently into the answer. Choosing the margin -- and deciding whether to
  * spend it at all -- is a fleet-budget decision this tool has no standing to make.
  *
- * It is also NOT a CI gate and is deliberately not wired into any workflow: it
- * needs the network and a token, and a check that cannot run offline has no
- * business in the lint farm. `check-stall-guard-budget.mjs` is the gate; this is
- * the instrument you reach for when that gate's headroom needs re-deriving.
+ * The MEASUREMENT path is NOT a CI gate and is deliberately not wired into any
+ * workflow: it needs the network and a token, and a check that cannot run
+ * offline has no business in the lint farm. `check-stall-guard-budget.mjs` is
+ * the gate; this is the instrument you reach for when that gate's headroom needs
+ * re-deriving.
+ *
+ * `--self-test` is the exception, and that distinction is load-bearing (#13246).
+ * The paragraph above was written of the TOOL and was read as covering the FLAG
+ * too, which left every assertion below unrun -- the #13121 refusal branches
+ * included, so the only proof they fire was itself never executed. The flag
+ * takes no `--run`, which makes `fetchRunJobs` unreachable from it: no socket,
+ * no token, only this repo's workflow directory and temp fixtures. It is wired
+ * as `check:stall-guard-headroom` and runs ONLY the flag -- never append a bare
+ * invocation to that script, however tidy the symmetry with its two siblings in
+ * the lint farm looks.
  *
  * ## Reading the exit code
  *

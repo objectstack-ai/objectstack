@@ -107,6 +107,20 @@ export interface PlatformAdminEmailConfig {
    * they are told apart by {@link refusal} rather than by a second empty value.
    */
   readonly emails: readonly string[];
+  /**
+   * The SAME administrators as {@link emails} and index-aligned with it, each
+   * spelled as the operator typed it — trimmed only, never lowercased (exactly
+   * what `resolvePlatformOwnerEmail()` used to hand a single-value reader).
+   *
+   * It exists so that no consumer ever has a reason to split {@link raw} a
+   * second time. Two readers need the as-typed form and neither may re-parse
+   * to get it: the elevation gate's by-email `sys_user` lookup queries the
+   * verbatim spelling alongside the normalized one (an imported/legacy row may
+   * not be stored lowercased, and a driver `where` is an exact match), and the
+   * walled boot diagnostic quotes the addresses back to the operator, who
+   * should see what they wrote.
+   */
+  readonly declaredSpellings: readonly string[];
   /** What the operator actually typed, when the variable was set to anything. */
   readonly raw?: string;
   /**
@@ -117,7 +131,10 @@ export interface PlatformAdminEmailConfig {
   readonly refusal?: string;
 }
 
-const EMPTY_CONFIG: PlatformAdminEmailConfig = Object.freeze({ emails: Object.freeze([]) as readonly string[] });
+const EMPTY_CONFIG: PlatformAdminEmailConfig = Object.freeze({
+  emails: Object.freeze([]) as readonly string[],
+  declaredSpellings: Object.freeze([]) as readonly string[],
+});
 
 /**
  * Parse one raw `OS_PLATFORM_OWNER_EMAIL` value into the administrator list.
@@ -132,6 +149,7 @@ export function parsePlatformAdminEmails(raw: string | undefined): PlatformAdmin
   if (text.trim() === '') return EMPTY_CONFIG;
 
   const emails: string[] = [];
+  const declaredSpellings: string[] = [];
   for (const piece of text.split(PLATFORM_ADMIN_EMAIL_SEPARATOR)) {
     const entry = normalizePlatformAdminEmail(piece);
     // Blanks are DROPPED, not refused: a trailing separator or a line wrapped
@@ -141,6 +159,7 @@ export function parsePlatformAdminEmails(raw: string | undefined): PlatformAdmin
     if (!isParseableAddress(entry)) {
       return {
         emails: Object.freeze([]) as readonly string[],
+        declaredSpellings: Object.freeze([]) as readonly string[],
         raw: text,
         refusal:
           `${PLATFORM_OWNER_EMAIL_ENV} entry ${JSON.stringify(piece)} is not an email address, so the `
@@ -151,11 +170,19 @@ export function parsePlatformAdminEmails(raw: string | undefined): PlatformAdmin
           + 'comma-separated list of them.',
       };
     }
-    // Duplicates collapse; first declaration wins the position.
-    if (!emails.includes(entry)) emails.push(entry);
+    // Duplicates collapse; first declaration wins the position — and the
+    // spelling that wins it is the one kept, so the two arrays stay aligned.
+    if (!emails.includes(entry)) {
+      emails.push(entry);
+      declaredSpellings.push(piece.trim());
+    }
   }
 
-  return { emails: Object.freeze(emails) as readonly string[], raw: text };
+  return {
+    emails: Object.freeze(emails) as readonly string[],
+    declaredSpellings: Object.freeze(declaredSpellings) as readonly string[],
+    raw: text,
+  };
 }
 
 /**
@@ -246,9 +273,47 @@ export function matchesConfiguredPlatformAdmin(
 ): boolean {
   if (config.emails.length === 0) return false;
   if (!row || typeof row !== 'object') return false;
-  const email = normalizePlatformAdminEmail((row as { email?: unknown }).email);
-  if (email === '' || !config.emails.includes(email)) return false;
+  if (!isConfiguredPlatformAdminEmail((row as { email?: unknown }).email, config)) return false;
   return isEmailVerifiedUserRow(row);
+}
+
+/**
+ * [#13147] Is this bare ADDRESS one of the declared administrators?
+ *
+ * The membership half of {@link matchesConfiguredPlatformAdmin}, spelled once
+ * and exported, because the row-and-verified predicate above is not the shape
+ * every reader of `OS_PLATFORM_OWNER_EMAIL` needs:
+ *
+ *  - the elevation gate (`plugin-security/bootstrap-platform-admin.ts`) must
+ *    keep the two halves SEPARATE — its `walled_owner_not_registered` and
+ *    `walled_owner_not_verified` diagnostics are different answers;
+ *  - the creation-time operator stamp (`plugin-auth`) is handed an email
+ *    STRING by better-auth, before any row exists to read;
+ *  - the Layer 0 wall bypass takes a fast negative on the session's
+ *    server-resolved email before it spends a `sys_user` read.
+ *
+ * ⛔ Those readers must NOT hand-roll `config.emails.includes(x.toLowerCase())`
+ * instead. That expression is where a seventh dialect gets born: it silently
+ * drops the trim, and a stray space in one list entry then makes an
+ * administrator vanish with nothing to notice. One membership expression, one
+ * normalization ({@link normalizePlatformAdminEmail}), one place to fix.
+ *
+ * Fail-closed like everything else here: an empty or refused config answers
+ * `false` without looking at the candidate, and a blank/non-string candidate
+ * answers `false` against any config.
+ *
+ * ⚠️ This is a match against CONFIGURATION only — it says nothing about whether
+ * the address is verified, or whether the caller actually holds it. Standing
+ * still requires {@link matchesConfiguredPlatformAdmin} over the caller's own
+ * stored row; see this module's header for why `grants.email` is never it.
+ */
+export function isConfiguredPlatformAdminEmail(
+  email: unknown,
+  config: PlatformAdminEmailConfig,
+): boolean {
+  if (config.emails.length === 0) return false;
+  const candidate = normalizePlatformAdminEmail(email);
+  return candidate !== '' && config.emails.includes(candidate);
 }
 
 /**

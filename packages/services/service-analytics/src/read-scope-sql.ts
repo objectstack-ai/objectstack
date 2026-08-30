@@ -178,11 +178,27 @@ import {
  * deliberately left alone — deciding it here would settle #5299's
  * key-missing-vs-value-null question as a side effect — and `driver-memory` /
  * `driver-mongodb` were pin-only under the #5499 freeze when #6125 scoped this,
- * so this compiler and those two answer the cell differently on purpose — a debt
- * #6125 recorded as owed AT THAW. The thaw has arrived: the freeze dissolved
+ * so this compiler and those two answered the cell differently — a debt #6125
+ * recorded as owed AT THAW. The thaw has arrived: the freeze dissolved
  * 2026-08-11 (head note of `@objectstack/spec`'s `aggregation-conformance.ts`),
- * so that debt is now DUE rather than deferred, and nothing has been triaged
- * against it yet.
+ * so that debt became DUE rather than deferred.
+ *
+ * ⚠️ [#13166] That debt has since been triaged, and it was SMALLER than "those
+ * two" makes it sound, because the clause was also wrong on its second half —
+ * which is why #13166 settled the wording together with the divergence instead
+ * of re-tensing it. A tense-only rewrite would have carried the false half
+ * forward as settled-looking prose.
+ *   (a) `driver-mongodb` was never a holdout for the negation-carrying operator
+ *       family. `translateFieldOperators` passes `$nin` straight through and
+ *       compiles `$notContains` to `{ $not: { $regex } }`, and both match a
+ *       missing or null field — so it has always answered as this compiler does
+ *       through {@link nullValueSatisfiesOperator}.
+ *   (b) `driver-memory` was the one real holdout, and only on its REFERENCE
+ *       matcher; its live mingo query path already agreed. #13166 aligned that
+ *       matcher, so on the null SEMANTICS cell nothing answers differently now.
+ * ⛔ That does NOT discharge the whole debt. This section is about the
+ * `undefined`-COMPARAND question, a DIFFERENT cell from the null-semantics one,
+ * and it remains open on both drivers. Do not read #13166 as having closed it.
  *
  * The eleventh message was measured against `looksLikeInternalErrorLeak` before
  * being added, because the section above turns on that predicate answering FALSE

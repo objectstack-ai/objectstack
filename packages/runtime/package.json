@@ -41,6 +41,14 @@
     "zod": "^4.4.3",
     "@objectstack/metadata-core": "workspace:*"
   },
+  "peerDependencies": {
+    "@objectstack/driver-turso": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@objectstack/driver-turso": {
+      "optional": true
+    }
+  },
   "optionalDependencies": {
     "@objectstack/driver-mongodb": "workspace:*"
   },

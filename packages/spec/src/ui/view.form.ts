@@ -4,7 +4,8 @@
  * View — canonical FormView layout.
  *
  * Views power most data surfaces (grid / kanban / calendar / gantt /
- * gallery / timeline / chart) and each surface has its own block of
+ * gallery / timeline / chart — and `page`, which mounts a published page
+ * instead of drawing rows) and each surface has its own block of
  * options. We group fields by surface so the editor doesn't dump 30+
  * irrelevant knobs on the user.
  *
@@ -101,6 +102,26 @@ export const viewForm = defineForm({
       description: 'Chart-specific configuration.',
       visibleWhen: "data.type == 'chart'",
       fields: [{ field: 'chart', type: 'composite' }],
+    },
+    {
+      // [#13216] The `page` surface. Unlike every sibling block above, this one
+      // is a single binding rather than a composite: a `page` view delegates
+      // its whole rendering to the named page, so there is nothing else about
+      // it to configure here — every other control on this form describes how
+      // to draw ROWS, which a page view does not do.
+      name: 'page',
+      label: 'Page',
+      description: 'The published page this view mounts.',
+      visibleWhen: "data.type == 'page'",
+      fields: [
+        {
+          field: 'pageName',
+          required: true,
+          helpText:
+            'Name of an already-published page (lowercase snake_case). The page renders in place of '
+            + 'the record list, so leave Columns empty.',
+        },
+      ],
     },
     {
       name: 'end_user_controls',
