@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+import { httpRequestForRoute } from './http-request-test-builder.js';
 
 const PUBLIC_BOOK = { name: 'manual', label: 'Manual', audience: 'public', groups: [] };
 const ORG_BOOK = { name: 'internal', label: 'Internal', audience: 'org', groups: [] };
@@ -135,7 +136,7 @@ describe('the exemption does not widen past book/doc reads (#3963)', () => {
     const put = rest.getRoutes().find((r: any) => r.method === 'PUT' && r.path === ITEM);
     if (put) {
       const res = makeRes();
-      await put.handler({ method: 'PUT', params: { type: 'book', name: 'manual' }, query: {}, body: {} }, res);
+      await put.handler(httpRequestForRoute(put, { params: { type: 'book', name: 'manual' }, body: {} }), res);
       expect(res.statusCode).toBe(401);
       expect(protocol.saveMetaItem).not.toHaveBeenCalled();
     }

@@ -88,6 +88,40 @@
 // narrowing nobody can see is indistinguishable from a matcher that stopped
 // matching.
 //
+// ## Same-file resolution is by SCOPE, not by spelling
+//
+// Conjunct 3 follows same-file helpers, so it has to answer "which body does
+// this call reach?" -- and answering that by NAME alone is how a census invents
+// a write. Two measured cases, and they are one defect at two depths:
+//
+//   - `db-job-adapter.ts :: cancel` resolved the DOTTED path `this.cron.cancel`
+//     by its last segment and walked into the file's own `cancel()`. Answered by
+//     `sameFileCallee`: only `foo(...)` and `this.foo(...)` may resolve at all.
+//   - `action-execution.ts :: invokeBusinessAction` PASSES that test -- its
+//     `callData(...)` is a bare identifier -- and still reached the wrong body.
+//     The name is destructured from the function's own `wiring` parameter, and
+//     the module-level `callData` a thousand lines up is a different function
+//     (its first parameter is `deps`; the call site passes `'get'`). The census
+//     reported a record READ as `write=insert@170`, in the exact class the
+//     header above forbids: a write that is not in the guarded block.
+//
+// So a bare identifier is resolved against the LEXICAL SCOPE CHAIN at the call
+// site (`resolveSameFileBody`), not against the file-wide body index: the
+// innermost binding of the name wins, and a binding that holds no function -- a
+// parameter, a destructured member, a plain `const`/`let`, a catch variable, an
+// import -- REFUSES the call rather than falling through to a same-named body
+// elsewhere in the file. The refusal count is printed on every run, for the same
+// reason the AWAITED drop count is.
+//
+// This keys on SCOPE, which is what decides a bare identifier in JavaScript, and
+// it deliberately does not compare signatures. Once the innermost binding IS the
+// file-scope function, a disagreeing signature would mean the call does not
+// type-check, so there is nothing left for a second key to catch; both disproofs
+// recorded against `invokeBusinessAction` are answered by the first one. The
+// narrowing can only REMOVE a resolution that JavaScript itself would not make,
+// so it cannot hide a member: where the census still resolves, it resolves to
+// the body the call actually reaches.
+//
 // ## What is NOT mechanical, and is not pretended to be
 //
 // The card's own phrasing of the family includes "...and the caller still
@@ -346,6 +380,20 @@ const REGRESSION_CONTROLS = [
       + '`engine.update(...)` two frames on, and reported a cron-registry cleanup as a swallowed durability write. '
       + 'See `sameFileCallee`.',
   },
+  {
+    file: 'packages/runtime/src/action-execution.ts',
+    enclosing: 'invokeBusinessAction',
+    why:
+      'Its try block is `await callData(\'get\', { object, id }, driver, envId, ec)` -- a READ, through the wiring '
+      + 'callback this function destructures from its own `wiring` parameter (`const { driver, envId, ec, getMeta, '
+      + 'callData } = wiring;`). Resolving that BARE identifier against the whole-file body index walked into the '
+      + 'MODULE-LEVEL `callData` a thousand lines up, reached the `await ql.insert(...)` inside its `if (action === '
+      + '\'create\')` branch, and reported the record load as `write=insert@170`. Two disproofs, either alone fatal: '
+      + 'the identifier is a local binding, and the signatures disagree (the module-level function takes `deps` '
+      + 'first; the call site passes `\'get\'`). The dotted-path rule above does NOT catch this one -- `callData(...)` '
+      + 'is exactly the bare shape that rule permits -- which is why `resolveSameFileBody` decides bare identifiers '
+      + 'by scope. See `resolveSameFileBody`.',
+  },
 ];
 
 /* ------------------------------------------------------------------------- *
@@ -501,6 +549,11 @@ function isAwaited(node) {
  * where the cost is a site a person triages away; it may not over-collect by
  * inventing a write that is not in the guarded block, because that is a member
  * nobody can act on and it discredits the list it sits in.
+ *
+ * Passing this test is NECESSARY and not sufficient for a BARE identifier:
+ * `foo(...)` reaches the file-scope `foo` only while no LOCAL binding shadows
+ * the name at the call site. `resolveSameFileBody` decides that, and it is the
+ * other half of this rule -- see "Same-file resolution is by SCOPE" above.
  */
 function sameFileCallee(path) {
   if (path.length === 1) return path[0];
@@ -508,8 +561,128 @@ function sameFileCallee(path) {
   return null;
 }
 
+/** Every name a binding pattern introduces: `{ a, b: c }`, `[d]`, `...rest`. */
+function bindingNames(nameNode, out = new Set()) {
+  if (ts.isIdentifier(nameNode)) {
+    out.add(nameNode.text);
+    return out;
+  }
+  if (ts.isObjectBindingPattern(nameNode) || ts.isArrayBindingPattern(nameNode)) {
+    for (const element of nameNode.elements) {
+      if (ts.isBindingElement(element)) bindingNames(element.name, out);
+    }
+  }
+  return out;
+}
+
+/** The body a declaration offers a caller, or null when it holds no function. */
+function declaredFunctionBody(decl) {
+  if (ts.isFunctionDeclaration(decl) || ts.isFunctionExpression(decl)) return decl.body ?? null;
+  if (ts.isVariableDeclaration(decl) && decl.initializer
+    && (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))) {
+    return decl.initializer.body ?? null;
+  }
+  return null;
+}
+
+function importBindsName(node, name) {
+  const clause = node.importClause;
+  if (!clause) return false;
+  if (clause.name?.text === name) return true;
+  const bindings = clause.namedBindings;
+  if (!bindings) return false;
+  if (ts.isNamespaceImport(bindings)) return bindings.name.text === name;
+  return bindings.elements.some((element) => element.name.text === name);
+}
+
+/**
+ * The declaration of `name` introduced BY this node, or null.
+ *
+ * One node of the scope chain at a time, so the caller can stop at the INNERMOST
+ * binding — which is the one JavaScript resolves the identifier to.
+ */
+function bindingIntroducedBy(node, name) {
+  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)
+    || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)
+    || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) {
+    for (const parameter of node.parameters) {
+      if (bindingNames(parameter.name).has(name)) return parameter;
+    }
+    // A named function expression binds its own name inside its own body.
+    if (ts.isFunctionExpression(node) && node.name?.text === name) return node;
+  }
+  if (ts.isCatchClause(node) && node.variableDeclaration
+    && bindingNames(node.variableDeclaration.name).has(name)) {
+    return node.variableDeclaration;
+  }
+  if ((ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node))
+    && node.initializer && ts.isVariableDeclarationList(node.initializer)) {
+    for (const decl of node.initializer.declarations) {
+      if (bindingNames(decl.name).has(name)) return decl;
+    }
+  }
+  let statements = null;
+  if (ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node)) statements = node.statements;
+  else if (ts.isCaseBlock(node)) statements = node.clauses.flatMap((clause) => clause.statements);
+  if (!statements) return null;
+  for (const statement of statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const decl of statement.declarationList.declarations) {
+        if (bindingNames(decl.name).has(name)) return decl;
+      }
+      continue;
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) return statement;
+    if (ts.isClassDeclaration(statement) && statement.name?.text === name) return statement;
+    if (ts.isImportDeclaration(statement) && importBindsName(statement, name)) return statement;
+  }
+  return null;
+}
+
+/**
+ * The same-file body this call reaches — decided by SCOPE, not by spelling.
+ *
+ * `sameFileCallee` has already refused every dotted path but `this.foo`. What is
+ * left is the case it cannot see: a BARE `foo(...)` whose name is bound locally.
+ * Walking outward from the call site, the innermost binding of the name wins:
+ *
+ *   - it declares a function (`function foo`, `const foo = () => {}`)  -> that body,
+ *     which is the one the call reaches even when the file holds another `foo`;
+ *   - it declares anything else — a parameter, a destructured member, a plain
+ *     `const`/`let`, a catch variable, an import — -> REFUSED, and counted. The
+ *     call reaches something this file does not contain, so following a
+ *     same-named body would be inventing a write. `action-execution.ts ::
+ *     invokeBusinessAction` is the measured case (#12981): `const { ..., callData
+ *     } = wiring;` shadows the module-level `callData`, and following it turned a
+ *     record READ into `write=insert@170`.
+ *
+ * Falling back to the file-wide index when NO binding is found keeps the census
+ * collecting exactly what it collected before: the narrowing only ever removes a
+ * resolution that JavaScript itself would not make.
+ */
+function resolveSameFileBody(callNode, path, bodies, stats) {
+  const name = sameFileCallee(path);
+  if (!name) return null;
+  if (path.length > 1) return bodies.get(name) ?? null;
+  for (let cursor = callNode.parent; cursor; cursor = cursor.parent) {
+    const decl = bindingIntroducedBy(cursor, name);
+    if (!decl) continue;
+    const body = declaredFunctionBody(decl);
+    if (body) return body;
+    // Counted only when the file-wide index HOLDS this name — that is exactly the
+    // set of calls the previous rule would have followed, so the printed number
+    // measures the narrowing rather than every locally-bound callback in the repo.
+    if (stats && bodies.has(name)) {
+      stats.refusedShadowed += 1;
+      stats.shadowedNames.set(name, (stats.shadowedNames.get(name) ?? 0) + 1);
+    }
+    return null;
+  }
+  return bodies.get(name) ?? null;
+}
+
 /** Walk a block plus, transitively, the same-file helpers it calls. */
-function walkWithHelpers(block, bodies, visit, seen = new Set(), depth = 0) {
+function walkWithHelpers(block, bodies, visit, stats, seen = new Set(), depth = 0) {
   if (depth > MAX_HELPER_DEPTH) return;
   walkAll(block, (node) => {
     visit(node);
@@ -517,9 +690,11 @@ function walkWithHelpers(block, bodies, visit, seen = new Set(), depth = 0) {
     const path = calleePath(node.expression);
     if (!path) return;
     const name = sameFileCallee(path);
-    if (!name || !bodies.has(name) || seen.has(name)) return;
+    if (!name || seen.has(name)) return;
+    const body = resolveSameFileBody(node, path, bodies, stats);
+    if (!body) return;
     seen.add(name);
-    walkWithHelpers(bodies.get(name), bodies, visit, seen, depth + 1);
+    walkWithHelpers(body, bodies, visit, stats, seen, depth + 1);
   });
 }
 
@@ -563,7 +738,7 @@ function analyzeFile(file, relPath, findings, stats) {
         return;
       }
       write = { callee: name, origin, line: lineOf(inner) };
-    });
+    }, stats);
     if (!write) return;
     stats.guardedWrites += 1;
 
@@ -602,7 +777,7 @@ function analyzeFile(file, relPath, findings, stats) {
       if (PROPAGATION_CALLEES.has(name)) channel = channel ?? 'propagation-vocabulary';
       if (name !== REFUSAL_RECORD_METHOD || path.length < 2) return;
       if (path.slice(0, -1).some((seg) => accumulators.has(seg))) channel = 'refusal-accumulator';
-    });
+    }, stats);
 
     // -- conjunct 2: does the failure leave as an exception?
     if (rethrows) {
@@ -712,6 +887,8 @@ function census({ only } = {}) {
     rethrows: 0,
     droppedNotAwaited: 0,
     droppedNames: new Map(),
+    refusedShadowed: 0,
+    shadowedNames: new Map(),
     buckets: { silent: 0, quiet: 0, loud: 0 },
   };
   for (const file of files) {
@@ -767,6 +944,15 @@ function report({ sites = false } = {}) {
   const dropped = [...stats.droppedNames.entries()].sort((a, b) => b[1] - a[1]);
   if (dropped.length > 0) {
     out.push(`    by name: ${dropped.map(([n, c]) => `${n}×${c}`).join(', ')}`);
+  }
+  out.push('');
+  out.push(`  refused by the SCOPE resolver                 ${stats.refusedShadowed} call(s)`);
+  out.push('    a bare identifier bound locally at the call site — a parameter, a destructured');
+  out.push('    member, a `const`/`let`, a catch variable, an import — where the file also holds');
+  out.push('    a same-named body. Following it would invent a write (see `resolveSameFileBody`).');
+  const shadowed = [...stats.shadowedNames.entries()].sort((a, b) => b[1] - a[1]);
+  if (shadowed.length > 0) {
+    out.push(`    by name: ${shadowed.map(([n, c]) => `${n}×${c}`).join(', ')}`);
   }
   out.push('');
   out.push('  [1] DARK members, by file — the repair worklist:');
@@ -860,7 +1046,11 @@ function main(argv) {
     process.stdout.write(`${JSON.stringify({
       members,
       quiet,
-      stats: { ...stats, droppedNames: Object.fromEntries(stats.droppedNames) },
+      stats: {
+        ...stats,
+        droppedNames: Object.fromEntries(stats.droppedNames),
+        shadowedNames: Object.fromEntries(stats.shadowedNames),
+      },
     }, null, 2)}\n`);
     return 0;
   }

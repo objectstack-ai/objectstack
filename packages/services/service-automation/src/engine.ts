@@ -930,6 +930,22 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 }
 
 /**
+ * The definition-level input-schema guard's own throw type (#10025).
+ *
+ * {@link AutomationEngine.validateNodeInputSchemas} used to throw bare
+ * `Error`s, which left `execute()`'s catch no way to tell "the definition
+ * refused to dispatch" from "a node ran and failed" without a regex over the
+ * message — the tolerant-consumer shape PD #12 forbids. This class is the
+ * classification channel: recognised in exactly one place, the catch's
+ * non-retryable short-circuit, which converts it into the never-dispatched
+ * `FLOW_INPUT_SCHEMA_INVALID` exit instead of handing it to `retryExecution`.
+ *
+ * Not exported on purpose — callers read the ADR-0112 `code` off the result,
+ * never the throw.
+ */
+class InputSchemaViolationError extends Error {}
+
+/**
  * Marks a {@link ResumeSignal} the ENGINE built for its own continuations —
  * the subflow output mapping and the `map` item handoff. Module-private and
  * symbol-keyed, so it cannot arrive from a transport (no JSON body produces a
@@ -3842,6 +3858,40 @@ export class AutomationEngine implements IAutomationService {
                 error: errorMessage,
             }, context);
 
+            // [#10025] NEVER DISPATCHED, ruled NON-RETRYABLE (maintainer,
+            // 2026-08-20, Option B taken whole). The guard's verdict is a pure
+            // function of the flow definition — `validateNodeInputSchemas`
+            // deliberately ignores its variables parameter — so attempt 2
+            // cannot answer differently than attempt 1, and handing this throw
+            // to `retryExecution` below would burn the whole retry budget
+            // (backoff delays included) re-deriving a certainty into
+            // 1 + maxRetries identical failed rows. Short-circuiting HERE,
+            // before the strategy branch, is the ruling's whole content:
+            // `strategy: 'retry'` changes nothing about this exit, and the ONE
+            // failed row recorded above is the run history's entire account of
+            // the refusal.
+            //
+            // The envelope matches its never-dispatched siblings
+            // (`FLOW_DISABLED`, `FLOW_NO_START_NODE` — #9378/#9415): a `code`
+            // and NO `status`, whose absence is the discriminator the
+            // transport's 422 arm reads (see the `status: 'failed'` exit
+            // below). No `errorMessage` / `summary` either — those are a RUN's
+            // artefacts, and no node executed.
+            //
+            // The #9889 parity floor underneath is UNTOUCHED: the guard is
+            // still called identically by both attempt paths, so if any route
+            // ever reaches `executeWithoutRetry` without crossing this catch,
+            // the refusal still fires — just without this classification.
+            // This arm decides what `execute()` does with the verdict; it
+            // never weakens who renders it.
+            if (err instanceof InputSchemaViolationError) {
+                return {
+                    success: false,
+                    code: 'FLOW_INPUT_SCHEMA_INVALID',
+                    error: errorMessage,
+                };
+            }
+
             // Error handling strategy.
             //
             // [#9510] ⚠️ This handoff can now return a NON-TERMINAL result: a
@@ -3870,19 +3920,21 @@ export class AutomationEngine implements IAutomationService {
                 // the same lifecycle verdict this exit just wrote to the run
                 // log two statements up, now also on the result.
                 //
-                // Load-bearing, not decoration: `execute()` has three OTHER
+                // Load-bearing, not decoration: `execute()` has four OTHER
                 // `success: false` exits that never dispatched anything (flow
-                // not found, flow disabled, no start node), and a transport
+                // not found, flow disabled, no start node, and the
+                // input-schema refusal in the arm above), and a transport
                 // cannot tell them from this one without either a message
                 // regex or sniffing `summary` / `durationMs` — the
                 // tolerant-consumer shape PD #12 forbids, and the one #8684
                 // deliberately did not reproduce on the resume route. Those
-                // three exits carry NO `status`, this one carries `'failed'`,
+                // four exits carry NO `status`, this one carries `'failed'`,
                 // so "the run dispatched and was rejected" is a fact the route
                 // reads rather than infers.
                 //
-                // [#9415] Two of those three now also carry a `code`
-                // (`FLOW_DISABLED`, `FLOW_NO_START_NODE`) so the transport can
+                // [#9415] Three of those four now also carry a `code`
+                // (`FLOW_DISABLED`, `FLOW_NO_START_NODE`, and #10025's
+                // `FLOW_INPUT_SCHEMA_INVALID`) so the transport can
                 // answer them 409/422 instead of 200. That did NOT retire the
                 // rule above — it sharpened it. The `status` absence is still
                 // the discriminator this arm is read by, and it is the reason
@@ -5817,13 +5869,22 @@ export class AutomationEngine implements IAutomationService {
      * belongs HERE, in the shared method — re-inlining either caller's copy
      * re-opens the execute/executeWithoutRetry drift this file has now paid
      * for six times (#9378, #9415, #9414, #9510, #9704, #9889).
+     *
+     * [#10025] Throws {@link InputSchemaViolationError}, not a bare `Error`:
+     * because the verdict cannot change between attempts, the maintainer ruled
+     * the refusal NON-RETRYABLE (2026-08-20, Option B taken whole), and
+     * `execute()`'s catch needs a typed throw to classify it as the
+     * never-dispatched `FLOW_INPUT_SCHEMA_INVALID` exit without sniffing
+     * message prose. The chokepoint contract above is unchanged — both attempt
+     * paths still call this method identically; what changed is what
+     * `execute()` does with the throw.
      */
     private validateNodeInputSchemas(flow: FlowParsed, _variables: Map<string, unknown>): void {
         for (const node of flow.nodes) {
             if (node.inputSchema && node.config) {
                 for (const [paramName, paramDef] of Object.entries(node.inputSchema)) {
                     if (paramDef.required && !(paramName in (node.config as Record<string, unknown>))) {
-                        throw new Error(
+                        throw new InputSchemaViolationError(
                             `Node '${node.id}' missing required input parameter '${paramName}'`,
                         );
                     }
@@ -5831,7 +5892,7 @@ export class AutomationEngine implements IAutomationService {
                     if (value !== undefined) {
                         const actualType = this.getValueType(value);
                         if (actualType !== paramDef.type) {
-                            throw new Error(
+                            throw new InputSchemaViolationError(
                                 `Node '${node.id}' parameter '${paramName}' expected type '${paramDef.type}' but got '${actualType}'`,
                             );
                         }

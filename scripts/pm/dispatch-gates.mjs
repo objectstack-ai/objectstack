@@ -2794,6 +2794,35 @@ export function coveringJobFilter(entry, inputPath) {
  * `scripts/` module (3 live family-module pairs) and a relative target outside
  * `scripts/` (3, all `eslint.config.mjs`).
  *
+ * ## The AGGREGATE line over the same edges, measured and refused too (#13251)
+ *
+ * The follow-up to this refusal asked whether ONE summary line per edited
+ * module ("imported by N discovered families; a change to its exports breaks
+ * them at load") could carry the information the 232 refused leads carry.
+ * Measured over the live card population — 1,862 first-parent commits on
+ * origin/main, 2026-08-16..30, window proven by git-history.mjs, at 71627f7b
+ * — and refused as well:
+ *
+ *   - it would have fired on 8.8% of cards, but the case an aggregate exists
+ *     for — the five head utilities whose refused lists motivated it — fired
+ *     on 0.6% (11 cards), and on those no runnable subset exists between the
+ *     derived list and the farm. 231 of the then-241 novel pairs sat in
+ *     UNFILTERED workflows: CI already buys the whole class in one round.
+ *   - 93% of firings land on TAIL modules (fan-in <= 3), where the value is
+ *     the NAMES, and every names-shape is already decided: all names is this
+ *     refused key; names under a threshold — and "top importers: …" capped at
+ *     K is the same thing — is a fan-in cutoff, the volume rule this file has
+ *     no provenance to state; a bare count without names fails "changes a
+ *     decision" exactly where it fires most. 61 of the 164 firings were cards
+ *     on THIS file, whose count line ("imported by 1 discovered family")
+ *     withholds the one name that matters — the bare-root-worklist witness
+ *     the COSTS paragraph above already prices.
+ *
+ * The staleness alarms for this refusal are the SAME pins as the key's
+ * (concentration + witness, re-derived every `--self-test` run). The firing
+ * rates are history-facts, not tree-facts: re-measure them from the commands
+ * on #13251, never from this prose.
+ *
  * Returns `{ key, via }` — `via` is the provenance label the output prints, so
  * a lead can never be read as the wrong kind of claim.
  */

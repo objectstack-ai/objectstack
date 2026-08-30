@@ -762,14 +762,15 @@ function flowDefinitionRefusal(err: any): unknown {
  * route. A caller that branches on the HTTP status alone read a failed run as
  * a successful one, and this is the door every app dispatches flows through.
  *
- * Implements the maintainer ruling on #9378 (2026-08-17) — all four rows,
- * completed by #9415:
+ * Implements the maintainer ruling on #9378 (2026-08-17) — completed by
+ * #9415, extended by #10025's non-retryable row:
  *
  * | engine exit                | reality            | answer                |
  * |----------------------------|--------------------|-----------------------|
  * | flow not found             | never dispatched   | `404`                 |
  * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
  * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
+ * | node config violates its declared `inputSchema` | never dispatched | `422` `FLOW_INPUT_SCHEMA_INVALID` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
  * | ran and PAUSED (whichever attempt) | ran, suspended | `200` + `runId` / `screen` |
  *
@@ -821,7 +822,11 @@ function flowDefinitionRefusal(err: any): unknown {
  * #9384 ruling (which keeps the union closed — a new member is a deliberate
  * widening, not a call-site mint). #9415 is that widening: the engine's
  * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
- * stamps `'FLOW_NO_START_NODE'`, and the two arms below read those.
+ * stamps `'FLOW_NO_START_NODE'`, and the arms below read those. #10025
+ * repeated the same shape for the definition-level input-schema refusal —
+ * spec seat first (#11504 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
+ * engine's non-retryable short-circuit stamps it — so its 422 is read here
+ * through the same shared table, again never minted at this call site.
  *
  * ⛔ The two workarounds this replaced were measured and REJECTED, and neither
  * becomes tempting again just because the arms now exist: matching the
@@ -926,7 +931,9 @@ async function respondToFlowTrigger(
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
- *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
+ *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
+ *                                  violating its `inputSchema` → 422
+ *                                  `FLOW_INPUT_SCHEMA_INVALID` (#10025), a run that
  *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
