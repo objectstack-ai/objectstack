@@ -136,6 +136,54 @@ describe('#11640 — the dead-end shape warns, by name and with the remedy', () 
   });
 });
 
+// ---------------------------------------------------------------------------
+describe('[#13147] the boot diagnostic under a comma-separated OS_PLATFORM_OWNER_EMAIL', () => {
+  const SECOND_OWNER = 'ops@corp.example';
+  const OWNER_LIST = `${OWNER}, ${SECOND_OWNER}`;
+
+  it('NAMES each declared administrator instead of printing the raw list in an address slot', () => {
+    // The card's fourth reader. It does not COMPARE the value, it PRINTS it —
+    // so "correct" here is not the comparators' fix pattern: the line must name
+    // the declared set, each member as the operator typed it, in a slot an
+    // operator reads as addresses.
+    walledWithDeclaredOwner('isolated', OWNER_LIST);
+    const msg = resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)!;
+    expect(msg).toBeTruthy();
+    expect(msg).toContain('OS_PLATFORM_OWNER_EMAIL');
+    expect(msg).toContain(OWNER);
+    expect(msg).toContain(SECOND_OWNER);
+    // Each member named separately — ⛔ not the raw string with its separator
+    // swallowed into one address-looking token.
+    expect(msg).toContain(`OS_PLATFORM_OWNER_EMAIL=${OWNER}, ${SECOND_OWNER}`);
+    expect(msg).toContain(WALLED_OWNER_NO_VERIFICATION_PATH);
+  });
+
+  it('prints the entries as TYPED, and only the entries the parse kept', () => {
+    // Trailing separators and blank entries are dropped by the parse, so what
+    // is printed is exactly the set that was understood — an operator comparing
+    // this line to their config can SEE an entry that did not survive.
+    walledWithDeclaredOwner('isolated', ` Ops.Lead@Corp.EXAMPLE , ${SECOND_OWNER} ,`);
+    const msg = resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)!;
+    expect(msg).toContain(`OS_PLATFORM_OWNER_EMAIL=Ops.Lead@Corp.EXAMPLE, ${SECOND_OWNER}`);
+  });
+
+  it('the dev-seed silence clause matches ANY declared member, not just the first', () => {
+    // `seedStampsDeclaredOwner`: the seed rescues the fresh-store shape when it
+    // provisions a declared administrator. Under a list that used to compare
+    // the seed address against the whole raw value and never match, so a dev
+    // boot warned about a dead end the seed had already closed.
+    process.env.NODE_ENV = 'development';
+    process.env.OS_SEED_ADMIN = '1';
+    walledWithDeclaredOwner('isolated', `${OWNER}, ${DEV_SEED_ADMIN}`);
+    expect(resolveWalledOwnerVerificationPathWarning(nothingWired('no-human-users'))).toBeNull();
+  });
+
+  it('⛔ a REFUSED list declares nobody, so the diagnostic stays silent like an unset variable', () => {
+    walledWithDeclaredOwner('isolated', `${OWNER},not-an-email`);
+    expect(resolveWalledOwnerVerificationPathWarning(NOTHING_WIRED)).toBeNull();
+  });
+});
+
 describe('#11640 — controls: every neighbouring shape stays SILENT', () => {
   it('an email transport is wired ⇒ the verification link can be delivered ⇒ no warning', () => {
     walledWithDeclaredOwner();

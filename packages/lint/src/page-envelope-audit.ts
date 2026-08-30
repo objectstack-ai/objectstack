@@ -160,6 +160,40 @@ function issueText(error: { issues: ReadonlyArray<{ path: PropertyKey[]; message
  * materialized (defaults) have no authored counterpart and must not be read
  * as findings.
  *
+ * ## The cycle guard — ancestor-scoped, on the authored side
+ *
+ * `properties` is `z.record(z.unknown())` and `properties.children` is
+ * `z.array(z.unknown())`, so a page whose component tree contains itself
+ * (`A -> B -> A`) is input the schema ADMITS: `PageSchema.safeParse` succeeds
+ * and this walk then recursed until the stack died. Door 1 runs it over the
+ * WHOLE page before anything else, so the audit died HERE first — the shared
+ * walk's own guard is a different function and never got the chance to help.
+ *
+ * Two properties of the guard are load-bearing, and each is pinned by a test:
+ *
+ *   - **It tracks the current descent path, not every object ever visited.** A
+ *     visited-set would also skip a subtree that is merely SHARED — the same
+ *     component literal referenced from two slots is legal, acyclic authoring —
+ *     and would silently drop its findings. An ancestor set skips a node only
+ *     when it is its own ancestor, which on acyclic input never happens, so the
+ *     guard is report-neutral there by construction rather than by luck.
+ *   - **It tracks `raw`, not `parsed`.** Iteration is driven by the authored
+ *     side (above), so every recursive call descends one level in `raw`;
+ *     bounding `raw`'s simple-path depth bounds the recursion whatever shape
+ *     `parsed` has. Tracking `parsed` too would add nothing and would risk
+ *     suppressing findings wherever a parse legitimately shares one object
+ *     across positions.
+ *
+ * Cycles through arrays are covered as well as cycles through records: the set
+ * holds any object identity, so an array that contains itself terminates too.
+ *
+ * On a cyclic page the descent stops at the repeat and no DISTINCT position is
+ * lost — every node of a finite graph is reachable by a simple path, so each
+ * authored position is still visited; what is dropped is the infinite tail of
+ * re-reports at ever-longer paths. The truncation is not surfaced on any
+ * precondition channel: unlike a door that could not open, this one read
+ * everything there was to read.
+ *
  * @internal Package-internal (not re-exported from the barrel): a consumer
  * always wants the three-door union {@link auditPageExpressionEnvelopes};
  * this single-door primitive exists so `page-envelope-audit.test.ts` can
@@ -173,6 +207,7 @@ export function collectBare(
   page: string,
   door: EnvelopeAuditDoor,
   out: BareExpressionFinding[],
+  ancestors: Set<object> = new Set(),
 ): void {
   if (typeof raw === 'string') {
     if (isEnvelope(parsed) && parsed.source === raw) {
@@ -180,34 +215,46 @@ export function collectBare(
     }
     return;
   }
-  if (Array.isArray(raw)) {
-    if (!Array.isArray(parsed)) return;
-    for (let i = 0; i < raw.length; i++) {
-      collectBare(raw[i], parsed[i], `${path}[${i}]`, page, door, out);
-    }
-    return;
-  }
-  if (!isRec(raw) || !isRec(parsed)) return;
+  // Primitives carry no descent and no cycle; below here `raw` is an object.
+  if (raw === null || typeof raw !== 'object') return;
 
-  for (const [key, value] of Object.entries(raw)) {
-    const childPath = path ? `${path}.${key}` : key;
-    const counterpart = parsed[key];
-
-    // Deprecated-alias case: the parse consumed this key and re-homed its
-    // value under the canonical name (`visibility` -> `visibleWhen`). A
-    // key-parallel walk alone would see `undefined` on the parsed side and
-    // move on, so the value is looked up by its own source text instead.
-    if (counterpart === undefined && typeof value === 'string' && value.length > 0) {
-      const renamed = Object.entries(parsed).find(
-        ([, pv]) => isEnvelope(pv) && pv.source === value,
-      );
-      if (renamed) {
-        out.push({ page, path: childPath, authored: value, normalizedTo: renamed[0], door });
-        continue;
+  // ── Cycle guard ────────────────────────────────────────────────────────────
+  // `ancestors` holds the objects on the CURRENT descent path — added on entry,
+  // removed on exit. Both halves of that are load-bearing; see the doc above.
+  if (ancestors.has(raw)) return;
+  ancestors.add(raw);
+  try {
+    if (Array.isArray(raw)) {
+      if (!Array.isArray(parsed)) return;
+      for (let i = 0; i < raw.length; i++) {
+        collectBare(raw[i], parsed[i], `${path}[${i}]`, page, door, out, ancestors);
       }
+      return;
     }
+    if (!isRec(raw) || !isRec(parsed)) return;
 
-    collectBare(value, counterpart, childPath, page, door, out);
+    for (const [key, value] of Object.entries(raw)) {
+      const childPath = path ? `${path}.${key}` : key;
+      const counterpart = parsed[key];
+
+      // Deprecated-alias case: the parse consumed this key and re-homed its
+      // value under the canonical name (`visibility` -> `visibleWhen`). A
+      // key-parallel walk alone would see `undefined` on the parsed side and
+      // move on, so the value is looked up by its own source text instead.
+      if (counterpart === undefined && typeof value === 'string' && value.length > 0) {
+        const renamed = Object.entries(parsed).find(
+          ([, pv]) => isEnvelope(pv) && pv.source === value,
+        );
+        if (renamed) {
+          out.push({ page, path: childPath, authored: value, normalizedTo: renamed[0], door });
+          continue;
+        }
+      }
+
+      collectBare(value, counterpart, childPath, page, door, out, ancestors);
+    }
+  } finally {
+    ancestors.delete(raw);
   }
 }
 

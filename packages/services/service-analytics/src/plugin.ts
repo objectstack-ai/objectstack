@@ -67,18 +67,31 @@ type TemporalDriverSurface = Pick<
 >;
 
 /**
- * Narrow a strategy-supplied aggregation `method` to the engine contract's
- * `AggregationFunction`, refusing anything else.
+ * Re-parse a bridge-supplied aggregation `method` as the engine contract's
+ * `AggregationFunction` before it is forwarded as `function`, refusing
+ * anything else.
  *
- * The two sides genuinely differ: `IDataEngine.aggregate`'s
- * `aggregations[].function` is the six-value enum, while the analytics
- * strategy contract that feeds this bridge declares `aggregations[].method` as
- * `string`. Parsing with the spec's OWN enum keeps a single vocabulary — no
- * local literal list to drift, and `AggregationFunction`'s error map already
- * knows the retired `array_agg` / `string_agg` spellings.
+ * Both sides now declare the same six-value enum: `IDataEngine.aggregate`'s
+ * `aggregations[].function`, and — since #12776 — the analytics strategy
+ * contract (`StrategyContext.executeAggregate`) plus the two consumer-local
+ * config mirrors this package keeps in lockstep with it (#12940). So this
+ * parse is DEFENCE IN DEPTH behind a compile-time check, not the only check
+ * (#11833).
+ *
+ * That is a reason to keep it, not to delete it. Types are erased: a
+ * JavaScript app supplying its own `executeAggregate`, or host drift arriving
+ * through a cube object that never met `CubeSchema`'s parse (the path
+ * `aggregate-bridge-function-vocabulary.test.ts` drives end to end), still
+ * reaches this seam carrying a method the engine does not declare. What the
+ * refusal buys is in `plugin.ts`'s forward below and in #12209: the engine is
+ * never handed a `function` no driver declares.
+ *
+ * Parsing with the spec's OWN enum keeps a single vocabulary — no local
+ * literal list to drift, and `AggregationFunction`'s error map already knows
+ * the retired `array_agg` / `string_agg` spellings.
  */
 function parseEngineAggregateFunction(
-  method: string,
+  method: AggregationFunction,
   alias: string,
 ): NonNullable<Parameters<IDataEngine['aggregate']>[1]['aggregations']>[number]['function'] {
   const parsed = AggregationFunction.safeParse(method);
@@ -116,13 +129,23 @@ export interface AnalyticsServicePluginOptions {
   executeAggregate?: (objectName: string, options: {
     groupBy?: string[];
     /**
-     * Per-aggregation `filter` (#10576, the #10413 contract field) — a
-     * CUSTOM bridge (an app author's own `executeAggregate`, as opposed to
-     * the auto-bridge below) MUST forward it to the real engine the same way
-     * the auto-bridge does, or a measure-scoped filter this plugin lowers
-     * onto the aggregation silently never reaches storage.
+     * The CUSTOM bridge's view of the aggregation entries — an app author's
+     * own `executeAggregate`, as opposed to the auto-bridge below. Mirrors
+     * `StrategyContext.executeAggregate`
+     * (`packages/spec/src/contracts/analytics-service.ts`) and must stay in
+     * lockstep with it; the two members that lockstep is load-bearing for:
+     *
+     * - `filter` (#10576, the #10413 contract field) — a custom bridge MUST
+     *   forward it to the real engine the same way the auto-bridge does, or a
+     *   measure-scoped filter this plugin lowers onto the aggregation
+     *   silently never reaches storage.
+     * - `method` is the spec's OWN six-value `AggregationFunction`, not
+     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   back into line. This is the declaration a custom-bridge author types
+     *   their handler against, so it is where the compile-time vocabulary
+     *   #12776 bought for strategy authors reaches them too.
      */
-    aggregations?: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>;
+    aggregations?: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>;
     filter?: Record<string, unknown>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
@@ -288,15 +311,24 @@ export class AnalyticsServicePlugin implements Plugin {
           // vacuous-filter convention.
           aggregations: aggregations?.map((a) => ({
             // [#11833] `function` is the engine contract's SIX-value
-            // `AggregationFunction`, while this bridge's own input declares
-            // `method: string` (`StrategyContext.executeAggregate`, spec
-            // `contracts/analytics-service.ts:300`). Narrowing the engine side
-            // to the contract turned that forward into a compile error — the
+            // `AggregationFunction`. This bridge's own input declared
+            // `method: string` when that history was written
+            // (`StrategyContext.executeAggregate`, spec
+            // `contracts/analytics-service.ts`), so the two ends of this
+            // rename spoke different vocabularies: narrowing the engine side
+            // to the contract turned the forward into a compile error — the
             // correct signal, and the one the deleted structural type hid by
             // declaring `function: string` on both sides.
             //
-            // Closed by PARSING with the spec enum itself rather than by
-            // widening back to `string` (what hid it) or casting past it
+            // Since #12776 (contract) and #12940 (this plugin's own config
+            // mirror above), BOTH ends declare the enum, so the rename is
+            // enum-to-enum and the parse below is defence in depth behind a
+            // compile-time check rather than the only check — see
+            // `parseEngineAggregateFunction` for why erased types still leave
+            // it load-bearing.
+            //
+            // It was closed by PARSING with the spec enum itself rather than
+            // by widening back to `string` (what hid it) or casting past it
             // (which keeps the hole and adds a lie). `AggregationFunction` is
             // the same schema `AggregationNodeSchema.function` is built from,
             // so there is one vocabulary, and its own error map already

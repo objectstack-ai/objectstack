@@ -255,6 +255,64 @@ when needed.
 
 ---
 
+## The v5.0 rename and its no-alias decision
+
+**Recorded 2026-08-30 (#12747); the decision itself is v5.0's.** This section
+writes down a decision that was made and enforced platform-wide but never
+stated, and it is written *here* because this record is where the rest of the
+repository sends a reader who asks why the platform says `environment`. It
+therefore states its reasons directly, rather than citing back the instruction
+file that cites this record.
+
+**What was renamed.** The tenancy noun `project` became `environment` on every
+surface the platform owns. Measured on `main`, 2026-08-30:
+
+| Surface | Spelling today |
+|:---|:---|
+| CLI command group | `packages/cli/src/commands/environments/` — `list`, `show`, `create`, `switch`, `bind`; there is no `projects` group |
+| Control-plane routes | `/api/v1/cloud/environments` |
+| Request header | `X-Environment-Id` (read in `packages/rest/src/rest-server.ts`) |
+| Environment variable | `OS_ENVIRONMENT_ID` (read in `packages/runtime`, `service-job`, `cloud-connection`) |
+
+Afterwards `project` keeps exactly one meaning here: the npm/monorepo sense — a
+checkout, a workspace, a `package.json` — which is the sense the v4 body above
+unifies onto Package.
+
+**No alias was kept, and that half is the load-bearing one.** There is no
+`OS_PROJECT_ID` and no `X-Project-Id` in the tree, and ADR-0087's conversion
+registry — the declared home for any tolerated legacy spelling — carries no
+entry translating `project` to `environment`. Since a tolerated alias would have
+to be declared there, the empty registry is positive evidence that none was
+tolerated, not merely evidence that nobody recorded one.
+
+**Why no alias.** Three reasons, none of which expires with the price:
+
+1. **One word per concept, or the vocabulary becomes a guess per call site.** An
+   alias makes both spellings correct, so every reader and every code generator
+   has to pick one, and a wrong pick typechecks. This is D3's argument below
+   applied one level up: a split vocabulary is worse than a uniformly old one,
+   because the reader cannot tell which half is the mistake.
+2. **A compatibility spelling outlives the reason for it.** It is cheap only
+   while it is understood as temporary. Nothing schedules its removal, each new
+   consumer learns it as a legitimate second form, and the mapping between the
+   two spellings becomes a permanent seam that every consumer reimplements.
+3. **The window was open, and it does not reopen at this price.** The Context
+   above records the condition the rename was taken under — *"The platform is
+   still pre-launch; the same one-shot-wipe window v3 used remains open."* Taken
+   then, the rename cost one coordinated edit; taken later it would cost a
+   deprecation cycle plus the alias it exists to avoid. The startup-stage
+   posture is to spend that window rather than bank a migration: no gradualism,
+   no dual-spelling interval, no single release carrying both.
+
+**What this section does not claim.** Not that the string `project` is absent
+from the tree — it remains correct in the npm/monorepo sense, in domain fixtures
+modelling a customer's own project object, and in the API identifiers the two
+addenda below adjudicate. The claim is the narrower, checkable one: on the
+surfaces tabled above the platform emits a single spelling, and no declared
+alias accepts the other.
+
+---
+
 ## Addendum (2026-08-27, #12473) — the rename stops at the CLI's user-facing vocabulary: three API surfaces keep `project` deliberately
 
 **Provenance.** Maintainer ruling on

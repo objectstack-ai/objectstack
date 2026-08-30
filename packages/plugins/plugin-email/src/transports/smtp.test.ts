@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SmtpTransport, smtpOptionsFromMailSettings } from './smtp.js';
+import { formatInvalidSmtpPortNotice } from './smtp-port-contract.js';
 import { makeTransport } from './index.js';
 
 const nm = vi.hoisted(() => ({
@@ -215,5 +216,56 @@ describe('smtpOptionsFromMailSettings', () => {
     expect(smtpOptionsFromMailSettings({}).host).toBe('');
     expect(smtpOptionsFromMailSettings({ smtp_host: '   ' }).host).toBe('');
     expect(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x' })).toEqual({ host: 'smtp.x' });
+  });
+
+  // #13190 — `absent` vs `present but unreadable`, which this function used to
+  // collapse into one bucket. A port that could not be read was DELETED here,
+  // and `SmtpTransport` then applied its built-in 587: a configured `abc`
+  // became a working-looking connection nobody chose, and `describe()`
+  // reported 587 as though it had been selected. The refusal already exists
+  // one layer down; this function's only job is to stop hiding the value from
+  // it, so these three buckets are pinned TOGETHER — pinning the refusal
+  // alone would leave the two fall-back buckets free to drift into it, and
+  // turning `smtp_port: ''` into a refusal breaks working deployments.
+  describe('absent vs present-but-unreadable (#13190)', () => {
+    it('omits `port` when the setting is ABSENT — 587 remains a legitimate default', () => {
+      const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x' });
+      expect(opts).not.toHaveProperty('port');
+      expect(new SmtpTransport(opts).describe().port).toBe(587);
+    });
+
+    it("keeps `smtp_port: ''` in the absent bucket — an empty field means 'not set'", () => {
+      const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '' });
+      expect(opts).not.toHaveProperty('port');
+      expect(new SmtpTransport(opts).describe().port).toBe(587);
+    });
+
+    it('passes a present-but-unreadable port through so the guard refuses it by name', () => {
+      const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: 'abc' });
+      // The key must SURVIVE the mapping — dropping it is the defect, and a
+      // transport built from these options is the thing that must not exist.
+      expect(opts).toHaveProperty('port');
+      expect(Number.isNaN(opts.port as number)).toBe(true);
+      // Asserted through the contract module's own generator (#12993), never a
+      // re-spelled `(expected 1-65535)`: a bare `.toThrow()` here would also
+      // pass on the unrelated `host is required` refusal two lines above it.
+      expect(() => new SmtpTransport(opts)).toThrow(formatInvalidSmtpPortNotice(NaN));
+    });
+
+    it('refuses every unreadable form, and still maps every readable one', () => {
+      for (const unreadable of ['abc', 'Infinity', '12x', {}, []] as unknown[]) {
+        const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: unreadable });
+        expect(() => new SmtpTransport(opts), `smtp_port=${JSON.stringify(unreadable)}`).toThrow(
+          /SmtpTransport: invalid port/,
+        );
+      }
+      // Unchanged in both directions: a readable in-range port still arrives,
+      // and a readable out-of-range one was already refused before this fix.
+      expect(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '465' }).port).toBe(465);
+      expect(new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: 465 }))
+        .describe().port).toBe(465);
+      expect(() => new SmtpTransport(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '99999' })))
+        .toThrow(formatInvalidSmtpPortNotice(99999));
+    });
   });
 });

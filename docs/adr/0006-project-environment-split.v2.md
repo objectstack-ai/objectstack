@@ -1,6 +1,6 @@
 # ADR-0006: Three-Layer Tenancy — Organization, Project, Environment
 
-**Status**: Accepted (v2)
+**Status**: Superseded by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20
 **Date**: 2026-05-20 (v1) / 2026-05-20 (v2 — same day revision)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: ADR-0002 (Environment-Per-Database Isolation), ADR-0003 (Package as First-Class Citizen), ADR-0005 (Metadata Customization Overlay)
