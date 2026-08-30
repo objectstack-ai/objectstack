@@ -1288,9 +1288,27 @@ export class InMemoryDriver implements IDataDriver {
         case '$in': case '$nin':
           result[op] = store(val);
           break;
-        // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, not a comparand, so it does not take the field's storage
-        // form (#4047).
+        // [#13195] `$exists` means "the field HAS A VALUE" (`!= null`), never
+        // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled
+        // onto this exit by the maintainer on 2026-08-30.
+        //
+        // It used to be `result[op] = val`: the operator went to mingo under
+        // its own name, and mingo evaluates `$exists` as KEY PRESENCE. So a row
+        // storing an explicit `null` — how a SQL NULL round-trips into a record
+        // — satisfied `$exists: true` here while the reference matcher one file
+        // over said it had no value, and `$exists: false` returned NOTHING at
+        // all where the caller asked for the rows with no value. Silent
+        // absence, not visible surplus, which is the trade
+        // `filter-logic-conformance.ts` calls the worse one.
+        //
+        // The lowering is not an invention: it is the spelling `$null` already
+        // uses fifteen lines up, and mingo answers it has-value on BOTH
+        // readings of "no value" — a stored `null` and an ABSENT KEY — so the
+        // key-absent column, which already agreed with the ruling, is unmoved.
+        //
+        // Value comparisons take the field's storage form (#4047); this one is
+        // a presence predicate, so its `null` is written literally, exactly as
+        // the `$null` arm writes its own.
         //
         // [#5702] `$regex` and `$options` were passed through here too, on the
         // same line, for the same "not a comparand" reason. Both are RETIRED
@@ -1299,7 +1317,11 @@ export class InMemoryDriver implements IDataDriver {
         // evaluation arm for a refused operator is exactly what let this
         // driver's two faces answer one `$regex` differently for so long.
         case '$exists':
-          result[op] = val;
+          if (val === true) {
+            result.$ne = null;
+          } else {
+            result.$eq = null;
+          }
           break;
         default:
           // [#5324] Was `result[op] = val` — a GENERIC passthrough that handed

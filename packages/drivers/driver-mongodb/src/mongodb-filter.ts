@@ -725,10 +725,33 @@ function translateFieldOperators(
         result[op] = store(value);
         break;
 
-      // Value-independent — a presence predicate takes a boolean, not a
-      // comparand, so it is never coerced.
+      // [#13195] Value-independent — a presence predicate takes a boolean, not
+      // a comparand, so it is never coerced. And "present" means the field HAS
+      // A VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in
+      // PR #5962, ruled onto this driver by the maintainer on 2026-08-30.
+      //
+      // It used to be `result[op] = value` — the operator passed through under
+      // its own name. MongoDB's `$exists` IS key presence at the wire level, so
+      // that passthrough is exactly what made this backend answer a stored
+      // `null` differently from `driver-memory`'s reference matcher: `$exists:
+      // true` kept the no-value row, and `$exists: false` returned NOTHING
+      // where the caller asked for the rows with no value.
+      //
+      // Nothing is invented to satisfy the ruling. `{$ne: null}` / `{$eq: null}`
+      // is the spelling the `$null` arm below already emits, and the rule that
+      // makes it answer has-value is stated in this package already
+      // (`mongodb-driver.ts`, beside the `$null` lowering): MongoDB matches a
+      // MISSING field and a stored `null` identically under equality, while
+      // `$exists` does not. So both readings of "no value" — a stored `null`
+      // and an absent key — answer the ruling, and the key-absent column, which
+      // already agreed, is unmoved. Measured on a real mongod 8.2.6 while this
+      // cell was pinned.
       case '$exists':
-        result[op] = value;
+        if (value === true) {
+          result.$ne = null;
+        } else {
+          result.$eq = null;
+        }
         break;
 
       case '$lte': {
