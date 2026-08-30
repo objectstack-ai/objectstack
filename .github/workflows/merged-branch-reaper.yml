@@ -1,0 +1,278 @@
+name: Merged-Branch Reaper (report-only)
+
+# The standing sweep for #12771: `claude/*` branches that outlived the PR they
+# were the head of.
+#
+# ⛔⛔ THIS WORKFLOW DELETES NOTHING. It classifies and reports. The deleting
+# mode is deliberately ABSENT, not merely switched off — see "Enabling the
+# deleting mode" at the bottom of this header. The maintainer's ruling of
+# 2026-08-28 requires that the first delivery produce the would-delete list for
+# one human look BEFORE deletion is ever enabled.
+#
+# ## The criterion is PR state MERGED. ⛔⛔ NEVER `is-ancestor`.
+#
+# A branch is reapable here if, and only if, the API says a pull request whose
+# HEAD REF is that branch has a non-null `merged_at`.
+#
+# The tempting alternative — `git merge-base --is-ancestor <tip> origin/main` —
+# is forbidden anywhere in this file, including as a secondary confirmation.
+# The reason is measured, not stylistic: this repo squash-merges through a merge
+# queue that REWRITES COMMITS (`allow_squash_merge=true`, `allow_merge_commit=
+# false`), so a fully-merged branch's tip is normally NOT an ancestor of `main`.
+# The filing seat measured the gap directly (#12771): of 304 `claude/*` branches
+# then present, the ancestor probe could vouch for just 15 — a FLOOR, not an
+# estimate. An ancestor-based reaper would delete those ~15, declare victory,
+# and leave the real accumulation untouched. It is the single most likely way to
+# ship something here that looks correct and is not.
+#
+# `is-ancestor` proves "nothing would be lost". It does NOT prove the converse,
+# and the converse is what a reaper needs.
+#
+# ## Why a scheduled sweep and NOT `on: pull_request` — measured, 2026-08-30
+#
+# The obvious shape is an event-driven reaper on `pull_request: [closed]`. It
+# was measured before being written, and the measurement says do not build it:
+#
+#   repo setting `delete_branch_on_merge`                     = TRUE (already on)
+#   `claude/*` PRs merged 2026-08-20T13:11Z .. 2026-08-30     = 1386
+#   ...whose head branch is STILL on the remote                =    1
+#   => native leak rate                                        = 0.07%
+#
+# GitHub's own `delete_branch_on_merge` already reaps 1385 of every 1386. An
+# `on: pull_request` reaper would fire ~140 times a day to find nothing ~99.93%
+# of the time, and would be a second writer racing the platform setting on the
+# same ref. What is actually left for a workflow to do is the part the native
+# setting cannot reach:
+#
+#   - the LEGACY BACKLOG — branches merged before the setting was enabled. 111
+#     of them, and they are old: 62 merged in 2026-04, 33 in 2026-06, only 8 in
+#     2026-08 (newest 2026-08-20). This is a one-time debt, not a flow.
+#   - the RARE LEAK — that 1-in-1386 the setting misses. A periodic sweep
+#     catches it a few days later at no extra cost.
+#
+# One mechanism covers both cleanly, so this is one mechanism: a weekly sweep
+# plus `workflow_dispatch`. Weekly is calibrated to the leak rate, not guessed —
+# at ~1 escaped branch per 10 days there is nothing for a daily run to find.
+#
+# ## ⚠️ What this reaper does NOT reach, stated because the gap is the point
+#
+# The MERGED criterion can only ever touch a branch that HAS a PR. Measured over
+# all 335 `claude/*` branches on 2026-08-30, classified by PR state:
+#
+#   MERGED           111  (33.1%)  <- everything this workflow can ever reap
+#   NO PR AT ALL     170  (50.7%)  <- ⚠️ unreachable here BY CONSTRUCTION
+#   CLOSED, unmerged  43  (12.8%)  <- excluded by policy (MERGED-only default)
+#   OPEN              11  ( 3.3%)  <- correctly excluded, still in use
+#
+# The NO-PR bucket is not a stale tail — it is the LIVE growth. 145 of those 170
+# carry a tip commit dated 2026-08, and 123 of them within the trailing 14 days:
+# agent branches pushed by a session that died, or never opened a PR at all.
+#
+# ⇒ This workflow is correct as ruled and clears a real 111-branch debt, but it
+# addresses roughly a third of the population and close to none of the ONGOING
+# accumulation. Widening the criterion to cover abandoned no-PR branches is a
+# NEW RULING (what proves such a branch is abandoned rather than in flight?),
+# not an implementation detail, and is deliberately NOT taken here.
+#
+# ## Report-only is enforced by the TOKEN, not just by the code
+#
+# `permissions: contents: read` below is the whole grant. Deleting a ref needs
+# `contents: write`. So even a defect in the classification cannot delete a
+# branch: the token this job runs with is structurally incapable of it. That is
+# the property to preserve when reviewing changes to this file.
+#
+# ## Enabling the deleting mode (NOT done here — the maintainer's call)
+#
+# Three edits, deliberately left undone so that enabling is a reviewed diff and
+# not a flipped default:
+#   1. raise `permissions:` to `contents: write`;
+#   2. add a step calling `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}`
+#      over the `reapable` list this job already computes and uploads;
+#   3. decide the CLOSED-unmerged policy. The default here is MERGED-ONLY.
+#      Reaping closed-but-unmerged branches discards work that was never
+#      merged — that is the maintainer's call to make, not this workflow's to
+#      assume.
+# The grace period below should stay in place when that happens.
+
+on:
+  schedule:
+    # Weekly, Monday 04:37 UTC. Calibrated to the 0.07% native leak rate above:
+    # there is ~1 escaped branch per 10 days, so a daily sweep would spend its
+    # API budget to find nothing six days out of seven. Offset off the top of
+    # the hour because scheduled workflows queue behind everyone else's :00.
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      grace_days:
+        description: 'Do not list a merged branch until its PR merged this many days ago.'
+        required: false
+        default: '7'
+  # Exercise the sweep on changes to itself, the same posture as
+  # required-set-patrol.yml. This is what makes the FIRST delivery of this PR a
+  # real would-delete list produced by a real runner rather than a claim about
+  # one. Publishes no required context, so a red here blocks nothing.
+  pull_request:
+    paths:
+      - '.github/workflows/merged-branch-reaper.yml'
+
+# Least privilege, and load-bearing: see "Report-only is enforced by the TOKEN".
+# `contents: read` lists branches; `pull-requests: read` reads PR state. Neither
+# can delete a ref.
+permissions:
+  contents: read
+  pull-requests: read
+
+# One sweep at a time. A scheduled run overlapping a manual dispatch would spend
+# two full classification passes (~340 API calls each) on one answer.
+concurrency:
+  group: merged-branch-reaper-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    # ⛔ NOT a required context, and must never become one. A findings-based red
+    # would block unrelated PRs on the state of somebody else's stale branch.
+    name: Merged-branch sweep (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Classify every claude/* branch by the state of its PR
+        id: sweep
+        uses: actions/github-script@v9
+        env:
+          GRACE_DAYS: ${{ github.event.inputs.grace_days || '7' }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const PREFIX = 'claude/';
+            const graceDays = Number(process.env.GRACE_DAYS || '7');
+            if (!Number.isFinite(graceDays) || graceDays < 0) {
+              core.setFailed(`grace_days must be a non-negative number, got ${process.env.GRACE_DAYS}`);
+              return;
+            }
+            const graceCutoff = Date.now() - graceDays * 24 * 60 * 60 * 1000;
+
+            // --- 1. the population -------------------------------------------------
+            // Every branch, then filtered to the prefix. Counted here rather than
+            // trusted from the card: `git ls-remote | wc -l` counts REFS, and what a
+            // naive count gets wrong is exactly whether they are all dev branches.
+            const allBranches = await github.paginate(github.rest.repos.listBranches, {
+              owner, repo, per_page: 100,
+            });
+            const candidates = allBranches.filter((b) => b.name.startsWith(PREFIX));
+            core.info(`branches on remote: ${allBranches.length}; matching ${PREFIX}: ${candidates.length}`);
+
+            // --- 2. classify by PR state ------------------------------------------
+            // ⛔ NO `is-ancestor` ANYWHERE. The only question asked of each branch is
+            // "does a PR whose head ref is this branch report a merged_at?".
+            const buckets = { reapable: [], grace: [], open: [], closedUnmerged: [], noPr: [], protectedBranch: [] };
+
+            for (const branch of candidates) {
+              if (branch.protected) {
+                buckets.protectedBranch.push({ branch: branch.name });
+                continue;
+              }
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'all', head: `${owner}:${branch.name}`, per_page: 100,
+              });
+
+              // Defensive: the `head` filter is the instrument this whole workflow
+              // rests on, so never accept a PR whose head ref is not literally this
+              // branch. (A neighbouring endpoint, commits/{sha}/pulls, returns PRs
+              // that merely CONTAIN the commit — a different question that reads
+              // like the same one. Measured on 2026-08-30: it reported "has a PR"
+              // for 4 of 5 branches that in fact had none of their own.)
+              const mine = prs.filter((pr) => pr.head && pr.head.ref === branch.name);
+              if (mine.length === 0) {
+                buckets.noPr.push({ branch: branch.name });
+                continue;
+              }
+              const merged = mine.filter((pr) => pr.merged_at);
+              const open = mine.filter((pr) => pr.state === 'open');
+
+              if (merged.length > 0) {
+                // Newest merge wins: a branch reused across two PRs is safe to reap
+                // only once the LAST of them has landed and aged out of the grace
+                // window.
+                const newest = merged
+                  .slice()
+                  .sort((a, b) => new Date(b.merged_at) - new Date(a.merged_at))[0];
+                // A branch with a merged PR AND a still-open PR is in use. Never
+                // reapable, whatever the merge says.
+                if (open.length > 0) {
+                  buckets.open.push({ branch: branch.name, pr: open[0].number, note: 'also has a merged PR' });
+                } else if (new Date(newest.merged_at).getTime() > graceCutoff) {
+                  buckets.grace.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
+                } else {
+                  buckets.reapable.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
+                }
+              } else if (open.length > 0) {
+                buckets.open.push({ branch: branch.name, pr: open[0].number });
+              } else {
+                buckets.closedUnmerged.push({ branch: branch.name, pr: mine[0].number });
+              }
+            }
+
+            // --- 3. render ---------------------------------------------------------
+            const n = (a) => a.length;
+            const total = candidates.length;
+            const pct = (a) => (total ? ((100 * n(a)) / total).toFixed(1) : '0.0');
+            const sample = (arr, fmt, k = 8) =>
+              arr.slice(0, k).map(fmt).join('\n') + (arr.length > k ? `\n_...and ${arr.length - k} more_` : '');
+
+            const lines = [];
+            lines.push('## Merged-branch reaper — DRY RUN. Nothing was deleted.');
+            lines.push('');
+            lines.push(`Criterion: **a PR whose head ref is the branch reports \`merged_at\`**. ⛔ Never \`is-ancestor\`.`);
+            lines.push(`Grace period: **${graceDays} day(s)** since merge. Token grant: \`contents: read\` — this job cannot delete a ref.`);
+            lines.push('');
+            lines.push(`### Population: ${total} \`${PREFIX}\` branches (of ${allBranches.length} on the remote)`);
+            lines.push('');
+            lines.push('| bucket | count | share | reaped? |');
+            lines.push('|---|---:|---:|---|');
+            lines.push(`| MERGED, past grace | ${n(buckets.reapable)} | ${pct(buckets.reapable)}% | ✅ would delete |`);
+            lines.push(`| MERGED, within grace | ${n(buckets.grace)} | ${pct(buckets.grace)}% | held ${graceDays}d |`);
+            lines.push(`| OPEN PR | ${n(buckets.open)} | ${pct(buckets.open)}% | ⛔ excluded — in use |`);
+            lines.push(`| CLOSED, unmerged | ${n(buckets.closedUnmerged)} | ${pct(buckets.closedUnmerged)}% | ⛔ excluded — MERGED-only policy |`);
+            lines.push(`| NO PR at all | ${n(buckets.noPr)} | ${pct(buckets.noPr)}% | ⛔ unreachable by construction |`);
+            lines.push(`| protected | ${n(buckets.protectedBranch)} | ${pct(buckets.protectedBranch)}% | ⛔ excluded |`);
+            lines.push('');
+            lines.push(`### ✅ Would delete (${n(buckets.reapable)})`);
+            lines.push('');
+            lines.push(n(buckets.reapable)
+              ? sample(buckets.reapable, (r) => `- \`${r.branch}\` — PR #${r.pr}, merged ${r.merged_at}`, 40)
+              : '_none_');
+            lines.push('');
+            lines.push('### ⛔ Excluded, with the reason for each');
+            lines.push('');
+            lines.push(`**OPEN PR (${n(buckets.open)})** — still in use:`);
+            lines.push(n(buckets.open) ? sample(buckets.open, (r) => `- \`${r.branch}\` — PR #${r.pr}${r.note ? ` (${r.note})` : ''}`) : '_none_');
+            lines.push('');
+            lines.push(`**CLOSED, unmerged (${n(buckets.closedUnmerged)})** — work that never landed; MERGED-only is the default policy:`);
+            lines.push(n(buckets.closedUnmerged) ? sample(buckets.closedUnmerged, (r) => `- \`${r.branch}\` — PR #${r.pr}`) : '_none_');
+            lines.push('');
+            lines.push(`**MERGED but within the ${graceDays}-day grace window (${n(buckets.grace)})**:`);
+            lines.push(n(buckets.grace) ? sample(buckets.grace, (r) => `- \`${r.branch}\` — PR #${r.pr}, merged ${r.merged_at}`) : '_none_');
+            lines.push('');
+            lines.push(`**NO PR at all (${n(buckets.noPr)})** — ⚠️ this reaper can never touch these:`);
+            lines.push(n(buckets.noPr) ? sample(buckets.noPr, (r) => `- \`${r.branch}\``) : '_none_');
+            lines.push('');
+            await core.summary.addRaw(lines.join('\n')).write();
+
+            const payload = { generated_at: new Date().toISOString(), grace_days: graceDays, total_branches: allBranches.length, prefix_branches: total, buckets };
+            require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/branch-reaper-report.json`, JSON.stringify(payload, null, 2));
+
+            core.notice(`Dry run: ${n(buckets.reapable)} of ${total} ${PREFIX} branches would be deleted. ${n(buckets.noPr)} have no PR and are unreachable by this criterion. Nothing was deleted.`);
+            core.setOutput('reapable', String(n(buckets.reapable)));
+            core.setOutput('no_pr', String(n(buckets.noPr)));
+
+      - name: Upload the full classification
+        # `always()`: a run whose report is missing because an earlier step died
+        # is itself the signal, and the partial file is worth more than nothing.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: branch-reaper-report
+          path: ${{ runner.temp }}/branch-reaper-report.json
+          if-no-files-found: warn
