@@ -4418,6 +4418,11 @@ export class ObjectStackProtocolImplementation implements
         // dashboard publish — without it every legitimate board reads as
         // dangling (see RuntimeStackContext.datasets).
         const datasets = listCollection('dataset', 'datasets');
+        // [#13216] The resolution universe validateViewPageRefs needs for a
+        // `type: 'page'` view publish — without it every legitimate page mount
+        // reads as dangling (see RuntimeStackContext.pages). Gathered on the
+        // same terms as the four above: per write, on an `active` publish only.
+        const pages = listCollection('page', 'pages');
 
         // [#9612] The closure this write is judged against. Resolved from the
         // package registry — the impure read — and handed to the pure gate as
@@ -4433,7 +4438,8 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            // [#10377] The batch's own pending drafts join the four
+            pages,
+            // [#10377] The batch's own pending drafts join the five
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
@@ -15808,9 +15814,19 @@ export class ObjectStackProtocolImplementation implements
     private async collectBatchPendingDeclarations(
         drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
-        const pending: {
-            objects: unknown[]; permissions: unknown[]; books: unknown[]; datasets: unknown[];
-        } = { objects: [], permissions: [], books: [], datasets: [] };
+        // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
+        // with `-?`, not as a hand-listed literal. The literal it replaces was
+        // the third place the collection set is written down, and the only one
+        // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
+        // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
+        // accumulated here, so a package publishing a page beside the view that
+        // mounts it would keep being refused for the sibling in its own batch —
+        // the `shyx_customer_ds` shape #10377 was filed for. `-?` makes every
+        // key REQUIRED, so the next widening is a compile error at this line
+        // instead.
+        const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
+            objects: [], permissions: [], books: [], datasets: [], pages: [],
+        };
         let any = false;
         for (const d of drafts) {
             // The canonical fold, same boundary the promote applies: a stored

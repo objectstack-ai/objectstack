@@ -612,6 +612,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "图表配置",
         description: "图表专属配置"
       },
+      page: {
+        label: "Page",
+        description: "The published page this view mounts."
+      },
       end_user_controls: {
         label: "终端用户控制",
         description: "终端用户在此视图上可执行的操作——快速筛选、筛选标签页、可视化切换（ADR-0047，对标 Airtable Interface）。"
@@ -692,6 +696,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       chart: {
         label: "图表"
+      },
+      pageName: {
+        label: "Page Name",
+        helpText: "Name of an already-published page (lowercase snake_case). The page renders in place of the record list, so leave Columns empty."
       },
       userFilters: {
         label: "用户筛选器",

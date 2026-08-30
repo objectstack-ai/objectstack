@@ -34,7 +34,7 @@
         },
         "type": {
           "status": "live",
-          "note": "objectui: ListView.tsx routes grid/kanban/calendar/gantt/gallery/timeline/chart/tree renderers (audit L16)."
+          "note": "objectui: ListView.tsx routes grid/kanban/calendar/gantt/gallery/timeline/chart/tree renderers (audit L16). [#13216] The enum also carries `page`, which routes nowhere in ListView by design — it delegates to the existing page renderer via the sibling `pageName` key (maintainer ruling 2026-08-29); the mount itself is objectui's half."
         },
         "data": {
           "status": "live",
@@ -117,6 +117,12 @@
         "tree": {
           "status": "live",
           "note": "objectui: @object-ui/plugin-tree ObjectTree.tsx (spec CHANGELOG: 'Renderer ships in objectui @object-ui/plugin-tree')."
+        },
+        "pageName": {
+          "status": "live",
+          "verifiedAt": "2026-08-30",
+          "evidence": "packages/spec/src/ui/view.zod.ts#checkListViewPageMount (refuses a `type: 'page'` view that declares no `pageName`, refuses `pageName` on any other view type, and refuses a non-empty `columns` beside it — attached to all three list-view doors: ListViewSchema, ObjectListViewSchema, ListViewOverlayWireSchema); packages/spec/src/stack.zod.ts#validateCrossReferences (build-time refusal when the named page is not in `stack.pages`); packages/lint/src/validate-view-page-refs.ts#validateViewPageRefs (the same resolution on the CLI commands and, via `runtimeTypes: ['flow','view']`, on the runtime publish gate — `PUT /api/v1/meta/view`)",
+          "note": "[#13216] The page a `type: 'page'` view mounts. Enforcement is in-repo and cited above; the RENDER half is objectui's and is delegation rather than new code — the ruling of 2026-08-29 is explicit that a page view hands off to the existing page renderer (「渲染委托既有页面渲染器」), so the page keeps its own audience gate (`page.assignedProfiles`) and no new authorization surface is introduced. Necessary-not-sufficient in the ADR-0054 sense until the objectui mount lands: the refusals above are measured here, the pixels are not."
         },
         "map": {
           "status": "live",

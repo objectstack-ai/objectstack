@@ -201,6 +201,16 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *
  * `timeline` / `tree` have config schemas too but are NOT flagged yet — same
  * verify-then-enforce gate; the audit's Tier-A names only these three.
+ *
+ * ⛔ [#13216] `page` does NOT belong in this table, and completing the map with
+ * it would be a regression in two independent ways. Its binding is `pageName`,
+ * a STRING — the check below asks `isRec(view[block])`, so a correct
+ * declaration would be read as a missing block and warned about on every page
+ * view. And the premise of this table does not hold for it: a `page` view with
+ * no binding does not degrade to a wrong-but-visible list, it renders nothing,
+ * so it is refused outright at parse by `checkListViewPageMount`
+ * (`packages/spec/src/ui/view.zod.ts`) — an error where this table can only
+ * advise, and already spent before a completeness pass ever runs.
  */
 const VIEW_BINDING_BLOCKS: Readonly<Record<string, string>> = {
   kanban: 'kanban',
