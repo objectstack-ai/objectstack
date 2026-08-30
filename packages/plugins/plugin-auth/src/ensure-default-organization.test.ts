@@ -100,4 +100,83 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
     expect(res.memberCreated).toBe(true);
     expect(ql.tables.sys_member).toHaveLength(1);
   });
+
+  // [#12981] A refused bootstrap write is a DURABILITY degradation, not a
+  // functional one: `tryInsert` answers `null`, the boot goes on, nothing else
+  // fails, and the admin simply has no organization. AGENTS.md "Degradation log
+  // levels" puts that at `error`, and the two lines below used to be `warn`.
+  describe('refused bootstrap writes report at `error` (#12981)', () => {
+    function refusingQl(object: string) {
+      const ql = makeQl();
+      const realInsert = ql.insert;
+      ql.insert = vi.fn(async (obj: string, data: Row) => {
+        if (obj === object) throw new Error(`write refused: ${obj}`);
+        return realInsert(obj, data);
+      }) as any;
+      return ql;
+    }
+
+    it('a refused sys_organization insert names the consequence AND the remedy at `error`', async () => {
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const res = await ensureDefaultOrganization(refusingQl('sys_organization'), { logger });
+
+      expect(res.reason).toBe('org_insert_failed');
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      // ⛔ Not `expect(...).toHaveBeenCalled()` on its own: the level IS the
+      // defect this repairs, so `warn` must be silent for the assertion to mean
+      // anything.
+      expect(logger.warn).not.toHaveBeenCalled();
+      const [message, cause, meta] = logger.error.mock.calls[0];
+      expect(message).toContain('NOT created');
+      expect(message).toContain('LOOKING HEALTHY');
+      expect(message).toContain('Remedy');
+      // The spec `Logger.error` arity: the CAUSE is the second argument and meta
+      // the third. Passing meta into the cause slot puts it where a Logger
+      // neither reads nor serializes it.
+      expect(cause).toBeUndefined();
+      expect(meta).toMatchObject({ object: 'sys_organization' });
+    });
+
+    it('a refused sys_member insert reports at `error` too', async () => {
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const res = await ensureDefaultOrganization(refusingQl('sys_member'), { logger });
+
+      expect(res).toMatchObject({ defaultOrgCreated: true, memberCreated: false, reason: 'member_insert_failed' });
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.error.mock.calls[0][0]).toContain('NOT bound');
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    // #9754: `error` is optional because hosts do inject reduced sinks. A
+    // fallback that only exists in the type is not a fallback — this is the
+    // case that proves the `warn` leg is wired, and it is the one
+    // `logger?.error?.(…)` would fail while looking correct.
+    it('falls back to `warn` against a sink with no `error`', async () => {
+      const logger = { info: vi.fn(), warn: vi.fn() };
+      await ensureDefaultOrganization(refusingQl('sys_organization'), { logger });
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0][0]).toContain('NOT created');
+      // The fallback takes (message, meta) — no cause slot on `warn`.
+      expect(logger.warn.mock.calls[0][1]).toMatchObject({ object: 'sys_organization' });
+    });
+
+    it('a class-based sink keeps its receiver (⛔ never a detached `error ?? warn`)', async () => {
+      // `@objectstack/core`'s ObjectLogger is a class whose `error` reaches for
+      // `this`. A detached `(logger.error ?? logger.warn)(…)` throws against it
+      // and survives every plain-closure double in this file, which is why the
+      // case is written with a real receiver.
+      class Sink {
+        seen: string[] = [];
+        info(): void {}
+        warn(): void {}
+        error(message: string): void {
+          this.seen.push(message);
+        }
+      }
+      const sink = new Sink();
+      await ensureDefaultOrganization(refusingQl('sys_organization'), { logger: sink });
+      expect(sink.seen).toHaveLength(1);
+    });
+  });
 });

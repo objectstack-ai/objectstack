@@ -1,0 +1,91 @@
+// The TEST-layer type-check program (#13176, adopting the mechanism #5286 set
+// for `packages/spec`, #5449 generalised, and #12542 carried to `packages/rest`
+// — the closest analogue to this package, see the `paths` note below).
+// `tsconfig.json` beside this one stays exactly as it is: it is the BUILD
+// config, and `package.json`'s `typecheck` script NAMES this sibling
+// (`tsc --noEmit -p tsconfig.test.json`), because a config no script invokes is
+// exactly the phantom this whole change is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE. Measured
+// per program rather than in aggregate, because one combined zero cannot tell
+// "excluded" from "the grep was wrong" (`tsc --noEmit --listFiles`, at
+// aa16721b6, workspace closure built first):
+//
+//   tsconfig.json          460 files, 0 x `*.test.ts`   (the `exclude` below names them)
+//   tsconfig.scripts.json  310 files, 0 x `*.test.ts`   (`include` is `scripts/**/*`)
+//   THIS FILE              591 files, 89 x `*.test.ts`  (the same grep, non-zero)
+//
+// So `pnpm --filter @objectstack/plugin-security typecheck` exiting 0 was a true
+// sentence carrying no information about any of the 89 test files (1625 tests)
+// in a package whose suites pin REFUSAL behaviour. AGENTS.md states both halves
+// of the rule this file applies: never `exclude` the tests from the config the
+// `typecheck` script reads, and "a `@ts-expect-error` in a file no tsc program
+// compiles is a phantom check". The cost was not hypothetical here — the
+// `__dirname` note in `src/seed-write-refusal.test.ts` records an author
+// steering around a diagnostic from a program that never ran.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite) while this package has no `"type":
+//     "module"`, so the inherited NodeNext compiles them as CommonJS. Measured
+//     over the identical file set: NodeNext reports 11 errors, of which 2 are
+//     the CHECK rather than the code — TS1470 (`import.meta` in a file "which
+//     will build into CommonJS output", `src/audience-anchor-set-claims.pin.test.ts`,
+//     a file vitest runs as ESM every day) and TS2550 (`Array.prototype.at`
+//     against a `lib` older than es2022, `src/permission-set-projection.test.ts`,
+//     on Node >= 22). Matching vitest is fidelity, not laxity: it is the same
+//     subtraction `packages/spec` and `packages/rest` made, and it removes the
+//     pressure that produced the `__dirname` workaround above.
+//     ⚠️ Nothing is lost on the src side by `moduleResolution: bundler` here:
+//     every `src/**/*.ts` file is ALSO in the build program above, which keeps
+//     NodeNext and keeps demanding the `.js` extensions this package ships.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config, and `types: ["node"]` from
+//     `tsconfig.json`. Nothing here may loosen a type rule; if a test does not
+//     compile, that is the finding.
+//
+// ⚠️ WHAT THIS PROGRAM INHERITS FROM `tsconfig.json`, both load-bearing and
+// neither re-declared here (read that file's #11184 comments first):
+//   - `rootDir: "../.."` (= `packages/`). Already widened there as a
+//     CONSEQUENCE of the `paths` rule, so the TS6059 pile a narrower root would
+//     produce does not arise: measured TS6059 x0 over this program.
+//   - `paths: { "@objectstack/types": ["../../types/src/index.ts"] }`. A child
+//     that declared its own `paths` would REPLACE this map rather than merge
+//     into it, silently sending that specifier back to `dist/` — a BUILD
+//     ARTIFACT — and this program's verdict would then be about the last
+//     `pnpm build` (`check:type-source-resolution`'s header states why the
+//     dangerous case is the typecheck that PASSES). This file declares no
+//     `paths` at all, so the rule stands.
+//     ⛔ Not extended to the four specifiers `vitest.config.ts` aliases to
+//     source: PR #12570 measured that route on `packages/rest` and it made the
+//     test layer WORSE (37 -> 42 errors, the +5 being TS6133 in other packages'
+//     source billed to a layer that cannot pay it down). The deps this program
+//     newly reaches through `dist/*.d.ts` are declared instead, in
+//     `scripts/check-type-source-resolution.mjs`'s registry, on that gate's
+//     onboarding limb — with the before/after numbers stated in place.
+//
+// There is NO `test-typecheck-debt.json` beside this config, on purpose — the
+// call `packages/metadata-core`, `packages/metadata-fs` and
+// `packages/triggers/trigger-record-change` made, and the one this package's
+// residue allows. All 9 remaining errors were REPAIRED in the change that added
+// this file rather than ledgered (5 in `src/explain-engine.test.ts`, 2 in
+// `src/rls-pushdown-limits.test.ts`, 1 each in `src/authz-matrix-gate.test.ts`
+// and `src/objects/default-permission-sets.test.ts`), so the whole test layer
+// compiles at ZERO. A per-file shrink-only ledger would hold nothing while
+// costing this package a `tsx` dependency and two more scripts; a bare
+// `tsc --noEmit -p tsconfig.test.json` is the strictly stronger gate at zero
+// residue, because ANY error here is red immediately with no ledger to be added
+// to. If this package ever acquires residue that cannot be fixed in its own PR,
+// that is the moment to wire `scripts/check-test-typecheck.mts` — not before.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

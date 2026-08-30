@@ -592,22 +592,35 @@ describe('a pass that is not refused reports exactly what it did before', () => 
  *
  * ## Why this reads the declaration instead of using `@ts-expect-error`
  *
- * Measured, twice, rather than assumed. This package's `tsconfig.json` excludes
- * `**\/*.test.ts` and `tsc --noEmit --listFiles` reports ZERO plugin-security
- * test files in the program its `typecheck` script runs — so a directive here
- * would not be evaluated by that script. `check:type-check-coverage` refuses
- * exactly that shape by name ("carries a `@ts-expect-error` directive but no
- * tsc program the `typecheck` script runs compiles it … replace the pin with a
- * runtime assertion", `PHANTOM_PIN_DEBT` closed to new entries), and it refused
- * this file when the pin was first written that way.
+ * Measured, twice, rather than assumed — AT THE TIME. This package's
+ * `tsconfig.json` excludes `**\/*.test.ts`, and back then that was the package's
+ * only word on the subject: `tsc --noEmit --listFiles` reported ZERO
+ * plugin-security test files in either program the `typecheck` script ran, so a
+ * directive here would not have been evaluated by any of them.
+ * `check:type-check-coverage` refuses exactly that shape by name ("carries a
+ * `@ts-expect-error` directive but no tsc program the `typecheck` script runs
+ * compiles it … replace the pin with a runtime assertion", `PHANTOM_PIN_DEBT`
+ * closed to new entries), and it refused this file when the pin was first
+ * written that way.
  *
- * So the pin is a runtime assertion over the declaration's own AST. It survives
- * removal of `check:optional-error-sink-contract`, which is the point — that
- * gate found the hole, but the property belongs to this module.
+ * [#13176] the sibling `tsconfig.test.json` compiles this file, so that
+ * measurement no longer holds and a directive here WOULD be evaluated. The pin
+ * stays a runtime assertion over the declaration's own AST anyway, and now for
+ * its own reason rather than for the absent compiler: it reads OPTIONALITY off
+ * the type alias's AST, which is a property no single `@ts-expect-error` call
+ * site expresses — and it survives removal of
+ * `check:optional-error-sink-contract`, which is the point. That gate found the
+ * hole; the property belongs to this module.
  *
- * ⚠️ Seeded from `__dirname`, not `import.meta.url`: under `module: NodeNext`
- * this package resolves as CommonJS, where `import.meta` is TS1470 and pushed
- * the shrink-only TEST_DEBT ratchet from 11 to 12.
+ * ⚠️ Seeded from `__dirname` rather than `import.meta.url`. The original reason
+ * is spent and is recorded because it is the cost of a hidden layer, not a
+ * footnote: under the inherited `module: NodeNext` this package resolves as
+ * CommonJS, `import.meta` is TS1470 there, and that one diagnostic would have
+ * pushed the shrink-only TEST_DEBT ratchet from 11 to 12 — so a source file was
+ * shaped around a program whose verdict nothing ever ran. `tsconfig.test.json`
+ * matches how vitest executes this layer (`module: esnext`), where
+ * `import.meta` is legal; `__dirname` is left in place because it works under
+ * both and churning it buys nothing.
  */
 describe('SeedLogger guarantees the channel a durability report degrades to', () => {
   const CATALOG_SOURCE = resolve(__dirname, 'per-organization-catalog.ts');

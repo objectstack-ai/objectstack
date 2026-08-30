@@ -8,6 +8,14 @@ import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
+// [#13176] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
+// (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
+// a layer's `contributors`, and a record attribution's `rules`. The engine
+// always populates both, which is why the assertions below reach through `?.`
+// and not `!`: an absent member arrives at the matcher as `undefined` and the
+// expectation still fails loudly, so the check survives the repair. This file
+// was outside every tsc program in the package until `tsconfig.test.json`.
+
 const SALES_USER = PermissionSetSchema.parse({
   name: 'sales_user',
   objects: { leave_request: { allowRead: true, allowCreate: true, readScope: 'unit' } },
@@ -188,7 +196,9 @@ describe('explainAccess (ADR-0090 D6)', () => {
     });
     const principal = d.layers.find((l) => l.layer === 'principal')!;
     // `contributors` is the z.input type (defaulted, so optional pre-parse) —
-    // normalize rather than dereference, keeping the test-layer TEST_DEBT flat.
+    // normalize rather than dereference. Written when this file was outside
+    // every tsc program and the motive was the TEST_DEBT ledger; it is the
+    // right shape either way, and [#13176] made it the compiler's business.
     const dropped = (principal.contributors ?? []).filter((c) => c.state === 'expired' || c.state === 'deactivated');
     expect(dropped).toEqual([
       { kind: 'permission_set', name: 'quarter_close_admin', via: 'held until 2026-06-01T00:00:00Z — expired', state: 'expired' },
@@ -437,7 +447,7 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     );
     const tenant = d.layers.find((l) => l.layer === 'tenant_isolation')!;
     expect(tenant.record!.outcome).toBe('excluded');
-    expect(tenant.record!.rules[0]).toMatchObject({ kind: 'tenant_filter', effect: 'excludes' });
+    expect(tenant.record!.rules?.[0]).toMatchObject({ kind: 'tenant_filter', effect: 'excludes' });
     expect(d.record).toMatchObject({ visible: false, decidedBy: 'tenant_isolation' });
   });
 
@@ -464,7 +474,7 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     );
     const sharing = d.layers.find((l) => l.layer === 'sharing')!;
     expect(sharing.record!.outcome).toBe('admitted');
-    expect(sharing.record!.rules[0]).toMatchObject({ kind: 'record_share', effect: 'admits', grants: 'read' });
+    expect(sharing.record!.rules?.[0]).toMatchObject({ kind: 'record_share', effect: 'admits', grants: 'read' });
     expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
   });
 
@@ -556,7 +566,7 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     );
     const vama = d.layers.find((l) => l.layer === 'vama_bypass')!;
     expect(vama.verdict).toBe('widens');
-    expect(vama.contributors.map((c) => c.name)).toEqual(['compliance_auditor']);
+    expect(vama.contributors?.map((c) => c.name)).toEqual(['compliance_auditor']);
     expect(d.record).toMatchObject({ visible: true, decidedBy: 'vama_bypass' });
   });
 
@@ -1097,8 +1107,8 @@ describe('explainAccess — export axis (#3544)', () => {
     const crud = d.layers.find((l) => l.layer === 'object_crud');
     // The attribution is the point: it names the granting set, so an admin can
     // see which grant to remove (or which one is missing).
-    expect(crud?.contributors.map((c) => c.name)).toContain('exporter');
-    expect(crud?.contributors.map((c) => c.name)).not.toContain('reader');
+    expect(crud?.contributors?.map((c) => c.name)).toContain('exporter');
+    expect(crud?.contributors?.map((c) => c.name)).not.toContain('reader');
   });
 
   it('surfaces the readFilter — an export streams the same filtered rows a read does', async () => {
