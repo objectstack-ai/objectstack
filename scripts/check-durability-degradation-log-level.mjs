@@ -5571,6 +5571,27 @@ function selfTestReadSeams() {
             expectSeams: 1,
         },
         {
+            // The bare-identifier ADMISSION, pinned. The receiver clause reads
+            // depth, not `this`-rootedness — `const self = this;` is how the
+            // live file reaches its own members from a closure, and requiring
+            // `this` would drop this seam. Without this case, tightening the
+            // clause to `this`/`super` only passes the whole suite.
+            name: 'flags: #12358 — a bare-identifier receiver is admitted, not refused',
+            code: `
+                class R {
+                    private async loadRow(ref: string) {
+                        return await this.driver.findOne('sys_metadata', { ref });
+                    }
+                    async read(ref: string) {
+                        const self = this;
+                        try { return await self.loadRow(ref); }
+                        catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
             // The clause must count REQUIRED parameters, not declared ones, or
             // it drops real reads through every wrapper with an optional tail.
             name: 'flags: #12358 — an optional parameter is not a required one',
