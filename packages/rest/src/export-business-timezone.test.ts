@@ -31,13 +31,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import ExcelJS from 'exceljs';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 import { formatCellValue, formatRowCells, formatRowForJson } from './export-format.js';
 import type { ExportFieldMeta } from './export-format.js';
+import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
 // The instant at the heart of the report: 2026-08-01 06:00 in +08 is
 // 2026-07-31 22:00 in UTC — a different day, month and quarter-of-year.
@@ -238,8 +238,7 @@ async function xlsxRow(timezone?: string): Promise<string[]> {
   const route = await boot(timezone);
   const { res, getBuffer } = makeBinRes();
   await route.handler({ params: { object: 'shift' }, query: { format: 'xlsx' } } as any, res);
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(getBuffer() as any);
+  const wb = await loadXlsxWorkbook(getBuffer());
   return (wb.worksheets[0].getRow(2).values as any[]).slice(1).map((v) => String(v));
 }
 
