@@ -1861,6 +1861,36 @@ const FIELD_RULE_REPORT_SELF_TEST_CASES = [
     },
   },
   {
+    // The epilogue an author actually reads at refusal time. It is a plain
+    // string nobody else reads — deleting the re-measured clause breaks no
+    // other assertion here and no gate anywhere goes red, which is exactly how
+    // the stale causal claim outlived its sibling in `validate-expressions.ts`
+    // after that one was corrected. Pinned so a revert cannot hide behind the
+    // surviving fault-open sentence, and so the two texts cannot drift apart
+    // silently again.
+    name: 'REPORT — the field-rule epilogue names BOTH outcomes, not just the fault-open one',
+    holds: () => {
+      const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+      // Scoped to the real epilogue. `lastIndexOf` skips this case's own
+      // literal above, so the assertion cannot satisfy itself.
+      const start = self.lastIndexOf('if (ruleViolations.length > 0) {');
+      const epilogue = self.slice(start, self.indexOf('// ── Surface 2', start));
+      return /RESOLVES/.test(epilogue)
+        // the mechanism is named, and named without a file extension (#5017)
+        && /`sectionFields`/.test(epilogue)
+        && !/sectionFields\.[a-z]+/.test(epilogue)
+        && /objectui#6010/.test(epilogue)
+        // the outcome under a bound scope, stated as the gap it is
+        && /SILENT/.test(epilogue)
+        && /enforcement gap/.test(epilogue)
+        && /WORSE of the two/.test(epilogue)
+        // ⛔ and the fault-open leg SURVIVES rather than being replaced: it is
+        // still what happens wherever no host publishes a scope.
+        && /falls back/.test(epilogue)
+        && /VISIBLE/.test(epilogue);
+    },
+  },
+  {
     name: 'REPORT — the GREEN summary path still PRINTS the skip list, not merely its count',
     holds: () => {
       const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
@@ -2015,11 +2045,26 @@ if (ruleViolations.length > 0) {
   const skipReport = renderFieldRuleSkips(ruleSkips);
   if (skipReport) console.error(`${skipReport}\n`);
   console.error(
-    `  A field-level \`visibleWhen\` that faults is fail-OPEN — the renderer falls back to VISIBLE —\n` +
-      `  so a wrong example does not merely not work, it shows the thing it was written to hide to\n` +
-      `  everyone who copies it. The verdict above is \`@objectstack/formula\`'s \`validateExpression\`\n` +
-      `  plus \`@objectstack/lint\`'s \`fieldRuleRootIssue\` — the same two the metadata walk applies to\n` +
-      `  this slot, imported rather than restated.`,
+    `  A wrong field-level \`visibleWhen\` does not merely not work, and since objectui#6010 it\n` +
+      `  fails in TWO directions rather than one. Under a host that publishes a predicate scope the\n` +
+      // `sectionFields` is spelled WITHOUT a source-file extension on purpose —
+      // the same reason the sibling message in `validate-expressions.ts` carries:
+      // this is a STRING literal, and #5017's receiver scan strips comments but
+      // not strings, so naming the module with its extension inside the text
+      // would register `sectionFields` as a read receiver of this gate. The
+      // self-test below pins the bare spelling.
+      `  renderer RESOLVES it (plugin-form's \`sectionFields\` copies this object rule onto the runtime\n` +
+      `  form field and \`resolveFieldRuleState\` evaluates it with that scope bound) — the control is\n` +
+      `  hidden in that one form while NO server-side gate evaluates a field-level \`visibleWhen\` at\n` +
+      `  all, so the record still carries the value and every other reader still returns it: a SILENT\n` +
+      `  enforcement gap. Where no host publishes a scope (the console's public \`/f/:slug\` route, and\n` +
+      `  every non-form reader) the root is unbound, the predicate faults and the renderer falls back\n` +
+      `  to VISIBLE, showing the thing it was written to hide to everyone who copies it. The gap is\n` +
+      `  the WORSE of the two — a visible fail-open gets reported, a silent one does not — so the\n` +
+      `  verdict below is more justified than when it was written, not less. That verdict is\n` +
+      `  \`@objectstack/formula\`'s \`validateExpression\` plus \`@objectstack/lint\`'s\n` +
+      `  \`fieldRuleRootIssue\` — the same two the metadata walk applies to this slot, imported rather\n` +
+      `  than restated.`,
   );
   process.exit(1);
 }

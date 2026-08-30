@@ -860,8 +860,8 @@ expression evaluates truthy.
 // e.g. on a PageComponent — `record` and `current_user` are both bound:
 visibleWhen: "record.account_type == 'premium'"
 
-// e.g. on a view FormField — `record`, `previous` and (since objectui#6010)
-// `current_user` are bound; on a FormSection, `current_user` is not:
+// e.g. on a view FormField or FormSection — `record`, `previous` and
+// `current_user` are all bound (objectui#6010, then #6110 + #6111):
 visibleWhen: "record.status != 'closed'"
 ```
 
@@ -871,17 +871,29 @@ The predicate's **binding root** is set by the layer, not the key:
 |---|---|
 | Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |
 | Runtime record form **fields** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6010) |
-| Runtime record form **sections** (`*.view.ts`) | `record` + `previous` — **not** `current_user` |
+| Runtime record form **sections** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6110 + #6111) |
 | Metadata-editing forms (`*.form.ts`) | `data` — the row under edit |
 
 The two form rows were one row until objectui#6010 bound the host predicate scope
-on the form renderer's authored-predicate call sites — only the field half moved.
-Two measured caveats travel with them: a **field** predicate is still evaluated
-with `current_user` unbound on the console's standalone form routes
-(`/forms/:name`, and the public `/f/:slug`), which run a second form renderer
-(objectui#6110); and an authored **section** predicate is read by that second
-renderer alone, because the object-view chain drops the key before any evaluator
-sees it (objectui#6111).
+on the SDUI form renderer's authored-predicate call sites — at that point only the
+field half moved. The section half has since caught up: objectui#6110 threads the
+host shell's scope into the console form renderer's `isSectionVisible`, where it
+used to pass `undefined`, and objectui#6111 stopped the object-view chain dropping
+the key before an evaluator sees it — `ObjectForm` / `SplitForm` / `ModalForm` /
+`DrawerForm` copy an authored section `visibleWhen` onto the `section-divider`
+pseudo-field, whose predicate the renderer evaluates with the same scope bound.
+
+Two measured caveats travel with **both** rows, and both fail in the direction an
+author will not notice. **First, the scope belongs to the host, so it is empty
+wherever no host publishes one.** The public `/f/:slug` route is mounted outside
+any provider deliberately — an anonymous visitor has no principal — so
+`current_user` is unbound there, the predicate faults, and visibility's fallback is
+*visible*. The authed `/forms/:name` route renders inside a shell that publishes
+the session principal and binds normally. **Second, the binding is client-side
+only.** Nothing on the write path evaluates a form-view field or section
+`visibleWhen` — it evaluates field `readonlyWhen` / `requiredWhen` and per-option
+`visibleWhen`, and that is the whole list — so a role test written here hides
+controls and protects no data.
 
 The legacy spellings `visibleOn` (view) and `visibility` (page) are `@deprecated`
 aliases: still accepted and folded into `visibleWhen` at parse time, so existing
@@ -929,12 +941,12 @@ deliberate and documented (objectui#2661); the envelope is what makes one
 predicate text mean one thing on every surface.
 
 Two limits come with it. **First, the binding is per surface, not per key.** A
-view form **field** predicate binds this scope since objectui#6010; a form
-**section** predicate does not (objectui#6111), and neither does an object-level
-field rule (`Field.*({ visibleWhen })`, ADR-0036) — that one is evaluated by the
-server as well as by the client, binds `record` (plus `previous`, `parent`) only,
-and naming `current_user` there is refused by `@objectstack/lint` at build time
-rather than faulting at runtime. **Second, `visibleWhen` is presentation, not
+view form **field** predicate binds this scope since objectui#6010 and a form
+**section** predicate since objectui#6110 + #6111; an object-level field rule
+(`Field.*({ visibleWhen })`, ADR-0036) is the exception — that one is evaluated by
+the server as well as by the client, its write-path evaluator binds `record` (plus
+`previous`, `parent`) only, and naming `current_user` there is refused by
+`@objectstack/lint` at build time rather than faulting at runtime. **Second, `visibleWhen` is presentation, not
 access control**: it decides what a client draws from data it already holds. To
 stop someone from *reading* something,
 use the permission layer — [field-level security](/docs/permissions/field-level-security)
