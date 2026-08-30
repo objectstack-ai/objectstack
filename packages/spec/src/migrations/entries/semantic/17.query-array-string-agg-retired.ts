@@ -21,7 +21,8 @@ export const entry: SemanticMigration = {
     + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
     + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
     + 'that worked on one backend and failed on another is exactly the unpredictability the '
-    + 'ruling ended, and #5499 has both of those backends frozen. `count_distinct` was '
+    + 'ruling ended, and #5499 had both of those backends frozen at the time (that freeze '
+    + 'was lifted on 2026-08-11). `count_distinct` was '
     + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
     + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
   acceptanceCriteria:
