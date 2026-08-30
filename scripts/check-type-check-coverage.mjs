@@ -788,6 +788,26 @@ const EXEMPT = {
 // removing them, and a note sized on the TS2835 line alone would have read as
 // "155 minus 121 = 34" and been wrong in both directions.
 //
+// `@objectstack/plugin-security` GRADUATED from this ledger (#13176; entry: 11
+// raw, re-measured 11 EXACTLY at aa16721b6 before repair — same 6 files, same
+// per-file counts as the card measured at 1a540e82b, so the number was still
+// true when it was retired). It is worth a line for what the split between the
+// two module semantics says, because this package is the third shape:
+// `packages/rest` fixed the CONFIG and 118 of its 155 collapsed; here the
+// config-tier is only 2 of the 11 — TS1470 (`import.meta` compiled as CommonJS)
+// and TS2550 (`Array.prototype.at` against a `lib` older than es2022) — and the
+// other 9 were real test-code type errors, every one of them REPAIRED in the
+// same PR rather than ledgered. So this package leaves with no
+// `test-typecheck-debt.json` at all, the call `metadata-core`, `metadata-fs` and
+// `trigger-record-change` made: at zero residue a bare
+// `tsc --noEmit -p tsconfig.test.json` is the stronger gate, since any error is
+// red immediately with no ledger to be added to. The TS1470 is the one worth
+// carrying forward: `src/seed-write-refusal.test.ts` documents an author
+// steering AROUND that diagnostic — writing `__dirname` instead of
+// `import.meta.url` — to keep this entry from going 11 to 12, for a program
+// whose verdict no `typecheck` script ever ran. A hidden layer does not only
+// hide errors; it also shapes the code written into it.
+//
 // SINCE MEASURED, across this whole ledger rather than on that one package
 // (#11491, at e47d5ef61, by dropping each entry's `"**/*.test.ts"` exclusion
 // and reading `check:type-source-resolution`): 14 of the 18 entries that HAVE
@@ -1067,7 +1087,6 @@ const TEST_DEBT = {
       + 'still import. One older claim is now false and is corrected rather than carried: '
       + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
-  '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
