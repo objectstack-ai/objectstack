@@ -310,12 +310,19 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       return logger.lines.error.map((l: any) => l.msg);
     }
 
+    /**
+     * The `debug` channel carries the engine's ordinary read tracing too, so
+     * this census is narrowed to the one frame under test. ⛔ Narrowed by an
+     * EXACT message match, not a substring: a filter that also admitted
+     * `'Find operation starting'` would report a frame this block did not
+     * measure.
+     */
     async function debugCensus(make: () => unknown) {
       await boot(async () => {
         throw make();
       });
       await engine.find('doc');
-      return logger.lines.debug.map((l: any) => l.msg);
+      return logger.lines.debug.filter((l: any) => l.msg === 'Find operation failed');
     }
 
     it('[#13273] the benign cause no longer reaches `error` — it reaches `debug`', async () => {
@@ -336,9 +343,9 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       // ⛔ Demoted, not muted: the frame is still emitted, still names the
       // object, and now carries its own classification instead of a stack.
       const benign = await debugCensus(() => new Error('no such table: sys_file'));
-      expect(benign).toEqual(['Find operation failed']);
+      expect(benign.map((l: any) => l.msg)).toEqual(['Find operation failed']);
 
-      const [meta] = logger.lines.debug[0].args;
+      const [meta] = benign[0].args;
       expect(meta).toMatchObject({ object: 'sys_file', reason: 'table-not-provisioned' });
     });
 
