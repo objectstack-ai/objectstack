@@ -5,7 +5,7 @@ Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other age
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
 
-> **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id`). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
+> **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
 This file carries principles, binding rules and lookup tables. Lessons from past
 incidents are distilled in place — failure mode, discipline, boundary — without
