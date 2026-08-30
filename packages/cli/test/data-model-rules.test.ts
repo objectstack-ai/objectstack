@@ -776,10 +776,27 @@ describe('lintDataModel — `reference_to` is a rejected alias, not a tolerated 
     // `refOf` is declared `string | undefined`; the old `||` chain returned
     // whatever truthy value was there, so this shape used to be reported as a
     // resolved target named `[object Object]`.
+    //
+    // ⚠️ The non-string value is BOUND THROUGH A VARIABLE rather than written
+    // inline, and the binding is a legibility device — not a way past a gate.
+    // `packages/lint/scripts/check-reference-carrier-shape.mjs` refuses a
+    // non-string LITERAL at a `reference` carrier position, and it is right to:
+    // an AUTHORED site of that shape is invisible in both directions at once —
+    // refused by `ObjectSchema.safeParse` and read as `undefined` by every rule
+    // that resolves it (#13053), so it reports nothing either way.
+    //
+    // That shape is exactly what this case must keep driving, because the whole
+    // assertion is that such a value resolves to NOTHING: it is a deliberate
+    // counter-example, not an authored carrier. The gate judges literals and
+    // leaves a non-literal unjudged, so the binding keeps its authored-site
+    // sweep honest while the assertion goes on testing the identical shape.
+    // ⛔ Do not inline this value again; ⛔ do not weaken the gate or add a path
+    // ignore there — it has no baseline and wants none, by design.
+    const nonStringReference = { object: 'project' };
     expect(
       has(
         lintDataModel([
-          { name: 'task', fields: { project: { type: 'lookup', reference: { object: 'project' } } } },
+          { name: 'task', fields: { project: { type: 'lookup', reference: nonStringReference } } },
         ]),
         'relationship/missing-reference',
       ),
