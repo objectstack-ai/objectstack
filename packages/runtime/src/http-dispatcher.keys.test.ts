@@ -330,3 +330,67 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
     expect(res.body.data.active_organization_id).toBeUndefined();
   });
 });
+
+/**
+ * [#12981] The mint path's `ql.insert` catch is SILENT, and that is the correct
+ * shape -- every path out of it hands the failure to the caller. The swallow-
+ * family census (`scripts/measure-durability-swallow-family.mjs`) reports the
+ * site as tier-1 DARK because it decides membership on three mechanical
+ * conjuncts and leaves "and the caller still reports success" to a person; the
+ * answer here is no, which is what puts the site OUT of the repair programme
+ * under AGENTS.md's third legal answer ("a failure handed to the CALLER is not
+ * a degradation at all").
+ *
+ * These pins exist because that ruling is otherwise a JUDGEMENT with nothing
+ * holding it up. The census will keep listing this site as DARK until the
+ * programme's last step, so the next reader arrives at a file the worklist
+ * accuses and a comment that says "not guilty". What makes the difference
+ * measurable is that the delivery is pinned: turn this catch into a real
+ * swallow and these go red, which is precisely the transition -- from
+ * delivering to silent-success -- that the census cannot see and this card
+ * exists to prevent.
+ */
+describe('HttpDispatcher.handleKeys — a refused insert is DELIVERED, never swallowed (#12981)', () => {
+  /** The mint path with a storage layer that refuses every write. */
+  function kernelRefusingInsert(driverMessage: string) {
+    const { kernel, rows } = makeKernel();
+    const ql: any = kernel.getService('objectql');
+    ql.insert = async () => { throw new Error(driverMessage); };
+    return { kernel, rows };
+  }
+
+  it('answers the ADR-0112 error envelope (500 / INTERNAL_ERROR) rather than reporting success', async () => {
+    const { kernel, rows } = kernelRefusingInsert('connection refused');
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'CI token' }, ctx()));
+
+    // The whole point: the requester was TOLD. Nothing here looks normal from
+    // the outside, so there is no durability degradation to escalate.
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+    expect(res.body.error.httpStatus).toBe(500);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('returns no key material — a caller never holds a credential that was never stored', async () => {
+    const { kernel } = kernelRefusingInsert('connection refused');
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'CI token' }, ctx()));
+
+    // A 201 carrying `data.key` after a refused insert would be the exact
+    // "claims to persist, did not persist" shape #12981 is about.
+    expect(res.body.data).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toMatch(/osk_/);
+  });
+
+  it('does not echo the driver error — row contents cannot leak through the envelope', async () => {
+    // The reason this catch discards the caught value at all, stated at the
+    // site: a driver error can quote the offending row.
+    const { kernel } = kernelRefusingInsert(
+      'duplicate key value violates unique constraint, row: sentinel-row-content',
+    );
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'CI token' }, ctx()));
+
+    expect(JSON.stringify(res.body)).not.toMatch(/sentinel-row-content/);
+    expect(res.body.error.message).not.toMatch(/duplicate key/);
+  });
+});
