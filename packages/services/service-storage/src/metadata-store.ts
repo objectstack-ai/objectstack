@@ -76,6 +76,34 @@ export interface FileRecord {
  * It also silences the `[tenant-audit]` warning this insert door raises on
  * every walled deployment — a warning naming exactly this defect ("writes will
  * not be tenant-isolated").
+ *
+ * ## What the SAME context does on update / delete (#13178)
+ *
+ * ⚠️ Not the same thing, and the difference is the whole reason the
+ * `update`/`delete` doors are not a copy-paste of the insert ones. Write-side
+ * tenancy in the SQL driver is two mechanisms, not one:
+ *
+ *  - **insert** — `injectTenantOnInsert` STAMPS `options.tenantId` onto the
+ *    row when the column is unset. The context supplies a VALUE.
+ *  - **update / delete** — `applyTenantScope` SCOPES the statement: the
+ *    predicate becomes `(organization_id = :tenantId OR organization_id IS
+ *    NULL)`. The context supplies a REACH.
+ *
+ * So threading it here buys two distinct things. A row stamped for ANOTHER
+ * organization stops being reachable through these doors — the isolation the
+ * insert-side repair could not give a door it does not run through. And the
+ * org-less rows stay reachable: the `OR … IS NULL` arm is #2734's deliberate
+ * global-row fail-open, so every `sys_upload_session` row written before
+ * #12928 (deliberately not backfilled — they age out through the object's own
+ * ADR-0057 TTL sweep) and every `sys_file` row #12745's backfill did not reach
+ * keeps updating and deleting exactly as it did. ⛔ This file does not restate
+ * that read semantics as a rule, still less change it — it is
+ * `applyTenantScope`'s, and it is named here only because it is what makes the
+ * narrowing safe for legacy rows.
+ *
+ * Third, and the reason this card exists: it silences the `[tenant-audit]`
+ * warning on the `update` and `delete` verbs, which raise it from the same
+ * `auditMissingTenant` call the `create` verb does.
  */
 export interface StorageWriteContext {
   /**
@@ -319,27 +347,68 @@ export class StorageMetadataStore {
     return (found as FileRecord | null | undefined) ?? null;
   }
 
-  async updateFile(id: string, patch: Partial<FileRecord>): Promise<FileRecord | null> {
+  /**
+   * Update one `sys_file` row.
+   *
+   * `context` carries the acting organization (#13178). It is the SAME channel
+   * {@link createFile} opened in #12745 — `{ context: { tenantId } }` on the
+   * engine options bag — and this door is the `update` half of that insert
+   * that #12745 did not repair. What the value MEANS differs by verb, and
+   * {@link StorageWriteContext} spells out the difference: the insert stamps
+   * from it, this scopes by it. Without it the call behaves exactly as it did
+   * before — an unscoped statement that raises `[tenant-audit]` on a walled
+   * deployment.
+   *
+   * ⛔ The `where` stays `{ id }` alone. The tenant term is the DRIVER's to
+   * add (`applyTenantScope`), for the same reason the insert does not stamp
+   * the column onto the payload: a predicate composed here would re-decide
+   * whether this object has a tenant column and what NULL means on it, one
+   * package away from the schema that answers both.
+   */
+  async updateFile(
+    id: string,
+    patch: Partial<FileRecord>,
+    context?: StorageWriteContext,
+  ): Promise<FileRecord | null> {
     const existing = await this.getFile(id);
     if (!existing) return null;
     const merged: FileRecord = { ...existing, ...patch, id, updated_at: new Date().toISOString() };
     if (!this.engine) {
+      // ⛔ The engine-absent stand-in deliberately does NOT scope. Unlike
+      // `createFile`'s stand-in — which RECORDS a value so a later `getFile`
+      // can read it back — there is no value to record here, only a reach to
+      // enforce, and enforcing a tenant wall over a process-local Map would
+      // stand up a second isolation mechanism outside the driver that owns
+      // the one real one. A no-engine deployment has no wall to be on the
+      // wrong side of (the same sentence `createFile`'s stand-in already
+      // makes), so this branch is unchanged by #13178.
       this.files.set(id, merged);
       return merged;
     }
+    const options = writeOptionsFor(context);
     await this.engineOp('sys_file', 'update', FILE_UPDATE_CONSEQUENCE, (engine) =>
-      engine.update('sys_file', merged as any, { where: { id } } as any),
+      engine.update('sys_file', merged as any, { where: { id }, ...options } as any),
     );
     return merged;
   }
 
-  async deleteFile(id: string): Promise<void> {
+  /**
+   * Delete one `sys_file` row.
+   *
+   * `context` carries the acting organization (#13178) — the `delete` half of
+   * #12745's insert, repaired for the same reason and through the same
+   * channel as {@link updateFile}. See {@link StorageWriteContext} for what
+   * the value does on this verb (it scopes the statement; it stamps nothing).
+   */
+  async deleteFile(id: string, context?: StorageWriteContext): Promise<void> {
     if (!this.engine) {
+      // Same reasoning as `updateFile`'s stand-in branch above.
       this.files.delete(id);
       return;
     }
+    const options = writeOptionsFor(context);
     await this.engineOp('sys_file', 'delete', FILE_DELETE_CONSEQUENCE, (engine) =>
-      engine.delete('sys_file', { where: { id } } as any),
+      engine.delete('sys_file', { where: { id }, ...options } as any),
     );
   }
 
@@ -408,7 +477,27 @@ export class StorageMetadataStore {
     return (found as UploadSessionRecord | null | undefined) ?? null;
   }
 
-  async updateSession(id: string, patch: Partial<UploadSessionRecord>): Promise<UploadSessionRecord | null> {
+  /**
+   * Update one `sys_upload_session` row.
+   *
+   * `context` carries the acting organization (#13178) — the `update` half of
+   * the insert #12928 repaired, the `sys_upload_session` sibling of
+   * {@link updateFile}. Same channel, same chokepoint, and the same split
+   * between stamping and scoping that {@link StorageWriteContext} records.
+   *
+   * ⚠️ This object is the one where the `OR … IS NULL` arm of the driver's
+   * scope is load-bearing rather than incidental: #12928 was ruled FORWARD
+   * STAMP ONLY, so every session row written before it carries
+   * `organization_id` NULL by decision. Narrowing this statement with strict
+   * equality would have stranded exactly those rows mid-upload. It does not,
+   * because the tenant term the driver composes keeps org-less rows in reach
+   * (#2734).
+   */
+  async updateSession(
+    id: string,
+    patch: Partial<UploadSessionRecord>,
+    context?: StorageWriteContext,
+  ): Promise<UploadSessionRecord | null> {
     const existing = await this.getSession(id);
     if (!existing) return null;
     const merged: UploadSessionRecord = {
@@ -418,22 +507,34 @@ export class StorageMetadataStore {
       updated_at: new Date().toISOString(),
     };
     if (!this.engine) {
+      // Same reasoning as `updateFile`'s stand-in branch: nothing to record,
+      // and a reach is not this Map's to enforce.
       this.sessions.set(id, merged);
       return merged;
     }
+    const options = writeOptionsFor(context);
     await this.engineOp('sys_upload_session', 'update', SESSION_UPDATE_CONSEQUENCE, (engine) =>
-      engine.update('sys_upload_session', merged as any, { where: { id } } as any),
+      engine.update('sys_upload_session', merged as any, { where: { id }, ...options } as any),
     );
     return merged;
   }
 
-  async deleteSession(id: string): Promise<void> {
+  /**
+   * Delete one `sys_upload_session` row.
+   *
+   * `context` carries the acting organization (#13178) — the `delete` half of
+   * #12928's insert. See {@link StorageWriteContext} for what the value does
+   * on this verb.
+   */
+  async deleteSession(id: string, context?: StorageWriteContext): Promise<void> {
     if (!this.engine) {
+      // Same reasoning as `updateFile`'s stand-in branch above.
       this.sessions.delete(id);
       return;
     }
+    const options = writeOptionsFor(context);
     await this.engineOp('sys_upload_session', 'delete', SESSION_DELETE_CONSEQUENCE, (engine) =>
-      engine.delete('sys_upload_session', { where: { id } } as any),
+      engine.delete('sys_upload_session', { where: { id }, ...options } as any),
     );
   }
 }

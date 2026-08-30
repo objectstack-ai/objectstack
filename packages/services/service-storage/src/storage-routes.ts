@@ -4,7 +4,12 @@ import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
-import type { StorageMetadataStore, FileRecord, UploadSessionRecord } from './metadata-store.js';
+import type {
+  StorageMetadataStore,
+  FileRecord,
+  UploadSessionRecord,
+  StorageWriteContext,
+} from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 // Type only. The PREDICATE is never re-implemented in this file (#10246): it
 // arrives through `opts.resolveFileHolder`, which the plugin binds to the reap
@@ -27,6 +32,15 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  * every single-tenant deployment) keeps type-checking and keeps working, and a
  * session with no active organization resolves to `undefined` rather than to a
  * guess.
+ *
+ * ⚠️ Since #13178 the same value also travels on this door's `updateFile` /
+ * `updateSession` calls, where it does something DIFFERENT — it scopes the
+ * statement instead of stamping a column, so a row belonging to another
+ * organization is no longer reachable (see `StorageWriteContext`). Two
+ * handlers had the session in hand and discarded it (`if ((await
+ * requireUploadSession(req, res)) === false) return;`); they now bind it, for
+ * the same reason #12745 bound it here — the value was already resolved, and
+ * dropping it was the whole defect.
  */
 export interface StorageUploadSession {
   userId?: string;
@@ -287,11 +301,14 @@ export function registerStorageRoutes(
    * it does not invent one. Terminal rows are returned untouched — a
    * `completed` upload does not become `expired` by sitting around.
    */
-  const expireIfPastDeadline = async (session: UploadSessionRecord): Promise<UploadSessionRecord> => {
+  const expireIfPastDeadline = async (
+    session: UploadSessionRecord,
+    context?: StorageWriteContext,
+  ): Promise<UploadSessionRecord> => {
     if (TERMINAL_SESSION_STATUSES.has(session.status)) return session;
     const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
     if (!Number.isFinite(deadline) || deadline > Date.now()) return session;
-    const updated = await store.updateSession(session.id, { status: 'expired' });
+    const updated = await store.updateSession(session.id, { status: 'expired' }, context);
     // `updateSession` answers null only when the row went away under us (the
     // TTL sweep, most likely) — the caller is refused either way.
     return updated ?? { ...session, status: 'expired' };
@@ -306,9 +323,12 @@ export function registerStorageRoutes(
    * The row staying at `completing` is the pre-#7667 behaviour, so the warn
    * names the consequence rather than pretending nothing happened.
    */
-  const markSessionFailed = async (uploadId: string): Promise<void> => {
+  const markSessionFailed = async (
+    uploadId: string,
+    context?: StorageWriteContext,
+  ): Promise<void> => {
     try {
-      await store.updateSession(uploadId, { status: 'failed' });
+      await store.updateSession(uploadId, { status: 'failed' }, context);
     } catch (statusErr: any) {
       opts.logger?.warn(
         `[storage] upload session ${uploadId} failed to complete, and the 'failed' status could not be ` +
@@ -392,7 +412,11 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.post(`${basePath}/upload/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      if ((await requireUploadSession(req, res)) === false) return;
+      // [#13178] Bound, not discarded: this handler already resolved the
+      // session and threw the value away, which is what left the commit
+      // statement unscoped and raising `[tenant-audit]`.
+      const session = await requireUploadSession(req, res);
+      if (session === false) return;
       const { fileId, eTag } = req.body ?? {};
       if (!fileId) {
         sendError(res, 400, 'INVALID_REQUEST', 'fileId is required');
@@ -405,10 +429,14 @@ export function registerStorageRoutes(
         return;
       }
 
-      const updated = await store.updateFile(fileId, {
-        status: 'committed',
-        etag: eTag ?? undefined,
-      });
+      const updated = await store.updateFile(
+        fileId,
+        {
+          status: 'committed',
+          etag: eTag ?? undefined,
+        },
+        { organizationId: session?.organizationId },
+      );
 
       sendOk(res, {
         // The opaque sys_file id — the value a file field stores as a
@@ -524,7 +552,12 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.put(`${basePath}/upload/chunked/:uploadId/chunk/:chunkIndex`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      if ((await requireUploadSession(req, res)) === false) return;
+      // [#13178] Bound rather than discarded — see the commit door above.
+      // Named `authSession` because `session` below is the sys_upload_session
+      // ROW; these are two different things and the handler needs both.
+      const authSession = await requireUploadSession(req, res);
+      if (authSession === false) return;
+      const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
       const { uploadId, chunkIndex: chunkIndexStr } = req.params;
       const chunkIndex = parseInt(chunkIndexStr, 10);
       if (!uploadId || isNaN(chunkIndex)) {
@@ -547,7 +580,7 @@ export function registerStorageRoutes(
 
       // Expiry is checked AFTER the resume token: a caller who cannot prove it
       // owns the session learns nothing about its state (#7667).
-      const live = await expireIfPastDeadline(session);
+      const live = await expireIfPastDeadline(session, writeContext);
       if (live.status === 'expired') {
         sendError(
           res,
@@ -582,11 +615,15 @@ export function registerStorageRoutes(
       currentParts.push({ chunkIndex, eTag });
       const uploadedChunks = (session.uploaded_chunks ?? 0) + 1;
       const uploadedSize = (session.uploaded_size ?? 0) + data.byteLength;
-      await store.updateSession(uploadId, {
-        uploaded_chunks: uploadedChunks,
-        uploaded_size: uploadedSize,
-        parts: JSON.stringify(currentParts),
-      });
+      await store.updateSession(
+        uploadId,
+        {
+          uploaded_chunks: uploadedChunks,
+          uploaded_size: uploadedSize,
+          parts: JSON.stringify(currentParts),
+        },
+        writeContext,
+      );
 
       sendOk(res, {
         chunkIndex,
@@ -603,7 +640,10 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.post(`${basePath}/upload/chunked/:uploadId/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      if ((await requireUploadSession(req, res)) === false) return;
+      // [#13178] Bound rather than discarded — see the commit door above.
+      const authSession = await requireUploadSession(req, res);
+      if (authSession === false) return;
+      const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
       const { uploadId } = req.params;
       const session = await store.getSession(uploadId);
       if (!session) {
@@ -611,7 +651,7 @@ export function registerStorageRoutes(
         return;
       }
 
-      const live = await expireIfPastDeadline(session);
+      const live = await expireIfPastDeadline(session, writeContext);
       if (live.status === 'expired') {
         sendError(
           res,
@@ -622,7 +662,7 @@ export function registerStorageRoutes(
         return;
       }
 
-      await store.updateSession(uploadId, { status: 'completing' });
+      await store.updateSession(uploadId, { status: 'completing' }, writeContext);
 
       const partsFromBody = (req.body?.parts ?? []) as Array<{ chunkIndex: number; eTag: string }>;
       const partsForBackend = partsFromBody.map(p => ({
@@ -637,15 +677,19 @@ export function registerStorageRoutes(
         }
 
         // Update file + session
-        await store.updateFile(session.file_id, { status: 'committed', key: finalKey });
-        await store.updateSession(uploadId, { status: 'completed' });
+        await store.updateFile(
+          session.file_id,
+          { status: 'committed', key: finalKey },
+          writeContext,
+        );
+        await store.updateSession(uploadId, { status: 'completed' }, writeContext);
       } catch (completionErr) {
         // Terminal for THIS attempt, not a lock: nothing here reads `failed` as
         // a refusal, so a client that retries the same uploadId after a
         // transient backend blip runs the happy path again and overwrites it
         // with `completed`. What the stamp buys is that an attempt which is
         // NOT retried stops claiming to be in flight (#7667).
-        await markSessionFailed(uploadId);
+        await markSessionFailed(uploadId, writeContext);
         throw completionErr;
       }
 
@@ -666,7 +710,12 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.get(`${basePath}/upload/chunked/:uploadId/progress`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      if ((await requireUploadSession(req, res)) === false) return;
+      // [#13178] Bound rather than discarded — the progress door can WRITE
+      // (`expireIfPastDeadline` statuses the row `expired`), so it owes the
+      // same context the other two write doors do.
+      const authSession = await requireUploadSession(req, res);
+      if (authSession === false) return;
+      const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
       const { uploadId } = req.params;
       const stored = await store.getSession(uploadId);
       if (!stored) {
@@ -678,7 +727,7 @@ export function registerStorageRoutes(
       // declared member of `UploadProgressSchema.status`, and a resuming client
       // (the SDK's `resumeUpload` polls this first) needs to be told the
       // session is gone, not handed a 410 it has to interpret (#7667).
-      const session = await expireIfPastDeadline(stored);
+      const session = await expireIfPastDeadline(stored, writeContext);
 
       const uploadedChunks = session.uploaded_chunks ?? 0;
       const uploadedSize = session.uploaded_size ?? 0;
