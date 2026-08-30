@@ -5,16 +5,6 @@ description: Discovery protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Service Status Enum
-Describes the operational state of a service in the discovery response.
-
-- `available`   – Fully operational: service is registered AND HTTP handler is verified.
-- `registered`  – Route is declared in the dispatcher table but the HTTP handler has
-                  not been verified (may 501 at runtime).
-- `unavailable` – Service is not installed / not registered in the kernel.
-- `degraded`    – Partially working (e.g., in-memory fallback, missing persistence).
-- `stub`        – Placeholder handler that always returns 501 Not Implemented.
-
 <Callout type="info">
 **Source:** `packages/spec/src/api/discovery.zod.ts`
 </Callout>

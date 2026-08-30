@@ -33,7 +33,8 @@
  *    and this repo writes module headers on either side of them); the first
  *    `const`/`export const`/… does.
  * 3. **Documenting nothing** — the block is not immediately followed by a
- *    declaration.
+ *    declaration, and — when the block sits INSIDE the import block — no
+ *    declaration sits on the far side of that plumbing either.
  *
  * (3) is the load-bearing one, and it is simply TSDoc's own rule read back: a
  * doc block belongs to the declaration it immediately precedes, which is why
@@ -42,8 +43,51 @@
  * as the Realtime page's opening paragraph was the generator inventing a second
  * meaning for text that already had one. "Immediately" means blank lines only:
  * nobody separates a JSDoc from its symbol with a `// ═══` banner, so a banner
- * (or another doc block, or an import) between the two marks the end of the
- * preamble rather than an attachment.
+ * (or another doc block) between the two marks the end of the preamble rather
+ * than an attachment.
+ *
+ * ## An import between a block and its symbol is not a separator (#13263)
+ *
+ * The one exception to that last sentence, and it is not a judgement call — it
+ * is a codemod. `scripts/lazify-schemas.ts` injects
+ * `import { lazySchema } from '…/shared/lazy-schema';` at the END of the file's
+ * leading run of comments, blank lines and imports, and the regex it uses for
+ * that run counts a doc block among the comments (its comment alternative is
+ * slash-star, any run, star-slash — a doc block matches it). So when a module
+ * was written as an `import { z } from 'zod';`, a blank line, a doc block
+ * reading `Service Status Enum`, and then `export const ServiceStatus`,
+ * the run swallowed the doc block and the injected import landed BETWEEN the
+ * block and the symbol it documents. Nothing about the block changed; only the
+ * detector's view of it did. Reading that import as "the preamble ends here"
+ * republished 28 symbol comments as their pages' subjects, `api/discovery`'s
+ * `Service Status Enum` and `data/field`'s `Field Type Enum` among them — and
+ * `gen:skill-refs` copied each one's first line into the PUBLISHED skill
+ * indexes, so the misattribution shipped to customer projects.
+ *
+ * Hence condition 3's second half: a declaration reachable across nothing but
+ * blank lines and plumbing is still the block's subject. Two things keep this a
+ * tightening rather than a demotion of the spelling `MODULE_PLUMBING` exists to
+ * permit — measured over all 193 reference sources, and both are load-bearing:
+ *
+ * - **It applies only INSIDE the import block.** A header written ABOVE the
+ *   imports is where the codemod cannot have put it: the injection point is
+ *   after the last import, so a block preceding every import was preceding them
+ *   before the codemod ran too. Without that half, `api/error-code-ledger`,
+ *   `cloud/template-manifest` and `system/doc` — three real headers whose
+ *   imports happen to be followed directly by a declaration — lose their
+ *   opening paragraph.
+ * - **A comment of any kind on the far side still ends the preamble.** A `// ═══`
+ *   banner or a second doc block means the block did NOT sit against the
+ *   declaration before the codemod ran, so the injection tells us nothing.
+ *   `api/analytics` (banner) and `system/cache` (the next schema's own JSDoc)
+ *   keep their headers through exactly this clause.
+ *
+ * What it deliberately does NOT decide is the block that sits inside the import
+ * list with a comment on the far side: `system/cache` and `shared/mapping` are
+ * genuine headers there and seven others are detached symbol docs, and no
+ * positional or structural signal separates them — only the prose does. That
+ * residue needs an explicit `@module` marker or a corpus pass, not a cleverer
+ * detector; #13263 records the reading, module by module.
  *
  * When no block qualifies, the module has no description and the page prints
  * none. 宁可缺,不要错 — a missing paragraph is a gap the reader can see, while
@@ -256,6 +300,40 @@ function nextNonBlankLine(lines: readonly string[], from: number): number | null
 }
 
 /**
+ * Is there a declaration on the far side of the plumbing that starts at `from`
+ * — i.e. does everything between hold nothing but blank lines and imports?
+ *
+ * Only ever asked of a block that sits INSIDE the import block, where the one
+ * thing known to put an import between a doc block and its symbol is the lazify
+ * codemod (see the module comment). Answering `true` there restores the verdict
+ * the block had before that import was injected.
+ *
+ * A comment of any kind — a `// ═══` banner, a second doc block, an import's
+ * own explanatory note — answers `false` instead of being walked over. That is
+ * the same boundary `nextNonBlankLine` draws and for the same reason: it means
+ * the block was NOT sitting against the declaration beforehand either, so the
+ * injected import carries no information about what the block documents. It is
+ * what keeps `api/analytics` (banner) and `system/cache` (the next schema's own
+ * JSDoc) opening with their real module headers.
+ *
+ * Continuation and closing lines of a multi-line import (`  Foo,`,
+ * `} from './x';`) are plumbing too — they open with neither an identifier
+ * character nor a comment delimiter, exactly as `findModuleDocBlock`'s own walk
+ * reads them.
+ */
+function declarationBeyondPlumbing(lines: readonly string[], from: number): boolean {
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    if (line.trimStart().startsWith('/')) return false; // a comment ends the preamble
+    if (MODULE_PLUMBING.test(line)) continue;
+    if (!startsDeclaration(line)) continue; // continuation / closing punctuation
+    return true;
+  }
+  return false;
+}
+
+/**
  * The module's own doc block, INNER text only (delimiters stripped, `*` line
  * prefixes intact) — or `null` when the module does not have one.
  *
@@ -271,6 +349,12 @@ function nextNonBlankLine(lines: readonly string[], from: number): number | null
 export function findModuleDocBlock(source: string): string | null {
   const lines = source.split('\n');
 
+  // Whether the walk has passed an import / re-export, i.e. whether a block
+  // found from here on sits INSIDE the import block rather than above it. Only
+  // there can the lazify codemod have put an import between a block and its
+  // symbol, so only there does the far-side check below apply (#13263).
+  let insideImportBlock = false;
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -280,13 +364,16 @@ export function findModuleDocBlock(source: string): string | null {
       if (end >= lines.length) return null; // unterminated — nothing to trust
       const next = nextNonBlankLine(lines, end + 1);
       if (next !== null && startsDeclaration(lines[next])) return null; // documents a symbol
+      // …and the same verdict when only injected plumbing stands between the
+      // two: the import moved, the attachment did not.
+      if (insideImportBlock && declarationBeyondPlumbing(lines, end + 1)) return null;
       const raw = lines.slice(i, end + 1).join('\n');
       return raw.slice(raw.indexOf('/**') + 3, raw.lastIndexOf('*/'));
     }
 
     if (line.startsWith('/*')) { i = endOfBlockComment(lines, i) + 1; continue; }
     if (line.trim() === '' || line.trim().startsWith('//') || !/^\S/.test(line)) { i++; continue; }
-    if (MODULE_PLUMBING.test(line)) { i++; continue; }
+    if (MODULE_PLUMBING.test(line)) { insideImportBlock = true; i++; continue; }
     if (startsDeclaration(line)) return null; // header zone closed before any block
 
     i++; // closing punctuation of a multi-line import / re-export
