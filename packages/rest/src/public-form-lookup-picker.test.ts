@@ -31,6 +31,9 @@ import { describe, expect, it, vi } from 'vitest';
 // its suite green. Both predicates live in metadata-core.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+// [#13137] The instrument for the three-level control at the bottom of this
+// file — the REAL `FieldSchema`, not a restatement of it.
+import { FieldSchema } from '@objectstack/spec/data';
 import { RestServer } from './rest-server.js';
 
 // ─── the real save path (the seam that refused the picker before #7467) ─────
@@ -140,7 +143,9 @@ function mockRes() {
 /**
  * Mount the real routes over a protocol that serves the STORED view body.
  * `objectDef` defaults to the canonical `leadObject`; the #7486 suite passes
- * variants to cover the legacy pre-fold spellings of the same field.
+ * variants to cover the legacy spellings the route's fallback chain still
+ * reads — spellings `FieldSchema` REFUSES (#13137), so they can only ever have
+ * been STORED, never authored through the spec.
  */
 function routesOver(storedView: any, foundRows: any[], objectDef: any = leadObject) {
     const findData = vi.fn().mockResolvedValue({ data: foundRows });
@@ -321,12 +326,17 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
 
 /**
  * The defect this suite pins: the route's fallback chain read only the LEGACY
- * field-def spellings (`referenceTo` / `target` / `options.objectName`), while
- * `packages/spec/src/data/field.zod.ts` folds every one of those onto the
- * canonical `reference` at parse. A parsed object schema therefore carried
- * NONE of the keys the route read — the chain resolved `undefined` and a
- * well-formed form got `500 LOOKUP_TARGET_MISSING`, making `publicPicker.object`
- * de-facto REQUIRED while the schema and docs present it as optional.
+ * field-def spellings (`referenceTo` / `target` / `options.objectName`), not
+ * one of which `packages/spec/src/data/field.zod.ts` ACCEPTS. ⛔ [#13137] It
+ * does not fold them onto `reference` either — an earlier version of this
+ * paragraph claimed it did. `FieldSchema` is a `strictObject`, so
+ * `referenceTo` / `target` are REFUSED by name; the `aliases` table only adds
+ * *"Did you mean …"* to that refusal, because `strictObject` consults it solely
+ * from the `unrecognized_keys` path. Pinned three ways at the bottom of this
+ * file. A parsed object schema therefore carried NONE of the keys the route
+ * read — the chain resolved `undefined` and a well-formed form got
+ * `500 LOOKUP_TARGET_MISSING`, making `publicPicker.object` de-facto REQUIRED
+ * while the schema and docs present it as optional.
  *
  * Every case below omits `object` deliberately: that is the axis under test.
  * The suite above covers the override branch and must stay that way — between
@@ -356,16 +366,27 @@ describe('#7486 the picker target resolves from the field definition when `objec
         expect(findData.mock.calls[0][0].object).toBe('sys_user');
     });
 
-    // Stored pre-fold rows never went through the alias table, so the legacy
-    // spellings are live data, not history. The fix EXTENDS the chain; one that
-    // replaced it would turn these three green cases into 500s.
+    // ⛔ [#13137] These are spellings `FieldSchema` REFUSES. There is no fold,
+    // so there is no "pre-fold row" for one of these to be — an earlier version
+    // of this comment said there was, and #12920 cites that sentence as its
+    // strongest surviving evidence that stored legacy rows exist. It carries
+    // ZERO observational content about stored data, and neither do these cases.
+    //
+    // What is true and what these pin: a def spelling the target this way never
+    // came through `FieldSchema`, and the serving read path replays ADR-0087
+    // conversions (`applyConversionsToStoredItem`) without any schema
+    // validation, so such a def would reach the route verbatim. These cases pin
+    // what the route DOES with one. ⚠️ Whether any exists is #12920's open
+    // production census — ⛔ assert nothing here in either direction.
+    // The fix EXTENDS the chain; one that replaced it would turn these three
+    // green cases into 500s.
     const LEGACY_DEFS: Array<[string, Record<string, unknown>]> = [
         ['referenceTo', { type: 'lookup', referenceTo: 'sys_user' }],
         ['target', { type: 'lookup', target: 'sys_user' }],
         ['options.objectName', { type: 'lookup', options: { objectName: 'sys_user' } }],
     ];
     for (const [spelling, ownerDef] of LEGACY_DEFS) {
-        it(`a stored PRE-FOLD row spelling the target \`${spelling}\` still resolves`, async () => {
+        it(`a stored row spelling the target the LEGACY way (\`${spelling}\`) still resolves`, async () => {
             const stored = await savedWithoutObject();
             const legacyObject = { ...leadObject, fields: { ...leadObject.fields, owner: ownerDef } };
             const { findData, lookup } = routesOver(stored, [], legacyObject);
@@ -408,4 +429,69 @@ describe('#7486 the picker target resolves from the field definition when `objec
         expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
         expect(findData).not.toHaveBeenCalled();
     });
+});
+
+// ─── [#13137] the spec's alias table REFUSES, it does not fold ─────────────
+
+/**
+ * The three-level control, pinned so the prose above cannot rot back.
+ *
+ * Two levels cannot carry this. "`FieldSchema` rejects `referenceTo`" reads
+ * equally well as *not measured*, and a blanket "everything is rejected" says
+ * nothing about the alias table at all. Three levels separate the claims:
+ * ACCEPT (the canonical key) · REFUSE **with** a rename hint (an alias-table
+ * entry) · REFUSE **without** one (a key on no list). Only the third makes the
+ * second mean something.
+ *
+ * The mechanism, if this ever reads surprising: `strictObject`'s `aliases`
+ * table is consulted ONLY from the `unrecognized_keys` path
+ * (`packages/spec/src/shared/strict-object.ts`), so an entry can only ever
+ * decorate a REFUSAL. ⛔ It is not a normaliser, on this surface or any other —
+ * three separate seats read the name `aliases` as "fold" on two different
+ * schemas in one day, which is what this file's prose used to say too.
+ *
+ * ⛔ SCOPE: this pins the SPEC's behaviour and nothing else. It asserts
+ * nothing about whether any stored row spells a target the legacy way — that
+ * is #12920's open production census, unanswerable from here, and ⛔ no
+ * assertion below may be cited as evidence in either direction.
+ */
+describe('#13137 `FieldSchema` REFUSES the legacy target spellings, it does not fold them', () => {
+    /** `type` is the only required key on `FieldSchema`; everything else is the axis under test. */
+    const parseField = (extra: Record<string, unknown>) => FieldSchema.safeParse({ type: 'lookup', ...extra });
+    const messagesOf = (result: { success: boolean; error?: { issues: Array<{ code: string; message: string }> } }) =>
+        (result.error?.issues ?? []).map((i) => i.message).join('\n');
+    const codesOf = (result: { success: boolean; error?: { issues: Array<{ code: string }> } }) =>
+        (result.error?.issues ?? []).map((i) => i.code);
+
+    it('LEVEL 1 — POSITIVE CONTROL: the canonical `reference` is ACCEPTED', () => {
+        // Without this the two refusals below are indistinguishable from a
+        // schema that refuses its own canonical key, i.e. a broken instrument.
+        const result = parseField({ reference: 'sys_user' });
+        expect(result.success).toBe(true);
+        expect(result.success && result.data.reference).toBe('sys_user');
+    });
+
+    it('LEVEL 2 — NEGATIVE CONTROL: a key on no list is refused `unrecognized_keys` with NO rename hint', () => {
+        const result = parseField({ zzz_not_a_key: 'sys_user' });
+        expect(result.success).toBe(false);
+        expect(codesOf(result)).toContain('unrecognized_keys');
+        expect(messagesOf(result)).toContain('`zzz_not_a_key`');
+        expect(messagesOf(result)).not.toContain('Did you mean');
+    });
+
+    // LEVEL 3 — all five spellings the alias table files under `reference`.
+    // ⛔ `success` is `false` for every one of them: that is the whole card.
+    for (const alias of ['relatedTo', 'referenceTo', 'target', 'targetObject', 'lookupObject']) {
+        it(`LEVEL 3 — \`${alias}\` is REFUSED with a rename hint onto \`reference\` — NOT folded onto it`, () => {
+            const result = parseField({ [alias]: 'sys_user' });
+            // Refused, not rewritten. If this ever flips to `true`, the alias
+            // table has become a normaliser and every "does not fold" sentence
+            // in this file and in `rest-server.ts` needs rewriting again.
+            expect(result.success).toBe(false);
+            expect(codesOf(result)).toContain('unrecognized_keys');
+            // The hint is what separates level 3 from level 2 — it names the
+            // canonical key the author should have written instead.
+            expect(messagesOf(result)).toContain(`Did you mean \`${alias}\` → \`reference\`?`);
+        });
+    }
 });

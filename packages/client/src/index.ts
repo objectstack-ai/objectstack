@@ -16,6 +16,13 @@ import {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  // [#13023] The reset door's response contract. Both `meta.deleteItem`
+  // declarations BIND this type rather than transcribing its members: a
+  // hand-written member list is the exact defect this card removes (a local
+  // declaration that drifts from the wire), and the card's own body
+  // demonstrated the failure by attributing the IMPLEMENTATION's declared
+  // return to this schema.
+  DeleteMetaItemResponse,
   PublishMetaItemResponse,
   PublishPackageDraftsResponse,
   LoginRequest,
@@ -1150,12 +1157,24 @@ export class ObjectStackClient {
      * metadata_conflict` instead — the door has always read the header
      * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
      * had no argument for it until #12181.
+     *
+     * [#13023] READ `reset`, NEVER `deleted`. This method used to declare
+     * `{ type, name, deleted }` — an UNINHABITED shape: the door answers
+     * `res.json(result)` with `deleteMetaItem`'s return, and not one of its
+     * four branches carries `type`, `name` or `deleted`. So `r.deleted`
+     * compiled and read `undefined` on EVERY reset, including the ones that
+     * really removed a row, and the SDK's own tests had to cast through `any`
+     * to see the truth. The truthful flag is {@link DeleteMetaItemResponse}'s
+     * `reset`: `true` means an overlay row was deleted, `false` means none
+     * existed and the item was already at its artifact default — exactly the
+     * distinction a caller most wants. Same correction #5638 made one door
+     * over on `DeleteDataResult`.
      */
     deleteItem: async (
         type: string,
         name: string,
         options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
         const route = this.getRoute('metadata');
         // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
         // the three meanings `qs` holds in this file.
@@ -1169,7 +1188,11 @@ export class ObjectStackClient {
             method: 'DELETE',
             ...(headers ? { headers } : {}),
         });
-        return this.unwrapResponse(res);
+        // The door answers BARE (`res.json(result)`), and `unwrapResponse`
+        // strips only a body carrying BOTH a boolean `success` AND a `data`
+        // key — this one has no `data` — so the caller receives the door's
+        // whole body and the annotation above describes it.
+        return this.unwrapResponse<DeleteMetaItemResponse>(res);
     },
 
     /**
@@ -6013,12 +6036,18 @@ export class ScopedEnvironmentClient {
      * reads `?state=` — and the `If-Match` header — byte-identically. A bag
      * on only one of the two clients would be a fresh divergence of the kind
      * #7019 rules against, not half a fix.
+     *
+     * [#13023] Returns {@link DeleteMetaItemResponse} — read `reset`, never
+     * `deleted`. The phantom `{ type, name, deleted }` declaration was
+     * TEXTUALLY IDENTICAL on both twins, so correcting one and not the other
+     * would have been half a fix in the same #11713 direction the bag above
+     * records. See the unscoped twin for the full account.
      */
     deleteItem: async (
       type: string,
       name: string,
       options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
       // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
       const query = metaDeleteQuery(options);
       // Header half of the same bag, through the same one builder the twin
@@ -6028,7 +6057,8 @@ export class ScopedEnvironmentClient {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
-      return this.parent._unwrap(res);
+      // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
+      return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
     getHistory: async (
       type: string,
