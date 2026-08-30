@@ -892,8 +892,8 @@ any provider deliberately — an anonymous visitor has no principal — so
 the session principal and binds normally. **Second, the binding is client-side
 only.** Nothing on the write path evaluates a form-view field or section
 `visibleWhen` — it evaluates field `readonlyWhen` / `requiredWhen` and per-option
-`visibleWhen`, and that is the whole list — so a role test written here hides
-controls and protects no data.
+`visibleWhen`, and that is the whole list — so a `current_user.positions` test
+written here hides controls and protects no data.
 
 The legacy spellings `visibleOn` (view) and `visibility` (page) are `@deprecated`
 aliases: still accepted and folded into `visibleWhen` at parse time, so existing
