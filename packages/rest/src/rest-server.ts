@@ -10898,6 +10898,13 @@ export class RestServer {
                 // server-side inconsistency, but named, so the client can say
                 // which run needs an operator instead of showing a bare 500.
                 [/^RESUME_FAILED/, 500, 'RESUME_FAILED'],
+                // The write IS recorded and NOT rolled back, but the updated
+                // row is invisible inside the caller's organization scope, so
+                // the result envelope cannot be built. Same class as
+                // RESUME_FAILED — a genuine server-side inconsistency, named
+                // (#13182): read the request back with a system or
+                // matching-organization context.
+                [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {

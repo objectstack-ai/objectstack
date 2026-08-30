@@ -8822,12 +8822,81 @@ export class ObjectQL implements IObjectQLEngine {
 
           return hookContext.result;
       } catch (e) {
-          this.logger.error('Find operation failed', e as Error, { object });
+          this.reportFindFailure(object, e);
           throw e;
       }
     });
 
     return opCtx.result as any[];
+  }
+
+  /**
+   * Report a failed {@link find} at the level its CAUSE earns — then leave the
+   * throw exactly where it was.
+   *
+   * ## The two facts this frame used to merge
+   *
+   * "The table has not been created yet" and "the read failed" are different
+   * facts, and until #13273 this line reported both at `error`, with a stack.
+   * The first one is the ordinary state of a database nobody has migrated yet,
+   * and every caller on that path already treats it as a normal answer and says
+   * so in its own code: {@link readMigrationFlagVerified} ("an unreadable table
+   * … → false"), `ObjectQLPlugin.readAuthoredHookRows` /
+   * `readAuthoredActionRows` (report `authoredRows: 0` and carry on),
+   * `readAuthoredTranslationLayer`, and `ObjectStoreActionActivationStore.probe`
+   * (whose caller already follows this frame with a `warn` stating the
+   * consequence in operator terms).
+   *
+   * Measured, on `os migrate plan --database-url file:<an unmigrated db>`: five
+   * ERROR records with full stack traces, out of a command that EXITS 0 and
+   * prints a correct plan. Four stack traces are the first thing an operator
+   * sees when planning a database whose whole point is that it is not migrated
+   * yet — and an `error` channel that fires on a routine state is the
+   * over-application `sql-driver.ts` already names on a nearby line: it trains
+   * everyone to skim `error`.
+   *
+   * ## ⛔ What this is NOT is a broadened catch
+   *
+   *   * The throw is UNCHANGED on both branches. No caller's control flow, no
+   *     caller's `catch`, and no error envelope moves — this method decides a
+   *     log level and nothing else.
+   *   * Only the class that positively identifies as "relation does not exist"
+   *     is demoted, asked through the shared {@link isMissingTableError}
+   *     predicate (`@objectstack/metadata/errors`, #4825) — the same call
+   *     {@link probeInstallOrganizations} and {@link resolveFileReferences}
+   *     make, never a hand-rolled `code === '42P01'` copy. That predicate earns
+   *     a benign verdict rather than defaulting to one: a connection drop, a
+   *     timeout, a permission denial, a query fault — and, through its
+   *     `excludes`, Postgres' `column "x" of relation "y" does not exist`,
+   *     which contains a legal missing-table phrase but is a column fault on a
+   *     table that EXISTS — all stay `error`, with the stack.
+   *   * The fault stays visible without this frame: the driver's own refusal
+   *     envelope (`SqlDriver.backendStatementFault` → `logger.warn`) carries
+   *     the table, the dialect reason and the compiled statement, and is
+   *     untouched here. That is deliberately the surviving loud half, and it is
+   *     the half `runtime/src/expected-read-refusal-noise.ts` already documents
+   *     as "where this class of fault can still be picked up".
+   *
+   * `debug` rather than `warn` for exactly that reason: the driver already puts
+   * one warn-level line per refusal in front of a reader, so a second would
+   * move this noise rather than remove it. What the demotion drops is the
+   * duplicate and its stack; the classification survives in the meta.
+   *
+   * ⛔ Deliberately READS only. `insert`/`update`/`delete` keep their
+   * unconditional `error`: a write to a table that does not exist is not a
+   * normal answer for any caller — nothing landed, and the row the caller
+   * believes it stored is gone.
+   */
+  private reportFindFailure(object: string, error: unknown): void {
+    if (isMissingTableError(error)) {
+      this.logger.debug('Find operation failed', {
+        object,
+        reason: 'table-not-provisioned',
+        error: (error as { message?: unknown } | null | undefined)?.message,
+      });
+      return;
+    }
+    this.logger.error('Find operation failed', error as Error, { object });
   }
 
   /**

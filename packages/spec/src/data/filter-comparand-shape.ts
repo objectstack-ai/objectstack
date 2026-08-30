@@ -222,7 +222,7 @@ function nonListComparandError(
     `"${op}" tests membership of a list — write ${shapePreview([value])} for a single value` +
     (alternative ? `, or use ${alternative} to compare against it` : '') +
     `. Authoring spellings: ${spellings.join(', ')}. The filter was NOT applied, and an ` +
-    `unapplied filter would have returned the UNFILTERED result set (#5869).`,
+    `unapplied filter would have returned the UNFILTERED result set.`,
   );
 }
 
@@ -247,7 +247,7 @@ function malformedRangeComparandError(
     `value array. Received ${describeOperand(value)} (${shapePreview(value)}) at ${path}. ` +
     `A range needs exactly two bounds, in order; the authoring spelling that lowers to ` +
     `"$between" is "between". The filter was NOT applied, and an unapplied filter would have ` +
-    `returned the UNFILTERED result set (#5869).`,
+    `returned the UNFILTERED result set.`,
   );
 }
 

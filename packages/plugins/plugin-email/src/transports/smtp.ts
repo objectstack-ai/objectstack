@@ -262,6 +262,31 @@ export class SmtpTransport implements IEmailTransport {
  * Values arrive typed from the resolver but may be strings when supplied via
  * `OS_MAIL_SMTP_*` env — coerced here, at that boundary, and nowhere else.
  * `host` comes back `''` when unset; the caller decides how loud that is.
+ *
+ * ## `absent` and `present but unreadable` are not the same thing
+ *
+ * Only an ABSENT `smtp_port` — and the empty string, deliberately — omits
+ * `port` and lets {@link SmtpTransport} apply its built-in 587. A port that
+ * is PRESENT and does not coerce to a finite number is passed through as the
+ * number it coerced to, so the transport's own guard refuses it by name
+ * (`isValidSmtpPort` / `formatInvalidSmtpPortNotice`).
+ *
+ * This function used to drop the key in BOTH cases, which converted a loud
+ * refusal into a silent default one layer above the guard that exists to be
+ * loud: `smtp_port: 'abc'` became a working-looking connection to 587, and
+ * `describe()` reported 587 as though it had been chosen. Both doors that
+ * feed this function really do admit such a value — MEASURED, not argued:
+ * the `OS_MAIL_SMTP_PORT` env override resolves as the string `'abc'`
+ * (`source: 'env'`, `locked: true`), because a non-numeric value is not
+ * *outside* a numeric window and the settings service's declared
+ * `min: 1, max: 65535` therefore does not reject it; and the ordinary save
+ * path stores the same value for the same reason. So the refusal has to
+ * happen at or below this line — and below is where it already lives.
+ * ⛔ Do not add a second, parallel refusal here.
+ *
+ * `smtp_port: ''` stays in the absent bucket on purpose: an empty field is
+ * how a settings form spells "not set", and refusing it would convert a
+ * working configuration into a boot-time refusal.
  */
 export function smtpOptionsFromMailSettings(values: Record<string, unknown>): SmtpTransportOptions {
   const str = (v: unknown): string | undefined => {
@@ -282,7 +307,11 @@ export function smtpOptionsFromMailSettings(values: Record<string, unknown>): Sm
   const password = str(values.smtp_password);
   return {
     host: str(values.smtp_host) ?? '',
-    ...(port != null && Number.isFinite(port) ? { port } : {}),
+    // `undefined` is the ONLY bucket that may fall back to the transport's
+    // 587: it means the key was absent (or empty). A present-but-unreadable
+    // port keeps its coerced value — `NaN`, `Infinity` — so `SmtpTransport`
+    // refuses it, instead of this line silently deleting the setting.
+    ...(port !== undefined ? { port } : {}),
     ...(secure != null ? { secure } : {}),
     ...(user ? { user } : {}),
     ...(password ? { password } : {}),

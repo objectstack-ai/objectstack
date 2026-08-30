@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
@@ -535,9 +535,22 @@ function sendResultBase(
  * this in #5367/#5808 by keying on the DECLARATION rather than the prose, but the
  * rule was written in-line there because one consumer does not justify a shared
  * surface. This exit is the second consumer, so it was promoted:
- * {@link declaresServerFault}, next to the heuristic it complements, read by both
+ * `declaresServerFault`, next to the heuristic it complements, read by both
  * boundaries. ⛔ It is NOT "withhold every 5xx" — #5667 kept UNDECLARED 5xx
  * legible on purpose, and a bare `Error` still goes through the heuristic alone.
+ *
+ * [#12281] A fifth, and the reason that predicate is now {@link
+ * serverFaultProvenance}: `declaresServerFault` required a non-empty string
+ * `code` beside the 5xx and read the `status` spelling only, so this exit
+ * withheld a NARROWER band than `/data` — a declared 5xx with no code, and a
+ * declared 5xx spelled `statusCode`, both shipped their prose here and were
+ * withheld one door over. Ruled 2026-08-27 on #12509 (option D): this exit
+ * adopts the structural withhold for EVERY declared 5xx message, and reads the
+ * shared judgement rather than growing a second copy of it. Measured before the
+ * change: the population that changes hands today is EMPTY (the two repo-wide
+ * no-code 5xx producer families cannot reach this door), which is precisely why
+ * now was the cheapest moment — the alignment costs no legibility that exists
+ * and buys the invariant forward.
  *
  * The code still travels, and `READ_SCOPE_COMPILE_FAILED` reaches the client
  * untouched — so what a machine reads is unchanged and only the prose is withheld,
@@ -586,12 +599,44 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
         }
     }
     const raw = err?.message;
-    // [#5811] Two independent reasons to withhold, both 5xx-only. The
-    // declaration comes first because it needs no guess about the text:
-    // `declaresServerFault` already implies `status >= 500`, so it can never
-    // reach a 4xx answer the caller is entitled to read.
+    // [#3842] A thrown error's own `.code` finally has somewhere to go — see the
+    // `declaredCode` note below for WHICH spelling travels. Resolved HERE, above
+    // the message ternary, because [#12281] that ternary now reads the same
+    // resolver answer: one read of the throw, one set of facts, so the prose rule
+    // and the code rule can never be looking at different errors.
+    const thrown = resolveThrownHttpError(err, 500);
+    // [#5811/#12281] Two independent reasons to withhold, both 5xx-only. The
+    // declaration comes first because it needs no guess about the text.
+    //
+    // [#12281] The declaration limb is `serverFaultProvenance(thrown) ===
+    // 'declared'` — the ONE definition of "the producer named this 5xx itself"
+    // (`@objectstack/types`), ruled 2026-08-27 (option D) and already read by
+    // `demotedDeclaredCode` for the code channel. ⛔ Not re-derived here: "one
+    // rule, every door inherits" is the point of #12509, and a per-door variant
+    // is the divergence this family has now been repaired for twice.
+    //
+    // It replaces `declaresServerFault`, which withheld on `status >= 500` AND a
+    // non-empty string `code`, and closes the TWO axes that read apart from
+    // `/data`'s `declaredHttpStatus`:
+    //   1. a declared 5xx carrying NO `code` fell through to the heuristic alone
+    //      — the half #5811's own argument found insufficient;
+    //   2. `declaresServerFault` read `status` ONLY, so a fully ADR-0112-compliant
+    //      producer that merely spells `statusCode` shipped its prose here while
+    //      `/data` withheld it. `declaredStatus` reads `status ?? statusCode`.
+    //
+    // ⛔ Still NOT "withhold every 5xx". The gate is the DECLARED status, never
+    // the resolved `httpStatus` above (which falls back to 500 for a throw that
+    // declared nothing): `serverFaultProvenance` answers `'undeclared'` exactly
+    // when `declaredStatus` is absent, so #5667's tiering survives intact — a
+    // bare `Error` from our own code is the operator's own bug report and still
+    // goes through the heuristic alone. A naive `httpStatus >= 500` test would
+    // silently delete that, which is the one way this change could do harm.
+    //
+    // The author-facing text channel is `userMessage` (#9934), never the raw
+    // message — a producer whose 5xx prose is addressed to a human declares it
+    // there and it survives the withhold on its own channel.
     const message =
-        declaresServerFault(err) || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
+        serverFaultProvenance(thrown) === 'declared' || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
             ? INTERNAL_ERROR_MESSAGE
             : raw || 'Internal Server Error';
     // [#3842] A thrown error's own `.code` finally has somewhere to go — the
@@ -607,7 +652,6 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     // resolver's status chain is byte-identical to `httpStatus` above (status →
     // statusCode → validation 400 → 500), so the two reads cannot disagree. A
     // non-string `.code` (a driver errno) stays in `details`, as context.
-    const thrown = resolveThrownHttpError(err, 500);
     const declaredCode = demotedDeclaredCode(thrown);
     const details =
         (err?.code && typeof err.code !== 'string') || validation

@@ -13,12 +13,15 @@
  *
  * ONE CORRECTION to the issue body, measured rather than assumed: the catch is
  * zero-output, but the PATH is not literally silent. The generic read handler
- * one frame up already logs `error: 'Find operation failed' { object:
- * 'sys_file' }` before rethrowing into this catch. That line is untouched here,
- * and `the pre-existing generic line cannot tell the two apart` below pins why
- * it does not satisfy the acceptance: it is byte-identical for the benign and
- * the non-benign failure, and it describes the sub-read only — never the parent
- * object, the fields left un-hydrated, or the consequence.
+ * one frame up already logs `'Find operation failed' { object: 'sys_file' }`
+ * before rethrowing into this catch. That line is untouched here, and the
+ * `the generic line separates the two causes but still cannot name the loss`
+ * block below pins why it does not satisfy the acceptance: it describes the
+ * sub-read only — never the parent object, the fields left un-hydrated, or the
+ * consequence. ⚠️ [#13273] That block was rewritten when the generic frame
+ * stopped being `error` for every cause: it is `debug` for the benign
+ * "table was never provisioned" class now, and `error` for everything else.
+ * The consequence gap this file exists to close is unchanged either way.
  *
  * The pass-through itself is correct and is NOT what this fixes. A file-metadata
  * read that fails must not take down the record read that asked for it, so
@@ -279,16 +282,26 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
    * #6116's body says the seam logs nothing. Measured on `origin/main` that is
    * true of the CATCH, but not of the whole path: the generic read handler one
    * frame up (`engine.ts`, `'Find operation failed'`) already reports the
-   * failed `sys_file` sub-read at `error` before rethrowing into this catch.
-   * That line is real and this fix neither removes nor duplicates it.
+   * failed `sys_file` sub-read before rethrowing into this catch. That line is
+   * real and this fix neither removes nor duplicates it.
    *
-   * It cannot be the discriminator the acceptance asks for, for two reasons
-   * pinned below: it is emitted IDENTICALLY for the benign and the non-benign
-   * failure, and it describes the sub-read only — never the parent object,
-   * the fields left un-hydrated, or the consequence that those bare ids will
-   * read downstream as "this record has no file".
+   * ⚠️ [#13273] What HAS moved since #6116, and why this block was rewritten
+   * rather than deleted. That generic frame used to be `error` for every cause
+   * — which is what made it useless as a discriminator, and is the sentence
+   * this block used to pin. `engine.ts` now asks `isMissingTableError` and puts
+   * the benign class on `debug`, so the two causes no longer produce the same
+   * line. The re-pinned facts below are therefore:
+   *
+   *   1. the generic frame DOES now separate the two causes by channel — the
+   *      benign read leaves the `error` channel empty (#13273's own acceptance,
+   *      re-measured from this file's fake driver);
+   *   2. and it STILL does not satisfy #6116's acceptance, because on the
+   *      outage branch it describes the sub-read only — never the parent
+   *      object, the fields left un-hydrated, or the consequence that those
+   *      bare ids will read downstream as "this record has no file". That gap
+   *      is what the seam's own `warn` closes, and it is unchanged.
    */
-  describe('the pre-existing generic line cannot tell the two apart', () => {
+  describe('the generic line separates the two causes but still cannot name the loss', () => {
     async function errorCensus(make: () => unknown) {
       await boot(async () => {
         throw make();
@@ -297,15 +310,43 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       return logger.lines.error.map((l: any) => l.msg);
     }
 
-    it('reports the same `error` for a benign and a non-benign failure', async () => {
+    /**
+     * The `debug` channel carries the engine's ordinary read tracing too, so
+     * this census is narrowed to the one frame under test. ⛔ Narrowed by an
+     * EXACT message match, not a substring: a filter that also admitted
+     * `'Find operation starting'` would report a frame this block did not
+     * measure.
+     */
+    async function debugCensus(make: () => unknown) {
+      await boot(async () => {
+        throw make();
+      });
+      await engine.find('doc');
+      return logger.lines.debug.filter((l: any) => l.msg === 'Find operation failed');
+    }
+
+    it('[#13273] the benign cause no longer reaches `error` — it reaches `debug`', async () => {
       const benign = await errorCensus(() => new Error('no such table: sys_file'));
       const outage = await errorCensus(() =>
         Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }));
 
-      // Identical — so an operator reading only this line learns that a read
-      // failed, never whether the answer they received can be trusted.
-      expect(benign).toEqual(['Find operation failed']);
+      // "The table was never provisioned" is a routine state, not a failure to
+      // report — and every caller on that path treats it as a normal answer.
+      expect(benign).toEqual([]);
+      // ⭐ The positive control on that zero: the SAME read, one cause over,
+      // still reaches `error`. So the empty census above measures the
+      // classification and not a broken fixture.
       expect(outage).toEqual(['Find operation failed']);
+    });
+
+    it('[#13273] the benign frame is still recorded, one channel down', async () => {
+      // ⛔ Demoted, not muted: the frame is still emitted, still names the
+      // object, and now carries its own classification instead of a stack.
+      const benign = await debugCensus(() => new Error('no such table: sys_file'));
+      expect(benign.map((l: any) => l.msg)).toEqual(['Find operation failed']);
+
+      const [meta] = benign[0].args;
+      expect(meta).toMatchObject({ object: 'sys_file', reason: 'table-not-provisioned' });
     });
 
     it('names only the sub-read, not the degradation it caused', async () => {

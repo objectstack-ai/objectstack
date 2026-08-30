@@ -50,20 +50,23 @@ variable. Both tiers can embed the platform's real data components
 
 ## Layout Hierarchy
 
+A page holds **regions**; a region holds **components**; only a form-shaped
+component holds **sections**, and a section holds **fields**. Related lists and
+widgets are components in their own right — they are not children of a section.
+
 ```
 Page
- ├─ Header (Title, Actions, Breadcrumbs)
- ├─ Main Region
- │   ├─ Section 1
- │   │   ├─ Field Group
- │   │   │   ├─ Field A (span: 6)
- │   │   │   └─ Field B (span: 6)
- │   │   └─ Widget
- │   └─ Section 2
- │       └─ Related List
- └─ Sidebar Region
-     ├─ Widget: Quick Stats
-     └─ Widget: Activity Feed
+ ├─ Region: header
+ │   └─ Component: page:header        (title, actions, breadcrumb)
+ ├─ Region: main
+ │   ├─ Component: record:details
+ │   │   └─ Section
+ │   │       ├─ Field A (span: auto)
+ │   │       └─ Field B (span: full)
+ │   └─ Component: record:related_list
+ └─ Region: sidebar
+     ├─ Component: object-metric
+     └─ Component: record:activity
 ```
 
 ## Page Templates
@@ -72,8 +75,15 @@ Top-level layout structures that define macro organization.
 
 ### Standard Template
 
+A page is identified by `name` + `label`, and its content lives in `regions`,
+each holding typed `components`. There is no `context:` key — the binding is
+`object` plus `type` (`record` here).
+
+{/* os:check-yaml page */}
 ```yaml
-context: record
+name: account_record
+label: Account Record Page
+type: record
 object: account
 template: standard
 regions:
@@ -85,15 +95,15 @@ regions:
           actions: [edit, delete, share]
   - name: main
     components:
-      - type: page:section
+      - type: record:details
         properties:
-          label: Contact Information
           fields: [name, email, phone]
   - name: sidebar
+    width: small
     components:
-      - type: widget
+      - type: record:activity
         properties:
-          component: activity_feed
+          limit: 10
 ```
 
 **Visual Layout:**
@@ -123,17 +133,20 @@ regions:
 
 High-density layout for power users (like Salesforce Service Console).
 
+{/* os:check-yaml page */}
 ```yaml
-context: app
+name: service_console
+label: Service Console
+type: app
 template: console
 regions:
   - name: left
     width: small
     components:
-      - type: record:list
+      - type: object-grid
         properties:
-          object: case
-          
+          objectName: case
+
   - name: right
     width: full
     components:
@@ -180,47 +193,39 @@ regions:
 - Sales (Opportunity pipeline + details)
 - Helpdesk (Ticket queue + ticket details)
 
-### Wizard Template
+### There is no wizard template
 
-Multi-step flow with progress indicator.
+<Callout type="warn">
+  Earlier revisions of this page documented a **Wizard Template** — a page whose
+  body was a `steps:` list, each step carrying its own `label` and `fields` — and
+  a matching `Multi-Step Onboarding Wizard` example further down. **`steps` exists
+  on no schema.** `PageSchema` is `.strict()`, so it is refused by name
+  (`Unrecognized key(s) on this page: steps`), and no other shape in the spec
+  declares it either. `template: wizard` compounds it quietly: `template` is a
+  free-form string, so that half *parses* while naming a layout template no
+  renderer provides.
 
-```yaml
-# page_template: wizard
-steps:
-  - name: account_info
-    label: Account Information
-    fields: [company_name, industry, size]
-  - name: contact_details
-    label: Contact Details
-    fields: [name, email, phone]
-  - name: preferences
-    label: Preferences
-    fields: [newsletter, notifications]
-  - name: review
-    label: Review & Submit
-    type: summary
-```
-
-**Visual Layout:**
-```
-┌────────────────────────────────────────────────────┐
-│  New Customer Setup                                │
-│  ● Account Info → ○ Contact → ○ Preferences → ○   │
-├────────────────────────────────────────────────────┤
-│                                                    │
-│  Account Information                               │
-│                                                    │
-│  Company Name: _______________________________     │
-│  Industry:     [Select Industry ▼]                 │
-│  Company Size: ○ 1-10  ○ 11-50  ○ 51-200          │
-│                                                    │
-│                          [Cancel]  [Next Step →]   │
-└────────────────────────────────────────────────────┘
-```
+  Both are **removed rather than implemented** — multi-step authoring is an
+  implementation card first, exactly like the deferred tab loading and the
+  virtualization block this page removed before it. To collect a long form in
+  stages today, use the real, declared shapes: a `tabbed` form view (every
+  section renders as its own tab — see [Tabs](#tabs-multi-page-layouts)), or
+  a [flow](/docs/automation/flows) when the steps need to branch or
+  persist between visits.
+</Callout>
 
 ## The 12-Column Grid System
 
-All layouts use a responsive grid that divides space into 12 columns.
+<Callout type="warn">
+  **"12 columns" describes the renderer's internal grid, not an authorable span
+  vocabulary.** What an author declares is much narrower, and both keys are
+  strict: a section's `columns` is a scalar `1`–`4`, and a field's width is
+  `span: auto | full` (or the legacy absolute `colSpan`, also `1`–`4`). There is
+  **no** `span: 6` and no twelfth of anything in the metadata. The examples below
+  are written in the vocabulary the schemas accept.
+</Callout>
+
+All layouts use a responsive grid that divides space into columns.
 
 ### Basic Grid Layout
 
@@ -228,12 +233,12 @@ All layouts use a responsive grid that divides space into 12 columns.
 ```yaml
 section:
   label: Contact Information
-  columns: 2  # Each field takes 6/12 columns (50% width)
+  columns: 2  # two fields per row (50% width each)
   fields:
-    - name      # Column 1-6
-    - email     # Column 7-12
-    - phone     # Column 1-6 (new row)
-    - company   # Column 7-12
+    - name      # row 1, left
+    - email     # row 1, right
+    - phone     # row 2, left
+    - company   # row 2, right
 ```
 
 **Rendered Grid:**
@@ -247,20 +252,24 @@ section:
 
 ### Custom Span Widths
 
+A field's width is set on the field itself, inside the section's own `fields`
+list — there is no section-level `layout:` block. `span: full` takes the whole
+row at any column count; omitting `span` (`auto`) lets the renderer size the
+field from its widget type and the current column count.
+
+{/* os:check-yaml FormSectionSchema key=section */}
 ```yaml
 section:
   label: Product Details
-  layout:
+  columns: 3
+  fields:
     - field: product_name
-      span: 12  # Full width
-    - field: price
-      span: 4   # 33% width
+      span: full      # whole row
+    - field: price    # auto — one of three columns
     - field: quantity
-      span: 4   # 33% width
     - field: total
-      span: 4   # 33% width
     - field: description
-      span: 12  # Full width
+      span: full      # whole row
 ```
 
 **Rendered Grid:**
@@ -390,43 +399,57 @@ sections:
   [row-level security](/docs/permissions/rls) — both enforced on the server.
 </Callout>
 
-### Section Variants
+### There are no section variants
 
-```yaml
-sections:
-  - label: Quick Summary
-    variant: compact  # Reduced padding
-    columns: 4
-    fields: [status, priority, assignee, due_date]
-  
-  - label: Description
-    variant: spacious  # Extra padding
-    fields: [long_description]
-  
-  - label: Danger Zone
-    variant: danger  # Red border, warning icon
-    fields: [archive, delete]
-```
+<Callout type="warn">
+  Earlier revisions of this page documented a section-level `variant:` key with
+  the values `compact` / `spacious` / `danger`. **It existed on no schema.**
+  `FormSectionSchema` is `.strict()` and declares no `variant`, so authoring one
+  is a parse failure (`Unrecognized key(s) on this form section: variant`) — not
+  a section that renders with default padding. It is **removed rather than
+  implemented**: per-section density and emphasis are a theming decision with no
+  renderer behind them today. A section's authorable presentation is `label`,
+  `description`, `columns`, `collapsible` and `collapsed`.
+</Callout>
 
 ## Field Groups and Inline Layout
 
-### Inline Field Group
+<Callout type="warn">
+  **There is no `field_group`, and no section-level `layout:` list.** Earlier
+  revisions of this page grouped fields two ways — an inline `field_group` nested
+  under a section's `layout:`, and a bare `- type: field_group` list — with
+  twelfth-based `span:` numbers on the fields inside. None of it existed:
+  `FormSectionSchema` refuses `layout` by name, and `field_group` is not a type
+  on any schema. **Removed rather than implemented.**
 
-Group related fields on the same row:
+  Both examples were doing something the declared shape already does — see the
+  replacement below. For a value that is genuinely one composite thing rather
+  than neighbouring fields, the grouping belongs on the **field**: a field of
+  type `address` (or `composite`) carries its own `fields` list.
+</Callout>
 
+Fields sit on the same row because the section says how many columns it has, and
+a field widens itself with `span: full`:
+
+{/* os:check-yaml FormSectionSchema[] key=sections */}
 ```yaml
 sections:
   - label: Name
-    layout:
-      - type: field_group
-        inline: true
-        fields:
-          - field: first_name
-            span: 6
-            placeholder: First
-          - field: last_name
-            span: 6
-            placeholder: Last
+    columns: 2          # first_name and last_name share a row
+    fields:
+      - field: first_name
+        placeholder: First
+      - field: last_name
+        placeholder: Last
+
+  - label: Address
+    columns: 3
+    fields:
+      - field: street
+        span: full      # whole row above the three below
+      - field: city
+      - field: state
+      - field: postal_code
 ```
 
 **Rendered:**
@@ -435,26 +458,7 @@ Name
 ┌──────────────────────┬──────────────────────┐
 │ First: _____________ │ Last: ______________ │
 └──────────────────────┴──────────────────────┘
-```
 
-### Address Field Group
-
-```yaml
-- type: field_group
-  label: Address
-  fields:
-    - field: street
-      span: 12
-    - field: city
-      span: 6
-    - field: state
-      span: 3
-    - field: postal_code
-      span: 3
-```
-
-**Rendered:**
-```
 Address
 ┌─────────────────────────────────────────────────┐
 │ Street: _______________________________________│
@@ -588,22 +592,26 @@ CSS-property map with camelCase keys. Prefer design tokens
 
 Display child records within a parent record's page.
 
+**A related list is a page component, not a form section.** It lives in a page
+region's `components`, with the type `record:related_list` and its configuration
+under `properties`. `FormSectionSchema` refuses `type`, `object` and
+`relationField` by name — a form section holds `fields`, and nothing else.
+
 ### Basic Related List
 
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-sections:
-  - type: related_list
-    label: Contacts
-    object: contact
-    relationField: account_id  # contact.account_id → account.id
-    columns:
-      - name
-      - email
-      - phone
-    actions:
-      - type: standard_new
-        label: New Contact
+type: record:related_list
+properties:
+  objectName: contact
+  relationshipField: account_id  # contact.account_id → account.id
+  columns: [name, email, phone]
+  limit: 5
+  actions: [standard_new]
 ```
+
+Note the spellings: `objectName` and `relationshipField` (not `object` /
+`relationField`), and `actions` is a list of **action ids**, not objects.
 
 **Rendered:**
 ```
@@ -618,52 +626,49 @@ sections:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Inline Editing Related List
+### A related list has no inline-edit mode
 
-```yaml
-sections:
-  - type: related_list
-    label: Invoice Line Items
-    object: invoice_line
-    relationField: invoice_id
-    mode: inline_edit  # Edit cells directly
-    columns:
-      - field: product
-        type: lookup
-        object: product
-      - field: quantity
-        type: number
-        editable: true
-      - field: unit_price
-        type: currency
-        editable: true
-      - field: total
-        type: formula
-        formula: quantity * unit_price
-        editable: false
-    actions:
-      - type: add_row
-        label: Add Line Item
-```
+<Callout type="warn">
+  Earlier revisions of this page documented an **Inline Editing Related List** —
+  `mode: inline_edit` on the list, with per-column `type` / `editable` / `formula`
+  definitions. **None of it existed.** `RecordRelatedListProps` is `.strict()` and
+  declares no `mode`; its `columns` is an array of **field-name strings**, never
+  column-definition objects, and the column's type, editability and formula are
+  properties of the field on the child object — not of the list that displays it.
+  **Removed rather than implemented.**
+
+  Inline editing does exist, one component over: `record:details` declares
+  `inlineEdit` (renderer default on, where the object itself is editable). For an
+  editable child collection — the invoice-lines shape this example reached for —
+  the declared block is `object-master-detail-form` with a `details` entry; see
+  [Master-Detail Forms](#master-detail-forms) below.
+</Callout>
 
 ## Widgets: Embedding Rich Components
 
 Widgets are pre-built UI components that display data or provide functionality.
+Like related lists, they are **page components** — there is no `type: widget`
+wrapper and no `component:` / `config:` pair. The widget *is* the component
+`type`, and its configuration is `properties`.
 
 ### Metric Widget
 
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-sections:
-  - type: widget
-    component: metric
-    config:
-      title: Open Opportunities
-      value: 47
-      trend: +12%
-      trendDirection: up
-      icon: trending-up
-      color: success
+type: object-metric
+properties:
+  objectName: opportunity
+  label: Open Opportunities
+  aggregate:
+    field: id
+    function: count
+  icon: trending-up
+  colorVariant: success
 ```
+
+A metric **aggregates its object** — it has no literal `value:` key to hard-code
+a number into. `colorVariant` (not `color`) is an enum: `default`, `blue`,
+`teal`, `orange`, `purple`, `success`, `warning`, `danger`.
 
 **Rendered:**
 ```
@@ -677,89 +682,106 @@ sections:
 
 ### Activity Feed Widget
 
+The feed is bound to the record the page is already on, so it takes no `object`
+or record filter of its own.
+
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-sections:
-  - type: widget
-    component: activity_feed
-    config:
-      object: activity
-      filter: { related_to: '{recordId}' }
-      limit: 10
-      showFilters: true
+type: record:activity
+properties:
+  limit: 10
+  showFilterToggle: true
+  unifiedTimeline: true
 ```
 
 ### Custom Widget
 
+A component `type` outside the platform's own namespaces is an open extension
+point — a registered custom or plugin component:
+
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-sections:
-  - type: widget
-    component: custom.approval_timeline
-    config:
-      recordId: '{recordId}'
-      showComments: true
+type: custom.approval_timeline
+properties:
+  recordId: '{recordId}'
+  showComments: true
 ```
+
+<Callout type="info">
+  `properties` is an open bag (`Record<string, unknown>`), so **it is the one part
+  of a component the spec parse does not check**. For the platform's own types the
+  authoring rules dispatch `ComponentPropsMap` and reject a misspelled prop; a
+  `custom.*` type has no entry there, so its props are validated only by whatever
+  registered the component.
+</Callout>
 
 ## Advanced Layouts
 
-### Master-Detail Split View
+<Callout type="warn">
+  **There is no page-level `layout:` block.** Earlier revisions of this page
+  described three advanced layouts as a top-level `layout:` mapping —
+  `split_view`, `card_grid` and `kanban`. On `PageSchema`, `layout` is an
+  **alias for `template`**, a plain string naming a layout template, so a mapping
+  written there is refused with exactly that rename hint (`Did you mean layout →
+  template?`). None of `split_view`, `card_grid`, `list_view` or `detail_view` is
+  a type on any schema.
 
+  Two of the three describe capabilities the platform really has — they were
+  written at the wrong tier, and are restated below as the components that
+  deliver them. The third, `card_grid`, is **removed rather than implemented**:
+  besides having no schema, its per-breakpoint `columns: { desktop, tablet,
+  mobile }` map is the same breakpoint-map defect class removed from this page
+  before. Per-breakpoint layout is `responsiveStyles` (ADR-0065), documented
+  above.
+</Callout>
+
+### Master-Detail Forms
+
+A parent record edited alongside its child collections is the declared
+`object-master-detail-form` block. `details` entries derive the foreign key and
+columns from the child object's metadata when you omit them.
+
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-layout:
-  type: split_view
-  orientation: horizontal  # or 'vertical'
-  split: 60  # Left: 60%, Right: 40%
-  left:
-    type: list_view
-    object: opportunity
-    view: my_opportunities
-  right:
-    type: detail_view
-    object: opportunity
-    recordId: '{selectedRecordId}'
+type: object-master-detail-form
+properties:
+  objectName: invoice
+  mode: edit
+  formType: tabbed
+  fields: [invoice_number, customer, invoice_date]
+  details:
+    - title: Line Items
+      childObject: invoice_line
+      relationshipField: invoice_id
+      columns: [product, quantity, unit_price]
 ```
 
-### Grid of Cards
+For the *master/detail browsing* pattern — pick a record on the left, show it on
+the right — the mechanism is page state rather than a layout block: declare a
+page `variables` entry whose `source` names the picker component, and read it in
+sibling components as `page.<var>`.
 
+### Kanban Board
+
+A board is the `object-kanban` block. Its `columns` are **swimlane definitions**
+(`{ id, title }` per `groupBy` value), not a field projection — the fields drawn
+on each card are `cardFields`.
+
+{/* os:check-yaml PageComponentSchema */}
 ```yaml
-layout:
-  type: card_grid
-  columns:
-    desktop: 3
-    tablet: 2
-    mobile: 1
-  cards:
-    - type: metric_card
-      title: Revenue
-      value: $1.2M
-    - type: metric_card
-      title: Deals
-      value: 47
-    - type: chart_card
-      title: Pipeline
-      chartType: funnel
-```
-
-### Kanban Board Layout
-
-```yaml
-layout:
-  type: kanban
-  object: project_task
+type: object-kanban
+properties:
+  objectName: project_task
   groupBy: status
   columns:
-    - value: todo
-      label: To Do
-      color: gray
-    - value: in_progress
-      label: In Progress
-      color: blue
-    - value: done
-      label: Done
-      color: green
-  cardFields:
-    - title
-    - assignee
-    - due_date
+    - id: todo
+      title: To Do
+    - id: in_progress
+      title: In Progress
+    - id: done
+      title: Done
+  cardTitle: title
+  cardFields: [assignee, due_date]
 ```
 
 ## Layout Schema Reference
@@ -931,108 +953,91 @@ element from anyone; it shows it to everyone.
 
 ### Customer 360 Page
 
+`regions` is an **array** of named regions, each with a `components` list — not a
+map keyed by region name.
+
+{/* os:check-yaml page */}
 ```yaml
 name: customer_360
+label: Customer 360
+type: record
 object: customer
 template: standard
 regions:
-  header:
-    - type: title
-      field: name
-    - type: actions
-      buttons: [edit, delete, share, convert]
-  
-  main:
-    - type: section
-      label: Overview
-      columns: 2
-      fields:
-        - name
-        - status
-        - industry
-        - employee_count
-        - website
-        - phone
-    
-    - type: section
-      label: Key Contacts
-      columns: 1
-      component:
-        - type: related_list
-          object: contact
-          relationField: account_id
+  - name: header
+    components:
+      - type: page:header
+        properties:
+          title: Customer
+          actions: [edit, delete, share]
+
+  - name: main
+    components:
+      - type: record:details
+        properties:
+          columns: '2'
+          fields: [name, status, industry, employee_count, website, phone]
+
+      - type: record:related_list
+        properties:
+          title: Key Contacts
+          objectName: contact
+          relationshipField: customer_id
           columns: [name, title, email, phone]
-    
-    - type: section
-      label: Open Opportunities
-      component:
-        - type: related_list
-          object: opportunity
-          relationField: account_id
-          filter: { stage: { $ne: 'closed_won' } }
+
+      - type: record:related_list
+        properties:
+          title: Open Opportunities
+          objectName: opportunity
+          relationshipField: customer_id
           columns: [name, amount, close_date, stage]
-  
-  sidebar:
-    - type: widget
-      component: metric
-      config:
-        title: Total Revenue
-        value: $1.2M
-    
-    - type: widget
-      component: activity_feed
-      config:
-        limit: 10
+
+  - name: sidebar
+    width: small
+    components:
+      - type: object-metric
+        properties:
+          objectName: opportunity
+          label: Total Revenue
+          aggregate:
+            field: amount
+            function: sum
+          format: '$0,0'
+
+      - type: record:activity
+        properties:
+          limit: 10
 ```
 
-### Multi-Step Onboarding Wizard
+### Staged Onboarding Form
 
+The `steps:` wizard this example used does not exist (see [There is no wizard
+template](#there-is-no-wizard-template)). The declared way to collect a long form
+in stages is a **tabbed form view**: set `type: tabbed`, and each section becomes
+its own tab in declaration order.
+
+{/* os:check-yaml FormViewSchema */}
 ```yaml
-name: employee_onboarding
-object: employee
-template: wizard
-steps:
+type: tabbed
+defaultTab: personal_info
+
+sections:
   - name: personal_info
     label: Personal Information
-    sections:
-      - label: Basic Details
-        columns: 2
-        fields:
-          - first_name
-          - last_name
-          - email
-          - phone
-          - date_of_birth
-          - ssn
-  
+    columns: 2
+    fields: [first_name, last_name, email, phone, date_of_birth]
+
   - name: employment
     label: Employment Details
-    sections:
-      - label: Position
-        fields:
-          - job_title
-          - department
-          - manager
-          - start_date
-          - employment_type
-  
+    fields: [job_title, department, manager, start_date, employment_type]
+
   - name: compensation
     label: Compensation
-    sections:
-      - label: Salary & Benefits
-        fields:
-          - base_salary
-          - bonus_eligible
-          - equity_grant
-          - benefits_plan
-  
-  - name: review
-    label: Review & Submit
-    type: summary
-    sections:
-      - type: summary_view
-        showAllFields: true
+    fields: [base_salary, bonus_eligible, equity_grant, benefits_plan]
 ```
+
+There is no `summary_view` review step and no `showAllFields` key; a read-only
+recap is a section whose fields are marked `readonly`.
 
 ## Performance
 

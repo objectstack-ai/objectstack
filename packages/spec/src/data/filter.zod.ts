@@ -293,7 +293,10 @@ function listPositionFieldReferenceMessage(position: string): string {
     + 'both SQL drivers refuse the position with INVALID_FILTER / 400. Write a literal value '
     + 'here, or move the reference to a scalar comparison operator '
     + '($eq/$ne/$gt/$gte/$lt/$lte), whose WHOLE comparand a { $field } reference may be. '
-    + 'Ruled 2026-08-11 on #7596: declared = enforced (ADR-0049).'
+    // The removal ruling of 2026-08-11 lives on the tracker (#7596) — internal
+    // readers get the id here; the customer-facing sentence keeps the date and
+    // the customer-resolvable ADR anchor only.
+    + 'Ruled 2026-08-11: declared = enforced (ADR-0049).'
   );
 }
 
@@ -1431,7 +1434,9 @@ function normalizedMemberMessage(position: string, input: unknown): string {
     + '({ "field": { "$op": value } }, whose keys are field names and whose operator map '
     + 'must satisfy FieldOperatorsSchema — comparand shapes included), or a nested LOGICAL '
     + `GROUP carrying only ${NORMALIZED_LOGICAL_KEYS.join(' / ')} and nothing else. `
-    + 'Ruled on #7711: declared = enforced (ADR-0049).'
+    // The ruling is #7711 on the tracker — the id stays here for internal
+    // readers; the sentence keeps the customer-resolvable ADR anchor.
+    + 'Declared = enforced (ADR-0049).'
   );
 }
 

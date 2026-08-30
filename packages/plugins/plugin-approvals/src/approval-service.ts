@@ -4780,7 +4780,7 @@ export class ApprovalService implements IApprovalService {
       throw new Error(
         `READ_BACK_FAILED: the write to approval request '${requestId}' was recorded, but the updated row is `
         + `not visible inside the caller's organization scope, so the result envelope cannot be built. The write `
-        + `is NOT rolled back — read the request back with a system or matching-organization context (#12769).`,
+        + `is NOT rolled back — read the request back with a system or matching-organization context.`,
       );
     }
     return fresh;

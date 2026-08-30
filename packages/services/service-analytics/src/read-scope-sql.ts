@@ -177,7 +177,12 @@ import {
  * value as a THIRD semantics ("the key is absent from the record") and is
  * deliberately left alone — deciding it here would settle #5299's
  * key-missing-vs-value-null question as a side effect — and `driver-memory` /
- * `driver-mongodb` stay pin-only under the #5499 freeze.
+ * `driver-mongodb` were pin-only under the #5499 freeze when #6125 scoped this,
+ * so this compiler and those two answer the cell differently on purpose — a debt
+ * #6125 recorded as owed AT THAW. The thaw has arrived: the freeze dissolved
+ * 2026-08-11 (head note of `@objectstack/spec`'s `aggregation-conformance.ts`),
+ * so that debt is now DUE rather than deferred, and nothing has been triaged
+ * against it yet.
  *
  * The eleventh message was measured against `looksLikeInternalErrorLeak` before
  * being added, because the section above turns on that predicate answering FALSE

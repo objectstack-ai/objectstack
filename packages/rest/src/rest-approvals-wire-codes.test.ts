@@ -115,6 +115,31 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         ).toBe(true);
     });
 
+    // [#13182] `READ_BACK_FAILED` is a NAMED wire row (the RESUME_FAILED
+    // precedent: a genuine server-side inconsistency, but named): the write is
+    // recorded and NOT rolled back, the read-back is org-filtered, and the
+    // 500 semantics stay. Pinned here so the prefix→code mapping and ledger
+    // membership cannot regress independently: without the mapping arm this
+    // throw would ride the template-generated `APPROVAL_APPROVE_FAILED` arm —
+    // a registered code whose name does not describe what happened.
+    it('an org-filtered read-back on approve answers 500 READ_BACK_FAILED — named, not the template fallback', async () => {
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(new Error(
+                "READ_BACK_FAILED: the write to approval request 'req_1' was recorded, but the updated row is "
+                + "not visible inside the caller's organization scope, so the result envelope cannot be built. "
+                + 'The write is NOT rolled back — read the request back with a system or matching-organization context.',
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/approve`);
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('READ_BACK_FAILED');
+        expect(answer.body?.error).toMatch(/^the write to approval request 'req_1' was recorded/);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'READ_BACK_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
     it('an unmapped service fault on approve answers 500 APPROVAL_APPROVE_FAILED — the template-generated arm, live', async () => {
         const rest = boot({
             decide: vi.fn().mockRejectedValue(new Error('kaboom: not in the mapping table')),
