@@ -1375,6 +1375,147 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
   ),
 }));
 
+/**
+ * History Metadata Item Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/history` (the
+ * `historyMetaItem` protocol method) — the durable change-log for one item:
+ * the `sys_metadata_history` events (every overlay put/delete, ADR-0008 §2.4)
+ * that Studio's History tab renders as a timeline. Mirrors the
+ * implementation's parameter type in `@objectstack/metadata-protocol` member
+ * for member — a declared-surface catch-up, not a new capability (the #11006
+ * maintainer-ruled pattern, 2026-08-22 option B, carried one door over
+ * exactly as #11678 carried it to the audit twin): the verb and every member
+ * here already ship and are enforced.
+ *
+ * `environmentId` is deliberately NOT declared — the transport-level
+ * multi-kernel routing key is OUT of protocol request shapes by the #9741
+ * maintainer ruling (2026-08-18): `resolveProtocol(environmentId)` selects
+ * the target kernel before this method is entered, and the implementation
+ * never declares or reads it off the request. Unlike the audit twin (whose
+ * door stopped sending it when #8747 scoped the read), the REST history door
+ * still spreads it into the outgoing payload; that long-standing wire member
+ * rides the door's `TransportScopedMetaRequest` wrapper, never this schema.
+ */
+export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) partition the change log is read from. Absent '
+    + 'means the env-wide partition (the implementation resolves the overlay '
+    + 'repository as `organizationId ?? null`, keyed `org: \'env\'`). '
+    + 'Declared because the implementation declares and reads it; plain '
+    + '`string`, not nullable, because that is the implementation\'s '
+    + 'parameter type — unlike the audit twin, whose door always sends '
+    + '`ctx?.tenantId ?? null` and whose implementation declares '
+    + '`string | null`. The REST history door currently sends no '
+    + 'organization at all (the #8747-family tenant-scoping question is a '
+    + 'separate measurement for that door — declaring the member records '
+    + 'the implementation contract, it does not answer that question).',
+  ),
+  sinceSeq: z.number().optional().describe(
+    'Exclusive lower bound on `seq` for pagination: only events with '
+    + '`seq > sinceSeq` are returned. Absent means "from the beginning".',
+  ),
+  limit: z.number().optional().describe(
+    'Maximum events to return, oldest first. Forwarded to the repository '
+    + 'unclamped and with NO default — absent means the full remaining '
+    + 'change log. (Deliberately no declared bounds: unlike the audit '
+    + 'twin\'s [1, 500] clamp, nothing on this path clamps or refuses, so '
+    + 'declaring `.min()`/`.max()` here would refuse values the shipped '
+    + 'verb accepts.)',
+  ),
+}));
+
+/**
+ * History Metadata Item Response
+ *
+ * The body of `GET /api/v1/meta/:type/:name/history`, mirrored member for
+ * member from the implementation's return type
+ * (`ObjectStackProtocolImplementation.historyMetaItem` returns
+ * `{ events: MetadataEvent[] }`), in `seq` order — oldest first, the
+ * opposite end of the log from the audit twin's newest-first trail.
+ *
+ * The event shape transcribes `MetadataEventSchema` from
+ * `@objectstack/metadata-core` (ADR-0008 §2.4) — the spec cannot import that
+ * package (dependency direction), so the shape is transcribed here the same
+ * way the audit twin transcribed its event rows (#11678). Two deliberate
+ * widenings against the source schema, both because a declared-surface
+ * catch-up must not refuse bodies the shipped verb yields: `ref.type` is a
+ * plain string rather than the static metadata-type registry enum (plugin
+ * runtime-create types flow through this door and are registry-absent by
+ * design — freezing the registry into this contract is the same drift the
+ * #12038 1C ruling refused for the published-body route), and `ref.name`
+ * carries no spelling regex.
+ *
+ * `{ events: [] }` is the honest answer for a genuinely empty change log AND
+ * for a non-overlay metadata type (neither `allowOrgOverride` nor
+ * `allowRuntimeCreate`): such types have no history by construction —
+ * `saveMetaItem` refuses them outright (#5086) — and the implementation
+ * answers `[]` rather than throwing so callers can treat "no history"
+ * uniformly. It is NEVER the answer for a protocol that lacks the verb: the
+ * REST door refuses 501 before the call.
+ */
+export const HistoryMetaItemResponseSchema = lazySchema(() => z.object({
+  events: z.array(z.object({
+    seq: z.number().int().nonnegative().describe(
+      'Sequence number this write produced in the org log '
+      + '(sys_metadata_history.event_seq) — the token the request\'s '
+      + '`sinceSeq` filters on, and the same key the write-verb receipts '
+      + '(`SaveMetaItemResponseSchema.seq` and siblings) carry.',
+    ),
+    op: z.enum(['create', 'update', 'delete', 'rename', 'publish', 'revert']).describe(
+      'Which change-log operation the event records (ADR-0008 §2.4). Closed '
+      + 'vocabulary, mirrored from the producer\'s own enum.',
+    ),
+    ref: z.object({
+      org: z.string().describe(
+        'Tenant/org partition the row lives in; `env` for the env-wide '
+        + 'partition, `system` for built-ins.',
+      ),
+      type: z.string().describe(
+        'Canonical singular metadata type key. A plain string by intent — '
+        + 'plugin runtime-create types flow through this door and are '
+        + 'registry-absent by design (see the schema-level note).',
+      ),
+      name: z.string().describe('Item machine name.'),
+      version: z.string().optional().describe(
+        'Optional version pin (content hash); omitted for HEAD.',
+      ),
+    }).describe('Which item the event is about.'),
+    hash: z.string().nullable().describe(
+      'Content hash of the body this event wrote; `null` when the event '
+      + 'wrote none (`op="delete"`).',
+    ),
+    parentHash: z.string().nullable().describe(
+      'Hash the written version was derived from; `null` for a first '
+      + 'version.',
+    ),
+    version: z.number().int().positive().optional().describe(
+      'Per-(org,type,name) monotonic lineage counter at this event — the '
+      + 'token `rollbackMetaItem({ toVersion })` pins. Absent when the row '
+      + 'recorded none.',
+    ),
+    previousName: z.string().optional().describe('Set on op="rename": the old machine name.'),
+    actor: z.string().nullable().describe(
+      'Who wrote this. `null` = system-initiated (boot sync, migration, '
+      + 'scheduled job) — never a sentinel string (#4556): consumers that '
+      + 'resolve this against `sys_user` must be able to tell "nobody" from '
+      + '"a user id".',
+    ),
+    message: z.string().optional().describe('Optional commit message recorded with the write.'),
+    ts: z.string().describe('When the write happened (ISO-8601 string).'),
+    source: z.string().describe(
+      'Origin label of the write: "fs", "studio", "rest", "ai", '
+      + '"git-import", …',
+    ),
+  })).describe(
+    'The durable change-log for the item, oldest first. See the '
+    + 'schema-level note for what an empty array means — and what it never '
+    + 'means.',
+  ),
+}));
+
 // ==========================================
 // Meta history / diagnostics family (#12038)
 // ==========================================
@@ -2813,6 +2954,8 @@ export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
 export type AuditMetaItemRequest = z.input<typeof AuditMetaItemRequestSchema>;
 export type AuditMetaItemResponse = z.input<typeof AuditMetaItemResponseSchema>;
+export type HistoryMetaItemRequest = z.input<typeof HistoryMetaItemRequestSchema>;
+export type HistoryMetaItemResponse = z.input<typeof HistoryMetaItemResponseSchema>;
 /** Opaque by ruling (#12038 1C) — see {@link GetPublishedMetaItemResponseSchema}. */
 export type GetPublishedMetaItemResponse = z.input<typeof GetPublishedMetaItemResponseSchema>;
 /** Post-parse shape of {@link GetPublishedMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
@@ -3121,6 +3264,26 @@ export interface MetadataProtocol {
    * capability is never reported as an empty trail).
    */
   auditMetaItem?(request: AuditMetaItemRequest): Promise<AuditMetaItemResponse>;
+  /**
+   * Durable change-log read (`GET /api/v1/meta/:type/:name/history`) — the
+   * `sys_metadata_history` events for one item, oldest first, that Studio's
+   * History tab renders as a timeline (the audit member above serves the
+   * sibling 审计日志 / Audit log tab; ADR-0008 §2.4 is the event contract).
+   * Declared optional like its `auditMetaItem` / `deleteMetaItem` /
+   * `getMetaItemLayered` siblings: additive to a shipped contract, with the
+   * implementation (`@objectstack/metadata-protocol`) predating the
+   * declaration. Promotes what was an ADR-0076 D9 server-only extension into
+   * a declared optional member (the #11006 maintainer-ruled pattern,
+   * 2026-08-22 option B, carried one door over exactly as #11678 carried it
+   * to the audit twin) — before this, the REST history door reached the verb
+   * through a runtime cast and its request literal was compiled against
+   * nothing. A host without the verb is CONFORMING: the REST door
+   * feature-detects and answers 501 before the call. A host WITH the verb
+   * answers `{ events: [] }` for a non-overlay type — no history exists by
+   * construction — which is a declared, honest body, never a capability
+   * signal.
+   */
+  historyMetaItem?(request: HistoryMetaItemRequest): Promise<HistoryMetaItemResponse>;
   getUiView?(request: GetUiViewRequest): Promise<GetUiViewResponse>;
 }
 

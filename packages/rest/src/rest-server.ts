@@ -85,6 +85,7 @@ import type {
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
     AuditMetaItemRequest,
+    HistoryMetaItemRequest,
     DeleteMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
@@ -5995,7 +5996,14 @@ export class RestServer {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    if (!(p as any).historyMetaItem) {
+                    // The cast came off when `MetadataProtocol` declared
+                    // `historyMetaItem` (#12005 — the #11006 pattern, exactly
+                    // as #11678 de-cast the audit twin below). The member is
+                    // declared OPTIONAL, so this truthiness guard is not just
+                    // feature detection: it is what narrows the member to
+                    // callable at the call site. Same guard semantics as
+                    // before, minus the cast.
+                    if (!p.historyMetaItem) {
                         res.status(501).json({
                             error: 'History query not supported by protocol implementation',
                         });
@@ -6012,13 +6020,24 @@ export class RestServer {
                     const limit = req.query?.limit !== undefined
                         ? Number(req.query.limit)
                         : undefined;
-                    const result = await (p as any).historyMetaItem({
+                    // Typed through `TransportScopedMetaRequest` like the
+                    // reset door above, NOT as a plain `HistoryMetaItemRequest`
+                    // like the audit door below: this door still spreads the
+                    // transport-level `environmentId` (long-standing wire
+                    // shape, deliberately unchanged — the #9741 ruling keeps
+                    // it out of the protocol schema, and the implementation
+                    // never reads it), so the wrapper is what layers that one
+                    // member on. Every OTHER key is compiled against the spec
+                    // contract — an undeclared member here is now TS2353
+                    // instead of a payload member no contract has ever seen.
+                    const historyRequest: TransportScopedMetaRequest<HistoryMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
                         ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
-                    });
+                    };
+                    const result = await p.historyMetaItem(historyRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);
