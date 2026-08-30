@@ -5793,7 +5793,10 @@ export class ObjectStackProtocolImplementation implements
      *          the overlay as absent.
      */
     private rethrowUnlessMetadataStoreUnprovisioned(error: unknown): void {
-        if (isMissingTableError(error)) return;
+        // [#13324] Every caller of this helper reads `sys_metadata`, so name it:
+        // a failure that names some OTHER relation (a view over a dropped base
+        // table) says nothing about whether the overlay store is empty.
+        if (isMissingTableError(error, 'sys_metadata')) return;
         // [#12536] CLASSIFY, do not assume. A read can fail because the store
         // is unreachable OR because a metadata app's hook refused it in its
         // own words — see {@link metadataReadFailureError}.
@@ -10337,7 +10340,7 @@ export class ObjectStackProtocolImplementation implements
                 //
                 // No new response field and no new error code — the caller
                 // receives the read's own failure, envelope intact.
-                if (isMissingTableError(error)) continue;
+                if (isMissingTableError(error, obj.name)) continue;
                 throw error;
             }
         }
@@ -16335,7 +16338,7 @@ export class ObjectStackProtocolImplementation implements
                 //
                 // No new error code and no new response field: the caller
                 // receives the read's own failure, envelope intact.
-                if (!isMissingTableError(error)) throw error;
+                if (!isMissingTableError(error, 'sys_metadata')) throw error;
                 commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
             }
         }
@@ -17784,7 +17787,7 @@ export class ObjectStackProtocolImplementation implements
             // the turn is unrevertible is a separate question (a response-field
             // change the #8896 ruling forbids for this family) and deliberately
             // NOT decided here.
-            if (isMissingTableError(error)) {
+            if (isMissingTableError(error, 'sys_metadata_commit')) {
                 if (!this.commitStoreUnprovisionedNoted) {
                     this.commitStoreUnprovisionedNoted = true;
                     console.info(
@@ -19684,7 +19687,7 @@ export class ObjectStackProtocolImplementation implements
             // `error` names what the outage COSTS and how to fix it. Keeping
             // the technical line here at `warn` is what lets the consumer's
             // line stay the single loud statement of consequence.
-            if (!isMissingTableError(e)) {
+            if (!isMissingTableError(e, 'sys_metadata')) {
                 storeUnavailable = true;
                 console.warn(
                     `[Protocol] DB hydration skipped: ${e instanceof Error ? e.message : String(e)}`,

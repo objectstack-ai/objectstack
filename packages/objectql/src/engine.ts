@@ -3720,7 +3720,7 @@ export class ObjectQL implements IObjectQLEngine {
     } catch (error) {
       // The one benign cause only — anything else is an outage, not an
       // emptiness, and must not be memoised as one.
-      if (!isMissingTableError(error)) throw error;
+      if (!isMissingTableError(error, ORGANIZATION_OBJECT)) throw error;
       ids = [];
     }
     this.organizationProbeMemo = ids;
@@ -4684,7 +4684,7 @@ export class ObjectQL implements IObjectQLEngine {
       // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
       // exactly ONE failure reason — the table has not been provisioned, so
       // there are genuinely no rows and number 1 collides with nothing.
-      if (isMissingTableError(error)) return 0;
+      if (isMissingTableError(error, object)) return 0;
       // Every other failure (connection drop, timeout, permission denial,
       // query error) means the rows may well exist and simply were not seen.
       // Answering 0 there restarts the sequence at 1 against a table already
@@ -8372,7 +8372,7 @@ export class ObjectQL implements IObjectQLEngine {
       // is FUNCTIONAL and scoped to this response (the answer is visibly
       // smaller, and the next read repairs it); nothing on this path claims to
       // have persisted anything.
-      if (!isMissingTableError(error)) {
+      if (!isMissingTableError(error, 'sys_file')) {
         this.logger.warn(
           'sys_file lookup failed; file fields keep their raw ids and will render as "no file" for this read — '
             + 'check storage/database availability, then re-read to hydrate',
@@ -8888,7 +8888,7 @@ export class ObjectQL implements IObjectQLEngine {
    * believes it stored is gone.
    */
   private reportFindFailure(object: string, error: unknown): void {
-    if (isMissingTableError(error)) {
+    if (isMissingTableError(error, object)) {
       this.logger.debug('Find operation failed', {
         object,
         reason: 'table-not-provisioned',
@@ -11650,7 +11650,7 @@ export class ObjectQL implements IObjectQLEngine {
           //
           // No new response field and no new error code: the caller receives
           // the probe's own failure, envelope intact.
-          if (isMissingTableError(error)) continue;
+          if (isMissingTableError(error, childName)) continue;
           throw error;
         }
         // [#9362] The multi-value pushdown above is a SUPERSET, so the exact
