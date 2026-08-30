@@ -41,8 +41,9 @@ export const entry: SemanticMigration = {
     + 'valid filter — one constraining columns named `object` and `where` — and so is a '
     + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
     + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
-    + 'BARE spelling returns the unfiltered set in silence — stays open under the #5499 '
-    + 'freeze (#6320). ADR-0087, #6320.',
+    + 'BARE spelling returns the unfiltered set in silence — stayed open under the #5499 '
+    + 'freeze, which was lifted on 2026-08-11; it is still open, now unexcused rather than '
+    + 'deferred (#6320). ADR-0087, #6320.',
   acceptanceCriteria:
     'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
     + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '

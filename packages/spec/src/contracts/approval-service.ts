@@ -573,6 +573,12 @@ export interface ApprovalDecisionResult {
 
 /**
  * Public contract — the node-era approval runtime.
+ *
+ * Every mutation echoes the row it just changed. A mutation whose post-write
+ * read-back is filtered out by the caller's organization scope throws
+ * `READ_BACK_FAILED` (HTTP 500 over REST, registered in the ADR-0112 ledger):
+ * the write is recorded and NOT rolled back — read the request back with a
+ * system or matching-organization context.
  */
 export interface IApprovalService {
   /**

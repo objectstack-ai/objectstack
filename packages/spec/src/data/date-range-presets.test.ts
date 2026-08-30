@@ -67,7 +67,10 @@ describe('date-range preset vocabulary (#4614, re-homed by #8793)', () => {
     expect(message).toContain('$gte');            // the position it sat in
     expect(message).toContain('{30_days_ago}');   // the spelling that works
     expect(message).toContain('2026-01-15');      // the ISO alternative
-    expect(message).toContain('#8793');           // attributable from the error alone
+    // Attributable from the error alone by the customer-resolvable sentence —
+    // never by a tracker id (#13156's strip).
+    expect(message).toContain('Refused at authoring time so the error surfaces where the filter is written.');
+    expect(message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     // A calendar preset prescribes its window pair.
     const window = bareDateRangePresetComparandMessage('this_week', '$lt');
     expect(window).toContain('{week_start}');

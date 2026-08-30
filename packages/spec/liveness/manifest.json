@@ -87,20 +87,10 @@
       "note": "Read as a declaration rather than as an install instruction: an unresolvable dependency still counts toward the closure (the loop's own comment says so — the package declared it, so an object stamped with it is reachable by declaration), the transitive walk just stops there. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `protocol.ts:4290-4300` had rotted in range of this 20255-line file onto a docblock about `evaluateRuntimeAuthoringGate` staying pure and about advisories riding the 2xx, ~210 lines short of the read. The note's own inner citation (`the code says so at :4293-4296`) had rotted with it and is now stated symbol-relative instead of by line — a line inside a note is exactly as unfalsifiable as one the scanner cannot parse, since no check reads `note` at all. Re-closed by hand against c459da6bc."
     },
     "configuration": {
-      "children": {
-        "title": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Dead by container: `manifest.configuration` has ZERO reads anywhere in objectstack or objectui (repo-wide probe for `(manifest|pkg|package|entry|artifact)?.configuration`, non-test, non-comment — no hits at all), so no key beneath it can be read. The describe() promises a settings surface the plugin \"exposes to the user via UI/ENV\"; nothing renders or resolves it. The live analogue is the settings service's own declaration surface (packages/services/service-settings), which is authored separately and never sourced from here."
-        },
-        "properties": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Same zero as its sibling — the container is never read. This is the larger half of the loss: the per-setting shape declares `type` / `default` / `description` / `required` / `secret` / `enum`, and `secret: true` in particular reads as \"value is encrypted/masked (e.g. API Keys)\" while nothing encrypts, masks or even parses it. That is the false-compliance shape ADR-0049 exists for; filed as #11332 rather than acted on here, because this card seeds the ledger and does not retire keys."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-08-29",
+      "evidenceScope": "cross-repo",
+      "note": "RETIRED, and the row must STAY: `retiredKey()` keeps the key in the walked shape (a tombstone, not a strict removal; the `loading` precedent). Removed in @objectstack/spec 17.x (#11332, ADR-0049), ADR-0087 D3 entry `plugin-manifest-dead-containers-retired`, retired-key entry `kernel/Manifest:configuration`. The container had ZERO reads in objectstack, objectui and cloud (#12400, cloud clean at 15f55df with positive controls), which settled both children at once — the per-child rows this row used to carry (title / properties, dead-by-container, verified 2026-08-23) leave the ledger with the children, because the tombstone removes the drilled shape beneath the key. `properties.*.secret` is why this was recorded as false compliance rather than tidying: its describe() promised \"value is encrypted/masked (e.g. API Keys)\" and nothing encrypted, masked or even parsed it. The enforced channel is host composition — the options object passed to the plugin's constructor in defineStack plugins."
     },
     "contributes": {
       "children": {
@@ -181,44 +171,16 @@
       "note": "Deprecated in favour of `defineStack({ data })` but still read, so `live` rather than `dead`. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `app-plugin.ts:946-947` had rotted in range onto the JOB scheduling block (`ok++` after a `svc.schedule(...)` with its retry policy), ~55 lines short of the read. That is the SAME rot batch 1 recorded one file over for `object.actions`, which cited `app-plugin.ts:929` and landed in the same job block: two ledger entries, two different keys, one drifted region. ANCHOR CHOICE, stated because it is weaker than the batch's others: the read is inline in `AppPlugin.start`, which has no enclosing named helper (contrast `collectBundleActions`, which batch 1 could anchor for `object.actions`), so the anchor names `seedDatasets` — the local the spread lands in, unique in the file and specific to this collection — rather than the 1840-line class. Re-closed by hand against c459da6bc. Its subtree is SeedSchema, classified in full by the governed `seed` type — recorded as a RESOLVED deferral (`manifest/data` → `seed`) in scripts/liveness/undrilled-containers.baseline.json rather than duplicated here, so a key added to SeedSchema cannot get a verdict on one side and not the other."
     },
     "capabilities": {
-      "children": {
-        "implements": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Dead by container: `manifest.capabilities` (PluginCapabilityManifestSchema) has ZERO reads in objectstack or objectui. The `.capabilities` hits the probe returns belong to other surfaces entirely — driver loader contracts (packages/metadata/src/metadata-manager.ts:798), the QuickJS sandbox argument set (packages/runtime/src/sandbox/quickjs-runner.ts:120), REST discovery (packages/rest/src/rest-server.ts:3333) — none of them reached from a manifest."
-        },
-        "provides": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Same zero as its siblings — the container is never read, so no key beneath it can be. The describe() sells plugin interoperability and automatic discovery; no discovery path consults it."
-        },
-        "requires": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Same zero. Note the live analogue one level up: real dependency resolution runs off top-level `manifest.dependencies` (packages/metadata-protocol/src/protocol.ts:4290), not off this declaration."
-        },
-        "extensionPoints": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Same zero. Declares extension points nothing enumerates — the sibling of `contributes.fieldTypes`, which declares an extension point with no registration seam."
-        },
-        "extensions": {
-          "status": "dead",
-          "verifiedAt": "2026-08-23",
-          "evidenceScope": "cross-repo",
-          "note": "Same zero, and not to be confused with the manifest's own top-level `extensions` key, which is separately dead below."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-08-29",
+      "evidenceScope": "cross-repo",
+      "note": "RETIRED, and the row must STAY: `retiredKey()` keeps the key in the walked shape (a tombstone, not a strict removal; the `loading` precedent). Removed in @objectstack/spec 17.x (#11332, ADR-0049), ADR-0087 D3 entry `plugin-manifest-dead-containers-retired`, retired-key entry `kernel/Manifest:capabilities`. The container (PluginCapabilityManifestSchema) had ZERO reads in objectstack, objectui and cloud (#12400, cloud clean at 15f55df with positive controls), which settled all five children at once — the per-child rows this row used to carry (implements / provides / requires / extensionPoints / extensions, each dead-by-container, verified 2026-08-23) leave the ledger with the children, because the tombstone removes the drilled shape beneath the key. Provenance worth keeping: the bare `.capabilities` hits a re-measurement will find belong to other surfaces (driver loader contracts at packages/metadata/src/metadata-manager.ts, the QuickJS sandbox argument set at packages/runtime/src/sandbox/quickjs-runner.ts, REST discovery at packages/rest/src/rest-server.ts, the ADR-0066 stack-level `capabilities` collection); real dependency resolution runs off top-level `manifest.dependencies` (packages/metadata-protocol/src/protocol.ts), never off `capabilities.requires`. `PluginCapabilityManifestSchema` stays published — the plugin-registry surface still declares it."
     },
     "extensions": {
       "status": "dead",
-      "verifiedAt": "2026-08-23",
+      "verifiedAt": "2026-08-29",
       "evidenceScope": "cross-repo",
-      "note": "`z.record(z.string(), z.unknown())` — an untyped escape hatch with zero reads in objectstack or objectui (repo-wide probe, non-test, non-comment: no hits). Worth separating from the other dead keys when a removal is cut: because the value type is `unknown`, this key is where anything the platform does not yet model gets parked, so its emptiness is evidence that authors are not parking things here either."
+      "note": "RETIRED, and the row must STAY: `retiredKey()` keeps the key in the walked shape (a tombstone, not a strict removal; the `loading` precedent). Removed in @objectstack/spec 17.x (#11332, ADR-0049), ADR-0087 D3 entry `plugin-manifest-dead-containers-retired`, retired-key entry `kernel/Manifest:extensions`. Prior verdict kept as provenance: `z.record(z.string(), z.unknown())` — an untyped escape hatch with zero reads in all three repos; because the value type was `unknown`, this key is where anything the platform does not yet model would get parked, so its emptiness was evidence that authors were not parking things here either — an untyped catch-all with no users was the cheapest removal in the family. The enforced extension channels are `contributes.kinds`, `navigationContributions` (ADR-0029 D7), and plugin code itself."
     },
     "navigationContributions": {
       "children": {

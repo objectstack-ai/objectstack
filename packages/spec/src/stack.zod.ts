@@ -1089,7 +1089,7 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
         if (entry.transform === 'javascript') {
           errors.push(
             `Mapping '${m.name}' uses transform 'javascript', which the import path does not execute ` +
-              `(no server-side sandbox — see framework#2611). Use none/constant/map/split/join/lookup, ` +
+              `(no server-side sandbox). Use none/constant/map/split/join/lookup, ` +
               `or model the logic as a flow.`,
           );
         }
@@ -2010,7 +2010,7 @@ function warnMalformedCollectionKey(key: string): void {
     `composeStacks: top-level key '${key}' is a collection (concatenated across stacks) but at ` +
       `least one stack carries a non-array value for it — that value cannot be composed and was ` +
       `skipped. Author it as an array, or run the stack through strict \`defineStack\` to have ` +
-      `the shape rejected where it is written. See objectstack-ai/objectstack#5005.`,
+      `the shape rejected where it is written.`,
   );
 }
 
@@ -2036,7 +2036,7 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
     `composeStacks: top-level key '${key}' has no declared composition rule — composed with ` +
       `the default (${rule === 'concat' ? 'arrays are concatenated' : 'single value; conflicting declarations throw'}). ` +
       `Declare what composing it means in COMPOSE_KEY_DISPOSITIONS (packages/spec/src/stack.zod.ts) ` +
-      `in the same change that declares the key — see objectstack-ai/objectstack#5005.`,
+      `in the same change that declares the key.`,
   );
 }
 
