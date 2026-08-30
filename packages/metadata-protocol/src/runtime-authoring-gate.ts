@@ -383,14 +383,22 @@ export type RuntimePendingDeclarations = RuntimeStackContext;
  *
  * Every metadata type NOT listed here contributes nothing to the closure, and
  * that is the correct answer rather than a gap: a collection is carried
- * because some rule RESOLVES REFERENCES INTO IT, and only these four are read
+ * because some rule RESOLVES REFERENCES INTO IT, and only these five are read
  * that way (`RuntimeStackContext`'s own docblock records the measurement).
+ *
+ * [#13216] `page` is the fifth, and it arrives with the closure case already
+ * measured rather than as an afterthought: a package that ships a custom page
+ * together with the object view that mounts it publishes BOTH in one batch, so
+ * without this row `validateViewPageRefs` would report the sibling page as
+ * unresolved for exactly the batch that carries it — the `shyx_customer_ds`
+ * shape one collection over.
  */
 export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
     object: 'objects',
     permission: 'permissions',
     book: 'books',
     dataset: 'datasets',
+    page: 'pages',
 } as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
 
 /**
@@ -521,8 +529,16 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     datasets?: readonly unknown[];
     /**
+     * [#13216] Live page declarations — the resolution universe
+     * `validateViewPageRefs` resolves a `type: 'page'` list view's `pageName`
+     * against. Without it every legitimate page mount published through
+     * `PUT /api/v1/meta/view` reads as dangling, so the thread-through is
+     * load-bearing on exactly the door the mount is authored at.
+     */
+    pages?: readonly unknown[];
+    /**
      * [#10377] The declarations this write's own BATCH is publishing alongside
-     * it — folded into the four collections above by
+     * it — folded into the five collections above by
      * {@link mergePendingDeclarations} before any rule runs.
      *
      * Stated by the batch door (`publishPackageDrafts`), which is the only
@@ -585,7 +601,7 @@ export function evaluateRuntimeAuthoringGate(args: {
         item: args.body,
         ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
         // [#10377] Live universe + this batch's own pending drafts, folded per
-        // collection. Uniform across all four on purpose: the closure ruling
+        // collection. Uniform across all five on purpose: the closure ruling
         // judges a package as a self-consistent UNIT, and a per-collection
         // closure is precisely the state that produced this card — `objects`
         // had been threaded, `datasets` had not, and the difference was
@@ -595,6 +611,7 @@ export function evaluateRuntimeAuthoringGate(args: {
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
+            pages: mergePendingDeclarations(args.pages ?? [], args.pending?.pages),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });

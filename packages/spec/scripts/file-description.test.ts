@@ -198,15 +198,25 @@ describe('findModuleDocBlock — a block documents a symbol, or it documents the
   });
 
   it('keeps a header the lazify codemod separated from the imports', () => {
-    // `scripts/lazify-schemas.ts` inserts its import after the leading run of
-    // comments and imports — and that run swallows a doc block, so a header can
-    // end up with imports on both sides. It is still a header.
+    // `api/analytics.zod.ts`, as it really is on `main`. `lazify-schemas.ts`
+    // inserts its import after the leading run of comments and imports — and
+    // that run swallows a doc block, so a header can end up with imports on
+    // both sides. It is still a header, and the banner is why: the block was
+    // not sitting against the declaration before the codemod ran either.
+    //
+    // ⚠️ This case used to be written WITHOUT the banner, and that reduction
+    // dropped the one line carrying the verdict (#13263) — see the case below,
+    // which is that bannerless shape and now asserts the opposite.
     const source = [
       "import { z } from 'zod';",
       '',
       '/**',
       ' * Analytics API Protocol',
       ' */',
+      '',
+      '// ==========================================',
+      '// 1. API Endpoints',
+      '// ==========================================',
       '',
       "import { lazySchema } from '../shared/lazy-schema';",
       'export const AnalyticsEndpoint = z.enum([]);',
@@ -217,6 +227,143 @@ describe('findModuleDocBlock — a block documents a symbol, or it documents the
 
   it('returns null rather than guessing when a file has no doc block at all', () => {
     expect(findModuleDocBlock("import { z } from 'zod';\nexport const A = z.string();\n")).toBeNull();
+  });
+});
+
+/**
+ * #13263 — an injected import is not a separator.
+ *
+ * `lazify-schemas.ts` injects its `lazySchema` import at the END of the file's
+ * leading run of comments, blank lines and imports, and its regex for that run
+ * counts a doc block among the comments. A module written as an import, a blank
+ * line, `Service Status Enum` and then `export const ServiceStatus` therefore
+ * came out of the codemod with the import BETWEEN the block and its symbol —
+ * and condition 3, which skipped only blank lines, then read the block as
+ * documenting nothing. 28 reference pages opened with one schema's comment, and
+ * `gen:skill-refs` copied each first line into the published skill indexes.
+ *
+ * The tightening applies only INSIDE the import block and stops at a comment of
+ * any kind, which is what the four `keeps` cases below pin: without the first
+ * limb, three real headers written above their imports go blank; without the
+ * second, `api/analytics` and `system/cache` do.
+ *
+ * MEASURED over `packages/spec/src` (193 sources, base `3322527f`): 28 pages
+ * lose a misattributed opening, 0 change to a different block, 165 are
+ * byte-identical. The corpus limb at the end of this file re-derives that
+ * rather than restating it.
+ */
+describe('findModuleDocBlock — #13263: an import injected between a block and its symbol', () => {
+  it('rejects a block the codemod separated from the declaration it documents', () => {
+    // `api/discovery.zod.ts`, `data/field.zod.ts`, and 26 more. This is the
+    // previous case's source with the banner removed — the whole difference.
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * Service Status Enum',
+      ' * Describes the operational state of a service in the discovery response.',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      "export const ServiceStatus = z.enum(['available', 'stub']);",
+      '',
+    ].join('\n');
+    expect(findModuleDocBlock(source)).toBeNull();
+  });
+
+  it('rejects it across a blank line and several injected imports', () => {
+    // `automation/flow.zod.ts` has five between the block and `FlowNodeAction`;
+    // `data/object.zod.ts` six. Distance in plumbing lines is not a signal.
+    const source = [
+      "import { z } from 'zod';",
+      "import { ProtectionSchema } from '../shared/protection.zod';",
+      '',
+      '/**',
+      ' * Flow Node Types — built-in seed set (ADR-0018).',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      "import { retiredKey } from '../shared/retired-key';",
+      "import { strictObject } from '../shared/strict-object';",
+      '',
+      "export const FlowNodeAction = z.enum(['start', 'end']);",
+      '',
+    ].join('\n');
+    expect(findModuleDocBlock(source)).toBeNull();
+  });
+
+  it('rejects it across a MULTI-LINE import — continuation lines are plumbing too', () => {
+    // `data/document.zod.ts` and `kernel/execution-context.zod.ts` reach their
+    // declaration only over a wrapped import's `Foo,` and `} from '…';` lines.
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * Document Version Schema',
+      ' */',
+      'import {',
+      '  MetadataProtectionFields,',
+      '  ProtectionSchema,',
+      "} from '../kernel/metadata-protection.zod';",
+      'export const DocumentVersionSchema = z.object({});',
+      '',
+    ].join('\n');
+    expect(findModuleDocBlock(source)).toBeNull();
+  });
+
+  it('keeps a header written ABOVE the imports, even with a declaration right after them', () => {
+    // `system/doc.zod.ts`, `cloud/template-manifest.zod.ts`,
+    // `api/error-code-ledger.zod.ts`. The codemod injects AFTER the last
+    // import, so a block preceding every import preceded them beforehand too —
+    // the position is the proof, and dropping this limb blanks all three.
+    const source = [
+      '// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.',
+      '',
+      '/**',
+      ' * Package Documentation Metadata Protocol (ADR-0046)',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      'export const DocSchema = z.object({});',
+      '',
+    ].join('\n');
+    expect(opening(findModuleDocBlock(source))).toBe('Package Documentation Metadata Protocol (ADR-0046)');
+  });
+
+  it('keeps a header inside the imports when the next schema carries its own JSDoc', () => {
+    // `system/cache.zod.ts` — its block names itself ("This File") and the
+    // declaration beyond the injected import is already documented, so that
+    // import says nothing about what the block documents.
+    const source = [
+      "import { z } from 'zod';",
+      "import { CronExpressionInputSchema } from '../shared/expression.zod';",
+      '',
+      '/**',
+      ' * Application-Level Cache Protocol',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      '/** Cache eviction strategy. */',
+      "export const CacheStrategySchema = z.enum(['lru']);",
+      '',
+    ].join('\n');
+    expect(opening(findModuleDocBlock(source))).toBe('Application-Level Cache Protocol');
+  });
+
+  it('keeps a block with no declaration on the far side at all', () => {
+    // A module that is nothing but re-exports — the plumbing runs to the end of
+    // the file, so there is no symbol for the block to have been torn from.
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * Environment Artifact Envelope — re-export',
+      ' */',
+      "export { EnvironmentArtifactSchema } from './artifact.zod';",
+      "export type { EnvironmentArtifact } from './artifact.zod';",
+      '',
+    ].join('\n');
+    expect(opening(findModuleDocBlock(source))).toBe('Environment Artifact Envelope — re-export');
   });
 });
 
@@ -1022,6 +1169,58 @@ describe('corpus — no reference source donates a symbol comment to its page', 
       .toBe('Package Documentation Metadata Protocol (ADR-0046)');
     expect(openingOf('api/error-code-ledger.zod.ts'))
       .toBe('Error-Code Ledger (ADR-0112 D3).');
+  });
+
+  /**
+   * #13263's corpus limb — the half that cannot rot.
+   *
+   * Re-derives the verdict from the real tree instead of restating a file list:
+   * a selected block that sits inside the import block must have a COMMENT on
+   * the far side of that plumbing, never a declaration. A source that acquires
+   * the codemod shape later cannot quietly re-acquire a wrong page description,
+   * and the three headers written above their imports are pinned by name in the
+   * `#6145` case above, so neither direction can drift alone.
+   */
+  it('never selects a block with a declaration on the far side of the imports', () => {
+    const PLUMBING = /^(?:import\b|export\s*(?:\*|\{|type\s*\{))/;
+    const offenders: string[] = [];
+    for (const file of zodFiles) {
+      const source = fs.readFileSync(file, 'utf-8');
+      const block = findModuleDocBlock(source);
+      if (block === null) continue;
+      const lines = source.split('\n');
+      const marker = `/**${block}*/`;
+      const at = source.indexOf(marker);
+      if (at < 0) continue; // already reported by the case above
+      const startLine = source.slice(0, at).split('\n').length - 1;
+      const endLine = startLine + marker.split('\n').length - 1;
+      if (!lines.slice(0, startLine).some(l => PLUMBING.test(l))) continue; // above the imports
+
+      for (let i = endLine + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trim() === '') continue;
+        if (line.trimStart().startsWith('/')) break; // a comment ends the preamble
+        if (PLUMBING.test(line)) continue;
+        if (!/^[A-Za-z_$@]/.test(line)) continue; // continuation / closing punctuation
+        offenders.push(`${path.relative(SRC_DIR, file)} → ${line.slice(0, 60)}`);
+        break;
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('publishes no description for the modules whose opening was one schema\'s doc', () => {
+    const openingOf = (rel: string) =>
+      opening(findModuleDocBlock(fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8')));
+
+    // Four of the 28, one per shape: the plain single injected import, the run
+    // of five, the wrapped import, and the one whose page-wide blast radius the
+    // card measured (`gen:skill-refs` shipped `Field Type Enum` as the pointer
+    // row for a module of ~40 field schemas).
+    expect(openingOf('api/discovery.zod.ts')).toBeNull();
+    expect(openingOf('automation/flow.zod.ts')).toBeNull();
+    expect(openingOf('kernel/execution-context.zod.ts')).toBeNull();
+    expect(openingOf('data/field.zod.ts')).toBeNull();
   });
 });
 
