@@ -163,7 +163,14 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
   it('`$between` + `$gte` — the range`s lower bound, contested', async () => {
     const [ab, ba] = bothOrders('score', ['$between', [1, 5]], ['$gte', 9]);
     // Was [] / ['1','2']: one order kept `$gte: 9` (empty, correct by
-    // accident), the other dropped it and returned the whole range.
+    // ACCIDENT), the other dropped it and returned the whole range.
+    //
+    // ⭐ This cell and the `$between` + `$lte` one below fail in OPPOSITE
+    // directions on the broken code — measured, not reasoned. A suite that
+    // only ever wrote the operator first would have been green here and red
+    // below; one that only ever wrote it second, the reverse. Neither
+    // one-direction suite catches the class, which is why every cell in this
+    // file is asserted twice.
     expect(await liveIds(ab)).toEqual([]);
     expect(await liveIds(ba)).toEqual([]);
     expect(matcherIds(ab)).toEqual([]);
@@ -172,7 +179,9 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
 
   it('`$between` + `$lte` — the range`s upper bound, contested', async () => {
     const [ab, ba] = bothOrders('score', ['$between', [1, 5]], ['$lte', 9]);
-    // Was ['1','2','3'] / ['1','2'] — the first WIDENED past the range.
+    // Was ['1','2','3'] / ['1','2'] — the FIRST order widened past the range,
+    // the second was right by accident. The mirror of the cell above; see its
+    // ⭐ note for why one direction proves nothing.
     expect(await liveIds(ab)).toEqual(['1', '2']);
     expect(await liveIds(ba)).toEqual(['1', '2']);
     expect(matcherIds(ab)).toEqual(['1', '2']);
