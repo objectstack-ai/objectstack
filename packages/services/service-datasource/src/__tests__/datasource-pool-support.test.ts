@@ -64,6 +64,7 @@ import {
 } from '../datasource-connection-service.js';
 import { DatasourceAdminService, type StoredDatasource } from '../datasource-admin-service.js';
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 
 describe('#5714 — which driver arms read a declared `pool`', () => {
   it('names the two sqlite arms, `memory` and `turso` as unable to honour it (#5931 / #7243)', () => {
@@ -304,7 +305,12 @@ function fakeEngine() {
     drivers,
     registerDriver: (driver: any) => { drivers.set(driver.name, driver); },
     registerDatasourceDef: () => {},
-    getDriverByName: (name) => drivers.get(name),
+    // [#12010] The double deliberately stores MINIMAL stand-ins (a bare
+    // `{ name }` is how these tests simulate an `onEnable`-registered
+    // driver), while the derived seam member answers the contract's
+    // `IDataDriver | undefined`. Narrowing on the way out keeps the double
+    // loose where it is meant to be loose without re-widening the seam.
+    getDriverByName: (name) => drivers.get(name) as IDataDriver | undefined,
   };
   return engine;
 }

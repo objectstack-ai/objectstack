@@ -45,6 +45,7 @@ import {
 } from './datasource-pool-support.js';
 import { connectFailureRemedy } from './connect-failure-remedy.js';
 import type { Logger } from './logger.js';
+import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
 export interface ConnectableDatasource {
@@ -85,48 +86,57 @@ export interface DatasourceBoundObject {
   datasource?: string;
 }
 
-/** Engine surface this service drives (the ObjectQL `'data'` engine). */
-export interface ConnectionEngineLike {
-  registerDriver?: (driver: unknown, isDefault?: boolean) => void;
-  registerDatasourceDef?: (def: {
-    name: string;
-    schemaMode?: string;
-    external?: { allowWrites?: boolean };
-  }) => void;
-  getDriverByName?: (name: string) => unknown;
-  /**
-   * Register read metadata (DDL-free) for a federated object so its physical
-   * remote table/columns resolve for queries. Idempotent; called per bound
-   * external object after the driver is registered, because boot schema-sync
-   * ran before this driver existed (ADR-0015 §18; matches what the legacy
-   * `onEnable` bridge does manually).
-   */
-  syncObjectSchema?: (objectName: string) => Promise<void>;
-  /**
-   * Name of the engine's DEFAULT driver, when one is set. Used by the
-   * `asDefault` connect path's idempotency guard (#3826): the default driver
-   * keeps its natural name, so `getDriverByName('default')` can never detect a
-   * prior registration.
-   */
-  getDefaultDriverName?: () => string | undefined;
-  /**
-   * Tell the engine a datasource was *declared* but is not connected, and why
-   * (framework#3828). Without this the engine cannot distinguish "the app
-   * misspelled a datasource name" from "the host's policy refused it" from "it
-   * failed to connect and the operator set OS_ALLOW_DRIVER_CONNECT_FAILURE" —
-   * all three used to surface as the same bare `is not registered`.
-   *
-   * `publicDetail` is the only part safe to echo to an end user; the operator
-   * -facing reason stays in the logs and the datasource-admin list.
-   */
-  markDatasourceUnavailable?: (info: {
-    name: string;
-    kind: 'blocked' | 'failed';
-    publicDetail?: string;
-  }) => void;
-  /** Drop a previous {@link markDatasourceUnavailable} record (reconnect / removal). */
-  clearDatasourceUnavailable?: (name: string) => void;
-}
+/**
+ * Engine surface this service drives (the ObjectQL `'data'` engine), DERIVED
+ * from the published contracts rather than re-declared structurally — the
+ * #4251 B3 sweep pattern, applied here exactly as `datasource-admin-plugin.ts`
+ * applied it to its own `DataEngineLike` one file over, under #11493's ruling.
+ *
+ * [#12010] Every member was hand-written here until this change, and the
+ * inventory that filed that card measured what it cost. Three of them —
+ * `registerDatasourceDef`, `markDatasourceUnavailable`,
+ * `clearDatasourceUnavailable` — were declared by NO contract at all: real
+ * `ObjectQL` methods, called across a package boundary, meeting no compiler on
+ * the producer side, so drift landed silently in this consumer. #12248
+ * adjudicated all three onto {@link IDataEngine} and #12482 followed with
+ * `syncObjectSchema`; deriving is what makes the next drift a build error here
+ * instead of a re-declaration that quietly disagrees.
+ *
+ * One member was not merely a duplicate but wrong in the unsafe direction.
+ * `registerDriver?: (driver: unknown, isDefault?: boolean) => void` promised
+ * this seam accepts *any* value as a driver. The engine does not —
+ * {@link IObjectQLEngine.registerDriver} takes an {@link IDataDriver} — so
+ * under `strictFunctionTypes` the real engine was measurably NOT assignable to
+ * this view, and a mis-shaped driver reaching `registerDriver` was a runtime
+ * problem the type was structured not to see. Deriving repairs both halves at
+ * once; `__tests__/connection-engine-like-contract.test.ts` pins them.
+ *
+ * Anchored on {@link IObjectQLEngine} rather than {@link IDataEngine} for one
+ * member: `registerDriver` is declared only on the full engine contract. The
+ * two describe the same instance — `packages/objectql`'s plugin registers one
+ * object under both the `'data'` and `'objectql'` slots — but the `'data'`
+ * slot's declared type is the data plane alone, which is why
+ * `datasource-admin-plugin.ts` still reaches this type through a cast.
+ *
+ * `Partial<…>` is load-bearing, not shorthand — the same reason the sibling
+ * `DataEngineLike` carries it. `registerDriver` is REQUIRED on the contract,
+ * while this service treats its absence as a graceful-degradation signal
+ * (`if (!factory || !engine?.registerDriver)` leaves the datasource
+ * metadata-only, status `'skipped-no-infra'`). Making it required here would
+ * change what a lightweight kernel does at boot.
+ */
+export type ConnectionEngineLike = Partial<
+  Pick<
+    IObjectQLEngine,
+    | 'registerDriver'
+    | 'registerDatasourceDef'
+    | 'getDriverByName'
+    | 'syncObjectSchema'
+    | 'getDefaultDriverName'
+    | 'markDatasourceUnavailable'
+    | 'clearDatasourceUnavailable'
+  >
+>;
 
 /** Secret dereference surface (the `SecretBinder.resolve`, Phase 2 / D3). */
 export interface ConnectionSecretResolver {
@@ -588,10 +598,19 @@ export class DatasourceConnectionService {
       // `default` goes through the engine's default-driver fallback, never
       // `drivers.get('default')`, and the natural name keeps logs/lookups
       // byte-for-byte with the pre-#3826 boot.
-      const engineDriver = (handle.driver ?? handle) as { name?: string };
+      // [#12010] `DatasourceDriverHandle.driver` is declared `unknown` — the
+      // factory escape hatch is open to any host-built driver — so a cast is
+      // unavoidable somewhere on this path. It belongs HERE, at the one call
+      // site that constructs the value, not widened into the exported seam
+      // type where it told every consumer the engine accepts any value as a
+      // driver.
+      const engineDriver = (handle.driver ?? handle) as IDataDriver;
       if (!opts.asDefault) {
         try {
-          engineDriver.name = name;
+          // `IDataDriver.name` is `readonly`, and the engine routes by
+          // `driver.name === <datasource>`, so the stamp goes through a
+          // writable view (a frozen driver throws and is tolerated below).
+          (engineDriver as { name?: string }).name = name;
         } catch {
           /* frozen driver — registration may still work if name already matches */
         }
@@ -648,9 +667,11 @@ export class DatasourceConnectionService {
   async disconnect(name: string, opts: { asDefault?: boolean } = {}): Promise<void> {
     const engine = this.cfg.engine();
     const driverName = opts.asDefault ? engine?.getDefaultDriverName?.() : name;
-    const driver = (driverName ? engine?.getDriverByName?.(driverName) : undefined) as
-      | { disconnect?: () => Promise<void> }
-      | undefined;
+    // [#12010] Cast-free: `getDriverByName` now answers the contract's
+    // `IDataDriver | undefined` instead of a locally re-declared `unknown`.
+    // The `typeof … === 'function'` guard below stays — a host-built driver in
+    // the registry satisfies the contract only structurally.
+    const driver = driverName ? engine?.getDriverByName?.(driverName) : undefined;
     if (this.states.get(name)?.ownership === 'host') {
       this.logger?.debug?.(`datasource '${name}': adopted (host-owned) instance — pool left to the host, clearing state only`);
     } else if (typeof driver?.disconnect === 'function') {

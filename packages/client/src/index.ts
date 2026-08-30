@@ -16,6 +16,13 @@ import {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  // [#13023] The reset door's response contract. Both `meta.deleteItem`
+  // declarations BIND this type rather than transcribing its members: a
+  // hand-written member list is the exact defect this card removes (a local
+  // declaration that drifts from the wire), and the card's own body
+  // demonstrated the failure by attributing the IMPLEMENTATION's declared
+  // return to this schema.
+  DeleteMetaItemResponse,
   PublishMetaItemResponse,
   PublishPackageDraftsResponse,
   LoginRequest,
@@ -1150,12 +1157,24 @@ export class ObjectStackClient {
      * metadata_conflict` instead — the door has always read the header
      * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
      * had no argument for it until #12181.
+     *
+     * [#13023] READ `reset`, NEVER `deleted`. This method used to declare
+     * `{ type, name, deleted }` — an UNINHABITED shape: the door answers
+     * `res.json(result)` with `deleteMetaItem`'s return, and not one of its
+     * four branches carries `type`, `name` or `deleted`. So `r.deleted`
+     * compiled and read `undefined` on EVERY reset, including the ones that
+     * really removed a row, and the SDK's own tests had to cast through `any`
+     * to see the truth. The truthful flag is {@link DeleteMetaItemResponse}'s
+     * `reset`: `true` means an overlay row was deleted, `false` means none
+     * existed and the item was already at its artifact default — exactly the
+     * distinction a caller most wants. Same correction #5638 made one door
+     * over on `DeleteDataResult`.
      */
     deleteItem: async (
         type: string,
         name: string,
         options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
         const route = this.getRoute('metadata');
         // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
         // the three meanings `qs` holds in this file.
@@ -1169,7 +1188,11 @@ export class ObjectStackClient {
             method: 'DELETE',
             ...(headers ? { headers } : {}),
         });
-        return this.unwrapResponse(res);
+        // The door answers BARE (`res.json(result)`), and `unwrapResponse`
+        // strips only a body carrying BOTH a boolean `success` AND a `data`
+        // key — this one has no `data` — so the caller receives the door's
+        // whole body and the annotation above describes it.
+        return this.unwrapResponse<DeleteMetaItemResponse>(res);
     },
 
     /**
@@ -2171,11 +2194,45 @@ export class ObjectStackClient {
       //    promised could not happen. `get` is the method that really does
       //    answer a `database` block.
       //
-      // The keys the route DOES send beside `environment` (`warnings`,
-      // `durationMs`, and a conditional `hostnameAssignment`) are deliberately
-      // not declared here — adding them is new published surface and a
-      // separate decision, not part of this rename.
-      return this.unwrapResponse<{ environment: any }>(res);
+      // The three keys the route sends BESIDE `environment` are declared here
+      // as of 2026-08-29. That absence used to be deliberate and this comment
+      // used to say so; the decision it was waiting for has since been made, so
+      // the stance is recorded rather than left standing:
+      //
+      //   ⚖️ Maintainer ruling, 2026-08-29, verbatim: 「同意」— option 甲.
+      //   `warnings` and `durationMs` are declared PRESENT, `hostnameAssignment`
+      //   OPTIONAL (the producer's own "absence stays absence" contract), and
+      //   all three are typed as the INLINE WIRE SHAPE.
+      //
+      // ⛔ Inline, and NOT bound to `@objectstack/spec/cloud`'s
+      // `ProvisionEnvironmentResponseSchema`. That is the namespace docblock's
+      // #11925/#12036 constraint applied to the response side: those contracts
+      // are camelCase row types for a control plane that speaks snake_case on
+      // `/api/v1/cloud/*`, so binding them would typecheck and be false. The
+      // ruling names the inline shape for that reason.
+      //
+      // ⚠️ Two facts a later reader must not have to rediscover:
+      //
+      //  - The producer shape is an INHERITED reading, not one measured from
+      //    this repo. `objectstack-ai/cloud` is not readable from here, so the
+      //    handler body quoted on the card (`packages/service-cloud/src/routes/
+      //    environment-lifecycle.ts`, POST `/cloud/environments`, spreading
+      //    `environment` / `warnings` / `durationMs` / conditional
+      //    `hostnameAssignment`) is the card author's 2026-08-28 measurement,
+      //    relayed. No gate in this repo can check it.
+      //  - `ProvisionEnvironmentResponseSchema` additionally declares a REQUIRED
+      //    `credential`, which that handler quote does not send, and marks
+      //    `warnings` `.optional()`, which the ruling declares present. Both
+      //    divergences are recorded and UNJUDGED; neither is settled here. The
+      //    `credential` one is why binding the schema is not the safe default
+      //    it looks like: it would make this SDK declare a key the wire does
+      //    not carry — this method's own defect class, pointed the other way.
+      return this.unwrapResponse<{
+        environment: any;
+        warnings: string[];
+        durationMs: number;
+        hostnameAssignment?: { requestedHostname: string; assignedHostname: string };
+      }>(res);
     },
 
     /**
@@ -6013,12 +6070,18 @@ export class ScopedEnvironmentClient {
      * reads `?state=` — and the `If-Match` header — byte-identically. A bag
      * on only one of the two clients would be a fresh divergence of the kind
      * #7019 rules against, not half a fix.
+     *
+     * [#13023] Returns {@link DeleteMetaItemResponse} — read `reset`, never
+     * `deleted`. The phantom `{ type, name, deleted }` declaration was
+     * TEXTUALLY IDENTICAL on both twins, so correcting one and not the other
+     * would have been half a fix in the same #11713 direction the bag above
+     * records. See the unscoped twin for the full account.
      */
     deleteItem: async (
       type: string,
       name: string,
       options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
       // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
       const query = metaDeleteQuery(options);
       // Header half of the same bag, through the same one builder the twin
@@ -6028,7 +6091,8 @@ export class ScopedEnvironmentClient {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
-      return this.parent._unwrap(res);
+      // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
+      return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
     getHistory: async (
       type: string,

@@ -290,6 +290,7 @@
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",
     "check:skill-examples": "tsx scripts/check-skill-examples.ts --self-test && tsx scripts/check-skill-examples.ts",
+    "check:yaml-examples": "tsx scripts/check-yaml-examples.ts --self-test && tsx scripts/check-yaml-examples.ts",
     "check:template-manifests": "tsx scripts/check-template-manifests.ts --self-test && tsx scripts/check-template-manifests.ts",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/spec --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/spec --project tsconfig.test.json",
@@ -310,7 +311,8 @@
     "ai": "^7.0.66",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   },
   "dependencies": {
     "pg-connection-string": "^2.14.0",

@@ -465,7 +465,7 @@ describe('RangeOperatorSchema', () => {
       // generic "Invalid input" zod gives an unexplained union.
       expect(withReference.error?.issues[0]?.code).toBe('invalid_union');
       expect(withReference.error?.issues[0]?.message).toContain('Not a valid $and member');
-      expect(alreadyInvalidComparand.error?.issues[0]?.message).toContain('#7711');
+      expect(alreadyInvalidComparand.error?.issues[0]?.message).toContain('Declared = enforced (ADR-0049)');
       // And the level that DOES judge comparands rejects both — unchanged.
       expect(FieldOperatorsSchema.safeParse({ $between: [{ $field: 'budget' }, 100] }).success)
         .toBe(false);

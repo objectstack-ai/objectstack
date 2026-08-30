@@ -129,6 +129,40 @@ export function getValueByPath(obj: any, path: string): any {
 }
 
 /**
+ * [#13166] Does a row whose field has NO VALUE satisfy this operator?
+ *
+ * The platform's settled answer for the negation-carrying operators is YES —
+ * the INCLUDE direction. #5146 made `$not` NULL-safe and ruled THIS matcher's
+ * answer canonical (`driver-sql` was rewritten to match it, not the other way
+ * round); #5298 option A extended the same answer to the non-negated `$ne` /
+ * `$nin` / `$notContains`. A ruling on 2026-08-10 briefly reversed it in favour
+ * of SQL's native three-valued logic and was WITHDRAWN the same day, once the
+ * cross-backend cost had been priced; include was re-affirmed.
+ *
+ * Ten other surfaces already answer this way, which is why aligning this one
+ * moves nothing on the SQL side: the four SQL compilers reach it through
+ * `nullSafeNegative` and their four copies of `nullValueSatisfiesOperator`
+ * (`$nin` → true, `$notContains` → true), `formula`'s `matchesFilterCondition`
+ * answers it directly, and `driver-mongodb` passes `$nin` through and compiles
+ * `$notContains` to `{ $not: { $regex } }` — both of which match a missing or
+ * null field in MongoDB.
+ *
+ * ⚠️ `$exists` is deliberately NOT here. It is not tolerant of an absent value,
+ * it is a question ABOUT one, and its own cell is a different, still-open
+ * divergence (#13195): this package's live mingo path and `driver-mongodb` read
+ * it as key-presence where this matcher and `formula` read it as has-value.
+ * `$null` is excluded for the same reason.
+ *
+ * Named rather than inlined because BOTH causes of the #13166 divergence have
+ * to answer the same question, and they sit in different places — a
+ * pre-switch guard that only sees `undefined`, and the `$notContains` arm that
+ * only sees `null`. Two spellings of one ruling is how they came apart.
+ */
+function noValueSatisfiesNegation(op: string): boolean {
+    return op === '$ne' || op === '$nin' || op === '$notContains';
+}
+
+/**
  * Evaluate a specific condition against a value
  */
 function checkCondition(value: any, condition: any): boolean {
@@ -165,7 +199,15 @@ function checkCondition(value: any, condition: any): boolean {
         const target = condition[op];
         
         // Handle undefined values
-        if (value === undefined && op !== '$exists' && op !== '$ne' && op !== '$null') {
+        //
+        // [#13166] The allowlist is {@link noValueSatisfiesNegation} plus the
+        // two operators that are ABOUT the absence rather than tolerant of it
+        // (`$exists` / `$null`), and it used to name `$ne` alone out of the
+        // three negative ones. That is why a MISSING key short-circuited to "no
+        // match" for `$nin` and `$notContains` before their arms ever ran — one
+        // of the two independent causes of the divergence #13166 measured, and
+        // the only one this guard can reach.
+        if (value === undefined && op !== '$exists' && op !== '$null' && !noValueSatisfiesNegation(op)) {
             return false; 
         }
 
@@ -219,6 +261,20 @@ function checkCondition(value: any, condition: any): boolean {
                 if (typeof value !== 'string' || !value.includes(target)) return false; 
                 break;
             case '$notContains':
+                // [#13166] A row with NO VALUE satisfies this — the second and
+                // INDEPENDENT cause of the same divergence. The guard above
+                // cannot reach this one: it only fires for `undefined`, so a
+                // field that is present and `null` arrived here and failed on
+                // `typeof value !== 'string'` — the TYPE test, not the
+                // predicate. Answering it from {@link noValueSatisfiesNegation}
+                // states which question is being answered.
+                //
+                // A present, non-string value keeps the answer it had: the
+                // ruling moved the no-value cells, and only those.
+                if (value == null) {
+                    if (noValueSatisfiesNegation(op)) break;
+                    return false;
+                }
                 if (typeof value !== 'string' || value.includes(target)) return false;
                 break;
             case '$startsWith': 

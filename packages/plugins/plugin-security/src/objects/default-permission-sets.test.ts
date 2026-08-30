@@ -16,7 +16,12 @@ const betterAuthSchemaNames = Object.values(PlatformObjects as Record<string, an
   .map((v) => v.name as string)
   .sort();
 
-const listNames = [...BETTER_AUTH_MANAGED_OBJECTS].sort();
+// `string[]`, not the literal union `BETTER_AUTH_MANAGED_OBJECTS` carries: this
+// pin compares the list against names read off the shipped schemas, which are
+// plain strings, and the comparison runs in BOTH directions. Left as the union,
+// `listNames.includes(<a schema name>)` is a type error rather than the
+// membership question the pin asks.
+const listNames: string[] = [...BETTER_AUTH_MANAGED_OBJECTS].sort();
 const setByName = (name: string): any => defaultPermissionSets.find((s) => s.name === name);
 
 describe('BETTER_AUTH_MANAGED_OBJECTS ↔ schemas (drift pin, #3325)', () => {

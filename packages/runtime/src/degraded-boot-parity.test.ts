@@ -31,6 +31,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { DatasourceConnectionService } from '@objectstack/service-datasource';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 
 const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
 
@@ -85,7 +86,12 @@ async function bootDatasource(): Promise<Error | undefined> {
     }) as any,
     engine: () => ({
       registerDriver: (d: any) => drivers.set(d.name, d),
-      getDriverByName: (n: string) => drivers.get(n),
+      // [#12010] The double stores a bare `{ name: 'd' }` stand-in, while
+      // `ConnectionEngineLike.getDriverByName` is now derived from the engine
+      // contract and answers `IDataDriver | undefined`. Narrowing on the way
+      // out keeps the double as loose as this parity test needs it without
+      // re-widening the seam.
+      getDriverByName: (n: string) => drivers.get(n) as IDataDriver | undefined,
     }),
     logger: { warn() {} },
   });

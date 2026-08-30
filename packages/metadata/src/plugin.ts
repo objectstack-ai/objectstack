@@ -829,12 +829,16 @@ export class MetadataPlugin implements Plugin {
         const roots = [...new Set(findings.map((f) => f.root))];
         const quote = (list: readonly string[]) => list.map((v) => `'${v}'`).join(', ');
 
-        // The bound vocabulary differs between a field slot and a section slot
-        // (a field also binds the `current_user` family, objectui#6010), so
-        // print only the rule(s) the findings actually implicate. Printing one
-        // flat list would either understate the field vocabulary — reading as
-        // "your legitimate current_user predicate is broken" — or quote a
-        // section rule at an operator whose artifact has no section findings.
+        // Print only the rule(s) the findings actually implicate, so an
+        // operator is never shown a rule their artifact has no instance of.
+        // ⚠️ The two lists are the SAME list today: a field bound the
+        // `current_user` family at objectui#6010 and a section did at
+        // objectui#6110 + #6111, so the per-surface split is currently empty
+        // (`@objectstack/metadata-core`, `BOUND_FORM_VIEW_PREDICATE_ROOTS`,
+        // carries the mechanism and the two times this claim went stale). The
+        // arms stay per surface because the QUESTION is per surface — two
+        // different renderers bind the family, and either can move without the
+        // other.
         const surfaces = new Set(findings.map((f) => f.surface));
         const vocabulary = [
             surfaces.has('field')

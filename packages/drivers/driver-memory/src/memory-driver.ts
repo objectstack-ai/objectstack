@@ -36,6 +36,16 @@ import {
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
+// [#13197] Field-level uniqueness — the constraint this driver enforced
+// NOWHERE, and the reason an out-of-process duplicate autonumber used to land
+// silently. The scoping semantics are `driver-sql`'s, measured; see the
+// module docblock.
+import {
+  assertNoUniqueViolation,
+  uniqueConstraintsFromDeclaredIndexes,
+  uniqueConstraintsFromFields,
+  type MemoryUniqueEnforcement,
+} from './memory-unique-constraint.js';
 
 /**
  * Persistence adapter interface.
@@ -176,16 +186,33 @@ interface MemoryTransaction {
  * - Field projection and distinct values
  * - Strict mode and initial data loading
  *
- * ## What this driver does NOT enforce
+ * ## What this driver enforces, and what it still does not
  *
- * It stores no constraints of any kind. {@link create} is a `table.push()` and
- * {@link syncSchema} only allocates an array and indexes temporal fields, so
- * there is no primary key, no uniqueness, no `NOT NULL`, no foreign key and no
- * column typing. `bulkCreate` will happily land two rows with the same `id`
+ * Since #13197 it enforces **field-level `unique`**, and since #13239
+ * **object-level declared `indexes[]` entries carrying `unique`** — both
+ * declaration surfaces `driver-sql` materializes uniqueness from, with its
+ * ADR-0120 D1/D3 scoping (`memory-unique-constraint.ts` carries the measured
+ * arm-for-arm tables, including the #4986 trap: bare `unique: true` means
+ * `'organization'` at field level and `'global'` on a declared index). A
+ * colliding write is REFUSED — `code: 'UNIQUE_VIOLATION'`, `status: 409` —
+ * instead of landing silently. That closes the one gap whose
+ * failure mode was a wrong ANSWER rather than a missing check: an autonumber
+ * allocated out-of-process used to duplicate an existing business identifier
+ * with no error anywhere, because the engine's collision resync
+ * (`createWithAutonumberResync`) is triggered by the STORE rejecting the
+ * duplicate and this store rejected nothing.
+ *
+ * Everything else is still unenforced. {@link syncSchema} allocates an array,
+ * indexes temporal fields and records those unique constraints — and nothing
+ * more — so there is no primary key, no `NOT NULL`, no foreign key and no
+ * column typing. `bulkCreate` will still happily land two rows with the same
+ * `id` (unless `id` itself declares `unique`, or a declared index lists it)
  * where a SQL driver raises a constraint violation, and a read returns both.
+ * A declared index WITHOUT `unique` is an access path and buys nothing here:
+ * this store is a linear scan.
  *
- * That makes it a WEAK oracle: code green against this driver can still be
- * broken against the SQL engines production runs on. Prefer in-memory SQLite
+ * That still makes it a WEAK oracle: code green against this driver can still
+ * be broken against the SQL engines production runs on. Prefer in-memory SQLite
  * for tests — `SqlDriver` with `connection: { filename: ':memory:' }`, or
  * `SqliteWasmDriver({ filename: ':memory:' })` where no native build is wanted.
  * This driver's remaining roles are the last-resort rung of the dev step-down
@@ -214,6 +241,17 @@ export class InMemoryDriver implements IDataDriver {
    * for it: the driver does not guess types from values.
    */
   private temporalFields: Map<string, Map<string, TemporalFieldKind>> = new Map();
+
+  /**
+   * [#13197, #13239] Declared unique constraints per object, populated by
+   * {@link syncSchema} — both declaration surfaces in one list (field-level
+   * `unique` and object-level `indexes[]` entries carrying `unique`), with the
+   * same shape and the same lifetime as {@link temporalFields} above, and for
+   * the same reason: an object absent from this map was never declared, so
+   * nothing is enforced for it. This driver does not infer a constraint from
+   * the data it happens to hold.
+   */
+  private uniqueConstraints: Map<string, MemoryUniqueEnforcement[]> = new Map();
   private transactions: Map<string, MemoryTransaction> = new Map();
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
@@ -468,6 +506,12 @@ export class InMemoryDriver implements IDataDriver {
       updated_at: data.updated_at || new Date().toISOString(),
     });
 
+    // [#13197] Refuse a declared-unique collision instead of landing it. Checked
+    // on the STORED form, so a temporal value is compared in the one shape this
+    // driver stores (#4047), and BEFORE the push, so a refused write leaves the
+    // table exactly as it found it.
+    this.assertUnique(object, newRecord);
+
     table.push(newRecord);
     this.markDirty();
     this.logger.debug('Record created', { object, id: newRecord.id, tableSize: table.length });
@@ -495,7 +539,11 @@ export class InMemoryDriver implements IDataDriver {
       created_at: table[index].created_at, // Preserve created_at
       updated_at: new Date().toISOString(),
     });
-    
+
+    // [#13197] The row being updated is excluded from its own check — an update
+    // that does not touch the unique field must not collide with itself.
+    this.assertUnique(object, updatedRecord, table[index].id);
+
     table[index] = updatedRecord;
     this.markDirty();
     this.logger.debug('Record updated', { object, id });
@@ -584,17 +632,26 @@ export class InMemoryDriver implements IDataDriver {
       
       const count = targetRecords.length;
       
+      // [#13197] Prepare and CHECK every row before mutating any of them: an
+      // `updateMany` that stamps the same unique value onto two rows collides
+      // by construction, and a half-applied batch is worse than a refusal. The
+      // pending rows are checked against each other too, which a per-row check
+      // against `table` alone would miss (nothing is written yet).
+      const pending: Array<{ index: number; row: Record<string, any> }> = [];
+      const targetIds = new Set(targetRecords.map((r) => r.id));
+      const settled = table.filter((r) => !targetIds.has(r.id));
       for (const record of targetRecords) {
           const index = table.findIndex(r => r.id === record.id);
-          if (index !== -1) {
-              const updated = this.toStoredRecord(object, {
-                  ...table[index],
-                  ...data,
-                  updated_at: new Date().toISOString()
-              });
-              table[index] = updated;
-          }
+          if (index === -1) continue;
+          const updated = this.toStoredRecord(object, {
+              ...table[index],
+              ...data,
+              updated_at: new Date().toISOString()
+          });
+          this.assertUnique(object, updated, table[index].id, [...settled, ...pending.map((p) => p.row)]);
+          pending.push({ index, row: updated });
       }
+      for (const { index, row } of pending) table[index] = row;
       
       if (count > 0) this.markDirty();
       this.logger.debug('UpdateMany completed', { object, count });
@@ -1439,6 +1496,20 @@ export class InMemoryDriver implements IDataDriver {
     // (ADR-0053 D-B3) and, like it, is idempotent.
     const kinds = indexTemporalFields(schema?.fields);
     this.temporalFields.set(object, kinds);
+    // [#13197, #13239] Learn the object's unique constraints in the same pass —
+    // BOTH declaration surfaces `driver-sql` materializes uniqueness from:
+    // field-level `unique` and object-level `indexes[]` entries carrying
+    // `unique`. Deliberately NOT retroactive: rows already in the table arrived
+    // from `initialData` or a persistence adapter, before any schema existed,
+    // and REFUSING them here would turn a declaration into a boot failure over
+    // data this driver did not write. From here on every write is checked, and
+    // an already-duplicated pair is reported by the first write that touches
+    // it — the same posture `driver-sql` takes when a unique index cannot be
+    // built over dirty data (it announces, it does not delete rows).
+    this.uniqueConstraints.set(object, [
+      ...uniqueConstraintsFromFields(schema),
+      ...uniqueConstraintsFromDeclaredIndexes(schema),
+    ]);
     if (kinds.size > 0) {
       const table = this.db[object];
       for (let i = 0; i < table.length; i++) {
@@ -1452,6 +1523,10 @@ export class InMemoryDriver implements IDataDriver {
     if (this.db[object]) {
       const recordCount = this.db[object].length;
       delete this.db[object];
+      // [#13197] The declaration dies with the table. A constraint left behind
+      // would be enforced over a table nobody declared — the inverse of the
+      // gap this closes, and just as invisible.
+      this.uniqueConstraints.delete(object);
       this.logger.info('Dropped in-memory table', { object, recordCount });
     }
   }
@@ -1622,6 +1697,31 @@ export class InMemoryDriver implements IDataDriver {
       result.id = record.id;
     }
     return result;
+  }
+
+  /**
+   * [#13197, #13239] Refuse `candidate` if it violates one of `object`'s
+   * declared unique constraints — field-level or object-level declared index.
+   *
+   * The ONE seam every write path goes through, so create, update and
+   * update-many cannot disagree about what `unique` means — the same
+   * single-judgment-point discipline `assertFilterConditionShape` enforces for
+   * the filter faces. `rows` defaults to the live table; `updateMany` passes a
+   * projected set instead, because its pending rows are not in the table yet.
+   *
+   * An object never passed through {@link syncSchema} has no entry and is
+   * unconstrained: this driver does not guess a constraint from the data, for
+   * the same reason it does not guess types from values.
+   */
+  private assertUnique(
+    object: string,
+    candidate: Record<string, any>,
+    exceptId?: unknown,
+    rows?: readonly Record<string, any>[],
+  ): void {
+    const constraints = this.uniqueConstraints.get(object);
+    if (!constraints || constraints.length === 0) return;
+    assertNoUniqueViolation(object, rows ?? this.getTable(object), candidate, constraints, exceptId);
   }
 
   private getTable(name: string) {

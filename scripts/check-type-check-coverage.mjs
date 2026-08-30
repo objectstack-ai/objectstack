@@ -742,7 +742,7 @@ const EXEMPT = {
 //     the fix: widen a hidden test layer's `include` one file at a time and
 //     measure each addition, because a wholesale glob can bill the layer for a
 //     non-test file it never asked to cover.)
-// `@objectstack/cli` (146 raw across 65 files, after #8612 repaired the first
+// `@objectstack/cli` (144 raw across 65 files, after #8612 repaired the first
 // two of its 59 missing import extensions) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 //
@@ -787,6 +787,26 @@ const EXEMPT = {
 // measured a second time: collapsing a cascade EXPOSES errors as well as
 // removing them, and a note sized on the TS2835 line alone would have read as
 // "155 minus 121 = 34" and been wrong in both directions.
+//
+// `@objectstack/plugin-security` GRADUATED from this ledger (#13176; entry: 11
+// raw, re-measured 11 EXACTLY at aa16721b6 before repair — same 6 files, same
+// per-file counts as the card measured at 1a540e82b, so the number was still
+// true when it was retired). It is worth a line for what the split between the
+// two module semantics says, because this package is the third shape:
+// `packages/rest` fixed the CONFIG and 118 of its 155 collapsed; here the
+// config-tier is only 2 of the 11 — TS1470 (`import.meta` compiled as CommonJS)
+// and TS2550 (`Array.prototype.at` against a `lib` older than es2022) — and the
+// other 9 were real test-code type errors, every one of them REPAIRED in the
+// same PR rather than ledgered. So this package leaves with no
+// `test-typecheck-debt.json` at all, the call `metadata-core`, `metadata-fs` and
+// `trigger-record-change` made: at zero residue a bare
+// `tsc --noEmit -p tsconfig.test.json` is the stronger gate, since any error is
+// red immediately with no ledger to be added to. The TS1470 is the one worth
+// carrying forward: `src/seed-write-refusal.test.ts` documents an author
+// steering AROUND that diagnostic — writing `__dirname` instead of
+// `import.meta.url` — to keep this entry from going 11 to 12, for a program
+// whose verdict no `typecheck` script ever ran. A hidden layer does not only
+// hide errors; it also shapes the code written into it.
 //
 // SINCE MEASURED, across this whole ledger rather than on that one package
 // (#11491, at e47d5ef61, by dropping each entry's `"**/*.test.ts"` exclusion
@@ -895,8 +915,14 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/cli': {
-    errors: 146,
-    note: 'TS7006 x60 (implicit any), TS2835 x57 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+    errors: 144,
+    note: 'TS7006 x59 (implicit any), TS2835 x56 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+      + 'LOWERED 146 -> 144 (#13109) and RE-TALLIED above from the same run, not rescaled: '
+      + 'test/platform-page-i18n-parity.test.ts 2 -> 0 (1 TS2835 + 1 TS7006), from adding the `.js` '
+      + 'extension to its one `../src/utils/i18n-extract` import -- the same one-import repair #8612 made '
+      + 'twice below, taken here because that file gained new tests in the same PR and untyped test code '
+      + 'is what let the cascade grow. FULLY ATTRIBUTED: no other file moved, and the per-code and '
+      + 'per-file tallies below were re-measured whole rather than decremented. '
       + 'The package #7353 was really about, and the largest single thing the exclude-shaped detector could '
       + 'not see: `tsconfig.json` says `include: ["src"]` and has no `exclude` AT ALL, so there was never an '
       + 'exclusion to notice, and the test files in the sibling `test/` tree are read by nothing -- not '
@@ -909,11 +935,12 @@ const TEST_DEBT = {
       + '(1 TS2835 + 34 TS7006) and test/i18n-extract.test.ts 7 -> 0 (1 TS2835 + 6 TS7006), from adding the '
       + '`.js` extension to one import each. Outside those two files the before and after diagnostic sets '
       + 'are identical line for line, and nothing new appeared anywhere. '
-      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 57 of the 59 extension-less '
-      + 'relative imports this layer carried are still there, spread over 24 files, and every one of the 60 '
+      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 56 of the 59 extension-less '
+      + 'relative imports this layer carried are still there, spread over 23 files, and every one of the 59 '
       + 'surviving TS7006 sits in a file that also carries a TS2835 -- there is no implicit-any anywhere in '
-      + 'this layer without a broken import above it. Read the top-of-ledger NodeNext note before sizing it: '
-      + 'TS2835 plus the cascade it causes are 117 of the 146 and are 57 repairs, not 117. Concentrated '
+      + 'this layer without a broken import above it, and the 23 files carrying a TS2835 are EVERY file in '
+      + 'this layer that carries any error at all. Read the top-of-ledger NodeNext note before sizing it: '
+      + 'TS2835 plus the cascade it causes are 115 of the 144 and are 56 repairs, not 115. Concentrated '
       + 'rather than spread -- test/data-model-rules.test.ts x26, test/i18n-declared-surface-gate.test.ts '
       + 'x19, test/i18n-section-coverage.test.ts x18, test/commands.test.ts x15, '
       + 'test/remote-api-commands.test.ts x12 are 90 of it. '
@@ -1060,7 +1087,6 @@ const TEST_DEBT = {
       + 'still import. One older claim is now false and is corrected rather than carried: '
       + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
-  '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },

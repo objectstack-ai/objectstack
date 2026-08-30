@@ -128,9 +128,9 @@ export function bareDateRangePresetComparandMessage(
     + `understood by the dashboard date-filter positions (dateRange.defaultRange, a date `
     + `global filter's defaultValue), where the console lowers it to {date-macro} bounds `
     + `before querying. As a bare "${operator}" comparand nothing resolves it: a declared `
-    + `datetime/date field refuses the query at the engine (INVALID_FILTER / 400, #8690), `
+    + `datetime/date field refuses the query at the engine (INVALID_FILTER / 400), `
     + `and any other column compares the literal string. Write the date-macro window `
     + `instead — e.g. ${window} — or an ISO date such as "2026-01-15". `
-    + `Refused at authoring time so the error surfaces where the filter is written (#8793).`
+    + `Refused at authoring time so the error surfaces where the filter is written.`
   );
 }

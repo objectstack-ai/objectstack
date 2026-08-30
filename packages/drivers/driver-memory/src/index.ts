@@ -22,6 +22,31 @@ export {
 } from './memory-tenancy-guard.js';
 export type { TenancyAwareSchema } from './memory-tenancy-guard.js';
 
+// [#13197, #13239] Uniqueness on BOTH declaration surfaces — field-level
+// `unique` and object-level declared `indexes[]` — with the refusal's wire
+// identity and the scoping helpers, exported so a consumer can assert the
+// envelope (`code` AND `status`, never merely "it threw") without
+// string-matching the message.
+export {
+  UNIQUE_VIOLATION_CODE,
+  UNIQUE_VIOLATION_STATUS,
+  assertNoUniqueViolation,
+  declaredIndexViolationError,
+  isDeclaredIndexConstraint,
+  tenantFieldOf,
+  uniqueConstraintsFromDeclaredIndexes,
+  uniqueConstraintsFromFields,
+  uniqueKeyOf,
+  uniqueViolationError,
+} from './memory-unique-constraint.js';
+export type {
+  DeclaredIndexInput,
+  MemoryDeclaredIndexConstraint,
+  MemoryUniqueConstraint,
+  MemoryUniqueEnforcement,
+  UniqueAwareSchema,
+} from './memory-unique-constraint.js';
+
 export default {
   id: 'com.objectstack.driver.memory',
   version: '1.0.0',

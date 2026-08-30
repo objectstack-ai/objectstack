@@ -121,6 +121,53 @@ export function createDeclaresNoDatabaseBlock(): void {
     void created.database;
 }
 
+/**
+ * `create` declares the three keys the route sends BESIDE `environment`.
+ *
+ * ⚖️ Maintainer ruling, 2026-08-29, verbatim: 「同意」 — option 甲. `warnings`
+ * and `durationMs` are declared PRESENT, `hostnameAssignment` OPTIONAL (the
+ * producer's own "absence stays absence" contract), all three typed as the
+ * INLINE WIRE SHAPE and ⛔ NOT bound to `@objectstack/spec/cloud`'s
+ * `ProvisionEnvironmentResponseSchema` — those are camelCase row contracts for
+ * a control plane that speaks snake_case on `/api/v1/cloud/*` (#11925/#12036).
+ *
+ * Each read below is a separate assertion on purpose: a key that regresses on
+ * its own is named by the failure instead of hidden behind a sibling's.
+ */
+export function createDeclaresTheWireResponseKeys(): void {
+    const created = {} as CreateShape;
+
+    // PRESENT, not optional. Assigning into a non-optional local is the pin:
+    // weakening either key to `?` puts `undefined` in the type, which stops
+    // being assignable, and the red lands on the declaration rather than in
+    // some caller months later.
+    const warnings: string[] = created.warnings;
+    const durationMs: number = created.durationMs;
+    void warnings;
+    void durationMs;
+
+    // OPTIONAL by the producer's contract — forwarded only when the control
+    // plane renamed a colliding hostname, so `hostnameAssignment !== undefined`
+    // is itself the signal. The `@ts-expect-error` IS the optionality
+    // assertion: it holds only while `undefined` is part of the type, so
+    // promoting the key to required makes the error vanish and this line goes
+    // red as an unused expect-error.
+    // @ts-expect-error `hostnameAssignment` is optional; a non-optional local cannot take its `undefined`
+    const assignment: { requestedHostname: string; assignedHostname: string } = created.hostnameAssignment;
+    void assignment;
+    void created.hostnameAssignment?.requestedHostname;
+    void created.hostnameAssignment?.assignedHostname;
+
+    // ⛔ `credential` stays UNDECLARED, and this pin is what keeps it that way.
+    // `ProvisionEnvironmentResponseSchema` declares it REQUIRED while the
+    // producer body this declaration was written against does not send it —
+    // an unjudged divergence that is NOT settled by copying the key here.
+    // Declaring it would make the SDK promise a key the wire does not carry,
+    // which is this method's own defect class pointed the other way.
+    // @ts-expect-error `POST /cloud/environments` is not declared to answer a `credential`; `rotateCredential` is the method that does
+    void created.credential;
+}
+
 /** Helper: a client whose `fetch` answers one canned BaseResponse envelope. */
 function clientAnswering(data: unknown) {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -202,6 +249,60 @@ describe('[ADR-0006 D2] client.environments — the control-plane namespace afte
         expect(fetchMock.mock.calls[0][1].method).toBe('POST');
     });
 
+    it('relays `warnings` and `durationMs` beside `environment` — reachable without an `as any`', async () => {
+        const { client } = clientAnswering({
+            environment: { id: 'env_new', display_name: 'Dev' },
+            warnings: ['seed package skipped: registry unreachable'],
+            durationMs: 4210,
+        });
+
+        const res = await client.environments.create({
+            organization_id: 'org_1',
+            display_name: 'Dev',
+        });
+
+        // `warnings` is the partial-degradation channel: this read is the whole
+        // point of the card, and before the declaration widened it needed a cast.
+        expect(res.warnings).toEqual(['seed package skipped: registry unreachable']);
+        expect(res.durationMs).toBe(4210);
+    });
+
+    it('relays `hostnameAssignment` when the control plane renamed a colliding hostname', async () => {
+        const { client } = clientAnswering({
+            environment: { id: 'env_new', hostname: 'dev-a1b2' },
+            warnings: [],
+            durationMs: 900,
+            hostnameAssignment: { requestedHostname: 'dev', assignedHostname: 'dev-a1b2' },
+        });
+
+        const res = await client.environments.create({
+            organization_id: 'org_1',
+            display_name: 'Dev',
+        });
+
+        expect(res.hostnameAssignment?.requestedHostname).toBe('dev');
+        expect(res.hostnameAssignment?.assignedHostname).toBe('dev-a1b2');
+    });
+
+    it('absence stays absence — no `hostnameAssignment` key when the requested hostname was kept', async () => {
+        const { client } = clientAnswering({
+            environment: { id: 'env_new', hostname: 'dev' },
+            warnings: [],
+            durationMs: 880,
+        });
+
+        const res = await client.environments.create({
+            organization_id: 'org_1',
+            display_name: 'Dev',
+        });
+
+        // `in` rather than a truthiness check: the producer's contract is that
+        // the KEY is absent, and reading absence as "unknown" is what its own
+        // schema comment forbids. A relay that materialised `undefined` would
+        // pass a truthiness assertion while breaking that contract.
+        expect('hostnameAssignment' in res).toBe(false);
+    });
+
     it('relays the activate envelope — `environment` beside `sessionUpdated`', async () => {
         const { client } = clientAnswering({
             environment: { id: 'env_1' },
@@ -232,5 +333,6 @@ describe('[ADR-0006 D2] client.environments — the control-plane namespace afte
         expect(typeof listEnvelopeCarriesTheWireKeys).toBe('function');
         expect(typeof singleRowEnvelopesCarryTheWireKey).toBe('function');
         expect(typeof createDeclaresNoDatabaseBlock).toBe('function');
+        expect(typeof createDeclaresTheWireResponseKeys).toBe('function');
     });
 });

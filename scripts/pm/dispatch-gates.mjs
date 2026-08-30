@@ -2703,6 +2703,71 @@ export function coveringJobFilter(entry, inputPath) {
  * still matches through that constant while a card editing the GATE FILE
  * matches through identity. They answer different inputs.
  *
+ * ## The FIFTH key this file measured and REFUSED: the module a gate IMPORTS (#13126)
+ *
+ * `firstPartyImportTargets` already follows a gate's `./sibling.mjs` import —
+ * but only to inherit that module's HINTS, which answers "what population does
+ * this gate watch, once you count what its helper watches". The same edge
+ * answers a second question, and it is identity-shaped: *if I edit this helper,
+ * which gate can I break?* None of the four keys above reaches it. A module is
+ * not the family's own file, not a `paths:` pattern, not a job filter, and its
+ * own path is not a literal the gate spells.
+ *
+ * The gap is real and was measured over the live tree, 183 families x 7347
+ * tracked files:
+ *
+ *   (family, imported module) pairs      273
+ *   ...another key already answers        41   15%, mostly a `scripts/**` hint
+ *                                              a gate declares for other reasons
+ *   ...NOVEL, no key reaches them        232   swept over the whole corpus with
+ *                                              the candidate key consulted LAST:
+ *                                              ADDED 232, RE-ATTRIBUTED 0, LOST 0
+ *
+ * So the key would be additive by construction, the way #13000's is, and it is
+ * still refused. The reason is PRECISION and the numbers are not close. #13000
+ * bought its class for 5 novel leads on this same corpus; this one costs 232,
+ * and 201 of the 232 (87%) land on five shared utilities that nearly every gate
+ * links:
+ *
+ *   scripts/invoked-as.mjs             a card that names 14 families names 118
+ *   scripts/import-prerequisite.mjs    14 -> 55
+ *   scripts/ts-parse.mjs               13 -> 37
+ *   scripts/js-comment-mask.mjs        17 -> 38
+ *   scripts/workspace-enumerator.mjs   12 -> 23
+ *
+ * Every one of those leads is TRUE — editing `invoked-as.mjs` really can turn
+ * all 118 red. A 118-gate list is still the failure this file's header names:
+ * the dev who gets one stops reading it, which ends exactly where a list that
+ * omits the one gate that matters ends. The tail is the opposite shape and is
+ * the half worth having — 21 modules carrying 31 pairs, the median card moving
+ * from 14 families to 15 — and the ONLY property separating the two halves is
+ * fan-in. This file draws its lines on provenance rather than on volume
+ * (`firstPartyImportTargets` says so where it refuses an imported gate file),
+ * and a fan-in cut has no provenance to state: `invoked-as.mjs` and
+ * `dispatch-gates.mjs` are the same KIND of edge, one link apart.
+ *
+ * Two narrowings were measured and neither earns it either:
+ *
+ *   importer is a `--self-test` family   12 novel pairs, but 8 of the 12 are
+ *                                        `<- invoked-as.mjs`, and the line is
+ *                                        the INHERITANCE narrowing borrowed for
+ *                                        the question #11556 / #11511 settled
+ *                                        separately — identity is not that
+ *   target is not itself a gate file     63 novel pairs, and it still takes an
+ *                                        `import-prerequisite.mjs` card to 55
+ *
+ * What the refusal COSTS is a live missing lead, and it is named rather than
+ * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
+ * THIS file, and a card editing this file derives 14 families without naming
+ * it. That gate gets run by hand. The miss costs one CI round, which is the
+ * side this file's header errs on everywhere, and it is a far smaller cost than
+ * the 118-lead card the general key prints for the module all 118 import.
+ *
+ * Two shapes make 232 a LOWER bound rather than an exact size, both already
+ * refused upstream for their own measured reasons: a dynamic `import()` of a
+ * `scripts/` module (3 live family-module pairs) and a relative target outside
+ * `scripts/` (3, all `eslint.config.mjs`).
+ *
  * Returns `{ key, via }` — `via` is the provenance label the output prints, so
  * a lead can never be read as the wrong kind of claim.
  */
@@ -4532,20 +4597,44 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     in the "undetermined" bucket;
  *   - the three test-file RATCHETS (`check:query-options-erasure`,
  *     `check:engine-double-contract`, `check:where-matcher`) each walk the tree
- *     for `*.test.*` files and reconcile the count against a baseline JSON. What
- *     their sources name is that baseline and, for two of them, the git ref they
- *     diff against — never the population. Measured on this tree, their entire
- *     hint sets are:
+ *     for `*.test.*` files and reconcile the count against a baseline JSON. For
+ *     two of the three, what the source names is that baseline — an artifact
+ *     roster, never the population — so those two score `silent` for every card
+ *     in the tree, and they HAVE hints, so the "undetermined" bucket never sees
+ *     them either. Before this entry named them they were printed in NEITHER
+ *     half of the output for every card in the tree.
  *
- *       check:query-options-erasure   scripts/query-options-erasure-baseline.json, origin/main
- *       check:where-matcher           scripts/where-matcher-conformance.baseline.json, origin/main
- *       check:engine-double-contract  scripts/engine-double-contract.baseline.json,
- *                                     @objectstack/{core,objectql,metadata-core}
+ *     ⛔ Their hint sets are NOT transcribed here, and a freshly re-measured
+ *     copy must not be put back. The copy that used to sit here listed all
+ *     three sets and read as measured; by the time anyone re-derived it,
+ *     exactly one of its five claims — the `check:engine-double-contract` row —
+ *     was still true. It named a git ref as a hint for two of the rows, a class
+ *     `isNonPathNamespace` refuses (this file's own self-test pins that
+ *     refusal); it gave `check:query-options-erasure` a one-hint set its source
+ *     has since outgrown; and it drew the conclusion below from both. Not one
+ *     of those drifts touched THIS file, so nothing here could have reported
+ *     them. `--residue` prints every family's live `names:` set and re-derives
+ *     it on every run: that is the authority for this question, and a reader
+ *     who wants the sets should run it rather than trust a paragraph.
  *
- *     Not one of those can cover a card's path, so all three score `silent` —
- *     they HAVE hints, so the "undetermined" bucket never sees them either, and
- *     before this entry named them they were printed in NEITHER half of the
- *     output for every card in the tree;
+ *     ⚠ `check:where-matcher` is the exception to the paragraph above, and it
+ *     stays in this entry anyway. Since #13231 its source declares its
+ *     `*.test.ts` population as a literal, so the ORDINARY path derivation
+ *     MATCHES it for a test file under `packages/` and it is no longer silent.
+ *     That is the shape the `check:cross-package-test-inputs` measurement in
+ *     the deletion criterion below describes, and it is answered the same way:
+ *     the declaration is set-equal to that gate's own walk, which is rooted at
+ *     `packages/`, so it reaches no test file outside that root, while the KIND
+ *     reaches every one — and the KIND reaches a card dispatched BEFORE its
+ *     code exists, which no path derivation can. Two routes to one gate is
+ *     redundancy, not a defect; the KIND is the load-bearing one. That gate's
+ *     own source says the same thing in the docblock above its literal, so
+ *     neither side of the pair asserts it alone.
+ *
+ *     Every membership claim in the two paragraphs above is re-derived in
+ *     `--self-test` against the live tree rather than restated here, so a tree
+ *     that moves one turns a case RED instead of leaving this prose quietly
+ *     false — which is the failure this entry has now paid for twice;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
  *     Its source names only three hints (measured, post-#9144): the shared
@@ -6760,6 +6849,80 @@ function selfTest() {
     subtracted.length === 0,
   );
 
+  // ── The refused fifth key, kept honest (#13126) ────────────────────────────
+  // `coveringKey`'s docblock refuses an IDENTITY key over these same import
+  // edges, and that refusal is a MEASUREMENT rather than a preference: it holds
+  // only while the class stays concentrated in the shared utilities nearly
+  // every gate links. Prose cannot notice the tree flattening under it, so the
+  // price is re-derived here on every run and asserted. A red in this block is
+  // not a broken derivation — it says the refusal is due a re-pricing.
+  const importClassFamilies = [...discoverFamilies().byCheck];
+  const importClassEdges = new Map();
+  for (const [check, e] of importClassFamilies) {
+    const edges = new Set();
+    for (const f of e.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+        if ((e.files ?? []).includes(mod)) continue;
+        edges.add(mod);
+      }
+    }
+    importClassEdges.set(check, edges);
+  }
+  const importNovel = [];
+  let importCoveredElsewhere = 0;
+  for (const [check, e] of importClassFamilies) {
+    for (const mod of importClassEdges.get(check) ?? []) {
+      if (coveringKey(e, mod)) importCoveredElsewhere++;
+      else importNovel.push([check, mod]);
+    }
+  }
+  t(
+    `the refused import-edge class is real and NOVEL — ${importNovel.length} (family, imported module)`
+      + ` pair(s) no key reaches, of ${importNovel.length + importCoveredElsewhere}`,
+    importNovel.length > 0,
+  );
+  t(
+    `…and the split the refusal quotes is not invented: ${importCoveredElsewhere} pair(s) another key`
+      + ' already answers, so the novel half is a measurement and not the raw count',
+    importCoveredElsewhere > 0,
+  );
+  // The card's own witness, and the single lead this refusal is KNOWN to cost.
+  // Asserted in both halves: the import edge exists, and no key names it.
+  const bareRootKey = 'scripts/pm/bare-root-worklist.mjs --self-test';
+  const bareRootImportFamily = importClassFamilies.find(([c]) => c === bareRootKey)?.[1];
+  t(
+    'the witness holds — bare-root-worklist --self-test imports THIS file, and no key names that'
+      + ' family for a card editing it',
+    (importClassEdges.get(bareRootKey)?.has('scripts/pm/dispatch-gates.mjs') ?? false)
+      && !!bareRootImportFamily
+      && coveringKey(bareRootImportFamily, 'scripts/pm/dispatch-gates.mjs') === null,
+  );
+  // Why it is refused, re-derived rather than recalled: the worst module would
+  // print a list nobody reads. The bound is the header's own "22 leads is the
+  // same as none", doubled — green through ordinary drift, red only if the
+  // concentration genuinely collapses and the class is worth re-pricing.
+  const importAddPerModule = new Map();
+  for (const [, mod] of importNovel) importAddPerModule.set(mod, (importAddPerModule.get(mod) ?? 0) + 1);
+  const importWorst = [...importAddPerModule]
+    .map(([mod, add]) => ({
+      mod,
+      add,
+      after: add + importClassFamilies.filter(([, e]) => coveringKey(e, mod)).length,
+    }))
+    .sort((a, b) => b.after - a.after);
+  t(
+    `the refusal is still earned — a card editing ${importWorst[0]?.mod} would name`
+      + ` ${importWorst[0]?.after} families under the refused key`,
+    (importWorst[0]?.after ?? 0) > 44,
+  );
+  const importTop5 = importWorst.slice(0, 5).reduce((s, r) => s + r.add, 0);
+  t(
+    `…and the class is still concentrated: ${importTop5} of ${importNovel.length} novel pair(s) land`
+      + ` on ${Math.min(5, importWorst.length)} module(s)`,
+    importTop5 * 2 > importNovel.length,
+  );
+
   // #12107, the live half — three claims about THIS tree, each one a thing the
   // fix buys that a fixture cannot show.
   const tsLiveFamilies = [...discoverFamilies().byCheck];
@@ -7643,14 +7806,25 @@ function selfTest() {
   // — so the gate's own self-test (which derives its declaration from ROOTS)
   // cannot pin it and this case is the only place that does.
   t('and the spec refusal-message population Rule 3 walks', docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/ui/action.zod.ts')));
-  // The negative half, load-bearing for a declaration spanning five roots: a
-  // gate named on EVERY card is the louder version of naming none. `packages/`
-  // is now claimed in ONE place and must stay that narrow — the whole tree is
-  // 78 packages and none of the other 77 is corpus, nor is spec's own build
-  // output, which the walk skips.
-  t('and claims nothing elsewhere under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/runtime/src/index.ts')));
-  t('nor spec outside its source tree', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/package.json')));
-  t('nor under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  // #13297 widened Rule 3's root: the cross-package prose-id leg walks every
+  // sibling package's non-test sources against a pinned baseline, so the gate
+  // now genuinely reads any package edit and declares `packages/**`. The
+  // narrow claim these cases used to pin ("spec/src and nothing else under
+  // packages/") is the boundary the #13179 deferral drew, and the deferral's
+  // own codified revival condition retired it — a sibling package source is
+  // now POSITIVE coverage, not an over-claim.
+  t('and the sibling-package prose population the ledgered leg walks', docAuthoringHints.some((h) => hintCovers(h, 'packages/runtime/src/index.ts')));
+  // The residual over-claim is bounded and known: `packages/**` subsumes
+  // spec's non-src files and every test file, which the leg's own walk skips
+  // (spec belongs to the position-based rule; test bodies are out). That is
+  // the tolerated carve-out-inside-a-walked-root case — the same shape as
+  // check:slot-lookup-ratchet declaring the whole of `packages/**` — pinned
+  // here so it stays a recorded residual rather than an accident.
+  t('spec outside its source tree rides the bounded packages/** over-claim', docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/package.json')));
+  // The negative half that SURVIVES the widening, still load-bearing: a gate
+  // named on EVERY card is the louder version of naming none, and the leg
+  // walks packages/ only — never apps/ or examples/.
+  t('and claims nothing under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !docAuthoringHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
 
   // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
@@ -7729,6 +7903,57 @@ function selfTest() {
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
   const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
+
+  // A THIRD shape of the same class, and the one with the worst failure
+  // direction (#13207): a gate whose declared population was its OWN GUARDED
+  // ARTIFACT. `check:llms-txt` re-derives the claims of `packages/spec/llms.txt`
+  // against trees elsewhere — the `*.zod.ts` counts under `packages/spec/src`,
+  // the `api-surface/` shards, the manifest `exports` keys, and the non-private
+  // `@objectstack/*` workspace set — but reached every one of them through
+  // `join(PKG, ...)`, so the only literal it spelled was `llms.txt` itself.
+  //
+  // The derivation could therefore name the gate only AFTER the artifact had
+  // been edited, while the edits that FALSIFY it land in those other trees.
+  // Measured on PR #13186 across two rounds of one branch: deleting a `src/`
+  // schema module moved `src/kernel/` 32 -> 31 and the summed total 208 -> 207,
+  // the derived family did not contain the gate, and the red reached CI. That
+  // is UNDER-matching — silent, and invisible in the tool's own output, where an
+  // omitted gate looks exactly like a gate that does not apply.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration. If this gate stops reading one of these trees,
+  // delete the case together with the literal — never keep it green by
+  // re-pointing it at a tree the gate never reads.
+  const llmsHints = extractWatchHints(
+    readFileSync(join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
+    'packages/spec/scripts/check-llms-txt.ts',
+  );
+  const llmsReaches = (f) => llmsHints.some((h) => hintCovers(h, f));
+  // The reproduction, as a case: the falsifying edit alone names the gate.
+  t('check:llms-txt reaches the schema tree its counts are derived from', llmsReaches('packages/spec/src/kernel/cluster.zod.ts'));
+  // …and by a route that is NOT the artifact hint. This is the reproduction
+  // itself: before this declaration the only hint covering anything was
+  // `packages/spec/llms.txt`, so a src-only diff derived nothing.
+  t('and by a route that is not the guarded artifact — the #13207 reproduction', llmsHints.some((h) => h !== 'packages/spec/llms.txt' && hintCovers(h, 'packages/spec/src/kernel/cluster.zod.ts')));
+  t('it still reaches the artifact it guards', llmsReaches('packages/spec/llms.txt'));
+  t('it reaches the api-surface shards every NAMED claim resolves against', llmsReaches('packages/spec/api-surface/data.json'));
+  t('it reaches the manifest whose exports keys the SUBPATH claims resolve against', llmsReaches('packages/spec/package.json'));
+  t('it reaches the repo-root workspace file it opens', llmsReaches('pnpm-workspace.yaml'));
+  t('and the workspace manifests whose set is the package-ecosystem denominator', llmsReaches('packages/drivers/driver-mongodb/package.json'));
+  // The negative half, and the load-bearing one. A population this broad is
+  // one respelling away from the "22 leads is the same as none" failure the
+  // header prices: `packages/spec` or `packages/**` would have bought the flip
+  // too, and named this gate on nearly every card in the repo. These pin that
+  // it bought the four trees it reads and NOTHING else — including the sibling
+  // directories inside its own package.
+  t('but claims no other file in its own package', !llmsReaches('packages/spec/docs/anything.md'));
+  t('nor a sibling package source', !llmsReaches('packages/rest/src/analytics-dataset-dimension-gate.test.ts'));
+  t('nor a content page', !llmsReaches('content/docs/deployment/cli.mdx'));
+  t('nor an app source', !llmsReaches('apps/docs/components/ui/card.tsx'));
+  t('nor an example', !llmsReaches('examples/app-crm/src/objects/lead.object.ts'));
+  // A workspace manifest is reached; a workspace SOURCE file is not. This is
+  // the pair that separates `packages/**\/package.json` from `packages/**`.
+  t('and a package manifest is reached where its source is not', llmsReaches('packages/qa/dogfood/package.json') && !llmsReaches('packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts'));
 
   // The DIRECTORY half of the same class (#10107). A gate whose population is a
   // top-level DIRECTORY spelled as a bare word is invisible for the same reason
@@ -9118,6 +9343,55 @@ function selfTest() {
   const xpkgResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(xpkgEntry.hints, f));
   t(`the tree still holds test files no hint of this gate reaches (${xpkgResidue.length}), so the entry is not redundant`,
     xpkgResidue.length > 0);
+
+  // ── The test-file entry's hint-set prose, re-derived (#13232) ─────────────
+  //
+  // This entry's docblock used to TRANSCRIBE the three ratchets' hint sets and
+  // conclude from the copy that all three score `silent`. Both halves went
+  // false without anything editing this file — one ratchet grew a real
+  // population literal (#13231), and the git ref two of the rows named stopped
+  // being admitted as a hint at all — so the transcription is gone and what it
+  // asserted is re-derived here instead. A red in this block means the prose
+  // above is due a re-reading, not that the derivation broke.
+  const WM = 'check:where-matcher';
+  const QOE = 'check:query-options-erasure';
+  const EDC = 'check:engine-double-contract';
+  const ratchetEntries = new Map([WM, QOE, EDC].map((c) => [c, discoverFamilies().byCheck.get(c)]));
+  t('all three ratchets are still discovered with hints, so nothing below is vacuous',
+    [...ratchetEntries.values()].every((e) => (e?.hints ?? []).length > 0));
+  // The half that survived: two of the three still name only artifacts, so
+  // `silent` for every card in the tree is still the right description of them.
+  const ORDINARY_TEST = 'packages/spec/src/x.test.ts';
+  t(`${QOE} still names nothing that can cover a card's test file — the surviving half of the old paragraph`,
+    !covers(ratchetEntries.get(QOE).hints, ORDINARY_TEST) && !covers(ratchetEntries.get(QOE).hints, OUTSIDE_PACKAGES));
+  t(`…and so does ${EDC}`,
+    !covers(ratchetEntries.get(EDC).hints, ORDINARY_TEST) && !covers(ratchetEntries.get(EDC).hints, OUTSIDE_PACKAGES));
+  // The half that broke, pinned in the direction that broke it: the moment this
+  // reddens, `check:where-matcher` is silent again and the ⚠ paragraph is wrong.
+  t(`${WM} IS reached by the ordinary path derivation for a packages test file — the exception the prose states`,
+    covers(ratchetEntries.get(WM).hints, ORDINARY_TEST));
+  t('…and that covering hint is the gate\'s OWN declared population, not one inherited from a module it imports',
+    !ratchetEntries.get(WM).hintOrigin?.get(ratchetEntries.get(WM).hints.find((h) => hintCovers(h, ORDINARY_TEST))));
+  // Why it stays in the table regardless — the same two-direction argument the
+  // #11199 block above makes for check:cross-package-test-inputs.
+  t(`but no hint of ${WM} reaches a test file outside its scan root, while the KIND does`,
+    !covers(ratchetEntries.get(WM).hints, OUTSIDE_PACKAGES)
+      && changeKindLines([OUTSIDE_PACKAGES], (n) => n).some((l) => l.includes(`- ${WM}   —`)));
+  const wmResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(ratchetEntries.get(WM).hints, f));
+  t(`the tree still holds test files no hint of ${WM} reaches (${wmResidue.length}), so its line is not redundant either`,
+    wmResidue.length > 0);
+  // The drift the deleted transcription could not report, closed at the source
+  // rather than by re-copying: both sources still SPELL the ref, and neither
+  // yields it as a hint. This is the case that reddens if the refusal is ever
+  // relaxed and a row naming `origin/main` becomes writable again.
+  const REF = ['origin', 'main'].join('/');
+  const refSpellers = [ratchetEntries.get(QOE), ratchetEntries.get(WM)]
+    .flatMap((e) => e.files ?? [])
+    .filter((f) => existsSync(join(ROOT, f)) && readFileSync(join(ROOT, f), 'utf8').includes(`'${REF}'`));
+  t(`both ratchet sources still spell ${REF} (${refSpellers.length}), so the next case is about the extractor and not a missing literal`,
+    refSpellers.length === 2);
+  t(`…and not one of them yields it as a hint, which is why no row here may name it`,
+    refSpellers.every((f) => !extractWatchHints(readFileSync(join(ROOT, f), 'utf8'), f).includes(REF)));
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //

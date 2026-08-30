@@ -48,6 +48,7 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
+import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
 
 // One inbox per concern. The mark-read routes MUTATE read-state, so a shared
 // user would make these suites order-dependent — the unread fixture the gap
@@ -63,18 +64,46 @@ const declaredMarkReadKeys = () => new Set(Object.keys((MarkNotificationsReadRes
 const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsReadResponseSchema as any).shape));
 
 // ═══════════════════════════════════════════════════════════════════════════
-// [#10380] The authz resolver's expected read failures: WITHHELD from the
-//          shared log, and ASSERTED instead
+// [#10380 → #10629 → #13325] The authz resolver's expected read failures:
+//          WITHHELD from the shared log, and ASSERTED instead
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // This fixture provisions the messaging objects and nothing else, so every
 // request's `resolveUserAuthzGrants` (`core/src/security/resolve-authz-context.ts`)
 // reads six `sys_*` tables that were never created. `tryFind` swallows each
 // one by design — the resolver is fail-closed and must always resolve — but on
-// the way out the driver and the engine each log it. Measured on `origin/main`:
-// 63 `[sql-driver] DATABASE_ERROR — the backend refused a read on '…'` lines
-// and 63 matching `ERROR Find operation failed` frames, out of a suite whose
-// eight tests all PASS.
+// the way out the driver and the engine each log it.
+//
+// ⚠️ [#13273] WHICH ENGINE CHANNEL — and why this file stopped rolling its own
+// capture. `ObjectQL.reportFindFailure` now picks the level from the CAUSE: a
+// read whose table was never provisioned — i.e. every read this block is
+// declared over — is logged at `debug`, carrying a
+// `reason: 'table-not-provisioned'` meta and no stack; every other read failure
+// keeps `error` with the stack. This file used to carry its own copy of the
+// capture and wrapped the engine's `error` channel ONLY, so from that change
+// onward its recognition arm could not match a single frame — measured on this
+// tree before the migration, the engine's `error` channel was invoked 0 times
+// while 63 `Find operation failed` frames arrived on `debug`, every one of
+// which satisfied that arm's own predicate. Dead suppression that read as live
+// protection, and the file stayed green throughout because everything it
+// asserted was fed by the DRIVER channel. It now uses the shared
+// `captureExpectedReadRefusals` (#10629), which wraps BOTH channels, so which
+// channel a frame arrives on is the ENGINE's classification and never this
+// fixture's problem.
+//
+// Counts RE-MEASURED on this tree (#13325), not transcribed:
+//
+//   pnpm --filter @objectstack/runtime exec vitest run \
+//     src/notification-schema-conformance.integration.test.ts
+//
+// → 63 `[sql-driver] DATABASE_ERROR — the backend refused a read on '…'`
+//   refusals withheld on the DRIVER channel, and 63 matching engine
+//   `Find operation failed` frames withheld on the `debug` channel, out of a
+//   suite whose eight tests all PASS. ⛔ Those two totals are PROSE, not a pin
+//   — they move with the routes this file drives, and re-deriving them means
+//   reading `noise.totalRefusals()` / `noise.totalEngineFrames()` off a run,
+//   never copying the numbers forward. What IS asserted is
+//   `silentChannels()`: every always-read table fired on BOTH channels.
 //
 // Turbo interleaves package logs without attribution, so in the `Test Core`
 // shard log those are indistinguishable from a real failure — they were lifted
@@ -84,10 +113,10 @@ const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsR
 // ⛔ Not a mute. A capture that only silences would make this file blind: if
 // those reads ever started SUCCEEDING (someone provisions the tables) or
 // stopped happening (the resolver drops a read), the log would go quiet and
-// nothing would notice. So the sinks below withhold ONLY the expected fault —
-// each line must name one of the six tables AND carry that same table's
-// `no such table` reason — and record what they withheld, which `afterAll`
-// asserts. Everything else reaches the console untouched.
+// nothing would notice. So the shared capture withholds ONLY the expected
+// fault — each line must name one of the six tables AND carry that same
+// table's `no such table` reason — and COUNTS what it withheld, per table and
+// per channel, which `afterAll` asserts.
 
 /**
  * The six tables the resolver reads and this fixture does not provision.
@@ -110,76 +139,6 @@ const ABSENT_AUTHZ_TABLES = [
  * `-t` run red without meaning anything.
  */
 const ALWAYS_READ_AUTHZ_TABLES = ABSENT_AUTHZ_TABLES.filter((t) => t !== 'sys_setting');
-
-/** Installs the two sinks and hands back the tables they withheld. */
-function captureExpectedAbsentTableNoise() {
-  const withheld = new Set<string>();
-  /** Recognised driver refusals not yet consumed by their engine frame. */
-  const pending = new Map<string, number>();
-
-  /** The refusal envelope AND the dialect reason must name the SAME table. */
-  const expectedRefusal = (line: string): string | undefined =>
-    ABSENT_AUTHZ_TABLES.find(
-      (t) => line.includes(`refused a read on '${t}'`) && line.includes(`no such table: ${t}`),
-    );
-
-  return {
-    withheld,
-
-    /**
-     * The driver's sink. Mirrors the default's `{ warn, error }` shape so
-     * `logDurabilityFailure` still finds an `error` channel.
-     */
-    install(driver: unknown): void {
-      (driver as { logger: unknown }).logger = {
-        warn: (msg: string, meta?: unknown): void => {
-          const table = expectedRefusal(String(msg));
-          if (table) {
-            withheld.add(table);
-            pending.set(table, (pending.get(table) ?? 0) + 1);
-            return;
-          }
-          console.warn(msg, meta ?? '');
-        },
-        error: (msg: string, meta?: unknown): void => console.error(msg, meta ?? ''),
-      };
-    },
-
-    /**
-     * The engine's `error` channel, through a Proxy so every other logger
-     * method stays the engine's own.
-     *
-     * ⛔ Gated on `pending`: an engine frame is withheld only when it sits
-     * directly above a driver refusal this capture already recognised. A
-     * `DATABASE_ERROR` on one of these six tables arising from any OTHER cause
-     * is not recognised by the driver sink, so its frame is not withheld here
-     * either — it reaches the log with both halves intact.
-     */
-    wrapEngine(engine: unknown): void {
-      const base = (engine as { logger: any }).logger;
-      (engine as { logger: any }).logger = new Proxy(base, {
-        get: (target: any, key: string) =>
-          key === 'error'
-            ? (msg: string, err?: unknown, meta?: unknown) => {
-                const object = (meta as { object?: string } | undefined)?.object;
-                const outstanding = object ? (pending.get(object) ?? 0) : 0;
-                const detail = String((err as { message?: string } | undefined)?.message ?? '');
-                if (
-                  msg === 'Find operation failed' &&
-                  object &&
-                  outstanding > 0 &&
-                  detail.includes(`refused to run this query for object '${object}'`)
-                ) {
-                  pending.set(object, outstanding - 1);
-                  return;
-                }
-                target.error(msg, err, meta);
-              }
-            : target[key],
-      });
-    },
-  };
-}
 
 /** Minimal `auth` service — `x-test-user` names the principal, absent = anonymous. */
 function fakeAuthPlugin(): Plugin {
@@ -205,15 +164,19 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   let kernel: ObjectKernel;
   let baseUrl: string;
   let messaging: MessagingService;
-  /** [#10380] The expected-noise capture, asserted in `afterAll`. */
-  const noise = captureExpectedAbsentTableNoise();
+  /**
+   * [#10629] The expected-noise capture, asserted in `afterAll`. The SHARED
+   * one — see the block above for what the per-fixture copy this replaced
+   * could no longer do.
+   */
+  const noise = captureExpectedReadRefusals([...ABSENT_AUTHZ_TABLES]);
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     // [#10380] The driver is named rather than inlined so its logger can be
     // scoped before it ever runs a statement.
     const driver = new SqliteWasmDriver({ filename: ':memory:' });
-    noise.install(driver);
+    noise.captureDriver(driver);
     await kernel.use(new DriverPlugin(driver));
     await kernel.use(new ObjectQLPlugin());
     // Inline delivery so `emit()` materializes the inbox row synchronously.
@@ -225,7 +188,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
 
     // [#10380] The engine only exists once the kernel has bootstrapped; the
     // reads this scopes all happen later, per request.
-    noise.wrapEngine(kernel.getService<unknown>('objectql'));
+    noise.captureEngine(kernel.getService<unknown>('objectql'));
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
@@ -255,13 +218,13 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
     // right repair is to re-derive the list above, NOT to relax this: a
     // resolver read that stopped happening is a finding, and a table that
     // started resolving means this fixture now provisions it.
-    for (const table of ALWAYS_READ_AUTHZ_TABLES) {
-      expect(
-        noise.withheld.has(table),
-        `the expected '${table}' read failure was never emitted — resolveUserAuthzGrants ` +
-          'no longer reads it, or it no longer fails, and this capture has stopped measuring it',
-      ).toBe(true);
-    }
+    //
+    // ⚠️ [#13325] STRICTLY MORE than the per-table `withheld.has(table)` loop
+    // this replaced, never less: that loop read the DRIVER channel only, which
+    // is exactly why it kept passing while the engine half of the same capture
+    // was dead. `silentChannels()` requires BOTH channels to have fired for
+    // each table, and a silent one NAMES ITSELF in the diff.
+    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
   }, 30_000);
 
   /** Drive one route as `user`, asserting the shared envelope, and hand back `data`. */

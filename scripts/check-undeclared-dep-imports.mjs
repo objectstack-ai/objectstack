@@ -116,6 +116,68 @@
  *     dead regex produces an empty finding set, and the empty set is what
  *     success looks like.
  *
+ * ## The provenance of a floor, and how to reproduce it
+ *
+ * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
+ * about `main`. It is the census the floors under it were derived from, not a
+ * statement about the tree you are running on.
+ *
+ * ⭐ This gate is the sharp case of why that record has to be PRINTED. All three
+ * floors are `>=`, and this record drifts UPWARD: measured 2026-08-29 the tree
+ * read 2085 non-test src files and 1819 specifiers against a recorded 2057 and
+ * 1805, so +28 and +14. ⛔ No floor can ever see an upward drift -- the number
+ * moves further from the only thing looking at it, and the gate goes on
+ * printing OK. The record was also a bare COMMENT until this repair, so nothing
+ * in the language could hold it: no self-test could reference it, and no run
+ * could show it to anybody.
+ *
+ * ⚠️ `MEASURED.ref` is this gate's PR BASE, and this gate DOES NOT EXIST in
+ * that tree: the census was taken on the PR branch, and the base is the sha the
+ * branch had to record. So the obvious recipe -- check the ref out and run the
+ * gate there -- fails with `MODULE_NOT_FOUND` (measured 2026-08-29), and the
+ * reader who tries it learns nothing about the record. Reproduce it by running
+ * TODAY's instrument AGAINST that tree instead. `sweep` is exported and takes a
+ * root for exactly this:
+ *
+ *   git worktree add --detach ../os-dep-provenance "$REF"    # $REF = MEASURED.ref
+ *   node --input-type=module -e "import('./scripts/check-undeclared-dep-imports.mjs')
+ *     .then((m) => { const r = m.sweep('../os-dep-provenance');
+ *       console.log(r.packages.length, r.scannedFiles, r.specifiers); })"
+ *
+ * All three counts are source-only, so where the tree is available the
+ * re-derivation is cheap: no install and no build. Re-derived at `MEASURED.ref`
+ * on 2026-08-29: 78 / 2057 / 1805 -- exactly the record, which is the
+ * measurement that rules out "the original count was written wrong".
+ *
+ * ⚠️ A SHALLOW clone cannot do this at all -- `MEASURED.ref` predates the
+ * default checkout window, so the commit is simply absent. That is why the
+ * reconciliation below is a PRINTED comparison and not a computed assertion:
+ * the ref's tree is not reliably on disk. And note what a computed assertion
+ * would be worth even where it works -- a commit's tree is IMMUTABLE, so
+ * re-deriving the record at its ref can never go red. The only thing that moves
+ * is today's tree, and comparing today's tree to the record is an equality.
+ *
+ * ## Why no equality against the tree, and why no band either
+ *
+ * An equality reds on every legitimate move, and this population moves on
+ * almost every merge -- every new source file under a published `src` changes
+ * it. A band around the record is the next thing to reach for, and it fails a
+ * derivation rather than a taste test. Two reasons, either one sufficient:
+ *
+ *   1. The band already exists and is called the FLOOR. `MIN_SCANNED_FILES` IS
+ *      `MEASURED.scannedFiles` minus the headroom this gate declared. A second,
+ *      narrower band would be a second tolerance for one fact, and its width
+ *      would be invented rather than measured.
+ *   2. No width measures anything. Measured 2026-08-29, the three gates in
+ *      `scripts/` carrying a record of this shape had drifted +28, -5 and -1
+ *      from theirs, in both directions, within days of landing. A band narrow
+ *      enough to notice a -1 next door reds on this file's +28; one wide enough
+ *      to survive the +28 cannot see the -1.
+ *
+ * So the repair is not enforcement. What was missing is that a GREEN run never
+ * showed the reader the two censuses side by side. `provenanceLine` prints both
+ * on every pass: the drift is a fact in the log, not a discovery.
+ *
  * ## The ledger is shrink-only, and a STALE row is RED
  *
  * A row is not an approval and not a waiver spelled once: it carries EVIDENCE
@@ -179,9 +241,27 @@ const REPO_ROOT = resolve(HERE, '..');
 const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
 
 // ---------------------------------------------------------------------------
-// Refusal floors -- measured on `aef1b7e6`, held with margin. Raising the real
-// number is normal; a run that drops BELOW one of these has stopped reading.
-//   packages: 78   non-test src files: 2057   @objectstack/* specifiers: 1805
+// Refusal floors, and the provenance of the census they were derived from --
+// the header is the authority on how to reproduce it and on why it is recorded
+// rather than enforced. Raising the real number is normal; a run that drops
+// BELOW one of these has stopped reading.
+//
+// ⚠️ This census used to be a bare COMMENT rather than a constant, and that is
+// why it drifted +28/+14 unnoticed: nothing in the language held it, so no
+// self-test could reference it and no run could print it. A record only prose
+// carries is a record only prose can lose.
+
+const MEASURED = Object.freeze({
+  // The commit this census describes. ⚠️ It is this gate's PR BASE, not a tree
+  // the gate ever ran in -- see the header for the recipe that actually
+  // reproduces it. Immutable, so the record stays reproducible forever even as
+  // `main` moves away from it. ⛔ Never repoint it without re-running all three
+  // counts against the new ref.
+  ref: 'aef1b7e6',
+  packages: 78,
+  scannedFiles: 2057,
+  specifiers: 1805,
+});
 const MIN_PACKAGES = 60;
 const MIN_SCANNED_FILES = 1500;
 const MIN_SPECIFIERS = 1200;
@@ -190,19 +270,6 @@ const MIN_SPECIFIERS = 1200;
 // The ledger. Shrink-only; every row carries evidence re-checked on each run.
 
 const LEDGER = [
-  {
-    pkg: '@objectstack/runtime',
-    dep: '@objectstack/driver-turso',
-    file: 'packages/runtime/src/turso-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The tree already carries the decision NOT to declare this, with its reason: #6268\'s header '
-      + 'on that file states that `@objectstack/driver-turso` is an optional PEER of '
-      + '`@objectstack/cli` and "is not declared by `@objectstack/runtime` at all", because a bare '
-      + '`import()` resolves from the tree of the module that EVALUATES it — so the CLI passes its '
-      + 'own thunk and this bare import is only the standalone stack\'s default. Absence raises '
-      + 'MissingDriverPackageError carrying the install command as data.',
-  },
   {
     pkg: '@objectstack/rest',
     dep: '@objectstack/objectql',
@@ -215,50 +282,6 @@ const LEDGER = [
       + 'coupled to the engine — `query-multiplicity.ts` and the rest of `rest-server.ts` duck-type '
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-turso',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The tree carries this decision in an executable form. `default-datasource-driver-factory.'
-      + 'test.ts` reaches the missing-package arm WITHOUT a stub — "deliberately not a dependency '
-      + 'of this package, that is what optional means" — and it fails loudly with a notice naming '
-      + 'the remedy if the package ever resolves from here. Declaring it (even as an optional peer) '
-      + 'links it in the workspace and takes that assertion out; measured on this branch.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-sqlite-wasm',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'Guarded arm: the load sits in try/catch and an absent package answers with '
-      + 'missingSqliteWasmDriverMessage, naming the fault, the consequence and the install command '
-      + '(#7385). The wasm driver rides as an optional install for published consumers, which the '
-      + 'factory header states, so an unconditional dependency would install it for everyone.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-sqlite-wasm',
-    file: 'packages/services/service-datasource/src/sqlite-driver-fallback.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'The same optional package on the fallback LADDER: rung 2 is entered inside try/catch and an '
-      + 'absent package simply drops through to the next rung. The whole point of the ladder is that '
-      + 'each rung may be unavailable, so a hard dependency would contradict the module.',
-  },
-  {
-    pkg: '@objectstack/service-datasource',
-    dep: '@objectstack/driver-mongodb',
-    file: 'packages/services/service-datasource/src/default-datasource-driver-factory.ts',
-    kind: 'optional-runtime-probe',
-    why:
-      'Guarded arm, same shape and same ruling as the sqlite-wasm arm beside it (#7385): try/catch, '
-      + 'and an absent package answers with the fault, the consequence and the install command. '
-      + '`@objectstack/runtime` declares this one in optionalDependencies for its own reasons; this '
-      + 'package reaches it only through the guarded factory arm.',
   },
   {
     pkg: '@objectstack/rest',
@@ -546,20 +569,52 @@ function refuse(message) {
 
 function floorProblems(result) {
   if (result.packages.length < MIN_PACKAGES) {
-    return `discovered only ${result.packages.length} workspace package(s), below the floor of ${MIN_PACKAGES}.\n`
+    return `discovered only ${result.packages.length} workspace package(s), below the floor of `
+      + `${MIN_PACKAGES} (${MEASURED.packages} on ${MEASURED.ref}).\n`
       + 'The `packages:` globs stopped matching. A sweep over an empty population reports exactly\n'
       + 'what a clean tree reports, so this is a refusal rather than a pass.';
   }
   if (result.scannedFiles < MIN_SCANNED_FILES) {
-    return `read only ${result.scannedFiles} non-test src file(s), below the floor of ${MIN_SCANNED_FILES}.\n`
+    return `read only ${result.scannedFiles} non-test src file(s), below the floor of `
+      + `${MIN_SCANNED_FILES} (${MEASURED.scannedFiles} on ${MEASURED.ref}).\n`
       + 'The walk or the test/exclusion filter broke. Refusing to report clean over files nobody read.';
   }
   if (result.specifiers < MIN_SPECIFIERS) {
-    return `extracted only ${result.specifiers} \`@objectstack/*\` specifier(s), below the floor of ${MIN_SPECIFIERS}.\n`
+    return `extracted only ${result.specifiers} \`@objectstack/*\` specifier(s), below the floor of `
+      + `${MIN_SPECIFIERS} (${MEASURED.specifiers} on ${MEASURED.ref}).\n`
       + 'The MATCHER broke. A dead matcher produces an empty finding set, and the empty set is what\n'
       + 'success looks like — so this is the one floor this gate cannot do without.';
   }
   return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: the census this run read, the floors
+ * it cleared, the census those floors were derived from, and the ref that
+ * census belongs to -- side by side.
+ *
+ * This is the whole repair, and this gate needed it most: its three floors are
+ * `>=`, and its record has drifted UPWARD (+28/+14 measured 2026-08-29). ⭐ No
+ * floor can EVER see an upward drift -- the number moves away from the only
+ * thing looking at it. Without this line the record could get arbitrarily far
+ * from the tree and every green log would look identical either way. The delta
+ * is reported as INFORMATION and never as a verdict: only the floors decide.
+ *
+ * Pure, so `--self-test` drives it with no tree.
+ *
+ * @param {{packages?: number, scannedFiles?: number, specifiers?: number}} counts
+ * @returns {string}
+ */
+export function provenanceLine(counts) {
+  const got = [counts?.packages ?? 0, counts?.scannedFiles ?? 0, counts?.specifiers ?? 0];
+  const rec = [MEASURED.packages, MEASURED.scannedFiles, MEASURED.specifiers];
+  const floors = [MIN_PACKAGES, MIN_SCANNED_FILES, MIN_SPECIFIERS];
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  return `  provenance — packages/scannedFiles/specifiers: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — the floors are `>=` and cannot see an upward'
+    + ' drift at all, which is why it is PRINTED. Reproduce the record: see this file\'s header.';
 }
 
 function main() {
@@ -607,6 +662,11 @@ function main() {
     + `${result.scannedFiles} non-test src files, ${result.specifiers} @objectstack/* specifiers `
     + `(${result.assembled} assembled, not judged); ${LEDGER.length} ledger row(s), all evidence intact.`,
   );
+  console.log(provenanceLine({
+    packages: result.packages.length,
+    scannedFiles: result.scannedFiles,
+    specifiers: result.specifiers,
+  }));
   return 0;
 }
 
@@ -810,8 +870,70 @@ function selfTest() {
       floorProblems({ packages: new Array(MIN_PACKAGES).fill(0), scannedFiles: 0, specifiers: 99999 }) !== null);
     t('FLOOR — a dead matcher trips the specifier floor (the one that cannot be seen otherwise)',
       floorProblems({ packages: new Array(MIN_PACKAGES).fill(0), scannedFiles: MIN_SCANNED_FILES, specifiers: 0 }) !== null);
-    t('FLOOR — measured values clear every floor',
-      floorProblems({ packages: new Array(MIN_PACKAGES).fill(0), scannedFiles: MIN_SCANNED_FILES, specifiers: MIN_SPECIFIERS }) === null);
+    // ⚠️ This case used to pass the FLOOR values back in as the "measured"
+    // ones, which made it `floors clear themselves` -- a tautology over two
+    // copies of one constant. It now reads the record, so it also catches a
+    // floor set ABOVE its own measurement.
+    t('FLOOR — the values in the record clear every floor',
+      floorProblems({
+        packages: new Array(MEASURED.packages).fill(0),
+        scannedFiles: MEASURED.scannedFiles,
+        specifiers: MEASURED.specifiers,
+      }) === null);
+    t('FLOOR — every floor sits at or below the value it was measured from',
+      MIN_PACKAGES <= MEASURED.packages && MIN_SCANNED_FILES <= MEASURED.scannedFiles
+      && MIN_SPECIFIERS <= MEASURED.specifiers);
+
+    // ── provenance: the record must stay reproducible, and visibly so ──────
+    //
+    // ⛔ None of these can red on a tree that legitimately moved -- that is the
+    // point, and an equality here is the thing the header rules out. They red
+    // when the RECORD stops being a self-contained, reproducible claim: a ref
+    // that is not a ref, a quotation that restated the ref instead of reading
+    // it, or a pass line that stopped showing the reader both censuses.
+    t('PROVENANCE — the record carries the ref it was measured on, inside the frozen record',
+      typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref) && Object.isFrozen(MEASURED),
+      JSON.stringify(MEASURED.ref));
+    t('PROVENANCE — the census is a CONSTANT, not a comment: every count is a number code can read',
+      [MEASURED.packages, MEASURED.scannedFiles, MEASURED.specifiers].every(Number.isInteger));
+    const floorRefusal = floorProblems({ packages: [], scannedFiles: 99999, specifiers: 99999 }) ?? '';
+    t('PROVENANCE — the refusal names the ref AND the measurement',
+      floorRefusal.includes(MEASURED.ref) && floorRefusal.includes(String(MEASURED.packages)), floorRefusal);
+    // ⚠️ The case above is NOT sufficient, and an ablation proved it: replacing
+    // `${MEASURED.ref}` in the refusal with the same sha typed out by hand
+    // leaves the OUTPUT identical, so an assertion over the output stays green
+    // while the ref and the count have become editable apart -- which is the
+    // whole defect this file was repaired for. The only thing separating
+    // "interpolated from the record" from "restated and currently agreeing" is
+    // that the literal occurs exactly ONCE in the CODE: inside the record.
+    //
+    // Comments are masked first, with this tree's own masker, because PROSE
+    // naming the ref is fine and sometimes necessary -- the header explains how
+    // to reproduce the census, and a sibling docblock may date a different
+    // claim to the same commit. What may never happen twice is a ref the
+    // MACHINE reads, because that is the pair that can drift apart.
+    const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const ownCode = blank(ownSource, scanSource(ownSource).comment);
+    t('PROVENANCE — the ref literal appears exactly ONCE in the CODE: inside the record. '
+      + 'Every other site interpolates it, so a count and its tree cannot be edited apart',
+      ownCode.split(MEASURED.ref).length - 1 === 1,
+      `${ownCode.split(MEASURED.ref).length - 1} code occurrence(s) of the ref literal`);
+    const provDrifted = provenanceLine({ packages: 78, scannedFiles: 2085, specifiers: 1819 });
+    t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
+      provDrifted.includes('78/2085/1819')
+      && provDrifted.includes(`${MEASURED.packages}/${MEASURED.scannedFiles}/${MEASURED.specifiers}`)
+      && provDrifted.includes(`${MIN_PACKAGES}/${MIN_SCANNED_FILES}/${MIN_SPECIFIERS}`)
+      && provDrifted.includes(MEASURED.ref), provDrifted);
+    t('PROVENANCE — the UPWARD drift no floor can see is the one this line reports',
+      provDrifted.includes('=/+28/+14')
+      && provenanceLine(MEASURED).includes('=/=/=')
+      && provenanceLine({ ...MEASURED, specifiers: MEASURED.specifiers - 5 }).includes('/-5'),
+      provDrifted);
+    t('PROVENANCE — the delta is marked as information, never as a verdict',
+      /not a verdict/i.test(provDrifted) && !/✗|REFUS/.test(provDrifted), provDrifted);
+    t('PROVENANCE — the PASS path actually prints it (a line nothing calls is the defect above)',
+      readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'provenanceLine'}({`),
+      'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
 
     // ── ledger reconciliation, in both directions ─────────────────────────
     const row = { pkg: '@objectstack/p', dep: '@objectstack/d', file: 'packages/p/src/a.ts', kind: 'optional-runtime-probe', why: 'x'.repeat(50) };

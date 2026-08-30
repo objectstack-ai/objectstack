@@ -125,11 +125,74 @@
  * nothing: a manifest walk that discovers nothing, an `exports` resolver that
  * reads no `require` condition, a CommonJS collector that matches no file, a
  * probe table that was emptied. Each produces zero findings, and zero findings
- * is exactly what success looks like. So each carries a floor measured on
- * `8cb96ec41b` and held with margin, and below any of them the gate REFUSES
- * (`exit 2`) rather than passing. Same idiom and same reason as
- * `check-keyed-text-bounds.mjs` (five floors) and
- * `check-undeclared-dep-imports.mjs` (three).
+ * is exactly what success looks like. So each carries a floor derived from the
+ * census recorded in `MEASURED` below and held with margin, and below any of
+ * them the gate REFUSES (`exit 2`) rather than passing. Same idiom and same
+ * reason as `check-keyed-text-bounds.mjs` (five floors) and
+ * `check-undeclared-dep-imports.mjs` (three) -- and, measured 2026-08-29, the
+ * same exposure below: those are the only other two gates in `scripts/` that
+ * record a census beside inequality floors, and both had already drifted from
+ * their own record.
+ *
+ * ## The provenance of a floor, and how to reproduce it
+ *
+ * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
+ * about `main`. It is what this gate's own instrument printed on that tree, and
+ * it is what the floors under it were derived from. It is NOT a statement about
+ * the tree you are running on. To re-derive it, take the ref from `MEASURED`
+ * (every passing run prints it) and:
+ *
+ *   git worktree add --detach ../os-cjs-provenance "$REF"    # $REF = MEASURED.ref
+ *   cd ../os-cjs-provenance
+ *   node scripts/check-dual-build-cjs-loads.mjs --list        # entries + packages
+ *
+ * ⚠️ Two of the four counters are cheap to reproduce and two are not, and that
+ * asymmetry is the thing a reader most needs to know:
+ *
+ *   entries, packages   read from `packages/**\/package.json` ALONE -- no
+ *                       install, no build, because `--list` returns before the
+ *                       prerequisite check. Re-derived at `MEASURED.ref` on
+ *                       2026-08-29: 103 / 67, exactly the record.
+ *   cjsFiles, probes    read from emitted `dist/`, so reproducing them costs a
+ *                       full `pnpm install && pnpm build` AT that ref. ⛔ Do
+ *                       not read a matching `cjsFiles` as corroboration of the
+ *                       other two -- it moves with the BUILD, not with the
+ *                       source. On 2026-08-29 the built tree read 610 against a
+ *                       recorded 613 while `probes` still matched exactly.
+ *
+ * ## This population shrinks for good reasons, not only grows
+ *
+ * A floor reads as if the thing under it only ever rises. This one does not. A
+ * package with no `exports` map publishes its `main` AS a require entry point,
+ * so giving it an accurate ESM-only `exports` map REMOVES it from this
+ * population -- an improvement that decrements `entries` AND `packages`. That
+ * is exactly how this record first parted company with the tree: it was exact
+ * at `MEASURED.ref` and stayed exact for its whole life until
+ * `@objectstack/cli` left the population that way. ⇒ a drop here is not
+ * evidence of a broken walk; only a drop below the floor is.
+ *
+ * ## Why no equality against the tree, and why no band either
+ *
+ * An equality reds on every legitimate move, in both directions -- the very PR
+ * that declared the `exports` map above would have reddened it. A band around
+ * the record is the next thing to reach for, and it fails a derivation rather
+ * than a taste test. Two reasons, either one sufficient:
+ *
+ *   1. The band already exists and is called the FLOOR. `MIN_ENTRIES` IS
+ *      `MEASURED.entries` minus the headroom this gate declared. A second,
+ *      narrower band would be a second tolerance for one fact, and its width
+ *      would be invented rather than measured.
+ *   2. No width measures anything. Measured 2026-08-29, the three gates in
+ *      `scripts/` carrying a record of this shape had drifted -1, -5 and +15
+ *      from theirs, in both directions, within days of landing. A band narrow
+ *      enough to notice this file's -1 reds on the +15 next door; one wide
+ *      enough to survive the +15 cannot see a -1.
+ *
+ * So the repair is not enforcement. What was missing is that a GREEN run never
+ * showed the reader the two numbers side by side, so the record could stop
+ * describing the tree with nothing, anywhere, saying so. `provenanceLine`
+ * prints both on every pass: the drift is a fact in the log now, not a
+ * discovery.
  *
  * ## Where it runs, and why not in the lint job
  *
@@ -298,12 +361,24 @@ const EXIT_REFUSE = 2;
 const EXIT_PREREQ = 3;
 
 // ---------------------------------------------------------------------------
-// Vacuity floors -- see the header. Measured on `8cb96ec41b` (a full `pnpm
-// build`, then this gate), each floor held with margin. Re-measuring UP is
-// free; LOWERING one to make a run pass is the move this block exists to make
+// Vacuity floors, and the provenance of the census they were derived from --
+// the header is the authority on how to reproduce it and on why it is recorded
+// rather than enforced. The ref lives INSIDE the record, so a count and the
+// tree it came from cannot be edited apart, and every site that quotes either
+// interpolates from here instead of restating it. Re-measuring UP is free;
+// LOWERING a floor to make a run pass is the move this block exists to make
 // visible in a diff.
 
-const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1, typedJudged: 102 });
+const MEASURED = Object.freeze({
+  // The commit this census was taken on -- a full install and build, then this
+  // gate. Immutable, so the record stays reproducible forever even as `main`
+  // moves away from it. ⛔ Never repoint it without re-running all four counts.
+  ref: '8cb96ec41b',
+  entries: 103,
+  packages: 67,
+  cjsFiles: 613,
+  probes: 1,
+});
 const MIN_ENTRIES = 90;
 const MIN_PACKAGES = 58;
 const MIN_CJS_FILES = 520;
@@ -311,20 +386,19 @@ const MIN_PROBES = 1;
 const MIN_TYPED_JUDGED = 88;
 
 /**
- * Where each count was measured. Carried PER ROW rather than as one commit in
- * the message template, because the counts were not all taken on the same
- * tree: TYPED arrived with #13112 and its floor was measured there. Folding a
- * later measurement under an earlier commit's name would make the refusal
- * message cite a tree the number does not come from — a small lie in the one
- * place a reader goes to decide whether a floor is trustworthy.
+ * TYPED's own census record -- a SECOND single-ref claim beside `MEASURED`,
+ * never a fifth count inside it. The four counts above were taken on
+ * `MEASURED.ref`, where the TYPED invariant's subject did not exist yet (the
+ * 27 typed manifests are what #13112's fix landed), so folding this number
+ * under that commit's name would make the refusal message cite a tree the
+ * number does not come from — a small lie in the one place a reader goes to
+ * decide whether a floor is trustworthy. Same discipline as `MEASURED`: one
+ * claim about one named commit; ⛔ never repoint without re-running the count.
+ * `dist/` is unaffected by that diff (an `exports` map decides what a resolver
+ * READS, never what tsup EMITS), so the count is the one a clean build of that
+ * commit produces.
  */
-const MEASURED_AT = Object.freeze({
-  entries: '8cb96ec41b', packages: '8cb96ec41b', cjsFiles: '8cb96ec41b', probes: '8cb96ec41b',
-  // The manifest tree of #13112's fix. `dist/` is unaffected by that diff (an
-  // `exports` map decides what a resolver READS, never what tsup EMITS), so
-  // this count is the same one a clean build of that commit produces.
-  typedJudged: '196612a313',
-});
+const MEASURED_TYPED = Object.freeze({ ref: '196612a313', typedJudged: 102 });
 
 /**
  * The first floor a run falls below, as a refusal message -- or `null` when
@@ -337,27 +411,56 @@ export function floorProblem(counts) {
   const rows = [
     [counts?.entries ?? 0, MIN_ENTRIES, MEASURED.entries, 'published `require` entry point(s)',
       'The manifest walk or the `exports` resolver broke. With no entries nothing is required, nothing is parsed, and the gate prints what a clean tree prints.',
-      MEASURED_AT.entries],
+      MEASURED.ref],
     [counts?.packages ?? 0, MIN_PACKAGES, MEASURED.packages, 'publishable package(s)',
       'Entries were found but collapsed onto a fraction of the tree — the walk is reading part of `packages/`, not the whole of it.',
-      MEASURED_AT.packages],
+      MEASURED.ref],
     [counts?.cjsFiles ?? 0, MIN_CJS_FILES, MEASURED.cjsFiles, 'emitted CommonJS file(s)',
       'This is the PARSES population. `commonJsFilesUnder` matched (almost) nothing, so `node --check` ran over an empty set and every byte we emit went unread.',
-      MEASURED_AT.cjsFiles],
+      MEASURED.ref],
     [counts?.probes ?? 0, MIN_PROBES, MEASURED.probes, 'cross-format behaviour probe(s) run',
       'AGREES is the invariant loading alone cannot give you, and an empty probe table satisfies it vacuously.',
-      MEASURED_AT.probes],
-    [counts?.typedJudged ?? 0, MIN_TYPED_JUDGED, MEASURED.typedJudged, 'require entry point(s) JUDGED by TYPED',
+      MEASURED.ref],
+    [counts?.typedJudged ?? 0, MIN_TYPED_JUDGED, MEASURED_TYPED.typedJudged, 'require entry point(s) JUDGED by TYPED',
       'This is the TYPED population — entries reached and answered, clean or not. It does not move when packages are defective, only when the row loop stops asking, so a fall here means TYPED went silent rather than that the tree got worse.',
-      MEASURED_AT.typedJudged],
+      MEASURED_TYPED.ref],
   ];
   for (const [got, min, measured, what, why, at] of rows) {
     if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on ${at ?? MEASURED_AT.entries}).\n`
+    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on ${at}).\n`
       + `  ${why}\n`
       + '  ⛔ NOT a pass: nothing, or nearly nothing, was read.';
   }
   return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: the census this run read, the floors
+ * it cleared, the census those floors were derived from, and the ref that
+ * census belongs to -- side by side.
+ *
+ * This is the whole repair. The floors are inequalities on purpose, so no run
+ * can ever contradict the record; without this line the record could stop
+ * describing the tree and every green log would look identical either way. The
+ * delta is reported as INFORMATION and never as a verdict: this population
+ * moves in both directions for good reasons (see the header), and only the
+ * floors decide anything.
+ *
+ * Pure, so `--self-test` drives it with no tree.
+ *
+ * @param {{entries?: number, packages?: number, cjsFiles?: number, probes?: number}} counts
+ * @returns {string}
+ */
+export function provenanceLine(counts) {
+  const got = [counts?.entries ?? 0, counts?.packages ?? 0, counts?.cjsFiles ?? 0, counts?.probes ?? 0];
+  const rec = [MEASURED.entries, MEASURED.packages, MEASURED.cjsFiles, MEASURED.probes];
+  const floors = [MIN_ENTRIES, MIN_PACKAGES, MIN_CJS_FILES, MIN_PROBES];
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  return `  provenance — entries/packages/cjsFiles/probes: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
+    + ' reasons, and only the floors decide. Reproduce the record: see this file\'s header.';
 }
 
 /**
@@ -946,6 +1049,12 @@ async function main(argv) {
   );
   for (const h of ledgerHits) console.log(`  · declared: ${h}`);
   for (const h of typedExempt) console.log(`  · declared UNREACHABLE declaration: ${h}`);
+  console.log(provenanceLine({
+    entries: rows.length,
+    packages: new Set(rows.map((r) => r.pkg)).size,
+    cjsFiles: cjsFileCount,
+    probes: probesRun,
+  }));
   return EXIT_OK;
 }
 
@@ -1235,8 +1344,8 @@ export async function selfTest() {
   // driven down individually AND the measured tuple is asserted to clear them
   // all — a floor accidentally set above its own measurement would red every
   // real run, which is the opposite failure and just as invisible in review.
-  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedJudged: MEASURED.typedJudged };
-  t('FLOOR — the values measured on 8cb96ec41b clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
+  const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedJudged: MEASURED_TYPED.typedJudged };
+  t('FLOOR — the values in the records clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
   t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
   t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
@@ -1249,19 +1358,49 @@ export async function selfTest() {
   // because judged does not fall when clean does. With the floor on the clean
   // count this returned a refusal and the 35 findings were never printed.
   t('FLOOR — a tree FULL of TYPED findings still reports them, never refuses',
-    floorProblem({ ...full, typedJudged: MEASURED.typedJudged }) === null);
+    floorProblem({ ...full, typedJudged: MEASURED_TYPED.typedJudged }) === null);
   t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
   t('FLOOR — the refusal names the count, the floor and the measurement',
-    /measured only 0 .* below the floor of \d+ \(613 on 8cb96ec41b\)/s.test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
+    new RegExp(`measured only 0 .* below the floor of \\d+ \\(${MEASURED.cjsFiles} on ${MEASURED.ref}\\)`, 's')
+      .test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
     JSON.stringify(floorProblem({ ...full, cjsFiles: 0 })));
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
     && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes
-    && MIN_TYPED_JUDGED <= MEASURED.typedJudged);
-  t('FLOOR — every count carries the tree it was measured on',
-    Object.keys(MEASURED).every((k) => typeof MEASURED_AT[k] === 'string' && MEASURED_AT[k].length >= 10));
+    && MIN_TYPED_JUDGED <= MEASURED_TYPED.typedJudged);
+  t('FLOOR — both census records carry the tree they were measured on',
+    typeof MEASURED.ref === 'string' && MEASURED.ref.length >= 10
+    && typeof MEASURED_TYPED.ref === 'string' && MEASURED_TYPED.ref.length >= 10);
   t('FLOOR — the refusal code is distinct from findings and prerequisite',
     EXIT_REFUSE !== EXIT_FINDINGS && EXIT_REFUSE !== EXIT_PREREQ && EXIT_REFUSE !== EXIT_OK);
+
+  // ── provenance: the record must stay reproducible, and visibly so ────────
+  //
+  // None of these can red on a tree that legitimately moved — that is the
+  // point. They red when the RECORD stops being a self-contained, reproducible
+  // claim: a ref that is not a ref, a quotation that restated the ref instead
+  // of reading it, or a pass line that stopped showing the reader both numbers.
+  t('PROVENANCE — the record carries the ref it was measured on',
+    typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref), JSON.stringify(MEASURED.ref));
+  t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
+    (floorProblem({ ...full, entries: 0 }) ?? '').includes(MEASURED.ref),
+    JSON.stringify(floorProblem({ ...full, entries: 0 })));
+  const provDrifted = provenanceLine({ entries: 102, packages: 66, cjsFiles: 610, probes: 1 });
+  t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
+    provDrifted.includes('102/66/610/1')
+    && provDrifted.includes(`${MEASURED.entries}/${MEASURED.packages}/${MEASURED.cjsFiles}/${MEASURED.probes}`)
+    && provDrifted.includes(`${MIN_ENTRIES}/${MIN_PACKAGES}/${MIN_CJS_FILES}/${MIN_PROBES}`)
+    && provDrifted.includes(MEASURED.ref), provDrifted);
+  t('PROVENANCE — drift is reported in BOTH directions, and equality says so',
+    provDrifted.includes('-1/-1/-3/=')
+    && provenanceLine({ ...full }).includes('=/=/=/=')
+    && provenanceLine({ ...full, entries: MEASURED.entries + 15 }).includes('+15/'),
+    provDrifted);
+  t('PROVENANCE — the PASS path actually prints it (a line nothing calls is the defect above)',
+    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'provenanceLine'}({`),
+    'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
+  t('PROVENANCE — the delta is marked as information, never as a verdict',
+    /not a verdict/i.test(provDrifted) && !/✗|REFUSES/.test(provDrifted), provDrifted);
 
   // ── the real ledger is well-formed and shrink-only in shape ───────────────
   // The SHIPPED exemption table against the REAL population — the half a
@@ -1293,7 +1432,8 @@ export async function selfTest() {
     console.error(`✗ check-dual-build-cjs-loads self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, the parse failure the ledger may never silence, and TYPED in both directions — the #13112 shape red, the identically-spelled CJS-first package green).`);
+  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, the parse failure the ledger may never silence, the record's ref reproducible, quoted from the record and printed on the pass path, and TYPED in both directions — the #13112 shape red, the identically-spelled CJS-first package green).`);
+
   return EXIT_OK;
 }
 

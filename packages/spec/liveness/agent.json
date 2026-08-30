@@ -1,14 +1,14 @@
 {
   "type": "agent",
-  "_note": "AgentSchema. Seeded from docs/audits/2026-06-agentschema-property-liveness.md. agent-runtime.ts is the runtime consumer; AgentPreview is display-only. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `packages/services/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code (the framework's own service-ai tree is a stale build artifact with no src/). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. agent.knowledge (and AIKnowledgeSchema) removed; the topics→sources rename was absorbed into the removal pre-release.",
+  "_note": "AgentSchema. Seeded from docs/audits/2026-06-agentschema-property-liveness.md. agent-runtime.ts is the runtime consumer; AgentPreview is display-only. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `cloud: packages/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code. 2026-08-30 (#13272): the previous wording of this sentence was false in BOTH halves. (a) It called the framework's own service-ai tree “a stale build artifact with no src/” — there is no tree at all: `packages/services/` holds every sibling service EXCEPT service-ai, and `git ls-files | grep -ic service-ai` returns 0. Absent, not stale. (b) The citations spelled `packages/services/service-ai/...`, a path present in NEITHER repo; cloud's real layout, measured at cloud@15f55df (#13042), is `packages/service-ai/...`. Every citation below now carries the explicit `cloud` realm marker, so it is attributed by the marker `scanEvidence` reads rather than riding the `FOREIGN_PATH_PREFIXES` special case that silently exempted the stale spelling from resolution — which is why 22 dead pointers sat green. ⚠ NOT RE-VERIFIED: this repair corrected the package root from that recorded measurement ONLY. No consumer below was re-read against a cloud checkout, so no `verifiedAt` was stamped and no `#symbol` anchor was added — the gate never resolves a foreign anchor, so an unchecked one would re-create the unfalsifiable pointer this repair removes. Re-verifying these consumers against a live cloud checkout is still open (#13272). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. agent.knowledge (and AIKnowledgeSchema) removed; the topics→sources rename was absorbed into the removal pre-release.",
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts"
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts"
     },
     "surface": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts (resolveActiveSkills)",
       "note": "ADR-0063 §1 — the product surface this agent binds ('ask'|'build'). resolveActiveSkills enforces that only surface-compatible skills (matching, or 'both') attach; tool scoping is derived from that bundle."
     },
     "label": {
@@ -21,47 +21,47 @@
     },
     "role": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "persona → system prompt."
     },
     "instructions": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "system prompt."
     },
     "model": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts:264",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts:264",
       "note": "PARTIAL — model/temperature/maxTokens applied; model.provider + topP DEAD."
     },
     "skills": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "Agent→Skill→Tool."
     },
     "tools": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "legacy direct-tool fallback."
     },
     "active": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "gates listing + 403 on chat."
     },
     "planning": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/agent-runtime.ts",
+      "evidence": "cloud: packages/service-ai/src/agent-runtime.ts",
       "note": "Only planning.maxIterations remains; the dead strategy/allowReplan knobs were removed in 16.0 (#2377)."
     },
     "access": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/routes/agent-access.ts:50",
+      "evidence": "cloud: packages/service-ai/src/routes/agent-access.ts:50",
       "note": "evaluateAgentAccess() — allow-list by userId/role; enforced at the chat route (agent-routes.ts:151). #1884 (landed after the 2026-06 audit, which still listed it dead)."
     },
     "permissions": {
       "status": "live",
-      "evidence": "packages/services/service-ai/src/routes/agent-access.ts:50",
+      "evidence": "cloud: packages/service-ai/src/routes/agent-access.ts:50",
       "note": "evaluateAgentAccess() — caller must hold ALL required permissions/roles; enforced at the chat route. #1884."
     },
     "lifecycle": {

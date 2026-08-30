@@ -361,7 +361,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/apps/setup:
     dependencies:
@@ -383,7 +383,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/apps/studio:
     dependencies:
@@ -2100,6 +2100,9 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../drivers/driver-sqlite-wasm
+      '@objectstack/driver-turso':
+        specifier: workspace:^
+        version: link:../drivers/driver-turso
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
@@ -2347,6 +2350,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/driver-turso':
+        specifier: workspace:^
+        version: link:../../drivers/driver-turso
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2680,6 +2686,9 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   packages/triggers/trigger-api:
     dependencies:

@@ -163,8 +163,30 @@ function fieldEntries(fields: any): FieldEntry[] {
   return Object.entries<any>(fields).map(([name, def]) => ({ name, def }));
 }
 
+/**
+ * The `reference` target a relationship field points at.
+ *
+ * `reference` is the only spelling `FieldSchema` declares; `reference_to` (like
+ * `referenceTo` / `relatedTo` / `target`) is a rejected alias the strict error
+ * map renames for the author, so a field carrying it does not parse (#5017,
+ * #11567 — "one key, one answer, on both doors").
+ *
+ * The DELIBERATE narrowing here mirrors `refOf` in
+ * `packages/lint/src/validate-security-posture.ts`, which was narrowed to
+ * canonical-only on purpose and records the reasoning. It applies with more
+ * force in THIS file, because these rules exist to tell an author their
+ * metadata is wrong: `lintDataModel` runs over a schema-parsed stack
+ * (`@objectstack/lint` is "pure `(stack) => Finding[]` … an in-memory,
+ * schema-parsed stack object"), where a rejected alias cannot appear — and on
+ * any pre-parse path the schema already names the real defect (the alias key)
+ * rather than R1 guessing past it. Tolerating the alias made
+ * `relationship/missing-reference` report a valid target for a field that has
+ * none: the one component whose job is to catch the misspelling was the one
+ * accepting it.
+ */
 function refOf(def: any): string | undefined {
-  return def?.reference || def?.reference_to;
+  const r = def?.reference as unknown;
+  return typeof r === 'string' && r ? r : undefined;
 }
 
 // ─── Uniqueness declarations (ADR-0120) ─────────────────────────────

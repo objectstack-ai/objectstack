@@ -703,6 +703,132 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
   return new Set([...warned].filter((path) => !path.includes('.')));
 }
 
+/**
+ * How many levels of `properties.children` nesting the per-component pass
+ * descends below region level — a MIRROR of `translatePage`'s
+ * `MAX_NESTED_COMPONENT_DEPTH` (#12961), which `@objectstack/spec` deliberately
+ * does not export ("the guard is a safety property of the walk, not a contract
+ * consumers address").
+ *
+ * ⚠️ A mirrored constant drifts, so it is not left to care: the deep-chain case
+ * in `test/platform-page-i18n-parity.test.ts` runs a container chain LONGER
+ * than this number through both sides and asserts they stop at the same depth,
+ * so raising the cap in `packages/spec` alone reds there rather than silently
+ * making the extractor the narrower of the two again. The durable fix is a walk
+ * exported from `packages/spec` and imported by both sides, the way
+ * `PAGE_COMPONENT_COPY_KEYS` already is — filed separately, since it is a
+ * `packages/spec` edit.
+ */
+const MAX_NESTED_COMPONENT_DEPTH = 32;
+
+/**
+ * Write `pages.<page>.components.<id>.<key>` for every component
+ * `translatePage` addresses — and only those (#13109).
+ *
+ * The KEY list is shared ({@link PAGE_COMPONENT_COPY_KEYS}, imported from the
+ * resolver), so neither side can drift on WHICH KEYS. The WALK is not shared,
+ * and that is the drift this function exists to close: the resolver descends a
+ * container's declared `properties.children` recursively, so
+ * `pages.<page>.components.<id>` resolves for a nested component id, while this
+ * pass used to iterate `regions[].components[]` and stop — the second half of
+ * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names (the extractor
+ * OMITTING a key the resolver reads). A translator extracting a page whose copy
+ * lives in nested components got a skeleton with no entries for them.
+ *
+ * ⛔ MATCHED, not widened. `@objectstack/lint`'s `walkPageComponents` is the
+ * shared traversal one pass down (object sections), and reusing it here would
+ * have been the cheaper edit — but it is WIDER than the resolver in four ways
+ * (`slots.<slot>` roots, `properties.items[].children`, `properties.body`,
+ * `properties.footer`) and NARROWER in one (it skips `kind: 'html' | 'react' |
+ * 'jsx'` pages, which `translatePage` walks). Emitting its extra shapes would
+ * recreate the OTHER half of the same failure pair — offering keys the resolver
+ * ignores — and adopting its page skip would drop region-level keys that
+ * resolve today. So this walk mirrors `translatePage` exactly:
+ *
+ *   - roots: `regions[].components[]` only — `slots.<slot>` is not walked by
+ *     the resolver, on any page;
+ *   - descent: `properties.children` only, recursively, depth-capped at
+ *     {@link MAX_NESTED_COMPONENT_DEPTH} and cycle-guarded on ancestors,
+ *     because `children` is `z.array(z.unknown())` authored data;
+ *   - collisions: a region-level component holding an id wins outright — even
+ *     a `page:header`, which emits nothing here but still BLOCKS a nested
+ *     namesake — and among nested components the document-order first match
+ *     takes the entry. One bundle entry, one component, so a repeated id can
+ *     never be counted twice against coverage either.
+ */
+function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
+  const regions: any[] = Array.isArray(page.regions) ? page.regions : [];
+  const regionComponents = (region: any): any[] =>
+    Array.isArray(region?.components) ? region.components : [];
+
+  // Pass 1: every id carried at REGION level, known in full before the descent
+  // visits its first nested component — a region-level namesake in a LATER
+  // region still beats a nested match seen earlier.
+  const regionLevelIds = new Set<string>();
+  for (const region of regions) {
+    for (const component of regionComponents(region)) {
+      const id = componentId(component);
+      if (id !== undefined) regionLevelIds.add(id);
+    }
+  }
+
+  // Ids already taken by an earlier nested component, so the document-order
+  // first match keeps the entry.
+  const claimedNestedIds = new Set<string>();
+  // The current descent path, for the cycle guard. Ancestors only — a subtree
+  // referenced twice as a SIBLING is two legitimate components.
+  const ancestors = new Set<any>();
+
+  const visit = (component: any, depth: number): void => {
+    if (!component || typeof component !== 'object' || Array.isArray(component)) return;
+    if (ancestors.has(component)) return;
+
+    const nested = depth > 0;
+    const id = componentId(component);
+    if (id !== undefined && (!nested || (!regionLevelIds.has(id) && !claimedNestedIds.has(id)))) {
+      if (nested) claimedNestedIds.add(id);
+      if (nested || component.type !== PAGE_HEADER_COMPONENT_TYPE) {
+        const props = component.properties ?? {};
+        for (const key of PAGE_COMPONENT_COPY_KEYS) {
+          // `label` may be authored on the component itself or in its props —
+          // the same either/or `translatePage` resolves back onto.
+          const value = key === 'label' && typeof component.label === 'string' && component.label
+            ? component.label
+            : props[key];
+          if (typeof value === 'string' && value) {
+            pushEntry(out, ['pages', name, 'components', id, key], value, 'page');
+          }
+        }
+      }
+    }
+
+    if (depth >= MAX_NESTED_COMPONENT_DEPTH) return;
+    const props = component.properties;
+    if (!props || typeof props !== 'object' || Array.isArray(props)) return;
+    const children = (props as Record<string, unknown>).children;
+    if (!Array.isArray(children)) return;
+    ancestors.add(component);
+    try {
+      for (const child of children) visit(child, depth + 1);
+    } finally {
+      ancestors.delete(component);
+    }
+  };
+
+  for (const region of regions) {
+    for (const component of regionComponents(region)) visit(component, 0);
+  }
+}
+
+/** The id a component is addressed by, or `undefined` when it carries none. */
+function componentId(component: any): string | undefined {
+  if (!component || typeof component !== 'object') return undefined;
+  return typeof component.id === 'string' && component.id.length > 0 ? component.id : undefined;
+}
+
+/** The one component type whose copy is addressed by PAGE name, not by id. */
+const PAGE_HEADER_COMPONENT_TYPE = 'page:header';
+
 /** Options shared by the two surfaces built on {@link collectExpectedEntries}. */
 export interface ExpectedEntryOptions {
   /**
@@ -941,7 +1067,7 @@ export function collectExpectedEntries(
     for (const region of regions) {
       const components: any[] = Array.isArray(region?.components) ? region.components : [];
       for (const component of components) {
-        if (component?.type !== 'page:header') continue;
+        if (component?.type !== PAGE_HEADER_COMPONENT_TYPE) continue;
         const props = component.properties ?? {};
         // `title` duplicating `label` is the common case and resolves via the
         // label fallback — only emit it when the two genuinely differ.
@@ -959,28 +1085,12 @@ export function collectExpectedEntries(
     // translator would have to know the keys to hand-write them — which is
     // most of the reason the copy went untranslated in the first place.
     //
-    // `page:header` is deliberately skipped: its copy is addressed by page
-    // name above, and emitting it here too would offer one string under two
-    // keys.
-    for (const region of regions) {
-      const components: any[] = Array.isArray(region?.components) ? region.components : [];
-      for (const component of components) {
-        if (component?.type === 'page:header') continue;
-        const id = component?.id;
-        if (typeof id !== 'string' || !id) continue;
-        const props = component.properties ?? {};
-        for (const key of PAGE_COMPONENT_COPY_KEYS) {
-          // `label` may be authored on the component itself or in its props —
-          // the same either/or `translatePage` resolves back onto.
-          const value = key === 'label' && typeof component.label === 'string' && component.label
-            ? component.label
-            : props[key];
-          if (typeof value === 'string' && value) {
-            pushEntry(out, ['pages', name, 'components', id, key], value, 'page');
-          }
-        }
-      }
-    }
+    // `page:header` is deliberately skipped AT REGION LEVEL: its copy is
+    // addressed by page name above, and emitting it here too would offer one
+    // string under two keys. A NESTED `page:header` is a different component —
+    // `translatePage`'s page-name route stops at region level, so a nested one
+    // is reachable by the id route ONLY and must be offered here (#13109).
+    emitPageComponentCopy(out, page, name);
   }
 
   // ── Screen flows (`flows.<flow>.screens.<node>.…`, #7646 / #11287) ─
