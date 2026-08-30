@@ -34,6 +34,19 @@ export {
   verifyPluginArtifact,
 } from './plugin-artifact-signature.js';
 
+// Per-file artifact integrity verification (ADR-0025 §3.2) — pure and
+// portable like the signature contract above; consumed by the
+// `os plugin publish` preflight. Unpack-time re-verification stays the
+// cloud control plane's obligation (#11331).
+export {
+  verifyIntegrity,
+  formatIntegrityViolation,
+  type IntegrityFile,
+  type IntegrityViolation,
+  type IntegrityViolationKind,
+  type VerifyIntegrityResult,
+} from './plugin-artifact-integrity.js';
+
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
 // The kernel never received a plugin's config to validate — factories close

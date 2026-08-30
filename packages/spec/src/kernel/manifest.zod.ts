@@ -100,8 +100,10 @@ export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
 /**
  * Per-file content digests of the packaged artifact (ADR-0025 §3.2),
  * mapping artifact-relative path → digest string (e.g. "sha256-<base64>").
- * Re-verified by the runtime when it unpacks the `.osplugin` (ADR §3.5
- * step 5).
+ * Computed at build time (`os plugin build`) and self-checked by the
+ * publisher at the `os plugin publish` preflight. Unpack-time
+ * re-verification (ADR §3.5 step 5) is the cloud control plane's
+ * obligation and is not implemented in this repo (#11331).
  */
 export const PluginIntegritySchema = z
   .record(z.string(), z.string())
@@ -609,8 +611,10 @@ export const ManifestSchema = z.object({
     .describe('Dependency packaging strategy (ADR-0025 §3.3)'),
 
   /**
-   * Per-file content digests of the packaged artifact (ADR-0025 §3.2),
-   * verified at install/load time when the runtime unpacks the `.osplugin`.
+   * Per-file content digests of the packaged artifact (ADR-0025 §3.2).
+   * Computed at build, self-checked at the publish preflight; unpack-time
+   * verification is the cloud control plane's obligation, not yet
+   * implemented (#11331).
    */
   integrity: PluginIntegritySchema.optional()
     .describe('Per-file content digests of the plugin artifact (ADR-0025 §3.2)'),

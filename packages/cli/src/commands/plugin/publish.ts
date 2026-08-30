@@ -7,7 +7,11 @@
  * Flow:
  *   1. Read the `.osplugin` bytes + the detached `.sig` (publisher signature).
  *   2. Extract the compiled `objectstack.plugin.json` from inside the
- *      artifact (id / version / name / runtime / permissions / integrity).
+ *      artifact (id / version / name / runtime / permissions / integrity),
+ *      then preflight the artifact files against the manifest's declared
+ *      per-file `integrity` digests (ADR-0025 §3.2) — refuse on any
+ *      mismatch / missing / extra file; an absent map skips the check
+ *      (the field is optional).
  *   3. POST /cloud/packages          — ensure the sys_package row exists.
  *   4. POST /cloud/packages/:id/versions with `artifact_kind: 'plugin'`,
  *      the base64 artifact, the declared manifest, the signature, and the
@@ -25,7 +29,15 @@ import { resolve as resolvePath, basename } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
-import { OSPLUGIN_EXT, sha256Hex, readOspluginManifest } from '../../utils/osplugin.js';
+import {
+  OSPLUGIN_EXT,
+  MANIFEST_FILENAME,
+  SIGNATURE_FILENAME,
+  sha256Hex,
+  readTarGz,
+  type ArchiveFile,
+} from '../../utils/osplugin.js';
+import { verifyIntegrity, formatIntegrityViolation } from '@objectstack/core';
 
 interface PostResult { ok: boolean; status: number; body: any; error?: string }
 
@@ -80,8 +92,12 @@ export default class PluginPublish extends Command {
 
     // 2. Extract the compiled manifest from inside the artifact. ────────
     let manifest: Record<string, any>;
+    let archiveFiles: ArchiveFile[];
     try {
-      manifest = readOspluginManifest(bytes);
+      archiveFiles = readTarGz(bytes);
+      const entry = archiveFiles.find((f) => f.path === MANIFEST_FILENAME);
+      if (!entry) throw new Error(`${MANIFEST_FILENAME} not found in artifact`);
+      manifest = JSON.parse(Buffer.from(entry.data).toString('utf8')) as Record<string, any>;
     } catch (err: any) {
       printError(`Cannot read manifest from artifact: ${err?.message ?? err}`);
       this.exit(1);
@@ -92,6 +108,39 @@ export default class PluginPublish extends Command {
     const displayName = String(flags['display-name'] ?? manifest.name ?? id).trim();
     if (!id || !version) { printError('Artifact manifest is missing id or version.'); this.exit(1); return; }
     printStep(`${id}@${version} (${(bytes.byteLength / 1024).toFixed(1)} KB, runtime: ${manifest.runtime ?? 'unset'})`);
+
+    // 2b. Integrity preflight (ADR-0025 §3.2) — self-check the artifact
+    // bytes against the manifest's own declared per-file digests before
+    // upload. Absent map = permissive by contract (the field is
+    // `.optional()`; artifacts built before integrity computation stay
+    // publishable). Unpack-time re-verification remains the cloud control
+    // plane's obligation (#11331) — this preflight does not discharge it.
+    const declaredIntegrity = manifest.integrity;
+    if (
+      declaredIntegrity !== undefined && declaredIntegrity !== null
+      && (typeof declaredIntegrity !== 'object' || Array.isArray(declaredIntegrity))
+    ) {
+      printError('Artifact manifest has a malformed `integrity` map (expected an object of path → digest). Rebuild with `os plugin build`.');
+      this.exit(1);
+      return;
+    }
+    const integrityCheck = verifyIntegrity(
+      archiveFiles,
+      declaredIntegrity as Record<string, string> | undefined,
+      { exempt: [MANIFEST_FILENAME, SIGNATURE_FILENAME] },
+    );
+    if (!integrityCheck.ok) {
+      printError(`Integrity preflight failed — the artifact's bytes no longer match its own manifest \`integrity\` digests (${integrityCheck.violations.length} violation${integrityCheck.violations.length === 1 ? '' : 's'}):`);
+      for (const v of integrityCheck.violations) console.log(`    • ${formatIntegrityViolation(v)}`);
+      console.log('\n  Rebuild the artifact with `os plugin build` (then re-sign with `os plugin sign`) so the digests match the packaged files, and publish the fresh artifact.');
+      this.exit(1);
+      return;
+    }
+    if (integrityCheck.skipped) {
+      printStep('No `integrity` map in the manifest — per-file integrity preflight skipped.');
+    } else {
+      printKV('  Integrity', `${integrityCheck.checked} file(s) verified against the manifest digests`);
+    }
 
     // 3. Detached publisher signature. ─────────────────────────────────
     const sigPath = resolvePath(process.cwd(), flags.sig ?? `${artifactPath}.sig`);
