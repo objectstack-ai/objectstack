@@ -30,23 +30,39 @@
  *      required to access this endpoint." The caller may hold a valid session;
  *      the fault is elsewhere.
  *    - `GRANTS LOST` (two classes) — identity survives and the CAPABILITY
- *      aggregation is what faulted, so the door answers **403 `FORBIDDEN`**,
+ *      aggregation is what faulted, so the door answered **403 `FORBIDDEN`**,
  *      "Reading packages requires the `studio.access` or `setup.access`
- *      capability." An authenticated administrator is told they lack a
- *      capability while the permission store is down. ⭐ This shape does NOT
+ *      capability." An authenticated administrator was told they lack a
+ *      capability while the permission store was down. ⭐ This shape does NOT
  *      travel through the `.catch(() => undefined)` the card names, nor through
  *      `computeExecCtx`'s own `catch`: it is `tryFind`'s per-read swallow
  *      inside `resolveAuthzContext` (`@objectstack/core`), one layer further
- *      out. Section 5 pins that both shapes are byte-identical to their
- *      innocent twins.
+ *      out.
+ *
+ *      ⭐ **[#13279] REPAIRED, and this file now pins the repair.** Maintainer
+ *      ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` distinguishes
+ *      "no rows" from "the read failed", and a read failure fails LOUD. The
+ *      `PERMISSION_STORE_DOWN` class therefore answers **503
+ *      `SERVICE_UNAVAILABLE`** and is no longer byte-identical to its innocent
+ *      twin — section 5's assertion is INVERTED IN PLACE, with the superseded
+ *      text quoted beside it. ⚠️ The SECOND grants-lost class,
+ *      `DATA_ENGINE_UNRESOLVABLE`, is UNCHANGED and still answers 403: it
+ *      reaches an empty grant set through `tryFind`'s `!ql` guard (there is no
+ *      engine to read) rather than through its `catch` (a read that failed), so
+ *      the ruling's landing point does not see it. That residue is asserted
+ *      explicitly in section 3 rather than left to be rediscovered.
  *  - **Is a fault ever served as ANONYMOUS ACCESS, or as a silent success? NO.**
  *    Every degraded class is REFUSED on every wire-reachable method of all
  *    four routes. The swallow fails CLOSED. (Section 6.)
- *  - **Does a fault ever reach the caller as the 5xx it is? NO — never, in any
- *    class.** That zero is read against a WORKING instrument: section 1 shows
- *    this same door answering **500 `INTERNAL_ERROR`** when the fault is raised
- *    one layer later, by the package service. So "no 5xx" is a property of the
- *    degradation, not of the harness.
+ *  - **Does a fault ever reach the caller as the 5xx it is?** It did not, in
+ *    any class — that zero was read against a WORKING instrument: section 1
+ *    shows this same door answering **500 `INTERNAL_ERROR`** when the fault is
+ *    raised one layer later, by the package service. So "no 5xx" was a property
+ *    of the degradation, not of the harness. ⭐ **[#13279] Now partitioned
+ *    rather than zero**: the ruled permission-store class answers 503 on every
+ *    route, and every class the ruling did not reach still answers a refusal.
+ *    Section 3 asserts both halves, so the test still fails if a door goes
+ *    quiet again OR if an unruled class starts throwing.
  *  - **Does the `.catch(() => undefined)` at
  *    `resolvePackageRouteExecutionContext` ever fire on production input? NO.**
  *    In every class below the private resolver FULFILS. `computeExecCtx` wraps
@@ -59,13 +75,18 @@
  *    lets anything through. Section 4 measures this per class, against a
  *    control that shows the witness CAN report a rejection.
  *
- * ## ⛔ What this file does not do
+ * ## What this file does, and no longer does not (#13279)
  *
- * It does not repair anything and it asserts no verdict. Question 3's repair —
- * distinguishing "no context" from "resolution failed" — is a behaviour change
- * on a public door and is explicitly out of this card's scope. `rest-server.ts`
- * is not edited by this change at all (it is under a same-file serial hold);
- * everything here is measurement.
+ * As written for #13255 this file repaired nothing and asserted no verdict —
+ * distinguishing "no context" from "resolution failed" was a behaviour change
+ * on a public door and out of that card's scope. #13279 RULED that change for
+ * the permission-store half, so the assertions covering it are now regression
+ * pins on the repaired behaviour rather than measurements of a defect.
+ *
+ * ⛔ The other half is still not repaired and still not asserted as a verdict:
+ * `CONTEXT LOST` remains byte-identical to a genuine anonymous caller (section
+ * 5's first case is unchanged), and `DATA_ENGINE_UNRESOLVABLE` remains a 403.
+ * Both are recorded here as measurements, exactly as before.
  *
  * ## Reading discipline
  *
@@ -77,7 +98,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+import {
+  ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
+  // [#13279] The loud permission-store outage, and its brand predicate.
+  AUTHZ_STORE_UNAVAILABLE_CODE, AUTHZ_STORE_UNAVAILABLE_STATUS, isAuthzStoreUnavailableError,
+} from '@objectstack/core';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
 import { RestServer } from './rest-server.js';
@@ -258,13 +283,25 @@ interface FaultClass {
   faulted: () => Wiring;
   /** The request that reaches the door (scoped mount supplies `params`). */
   req?: Record<string, any>;
-  ctx: 'lost' | 'grants';
+  /**
+   * `lost`   — the whole execution context is gone.
+   * `grants` — identity survives, the capability aggregation is empty.
+   * `loud`   — [#13279] the resolution REFUSES rather than resolving at all.
+   */
+  ctx: 'lost' | 'grants' | 'loud';
   read: { status: number; code: string };
   write: { status: number; code: string };
 }
 
 const DENY = { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE };
 const FORBID = { status: 403, code: 'FORBIDDEN' };
+/**
+ * [#13279] The LOUD cohort — a permission-store outage, answered as the outage
+ * it is. Ruled 2026-08-30 (maintainer, verbatim 「第一批其余同意」):
+ * `tryFind` distinguishes "no rows" from "the read failed", and a read failure
+ * fails LOUD, so an outage can no longer be answered as a capability denial.
+ */
+const UNAVAILABLE = { status: AUTHZ_STORE_UNAVAILABLE_STATUS, code: AUTHZ_STORE_UNAVAILABLE_CODE };
 
 const CLASSES: FaultClass[] = [
   {
@@ -308,7 +345,12 @@ const CLASSES: FaultClass[] = [
     id: 'PERMISSION_STORE_DOWN',
     what: 'identity resolves, then every permission-store read throws',
     faulted: () => ({ ...healthy(), objectQLProvider: async () => qlDown() }),
-    ctx: 'grants', read: FORBID, write: FORBID,
+    // ⭐ [#13279] INVERTED IN PLACE, not re-baselined. Until the 2026-08-30
+    // ruling this row read `ctx: 'grants', read: FORBID, write: FORBID` — an
+    // authenticated principal with an empty capability set, refused 403. That
+    // was the DISGUISE the ruling reverses: the store that holds the
+    // capabilities was down, so no capability judgement was ever reached.
+    ctx: 'loud', read: UNAVAILABLE, write: UNAVAILABLE,
   },
   {
     id: 'DATA_ENGINE_UNRESOLVABLE',
@@ -323,6 +365,23 @@ describe('[#13255] reachability — each production fault class, driven, with it
     // ---- the fault -------------------------------------------------------
     const rest = serverWith(klass.faulted());
     const req = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    // [#13279] The loud cohort never produces a context to inspect — that IS
+    // the repair. The resolution REJECTS with the branded outage error instead
+    // of fabricating an envelope that reports a capability set nobody read.
+    if (klass.ctx === 'loud') {
+      const settled = await rest.resolvePackageRouteExecutionContext(req).then(
+        (v) => ({ ok: true as const, v }), (e) => ({ ok: false as const, e }),
+      );
+      expect(settled.ok).toBe(false);
+      // The BRAND, not merely "something threw": an incidental throw would
+      // satisfy a bare `.rejects` and prove nothing about which fault fired.
+      expect(isAuthzStoreUnavailableError((settled as any).e)).toBe(true);
+      expect((settled as any).e.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+      // POSITIVE CONTROL, unchanged: the same wiring minus the fault is served.
+      const served = await drive(mount(serverWith(healthy())), 'GET', PKGS, klass.req ?? {});
+      expect(served.status).toBe(200);
+      return;
+    }
     const ctx = await rest.resolvePackageRouteExecutionContext(req);
     if (klass.ctx === 'lost') {
       expect(ctx).toBeUndefined();
@@ -370,20 +429,36 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     expect(publish.body?.error?.code).toBe(klass.write.code);
   });
 
-  it('⭐ NO class, on any route, is answered with the 5xx the fault actually is', async () => {
-    const seen: number[] = [];
+  it('⭐ [#13279] a permission-store OUTAGE surfaces as a 5xx on every route; every other class still does not', async () => {
+    // ⭐ INVERTED IN PLACE, not re-baselined. This test used to assert
+    // `seen.filter((s) => s >= 500)` was EMPTY across every class and route —
+    // "a fault never reaches the caller as the 5xx it is", which was the
+    // card's headline finding. The 2026-08-30 ruling reverses exactly that for
+    // the permission-store class, so the assertion is inverted rather than
+    // deleted: the zero becomes a partition, and the classes NOT covered by the
+    // ruling keep the original reading, which is what makes this still a
+    // regression test rather than a rubber stamp.
+    const loud: number[] = [];
+    const quiet: number[] = [];
     for (const klass of CLASSES) {
       const routes = mount(serverWith(klass.faulted()));
       const extra = klass.req ?? {};
-      seen.push((await drive(routes, 'GET', PKGS, extra)).status);
-      seen.push((await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'x' } })).status);
-      seen.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'x', version: '1.0.0' } } })).status);
+      const bucket = klass.ctx === 'loud' ? loud : quiet;
+      bucket.push((await drive(routes, 'GET', PKGS, extra)).status);
+      bucket.push((await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'x' } })).status);
+      bucket.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'x', version: '1.0.0' } } })).status);
     }
-    // ⚠️ ZERO. Its control is section 1's 500 case, on this same door and this
-    // same harness — so this reads as "the degradation never surfaces", not as
-    // "the instrument cannot see a 5xx".
-    expect(seen.filter((s) => s >= 500)).toEqual([]);
-    expect(seen.every((s) => s === ANONYMOUS_DENY_STATUS || s === 403)).toBe(true);
+    // The ruled class: the outage is the answer, on EVERY route — not one door
+    // taught to be loud while its siblings kept the disguise.
+    expect(loud.length).toBeGreaterThan(0);
+    expect(loud.every((s) => s === AUTHZ_STORE_UNAVAILABLE_STATUS)).toBe(true);
+    // ⚠️ The classes the ruling did NOT reach still answer a refusal, and that
+    // residue is deliberately left visible rather than asserted away:
+    // `DATA_ENGINE_UNRESOLVABLE` reaches an empty grant set through `tryFind`'s
+    // `!ql` guard (no engine to read) rather than through its `catch` (a read
+    // that failed), so the ruling's landing point does not see it.
+    expect(quiet.filter((s) => s >= 500)).toEqual([]);
+    expect(quiet.every((s) => s === ANONYMOUS_DENY_STATUS || s === 403)).toBe(true);
   });
 
   it('the capability clause, isolated from the anonymous floor, refuses the lost context too', async () => {
@@ -414,13 +489,19 @@ describe('[#13255] the private resolver FULFILS on every production fault class'
     expect(await settle(Promise.resolve(1))).toBe('fulfilled');
   });
 
-  it.each(CLASSES)('$id — `resolveExecCtx` resolves; it does not reject', async (klass) => {
+  it.each(CLASSES)('$id — `resolveExecCtx` settles the way its cohort declares', async (klass) => {
     const rest = serverWith(klass.faulted());
     const req: Record<string, any> = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
     // The PRIVATE resolver, read BEFORE the wrapper's `.catch` can act — so
     // this reads the supplier, not the net over it.
     const inner = (rest as any).resolveExecCtx(req.params?.environmentId, req);
-    expect(await settle(inner)).toBe('fulfilled');
+    // ⭐ [#13279] INVERTED IN PLACE for the loud cohort. This assertion used to
+    // read `'fulfilled'` for EVERY class, and that uniformity was the finding:
+    // every fault reached the door as a value, so no fault could be told from a
+    // verdict. A permission-store outage now REJECTS all the way out here —
+    // which is why `computeExecCtx`'s blanket `catch` had to learn to re-raise
+    // it. Every other class still fulfils, exactly as measured before.
+    expect(await settle(inner)).toBe(klass.ctx === 'loud' ? 'rejected' : 'fulfilled');
   });
 
   it('CONTROL: when the inner resolve IS made to reject, the wrapper is what absorbs it', async () => {
@@ -452,16 +533,40 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
     expect(JSON.stringify(faulted)).toBe(JSON.stringify(anonymous));
   });
 
-  it('GRANTS LOST: a permission-store outage answers exactly what "you hold nothing" answers', async () => {
+  it('⭐ [#13279] GRANTS LOST: a permission-store outage NO LONGER answers what "you hold nothing" answers', async () => {
+    // ⭐ THE INVERSION. This is the #13282 assertion the 2026-08-30 ruling
+    // reverses, inverted IN PLACE with its reason recorded — ⛔ not deleted and
+    // ⛔ not re-baselined. It used to read:
+    //
+    //     expect(faulted.status).toBe(403);
+    //     expect(faulted.body?.error?.message).toContain('studio.access');
+    //     expect(JSON.stringify(faulted)).toBe(JSON.stringify(genuinelyEmpty));
+    //
+    // i.e. an outage of the permission store and a caller who genuinely holds
+    // nothing were ONE answer, byte for byte. Maintainer ruling 2026-08-30,
+    // verbatim 「第一批其余同意」: 权限库不可达时不再解析为「已认证零能力」,
+    // 而是响亮拒绝(与真实能力拒绝的 403 可区分).
     const faulted = await drive(
       mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS,
     );
     const genuinelyEmpty = await drive(
       mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })), 'GET', PKGS,
     );
-    expect(faulted.status).toBe(403);
-    expect(faulted.body?.error?.message).toContain('studio.access');
-    expect(JSON.stringify(faulted)).toBe(JSON.stringify(genuinelyEmpty));
+
+    // The outage is answered as an outage — and says so, in words that cannot
+    // be read as a permission verdict.
+    expect(faulted.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect(faulted.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+    expect(faulted.body?.error?.message).not.toContain('studio.access');
+
+    // ⚠️ The other half of the ruling, and the half a one-sided fix would
+    // break: a GENUINE capability denial is untouched. Making outages loud is
+    // only correct if real denials still read as denials.
+    expect(genuinelyEmpty.status).toBe(403);
+    expect(genuinelyEmpty.body?.error?.message).toContain('studio.access');
+
+    // The disguise is gone, stated on the same comparison that pinned it.
+    expect(JSON.stringify(faulted)).not.toBe(JSON.stringify(genuinelyEmpty));
   });
 
   it('CONTROL: the same comparison SEPARATES two answers that differ', async () => {

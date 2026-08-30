@@ -20,11 +20,19 @@
  * implementation; both entry points are thin adapters that supply `ql` /
  * `getSession` their own way and delegate here.
  *
- * Fail-closed: every read is defensive. Missing services / tables yield a
- * partial context (even `{ positions: [], permissions: [] }`) — enforcement is the
- * SecurityPlugin's job, never this resolver's.
+ * Fail-closed: every read is defensive about a MISSING service — an unwired
+ * `ql` yields a partial context (even `{ positions: [], permissions: [] }`) and
+ * enforcement stays the SecurityPlugin's job, never this resolver's.
+ *
+ * ⚠️ [#13279] A FAILED read is not a missing service, and since the 2026-08-30
+ * ruling the two no longer share an answer. When a permission-store read is
+ * issued and THROWS, this resolver raises {@link AuthzStoreUnavailableError}
+ * instead of reporting an empty grant set: an outage must not be answerable as
+ * a capability denial. See `authz-store-unavailable.ts` for the full reasoning
+ * and for why the failure is a throw rather than a field on the envelope.
  */
 
+import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -147,14 +155,34 @@ async function tryFind(
     let rows = await ql.find(object, { where, limit, context } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+  } catch (err) {
+    // [#13279] THE loud failure. This `catch` used to `return []`, which made a
+    // FAILED read and an EMPTY one the same answer — so an outage of the
+    // permission store resolved as an authenticated principal holding zero
+    // capabilities, and the door answered a `403` byte-identical to a genuine
+    // capability denial. Ruled 2026-08-30: distinguish the two, and fail LOUD.
+    //
+    // ⚠️ The `!ql` guard ABOVE deliberately still returns `[]`: "no engine is
+    // wired" is not a failed read, and an embedder that never configured a data
+    // plane must keep resolving to an empty-but-valid envelope exactly as
+    // before. Only a read that was ISSUED and THREW reaches here.
+    throw new AuthzStoreUnavailableError(object, err);
   }
 }
 
 /**
- * Resolve the authorization context for an inbound request. Always resolves —
- * never throws. Anonymous requests yield `{ positions: [], permissions: [], ... }`.
+ * Resolve the authorization context for an inbound request. Anonymous requests
+ * yield `{ positions: [], permissions: [], ... }`.
+ *
+ * ⚠️ [#13279] This function used to document itself as "Always resolves — never
+ * throws", and that total guarantee WAS the defect: the only way to always
+ * resolve across a permission-store outage is to report a capability set the
+ * resolver never actually read. It now throws exactly one error —
+ * {@link AuthzStoreUnavailableError}, when a permission-store read was issued
+ * and failed. Every other path still resolves, including every MISSING-service
+ * path. A transport that fails closed on unexpected throws should re-raise this
+ * one ({@link isAuthzStoreUnavailableError}) rather than degrade it to a
+ * refusal — degrading it restores the disguise the ruling removed.
  */
 export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
@@ -321,8 +349,14 @@ export interface ResolveUserAuthzGrantsOptions {
  * automation engine calls this to run the flow's data ops exactly as that user
  * — not the bare member/everyone fallback the missing grants used to leave it.
  *
- * Fail-closed like its parent: every read is defensive, a missing engine/table
- * yields an empty-but-valid envelope, and it never throws.
+ * Fail-closed like its parent: a missing engine yields an empty-but-valid
+ * envelope.
+ *
+ * ⚠️ [#13279] "and it never throws" was removed from this sentence deliberately.
+ * A permission-store read that is issued and FAILS now raises
+ * {@link AuthzStoreUnavailableError} rather than contributing an empty grant
+ * set, so a `runAs:'user'` automation cannot silently run with the authority of
+ * a user whose grants were never read.
  */
 export async function resolveUserAuthzGrants(
   ql: any,

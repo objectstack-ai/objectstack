@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext } from '@objectstack/core';
+import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
 import type {
   IHttpServer,
   IDataEngine,
@@ -770,7 +770,11 @@ function buildFileReadAuthorizer(
         }
       }
       return 'deny';
-    } catch {
+    } catch (err) {
+      // [#13279] A permission-store outage is not a read verdict. Re-raised so
+      // the file-read door answers the 503 it is instead of a silent 'deny'
+      // indistinguishable from a genuine refusal.
+      if (isAuthzStoreUnavailableError(err)) throw err;
       return 'deny'; // fail closed
     }
   };

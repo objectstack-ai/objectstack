@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext } from '@objectstack/core';
+import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
   AuthSessionApi,
@@ -843,7 +843,11 @@ export class SharingServicePlugin implements Plugin {
                 // both sibling transports build — `rest-server.ts` and
                 // `runtime/src/security/resolve-execution-context.ts`.
                 return { ...authz, isSystem: false };
-              } catch {
+              } catch (err) {
+                // [#13279] Degrading an outage to `{}` answers 401 — the same
+                // answer a genuine anonymous caller gets. Re-raised so the
+                // outage is not laundered into an authentication verdict.
+                if (isAuthzStoreUnavailableError(err)) throw err;
                 return {}; // anonymous → authed routes 401
               }
             };

@@ -71,7 +71,13 @@ type Handler = (req: any, res: any) => any;
 
 /**
  * Every `this.resolveExecCtx(environmentId, req)` invocation, with the line it
- * sits on and whether it carries its OWN `.catch(() => undefined)`.
+ * sits on and whether it carries its OWN `.catch(…)`.
+ *
+ * [#13279] The catch ARGUMENT changed — every site now passes
+ * `rethrowAuthzStoreUnavailable` instead of `() => undefined`, so a
+ * permission-store outage is re-raised rather than degraded into a refusal.
+ * The detection below keys on `.catch(` and is deliberately spelling-agnostic,
+ * so this census still measures WHICH sites are caught, which is its subject.
  *
  * ⚠️ The catch may sit on the CONTINUATION line — four of them do. A
  * single-line grep counts 16 and misses those four, which is how the thread's
@@ -499,8 +505,13 @@ describe('[#13160] §6 the boundary of this census', () => {
         // `package-door-execctx-fault-reading.test.ts` (PR #13153) —
         // fail-CLOSED, two ablation legs, both rival readings falsified.
         // ⛔ Recorded as DEFERRED to that file, never as "assumed closed".
+        // [#13279] The catch argument is now `rethrowAuthzStoreUnavailable`
+        // (was `() => undefined`): a permission-store OUTAGE must reach the
+        // door as the 503 it is instead of being laundered into a 401/403.
+        // This grep tracks the wrapper's CURRENT spelling — the site is still
+        // deferred to its own file, which is what §6 asserts.
         const wrapper = SOURCE.split('\n').findIndex((l) =>
-            l.includes('return this.resolveExecCtx(environmentId, req).catch(() => undefined);'));
+            l.includes('return this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);'));
         expect(wrapper).toBeGreaterThan(0);
         expect(SITES.some((s) => s.line === wrapper + 1)).toBe(true);
     });
