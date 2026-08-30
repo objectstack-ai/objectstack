@@ -124,6 +124,60 @@ const VITEST_CONFIG_NAMES = [
 
 const DISARM_RE = /\bdisableConsoleIntercept\s*:\s*true\b/;
 const REARM_RE = /\bdisableConsoleIntercept\s*:\s*false\b/;
+const PROJECTS_RE = /\bprojects\s*:\s*\[/;
+const TEST_BLOCK_RE = /\btest\s*:\s*\{/g;
+
+/**
+ * For a config that defines inline `projects`, the ROOT-level setting is
+ * INERT: measured on vitest 4.1.10 (probe fixture: root
+ * `disableConsoleIntercept: true` + one inline project + a logging test —
+ * the reporter received the console RPC all the same, byte-identical to the
+ * armed control). So a projects config must carry the disarm inside EVERY
+ * project's own `test` block, and a root-only spelling is precisely the
+ * declared-≠-enforced shape this repo refuses. Brace-matching is safe here
+ * because the source arrives with comments AND string/template content
+ * blanked — no brace inside prose survives to miscount.
+ *
+ * @returns {string[]} the masked bodies of every `test: {...}` block that
+ * sits INSIDE the projects array.
+ */
+function projectTestBlocks(masked) {
+  const start = PROJECTS_RE.exec(masked);
+  if (!start) return [];
+  const openBracket = masked.indexOf('[', start.index);
+  let depth = 0;
+  let end = -1;
+  for (let i = openBracket; i < masked.length; i++) {
+    if (masked[i] === '[') depth += 1;
+    else if (masked[i] === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return [];
+  const region = masked.slice(openBracket, end + 1);
+  const blocks = [];
+  TEST_BLOCK_RE.lastIndex = 0;
+  let m;
+  while ((m = TEST_BLOCK_RE.exec(region)) !== null) {
+    const open = openBracket + m.index + m[0].length - 1; // the '{'
+    let d = 0;
+    for (let i = open; i <= end; i++) {
+      if (masked[i] === '{') d += 1;
+      else if (masked[i] === '}') {
+        d -= 1;
+        if (d === 0) {
+          blocks.push(masked.slice(open, i + 1));
+          break;
+        }
+      }
+    }
+  }
+  return blocks;
+}
 /** A script that runs vitest — `vitest run`, `vitest --coverage`, a bare `vitest`. */
 const VITEST_SCRIPT_RE = /(?:^|\s|&&|;)vitest(?:\s|$)/;
 
@@ -226,6 +280,21 @@ export function scan(root) {
           `(EnvironmentTeardownError: [vitest-worker]: Closing rpc while ` +
           `"onUserConsoleLog" was pending). Add to the test block:\n${REMEDY}`,
       );
+      continue;
+    }
+    if (PROJECTS_RE.test(masked)) {
+      const blocks = projectTestBlocks(masked);
+      const undisarmed = blocks.filter((b) => !DISARM_RE.test(b));
+      if (blocks.length === 0 || undisarmed.length > 0) {
+        findings.push(
+          `${rel(root, dir)}/${configName}: defines inline projects, and ` +
+            `${blocks.length === 0 ? 'no project test block could be read' : `${undisarmed.length} of ${blocks.length} project test block(s) lack the setting`} ` +
+            `— a ROOT-level disableConsoleIntercept is INERT for project runs ` +
+            `(measured on vitest 4.1.10: a probe project's console write still ` +
+            `arrived over RPC with the root disarm in place). Put\n${REMEDY}\n` +
+            `inside EVERY project's own test block.`,
+        );
+      }
     }
   }
   return { findings, vitestPackages };
@@ -358,6 +427,35 @@ function selfTest() {
       packages: { a: { 'package.json': QUIET_MANIFEST } },
       expectFindings: 0,
       expectVitestPackages: 0,
+    },
+    {
+      name: 'projects config with only a ROOT disarm fails (root is inert for projects)',
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'vitest.config.ts':
+            `export default { test: { disableConsoleIntercept: true, projects: [\n` +
+            `  { test: { name: 'p1', include: ['x'] } },\n` +
+            `  { test: { name: 'p2', disableConsoleIntercept: true } },\n` +
+            `] } };\n`,
+        },
+      },
+      expectFindings: 1,
+      expectText: 'INERT for project runs',
+    },
+    {
+      name: 'projects config disarmed in every project passes',
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'vitest.config.ts':
+            `export default { test: { projects: [\n` +
+            `  { test: { name: 'p1', disableConsoleIntercept: true } },\n` +
+            `  { test: { name: 'p2', disableConsoleIntercept: true } },\n` +
+            `] } };\n`,
+        },
+      },
+      expectFindings: 0,
     },
     {
       name: 'string-guarded config: setting inside a template literal does not count',
