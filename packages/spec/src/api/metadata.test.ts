@@ -17,10 +17,6 @@ import {
   MetadataBulkRegisterRequestSchema,
   MetadataBulkUnregisterRequestSchema,
   MetadataBulkResponseSchema,
-  // Overlay
-  MetadataOverlayResponseSchema,
-  MetadataOverlaySaveRequestSchema,
-  MetadataEffectiveResponseSchema,
   // Import/Export
   MetadataExportRequestSchema,
   MetadataExportResponseSchema,
@@ -536,52 +532,8 @@ describe('MetadataBulkResponseSchema', () => {
 });
 
 // ==========================================
-// 5. Overlay / Customization
+// 5. Overlay / Customization — REMOVED (#13135, ADR-0049; see metadata.zod.ts §5)
 // ==========================================
-
-describe('MetadataOverlayResponseSchema', () => {
-  it('should accept response with overlay', () => {
-    const result = MetadataOverlayResponseSchema.parse({
-      success: true,
-      data: {
-        id: 'overlay-001',
-        baseType: 'object',
-        baseName: 'account',
-        scope: 'platform',
-        patch: { fields: { status: { label: 'Account Status' } } },
-      },
-    });
-    expect(result.data?.baseType).toBe('object');
-  });
-
-  it('should accept response without overlay (undefined)', () => {
-    const result = MetadataOverlayResponseSchema.parse({
-      success: true,
-    });
-    expect(result.data).toBeUndefined();
-  });
-});
-
-describe('MetadataEffectiveResponseSchema', () => {
-  it('should accept effective metadata response', () => {
-    const result = MetadataEffectiveResponseSchema.parse({
-      success: true,
-      data: {
-        name: 'account',
-        label: 'Account',
-        fields: { status: { label: 'Account Status', type: 'select' } },
-      },
-    });
-    expect(result.data).toBeDefined();
-  });
-
-  it('should accept null/undefined effective response', () => {
-    const result = MetadataEffectiveResponseSchema.parse({
-      success: true,
-    });
-    expect(result.data).toBeUndefined();
-  });
-});
 
 // ==========================================
 // 6. Import / Export
@@ -1041,38 +993,9 @@ describe('Cross-Framework Metadata API Contracts', () => {
     });
   });
 
-  describe('GET /api/meta/:type/:name/overlay — Get overlay', () => {
-    it('returns overlay when customization exists', () => {
-      const response = MetadataOverlayResponseSchema.parse({
-        success: true,
-        data: {
-          id: 'overlay-123',
-          baseType: 'object',
-          baseName: 'account',
-          scope: 'platform',
-          patch: { fields: { status: { label: 'Custom Status' } } },
-        },
-      });
-      expect(response.data?.scope).toBe('platform');
-    });
-  });
-
-  describe('GET /api/meta/:type/:name/effective — Get effective metadata', () => {
-    it('returns merged metadata with overlays applied', () => {
-      const response = MetadataEffectiveResponseSchema.parse({
-        success: true,
-        data: {
-          name: 'account',
-          label: 'Account',
-          fields: {
-            status: { label: 'Custom Status', type: 'select' },
-            name: { label: 'Account Name', type: 'text' },
-          },
-        },
-      });
-      expect(response.data).toBeDefined();
-    });
-  });
+  // (The `…/overlay` and `…/effective` route cases were removed with the
+  // section-5 contracts — #13135, ADR-0049: no adapter ever served those
+  // paths, so the cases pinned an API that did not exist.)
 
   describe('GET /api/meta/:type/:name/dependencies — Get dependencies', () => {
     it('returns what this item depends on', () => {

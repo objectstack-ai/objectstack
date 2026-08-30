@@ -5280,7 +5280,22 @@ const step18: MigrationStep = {
     'across the tree, the example apps and the published *.form.ts corpus). The FormView ' +
     'vocabulary\'s own option shape (`FormSelectOptionSchema`, ui/view.zod.ts) now refuses ' +
     'the key with the prescription; the mechanical conversion strips it from stored ' +
-    'sources (pure lossless delete — it never had an effect on this surface to lose).',
+    'sources (pure lossless delete — it never had an effect on this surface to lose). ' +
+    'It also retires the paper metadata-customization protocol whole (#13135, re-charter ' +
+    'of #12057; ADR-0049 enforce-or-remove, maintainer ruling 2026-08-29): ' +
+    '`kernel/metadata-customization.zod.ts` — the three-layer platform/user patch-overlay ' +
+    'model with field-level change tracking and a 3-way-merge story — was exported, ' +
+    'documented as the customization architecture, and implemented ONLY by an unreachable ' +
+    '`packages/metadata` limb (no route served the paper `…/overlay`/`…/effective` ' +
+    'endpoints; the four optional service members were called only by their own unit ' +
+    'tests). ADR-0126 §6 wall 4 supersedes it on the record ("nothing may build against ' +
+    'it"). The module\'s seven defs and the three section-5 API contracts leave via ' +
+    'RETIRED_DEFS_BY_MAJOR; the authorable carriers `MetadataPluginConfig.' +
+    'customizationPolicies` / `.mergeStrategy` and `MetadataManagerConfig.persistence.' +
+    'overlayWritable` are retiredKey tombstones (no D2 conversion — plugin/manager ' +
+    'configs are not stack collection members, the additionalTypes reasoning). The ' +
+    'customization that actually ships: ADR-0005\'s org overlay and ADR-0126\'s ' +
+    'packaged-metadata model.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5553,6 +5568,66 @@ const step18: MigrationStep = {
         + '(same pin). ⚠️ Runtime behaviour is deliberately UNCHANGED: the CLI '
         + 'never resolved commands from this declaration — commands are '
         + 'oclif-auto-discovered, before and after.',
+    },
+    {
+      id: 'client-meta-reset-result-reset',
+      surface:
+        'client.meta.deleteItem(...).deleted / .type / .name (the return of '
+        + '`client.meta.deleteItem()` and the environment-scoped '
+        + '`client.environment(id).meta.deleteItem()`)',
+      replacement:
+        '`reset` — `r.deleted` → `r.reset`. Same call, same wire body, declared shape. Both '
+        + 'twins now declare `DeleteMetaItemResponse` (`@objectstack/spec/api`); `type` and '
+        + '`name` have no replacement because the reset door never echoed them — the caller '
+        + 'already holds both, it passed them in',
+      reason:
+        'Both `deleteItem` declarations on `@objectstack/client` declared '
+        + '`Promise<{ type: string; name: string; deleted: boolean }>` while '
+        + '`DeleteMetaItemResponseSchema` declares `{ success, reset?, message? }`. The '
+        + 'declaration was not merely imprecise, it was UNINHABITED: '
+        + '`DELETE /meta/:type/:name` ends in `res.json(result)` with `deleteMetaItem`\'s '
+        + 'return, and not one of that method\'s four return branches carries `type`, `name` '
+        + 'or `deleted`. Both surfaces are pure `unwrapResponse` / `_unwrap` passthroughs — '
+        + 'and the reset body carries no `data` key, so nothing is stripped — which makes the '
+        + 'declaration a CLAIM about the wire, never a rewrite of it, and the claim was false '
+        + 'in the one direction that matters: the compiler endorsed a spelling no server has '
+        + 'ever sent. `if (r.deleted)` compiled and read `undefined` on EVERY reset, including '
+        + 'the ones that really removed an overlay row; `if (r.reset)` was rejected by the '
+        + 'compiler and correct on the wire. So this REVEALS a defect rather than breaking '
+        + 'working code — every reader of the old key was already reading `undefined`, on '
+        + 'every deployment and not just some. The truthful flag also carries the distinction '
+        + 'the phantom one could not express at all: `reset: true` means an overlay row was '
+        + 'deleted, `reset: false` means none existed and the item was already at its artifact '
+        + 'default. Registered as a semantic entry rather than a mechanical conversion for the '
+        + 'reason the rewrite does not capture: a call site that branched on `r.deleted` has '
+        + 'been taking the FALSE branch unconditionally since it was written, and whatever '
+        + 'that branch did — or skipped — is what has to be re-read. There is no authored '
+        + 'source for the chain to rewrite either; this is a published TypeScript surface whose '
+        + 'enforced channel is tsc at the call site, and for an untyped JS caller there is no '
+        + 'constrained channel at all, which is why this entry is the only notification that '
+        + 'reaches them. ⛔ Do not write `r.reset ?? r.deleted`: there is one producer shape, '
+        + 'and a consumer accepting two spellings is what contract-first exists to prevent. No '
+        + 'deprecated `deleted?: boolean` transition key ships, for the same reason — a '
+        + 'transition period is for keys that WORKED, and this one never did. The identical '
+        + 'correction one door over is `client-delete-result-success` (#5638); the wire is '
+        + 'deliberately untouched here, per the 2026-08-29 ruling that reality is the '
+        + 'contract. ADR-0087, #13023.',
+      acceptanceCriteria:
+        'No code reads `.deleted`, `.type` or `.name` off a `client.meta.deleteItem()` / '
+        + '`client.environment(id).meta.deleteItem()` result; `tsc` names every site for a '
+        + 'typed caller, and an untyped JS caller must be swept by hand because nothing will '
+        + 'report it. Nothing about the request, the route, the status codes or the error '
+        + 'shapes changes, and no server needs upgrading — the value you may now read is the '
+        + 'one that was already arriving. ⚠️ The real work is behavioural: every '
+        + '`if (r.deleted)` has been false since it was written, so re-read what each of those '
+        + 'branches was supposed to do. Cache invalidation, registry refreshes and UI reloads '
+        + 'guarded that way have never run, and switching to `r.reset` turns them ON for the '
+        + 'first time — verify that is what you want rather than assuming it restores prior '
+        + 'behaviour. Note `reset` is OPTIONAL in the contract and distinguishes two successful '
+        + 'outcomes, so `if (r.reset)` and `if (r.success)` are different questions: the former '
+        + 'asks whether a row went away, the latter whether the call was accepted. Any test '
+        + 'that passed while asserting on `deleted` was asserting on `undefined` and needs '
+        + 'rewriting, not renaming.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -6538,6 +6613,55 @@ const step18: MigrationStep = {
         'Every memory datasource parses with no `${…}` span in `persistence.path` or ' +
         '`persistence.key`; `initialData` record values containing literal `${…}` keep parsing ' +
         'byte-identically.',
+    },
+    {
+      id: 'metadata-customization-protocol-retired',
+      surface:
+        'the paper metadata-customization protocol: `kernel/metadata-customization.zod.ts` '
+        + 'whole (`MetadataOverlay`, `FieldChange`, `CustomizationOrigin`, `MergeConflict`, '
+        + '`MergeStrategyConfig`, `MergeResult`, `CustomizationPolicy`) / the section-5 '
+        + 'Overlay/Customization API contracts (`api/MetadataOverlayResponse`, '
+        + '`api/MetadataOverlaySaveRequest`, `api/MetadataEffectiveResponse`) / the optional '
+        + '`getOverlay`/`saveOverlay`/`removeOverlay`/`getEffective` members of '
+        + '`contracts/metadata-service.ts` / the authorable keys '
+        + '`MetadataPluginConfig.customizationPolicies`, `MetadataPluginConfig.mergeStrategy` and '
+        + '`MetadataManagerConfig.persistence.overlayWritable` (tombstoned; see '
+        + '`RETIRED_KEYS_BY_MAJOR[18]`)',
+      replacement:
+        'nothing to re-declare — delete any authored keys. The customization mechanisms that '
+        + 'actually ship: ADR-0005\'s org-scoped overlay (opt-in via `allowOrgOverride` on '
+        + '`DEFAULT_METADATA_TYPE_REGISTRY`, stored as `sys_metadata` org rows, written through the '
+        + 'REST meta write doors and read back through `getMetaItemLayered`\'s '
+        + '`code`/`overlay`/`effective` layers), and ADR-0126\'s packaged-metadata customization '
+        + 'model (clone with a new machine name + ledger disable — never a field-level patch '
+        + 'overlay)',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-29 on #12057 (「同意」 — retirement '
+        + 'adopted, re-scope rejected), executed widened by #13135 per the fork report on #12057: '
+        + 'the module declared a three-layer platform/user patch-overlay protocol with field-level '
+        + 'change tracking and a 3-way-merge story, published reference docs described it as the '
+        + 'customization architecture — and nothing reachable implemented it. The one '
+        + 'implementation (`packages/metadata`\'s manager limb) was served by no route and called '
+        + 'only by its own unit tests; no merge engine ever existed; no code read a '
+        + '`CustomizationPolicy`. ADR-0126 §6 wall 4 supersedes the protocol as a matter of record '
+        + '("nothing may build against it") — the per-field overlay layer it described is '
+        + 'precisely what the #11513 ruling recorded as deliberately not chartered. Why D3 '
+        + 'semantic and not a D2 conversion: the defs leave with no carrier key in any stack '
+        + 'collection, and the three tombstoned keys live on plugin/manager configs, which are not '
+        + 'stack collection members (`PLURAL_TO_SINGULAR` has no `plugins` entry) — a '
+        + 'MetadataConversion would be a transform with no seam that ever runs (the '
+        + '`kernel/Manifest:loading` precedent).',
+      acceptanceCriteria:
+        'No import of `metadata-customization.zod` (or of the retired names from '
+        + '`@objectstack/spec/kernel` / `@objectstack/spec/api`) compiles anywhere; no '
+        + '`MetadataPluginConfig` carries `customizationPolicies` or `mergeStrategy`; no '
+        + '`MetadataManagerConfig` carries `persistence.overlayWritable` (TypeScript authors get '
+        + 'the refusal at compile time — the keys are typed `never` — and a value reaching the '
+        + 'parse is refused with the prescription at the key\'s path). ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: no route ever served the paper '
+        + '`…/overlay` / `…/effective` endpoints, so removing the limb removes no served '
+        + 'behaviour — the ADR-0005 org-overlay read/write path (`getMetaItemLayered`, the REST '
+        + 'meta write doors) stays exactly as it was, before and after.',
     },
     {
       id: 'metadata-item-name-grammar-enforced',
@@ -8095,6 +8219,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `translations` collection (`defineTranslationBundle`), governed by
     // `packages/spec/liveness/translation.json`.
     'kernel/Manifest:contributes.translations',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // surface). `persistence.overlayWritable` gated exactly one method —
+    // `MetadataManager.saveOverlay()` — which belonged to the paper
+    // metadata-customization protocol removed whole in the same change: no route
+    // ever served the paper `…/overlay` endpoints, no UI called the method, and
+    // its only callers were `packages/metadata`'s own unit tests. With the limb
+    // gone the flag gates nothing. The base write gate `persistence.writable`
+    // stays; the real org-overlay writes (ADR-0005) ride the REST meta write
+    // doors' `manage_metadata` permission gate, not this flag.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look
+    // (the #8586 precedent).
+    //
+    // Registered here but NOT in `src/conversions/registry.ts` — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning: a
+    // metadata-manager config is not a stack collection member, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone (`tsc` + the parse) and
+    // the D3 semantic entry `metadata-customization-protocol-retired`.
+    'kernel/MetadataManagerConfig:persistence.overlayWritable',
     // #8586 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-14, ruled
     // REMOVE). `additionalTypes` was declared, authorable, and documented on four
     // docs pages as THE way a plugin registers a custom metadata type — and read
@@ -8118,6 +8265,60 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // The prescription reaches authors through the tombstone (`tsc` + the parse)
     // and the D3 semantic entry `metadata-plugin-additional-types-retired`.
     'kernel/MetadataPluginConfig:additionalTypes',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // surface). `customizationPolicies` embedded the paper metadata-customization
+    // protocol's `CustomizationPolicySchema` (lockedFields / customizableFields
+    // whitelists) and was read by NOTHING: no code ever consulted a policy before
+    // accepting or refusing a customization, and the protocol it configured —
+    // the three-layer overlay of `kernel/metadata-customization.zod.ts`, removed
+    // whole in the same change (see `RETIRED_DEFS_BY_MAJOR[18]`) — was itself
+    // unreachable from any served surface. ADR-0126 §6 wall 4 supersedes the
+    // protocol on the record ("nothing may build against it"). What a
+    // customization may touch is governed by ADR-0005's org overlay
+    // (`allowOrgOverride`) and ADR-0126's packaged-metadata model.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8586 precedent).
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // the sibling `kernel/MetadataPluginConfig:additionalTypes` entry gives: the
+    // conversion chain walks a normalized STACK and
+    // `applyConversionsToStoredItem` maps a metadata type onto one of its
+    // collections. A metadata-plugin config is neither — there is no `plugins`
+    // entry in `PLURAL_TO_SINGULAR`, so a MetadataConversion here would be a
+    // transform with no seam that ever runs. The prescription reaches authors
+    // through the tombstone (`tsc` + the parse) and the D3 semantic entry
+    // `metadata-customization-protocol-retired`.
+    'kernel/MetadataPluginConfig:customizationPolicies',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // surface). `mergeStrategy` embedded the paper protocol's
+    // `MergeStrategyConfigSchema` (keep-custom / accept-incoming /
+    // three-way-merge) and was read by NOTHING: no 3-way merge engine ever
+    // existed, and package upgrades do not merge customizations — ADR-0126 §6
+    // wall 3 separates the packaged BASE (upgrades rewrite it) from the
+    // customer's recorded choices (never touched by an upgrade). The value
+    // schema leaves with its module (`kernel/metadata-customization.zod.ts`,
+    // `RETIRED_DEFS_BY_MAJOR[18]`). NOT the same surface as the inline
+    // three-value `mergeStrategy` vocabulary on `api/PackageUpgradeRequest` /
+    // `kernel/UpgradePackageRequest` — those are separately declared twins that
+    // never imported the module and are deliberately untouched here.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look
+    // (the #8586 precedent).
+    //
+    // Registered here but NOT in `src/conversions/registry.ts` — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning: a metadata-plugin
+    // config is not a stack collection member, so a MetadataConversion would be
+    // a transform with no seam that ever runs. The prescription reaches authors
+    // through the tombstone (`tsc` + the parse) and the D3 semantic entry
+    // `metadata-customization-protocol-retired`.
+    'kernel/MetadataPluginConfig:mergeStrategy',
     // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
     // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
     // sharper reason than either: this key HAD a reader that acted, and what it did
@@ -9014,6 +9215,75 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the `GET /api/meta/:type/:name/effective` response contract. No adapter
+    // ever served that path; the layered read that actually ships is
+    // `getMetaItemLayered` (ADR-0005 org overlay, `code`/`overlay`/`effective`
+    // layers) with its own contracts.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'api/MetadataEffectiveResponse',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the `GET /api/meta/:type/:name/overlay` response contract. No adapter ever
+    // served that path (measured: no route spelling in packages/rest or
+    // packages/metadata).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'api/MetadataOverlayResponse',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the `PUT /api/meta/:type/:name/overlay` request contract (a bare
+    // `MetadataOverlaySchema`). No adapter ever served that path.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'api/MetadataOverlaySaveRequest',
     // #12038 — `api/package-api.zod.ts` `PackageRollbackResponseSchema`, retired
     // whole together with the `PackageApiContracts.rollbackPackage` entry that
     // bound it (maintainer ruling 2026-08-27, sub-question 3A). The schema
@@ -9111,6 +9381,52 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/CLICommandContribution',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the who-customized enum (`package`/`admin`/`user`/`migration`/`api`).
+    // Nothing ever wrote or read an origin.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/CustomizationOrigin',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the vendor customization-boundary policy (lockedFields /
+    // customizableFields whitelists), embedded by the retired authorable key
+    // `MetadataPluginConfig.customizationPolicies` (see
+    // `RETIRED_KEYS_BY_MAJOR[18]`). No code ever consulted a policy.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/CustomizationPolicy',
     // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
     // `DistributedStateConfigSchema`, retired whole (ADR-0049 enforce-or-remove).
     //
@@ -9147,6 +9463,31 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // receive a parse-time tombstone. This table plus the D3 semantic entry
     // `hot-reload-inert-state-strategies-retired` ARE the declaration.
     'kernel/DistributedStateConfig',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the per-field change-tracking record
+    // (`path`/`originalValue`/`currentValue`) `MetadataOverlay.changes` embedded
+    // for upgrade conflict detection that never ran. objectui's
+    // `packages/types/src/views.ts` names it in a comment that itself says 'Do
+    // not re-point this at it'.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/FieldChange',
     // #11825 — `kernel/GracefulDegradation` left with
     // `kernel/AdvancedPluginLifecycleConfig`: its ONLY consumer was the retired
     // container's `degradation` key (the #3950 rule — an exported value schema
@@ -9163,6 +9504,102 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // ENFORCE route of ADR-0049 through a new ADR — the implementation first.
     // See `18.kernel__AdvancedPluginLifecycleConfig.ts` for the family record.
     'kernel/GracefulDegradation',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the 3-way-merge conflict record (`baseValue`/`incomingValue`/`customValue`
+    // + suggested resolution). No merge engine ever existed to produce one.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/MergeConflict',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the 3-way-merge outcome record (merged payload, conflicts, auto-resolved
+    // stats). No merge engine ever existed to produce one.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/MergeResult',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the merge-strategy config (`keep-custom`/`accept-incoming`/`three-way-
+    // merge` + path rules), embedded by the retired authorable key
+    // `MetadataPluginConfig.mergeStrategy` (see `RETIRED_KEYS_BY_MAJOR[18]`).
+    // NOT the inline three-value `mergeStrategy` vocabulary on
+    // `api/PackageUpgradeRequest` / `kernel/UpgradePackageRequest` — separately
+    // declared twins, untouched.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/MergeStrategyConfig',
+    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // the widened surface). Part of the whole-module removal of
+    // `kernel/metadata-customization.zod.ts` — the paper three-layer
+    // customization protocol ADR-0126 §6 wall 4 supersedes on the record
+    // ("nothing may build against it"). Zero reachable consumers, re-verified
+    // at the retirement's base commit with positive controls (#12057 fork
+    // report): the only implementation was `packages/metadata`'s manager limb,
+    // served by no route and called only by its own unit tests; the real
+    // mechanisms are ADR-0005's org overlay and ADR-0126's packaged-metadata
+    // model. This def: the protocol's core record: a platform/user-scoped JSON-merge-patch delta
+    // (`baseType`/`baseName`/`scope`/`patch`) with field-level `changes`
+    // tracking. Only importers were `api/metadata.zod.ts` section 5,
+    // `contracts/metadata-service.ts`'s optional members, and
+    // `packages/metadata`'s unreachable manager limb — all removed in the same
+    // change.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. No carrier key survives for
+    // these defs and no authored document embedded them, so no tombstone and no
+    // D2 conversion — this table plus the D3 semantic entry
+    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // route-3 shape).
+    'kernel/MetadataOverlay',
     // #11825 — `kernel/PluginUpdateStrategy` left with
     // `kernel/AdvancedPluginLifecycleConfig`: its ONLY consumer was the retired
     // container's `updates` key (the #3950 rule — an exported value schema with

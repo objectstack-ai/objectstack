@@ -314,17 +314,20 @@ export const Account = ObjectSchema.create({
 | `icon` | `string?` | Lucide/Material icon name for the group header |
 | `description` | `string?` | Optional description under the header |
 | `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour on every surface: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
+| `visibleWhen` | `Expression?` (CEL) | Section visibility predicate — the whole group, header included, is shown only when it evaluates TRUE, else hidden (fail-closed). Same spelling and CEL vocabulary as field and action predicates (ADR-0089); write a bare string (`visibleWhen: "record.type == 'invoice'"`) or the full expression envelope (ADR-0085 §5) |
 
 ### Supported Migrations (MVP)
 
 ✅ Add / rename / delete / reorder groups — edit the `fieldGroups` array.
 ✅ Assign an existing field to a group — set `Field.group`.
 
+✅ Show or hide a whole group conditionally — set `visibleWhen` on the group
+(ADR-0085 §5).
+
 ⏳ Deferred (future iterations): explicit per-field in-group ordering, nested
-groups, group-level visibility predicates. Groups render identically on forms,
-modals, and detail pages; when a single page needs a bespoke layout beyond
-groups, assign it a custom Page schema instead of adding per-surface hints
-here (ADR-0085).
+groups. Groups render identically on forms, modals, and detail pages; when a
+single page needs a bespoke layout beyond groups, assign it a custom Page
+schema instead of adding per-surface hints here (ADR-0085).
 
 ---
 

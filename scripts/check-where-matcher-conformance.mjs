@@ -232,6 +232,55 @@ const repoRoot = resolve(__dirname, '..');
 const BASELINE_PATH = 'scripts/where-matcher-conformance.baseline.json';
 const SCAN_ROOT = 'packages';
 
+/**
+ * ## The dispatch-gates declaration -- the `ROOT_DIR_WATCH_HINTS` idiom (#13163)
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives WHICH gates a card must run by matching the
+ * path literals in each gate's source against the card's changed files. This gate
+ * declared its population TWICE and the derivation could read NEITHER of them:
+ *
+ *   1. IN PROSE, in the discovery section above -- "a function in `packages/**\/*.test.ts`
+ *      whose body...". `extractWatchHints` masks comment ranges by construction, so a
+ *      population documented in a comment is invisible to it BY DESIGN. ⛔ Rewording that
+ *      comment fixes nothing. (The separator is escaped only so the glob cannot close
+ *      this block comment -- the same spelling rule the PM's bare-root worklist follows.)
+ *   2. IN CODE, as `SCAN_ROOT` above -- a bare single-segment word, which `looksPathy`
+ *      refuses as no hint at all (a measured refusal: admitting the bare-top-level-word
+ *      class costs +139084 fabricated pairs, and it stays). The one narrow re-admission,
+ *      `moduleRelativeDirectoryHint`, resolves a single-segment literal against the
+ *      SCRIPT'S OWN directory, so `'packages'` resolves under `scripts/`, which is not
+ *      tracked ⇒ null.
+ *
+ * Measured before this declaration, `extractWatchHints` over this file returned exactly
+ * ONE hint: `scripts/where-matcher-conformance.baseline.json`, this gate's own ledger.
+ * ⇒ the derivation could name this gate only for a change set that edits the set of
+ * files ALREADY KNOWN to be wrong, and never for a NEW silently-wrong matcher anywhere
+ * under the root it scans -- the exact inverse of what it guards. The live specimen is a
+ * PR that derived 30 of 30 green gates locally, whole-repo lint included, and still went
+ * RED in CI on a test file it ADDS.
+ *
+ * The spelling below is measured on this tree at 2889 of the 2889 files this gate's own
+ * `testFilesUnder()` walk admits -- set-equal in BOTH directions against `hintCovers`,
+ * nothing walked left uncovered and nothing covered left unwalked, so 100% precise and
+ * complete -- against 5509 tracked files under the bare root. Its liveness and precision
+ * carry a second, independent pin in the PM's bare-root worklist, whose recorded verdict
+ * for this row moves to DECLARED-NARROWER with this change.
+ *
+ * ⛔ It must be spelled as a LITERAL, not built from `SCAN_ROOT` -- the hint extractor
+ * reads source text, so a computed template of the root would produce no hint and leave
+ * the gate exactly as invisible. Both directions are pinned in `--self-test` below. A
+ * declaration that can drift from the scan is worse than none -- it replaces a silent
+ * gate with a lying one.
+ *
+ * ⚠️ This does NOT retire the convention-KIND entry that names this gate for "adds or
+ * edits a test file" in the dispatch tool: that entry is a different authority, pinned by
+ * that tool's own self-test, and it reaches a card dispatched BEFORE its code exists,
+ * which no path derivation can. What changes is that the high-signal MATCHED column --
+ * the one a dev pastes and runs -- now names this gate for the test files it really
+ * walks, instead of only for edits to its own baseline.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**/*.test.ts'];
+
 // ---------------------------------------------------------------------------
 // The probe vocabulary. Field names are deliberately synthetic so no matcher
 // can special-case them (several doubles branch on `organization_id`, `id`,
@@ -871,6 +920,58 @@ function selfTest() {
   expect('a grown count is an error', reconcile(fakeMeasured, { 'a.test.ts': { silent: 0 } }).length === 1);
   expect('a fallen count is an error (ratchet down)', reconcile(fakeMeasured, { 'a.test.ts': { silent: 2 } }).length === 1);
   expect('a stale entry is an error', reconcile(new Map(), { 'gone.test.ts': { silent: 1 } }).length === 1);
+
+  // -- the dispatch-gates declaration (#13163's landing obligation) ---------
+  //
+  // Enforcement cannot hold either half here: the declaration is read by ANOTHER TOOL
+  // (the PM's dispatch derivation), so a wrong or stale one runs green in this file
+  // forever and pays itself out as a dev dispatched on a test-file card with this gate
+  // missing from the brief -- the CI round trip #13163 was filed for. A missing
+  // declaration is a silent gate; a surplus one is a LYING gate, and the price the
+  // derivation records for a fabricated lead is higher than for a missing one. Driven
+  // through this gate's OWN corpus walk, never a copy of its regex.
+  const DECLARED_TAIL = '.test.ts';
+  const walked = testFilesUnder(join(repoRoot, SCAN_ROOT))
+    .map((abs) => relative(repoRoot, abs).replace(/\\/g, '/'));
+  // The needle is ASSEMBLED, never spelled. Written as a literal here it would appear in
+  // this assertion's own source text, so `includes` would find it in the CHECK rather
+  // than in the declaration and stay green with the declaration deleted -- a phantom pin.
+  const declNeedle = `'${SCAN_ROOT}/` + '*'.repeat(2) + `/*${DECLARED_TAIL}'`;
+  const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  expect(
+    'the declaration is spelled as a LITERAL in this source, not computed -- the hint '
+      + 'extractor reads source text, so a computed root would build no hint at all',
+    ownSource.includes(declNeedle),
+  );
+  expect(
+    'the declared hint is rooted at the population constant this gate actually walks',
+    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0].startsWith(`${SCAN_ROOT}/`),
+  );
+  expect(
+    'the corpus walk is non-empty, so the two directions below judge something',
+    walked.length > 0,
+  );
+  expect(
+    'nothing is declared that this gate does not walk -- every file testFilesUnder admits '
+      + 'lies under the declared root and ends in the declared extension',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.endsWith(DECLARED_TAIL))
+      && walked.every((f) => f.startsWith(`${SCAN_ROOT}/`) && f.endsWith(DECLARED_TAIL)),
+  );
+  // ...and the declared filter is a NARROWING rather than the bare root wearing a glob:
+  // a non-test sibling sitting in the same directory as an admitted file is NOT admitted.
+  const admitted = new Set(walked);
+  const siblingDir = walked.length ? dirname(join(repoRoot, walked[0])) : null;
+  const nonTestSibling = siblingDir
+    ? readdirSync(siblingDir)
+      .map((e) => relative(repoRoot, join(siblingDir, e)).replace(/\\/g, '/'))
+      .find((f) => !f.endsWith(DECLARED_TAIL) && statSync(join(repoRoot, f)).isFile())
+    : null;
+  expect('a non-test sibling exists to prove the filter discriminates', Boolean(nonTestSibling));
+  expect(
+    'and the declaration is a NARROWING, not the bare root wearing a glob -- that sibling '
+      + 'is under the same root and is NOT in the walk',
+    Boolean(nonTestSibling) && !admitted.has(nonTestSibling),
+  );
 
   if (failures.length > 0) {
     console.error(`✗ check-where-matcher-conformance --self-test (${failures.length} failure(s)):\n`);

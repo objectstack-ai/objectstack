@@ -297,11 +297,25 @@ describe('[#5582] nothing of a 5xx message reaches the client', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#5582] the 4xx half and the structured branches are untouched', () => {
-    it('a short 4xx is still byte-for-byte verbatim, with its object', () => {
+    it('a short 4xx keeps its authored sentence — nothing withheld — with its object', () => {
+        // [#12975] PIN MOVED, with the ruled behaviour change in the same PR
+        // (maintainer, 2026-08-29). §4's subject is the 5xx WITHHOLD not
+        // reaching the 4xx half, and that is unchanged: the caller still gets
+        // the producer's sentence rather than `INTERNAL_ERROR_MESSAGE`. What
+        // moved is that the ADR-0111 `CODE:` prefix this fixture carries is no
+        // longer part of that sentence — `error` is human language, `code` is
+        // the machine token, and the whole body is asserted here so losing the
+        // token with the prefix would red rather than pass.
+        //
+        // The title lost the words "byte-for-byte verbatim" for the same
+        // reason: the AUTHORED half is verbatim, the restatement of `code` in
+        // front of it is not part of what was authored for the caller.
         const msg = 'FORBIDDEN: insufficient privileges to update showcase_inquiry rec1';
+        const human = 'insufficient privileges to update showcase_inquiry rec1';
         const r = mapDataError(Object.assign(new Error(msg), { code: 'FORBIDDEN', status: 403 }), 'showcase_inquiry');
         expect(r.status).toBe(403);
-        expect(r.body).toEqual({ error: msg, code: 'FORBIDDEN', object: 'showcase_inquiry' });
+        expect(r.body).toEqual({ error: human, code: 'FORBIDDEN', object: 'showcase_inquiry' });
+        expect(r.body.error).not.toBe(INTERNAL_ERROR_MESSAGE);
     });
 
     it('a long 4xx is still TRUNCATED rather than withheld (#5423)', () => {

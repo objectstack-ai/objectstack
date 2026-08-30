@@ -44,6 +44,15 @@
  * withhold got broader" and "the withhold swallowed everything" are one edit
  * apart.
  *
+ * ⚠️ [#12281] The DECLARED half of that predicate has since widened, and this
+ * file's half-envelope case was reversed with it. `declaresServerFault` required
+ * a non-empty string `code` beside the 5xx and read the `status` spelling only,
+ * so this exit withheld a NARROWER band than `/data`. Ruled 2026-08-27 on #12509
+ * (option D): the door now reads `serverFaultProvenance` — "the producer named
+ * this 5xx itself", `status ?? statusCode`, with `code` not consulted — and
+ * withholds EVERY declared 5xx message. The UNDECLARED tiering below is untouched
+ * by that change and is exactly what it must not break.
+ *
  * ## Why this file boots the REAL analytics service
  *
  * Producer and boundary are different facts, and a hand-written `Object.assign(new
@@ -260,14 +269,32 @@ describe('[#5811] POST /analytics/query — a read-scope failure says nothing ab
         expect(String(res.body.error.message)).toMatch(/no strategy can handle query/);
     });
 
-    it('a 5xx with only HALF an envelope stays readable — a code is required, not just a status', async () => {
-        // Guards the predicate's second half at the boundary. A producer that
-        // ships a status without a code has not declared anything; inventing the
-        // withhold for it would be the consumer-side leniency PD #12 removes.
+    it('[#12281] a 5xx with only HALF an envelope is ALSO withheld — a status alone declares it', async () => {
+        // ⚠️ REVERSED, deliberately. Until #12281 this case asserted the opposite
+        // ("a code is required, not just a status"), on the reasoning that a
+        // producer shipping a status without a code "has not declared anything".
+        //
+        // The maintainer ruled otherwise on #12509, 2026-08-27 (option D),
+        // propagated to #12281: `errorResponseBase` adopts the structural
+        // withhold for EVERY declared 5xx message, aligning to `/data` — whose
+        // `declaredHttpStatus` never looked at `code` at all. Naming a 5xx status
+        // IS the declaration; the code is a second, independent channel (#9106),
+        // and requiring it here is what left the no-code half of the band on
+        // `looksLikeInternalErrorLeak` alone — the phrasing heuristic #5811's own
+        // argument found insufficient, which is why the withhold was made
+        // structural in the first place.
+        //
+        // ⛔ This is NOT the consumer-side leniency PD #12 removes: nothing is
+        // invented for the half that was not declared. The code channel still
+        // reports exactly what the producer spelled (here: nothing, so the
+        // status-derived `SERVICE_UNAVAILABLE`), and only the prose is withheld.
+        // The full text still reaches the operator through `__obsRecordedError`.
         const err = Object.assign(new Error('analytics engine unavailable'), { status: 503 });
         const res = await postAnalyticsQuery({ query: async () => { throw err; } }, query);
         expect(res.statusCode).toBe(503);
-        expect(res.body.error.message).toBe('analytics engine unavailable');
+        expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
+        // The operator still gets the untouched sentence.
+        expect(String((res as any).__obsRecordedError?.message)).toBe('analytics engine unavailable');
     });
 
     it('a DECLARED 4xx is untouched — the withhold is 5xx-only', async () => {

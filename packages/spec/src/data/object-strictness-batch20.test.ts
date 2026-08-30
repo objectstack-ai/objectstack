@@ -474,9 +474,33 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
     });
   });
 
-  describe('tombstones — a retired key\'s rejection carries its upgrade', () => {
-    it('`fieldGroups[].visibleWhen` says it was REMOVED, not misspelled', () => {
-      const msg = rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', visibleWhen: 'true' }] });
+  describe('the re-opened predicate slot — `fieldGroups[].visibleWhen` is a real key again (ADR-0049 loop closed)', () => {
+    // This block REPLACED a tombstone pin: `visibleWhen` was removed under
+    // ADR-0085 / ADR-0049 enforce-or-remove while nothing evaluated it, and
+    // re-declared once the form renderer's section-gating contract shipped.
+    // The pins flip accordingly — acceptance (both authorable shapes, with the
+    // ExpressionInputSchema normalization) instead of a curated rejection.
+    it('accepts the bare-string CEL shorthand and normalizes it to the envelope', () => {
+      const obj = accept(ObjectSchema, {
+        ...OBJ,
+        fields: { name: { type: 'text', label: 'Name', group: 'g' } },
+        fieldGroups: [{ key: 'g', label: 'G', visibleWhen: "record.type == 'invoice'" }],
+      }) as { fieldGroups?: Array<{ visibleWhen?: unknown }> };
+      expect(obj.fieldGroups?.[0]?.visibleWhen).toEqual({ dialect: 'cel', source: "record.type == 'invoice'" });
+    });
+
+    it('accepts the full Expression envelope, standalone and through the carrier', () => {
+      accept(ObjectFieldGroupSchema, { key: 'g', label: 'G', visibleWhen: { dialect: 'cel', source: 'record.amount > 0' } });
+      accept(ObjectSchema, {
+        ...OBJ,
+        fields: { name: { type: 'text', label: 'Name', group: 'g' } },
+        fieldGroups: [{ key: 'g', label: 'G', visibleWhen: { dialect: 'cel', source: 'record.amount > 0' } }],
+      });
+    });
+
+    it('`visibleOn` stays rejected, and its guidance now names the real slot', () => {
+      const msg = rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', visibleOn: 'true' }] });
+      expect(msg).toContain('visibleWhen');
       expect(msg).toContain('ADR-0085');
     });
   });

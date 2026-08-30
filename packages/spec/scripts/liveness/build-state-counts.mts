@@ -61,8 +61,10 @@ import { fileURLToPath } from 'node:url';
 import {
   STATE_COUNTS_FILE,
   STATE_COUNTS_PATH,
+  STATE_COUNTS_TOTALS_GUIDANCE,
   foldStateCounts,
   parseStateTable,
+  reconcileStateCountTotals,
   renderStateCounts,
 } from './readme-table.mts';
 
@@ -85,7 +87,10 @@ const run = spawnSync(process.execPath, [tsxCli, gate, '--json'], {
 
 // A crash is fatal; a red verdict is not. See the header — the gate is red
 // precisely when this artifact needs rewriting.
-let report: { types?: Record<string, { byStatus?: Record<string, number> }>; readmeMissingRows?: string[] };
+let report: {
+  types?: Record<string, { byStatus?: Record<string, number>; classified?: number }>;
+  readmeMissingRows?: string[];
+};
 try {
   report = JSON.parse(run.stdout || '');
 } catch {
@@ -103,6 +108,28 @@ const types = report.types ?? {};
 const rows = foldStateCounts(Object.keys(types), Object.fromEntries(
   Object.entries(types).map(([t, v]) => [t, v.byStatus ?? {}]),
 ));
+
+// ── refuse to publish a total the fold under-counted (#13083) ──
+// The header's rule is that a RED gate is not fatal here — the gate is red
+// precisely when this artifact needs rewriting. This failure is the exception,
+// and it is the same exception the unparseable report above already carves out:
+// there is nothing to rewrite. The fold that produced `rows` reads four status
+// names and drops everything else, so writing now would publish an understated
+// `classified` — and the gate's freshness leg would then compare those bytes
+// against a re-render of the SAME understated fold and call it current. A stale
+// artifact is the safer state; a fresh wrong one is unfalsifiable.
+const totalErrors = reconcileStateCountTotals({
+  governed: Object.keys(types),
+  byStatus: Object.fromEntries(Object.entries(types).map(([t, v]) => [t, v.byStatus ?? {}])),
+  classified: Object.fromEntries(Object.entries(types).map(([t, v]) => [t, v.classified])),
+});
+if (totalErrors.length) {
+  console.error(`✗ refusing to write ${STATE_COUNTS_FILE} — the fold does not preserve the walk's total:\n`);
+  totalErrors.forEach((s) => console.error(`    ${s}`));
+  console.error('');
+  STATE_COUNTS_TOTALS_GUIDANCE.forEach((line) => console.error(line ? `   ${line}` : ''));
+  process.exit(1);
+}
 
 const rendered = renderStateCounts(rows);
 writeFileSync(join(ledgerRoot, STATE_COUNTS_FILE), rendered);

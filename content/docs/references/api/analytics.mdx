@@ -18,7 +18,7 @@ Provides endpoints for executing analytical queries and discovering metadata.
 
 ```typescript
 import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
-import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsSqlResponse, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
+import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsResultResponse, AnalyticsSqlResponse, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = AnalyticsEndpoint.parse(data);
@@ -103,7 +103,7 @@ const result = AnalyticsEndpoint.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string }` | ✅ |  |
+| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string; totals?: object[] }` | ✅ |  |
 
 ### Nested Shape: `AnalyticsResultResponse.error`
 
@@ -123,8 +123,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **rows** | `Record<string, any>[]` | ✅ | Result rows |
-| **fields** | `{ name: string; type: string }[]` | ✅ | Column metadata |
+| **fields** | `{ name: string; type: string; label?: string; format?: string; … }[]` | ✅ | Column metadata |
 | **sql** | `string` | optional | Executed SQL (if debug enabled) |
+| **totals** | `{ dimensions: string[]; rows: Record<string, any>[] }[]` | optional | Marginal aggregates - one entry per requested totals grouping, in request order, each computed with the measure's true aggregate over the underlying data (never re-derived from bucketed values). The grand-total grouping yields a single dimensionless row. |
 
 
 ---

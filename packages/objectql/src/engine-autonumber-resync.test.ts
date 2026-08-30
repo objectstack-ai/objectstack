@@ -46,21 +46,30 @@
  * driver-memory (`supports = {}`) and driver-mongodb (absent) take this path;
  * driver-sql declares `autonumber: true`, and driver-sqlite-wasm and
  * driver-turso inherit it (`extends SqlDriver`; Turso spreads
- * `...super.supports`), so none of the three ever reaches here. Of the two that
- * do, only driver-mongodb can raise anything — a single-field unique index,
- * when the field declares `unique`. **driver-memory never can**: `create` is a
- * `table.push()` storing no constraints at all (#4065), so a duplicate lands
- * SILENTLY and this branch is unreachable.
+ * `...super.supports`), so none of the three ever reaches here.
  *
- * That is the repo's EXISTING ruled reading, not a fresh claim by this file:
+ * ⚠️ **Both of the two that do can now raise.** driver-mongodb raises a
+ * single-field unique index's `E11000` when the field declares `unique`; since
+ * #13197 driver-memory refuses a declared-unique collision too, in the ADR-0112
+ * envelope (`code: 'UNIQUE_VIOLATION'`, `status: 409`), with `driver-sql`'s
+ * ADR-0120 D1/D3 scoping. Until #13197 it never could — `create` was a
+ * `table.push()` storing no constraints at all (#4065) — so a duplicate landed
+ * SILENTLY and this branch was unreachable there. Section (3b) carries the
+ * pin, INVERTED in place rather than deleted, so the change of fact stays
+ * readable from `main`.
+ *
+ * The ownership reading behind (3b) is unchanged and is the repo's EXISTING
+ * ruled one, not a fresh claim by this file:
  * `scripts/driver-memory-census.ledger.json` records it for
  * `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`
  * as `ruled-permanent` («#6664 A, maintainer 2026-08-08 — inherits #5704
  * Q2 = B») — "InMemoryDriver declares `supports = {}`, so the ENGINE's
- * autonumber seeding owns the counter. No SQL backend can stand in". Section
- * (3b) pins the consequence rather than authoring a second answer to the same
- * question (#6832's one-contract-two-numbers shape). What covers driver-memory
- * is adoption, which waits for no rejection.
+ * autonumber seeding owns the counter. No SQL backend can stand in". What
+ * #13197 moved is which store can REJECT, never who issues the number, so that
+ * ruling is untouched. Section (3b) pins the consequence rather than authoring
+ * a second answer to the same question (#6832's one-contract-two-numbers
+ * shape). Adoption still covers the drift no store can report, and still waits
+ * for no rejection.
  *
  * NOTE this file imports no driver package — the rig below is a hand-rolled
  * fake driver — so it adds no `driver-memory` consumer and
@@ -149,10 +158,10 @@ function matches(row: Row, where: any): boolean {
  * signature limb) and the message names the INDEX, never the column — so
  * `isUniqueViolationError` says yes on the `duplicate key` limb while
  * `uniqueViolationColumn` answers `undefined`. That combination is exactly why
- * the resync treats an unnamed column as attributable: MongoDB is the ONE
- * in-repo fallback driver that can raise a collision at all (driver-memory has
- * no uniqueness constraints), and demanding a named column would make the
- * resync unreachable on it.
+ * the resync treats an unnamed column as attributable: neither in-repo fallback
+ * driver names a column this predicate can read — MongoDB names the INDEX, and
+ * driver-memory (since #13197) raises a coded envelope with no dialect prose in
+ * it — so demanding a named column would make the resync unreachable on both.
  */
 const mongoDuplicate = (field: string, value: string) =>
   Object.assign(
@@ -160,6 +169,26 @@ const mongoDuplicate = (field: string, value: string) =>
       `E11000 duplicate key error collection: app.doc index: ${field}_1 dup key: { ${field}: "${value}" }`,
     ),
     { code: 11000 },
+  );
+
+/**
+ * [#13197] `driver-memory`'s duplicate refusal — the ADR-0112 envelope, not a
+ * dialect. It carries `code: 'UNIQUE_VIOLATION'` (the platform's own registered
+ * code) and `status: 409`, and names no column in any spelling
+ * `uniqueViolationColumn` parses. So, exactly like the MongoDB shape above,
+ * `isUniqueViolationError` says yes while `uniqueViolationColumn` answers
+ * `undefined` — which is why the resync's unnamed-column attribution reaches
+ * this driver too. Reproduced here rather than imported: this file imports no
+ * driver package (see the header note), and the fields asserted on are the
+ * contract `driver-memory`'s own suite pins.
+ */
+const memoryDuplicate = (field: string, value: string) =>
+  Object.assign(
+    new Error(
+      `Unique constraint violated on \`doc.${field}\`: a record with the value ` +
+        `${JSON.stringify(value)} already exists. No record was written.`,
+    ),
+    { code: 'UNIQUE_VIOLATION', status: 409 },
   );
 
 /** Postgres names the conflicting COLUMN in its DETAIL line — `uniqueViolationColumn` reads it. */
@@ -650,26 +679,53 @@ describe('ObjectQL autonumber resync (#6806)', () => {
 
   /* ====================================================================== *
    * (3b) The collision half is STORAGE-DEPENDENT — name which driver gives
-   *      which guarantee, rather than implying one that is not delivered
+   *      which guarantee, rather than implying one that is not delivered.
+   *      #13197 changed the ANSWER for driver-memory (it constrains now); the
+   *      question, and the duty to answer it by driver name, are unchanged.
    * ==================================================================== */
 
-  describe('what a driver with no uniqueness constraint gets (driver-memory)', () => {
+  describe('what driver-memory gets, now that it DOES constrain (#13197)', () => {
     const SCHEMA = schemaWith('doc_no', 'D-{0000}');
 
-    it('a duplicate lands SILENTLY — the collision branch cannot be reached', async () => {
-      // `InMemoryDriver.create` is a `table.push()` storing no constraints of
-      // any kind (its own docstring since #4065 — it calls itself a WEAK
-      // oracle). So a duplicate raises nothing, there is no error to catch, and
-      // the re-issue this file pins elsewhere never runs. Recorded rather than
-      // papered over (PD #10): "collisions are handled" would be FALSE on one
-      // of the two drivers this fallback path serves — and the fallback path is
-      // only those two of five, the other three inheriting SqlDriver's
-      // `autonumber: true`. So the retry protects ONE backend, and this is the
-      // other one.
+    it('the duplicate is REFUSED and the number re-issued — it used to land silently', async () => {
+      // ⚠️ INVERTED IN PLACE by #13197. Until then this test asserted the
+      // DEFECT as correct behaviour — `written.doc_no === 'D-0005'` and
+      // `rows.filter(…D-0005).toHaveLength(2)`, over a comment calling two rows
+      // carrying one business identifier "the honest outcome". It was honest:
+      // `InMemoryDriver.create` was a `table.push()` storing no constraints of
+      // any kind (#4065's WEAK-oracle docstring), so a duplicate raised
+      // nothing, there was no error to catch, and the re-issue this file pins
+      // elsewhere never ran.
       //
-      // No `uniqueOn` — this rig is the memory driver's shape exactly.
+      // It is kept inverted rather than deleted or re-baselined, deliberately:
+      // read from `main`, a vanished pin and a silently-returned defect look
+      // identical, and this one's fact was falsified by a later card rather
+      // than being wrong when written.
+      //
+      // **What refuses it now.** `@objectstack/driver-memory` enforces
+      // field-level `unique` (`memory-unique-constraint.ts`), with
+      // `driver-sql`'s ADR-0120 D1/D3 scoping, and raises the ADR-0112
+      // envelope `code: 'UNIQUE_VIOLATION'` / `status: 409` — the shape
+      // `memoryDuplicate` below reproduces. `isUniqueViolationError` reads that
+      // code (#13197 added the limb), so the collision branch is REACHABLE on
+      // this driver for the first time: the stale counter is dropped, the
+      // counter re-seeds from the store's real max, and the number is re-issued.
+      //
+      // **What did NOT change, and must not.** The engine-side pre-issue
+      // existence probe stays REJECTED, for the cost reason `engine.ts` states
+      // at `createWithAutonumberResync`: a probe costs a query on every insert
+      // — the cost this resync exists to avoid — and is still racy, so it would
+      // trade a silent duplicate for a rarer silent duplicate at double the
+      // read cost. The fix landed in the driver precisely so the engine did not
+      // need one.
+      //
+      // `uniqueOn` + the memory envelope: this rig is the memory driver's shape
+      // exactly, as it is now.
       const rows = storedRows('doc_no', ['D-0003']);
-      const { engine, driver } = makeRig(SCHEMA, rows);
+      const { engine, driver } = makeRig(SCHEMA, rows, {
+        uniqueOn: 'doc_no',
+        duplicateError: memoryDuplicate,
+      });
       await engine.init();
       await engine.insert('doc', { title: 'first' }); // D-0004
 
@@ -678,15 +734,14 @@ describe('ObjectQL autonumber resync (#6806)', () => {
 
       const written = await engine.insert('doc', { title: 'second' });
 
-      // The honest outcome: the number is issued a second time, the write
-      // SUCCEEDS, and nothing anywhere says so. Fixing this needs uniqueness in
-      // the driver — `packages/drivers/**` is under the #5499 freeze, and a
-      // pre-issue existence probe in the engine would cost a query per insert
-      // and still be racy. Reported as a follow-up, not implemented here.
-      expect(written.doc_no).toBe('D-0005');
-      expect(rows.filter((r) => r.doc_no === 'D-0005')).toHaveLength(2);
-      // One create attempt: with no rejection there is nothing to retry.
-      expect(driver.create).toHaveBeenCalledTimes(2); // 'first' + 'second'
+      // The number is issued ONCE. D-0005 was refused, the counter re-seeded
+      // from the real max (5) and the re-issue landed above it.
+      expect(written.doc_no).toBe('D-0006');
+      expect(rows.filter((r) => r.doc_no === 'D-0005')).toHaveLength(1);
+      // Three creates: 'first', the REFUSED 'second', and its re-issue. The
+      // refused attempt is what the old assertion could not observe, because
+      // there was nothing to refuse it.
+      expect(driver.create).toHaveBeenCalledTimes(3);
     });
 
     it('...but ADOPTION still holds there — it needs no constraint at all', async () => {

@@ -582,7 +582,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
 // `HookBodyCapability` and `array_agg` / `AggregationFunction` enum-value
 // retirements — `data/hook-body.zod.ts`, `data/query.zod.ts`.)
 const GLOBAL_NAV_RETIRED =
-  '`global_nav` was removed from `ACTION_LOCATIONS` in @objectstack/spec 17 (#6888, ADR-0049 '
+  '`global_nav` was removed from `ACTION_LOCATIONS` in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — no running-app surface ever rendered it. The console command palette '
   + '(`⌘K`) builds its groups from nav items, objects, dashboards, pages, reports, recent items '
   + 'and record search; it reads no action metadata at all, so an action declaring this location '
@@ -1096,10 +1096,10 @@ const actionObject = () => strictObject({
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
         ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
-          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead (#5777). "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead. "
           + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
           + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
-          + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed (#6828). "
+          + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed. "
           + 'Expected an array of ActionParam, received an object.'
         : undefined
     ),

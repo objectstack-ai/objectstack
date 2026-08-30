@@ -288,7 +288,7 @@ const COMPARE_TO_OFFSET_RETIRED =
 // container changes, which is what makes this a mechanical conversion.
 const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   `\`dashboard.widgets[].compareTo: '${kind}'\` (the bare string form) was removed in `
-  + '@objectstack/spec 17.0.0 (#5011) — the ADR-0021 dataset renderer silently DROPPED it, so the '
+  + '@objectstack/spec 17.0.0 — the ADR-0021 dataset renderer silently DROPPED it, so the '
   + 'widget rendered its base numbers with the comparison the author asked for quietly absent. '
   + `Write \`compareTo: { kind: '${kind}' }\` instead — same comparison, spelled the way the `
   + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
@@ -307,8 +307,8 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
 // `actionUrl` should learn in the same breath that its two companions are gone
 // too, rather than hitting three parse errors in three edit rounds.
 const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =>
-  `\`dashboard.widgets[].${key}\` was removed in @objectstack/spec 17.0.0 (#5010, `
-  + 'ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. '
+  `\`dashboard.widgets[].${key}\` was removed in @objectstack/spec 17.0.0 `
+  + '(ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. '
   + 'No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from '
   + '`header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; '
   + 'delete all three. '

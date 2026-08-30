@@ -151,8 +151,10 @@ import { randomUUID } from 'node:crypto';
 import {
   CLI,
   CLI_BUILD_FIX,
+  closureBuildFix,
   looksLikeMissingCliCommand,
   oclifCommandFileFor,
+  owningPackageOf,
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
 
@@ -187,14 +189,43 @@ const at = (rel) => join(REPO_ROOT, rel);
 const LINT_COMMAND_ID = ['lint'];
 
 /**
+ * This gate's WHOLE build prerequisite, named once (#12564) — the CLI plus the
+ * build closure of every config in the population, derived from the population
+ * itself rather than written down.
+ *
+ * Computed at module scope on purpose: it is one command for the ROUND, not one
+ * per config, which is what keeps it eligible for `SHARED_REMEDIES` below. A
+ * remedy narrowed to the configs that actually failed would have to reach a
+ * classifier, and a classifier that can see the population is a classifier that
+ * can put per-round detail in a cause's identity — the #11395 hole, re-opened
+ * from the other side. Round-constant, so `groupFailuresByCause` keys exactly as
+ * it did before.
+ */
+const POPULATION_CLOSURE = closureBuildFix([...discoverExamples(), ...discoverPackages()]);
+
+/**
  * The remedy when a config's OWN workspace dependencies were never built (#6033) —
  * distinct from `CLI_BUILD_FIX`, which clears only the CLI. An example config
  * imports workspace packages by name, so a tree with just the CLI built still
  * cannot be linted, and the two remedies must not be confused for each other.
+ *
+ * ⭐ It used to say `pnpm build`, which is CORRECT and is not what a reader does
+ * (#12564). Sitting directly under it is a `why:` line naming ONE package, and
+ * that line is the specific, actionable-looking one — so a reader builds that
+ * package, re-runs, and is told the next one, because node stops resolving a
+ * config's imports at the first missing `dist/` (the mechanism is written out
+ * over `closureBuildFix`). Measured: four locked build rounds to get one reading,
+ * and the walk was six rounds long — the reporter escaped at four only by
+ * abandoning the diagnosis and building an owning package's closure instead.
+ * Naming the closure here is what makes the specific line and the remedy agree.
+ *
+ * Falls back to the coarser `pnpm build` when the closure cannot be derived: a
+ * strict superset costs time, never coverage, and a PARTIAL closure would be this
+ * card's own defect wearing a derivation's clothes (see `closureBuildFix`).
  */
-const WORKSPACE_BUILD_FIX = 'pnpm build';
+const WORKSPACE_BUILD_FIX = POPULATION_CLOSURE.command ?? 'pnpm build';
 /** …and when the package is not on disk at all, a build alone cannot help. */
-const INSTALL_THEN_BUILD_FIX = 'pnpm install && pnpm build';
+const INSTALL_THEN_BUILD_FIX = `pnpm install && ${WORKSPACE_BUILD_FIX}`;
 
 const update = process.argv.includes('--update');
 
@@ -831,9 +862,22 @@ function selfTest() {
   // about them may move. Pinned as the literal remedy strings a reader acts on.
   expect(
     '#11395 the classified branches are untouched',
-    explainConfigFailure(REAL_UNBUILT_DEP_ERROR).fix === 'pnpm build' &&
-      explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts").fix === 'pnpm install && pnpm build',
+    explainConfigFailure(REAL_UNBUILT_DEP_ERROR).fix === WORKSPACE_BUILD_FIX &&
+      explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts").fix ===
+        INSTALL_THEN_BUILD_FIX,
     'the two classified remedies are the text a reader runs; they must not move',
+  );
+
+  // The two remedies are still DISTINCT and still say what they used to say
+  // about each other: a package that is on disk but unbuilt needs a build, and
+  // one that is not there at all needs an install FIRST. #12564 changed what the
+  // build half spells, not which branch prescribes it.
+  expect(
+    '#12564 the two classified remedies stay distinct',
+    WORKSPACE_BUILD_FIX !== INSTALL_THEN_BUILD_FIX &&
+      INSTALL_THEN_BUILD_FIX === `pnpm install && ${WORKSPACE_BUILD_FIX}` &&
+      WORKSPACE_BUILD_FIX !== CLI_BUILD_FIX,
+    'the unbuilt / not-installed / CLI-only remedies must not collapse into one another',
   );
 
   // -------------------------------------------------------------------------
@@ -883,6 +927,71 @@ function selfTest() {
     '#10907 …spelled repo-relative, as the baseline keys are',
     offRoot.every((p) => !p.startsWith('/') && !p.includes(REPO_ROOT)),
     `absolute paths would silently re-key every baseline entry; got ${JSON.stringify(offRoot.slice(0, 2))}`,
+  );
+
+  // -------------------------------------------------------------------------
+  // The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming
+  // is that ONE round of it clears the whole population — so the property to pin
+  // is COMPLETENESS, and the failure to refuse is a closure that names SOME of
+  // the population. A partial closure is the worse half of this card's defect: it
+  // looks derived, it is specific, and it still does not converge.
+  // -------------------------------------------------------------------------
+  const derivedClosure = closureBuildFix(onRoot);
+  expect(
+    '#12564 the live population yields a closure',
+    typeof derivedClosure.command === 'string' && derivedClosure.command.length > 0,
+    `no closure could be named for ${onRoot.length} config(s): ${derivedClosure.unknown ?? '(no reason given)'}`,
+  );
+  // Every config's OWN owner must be in the command. Compared per config against
+  // the same manifests the derivation read, not against a list written here — a
+  // list would be the hand-maintained note this derivation exists to avoid.
+  const missingOwners = onRoot
+    .map((configPath) => owningPackageOf(configPath))
+    .filter((owner) => !owner || !(derivedClosure.command ?? '').includes(`--filter=${owner}`));
+  expect(
+    '#12564 …naming every config in the population',
+    missingOwners.length === 0,
+    `${missingOwners.length} owner(s) absent from the closure (${missingOwners.join(', ')}) — a closure that ` +
+      'misses one config leaves the reader exactly the round-trip this remedy exists to remove',
+  );
+  // The CLI is in it too. Without that, the command printed under PREREQUISITE
+  // NOT MET would not clear the prerequisite it is printed for — a remedy whose
+  // success condition it cannot itself reach.
+  expect(
+    '#12564 …and the CLI the gate spawns',
+    (derivedClosure.command ?? '').includes('--filter=@objectstack/cli'),
+    'the closure must clear the CLI prerequisite it is offered as the remedy for',
+  );
+  // ⛔ ALL-OR-NOTHING. A broken scan is the sharp case: with the CLI always
+  // seeded, an EMPTY population would render as `--filter=@objectstack/cli`
+  // alone — byte-for-byte the CLI-only remedy this card exists to replace,
+  // presented as though it were the whole closure. That is a guard whose
+  // total-failure output is indistinguishable from a plausible success. One
+  // unowned config is the same defect part-way. Both must come back as a REASON,
+  // never a command — the rule `emptyPopulationVerdict` states for the verdict.
+  const emptyClosure = closureBuildFix([]);
+  const partialClosure = closureBuildFix([...onRoot, 'no/such/place/objectstack.config.ts']);
+  expect(
+    '#12564 an empty population names no closure',
+    emptyClosure.command === undefined && typeof emptyClosure.unknown === 'string',
+    `an empty population produced a command (${emptyClosure.command}) — a broken scan must not render as the ` +
+      'CLI-only remedy wearing the closure\'s name',
+  );
+  expect(
+    '#12564 …and one unowned config refuses the WHOLE closure',
+    partialClosure.command === undefined && typeof partialClosure.unknown === 'string',
+    'a closure missing one config is this card\'s own defect wearing a derivation\'s clothes',
+  );
+  // The refusals this gate is CREDITED for do not move (#12564 fence 2). The
+  // remedy got longer; nothing about it may turn a refusal into a pass, so the
+  // two headlines stay reachable and the partial round still declines to judge.
+  expect(
+    '#12564 the refusal semantics did not move',
+    measureAllConfigs(['x.ts', 'y.ts'], (c) =>
+      c === 'x.ts' ? { failure: explainConfigFailure(REAL_UNBUILT_DEP_ERROR) } : { count: 0 },
+    ).failures.length === 1,
+    'a partial round must still collect a failure — a round that reports green over an unmeasured config is ' +
+      'strictly worse than the four rounds this card is about',
   );
 
   // The SHARED probe's own anchoring (#11394). #10907 anchored this FILE; the
@@ -974,7 +1083,9 @@ function selfTest() {
     `✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, ` +
       `stay distinct, and a failing config does not end the round; all ${FAILURE_BRANCHES.length} failure branches state ` +
       `one shared cause ONCE, with no config path in the key; the population resolves to ${onRoot.length} config(s) ` +
-      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK.`,
+      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK; ` +
+      `the build-prerequisite closure names all ${onRoot.length} of them plus the CLI, and refuses whole rather ` +
+      `than naming some.`,
   );
 }
 
@@ -1009,9 +1120,16 @@ function reportPrerequisiteNotMet(headline, detail) {
   console.error(
     `\ncheck-i18n-coverage: PREREQUISITE NOT MET — ${headline}\n\n` +
       detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
-      `\n\n  Fix:  ${CLI_BUILD_FIX}\n` +
-      `        …and on a tree that has never been built, \`pnpm build\`: this gate also\n` +
-      `        lints \`examples/*\`, whose configs import other workspace packages.\n\n` +
+      `\n\n  Fix:  ${WORKSPACE_BUILD_FIX}\n\n` +
+      `        That is this gate's WHOLE prerequisite in ONE command (#12564) — the CLI,\n` +
+      `        plus the build closure of every config in its population. Clearing only\n` +
+      `        the CLI (\`${CLI_BUILD_FIX}\`)\n` +
+      `        moves the wall rather than removing it: this gate also lints \`examples/*\`,\n` +
+      `        whose configs import workspace packages by name.\n` +
+      `        ⛔ And clearing it one package at a time does NOT converge. node stops\n` +
+      `        resolving a config's imports at the FIRST one with no \`dist/\`, so each\n` +
+      `        round can name exactly one more, however many are missing — measured at\n` +
+      `        six rounds down a single config's import list. Run the closure once.\n\n` +
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +

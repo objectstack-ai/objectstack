@@ -617,10 +617,12 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
     const message = parseWith({ [key]: value });
 
     // The prescription, in the parts an upgrading author needs: the
-    // fully-qualified key, the version, the issue, and the fix.
+    // fully-qualified key, the version, the ADR, and the fix. NOT the tracker
+    // id — it resolves to nothing for the author reading this refusal.
     expect(message).toMatch(new RegExp(`dashboard\\.widgets\\[\\]\\.${key}`));
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/#5010/);
+    expect(message).toMatch(/ADR-0049 enforce-or-remove/);
+    expect(message).not.toMatch(/#\d{3,5}\b/);
     // The three went together — an author who deletes only the one key they
     // were told about would hit this same error twice more.
     expect(message).toMatch(/delete all three/i);

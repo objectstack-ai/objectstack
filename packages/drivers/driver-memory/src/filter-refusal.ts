@@ -62,7 +62,11 @@ export function unsupportedFilterError(message: string): Error {
  * ADR-0112): the spec declares the key, this driver's `performAggregation`
  * evaluates no per-aggregation predicate, so it is a capability gap in the
  * backend rather than a mistake in the query. Building the evaluation here is
- * a capability investment this refusal deliberately is not (#5499 freeze).
+ * a capability investment this refusal deliberately is not. That was the
+ * #5499 investment freeze's call while it stood; the freeze dissolved
+ * 2026-08-11 (head note of `@objectstack/spec`'s `aggregation-conformance.ts`),
+ * so building it is now unclaimed rather than forbidden — and until someone
+ * claims it the refusal is still the honest answer for an uncompiled key.
  * Refused rather than silently aggregating the UNFILTERED rows — the #10413
  * defect. Unreachable through `engine.aggregate` (the engine lowers filtered
  * aggregations in memory for every driver); this fires only for a caller that

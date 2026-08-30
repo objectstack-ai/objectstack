@@ -44,12 +44,14 @@ describe('AggregationFunction', () => {
   // asserted `.toThrow()` would stay green if the error map were deleted.
   it('prescribes the retirement for `array_agg`', () => {
     expect(() => AggregationFunction.parse('array_agg'))
-      .toThrow(/`array_agg`.*was removed.*#6188.*Delete the aggregation/s);
+      .toThrow(/`array_agg`.*was removed.*ADR-0049.*Delete the aggregation/s);
+    expect(() => AggregationFunction.parse('array_agg')).not.toThrow(/#\d{3,5}\b/);
   });
 
   it('prescribes the retirement for `string_agg`', () => {
     expect(() => AggregationFunction.parse('string_agg'))
-      .toThrow(/`string_agg`.*was removed.*#6188.*Delete the aggregation/s);
+      .toThrow(/`string_agg`.*was removed.*ADR-0049.*Delete the aggregation/s);
+    expect(() => AggregationFunction.parse('string_agg')).not.toThrow(/#\d{3,5}\b/);
   });
 
   it('does NOT tell a mis-spelling that it "was removed"', () => {

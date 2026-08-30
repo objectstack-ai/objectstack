@@ -16,6 +16,13 @@ import {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  // [#13023] The reset door's response contract. Both `meta.deleteItem`
+  // declarations BIND this type rather than transcribing its members: a
+  // hand-written member list is the exact defect this card removes (a local
+  // declaration that drifts from the wire), and the card's own body
+  // demonstrated the failure by attributing the IMPLEMENTATION's declared
+  // return to this schema.
+  DeleteMetaItemResponse,
   PublishMetaItemResponse,
   PublishPackageDraftsResponse,
   LoginRequest,
@@ -1150,12 +1157,24 @@ export class ObjectStackClient {
      * metadata_conflict` instead — the door has always read the header
      * (`DeleteMetaItemRequest.parentVersion` describes it), this client just
      * had no argument for it until #12181.
+     *
+     * [#13023] READ `reset`, NEVER `deleted`. This method used to declare
+     * `{ type, name, deleted }` — an UNINHABITED shape: the door answers
+     * `res.json(result)` with `deleteMetaItem`'s return, and not one of its
+     * four branches carries `type`, `name` or `deleted`. So `r.deleted`
+     * compiled and read `undefined` on EVERY reset, including the ones that
+     * really removed a row, and the SDK's own tests had to cast through `any`
+     * to see the truth. The truthful flag is {@link DeleteMetaItemResponse}'s
+     * `reset`: `true` means an overlay row was deleted, `false` means none
+     * existed and the item was already at its artifact default — exactly the
+     * distinction a caller most wants. Same correction #5638 made one door
+     * over on `DeleteDataResult`.
      */
     deleteItem: async (
         type: string,
         name: string,
         options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
         const route = this.getRoute('metadata');
         // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
         // the three meanings `qs` holds in this file.
@@ -1169,7 +1188,11 @@ export class ObjectStackClient {
             method: 'DELETE',
             ...(headers ? { headers } : {}),
         });
-        return this.unwrapResponse(res);
+        // The door answers BARE (`res.json(result)`), and `unwrapResponse`
+        // strips only a body carrying BOTH a boolean `success` AND a `data`
+        // key — this one has no `data` — so the caller receives the door's
+        // whole body and the annotation above describes it.
+        return this.unwrapResponse<DeleteMetaItemResponse>(res);
     },
 
     /**
@@ -1492,15 +1515,19 @@ export class ObjectStackClient {
      * The `data` member is `IAnalyticsService.query`'s declared return, relayed
      * verbatim by the domain (`deps.success(await analyticsService.query(…))`).
      *
-     * ⛔ NOT bound to `AnalyticsResultResponseSchema` (`@objectstack/spec/api`),
-     * which looks like the route's own response type: its
-     * `data.fields` declares `{ name, type }` only, while the contract this
-     * route relays also carries `label` / `format` / `currency` /
-     * `percentScale` and `totals` — measured on a real `AnalyticsService` in
-     * `analytics-automation-json-erasure.test.ts`. Binding it would have
-     * narrowed the declaration below what the producer serves, which is the
-     * bound-but-false shape #12034 paid to remove. (The schema's own drift is
-     * a spec-side question, filed separately.)
+     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse`
+     * (`@objectstack/spec/api`). When #12104 wrote this annotation the schema
+     * was a stale projection — its `data.fields` declared `{ name, type }`
+     * only, while the contract this route relays also carries `label` /
+     * `format` / `currency` / `percentScale` and `totals` (measured on a real
+     * `AnalyticsService` in `analytics-automation-json-erasure.test.ts`), so
+     * binding it would have been the bound-but-false shape #12034 paid to
+     * remove. #13078 has since brought the schema to parity (pinned
+     * schema ≡ contract in `spec/api/analytics.test.ts`), but the binding
+     * stays on the producer's contract on purpose: the contract is what the
+     * route relays, and the schema is its transcription — annotating the
+     * source rather than the copy is what keeps this method immune to the
+     * transcription drifting again.
      */
     query: async (payload: any): Promise<BaseResponse & { data: AnalyticsResult }> => {
       const route = this.getRoute('analytics');
@@ -3806,14 +3833,21 @@ export class ObjectStackClient {
        * therefore resolves to the `AutomationResult` alone. The two differ in
        * the wrapper only, which is why the payload type is the same one.
        *
-       * ⛔ NOT bound to `TriggerFlowResponse` (`@objectstack/spec/api`), which
-       * looks like this route's response type: its `data` declares
-       * `{ success, output?, error?, durationMs? }`, and the door also serves
-       * `status` / `runId` / `screen` (a paused run — see the row above),
-       * `code`, `successMessage` / `errorMessage` and `summary`. Measured
-       * against the real `AutomationEngine` in
-       * `analytics-automation-json-erasure.test.ts`. Binding the narrower
-       * schema would refuse the very reads this docblock tells callers to make.
+       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse`
+       * (`@objectstack/spec/api`). When #12104 wrote this annotation the
+       * schema was a stale projection — its `data` declared
+       * `{ success, output?, error?, durationMs? }` while the door also
+       * serves `status` / `runId` / `screen` (a paused run — see the row
+       * above), `code`, `successMessage` / `errorMessage` and `summary`
+       * (measured against the real `AutomationEngine` in
+       * `analytics-automation-json-erasure.test.ts`), so binding it would
+       * have refused the very reads this docblock tells callers to make.
+       * #13078 has since brought the schema to parity (pinned
+       * schema ≡ contract in `spec/api/automation-api.zod.test.ts`), but the
+       * binding stays on the producer's contract on purpose: the contract is
+       * what the route relays, and the schema is its transcription —
+       * annotating the source rather than the copy is what keeps this method
+       * immune to the transcription drifting again.
        */
       trigger: async (triggerName: string, payload: any): Promise<BaseResponse & { data: AutomationResult }> => {
           const route = this.getRoute('automation');
@@ -6002,12 +6036,18 @@ export class ScopedEnvironmentClient {
      * reads `?state=` — and the `If-Match` header — byte-identically. A bag
      * on only one of the two clients would be a fresh divergence of the kind
      * #7019 rules against, not half a fix.
+     *
+     * [#13023] Returns {@link DeleteMetaItemResponse} — read `reset`, never
+     * `deleted`. The phantom `{ type, name, deleted }` declaration was
+     * TEXTUALLY IDENTICAL on both twins, so correcting one and not the other
+     * would have been half a fix in the same #11713 direction the bag above
+     * records. See the unscoped twin for the full account.
      */
     deleteItem: async (
       type: string,
       name: string,
       options?: DeleteMetaItemOptions,
-    ): Promise<{ type: string; name: string; deleted: boolean }> => {
+    ): Promise<DeleteMetaItemResponse> => {
       // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
       const query = metaDeleteQuery(options);
       // Header half of the same bag, through the same one builder the twin
@@ -6017,7 +6057,8 @@ export class ScopedEnvironmentClient {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
-      return this.parent._unwrap(res);
+      // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
+      return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
     getHistory: async (
       type: string,

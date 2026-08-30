@@ -690,6 +690,7 @@
     "data/ObjectFieldGroup:icon",
     "data/ObjectFieldGroup:key",
     "data/ObjectFieldGroup:label",
+    "data/ObjectFieldGroup:visibleWhen",
     "data/PerOperationRequiredPermissions:create",
     "data/PerOperationRequiredPermissions:delete",
     "data/PerOperationRequiredPermissions:read",

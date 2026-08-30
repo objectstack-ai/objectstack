@@ -174,7 +174,9 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    */
 
   /**
-   * ADR-0081 D1 — single-org default-organization bootstrap. In single-org
+   * The single-org default-organization bootstrap (a pre-repo decision whose
+   * old label collides with this repo's ADR series — see the citation note
+   * under ADR-0093 D9; the membership guarantee it backs is D9). In single-org
    * mode (`OS_MULTI_ORG_ENABLED` unset/false) nothing else ever creates an
    * organization, so sessions carry no `activeOrganizationId` and better-auth
    * `organization/invite-member` has no org to resolve — i.e. no way to add a
@@ -1020,7 +1022,8 @@ export class AuthPlugin implements Plugin {
       }
     });
 
-    // ADR-0081 D1 — single-org default-organization bootstrap. Every WALLED
+    // The single-org default-organization bootstrap (pre-repo decision; label
+    // collision documented under ADR-0093 D9). Every WALLED
     // posture (`group` and `isolated`) keeps its existing owner: the enterprise
     // organizations package, which runs the same idempotent helper with the
     // seed-ownership step injected. One crisp owner per posture, and the open
@@ -1134,7 +1137,7 @@ export class AuthPlugin implements Plugin {
     // level, which BYPASSES `account.create.after` / `stampIdentitySource`. This
     // ObjectQL `afterInsert` hook stamps `source=idp_provisioned` regardless of
     // the creation path, so SCIM-provisioned users are correctly marked as the
-    // managed mirror (ADR-0024 D4 / ADR-0071 verification #1). It mirrors the
+    // managed mirror (cloud ADR-0024 D4 / cloud ADR-0071 verification #1). It mirrors the
     // federated branch of `stampIdentitySource`, is idempotent, and never breaks
     // the insert. Complementary to (not a replacement for) the OAuth-path stamp.
     ctx.hook('kernel:ready', async () => {

@@ -1,0 +1,6 @@
+---
+"@objectstack/spec": minor
+"@objectstack/client": patch
+---
+
+Widen two route response schemas to parity with the producer contracts their routes relay. `AnalyticsResultResponseSchema.data` now declares everything `AnalyticsResult` declares — `fields[].label` / `format` / `currency` / `percentScale` (the renderer chains) and `totals` (the marginal-aggregate channel) — and `TriggerFlowResponseSchema.data` now declares everything `AutomationResult` declares, including the paused screen-flow state (`status` / `runId` / `screen`), the closed `code` classification, the friendly terminal messages and the run `summary`. Both parities are pinned schema ≡ contract at compile time, so the two sources can no longer drift apart silently. `AnalyticsResultResponse` / `AnalyticsResultResponseParsed` are now exported: the schema previously had no nameable response type at all. This is an accept-set widening with zero wire change — every payload that parsed before still parses, and the served keys the schemas used to silently strip (a paused run's `runId` and `screen`, a measure's `label`) now survive a parse. The client SDK's `analytics.query` / `automation.trigger` docblocks are refreshed to record the new state; their bindings still target the producer contracts and are unchanged.

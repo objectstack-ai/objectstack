@@ -57,10 +57,21 @@ export default class MetaDelete extends Command {
 
       const result = await client.meta.deleteItem(args.type, args.name);
 
+      // [#13023] `deleted` is THIS COMMAND's output key; its value is the reset
+      // door's `DeleteMetaItemResponse.reset`. Two different booleans live in
+      // this payload and must not be conflated — the top-level `success` is the
+      // CLI envelope's "the command completed", while `deleted` reports whether
+      // a customization overlay row actually went away (`reset: false` means
+      // none existed and the item was already at its artifact default). This
+      // read was `result.deleted` until now — a key no branch of the door has
+      // ever sent, so it evaluated to `undefined` and `JSON.stringify` /
+      // `yaml.stringify` dropped it: the key this command has always declared
+      // never appeared in a single run. Exactly the treatment #5638 gave the
+      // sibling `os data delete`, one door over.
       if (flags.format === 'json') {
-        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'json');
+        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.reset }, 'json');
       } else if (flags.format === 'yaml') {
-        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.deleted }, 'yaml');
+        await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.reset }, 'yaml');
       } else {
         printSuccess(`Metadata deleted: ${args.type}/${args.name}`);
       }

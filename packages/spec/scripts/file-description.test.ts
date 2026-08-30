@@ -1388,7 +1388,7 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     expect(offenders).toEqual([]);
   });
 
-  it('demotes only the 38 descriptions that needed it (#12249)', () => {
+  it('demotes only the 37 descriptions that needed it (#12249)', () => {
     // The other half, and the reason this is a renumbering rather than a
     // blanket `#`→`##`: 26 described modules already start their headings at
     // level 2, and shifting those too would have moved 105 correct headings a
@@ -1412,9 +1412,11 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       })
       .filter(d => d.untouched !== d.emitted);
 
-    expect(shifted.length).toBe(38);
+    // (38 -> 37: `kernel/metadata-customization.zod.ts` — one of the level-1
+    // openers — was removed whole by #13135's ADR-0049 retirement.)
+    expect(shifted.length).toBe(37);
     // …and every one of them was shifted because it opened at level 1.
-    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(38);
+    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(37);
   });
 
   it('keeps a description for every source that had one — #6134 selection is untouched', () => {

@@ -216,6 +216,10 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
+// [#12925] The OTHER gate's detector, imported so the kebab declaration below is
+// pinned against its real recognizers rather than a paraphrase of them. That gate
+// imports nothing from here, so this is a one-way edge.
+import { findViolations } from './check-error-code-casing.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -321,6 +325,228 @@ export const SHAPES = [
   // of literals is reduced, and it reports under `assignconst`.
   { name: 'codehelper', re: /\.code\s*=\s*([A-Za-z_$][\w$]*)\s*[;,\n)]/g, resolve: 'helper', lowercase: 'here' },
 ];
+
+/**
+ * ## [#12925] Kebab-case DIAGNOSTIC codes are a SEPARATE VOCABULARY — declared
+ * ## out of BOTH gates' population, once, here
+ *
+ * This repo authors two families of code-shaped string. `error.code` is one:
+ * ADR-0112 D1 rules its value space `^[A-Z][A-Z0-9_]*$`, this gate reports what
+ * is outside the registered set, and `check:error-code-casing` owns the
+ * lowercase sweep. The other is the AUTHOR-TIME DIAGNOSTIC code — `{ severity,
+ * code, message, tag }` records that describe an ARTIFACT rather than a
+ * request, carry a severity that can be a warning, and never reach `error.code`.
+ * That is the D6c genre, and `@objectstack/sdui-parser` spells its whole
+ * diagnostic vocabulary in KEBAB: `unknown-component`, `forbidden-tag`,
+ * `missing-required-prop`, …
+ *
+ * Neither gate has ever covered that family, and until this declaration NOTHING
+ * said so. Not one of the published grammars admits a hyphen — `assign`,
+ * `classfield`, `objlit`, `literalCodeValues` and the template shape here, and
+ * every pattern in `check:error-code-casing`, whose grammar is `[a-z][a-z0-9_]*`
+ * — so a kebab literal matches NO pattern in EITHER gate. Both run green over
+ * the file, both count it in "files scanned", and neither has anything to say.
+ *
+ * ⭐ This declaration is NOT a weakening. Coverage of this family is already
+ * zero and this changes no verdict; what changes is that the silence is now
+ * DECLARED rather than accidental. The bound this gate states for itself — a
+ * value it cannot reduce is REPORTED, never dropped — was being honoured for
+ * the constant form and quietly violated for the literal form, because a value
+ * outside every grammar fires no pattern and so cannot report itself.
+ *
+ * ## Why the declaration is here and not in each gate
+ *
+ * Two gates each carrying half of a boundary is what produced the hole: this
+ * one delegates a lowercase literal in `objlit`/`assign` to that one, that one
+ * defers a value with no literal at the position back to this one, and a kebab
+ * literal is in the seam — it HAS a literal, and it is lowercase, and neither
+ * grammar spells it. So the boundary is stated ONCE, in the file that already
+ * documents the pair's division of labour, and `--self-test` below pins it
+ * against BOTH gates' recognizers by importing the other gate's detector rather
+ * than paraphrasing it.
+ *
+ * ## The measurement behind it (re-measured on this tree, not relayed)
+ *
+ *   packages/sdui-parser, non-test source, 7 files in this gate's population:
+ *     24 distinct diagnostic codes — 8 stamped as `code: '…'` directly,
+ *        16 through the code-carrying helper `Parser#error(code, …)`
+ *     24 of 24 kebab-shaped; 0 non-kebab code VALUES in the package
+ *     this gate's SHAPES: 0 hits   ·   check:error-code-casing: 0 findings
+ *   The zeros are readings, not dead instruments: on independent populations
+ *   the same two instruments return 6 and 6 (`metadata-protocol/build-probes.ts`,
+ *   snake_case diagnostics) and 25 and 0 (`runtime/dispatcher-error-vocabulary.ts`,
+ *   SCREAMING_SNAKE). And the subject file IS inside the scanned set — it is
+ *   read and matches nothing, which is the whole defect.
+ *
+ * ⚠️ And matching is not the same as seeing. Ablated while pinning this:
+ * widening `objlit` alone to admit a hyphen makes the literal MATCH and still
+ * reports nothing, because `objlit` carries `lowercase: 'casing-gate'` and that
+ * delegation hands the value to the gate whose grammar excludes the hyphen —
+ * back into the same seam, one layer deeper. So the boundary this declares, and
+ * the boundary `--self-test` pins, is the RECOGNIZER population, not the finding
+ * list: a pin watching findings sits green through that widening.
+ *
+ * ## ⛔ What this declaration deliberately does NOT do
+ *
+ * ⛔ It does not widen any grammar to admit a hyphen. Widening would newly
+ * resolve other constants across the repo into SITES, and every new site then
+ * needs a declaration row in the table this gate reconciles against. That blast
+ * radius is UNMEASURED. Measuring it is a gate-POPULATION change, which is a
+ * maintainer decision on its own card — never a rider on a declaration.
+ *
+ * ⛔ It does not rename the diagnostic family to SCREAMING_SNAKE so a regex can
+ * see it. Kebab is that vocabulary's established convention across all 24 of
+ * them; renaming bends a vocabulary to fit a pattern.
+ *
+ * ⛔ And it does not become a general licence: this covers the kebab DIAGNOSTIC
+ * shape only. A hyphen in a value that reaches `error.code` is still outside
+ * ADR-0112 D1 and still a defect — there is simply no gate that can see one, and
+ * that is now on the record instead of in the gap between two regexes.
+ */
+export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
+  /** The shape declared out of both gates' population. */
+  shape: /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/,
+  /** A member, used by `--self-test` as the probe. */
+  sample: 'unknown-component',
+  /**
+   * Its non-kebab TWIN — the same characters with the hyphens spelled `_`.
+   * `--self-test` runs both through every recognizer, so the pin isolates the
+   * HYPHEN as the only reason the sample is unseen, rather than asserting a
+   * zero that a broken harness would also produce.
+   */
+  twin: 'unknown_component',
+  /** The package that owns this vocabulary, and the witness for the pin. */
+  owner: 'packages/sdui-parser',
+  /** Governed by: NEITHER gate. Stated so a run can print it. */
+  governedBy: 'neither — an author-time diagnostic vocabulary, ADR-0112 D6c genre',
+});
+
+/**
+ * ## [#13131] A code-carrying helper that stamps through an OBJECT LITERAL is
+ * ## invisible to `codehelper` — MEASURED, and deliberately NOT closed here
+ *
+ * `codehelper` above is anchored on an ASSIGNMENT: its regex is `.code = ident`.
+ * The reasoning it implements — "the identifier is a PARAMETER, so the literals
+ * live at the CALL SITES" — is a property of the HELPER, not of the assignment
+ * operator, and it holds just as well for the equally ordinary helper that
+ * builds an object literal:
+ *
+ *     function postureError(code: string, message: string) {
+ *       return { severity: 'error', code, message };   // <- nothing matches
+ *     }
+ *
+ * No shape in either gate anchors there. `objlit` needs a quote, `objlitconst`
+ * needs a SCREAMING_SNAKE identifier after the colon (and the conventional
+ * parameter name is `code`), `objlittemplate` needs backticks, and `codehelper`
+ * needs the `.code =`. So this is worse than a wrong verdict: no pattern fires
+ * at all, which means there is no site AND no unresolved entry either — nothing
+ * is reported, and nothing says so. That is precisely the bound this gate
+ * states for itself ("a value it cannot reduce is REPORTED, never dropped")
+ * failing in the one way the bound cannot notice.
+ *
+ * ## TWO blindnesses, not one — and the second is why the first is not enough
+ *
+ * ① POSITION. The object-literal stamp position has no shape (above).
+ * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognises
+ *    `function f(`, `constructor(` and `const|let|var f = (` — and NO class
+ *    method. So a code-carrying helper that is a METHOD is out of reach even in
+ *    the position `codehelper` already implements: the same body that produces
+ *    a site as a free function produces nothing as `private error(code, …)`.
+ *    Measured with a same-genre positive control, and pinned below.
+ *
+ * These are independent, and the card's own live instance needs BOTH:
+ * `Parser#error(code, message, start?, tag?)` in `packages/sdui-parser` is a
+ * class method that stamps through an object literal. Widening the position
+ * alone would still not reach it.
+ *
+ * ## The measurement (blast radius), on `packages/**` non-test source
+ *
+ * Method: the predicate — a `code` property of an object literal whose value is
+ * an identifier that is a PARAMETER of the enclosing function — evaluated on
+ * the real TypeScript AST, with call-site arguments reduced by THIS gate's own
+ * literal grammar (`/^[A-Za-z][A-Za-z0-9_]*$/`, so a hyphen does not reduce)
+ * and checked against the registered vocabulary and the declaration table.
+ * A regex instrument was tried first and discarded: it matched `${code}` inside
+ * a template and `f(a, code, b)` inside an argument list, and then LOST a true
+ * positive because a bracket inside a regex literal unbalanced its scan.
+ *
+ *   predicate matches            13 helpers (12 named, 1 anonymous)
+ *   (a) call sites newly reached 106   — 76 reduce to a literal, 30 do not
+ *   (b) NEW verdict rows needed   29   — 0 of them already carry a row
+ *   (c) undischargeable `unresolved` findings  4
+ *
+ * Split by whether `enclosingDeclaration` can see the declaration at all:
+ *
+ *   reachable today (blindness ① only)   9 helpers · 81 call sites · 29 rows · 1 unresolved
+ *   blocked by blindness ②               4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *
+ * ⚠️ (b) is not the whole cost, and reading it as the whole cost is the trap
+ * this note exists to prevent. All 29 new rows are LOWERCASE `FieldErrorCode`
+ * diagnostics (`required`, `invalid_type`, `min_value`, …) in four files —
+ * ADR-0112 D6 genre, not wire codes. The four `unresolved` findings are the
+ * expensive half: an `unresolved` entry is pushed UNCONDITIONALLY and no
+ * declaration row discharges it (see `reconcile`), so each one is a RED gate
+ * with no verdict available — including `Parser#error`, whose 16 call sites all
+ * pass kebab literals that this gate's grammar refuses to reduce.
+ *
+ * ## No victim today — verified, not assumed
+ *
+ * Of the 33 SCREAMING_SNAKE values reached, 33 are already registered; the
+ * count of values that are BOTH ADR-0112 D1 shaped AND unregistered — i.e. a
+ * real wire code hiding behind this blindness — is ZERO. `check:error-code-casing`
+ * likewise reports nothing on any of the files involved. So the value of
+ * closing this is preventing a future defect, not fixing a present one.
+ *
+ * ⚠️ One bound the measurement does NOT have. `helperCodesFor` scans only the
+ * DECLARING file, so every count here is over IN-FILE call sites. An exported
+ * helper called from other packages contributes 0 — `sendError` in
+ * `packages/types/src/response-envelope.ts` has 0 in-file calls and is one of
+ * the four `unresolved`. Counting cross-file callers needs resolution this
+ * source scan does not have; that number is UNMEASURED, and it is a lower bound
+ * on (a), never an upper one.
+ *
+ * ## ⛔ What this declaration deliberately does NOT do
+ *
+ * ⛔ It does not widen `codehelper`. Triage ruled the measuring round scoped to
+ * measurement: 「先量出加宽后的爆炸半径, ⛔ 不先加宽。数没量出来之前,"该不该加宽"
+ * 不是一个可裁的问题。」 The numbers above are that measurement; whether to
+ * widen is now a decidable question and belongs on its own card, with the
+ * verdict rows (`domain:cli`) as a rider on the same change.
+ *
+ * ⛔ It does not add verdict rows. A row for a site no shape derives is a
+ * `stale-row` finding, so the rows cannot land before the widening.
+ */
+export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
+  /**
+   * The two spellings of the unseen position. Each is a complete helper whose
+   * only difference from `SAME_GENRE_CONTROL` is the stamping line.
+   */
+  shorthand: `  return { severity: 'error', code, message };`,
+  longhand: `  return { severity: 'error', code: code, message };`,
+  /**
+   * The SAME-GENRE POSITIVE CONTROL: the identical helper stamping through the
+   * assignment `codehelper` does implement. `--self-test` runs both, so the
+   * zero on the object-literal spellings is a READING rather than a harness
+   * that stopped working — the discipline `KEBAB_DIAGNOSTIC_VOCABULARY` above
+   * records, applied to a different axis.
+   */
+  control: `  const e = new Error(message);\n  (e as any).code = code;\n  return e;`,
+  /** Unregistered in both `StandardErrorCode` and the ledger, in both casings. */
+  probe: 'HELPER_SCREAMING',
+  probeLowercase: 'helper_lowercase',
+  /** Blindness ②: the declaration forms `enclosingDeclaration` cannot see. */
+  invisibleDeclarationForms: Object.freeze(['class method', 'anonymous arrow']),
+  /** The live instance, read as evidence only — it is NOT edited by this card. */
+  liveInstance: 'packages/sdui-parser/src/parse.ts  Parser#error(code, message, start?, tag?)',
+  /** Measured blast radius, `packages/**` non-test source. See the prose above. */
+  measured: Object.freeze({
+    helpers: 13,
+    callSitesNewlyReached: 106,
+    newVerdictRows: 29,
+    undischargeableUnresolved: 4,
+    unregisteredWireCodesHiding: 0,
+  }),
+});
 
 const isTestFile = (rel) =>
   /\.(test|spec)\.[cm]?tsx?$/.test(rel) || /(^|\/)(__tests__|__mocks__|fixtures)\//.test(rel);
@@ -2105,6 +2331,230 @@ function selfTest() {
     );
   }
 
+
+  // [#12925] The kebab-case DIAGNOSTIC vocabulary is declared OUT of BOTH
+  // gates' population — `KEBAB_DIAGNOSTIC_VOCABULARY` above. It is pinned HERE,
+  // in the one place the declaration lives, so a later widening of ANY grammar
+  // in EITHER gate cannot adopt that family silently: something fails, and what
+  // fails names the decision.
+  //
+  // ⚠️ Both gates are green over the kebab family TODAY, so "still green" would
+  // prove nothing. Nothing below asserts a bare zero: every case runs the kebab
+  // sample AND its non-kebab TWIN — the same characters, hyphens spelled `_` —
+  // through the same recognizer. A harness that stopped working fails on the
+  // twin instead of passing on the sample, which is what makes the zero a
+  // reading. The other gate's detector is IMPORTED rather than paraphrased, so
+  // widening `check:error-code-casing` trips this too.
+  {
+    const K = KEBAB_DIAGNOSTIC_VOCABULARY;
+    const DECISION =
+      'a grammar now admits a hyphen, so the kebab DIAGNOSTIC vocabulary that ' +
+      'KEBAB_DIAGNOSTIC_VOCABULARY (#12925) declares OUT of both gates is being adopted into a ' +
+      "gate's population. That is a gate-POPULATION change — measure the blast radius (how many " +
+      'constants repo-wide newly resolve into sites that then need declaration rows) and route it ' +
+      'to the maintainer on its own card. Do not widen quietly, and do not adjust this pin to match.';
+
+    // The population question is whether any published RECOGNIZER MATCHES the
+    // value — not whether a run ends up REPORTING it. ⚠️ Measured, not assumed:
+    // widening `objlit` alone makes a kebab literal match and still reports
+    // nothing, because `objlit` carries `lowercase: 'casing-gate'` and that
+    // delegation hands the value to a gate whose grammar still excludes the
+    // hyphen — straight back into the same seam, one layer deeper. A pin that
+    // watched FINDINGS sat green through exactly that widening when this was
+    // ablated. So both sides are counted by MATCHES.
+    const matched = (source) => {
+      let n = 0;
+      for (const shape of SHAPES) n += [...source.matchAll(new RegExp(shape.re.source, shape.re.flags))].length;
+      return n + findViolations(source, 'packages/x/src/a.ts').length;
+    };
+
+    // ① The declared shape discriminates: it admits the sample and refuses the twin.
+    ok(K.shape.test(K.sample), `KEBAB_DIAGNOSTIC_VOCABULARY.shape rejects its own sample — ${DECISION}`);
+    ok(!K.shape.test(K.twin), 'KEBAB_DIAGNOSTIC_VOCABULARY.shape admits its non-kebab twin — the pin below cannot isolate the hyphen');
+
+    // ② In each literal STAMP POSITION: the kebab value is seen by NEITHER gate,
+    //    and its twin is seen by ONE of them. Same text, same position, one byte
+    //    class apart — so the hyphen is the only thing that puts it outside.
+    const positions = {
+      objlit: `throw Object.assign(new Error('x'), { code: '%CODE%' });`,
+      assign: `const e = new Error('x'); e.code = '%CODE%'; throw e;`,
+      classfield: `class E extends Error { readonly code = '%CODE%' as const; }`,
+    };
+    for (const [name, tmpl] of Object.entries(positions)) {
+      const kebab = matched(tmpl.replace('%CODE%', K.sample));
+      const twin = matched(tmpl.replace('%CODE%', K.twin));
+      ok(
+        kebab === 0,
+        `a kebab diagnostic code in the '${name}' position is now MATCHED by a recognizer — ${DECISION}`,
+      );
+      ok(
+        twin > 0,
+        `the non-kebab twin in the '${name}' position matches nothing either — the '${name}' probe ` +
+          'measures nothing, so the zero beside it is not a reading. Fix the probe before trusting either.',
+      );
+    }
+
+    // ③ The reducer itself: a kebab literal does not reduce, its twin does.
+    ok(
+      literalCodeValues(`'${K.sample}'`) === null,
+      `literalCodeValues now reduces a kebab literal — ${DECISION}`,
+    );
+    ok(
+      (literalCodeValues(`'${K.twin}'`) ?? []).includes(K.twin),
+      'literalCodeValues no longer reduces the non-kebab twin — the check above is vacuous',
+    );
+
+    // ④ The CONSTANT form is UNDISCHARGEABLE, which is why the inline literal
+    //    is the form this gate pair currently rewards. `objlitconst` matches the
+    //    constant NAME, the reducer refuses the kebab VALUE, and the resulting
+    //    `unresolved-constant` is pushed unconditionally — no declaration row
+    //    classifies it. Pinned because the declaration's argument rests on it.
+    {
+      const source =
+        `const SOME_DIAGNOSTIC = '${K.sample}';\n` +
+        `emit({ code: SOME_DIAGNOSTIC, message: 'x' });`;
+      const { sites, unresolved } = deriveSites({
+        registered,
+        files: [{ rel: 'packages/x/src/a.ts', source }],
+        readFile: () => '',
+      });
+      ok(sites.length === 0, `a kebab constant now resolves to a site — ${DECISION}`);
+      ok(unresolved.length === 1, 'a kebab code constant produced no unresolved finding — the bound this gate states for itself');
+      const undischarged = (declared) =>
+        reconcile({ sites, declared, registered, unresolved }).filter((f) => f.kind === 'unresolved-constant').length;
+      ok(undischarged([]) === 1, 'the unresolved kebab constant produced no finding');
+      ok(
+        undischarged([
+          { code: K.sample, file: 'packages/x/src/a.ts', shape: 'objlitconst', door: 'none', verdict: 'not-dispatcher-reachable', evidence: 'x' },
+        ]) === 1,
+        'a declaration row now discharges an unresolved kebab constant — the escape hatch this card ' +
+          'declared absent exists after all; the declaration above must be rewritten, not the pin',
+      );
+    }
+
+    // ⑤ The declared WITNESS is real and still homogeneous. This is what stops
+    //    the declaration outliving its subject: it fails if the owning package
+    //    moves, and it fails the moment that vocabulary stops being all-kebab —
+    //    at which point the family is no longer what was declared out.
+    {
+      const ownerDir = join(ROOT, K.owner);
+      ok(existsSync(ownerDir), `${K.owner} does not exist — KEBAB_DIAGNOSTIC_VOCABULARY.owner moved`);
+      let kebab = 0;
+      const foreign = [];
+      for (const f of walkSources(ownerDir, ROOT)) {
+        const src = maskComments(readFileSync(f.abs, 'utf8'));
+        for (const m of src.matchAll(/\bcode:\s*'([^']*)'/g)) {
+          if (K.shape.test(m[1])) kebab += 1;
+          else foreign.push(`${f.rel}: '${m[1]}'`);
+        }
+      }
+      ok(kebab > 0, `${K.owner} stamps no kebab diagnostic code at all — the declared witness is empty`);
+      ok(
+        foreign.length === 0,
+        `${K.owner} now stamps a NON-kebab code value (${foreign.join(', ')}) — the vocabulary declared ` +
+          'out of both gates is no longer homogeneous, so the declaration no longer describes it.',
+      );
+    }
+  }
+
+  // [#13131] The OBJECT-LITERAL stamp position inside a code-carrying helper,
+  // and the CLASS-METHOD declaration form, are both outside this gate —
+  // MEASURED (see OBJECT_LITERAL_CODE_HELPER_BLINDNESS above) and declared out
+  // rather than closed, because the round that measured them was scoped to
+  // measurement. Pinned HERE, in the one place the declaration lives, so a
+  // later widening of either half cannot land silently: something fails, and
+  // what fails names the decision.
+  //
+  // ⚠️ Nothing below asserts a bare zero. Every zero is paired with the
+  // SAME-GENRE POSITIVE CONTROL — the identical helper stamping through the
+  // assignment this gate does implement — so a harness that stopped working
+  // fails on the control instead of passing on the subject.
+  {
+    const B = OBJECT_LITERAL_CODE_HELPER_BLINDNESS;
+    const DECISION =
+      'a code-carrying helper that stamps through an OBJECT LITERAL, or one declared as a CLASS ' +
+      'METHOD, is now visible to a gate. That is a gate-POPULATION change: #13131 measured the ' +
+      'blast radius at 106 newly reached call sites, 29 new verdict rows in ' +
+      `${DECLARATION}, and 4 UNDISCHARGEABLE unresolved findings. Land the rows and the ` +
+      'declaration together, and rewrite OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust ' +
+      'this pin to match.';
+
+    const helper = (body, probe) =>
+      `export function postureError(code: string, message: string) {\n${body}\n}\n` +
+      `export function deny() { throw postureError('${probe}', 'x'); }\n`;
+    const REL = 'packages/x/src/a.ts';
+    const derive = (source) =>
+      deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: REL, source }], readFile: () => '' });
+    // Population = MATCHES across BOTH gates' recognizers, never the finding
+    // list — the lesson the kebab pin above paid for in an ablation.
+    const matched = (source) => {
+      let n = 0;
+      for (const shape of SHAPES) n += [...source.matchAll(new RegExp(shape.re.source, shape.re.flags))].length;
+      return n + findViolations(source, REL).length;
+    };
+
+    // ① BLINDNESS ①, the stamp POSITION. The control fires; the two
+    //    object-literal spellings of the same helper are seen by NOTHING —
+    //    not matched, so not reported, and not unresolved either.
+    const control = helper(B.control, B.probe);
+    ok(matched(control) > 0, `the same-genre control matches no recognizer at all — the pin below cannot read as a zero`);
+    ok(
+      derive(control).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
+      'the assignment-spelled code helper no longer derives a `codehelper` site — the control for #13131 is dead',
+    );
+    for (const [name, body] of [['shorthand', B.shorthand], ['longhand', B.longhand]]) {
+      for (const probe of [B.probe, B.probeLowercase]) {
+        const source = helper(body, probe);
+        ok(matched(source) === 0, `a recognizer now MATCHES the ${name} object-literal code helper ('${probe}') — ${DECISION}`);
+        const { sites, unresolved } = derive(source);
+        ok(
+          sites.length === 0 && unresolved.length === 0,
+          `the ${name} object-literal code helper ('${probe}') now derives ${sites.length} site(s) and ` +
+            `${unresolved.length} unresolved — ${DECISION}`,
+        );
+      }
+    }
+
+    // ② BLINDNESS ②, the DECLARATION FORM — and it is pinned on SITES rather
+    //    than on matches, deliberately. Here the recognizer DOES match: the
+    //    body is the very `.code = code` `codehelper` is written for. What
+    //    drops it is structural — `enclosingDeclaration`'s DECL_HEADER_RE has
+    //    no header for a class method, so the identifier is never recognised
+    //    as a parameter. Same body, same probe, one declaration form apart.
+    const body = B.control.replace(/^/gm, '  ');
+    const asFunction =
+      `export function fail(code: string, message: string) {\n${body}\n}\n` +
+      `export function run() { throw fail('${B.probe}', 'x'); }\n`;
+    const asMethod =
+      `class Thing {\n  private fail(code: string, message: string) {\n${body}\n  }\n` +
+      `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+    ok(
+      derive(asFunction).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
+      'the free-function control for #13131 blindness ② derives no site — the comparison below is dead',
+    );
+    ok(matched(asMethod) > 0, 'the class-method form matches no recognizer — blindness ② is not what was measured');
+    {
+      const { sites, unresolved } = derive(asMethod);
+      ok(
+        sites.length === 0 && unresolved.length === 0,
+        `a CLASS-METHOD code helper now derives ${sites.length} site(s) and ${unresolved.length} unresolved — ${DECISION}`,
+      );
+    }
+    // The mechanism itself, named so the failure above is diagnosable.
+    {
+      const at = asMethod.indexOf('.code = code');
+      const decl = enclosingDeclaration(asMethod, at);
+      ok(
+        !decl || !parseParamNames(decl.params).includes('code'),
+        'enclosingDeclaration now resolves a CLASS METHOD, so `codehelper` reaches method helpers — ' + DECISION,
+      );
+    }
+    ok(
+      B.invisibleDeclarationForms.includes('class method'),
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS no longer declares the class-method form out',
+    );
+  }
+
   if (fail.length) {
     console.error('check-dispatcher-error-vocabulary --self-test FAILED:');
     for (const f of fail) console.error(`  - ${f}`);
@@ -2158,7 +2608,20 @@ function main() {
     `  door typing (#9098): ${REST_DOOR_FILE} checked for the typed author-side responder, the ` +
     `absence of a second \`sendError\`, and decided refusals bypassing it.\n` +
     `  the sandbox limb (author-thrown codes from metadata-app action code) is outside this scan ` +
-    `by construction — see SANDBOX_AUTHORED_LIMB in ${DECLARATION}.`;
+    `by construction — see SANDBOX_AUTHORED_LIMB in ${DECLARATION}.` +
+    `\n  kebab-case DIAGNOSTIC codes (e.g. '${KEBAB_DIAGNOSTIC_VOCABULARY.sample}', owned by `+
+    `${KEBAB_DIAGNOSTIC_VOCABULARY.owner}) are a SEPARATE vocabulary, governed by `+
+    `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
+    `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
+    `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.` +
+    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) — and one ` +
+    `declared as a CLASS METHOD, in either stamp position — is outside this gate: no shape matches, so ` +
+    `there is no site AND no unresolved. Coverage of them is zero BY DECLARATION, not by accident. ` +
+    `Measured blast radius of closing it: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
+    `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} undischargeable unresolved, ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unregisteredWireCodesHiding} unregistered wire code(s) ` +
+    `hiding today — see OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');

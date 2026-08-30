@@ -3150,13 +3150,14 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
     expect(parsed.exportOptions).toStrictEqual({ formats: ['csv', 'xlsx'] });
   });
 
-  it("REJECTS 'pdf' in the legacy array form with the prescription naming #1301 and the survivors", () => {
+  it("REJECTS 'pdf' in the legacy array form with the prescription naming the survivors", () => {
     let message = '';
     try {
       ListViewSchema.parse({ type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/'pdf' was removed from `view\.exportOptions` formats/);
-    expect(message).toMatch(/#1301/);
+    expect(message).toMatch(/PDF export itself was declined as NOT PLANNED/);
+    expect(message).not.toMatch(/#\d{3,5}\b/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
     expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
   });
@@ -3164,7 +3165,7 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
   it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {
     expect(() => ListViewSchema.parse({
       type: 'grid', columns: ['name'], exportOptions: { formats: ['csv', 'pdf'] },
-    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats.*#1301/s);
+    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats.*NOT PLANNED/s);
   });
 
   it('a wrong format that was NEVER legal keeps the plain enum message, not the retirement text', () => {

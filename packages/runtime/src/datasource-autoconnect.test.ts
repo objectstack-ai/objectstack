@@ -16,9 +16,13 @@
 // to `@objectstack/driver-sql` + better-sqlite3 `:memory:` — the repo's
 // canonical ephemeral store (`examples/app-crm`, `cli db clean`). driver-memory
 // is the project's legacy test-convenience backend and its in-project test
-// surface is being retired (#5499). `:memory:` keeps every acceptance below
-// hermetic: the database lives and dies inside the process, so nothing reaches
-// the host filesystem and each boot starts empty.
+// surface is being retired — by #5704, which migrated the test backends, and
+// #6664, which replaced the prose census with the ledger
+// `check:driver-memory-census` enforces. NOT by #5499: that was an INVESTMENT
+// freeze, a different proposition on the same anchor, and it was lifted on
+// 2026-08-11 while the retirement carried on. `:memory:` keeps every
+// acceptance below hermetic: the database lives and dies inside the process, so
+// nothing reaches the host filesystem and each boot starts empty.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';

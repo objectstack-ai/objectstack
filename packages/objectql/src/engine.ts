@@ -3404,7 +3404,8 @@ export class ObjectQL implements IObjectQLEngine {
       // Propagate the service-principal label (`ExecutionContext.actor`,
       // e.g. `svc:flow:<name>`) so a non-user write stays attributable in the
       // audit log — the writer's `userId ?? session.actor` fallback is dead
-      // without this hop (ADR-0014 D2, #4366).
+      // without this hop (the `ExecutionContext.actor` audit-attribution
+      // contract, `@objectstack/spec` kernel/execution-context.zod.ts; #4366).
       ...(typeof (execCtx as any).actor === 'string' && (execCtx as any).actor
         ? { actor: (execCtx as any).actor }
         : {}),
@@ -4426,15 +4427,17 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * | driver | `supports.autonumber` | fallback path? | uniqueness on the column | a collision appears as |
    * |:---|:---|:---|:---|:---|
-   * | driver-memory | `supports = {}` | **yes** | **none, ever** | **nothing** — a silent duplicate |
+   * | driver-memory | `supports = {}` | **yes** | field-level `unique`, since #13197 (ADR-0120 D1/D3 scoping) | `UNIQUE_VIOLATION` / 409 → re-seed + re-issue, here |
    * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
    * | driver-sql | `autonumber: true` | no | — | — |
    * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
    * | driver-turso | inherited (`...super.supports`) | no | — | — |
    *
-   * So the retry protects essentially ONE backend: driver-mongodb with a
-   * `unique` autonumber field. That is not a new claim — it is the reading the
-   * repo already ruled and gates, in
+   * So the retry protects the TWO fallback backends — and it protected only one
+   * of them until #13197, because `driver-memory` enforced no uniqueness at all
+   * and had nothing to reject with. Which driver ISSUES the number is a
+   * separate question and is unmoved by that: it is the reading the repo
+   * already ruled and gates, in
    * `scripts/driver-memory-census.ledger.json`'s disposition for
    * `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`
    * (axis `ruled-permanent`, «#6664 A, maintainer 2026-08-08 — inherits #5704
@@ -4445,25 +4448,33 @@ export class ObjectQL implements IObjectQLEngine {
    * a second answer to "who owns the autonumber counter" is the same
    * one-contract-two-numbers defect this lane keeps closing (#6832).
    *
-   * `InMemoryDriver.create` is a `table.push()` and it stores no constraints of
-   * any kind — its own docstring says so since #4065, and calls itself a WEAK
-   * oracle for exactly this reason. So on driver-memory an out-of-process
-   * duplicate cannot raise anything for this method to catch, and the number
-   * lands twice in the rendered field with no error anywhere.
+   * ⚠️ **This paragraph used to record a live defect; #13197 closed it, and the
+   * ⛔ below is why the closure went where it did.** `InMemoryDriver.create` was
+   * a `table.push()` storing no constraints of any kind (#4065's WEAK-oracle
+   * docstring), so an out-of-process duplicate raised nothing for this method to
+   * catch and the number landed twice in the rendered field with no error
+   * anywhere. Since #13197 that driver enforces field-level `unique`
+   * (`driver-memory`'s `memory-unique-constraint.ts`, with `driver-sql`'s
+   * ADR-0120 D1/D3 scoping) and refuses the collision in the ADR-0112 envelope,
+   * which `isUniqueViolationError` reads — so the branch below is reachable
+   * there and the number converges instead of duplicating.
    *
-   * That is stated rather than papered over (PD #10: never advertise a
-   * capability the runtime does not deliver). What covers driver-memory is the
-   * OTHER half of this resync — {@link adoptExplicitAutonumber} — which needs no
-   * constraint at all because it never waits for a rejection. Between them: drift
-   * the engine can observe is fixed on every driver; drift only the store can
-   * report is fixed wherever the store reports it.
+   * What covers driver-memory in ADDITION is the other half of this resync —
+   * {@link adoptExplicitAutonumber} — which needs no constraint at all because it
+   * never waits for a rejection. Between them: drift the engine can observe is
+   * fixed on every driver; drift only the store can report is fixed wherever the
+   * store reports it.
    *
    * ⛔ The remedy for the silent-duplicate row is uniqueness enforcement in the
    * driver, NOT a pre-issue existence probe here: a probe costs a query on every
    * insert (the cost this resync was designed to avoid) and is still racy, so it
    * would trade a silent duplicate for a rarer silent duplicate at double the
-   * read cost. `packages/drivers/**` is under the #5499 investment freeze, so
-   * that work is not this change's to do.
+   * read cost. That argument is UNCHANGED by #13197 and is not a historical
+   * note — it is the standing reason no probe is added here, and it is what the
+   * driver-side fix was chosen over. (`packages/drivers/**` was under the #5499
+   * investment freeze when this comment was first written, which is why the work
+   * was deferred rather than misplaced; the freeze lifted on 2026-08-11 and the
+   * remedy landed where it always belonged, in the driver.)
    *
    * # And when it does not converge
    *
@@ -8811,12 +8822,81 @@ export class ObjectQL implements IObjectQLEngine {
 
           return hookContext.result;
       } catch (e) {
-          this.logger.error('Find operation failed', e as Error, { object });
+          this.reportFindFailure(object, e);
           throw e;
       }
     });
 
     return opCtx.result as any[];
+  }
+
+  /**
+   * Report a failed {@link find} at the level its CAUSE earns — then leave the
+   * throw exactly where it was.
+   *
+   * ## The two facts this frame used to merge
+   *
+   * "The table has not been created yet" and "the read failed" are different
+   * facts, and until #13273 this line reported both at `error`, with a stack.
+   * The first one is the ordinary state of a database nobody has migrated yet,
+   * and every caller on that path already treats it as a normal answer and says
+   * so in its own code: {@link readMigrationFlagVerified} ("an unreadable table
+   * … → false"), `ObjectQLPlugin.readAuthoredHookRows` /
+   * `readAuthoredActionRows` (report `authoredRows: 0` and carry on),
+   * `readAuthoredTranslationLayer`, and `ObjectStoreActionActivationStore.probe`
+   * (whose caller already follows this frame with a `warn` stating the
+   * consequence in operator terms).
+   *
+   * Measured, on `os migrate plan --database-url file:<an unmigrated db>`: five
+   * ERROR records with full stack traces, out of a command that EXITS 0 and
+   * prints a correct plan. Four stack traces are the first thing an operator
+   * sees when planning a database whose whole point is that it is not migrated
+   * yet — and an `error` channel that fires on a routine state is the
+   * over-application `sql-driver.ts` already names on a nearby line: it trains
+   * everyone to skim `error`.
+   *
+   * ## ⛔ What this is NOT is a broadened catch
+   *
+   *   * The throw is UNCHANGED on both branches. No caller's control flow, no
+   *     caller's `catch`, and no error envelope moves — this method decides a
+   *     log level and nothing else.
+   *   * Only the class that positively identifies as "relation does not exist"
+   *     is demoted, asked through the shared {@link isMissingTableError}
+   *     predicate (`@objectstack/metadata/errors`, #4825) — the same call
+   *     {@link probeInstallOrganizations} and {@link resolveFileReferences}
+   *     make, never a hand-rolled `code === '42P01'` copy. That predicate earns
+   *     a benign verdict rather than defaulting to one: a connection drop, a
+   *     timeout, a permission denial, a query fault — and, through its
+   *     `excludes`, Postgres' `column "x" of relation "y" does not exist`,
+   *     which contains a legal missing-table phrase but is a column fault on a
+   *     table that EXISTS — all stay `error`, with the stack.
+   *   * The fault stays visible without this frame: the driver's own refusal
+   *     envelope (`SqlDriver.backendStatementFault` → `logger.warn`) carries
+   *     the table, the dialect reason and the compiled statement, and is
+   *     untouched here. That is deliberately the surviving loud half, and it is
+   *     the half `runtime/src/expected-read-refusal-noise.ts` already documents
+   *     as "where this class of fault can still be picked up".
+   *
+   * `debug` rather than `warn` for exactly that reason: the driver already puts
+   * one warn-level line per refusal in front of a reader, so a second would
+   * move this noise rather than remove it. What the demotion drops is the
+   * duplicate and its stack; the classification survives in the meta.
+   *
+   * ⛔ Deliberately READS only. `insert`/`update`/`delete` keep their
+   * unconditional `error`: a write to a table that does not exist is not a
+   * normal answer for any caller — nothing landed, and the row the caller
+   * believes it stored is gone.
+   */
+  private reportFindFailure(object: string, error: unknown): void {
+    if (isMissingTableError(error)) {
+      this.logger.debug('Find operation failed', {
+        object,
+        reason: 'table-not-provisioned',
+        error: (error as { message?: unknown } | null | undefined)?.message,
+      });
+      return;
+    }
+    this.logger.error('Find operation failed', error as Error, { object });
   }
 
   /**
@@ -11166,8 +11246,9 @@ export class ObjectQL implements IObjectQLEngine {
   ): void {
     // The triggered-by half. `userId` survives the `sudo()`-shaped elevation,
     // which is what makes the two halves recordable at all; `actor` is the
-    // service-principal channel (ADR-0014 D2) that keeps a non-user-
-    // authenticated caller attributable instead of anonymous.
+    // service-principal channel (the `ExecutionContext.actor` contract,
+    // `@objectstack/spec` kernel/execution-context.zod.ts) that keeps a
+    // non-user-authenticated caller attributable instead of anonymous.
     const triggeredBy =
       (context?.userId != null && String(context.userId)) ||
       (typeof (context as any)?.actor === 'string' && (context as any).actor.trim()) ||

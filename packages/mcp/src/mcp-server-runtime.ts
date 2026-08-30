@@ -73,6 +73,63 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_field',
 ]);
 
+// ── AIToolDefinition.parameters → MCP inputSchema ────────────────────────────
+
+/**
+ * Convert an {@link AIToolDefinition}'s JSON Schema `parameters` into the Zod
+ * schema `McpServer.registerTool` requires for `inputSchema`.
+ *
+ * ⚠️ The conversion is not a stylistic choice, it is the only door. Measured
+ * against `@modelcontextprotocol/sdk` 1.30.0: `registerTool`'s `inputSchema`
+ * is typed `ZodRawShapeCompat | AnySchema`, and a raw JSON Schema object
+ * reaches the SDK's `getZodSchemaObject()`, which throws `inputSchema must be
+ * a Zod schema or raw shape, received an unrecognized object`. `zod@4`'s own
+ * `fromJSONSchema` opens that door with no new dependency (this package
+ * already depends on `zod`), and the SDK converts the result straight back to
+ * JSON Schema for `tools/list` — so what a client receives is the shape the
+ * definition declared.
+ *
+ * Skipping `inputSchema` is NOT the cheaper half of the same behaviour. The
+ * SDK synthesises `{ type: 'object', properties: {} }` for a tool registered
+ * without one — a positive claim that the tool takes no arguments — and
+ * `executeToolHandler()` then invokes the handler as `handler(extra)`, where
+ * `RequestHandlerExtra` carries no `arguments` member at all. A schema-less
+ * bridged tool therefore both mis-advertises itself AND executes with `{}`
+ * whatever the client sent.
+ *
+ * A `parameters` that does not describe an object — absent, `{}`, or untyped,
+ * all of which `fromJSONSchema` turns into `z.any()` — becomes a LOOSE EMPTY
+ * OBJECT. MCP requires `Tool.inputSchema.type` to be `"object"`, and a loose
+ * empty object is the honest report of "this definition declares no
+ * arguments": it advertises exactly what the SDK would have synthesised, it
+ * constrains nothing, and it keeps the arguments flowing to the handler.
+ *
+ * A `parameters` that cannot be converted at all is logged and gets the same
+ * loose empty object. Deliberately not a throw: this runs inside
+ * {@link MCPServerRuntime.bridgeTools}, so one unconvertible definition would
+ * otherwise take the server's ENTIRE tool surface down.
+ */
+function toolInputSchema(tool: AIToolDefinition, logger?: Logger): z.ZodType<Record<string, unknown>> {
+  const declaresNothing = () => z.looseObject({}) as unknown as z.ZodType<Record<string, unknown>>;
+
+  let converted: unknown;
+  try {
+    converted = z.fromJSONSchema(tool.parameters as never);
+  } catch (err) {
+    logger?.warn(`[MCP] Tool "${tool.name}" has unconvertible JSON Schema parameters; bridged with no declared arguments`, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return declaresNothing();
+  }
+
+  if (converted instanceof z.ZodObject) {
+    return converted as unknown as z.ZodType<Record<string, unknown>>;
+  }
+
+  logger?.debug(`[MCP] Tool "${tool.name}" declares no object parameters; bridged with no declared arguments`);
+  return declaresNothing();
+}
+
 // ── Metadata outage vs. metadata miss (#6055, ADR-0110 D3) ───────────────────
 
 /**
@@ -753,9 +810,11 @@ export class MCPServerRuntime {
   /**
    * Bridge all tools from the ToolRegistry to MCP tools.
    *
-   * Each registered tool becomes an MCP tool with the same name, description,
-   * and JSON Schema parameters. The handler delegates to the ToolRegistry's
-   * execute path.
+   * Each registered tool becomes an MCP tool with the same name, description
+   * and declared arguments: `AIToolDefinition.parameters` is JSON Schema, and
+   * {@link toolInputSchema} converts it into the Zod schema the SDK requires
+   * for `inputSchema`. The handler delegates to the ToolRegistry's execute
+   * path.
    */
   bridgeTools(toolRegistry: ToolRegistry): void {
     const tools = toolRegistry.getAll();
@@ -808,18 +867,24 @@ export class MCPServerRuntime {
 
   /**
    * Register a single tool on the MCP server from an AIToolDefinition.
+   *
+   * The definition's JSON Schema `parameters` is forwarded as the tool's
+   * `inputSchema` (see {@link toolInputSchema} for why it must be converted
+   * first). Declaring it is what makes the SDK hand the call's arguments to
+   * this handler at all: `McpServer.executeToolHandler()` branches on
+   * `tool.inputSchema` and invokes a schema-less tool as `handler(extra)` —
+   * with no `arguments` anywhere on that `extra` (`RequestHandlerExtra` has no
+   * such member), which is why a bridged tool used to execute with `{}` no
+   * matter what the client sent.
    */
   private registerToolFromDefinition(tool: AIToolDefinition, toolRegistry: ToolRegistry): void {
     const logger = this.config.logger;
 
-    // Convert JSON Schema parameters to Zod-compatible format for MCP SDK
-    // The MCP SDK registerTool with inputSchema expects a Zod raw shape or AnySchema.
-    // Since our tools use JSON Schema, we use the low-level .tool() with a raw callback
-    // and pass the JSON Schema as annotations metadata.
     this.mcpServer.registerTool(
       tool.name,
       {
         description: tool.description,
+        inputSchema: toolInputSchema(tool, logger),
         annotations: {
           // Mark tools with write side-effects for destructive operations
           destructiveHint: this.isDestructiveTool(tool.name),
@@ -827,12 +892,7 @@ export class MCPServerRuntime {
           openWorldHint: false,
         },
       },
-      async (extra) => {
-        // The MCP SDK passes tool arguments via the extra.arguments property
-        // when registerTool is called without an inputSchema.
-        const rawExtra = extra as Record<string, unknown>;
-        const args = (rawExtra.arguments ?? {}) as Record<string, unknown>;
-
+      async (args) => {
         try {
           const result = await toolRegistry.execute({
             type: 'tool-call',

@@ -24,7 +24,32 @@ import {
   AutomationApiErrorCode,
   AutomationApiContracts,
 } from './automation-api.zod';
+import type { TriggerFlowResponse } from './automation-api.zod';
 import { ExecutionStatus } from '../automation/execution.zod';
+import type { AutomationResult } from '../contracts/automation-service';
+
+/** Type-level identity: true iff A and B are the same type. */
+type Eq< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
+/** Compile error when the argument is not `true`. */
+type Assert< T extends true > = T;
+
+/**
+ * #13078 — the declared `data` of `TriggerFlowResponse` IS the
+ * `AutomationResult` contract interface, not merely shaped like it.
+ *
+ * Both trigger routes relay `IAutomationService.execute`'s declared return
+ * through `deps.success(result)` verbatim, and the contract was already
+ * correct while `TriggerFlowResponseSchema` declared a strict subset — the
+ * #9378/#9510 paused third state (`status`/`runId`/`screen`), `code`, the
+ * friendly terminal messages and `summary` were all missing. Same
+ * two-files-one-shape drift #6442 fixed for `AnalyticsMetadataResponseSchema`
+ * (the reasoning is recorded there); binding the two here is what stops it
+ * recurring: narrow either one alone and this goes red.
+ *
+ * Exported deliberately — an unread alias inside a test body is TS6196, and a
+ * `@ts-expect-error`-style pin no program compiles is no pin at all.
+ */
+export type TriggerFlowDataMatchesContract = Assert< Eq< TriggerFlowResponse['data'], AutomationResult > >;
 
 // ==========================================
 // Path Parameters
@@ -313,6 +338,130 @@ describe('TriggerFlowResponseSchema', () => {
     });
     expect(result.data.success).toBe(false);
     expect(result.data.error).toContain('timeout');
+  });
+
+  // #13078 — the AutomationResult members the schema used to be missing. The
+  // PRESERVATION half matters as much as the parse: this schema strips
+  // undeclared keys (BaseResponseSchema.extend + plain z.object), so before
+  // the widening the paused-run triple below "passed" while the parse silently
+  // dropped `status`, the `runId` a caller resumes with and the whole screen.
+  it('should preserve the paused-run triple — status, runId and the screen (#9378/#9510 third state)', () => {
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: true,
+        status: 'paused',
+        runId: 'run_screen_001',
+        screen: {
+          nodeId: 'collect_details',
+          title: 'Opportunity details',
+          fields: [
+            { name: 'amount', label: 'Amount', type: 'number', required: true },
+            {
+              name: 'stage',
+              label: 'Stage',
+              type: 'select',
+              options: [
+                { value: 'prospecting', label: 'Prospecting' },
+                { value: 'closed_won', label: 'Closed won' },
+              ],
+            },
+            { name: 'close_reason', type: 'text', visibleWhen: 'stage == "closed_won"' },
+          ],
+        },
+      },
+    });
+    expect(result.data.status).toBe('paused');
+    expect(result.data.runId).toBe('run_screen_001');
+    expect(result.data.screen?.nodeId).toBe('collect_details');
+    expect(result.data.screen?.fields).toHaveLength(3);
+    expect(result.data.screen?.fields[1].options?.[1].value).toBe('closed_won');
+    expect(result.data.screen?.fields[2].visibleWhen).toContain('closed_won');
+  });
+
+  it('should preserve an object-form screen pause — the second screen kind', () => {
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: true,
+        status: 'paused',
+        runId: 'run_convert_002',
+        screen: {
+          nodeId: 'create_customer',
+          kind: 'object-form',
+          objectName: 'account',
+          mode: 'create',
+          fields: [],
+          defaults: { name: 'Acme Corp' },
+          idVariable: 'customerId',
+        },
+      },
+    });
+    expect(result.data.screen?.kind).toBe('object-form');
+    expect(result.data.screen?.objectName).toBe('account');
+    expect(result.data.screen?.defaults?.name).toBe('Acme Corp');
+    expect(result.data.screen?.idVariable).toBe('customerId');
+  });
+
+  it('should preserve terminal message and summary on a finished run', () => {
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: true,
+        status: 'completed',
+        durationMs: 87,
+        successMessage: 'Opportunity created.',
+        summary: {
+          selected: 1,
+          acted: 1,
+          skipped: 0,
+          nodes: [],
+          gates: [],
+        },
+      },
+    });
+    expect(result.data.successMessage).toBe('Opportunity created.');
+    expect(result.data.summary?.acted).toBe(1);
+  });
+
+  it('should preserve the failure classification code alongside error', () => {
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: false,
+        error: 'Flow is disabled',
+        code: 'FLOW_DISABLED',
+      },
+    });
+    expect(result.data.code).toBe('FLOW_DISABLED');
+  });
+
+  it('should reject a status or code outside the closed vocabulary, and a screen without its nodeId', () => {
+    expect(() =>
+      TriggerFlowResponseSchema.parse({
+        success: true,
+        data: { success: true, status: 'running' },
+      })
+    ).toThrow();
+
+    expect(() =>
+      TriggerFlowResponseSchema.parse({
+        success: true,
+        data: { success: false, code: 'SOMETHING_ELSE' },
+      })
+    ).toThrow();
+
+    expect(() =>
+      TriggerFlowResponseSchema.parse({
+        success: true,
+        data: {
+          success: true,
+          status: 'paused',
+          runId: 'run_1',
+          screen: { title: 'No node id', fields: [] },
+        },
+      })
+    ).toThrow();
   });
 });
 

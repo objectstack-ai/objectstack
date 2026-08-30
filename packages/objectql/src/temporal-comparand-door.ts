@@ -57,9 +57,10 @@
  *   makes the zero non-vacuous).
  *
  * The only other seam holding both facts is the driver layer — four packages
- * each mirroring one function, under the #5499 investment freeze, where the
- * pass-through is a DELIBERATE contract with counter-pins asserting it
- * (`sql-driver-temporal-dialect.test.ts` asserts
+ * each mirroring one function (they sat under the #5499 investment freeze when
+ * this door was placed; it was lifted on 2026-08-11, and it is not what rules
+ * that seam out), where the pass-through is a DELIBERATE contract with
+ * counter-pins asserting it (`sql-driver-temporal-dialect.test.ts` asserts
  * `temporalFilterValue('t','at','not-a-date') === 'not-a-date'` on purpose) and
  * where `storageDatetimeValue` is shared with the WRITE path and the legacy
  * read-repair, so refusing there would also reject ingest of pre-convention

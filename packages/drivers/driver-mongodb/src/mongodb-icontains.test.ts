@@ -5,9 +5,13 @@
  * `translateFilter` emits.
  *
  * Server-free is not a convenience here, it is what makes the cell testable at
- * all: this package is in the #5499 frozen family and its real-mongod suites are
- * OPT-IN (`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`), so a suite that needed a
- * server would not run in CI. The pattern this translator emits is the whole
+ * all: this package's real-mongod suites are OPT-IN
+ * (`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, #5517), so a suite that needed a
+ * server would not run in CI. (This package was also in the #5499 frozen family
+ * when that was written; the freeze dissolved 2026-08-11 — head note of
+ * `@objectstack/spec`'s `aggregation-conformance.ts` — and the opt-in gate,
+ * which is what actually carries the argument, is unaffected by that.) The
+ * pattern this translator emits is the whole
  * behaviour — MongoDB's own `$regex` semantics are not under test — which is the
  * same judgement `mongodb-filter-logic-translation.test.ts` makes for the logic
  * case-set. The emitted patterns are additionally EXECUTED as JS `RegExp`s

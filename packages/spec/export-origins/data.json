@@ -263,6 +263,7 @@
     "Field": "src/data/field.zod.ts#Field (type)",
     "FieldGroupCollapse": "src/data/field-group-layout.ts#FieldGroupCollapse (type)",
     "FieldGroupSection": "src/data/field-group-layout.ts#FieldGroupSection (interface)",
+    "FieldGroupVisibleWhen": "src/data/field-group-layout.ts#FieldGroupVisibleWhen (type)",
     "FieldInput": "src/data/field.zod.ts#FieldInput (type)",
     "FieldMaskingKeep": "src/data/field.zod.ts#FieldMaskingKeep (type)",
     "FieldMaskingKeepSchema": "src/data/field.zod.ts#FieldMaskingKeepSchema (const)",

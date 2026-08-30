@@ -33,8 +33,16 @@
  *   1. `[sql-driver] DATABASE_ERROR — the backend refused a read on '<table>'
  *      … no such table: <table>`, from `SqlDriver.backendStatementFault`
  *      through the driver's own `logger.warn`;
- *   2. `ERROR Find operation failed {"object":"<table>",…}` one frame up
- *      (`objectql/src/engine.ts`), carrying the same fault as a stack.
+ *   2. `Find operation failed {"object":"<table>",…}` one frame up
+ *      (`objectql/src/engine.ts`), carrying the same fault. ⚠️ [#13273] It used
+ *      to be `ERROR`, with a stack, for EVERY cause; since #13273 the engine
+ *      asks `isMissingTableError` and puts the "table not provisioned" class
+ *      — i.e. exactly the class this module is declared over — on `debug`
+ *      instead, with no stack and a `reason: 'table-not-provisioned'` meta.
+ *      So this capture wraps BOTH channels (see `captureEngine`); which one a
+ *      given frame arrives on is the ENGINE's classification, never this
+ *      module's, and a frame that arrives on `error` is by construction one
+ *      the engine did NOT recognise as a missing table.
  *
  * Turbo interleaves package logs without attribution, so in the shared shard
  * log those are indistinguishable from a real failure. Not a hypothetical:
@@ -69,8 +77,8 @@
  *   * `captureEngine`'s pass-through calls the ENGINE'S OWN logger — the one
  *     the kernel built from its `logger` config and handed over by reference
  *     — so it inherits that logger's level. `ObjectLogger.write` returns
- *     early unless `error` is enabled, which it is not whenever the
- *     configured level ranks ABOVE `error` (`fatal`, `silent`).
+ *     early unless the frame's OWN level is enabled, which it is not whenever
+ *     the configured level ranks above it (for `error`: `fatal`, `silent`).
  *
  * ⇒ So the engine channel's loudness is the CALLER'S, not this module's, and
  * it is not uniform across this capture's consumers: the ones that boot
@@ -79,6 +87,13 @@
  * default (`info`) still see it. ⛔ Do not read the silent-fixture case as the
  * rule for all of them, and do not read a quiet engine channel in one fixture
  * as evidence about another.
+ *
+ * ⚠️ [#13273] The threshold moved for the "table not provisioned" class, and
+ * moved DOWN: that frame is now `debug` (rank 0), so a fixture has to be at
+ * `debug` to see an unrecognised one, where `info` used to be enough. The
+ * asymmetry above is unchanged in shape — the engine channel is still only as
+ * loud as the fixture's own kernel logger — the rank it is compared against
+ * is now the frame's, not `error`'s.
  *
  * ⇒ Read the guarantee per channel: the DRIVER channel is pinned in both
  * directions (withheld-when-expected, loud-when-not); the ENGINE channel is
@@ -170,15 +185,21 @@ export interface ExpectedReadRefusalCapture {
    */
   captureDriver(driver: unknown): void;
   /**
-   * Wrap the engine's `error` channel through a Proxy, so every OTHER logger
-   * method resolves to the engine's own. ⛔ Call it before the expected reads
-   * happen; the engine's logger is a private field with no setter, which is
-   * the same access `engine-readonly-when-parent.test.ts` established.
+   * Wrap the engine's `error` AND `debug` channels through a Proxy, so every
+   * OTHER logger method resolves to the engine's own. ⛔ Call it before the
+   * expected reads happen; the engine's logger is a private field with no
+   * setter, which is the same access `engine-readonly-when-parent.test.ts`
+   * established.
+   *
+   * ⚠️ [#13273] Both channels, because the engine now picks between them by
+   * cause: a read whose table was never provisioned goes to `debug`, every
+   * other read failure stays on `error`. Wrapping only one would leave this
+   * capture blind on whichever half the engine chose.
    *
    * ⚠️ [#11569] Its PASS-THROUGH is quieter than
    * {@link ExpectedReadRefusalCapture.captureDriver}'s: an unrecognised frame
    * goes to the engine's own logger and is dropped under a kernel configured
-   * above `error`. The implementation carries the full note.
+   * above that frame's own level. The implementation carries the full note.
    */
   captureEngine(engine: unknown): void;
 }
@@ -262,13 +283,14 @@ export function captureExpectedReadRefusals(
      * ⚠️ [#11569] Where a NON-matching frame actually goes, and why it is not
      * the same place `captureDriver`'s goes.
      *
-     * The fall-through below is `target.error(msg, err, meta)` — `target` is
+     * The fall-through below is `target.error(msg, err, meta)` — or, on the
+     * [#13273] `debug` arm, `target.debug(msg, meta)`. `target` is
      * the ENGINE'S OWN logger, i.e. the `ObjectLogger` the kernel built from
      * its `logger` config and handed to the engine by reference
      * (`core/src/kernel.ts` → `hostContext.logger`). So the pass-through
      * inherits that logger's level: `ObjectLogger.write` returns early unless
-     * `error` is enabled, and it is not whenever the configured level ranks
-     * above `error` — `fatal` or `silent`. Fixtures that boot with
+     * the frame's own level is enabled, and `error` is not whenever the
+     * configured level ranks above it — `fatal` or `silent`. Fixtures that boot with
      * `logger: { level: 'silent' }` therefore see an unrecognised engine frame
      * NOWHERE. `captureDriver`'s sink, by contrast, calls `console` directly
      * and is loud regardless. Both directions are pinned in
@@ -289,26 +311,53 @@ export function captureExpectedReadRefusals(
      */
     captureEngine(engine: unknown): void {
       const base = (engine as { logger: Record<string, any> }).logger;
+      /**
+       * The one recognition rule, shared by both channels the engine can put
+       * this frame on. Written once so the `debug` arm cannot drift looser
+       * than the `error` arm — the direction that turns a pin back into a mute.
+       */
+      const recognised = (msg: string, object: string | undefined, detail: string): boolean => {
+        const outstanding = object !== undefined ? (pending.get(object) ?? 0) : 0;
+        if (
+          msg === 'Find operation failed' &&
+          object !== undefined &&
+          outstanding > 0 &&
+          detail.includes(`refused to run this query for object '${object}'`)
+        ) {
+          pending.set(object, outstanding - 1);
+          bump(engineFrames, object);
+          return true;
+        }
+        return false;
+      };
       (engine as { logger: unknown }).logger = new Proxy(base, {
-        get: (target: Record<string, any>, key: string) =>
-          key === 'error'
-            ? (msg: string, err?: unknown, meta?: unknown) => {
-                const object = (meta as { object?: string } | undefined)?.object;
-                const outstanding = object !== undefined ? (pending.get(object) ?? 0) : 0;
-                const detail = String((err as { message?: string } | undefined)?.message ?? '');
-                if (
-                  msg === 'Find operation failed' &&
-                  object !== undefined &&
-                  outstanding > 0 &&
-                  detail.includes(`refused to run this query for object '${object}'`)
-                ) {
-                  pending.set(object, outstanding - 1);
-                  bump(engineFrames, object);
-                  return;
-                }
-                target.error(msg, err, meta);
-              }
-            : target[key],
+        get: (target: Record<string, any>, key: string) => {
+          if (key === 'error') {
+            return (msg: string, err?: unknown, meta?: unknown) => {
+              const object = (meta as { object?: string } | undefined)?.object;
+              const detail = String((err as { message?: string } | undefined)?.message ?? '');
+              if (recognised(msg, object, detail)) return;
+              target.error(msg, err, meta);
+            };
+          }
+          // [#13273] The SAME frame, on the channel the engine now chooses for
+          // a read whose table was never provisioned — which is every read this
+          // capture is declared over. `debug(msg, meta)` has no `error`
+          // argument, so the driver's envelope arrives as `meta.error` instead;
+          // the recognition rule above is otherwise identical, and a withheld
+          // frame is counted into the same `engineFrames` tally the caller
+          // asserts. ⛔ Without this arm the tally would read 0 for every
+          // declared table and `silentChannels()` would report a channel that
+          // is in fact firing — a false red across ~20 consuming fixtures.
+          if (key === 'debug') {
+            return (msg: string, meta?: unknown) => {
+              const m = meta as { object?: string; error?: unknown } | undefined;
+              if (recognised(msg, m?.object, String(m?.error ?? ''))) return;
+              target.debug(msg, meta);
+            };
+          }
+          return target[key];
+        },
       });
     },
   };

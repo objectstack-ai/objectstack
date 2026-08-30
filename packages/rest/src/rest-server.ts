@@ -1484,6 +1484,37 @@ export class RestServer {
      * source — so the two capability cohorts cannot drift. `environmentId` comes
      * from the scoped route param (`/environments/:environmentId/packages`) when
      * present, `undefined` for the unscoped mount.
+     *
+     * ## [#12537] What the `.catch(() => undefined)` below MEANS downstream
+     *
+     * The swallow used to be undocumented at both of this door's swallow sites
+     * — the nearby prose explained why the wrapper exists and what an ABSENT
+     * resolver means, never what a FAILING one means. Measured rather than
+     * inferred, every claim below carrying a same-shaped positive control, in
+     * `package-door-execctx-fault-reading.test.ts`:
+     *
+     *  - The packages gate (`package-routes.ts`) reads `undefined` as the
+     *    ANONYMOUS SUBJECT — it touches the context through optional chaining
+     *    only, so an absent context is a subject whose every field is absent,
+     *    not a branch. On every wire-reachable method the anonymous floor
+     *    decides and REFUSES (401 `UNAUTHENTICATED`); with that floor isolated,
+     *    the capability clause reads the same `undefined` as a subject holding
+     *    the EMPTY capability set and refuses again (403 `FORBIDDEN`).
+     *    ⇒ neither a SKIPPED evaluation nor a fall-through to a DEFAULT or
+     *    SYSTEM subject — both of which would answer 200. The swallow fails
+     *    CLOSED; ⛔ it is not a permission-adjacent fail-open.
+     *  - ⭐ This `.catch` is the SECOND net, not the first. {@link computeExecCtx}
+     *    wraps its whole body in `try { … } catch { return undefined; }`, so a
+     *    production resolve RESOLVES with `undefined` on a fault instead of
+     *    rejecting — this `.catch` has nothing to catch on that path, and the
+     *    fault-to-anonymous conversion happens one level down.
+     *  - What the swallow costs is DIAGNOSABILITY, not permission: a faulting
+     *    resolver, an unwired resolver and a genuinely anonymous caller are ONE
+     *    answer, byte-identical on the wire.
+     *
+     * ⛔ Whether any of that should CHANGE is not settled here — un-swallowing
+     * was explicitly not ruled (#12537, 2026-08-29). This records the reading
+     * so the next reader inherits a measurement instead of an argument.
      */
     resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
         const environmentId = req?.params?.environmentId ?? undefined;
@@ -8844,17 +8875,50 @@ export class RestServer {
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
                             // [#7486] `reference` FIRST — it is the canonical
-                            // key on `FieldSchema`, and `data/field.zod.ts`
-                            // folds `relatedTo` / `referenceTo` / `target` /
-                            // `targetObject` / `lookupObject` all onto it at
-                            // parse. Reading only the legacy spellings meant a
-                            // well-formed object schema carried NONE of them,
-                            // the chain resolved `undefined`, and the route
-                            // answered 500 — making `publicPicker.object`
+                            // key on `FieldSchema`, and the ONLY spelling that
+                            // schema accepts. Reading only the legacy spellings
+                            // meant a well-formed object schema carried NONE of
+                            // them, the chain resolved `undefined`, and the
+                            // route answered 500 — making `publicPicker.object`
                             // de-facto required while the schema and docs
-                            // present it as an optional override. The legacy
-                            // spellings stay after it for stored pre-fold rows,
-                            // which never went through the alias table.
+                            // present it as an optional override.
+                            //
+                            // ⛔ [#13137] `data/field.zod.ts` does NOT fold the
+                            // legacy spellings onto `reference`. An earlier
+                            // version of this comment said it did, and that
+                            // sentence is precisely what invited consumers to
+                            // be lenient. Its `aliases` table is a RENAME HINT
+                            // ON A REJECTED KEY, not a normaliser:
+                            // `strictObject` consults `aliases` only from the
+                            // `unrecognized_keys` path (the semantics are
+                            // stated in `spec/src/shared/strict-object.ts`), so
+                            // `relatedTo` / `referenceTo` / `target` /
+                            // `targetObject` / `lookupObject` are REFUSED by
+                            // `FieldSchema` — answered with *"Did you mean
+                            // `referenceTo` → `reference`?"* and never
+                            // rewritten. Pinned three ways (accept /
+                            // alias-refusal-with-hint / unknown-key-refusal
+                            // -without-hint) in
+                            // `public-form-lookup-picker.test.ts`.
+                            // ⇒ ⛔ this chain is NOT licence to be lenient
+                            // anywhere else: nothing upstream folds for you,
+                            // and a producer emitting a legacy spelling emits a
+                            // document the spec refuses by name.
+                            //
+                            // The tail below reads exactly three spellings —
+                            // `referenceTo`, `target`, `options.objectName` —
+                            // which is NOT the spec's five-entry hint list:
+                            // only the first two appear on it, and
+                            // `options.objectName` appears on no list at all.
+                            // They can reach here only on a STORED row that
+                            // never went through `FieldSchema`, which is
+                            // possible because the serving read path replays
+                            // ADR-0087 conversions
+                            // (`applyConversionsToStoredItem`) and performs no
+                            // schema validation. ⚠️ Whether such a row is still
+                            // reachable in production is #12920's OPEN census —
+                            // ⛔ do not widen this chain here, and do not narrow
+                            // it here either; #12920 decides its fate.
                             referenceTo = def?.reference
                                 ?? def?.referenceTo
                                 ?? def?.target

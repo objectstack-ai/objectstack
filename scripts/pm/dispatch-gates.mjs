@@ -2703,6 +2703,71 @@ export function coveringJobFilter(entry, inputPath) {
  * still matches through that constant while a card editing the GATE FILE
  * matches through identity. They answer different inputs.
  *
+ * ## The FIFTH key this file measured and REFUSED: the module a gate IMPORTS (#13126)
+ *
+ * `firstPartyImportTargets` already follows a gate's `./sibling.mjs` import —
+ * but only to inherit that module's HINTS, which answers "what population does
+ * this gate watch, once you count what its helper watches". The same edge
+ * answers a second question, and it is identity-shaped: *if I edit this helper,
+ * which gate can I break?* None of the four keys above reaches it. A module is
+ * not the family's own file, not a `paths:` pattern, not a job filter, and its
+ * own path is not a literal the gate spells.
+ *
+ * The gap is real and was measured over the live tree, 183 families x 7347
+ * tracked files:
+ *
+ *   (family, imported module) pairs      273
+ *   ...another key already answers        41   15%, mostly a `scripts/**` hint
+ *                                              a gate declares for other reasons
+ *   ...NOVEL, no key reaches them        232   swept over the whole corpus with
+ *                                              the candidate key consulted LAST:
+ *                                              ADDED 232, RE-ATTRIBUTED 0, LOST 0
+ *
+ * So the key would be additive by construction, the way #13000's is, and it is
+ * still refused. The reason is PRECISION and the numbers are not close. #13000
+ * bought its class for 5 novel leads on this same corpus; this one costs 232,
+ * and 201 of the 232 (87%) land on five shared utilities that nearly every gate
+ * links:
+ *
+ *   scripts/invoked-as.mjs             a card that names 14 families names 118
+ *   scripts/import-prerequisite.mjs    14 -> 55
+ *   scripts/ts-parse.mjs               13 -> 37
+ *   scripts/js-comment-mask.mjs        17 -> 38
+ *   scripts/workspace-enumerator.mjs   12 -> 23
+ *
+ * Every one of those leads is TRUE — editing `invoked-as.mjs` really can turn
+ * all 118 red. A 118-gate list is still the failure this file's header names:
+ * the dev who gets one stops reading it, which ends exactly where a list that
+ * omits the one gate that matters ends. The tail is the opposite shape and is
+ * the half worth having — 21 modules carrying 31 pairs, the median card moving
+ * from 14 families to 15 — and the ONLY property separating the two halves is
+ * fan-in. This file draws its lines on provenance rather than on volume
+ * (`firstPartyImportTargets` says so where it refuses an imported gate file),
+ * and a fan-in cut has no provenance to state: `invoked-as.mjs` and
+ * `dispatch-gates.mjs` are the same KIND of edge, one link apart.
+ *
+ * Two narrowings were measured and neither earns it either:
+ *
+ *   importer is a `--self-test` family   12 novel pairs, but 8 of the 12 are
+ *                                        `<- invoked-as.mjs`, and the line is
+ *                                        the INHERITANCE narrowing borrowed for
+ *                                        the question #11556 / #11511 settled
+ *                                        separately — identity is not that
+ *   target is not itself a gate file     63 novel pairs, and it still takes an
+ *                                        `import-prerequisite.mjs` card to 55
+ *
+ * What the refusal COSTS is a live missing lead, and it is named rather than
+ * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
+ * THIS file, and a card editing this file derives 14 families without naming
+ * it. That gate gets run by hand. The miss costs one CI round, which is the
+ * side this file's header errs on everywhere, and it is a far smaller cost than
+ * the 118-lead card the general key prints for the module all 118 import.
+ *
+ * Two shapes make 232 a LOWER bound rather than an exact size, both already
+ * refused upstream for their own measured reasons: a dynamic `import()` of a
+ * `scripts/` module (3 live family-module pairs) and a relative target outside
+ * `scripts/` (3, all `eslint.config.mjs`).
+ *
  * Returns `{ key, via }` — `via` is the provenance label the output prints, so
  * a lead can never be read as the wrong kind of claim.
  */
@@ -2723,12 +2788,26 @@ export function coveringKey(entry, inputPath) {
     };
   }
   const hint = (entry.hints ?? []).find((h) => hintCovers(h, inputPath));
-  if (!hint) return null;
-  // A hint a gate spells itself and one it inherits from a module it imports
-  // are different claims, so the label says which — the same reason the
-  // trigger and the identity keys carry their own provenance above.
-  const inherited = entry.hintOrigin?.get(hint);
-  return { key: hint, via: inherited ? `gate source via ${inherited}` : 'gate source' };
+  if (hint) {
+    // A hint a gate spells itself and one it inherits from a module it imports
+    // are different claims, so the label says which — the same reason the
+    // trigger and the identity keys carry their own provenance above.
+    const inherited = entry.hintOrigin?.get(hint);
+    return { key: hint, via: inherited ? `gate source via ${inherited}` : 'gate source' };
+  }
+  // LAST, and deliberately (#13000). The four keys above are all claims about a
+  // POPULATION — a pattern or a literal that covers your path — and this one is
+  // a claim about a single FILE, so consulting it earlier could only change
+  // which provenance an already-matched family prints. Placed here it is
+  // additive BY CONSTRUCTION: measured over the live tree, 81 (family, target)
+  // pairs, 19 of which another key already answers and keep the exact label
+  // they had. Nothing is re-attributed, and the widening is 5 leads.
+  const read = (entry.reads ?? []).find((r) => r === inputPath);
+  if (read) {
+    const by = entry.readOrigin?.get(read);
+    return { key: read, via: by && by !== read ? `program text read by ${by}` : 'program text read' };
+  }
+  return null;
 }
 
 /**
@@ -3363,6 +3442,144 @@ export function scratchDirSitesInSource(rel, source) {
     inTree.push({ ...site, dir: segs.join('/'), probe: [...segs, SCRATCH_PROBE_LEAF].join('/') });
   }
   return { inTree, unresolved, scanned };
+}
+
+/**
+ * ── The PROGRAM a gate opens by path, one hop from an import (#13000) ───────
+ *
+ * `firstPartyImportTargets` above follows the one undeclared dependency this
+ * tool knew about: a gate's `./sibling.mjs` import. A gate has a second kind,
+ * spelled in ordinary code rather than in an import statement — a repo file it
+ * opens at a path it builds from its OWN location:
+ *
+ *     readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8')
+ *
+ * ## The measured miss
+ *
+ * `scripts/objectui-changeset-digest.mjs` builds a throwaway repo and stages a
+ * COPY of `scripts/check-adr-0087-registration.mjs` into it, then runs the copy
+ * — the only thing that settles a claim about another gate's verdict. A PR that
+ * added an import to the staged gate broke the digest's self-test with
+ * ERR_MODULE_NOT_FOUND, and this derivation had scored `check:objectui-changeset`
+ * `silent` for that diff: the family declares exactly one population
+ * (`.changeset`), and the gate-script IDENTITY key fires on the edited gate's
+ * OWN families, never on the families of a gate that runs a copy of it.
+ *
+ * Why the literal did not reach `extractWatchHints` is worth naming, because it
+ * is not an oversight to repair there: that scan runs `maskSelfTests` first, so
+ * a fixture path planted in a self-test cannot become the gate's population.
+ * The staging sits inside the digest's `--self-test`, and the invocation CI runs
+ * IS that self-test. So the two scans want opposite things from the same bytes —
+ * a self-test's fixture LITERALS are not the gate's population, while the files
+ * its self-test really opens are the gate's inputs — and this one deliberately
+ * masks comments only.
+ *
+ * ## Why PROGRAM TEXT and not every file a gate opens
+ *
+ * Measured on this tree, over the 181 discovered families:
+ *
+ *   any tracked read target        81 pairs, 62 of them leads no other key gives
+ *   ...of PROGRAM TEXT only         5 novel leads
+ *   ...that are themselves gates    2 novel leads
+ *
+ * The widest reading is not WRONG — every one of the 62 is a file some gate
+ * really opens, and editing it really can turn that gate red. It is a different
+ * and larger card: 34 of the 62 land on four files (`package.json` +12,
+ * `.github/workflows/lint.yml` +9, `packages/spec/package.json` +8,
+ * `turbo.json` +5), which would take a root-manifest card from 5 leads to 17.
+ * This file's header prices that direction ("22 leads is the same as none"), so
+ * the data half is left for a card that pays for it.
+ *
+ * The line drawn instead is one the reader can state: a gate that opens another
+ * file's PROGRAM TEXT depends on that PROGRAM, and the shapes that dependency
+ * takes — stage it, execute it, assert on it — are three spellings of the same
+ * fact. A gate that opens data it PARSES is the other question. Restricting the
+ * TARGET rather than trying to recognise the write is also what keeps this
+ * derived: the writes in this tree go through local helpers (`gw(rel, text)`,
+ * `writeFixtureFile(dest, text)`) whose NAMES are the only thing saying they
+ * write, and matching a name and calling it semantics is the failure this card
+ * exists to avoid, one level in.
+ *
+ * Cost of the target restriction, stated rather than implied: a stager whose
+ * sandbox copies a JSON or Markdown input is not followed. `scripts/objectui-
+ * changeset-digest.mjs` stages ADR-0087's record beside the gate for exactly
+ * that reason, and this scan does not name it.
+ *
+ * ## What makes this precise where `git grep` is not
+ *
+ * The other mechanisation on the table was a grep of stager scripts for the
+ * edited gate's filename. Measured on this tree, a basename grep over the 5404
+ * tracked sources hits 924 mentions in 451 files; blanking comments leaves 372
+ * in 187, still almost entirely fixture names and prose. This scan reports 5.
+ *
+ * Three refusals do it, all borrowed from `scratchDirSitesInSource`, which
+ * reads path expressions for a different question and pays for this half:
+ *
+ *   - comments are BLANKED, so a docblock naming a gate is not a read of it;
+ *   - a call spelled inside a STRING literal is skipped by POSITION, so a
+ *     fixture source planted in a self-test is not a call;
+ *   - the argument is RESOLVED, never matched: an expression this scan cannot
+ *     read comes back `unknown` and contributes nothing, and a resolved path
+ *     that is not TRACKED contributes nothing either.
+ *
+ * The last one is also the boundary, and it is a MISSING lead by construction:
+ * a read whose path is built from a loop variable — `for (const f of [...])
+ * readFileSync(join(__dirname, f))`, which the digest writes five times — has
+ * no resolvable base, so it is refused. `scripts/bump-objectui.sh` is reached
+ * here only because the same file also reads it at a spelled-out path. ⛔ Do
+ * not close that by admitting the basename literal: that is the grep above.
+ *
+ * The gate's own file is dropped — a script that stages a copy of ITSELF is
+ * already matched by the identity key, and naming it again would print the same
+ * family twice under a weaker provenance.
+ *
+ * @param {string} rel  repo-relative path of the gate script
+ * @param {string} source  its contents
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]} repo-relative paths, in source order, deduped
+ */
+const SOURCE_READ_CALL = /\b(?:fs\.)?(?:readFileSync|copyFileSync)\s*\(/g;
+
+/** Program text, as opposed to data a gate parses — see the docblock above. */
+export const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
+
+/**
+ * The program files, of the tracked files a gate opens at an anchored path.
+ *
+ * Two functions rather than one, and the split is the DECISION: `anchoredReadTargets`
+ * answers what the scan can see, and this one applies the boundary this card
+ * drew. Kept apart so the self-test can price the refused half from the same
+ * primitive — a restriction measured only through itself reads 0 refusals
+ * whether it refuses much or nothing, which is how the first spelling of that
+ * case passed as a green over an instrument that could not return non-zero.
+ */
+export function readProgramTargetsInSource(rel, source, isTracked) {
+  return anchoredReadTargets(rel, source, isTracked).filter((t) => PROGRAM_TEXT_TARGET.test(t));
+}
+
+/** Every TRACKED file the source opens at a path anchored to its own location. */
+export function anchoredReadTargets(rel, source, isTracked) {
+  const masked = maskComments(String(source));
+  const { literal } = scanSource(masked);
+  const ctx = {
+    fileSegs: rel.split('/'),
+    names: nameInitialisers(masked),
+    returns: singleReturnExpressions(masked),
+    seen: new Set(),
+  };
+  const out = [];
+  for (const m of masked.matchAll(SOURCE_READ_CALL)) {
+    if (literal[m.index]) continue;
+    const { text } = balancedArgText(masked, m.index + m[0].length);
+    const expr = (splitArgList(text)[0] ?? '').trim();
+    ctx.seen.clear();
+    const at = resolvePathExpression(expr, ctx);
+    if (at.kind !== 'in-tree' || at.segs.length === 0) continue;
+    const path = at.segs.join('/');
+    if (path === rel || out.includes(path) || !isTracked(path)) continue;
+    out.push(path);
+  }
+  return out;
 }
 
 const SCANNED_SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
@@ -5562,6 +5779,10 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // measurement that decided it). That set is not knowable while the first
   // loop is still building it, which is the only reason there are two.
   const gateFiles = new Set([...byCheck.values()].flatMap((e) => e.files));
+  // The same tracked listing the reachability sweep walks, as a membership test
+  // for `readProgramTargetsInSource`: a resolved path the repo does not track is
+  // a sandbox destination or a build artifact, never an input a card can edit.
+  const trackedSet = tree?.files ?? new Set(trackedFiles());
   // A followed module is scanned once however many families import it —
   // invoked-as.mjs is imported by 79 of them.
   const moduleHints = new Map();
@@ -5581,16 +5802,31 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   };
   for (const entry of byCheck.values()) {
     entry.imports = [];
+    entry.reads = [];
+    entry.readOrigin = new Map();
     entry.hintOrigin = new Map();
     for (const f of entry.files) {
       const abs = join(ROOT, f);
       if (!existsSync(abs)) continue;
-      // ONE read, three answers now — the hints, the gate's own no-population
-      // declaration, and the first-party modules it imports — so no two of
-      // them can describe different revisions of a file, the same discipline
-      // the trigger paths take above.
+      // ONE read, FOUR answers now — the hints, the gate's own no-population
+      // declaration, the first-party modules it imports, and the program files
+      // it opens by path — so no two of them can describe different revisions
+      // of a file, the same discipline the trigger paths take above.
       const source = readFileSync(abs, 'utf8');
       entry.hints.push(...extractWatchHints(source, f, { tree }));
+      // ONE read, four answers now (#13000). ⛔ NOT gated on `entry.selfTest`,
+      // and that is the measurement rather than an oversight: the import follow
+      // is refused for a self-test because a module's population describes the
+      // gate's WORK, which a `--self-test` invocation does not perform. A file
+      // the self-test OPENS is the opposite case — the self-test is the run, and
+      // that read is the run's own input. The live specimen is this card's:
+      // `scripts/objectui-changeset-digest.mjs` stages its copy inside
+      // `--self-test`, and skipping self-tests here would close nothing.
+      for (const target of readProgramTargetsInSource(f, source, (t) => trackedSet.has(t))) {
+        if (entry.reads.includes(target)) continue;
+        entry.reads.push(target);
+        entry.readOrigin.set(target, f);
+      }
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
@@ -6589,6 +6825,80 @@ function selfTest() {
     subtracted.length === 0,
   );
 
+  // ── The refused fifth key, kept honest (#13126) ────────────────────────────
+  // `coveringKey`'s docblock refuses an IDENTITY key over these same import
+  // edges, and that refusal is a MEASUREMENT rather than a preference: it holds
+  // only while the class stays concentrated in the shared utilities nearly
+  // every gate links. Prose cannot notice the tree flattening under it, so the
+  // price is re-derived here on every run and asserted. A red in this block is
+  // not a broken derivation — it says the refusal is due a re-pricing.
+  const importClassFamilies = [...discoverFamilies().byCheck];
+  const importClassEdges = new Map();
+  for (const [check, e] of importClassFamilies) {
+    const edges = new Set();
+    for (const f of e.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+        if ((e.files ?? []).includes(mod)) continue;
+        edges.add(mod);
+      }
+    }
+    importClassEdges.set(check, edges);
+  }
+  const importNovel = [];
+  let importCoveredElsewhere = 0;
+  for (const [check, e] of importClassFamilies) {
+    for (const mod of importClassEdges.get(check) ?? []) {
+      if (coveringKey(e, mod)) importCoveredElsewhere++;
+      else importNovel.push([check, mod]);
+    }
+  }
+  t(
+    `the refused import-edge class is real and NOVEL — ${importNovel.length} (family, imported module)`
+      + ` pair(s) no key reaches, of ${importNovel.length + importCoveredElsewhere}`,
+    importNovel.length > 0,
+  );
+  t(
+    `…and the split the refusal quotes is not invented: ${importCoveredElsewhere} pair(s) another key`
+      + ' already answers, so the novel half is a measurement and not the raw count',
+    importCoveredElsewhere > 0,
+  );
+  // The card's own witness, and the single lead this refusal is KNOWN to cost.
+  // Asserted in both halves: the import edge exists, and no key names it.
+  const bareRootKey = 'scripts/pm/bare-root-worklist.mjs --self-test';
+  const bareRootImportFamily = importClassFamilies.find(([c]) => c === bareRootKey)?.[1];
+  t(
+    'the witness holds — bare-root-worklist --self-test imports THIS file, and no key names that'
+      + ' family for a card editing it',
+    (importClassEdges.get(bareRootKey)?.has('scripts/pm/dispatch-gates.mjs') ?? false)
+      && !!bareRootImportFamily
+      && coveringKey(bareRootImportFamily, 'scripts/pm/dispatch-gates.mjs') === null,
+  );
+  // Why it is refused, re-derived rather than recalled: the worst module would
+  // print a list nobody reads. The bound is the header's own "22 leads is the
+  // same as none", doubled — green through ordinary drift, red only if the
+  // concentration genuinely collapses and the class is worth re-pricing.
+  const importAddPerModule = new Map();
+  for (const [, mod] of importNovel) importAddPerModule.set(mod, (importAddPerModule.get(mod) ?? 0) + 1);
+  const importWorst = [...importAddPerModule]
+    .map(([mod, add]) => ({
+      mod,
+      add,
+      after: add + importClassFamilies.filter(([, e]) => coveringKey(e, mod)).length,
+    }))
+    .sort((a, b) => b.after - a.after);
+  t(
+    `the refusal is still earned — a card editing ${importWorst[0]?.mod} would name`
+      + ` ${importWorst[0]?.after} families under the refused key`,
+    (importWorst[0]?.after ?? 0) > 44,
+  );
+  const importTop5 = importWorst.slice(0, 5).reduce((s, r) => s + r.add, 0);
+  t(
+    `…and the class is still concentrated: ${importTop5} of ${importNovel.length} novel pair(s) land`
+      + ` on ${Math.min(5, importWorst.length)} module(s)`,
+    importTop5 * 2 > importNovel.length,
+  );
+
   // #12107, the live half — three claims about THIS tree, each one a thing the
   // fix buys that a fixture cannot show.
   const tsLiveFamilies = [...discoverFamilies().byCheck];
@@ -7558,6 +7868,57 @@ function selfTest() {
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
   const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
+
+  // A THIRD shape of the same class, and the one with the worst failure
+  // direction (#13207): a gate whose declared population was its OWN GUARDED
+  // ARTIFACT. `check:llms-txt` re-derives the claims of `packages/spec/llms.txt`
+  // against trees elsewhere — the `*.zod.ts` counts under `packages/spec/src`,
+  // the `api-surface/` shards, the manifest `exports` keys, and the non-private
+  // `@objectstack/*` workspace set — but reached every one of them through
+  // `join(PKG, ...)`, so the only literal it spelled was `llms.txt` itself.
+  //
+  // The derivation could therefore name the gate only AFTER the artifact had
+  // been edited, while the edits that FALSIFY it land in those other trees.
+  // Measured on PR #13186 across two rounds of one branch: deleting a `src/`
+  // schema module moved `src/kernel/` 32 -> 31 and the summed total 208 -> 207,
+  // the derived family did not contain the gate, and the red reached CI. That
+  // is UNDER-matching — silent, and invisible in the tool's own output, where an
+  // omitted gate looks exactly like a gate that does not apply.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration. If this gate stops reading one of these trees,
+  // delete the case together with the literal — never keep it green by
+  // re-pointing it at a tree the gate never reads.
+  const llmsHints = extractWatchHints(
+    readFileSync(join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
+    'packages/spec/scripts/check-llms-txt.ts',
+  );
+  const llmsReaches = (f) => llmsHints.some((h) => hintCovers(h, f));
+  // The reproduction, as a case: the falsifying edit alone names the gate.
+  t('check:llms-txt reaches the schema tree its counts are derived from', llmsReaches('packages/spec/src/kernel/cluster.zod.ts'));
+  // …and by a route that is NOT the artifact hint. This is the reproduction
+  // itself: before this declaration the only hint covering anything was
+  // `packages/spec/llms.txt`, so a src-only diff derived nothing.
+  t('and by a route that is not the guarded artifact — the #13207 reproduction', llmsHints.some((h) => h !== 'packages/spec/llms.txt' && hintCovers(h, 'packages/spec/src/kernel/cluster.zod.ts')));
+  t('it still reaches the artifact it guards', llmsReaches('packages/spec/llms.txt'));
+  t('it reaches the api-surface shards every NAMED claim resolves against', llmsReaches('packages/spec/api-surface/data.json'));
+  t('it reaches the manifest whose exports keys the SUBPATH claims resolve against', llmsReaches('packages/spec/package.json'));
+  t('it reaches the repo-root workspace file it opens', llmsReaches('pnpm-workspace.yaml'));
+  t('and the workspace manifests whose set is the package-ecosystem denominator', llmsReaches('packages/drivers/driver-mongodb/package.json'));
+  // The negative half, and the load-bearing one. A population this broad is
+  // one respelling away from the "22 leads is the same as none" failure the
+  // header prices: `packages/spec` or `packages/**` would have bought the flip
+  // too, and named this gate on nearly every card in the repo. These pin that
+  // it bought the four trees it reads and NOTHING else — including the sibling
+  // directories inside its own package.
+  t('but claims no other file in its own package', !llmsReaches('packages/spec/docs/anything.md'));
+  t('nor a sibling package source', !llmsReaches('packages/rest/src/analytics-dataset-dimension-gate.test.ts'));
+  t('nor a content page', !llmsReaches('content/docs/deployment/cli.mdx'));
+  t('nor an app source', !llmsReaches('apps/docs/components/ui/card.tsx'));
+  t('nor an example', !llmsReaches('examples/app-crm/src/objects/lead.object.ts'));
+  // A workspace manifest is reached; a workspace SOURCE file is not. This is
+  // the pair that separates `packages/**\/package.json` from `packages/**`.
+  t('and a package manifest is reached where its source is not', llmsReaches('packages/qa/dogfood/package.json') && !llmsReaches('packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts'));
 
   // The DIRECTORY half of the same class (#10107). A gate whose population is a
   // top-level DIRECTORY spelled as a bare word is invisible for the same reason
@@ -9438,6 +9799,131 @@ function selfTest() {
       coveringKey(entry, hint)?.via === `gate source via ${mod}`,
     );
   }
+
+  // ── The PROGRAM a gate opens by path (#13000) ─────────────────────────────
+  //
+  // The second undeclared dependency, beside the import above: a gate that
+  // opens another script's source at a path anchored to its own location. The
+  // card's instance is a STAGED COPY — the digest writes the ADR-0087 gate into
+  // a throwaway repo and runs it — and the three shapes (stage it, execute it,
+  // assert on it) are one dependency, so the recogniser reads the READ.
+  //
+  // The recogniser, on fixture source: one line per refusal, for the reason the
+  // import fixture above gives — a widening or a narrowing fails HERE with its
+  // reason named, rather than as a pair count nobody can attribute afterwards.
+  const readFixture = [
+    'const __dirname = dirname(fileURLToPath(import.meta.url));',
+    "const staged = readFileSync(join(__dirname, 'invoked-as.mjs'), 'utf8');", // followed
+    "copyFileSync(new URL('./js-comment-mask.mjs', import.meta.url), dest);", // copy, URL anchor
+    "const up = readFileSync(join(__dirname, '..', 'eslint.config.mjs'), 'utf8');", // climbs, still tracked
+    "const data = readFileSync(join(__dirname, '..', 'package.json'), 'utf8');", // DATA, not program text
+    "const gone = readFileSync(join(__dirname, 'does-not-exist.mjs'), 'utf8');", // resolves, untracked
+    "const self = readFileSync(join(__dirname, 'fixture.mjs'), 'utf8');", // itself: the identity key owns it
+    "const out = readFileSync(join(tmpdir(), 'x.mjs'), 'utf8');", // outside the tree
+    "const cwd = readFileSync('scripts/check-nul-bytes.mjs', 'utf8');", // bare literal, cwd unknown
+    "// readFileSync(join(__dirname, 'check-doc-anchors.mjs'), 'utf8');", // a comment
+    'const src = "readFileSync(join(__dirname, \'check-role-word.mjs\'), \'utf8\')";', // inside a string
+    "const loop = ['bump-objectui.sh'].map((f) => readFileSync(join(__dirname, f), 'utf8'));", // loop variable
+  ].join('\n');
+  const readFixtureOut = readProgramTargetsInSource('scripts/fixture.mjs', readFixture, (f) =>
+    liveTree.files.has(f),
+  );
+  t(
+    'the read scan follows a directory-anchored read and a URL-anchored copy, and refuses data, untracked, self,' +
+      ' out-of-tree, bare-literal, commented, string-literal and loop-variable spellings',
+    readFixtureOut.join(' · ') === 'scripts/invoked-as.mjs · scripts/js-comment-mask.mjs · eslint.config.mjs',
+    readFixtureOut.join(' · '),
+  );
+
+  // The live halves. Counts and names in every case, for the reason the import
+  // section states: a case that can only be read as "something was found" is
+  // the shape a pin fails in.
+  const readEdges = [...liveDiscovery.byCheck]
+    .flatMap(([check, e]) => (e.reads ?? []).map((r) => [check, r, e.readOrigin.get(r)]));
+  t(
+    `the live tree HAS a gate reading another script's source, so this key is not vacuous (${readEdges.length}:` +
+      ` ${readEdges.map(([c, r, by]) => `${c} <- ${r} via ${by}`).join(' · ') || 'none'})`,
+    readEdges.length > 0,
+  );
+
+  // The card's own specimen, end to end and by name. ⛔ Not "some family
+  // matches": the miss was THIS family scoring `silent` for THIS path.
+  const digestEntry = liveDiscovery.byCheck.get('check:objectui-changeset');
+  const STAGED_GATE = 'scripts/check-adr-0087-registration.mjs';
+  t(
+    `the staged gate reaches the family that runs a copy of it (${coveringKey(digestEntry, STAGED_GATE)?.via ?? 'no key'})`,
+    coveringKey(digestEntry, STAGED_GATE)?.key === STAGED_GATE &&
+      coveringKey(digestEntry, STAGED_GATE)?.via === 'program text read by scripts/objectui-changeset-digest.mjs',
+  );
+  // …and green for the RIGHT reason. `extractWatchHints` masks self-tests, so
+  // the staging literal is not a hint and cannot supply this lead — the case
+  // above would otherwise pass on a key it is not testing.
+  t(
+    'and no watch hint of that family covers it, which is why the key was needed',
+    !(digestEntry.hints ?? []).some((h) => hintCovers(h, STAGED_GATE)) &&
+      !(digestEntry.files ?? []).some((f) => hintCovers(f, STAGED_GATE)),
+  );
+
+  // Reconstruction: `entry.reads` is what the scan says over the family's own
+  // files, never a list kept here.
+  const offReads = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    const expected = [];
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const r of readProgramTargetsInSource(f, liveSource(f), (x) => liveTree.files.has(x))) {
+        if (!expected.includes(r)) expected.push(r);
+      }
+    }
+    if (expected.join(' · ') !== (entry.reads ?? []).join(' · ')) offReads.push(check);
+  }
+  t(
+    `a family's reads are exactly what the scan finds in the scripts its COMMAND names (off: ${offReads.join(', ') || 'none'})`,
+    offReads.length === 0,
+  );
+
+  // Additive BY CONSTRUCTION — the claim `coveringKey`'s comment makes. For
+  // every read target, the family either had no key at all before, or keeps the
+  // exact key and label it had: this one is consulted last and can only fill a
+  // hole.
+  const reattributed = [];
+  for (const [check, entry, target] of readEdges.map(([c, r]) => [c, liveDiscovery.byCheck.get(c), r])) {
+    const withKey = coveringKey(entry, target);
+    const saved = entry.reads;
+    entry.reads = [];
+    const without = coveringKey(entry, target);
+    entry.reads = saved;
+    // Both halves, because only the pair is the claim. Without the first, a
+    // derivation that answers NOTHING for every read edge satisfies "nothing
+    // was re-attributed" perfectly.
+    if (!withKey) reattributed.push(`${check} ${target}: no key at all`);
+    else if (without && (without.key !== withKey.key || without.via !== withKey.via)) {
+      reattributed.push(`${check} ${target}: ${without.via} -> ${withKey.via}`);
+    }
+  }
+  t(
+    `every read edge earns a key, and none is re-attributed — this key only fills a hole (${reattributed.join(' | ') || 'none'})`,
+    readEdges.length > 0 && reattributed.length === 0,
+  );
+
+  // The DATA refusal, priced rather than asserted: the live tree really does
+  // have gates reading tracked NON-program files at anchored paths, and none of
+  // them is here. That is the boundary this card declined to cross, and a
+  // future card widening it should red this case rather than discover it.
+  const dataReads = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const r of anchoredReadTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
+        if (!PROGRAM_TEXT_TARGET.test(r)) dataReads.push(`${check} <- ${r}`);
+      }
+    }
+  }
+  t(
+    `the program-text restriction is not vacuous: ${dataReads.length} anchored read(s) of tracked DATA are refused` +
+      ` (${dataReads.slice(0, 4).join(' · ')}${dataReads.length > 4 ? ` · +${dataReads.length - 4} more` : ''})`,
+    dataReads.length > 0 && dataReads.every((d) => !readEdges.some(([c, r]) => `${c} <- ${r}` === d)),
+  );
 
   // ── A followed module's JOIN BASE is not a population (#12500) ─────────────
   //

@@ -58,6 +58,8 @@ import type { ActionDescriptor, ExecutionLog, FlowParsed } from '@objectstack/sp
 import type { ExplainDecision } from '@objectstack/spec/security';
 import type { InstalledPackage } from '@objectstack/spec/kernel';
 import type {
+    DeleteMetaItemResponse,
+    DeleteDataResponse,
     ListDraftsResponse,
     GetMetaDiagnosticsResponse,
     FindReferencesToMetaResponse,
@@ -488,14 +490,19 @@ export async function returnTypePrecisionPins12104(): Promise<void> {
     // @ts-expect-error `queryDataset` is served bare by @objectstack/rest — there is no envelope
     void (await client.analytics.queryDataset({ selection: { measures: ['n'] } })).data;
 
-    // The two spec response types that LOOK like the right binding and are
-    // narrower than the contract their route relays. Pinned at the binding so a
-    // future sweep cannot "tidy" either annotation onto them: the keys below are
-    // served by the real producers and neither schema declares them.
-    // @ts-expect-error `TriggerFlowResponse.data` declares no `runId` — a paused run carries one
-    void (undefined as unknown as TriggerFlowResponse).data.runId;
-    // @ts-expect-error `TriggerFlowResponse.data` declares no `screen` — a screen-flow pause carries one
-    void (undefined as unknown as TriggerFlowResponse).data.screen;
+    // [#13078] RE-JUDGED, not re-spelled (the #6442 treatment): two
+    // suppressions here used to pin that `TriggerFlowResponse.data` declared
+    // neither `runId` nor `screen` — the near-miss trap that made binding the
+    // schema a false narrowing. That premise is retired by design:
+    // #13078 widened both stale schemas to parity with the contracts their
+    // routes relay, so the old pins' suppressions would now be UNUSED
+    // (TS2578) precisely because the defect they pinned is fixed. The new
+    // truth is stronger and pinned as an equality: the schema's `data` IS the
+    // producer contract. Narrow the schema again and this goes red — the same
+    // guard, pointing in the direction that is now true. (The annotations
+    // above still bind the CONTRACT on purpose: it is the source the routes
+    // relay; the schema is its transcription.)
+    expectTypeOf<TriggerFlowResponse['data']>().toEqualTypeOf<AutomationResult>();
 }
 
 /**
@@ -531,6 +538,118 @@ export function environmentIsNotTheCloudWireRow(): void {
     void specEnvironmentRow.display_name;
 }
 
+/**
+ * [#13023] `meta.deleteItem` declared a return the reset door has never
+ * answered — on BOTH twins.
+ *
+ * The declaration was `Promise<{ type: string; name: string; deleted: boolean }>`,
+ * and it is not merely imprecise, it is UNINHABITED. `DELETE /meta/:type/:name`
+ * ends in `res.json(result)` with `deleteMetaItem`'s return, and none of that
+ * method's four return branches carries `type`, `name` or `deleted`. So a
+ * first-party caller who branched on the documented `deleted` flag read
+ * `undefined` — falsy — on EVERY reset, including the ones that really removed
+ * a row. The truthful flag is `reset`, and its `false` arm ("no overlay row
+ * existed, already at artifact default") is exactly the case a caller most
+ * wants to tell apart. Nothing surfaced this because the types compiled; the
+ * SDK's own driven tests had to cast through `any` to read the real fields.
+ *
+ * The ruled fix (maintainer, 2026-08-29, option 甲) BINDS the response the spec
+ * already exports rather than transcribing its members — a hand-written member
+ * list is the same defect one layer up, and the card's own body demonstrated
+ * that failure by attributing the IMPLEMENTATION's declared return
+ * (`@objectstack/metadata-protocol`, which does name `seq` and
+ * `projectionApplied`) to `DeleteMetaItemResponseSchema`, which declares
+ * neither. ⛔ The wire is NOT touched: reality is the contract.
+ *
+ * Every claim is made TWICE, once per client. That is not padding — the two
+ * declarations were TEXTUALLY IDENTICAL, so a global count could not tell "both
+ * fixed" from "half the fix landed" (the #11713 twin-divergence trap, the same
+ * instrument note `meta-delete-item-carriers.test.ts` is shaped around).
+ *
+ * Type-level for this file's standing reason: types are erased before vitest
+ * runs, so a runtime test cannot observe a return-type narrowing at all. The
+ * BEHAVIOURAL half — `reset` read through the corrected type against a real
+ * `RestServer` + real protocol + real `sys_metadata` tables, `true` on a row
+ * that was deleted and `false` on one that was already at artifact default —
+ * lives in `meta-delete-item-carriers.test.ts`, where those reads stopped being
+ * `any` in this same change.
+ */
+export async function returnTypePrecisionPins13023(): Promise<void> {
+    // ── direction 1: both twins declare the spec's response ───────────────
+    expectTypeOf(await client.meta.deleteItem('view', 'account_list'))
+        .toEqualTypeOf<DeleteMetaItemResponse>();
+    expectTypeOf(await scoped.meta.deleteItem('view', 'account_list'))
+        .toEqualTypeOf<DeleteMetaItemResponse>();
+
+    // `reset` is READABLE now, and with the schema's optionality intact — a
+    // "narrowing" that made it a required `boolean` would be a fresh false
+    // declaration, since the door omits it on no branch it declares but the
+    // contract does not promise it.
+    expectTypeOf((await client.meta.deleteItem('view', 'account_list')).reset)
+        .toEqualTypeOf<boolean | undefined>();
+    expectTypeOf((await scoped.meta.deleteItem('view', 'account_list')).reset)
+        .toEqualTypeOf<boolean | undefined>();
+
+    // ── direction 2: the reads the phantom declaration invited must FAIL ──
+    // ⚠️ RED BEFORE, all six. While the twins declared `{ type, name, deleted }`
+    // each of these reads was LEGAL, so every suppression below went unused and
+    // tsc reported TS2578 — that unused-suppression signal IS the defect stated
+    // as a compile error. This is the half of the card that is the point: after
+    // the binding the reads are refused at the call site where a consumer would
+    // have written them, instead of compiling and evaluating to `undefined`.
+    // @ts-expect-error the reset door sends no `deleted` on any branch — read `reset`
+    void (await client.meta.deleteItem('view', 'account_list')).deleted;
+    // @ts-expect-error …and the scoped twin reaches the same handler, so neither may keep it
+    void (await scoped.meta.deleteItem('view', 'account_list')).deleted;
+    // @ts-expect-error the reset body echoes back no `type`
+    void (await client.meta.deleteItem('view', 'account_list')).type;
+    // @ts-expect-error the reset body echoes back no `type` (scoped twin)
+    void (await scoped.meta.deleteItem('view', 'account_list')).type;
+    // @ts-expect-error the reset body echoes back no `name`
+    void (await client.meta.deleteItem('view', 'account_list')).name;
+    // @ts-expect-error the reset body echoes back no `name` (scoped twin)
+    void (await scoped.meta.deleteItem('view', 'account_list')).name;
+}
+
+/**
+ * ⚠️ GREEN IN BOTH STATES — regression guards for #13023, recorded as such
+ * rather than counted as evidence the change was needed.
+ *
+ * 1. The near-miss the next sweep will reach for: `DeleteDataResponse` sits one
+ *    import away from `DeleteMetaItemResponse` and is the WRONG contract for the
+ *    reset door — it is the DATA door's `{ object, id, success }`, whose own
+ *    phantom-`deleted` declaration #5638 removed one door over. Binding it here
+ *    would compile and be false in exactly the direction this card just paid to
+ *    close.
+ *
+ * 2. THE GAP THIS BLOCK USED TO PIN AS UNDECLARED IS NOW CLOSED, on the spec
+ *    side, which is the only side allowed to close it: #13208 (issue #13155)
+ *    widened `DeleteMetaItemResponseSchema` to declare `seq` and
+ *    `projectionApplied` — the two wire-receipt keys `deleteMetaItem`'s
+ *    repository-delete branch always sent. This file's two `@ts-expect-error`
+ *    pins on those reads were therefore falsified BY DESIGN (a TS2578 unused
+ *    suppression is exactly how the closure was meant to surface here) and
+ *    are re-judged as the positive reads below: the keys are reachable from
+ *    the BOUND type with no local member list, so a later schema regression
+ *    that drops either key reds these reads as TS2339. The ⛔ against
+ *    hand-completing the annotation stands — nothing here writes members;
+ *    the type still comes whole from `@objectstack/spec`.
+ */
+declare const metaResetBody: DeleteMetaItemResponse;
+
+export function deleteDataResponseIsNotTheMetaResetShape(): void {
+    // @ts-expect-error the DATA door's delete body carries `object`/`id`; the reset door's does not
+    const mismatched: DeleteDataResponse = metaResetBody;
+    void mismatched;
+}
+
+export function metaResetResponseDeclaresTheWireReceipt(): void {
+    // #13208 declared both wire-receipt keys on the schema; these positive
+    // reads red as TS2339 if either is ever dropped from the bound type.
+    void metaResetBody.seq;
+    void metaResetBody.projectionApplied;
+}
+
 describe('client SDK return-type precision (#8140)', () => {
     it('exposes the type-level pins to tsc without executing a request', () => {
         // The assertions above are evaluated by `tsc` under
@@ -544,6 +663,9 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins12038).toBe('function');
         expect(typeof returnTypePrecisionPins12034).toBe('function');
         expect(typeof returnTypePrecisionPins12104).toBe('function');
+        expect(typeof returnTypePrecisionPins13023).toBe('function');
+        expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
+        expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
     });

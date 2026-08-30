@@ -50,7 +50,8 @@ export interface FileRecord {
 }
 
 /**
- * The acting session's organization, threaded into a `sys_file` write (#12745).
+ * The acting session's organization, threaded into a `sys_file` write (#12745)
+ * or a `sys_upload_session` write (#12928).
  *
  * ## Why a context and not a column on the payload
  *
@@ -125,6 +126,21 @@ export interface UploadSessionRecord {
   started_at?: string;
   expires_at?: string;
   updated_at?: string;
+  /**
+   * The registry-injected tenant column (#12928) — the `sys_upload_session`
+   * sibling of the `sys_file` declaration above.
+   *
+   * `sys_upload_session` declares no `tenancy` key either, so
+   * `isTenancyDisabled()` reads `false` and `applySystemFields` provisions
+   * `organization_id` on every install, walled deployment or not.
+   *
+   * Same division of labour as {@link FileRecord.organization_id}: the store
+   * does NOT put this in the engine payload (see {@link StorageWriteContext}),
+   * and it is declared here because the column is real — a caller may read it
+   * back off a row, an admin cross-organization write may set it explicitly,
+   * and the engine-absent stand-in records it.
+   */
+  organization_id?: string | null;
 }
 
 /** The `IDataEngine` operations this store issues. */
@@ -331,7 +347,29 @@ export class StorageMetadataStore {
   // Upload sessions
   // ---------------------------------------------------------------------------
 
-  async createSession(rec: UploadSessionRecord): Promise<UploadSessionRecord> {
+  /**
+   * Insert one `sys_upload_session` row.
+   *
+   * `context` carries the acting organization (#12928). It is the same channel,
+   * the same chokepoint and the same reasoning as {@link createFile} (#12745):
+   * with it the insert reaches the engine as `{ context: { tenantId } }`, which
+   * is how `sys_upload_session.organization_id` gets written at all — see
+   * {@link StorageWriteContext} for the chain and for why the column is not
+   * stamped onto the payload here. Without it the call behaves exactly as it
+   * did before: the row lands unstamped.
+   *
+   * ⚠️ Ruled scope (maintainer, 2026-08-29, verbatim and untranslated: 「同意」):
+   * FORWARD STAMP ONLY. Rows that are already NULL are deliberately not
+   * repaired — they age out through this object's own ADR-0057 TTL sweep
+   * (`lifecycle.ttl`, keyed on `expires_at`). That premise is not assumed here:
+   * `sys-upload-session-ttl-sweep.test.ts` drives the real declaration through
+   * the real Reaper against live SQL, because if the sweep were dead the
+   * no-backfill half of the ruling would fall with it.
+   */
+  async createSession(
+    rec: UploadSessionRecord,
+    context?: StorageWriteContext,
+  ): Promise<UploadSessionRecord> {
     const now = new Date().toISOString();
     const full: UploadSessionRecord = {
       uploaded_chunks: 0,
@@ -341,12 +379,20 @@ export class StorageMetadataStore {
       updated_at: now,
       ...rec,
     };
+    const options = writeOptionsFor(context);
     if (!this.engine) {
-      this.sessions.set(full.id, full);
-      return full;
+      // Mirrors `createFile`'s stand-in exactly: no schema to ask, so it
+      // records what it was told, and an explicit value on the record wins
+      // just as `injectTenantOnInsert` lets it.
+      const stamped: UploadSessionRecord =
+        options && full.organization_id == null
+          ? { ...full, organization_id: options.context.tenantId }
+          : full;
+      this.sessions.set(stamped.id, stamped);
+      return stamped;
     }
     await this.engineOp('sys_upload_session', 'insert', SESSION_INSERT_CONSEQUENCE, (engine) =>
-      engine.insert('sys_upload_session', full),
+      engine.insert('sys_upload_session', full, options),
     );
     return full;
   }

@@ -1,5 +1,53 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * View protocol schemas — the `view` metadata type and its three persisted body spellings.
+ *
+ * Covers the authoring surfaces (`defineView`, `defineViewItem`), the wire
+ * doors Studio and the REST layer write through, and
+ * {@link ViewMetadataSchema} — the union every persisted `view` body is judged
+ * by.
+ *
+ * ## Name grammar depends on the body spelling
+ *
+ * {@link ViewMetadataSchema} is a union over three persisted body shapes, and
+ * they do not share one `name` grammar. Which grammar applies is decided by the
+ * shape of the body — something an author never names explicitly — so neither
+ * failure direction below is discoverable from the key being written:
+ *
+ * | body spelling | recognised by | `name` is declared as | flat (undotted) name |
+ * |:---|:---|:---|:---|
+ * | standalone **ViewItem record** | a nested `config` | {@link ViewItemNameSchema} — `QUALIFIED_ITEM_NAME_PATTERN`, dot REQUIRED | **rejected**, located at `["name"]` |
+ * | flattened runtime **overlay** | an inline view config; no `config`, no container slot | `z.string().optional()` — no grammar at all | accepted |
+ * | `defineView` **container** | a container slot (`list` / `form` / `listViews` / `formViews`) | `z.string().optional()` on {@link ViewSchema} — no grammar at all | accepted, and normally IS flat |
+ *
+ * The two permissive rows are deliberate, not gaps left to tighten later:
+ *
+ * - A container's own name is the **bare object key**. ADR-0017 §3.2's
+ *   dual-read loader registers the aggregated container under `<object>` and
+ *   each expanded item under `<object>.<viewKey>`, so an object-scoped
+ *   container is named `crm_lead` — a name with no dot to carry.
+ * - An overlay's name is **stamped by the write path**, not authored:
+ *   `normalizeViewMetadata` puts it on every view body at the single write
+ *   chokepoint, and a personalization PUT inherits the identity of the entry it
+ *   shadows.
+ *
+ * So both of the readings an author naturally forms are wrong:
+ *
+ * - *"the dot is mandatory on every view row"* — read off
+ *   {@link ViewItemNameSchema} alone. It is not: overlay and container rows
+ *   accept flat names, and rows in this repo legitimately use them
+ *   (`case_grid`, `cases`, the container row `crm_lead`). Those rows are
+ *   correct as written, not defects awaiting a dotted rewrite.
+ * - *"flat names are fine generally"* — read off one of those flat-named rows.
+ *   It is not: put the same name on a standalone ViewItem record and it is
+ *   refused, on the one field the flat-named row told you to fill.
+ *
+ * This describes what the three shapes already do; it widens and narrows
+ * nothing. The one item-name grammar itself lives in
+ * `shared/identifiers.zod.ts` — grammar changes belong there, not here.
+ */
+
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -1323,8 +1371,8 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 // hook-body precedent's placement note applies here too: build-docs takes a
 // file's first JSDoc per exported symbol, and this constant needs no doc page.
 const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 (#8010; "
-  + 'PDF export itself was declined as #1301 NOT_PLANNED) — no renderer has ever produced a PDF '
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
+  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
   + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
   + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
   + "formats are 'csv', 'xlsx' and 'json'. "
@@ -1907,12 +1955,17 @@ export const FormFieldPublicPickerSchema = lazySchema(() => strictObject({
   ),
   /**
    * Referenced-object override. Omitted, the route resolves the target from
-   * the field definition on the parent object (`referenceTo`); set it only
-   * when that resolution is wrong for this form.
+   * the field definition on the parent object (`reference`); set it only when
+   * that resolution is wrong for this form.
+   *
+   * `reference` is the key `FieldSchema` accepts — `referenceTo` is only a
+   * rejected alias it lists so a failed parse can offer a rename hint, so an
+   * author following the old spelling of this sentence had their whole object
+   * metadata refused at parse.
    */
   object: z.string().optional().describe(
-    'Referenced-object override for the picker search; omitted → resolved from the field '
-    + 'definition (`referenceTo`).',
+    'Referenced-object override for the picker search; omitted → resolved from the `reference` '
+    + 'key on the field definition.',
   ),
 }).describe('Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).'));
 
@@ -3101,6 +3154,10 @@ export const ViewSchema = lazySchema(() => strictObject({
     // supplies these — declared for the same reason `translation` needed them
     // (#4001 batch 5): undeclared, they were stripped, and the metadata door
     // quietly discarded an item's own name on the way through.
+    // No grammar, and that is the ADR-0017 §3.2 dual-read talking: the
+    // container is registered under the BARE object key, so its own name is
+    // `crm_lead` — flat by construction, where a standalone ViewItem record
+    // must be `crm_lead.<viewKey>`. Stated once in this module's header block.
     name: z.string().optional().describe('Item name — supplied by the metadata door; for an object-scoped container it is the object name.'),
     label: I18nLabelSchema.optional().describe('Human-readable label shown in metadata lists.'),
     object: z.string().optional().describe('Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`.'),
@@ -3233,6 +3290,10 @@ export const ViewKindSchema = z
  */
 function viewItemBaseShape() {
   return {
+    // The dot is REQUIRED here and NOWHERE ELSE in the `view` family — the
+    // overlay and container spellings declare an ungrammared `name`. The
+    // three-way rule, and both directions it is misread in, are stated once in
+    // this module's header block.
     name: ViewItemNameSchema,
     object: z
       .string()
@@ -3623,6 +3684,10 @@ const INLINE_VIEW_KIND_REQUIRED =
  */
 function flattenedViewOverlayFields() {
   return {
+    // No grammar, deliberately: the write path stamps this name rather than an
+    // author writing it, so a flat overlay name is legal here while the SAME
+    // string is refused by `viewItemBaseShape()`'s `ViewItemNameSchema`. The
+    // per-spelling rule is stated once in this module's header block.
     name: z.string().optional().describe('Save name / qualified view id (stamped by the write path).'),
     object: z
       .string({ error: (issue) => (issue.input === undefined ? INLINE_VIEW_OBJECT_REQUIRED : undefined) })

@@ -3,7 +3,6 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { MetadataManagerConfigSchema } from './metadata-loader.zod';
-import { MergeStrategyConfigSchema, CustomizationPolicySchema } from './metadata-customization.zod';
 import { ActionSchema } from '../ui/action.zod';
 
 /**
@@ -39,7 +38,6 @@ import { ActionSchema } from '../ui/action.zod';
  *
  * ## References
  * - kernel/metadata-loader.zod.ts — MetadataManager wiring (datasource, cache, write gates)
- * - kernel/metadata-customization.zod.ts — Overlay/merge protocol
  * - system/metadata-persistence.zod.ts — Database record format + loader/watch envelope types
  * - contracts/metadata-service.ts — Service interface
  */
@@ -493,17 +491,51 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
   storage: MetadataManagerConfigSchema.describe('Storage backend configuration'),
 
   /**
-   * Default customization policies per metadata type.
-   * Controls what parts of metadata can be customized by admins/users.
+   * REMOVED in v17 (#13135, ADR-0049 enforce-or-remove; re-charter of #12057).
+   *
+   * `customizationPolicies` embedded the paper metadata-customization
+   * protocol's `CustomizationPolicySchema` (lockedFields / customizableFields
+   * whitelists) and was read by NOTHING: no code ever consulted a policy
+   * before accepting or refusing a customization, and the protocol it
+   * configured — the three-layer overlay of `metadata-customization.zod.ts` —
+   * was itself unreachable from any served surface (ADR-0126 §6 wall 4
+   * supersedes it: "nothing may build against it"). Authoring a policy got a
+   * clean parse and zero behaviour, zero diagnostics.
+   *
+   * Tombstoned rather than deleted for the same reason as `additionalTypes`
+   * below: `MetadataPluginConfigSchema` is not `.strict()`, so a plain
+   * deletion would silently strip the key (the #3726 / #3733 shape,
+   * ADR-0104). The mechanisms that actually govern customization are in the
+   * prescription.
    */
-  customizationPolicies: z.array(CustomizationPolicySchema).optional()
-    .describe('Default customization policies per type'),
+  customizationPolicies: retiredKey(
+    '`config.customizationPolicies` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
+    '(ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a ' +
+    'customization policy, and the overlay protocol it configured was itself unreachable from any ' +
+    'served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization ' +
+    "may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via " +
+    '`allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write ' +
+    "doors) and ADR-0126's packaged-metadata model (clone + ledger disable).",
+  ),
 
   /**
-   * Merge strategy for package upgrades.
+   * REMOVED in v17 (#13135, ADR-0049 enforce-or-remove; re-charter of #12057).
+   *
+   * `mergeStrategy` embedded the paper protocol's `MergeStrategyConfigSchema`
+   * (keep-custom / accept-incoming / three-way-merge) and was read by
+   * NOTHING: no 3-way merge engine ever existed, and package upgrades do not
+   * merge customizations — ADR-0126 §6 wall 3 separates the packaged BASE
+   * (upgrades rewrite it) from the customer's recorded choices (never
+   * touched by an upgrade). Same tombstone reasoning as above.
    */
-  mergeStrategy: MergeStrategyConfigSchema.optional()
-    .describe('Merge strategy for package upgrades'),
+  mergeStrategy: retiredKey(
+    '`config.mergeStrategy` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
+    '(ADR-0049 enforce-or-remove) — it never had an effect: no 3-way merge engine ever ' +
+    'existed to read it, and package upgrades do not merge customizations (ADR-0126: upgrades ' +
+    'rewrite the packaged base; customer choices live in the ledger and are never merged). ' +
+    'Delete the key. There is no replacement — upgrade-vs-customization separation is the ' +
+    'model, not a configurable strategy.',
+  ),
 
   /**
    * REMOVED in v17 (#8586, ADR-0049 enforce-or-remove).

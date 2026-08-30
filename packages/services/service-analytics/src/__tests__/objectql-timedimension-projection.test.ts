@@ -41,7 +41,7 @@ const dataset = DatasetSchema.parse({
   measures: [{ name: 'count', aggregate: 'count', field: 'id' }],
 });
 
-const TABLE = [
+const TABLE: Row[] = [
   { id: 1, due_date: '2026-01-10', priority: 'high' },
   { id: 2, due_date: '2026-01-20', priority: 'low' },
   { id: 3, due_date: '2026-02-05', priority: 'high' },

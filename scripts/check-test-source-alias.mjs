@@ -368,7 +368,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   ],
   '@objectstack/core': ['@objectstack/metadata-core', '@objectstack/spec'],
   '@objectstack/dogfood': [
-    '@objectstack/cli', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
+    '@objectstack/connector-mcp', '@objectstack/connector-openapi',
     '@objectstack/connector-rest', '@objectstack/core', '@objectstack/driver-sql',
     '@objectstack/driver-sqlite-wasm', '@objectstack/mcp', '@objectstack/metadata', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/plugin-audit', '@objectstack/plugin-auth',
@@ -408,23 +408,21 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/service-automation', '@objectstack/spec', '@objectstack/trigger-record-change',
   ],
   '@objectstack/formula': ['@objectstack/spec'],
-  // #12555 — RE-MEASURED, not widened. `@objectstack/plugin-hono-server` was always
-  // an unaliased artifact import of this package; the detector could not see it. Its
-  // import in `src/index.ts` sits directly under `export type EnvironmentDriverRegistry
-  // = any;`, and the unbounded clause capture above used to start at that `export`,
-  // run through the `;` and swallow the whole import statement — leaving a clause that
-  // BEGINS with `type`, which `isTypeOnlyClause` then discarded as type-only. A real
-  // runtime import was therefore filtered out as erased-at-compile-time. `--list` on
-  // the corrected detector adds exactly this one pair repo-wide (303 -> 304); the
-  // sibling gate corroborates it, `check-type-source-resolution.mjs` having carried
-  // `@objectstack/plugin-hono-server` in ITS entry for this package all along because
-  // `extractTypeImports` never applies the type-only filter.
-  // ⚠️ This is a LEDGER CORRECTION, not a remediation: hono's unit verdicts are still a
-  // function of build state for this pair. The fix the gate prescribes — an anchored
-  // alias in `packages/adapters/hono/vitest.config.ts` — is filed separately, because
-  // it makes that suite execute plugin-hono-server's SOURCE and so needs its own
-  // verification rather than a ride-along in a detector PR.
-  '@objectstack/hono': ['@objectstack/plugin-hono-server', '@objectstack/types'],
+  // #12555 recorded `@objectstack/plugin-hono-server` here as a ledger CORRECTION —
+  // the pair was always unaliased and the detector could not see it, because the
+  // runtime import in `src/index.ts` sits directly under `export type
+  // EnvironmentDriverRegistry = any;` and the unbounded clause capture swallowed it
+  // into a clause that BEGAN with `type`. #12767 is the remediation that took it back
+  // off: `packages/adapters/hono/vitest.config.ts` now carries an anchored array-form
+  // alias resolving that specifier to `packages/plugins/plugin-hono-server/src/index.ts`.
+  // Positive control on the remediation branch, because a suite that passes does not
+  // say WHICH file it loaded: `createOriginMatcher` gutted in plugin-hono-server's
+  // SOURCE with no rebuild left all 74 hono cases GREEN before the alias and failed
+  // exactly the 4 CORS-wildcard cases after it.
+  // `@objectstack/types` stays: `src/index.ts` imports readEnvWithDeprecation,
+  // looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE and resolveThrownHttpError from
+  // it as values, still through `dist/` — a remediation of its own, not this one.
+  '@objectstack/hono': ['@objectstack/types'],
   '@objectstack/http-conformance': [
     '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
     '@objectstack/plugin-hono-server', '@objectstack/runtime',
