@@ -91,14 +91,44 @@ describe('authz probe blind-spot census (#13260)', () => {
     expect(BLIND_SPOT_TOTAL_RUNTIME - BLIND_SPOT_TOTAL_STATIC).toBe(5);
   });
 
-  it('the matrix header probe count is still the one the census recorded as drifted', () => {
+  it('the matrix header probe count EQUALS the table — the drift is closed, not recorded', () => {
     const matrix = readFileSync(join(HERE, 'authz-conformance.matrix.ts'), 'utf8');
     const m = /`discover\(\)`: (\d+) probes over (\d+) named source files/.exec(matrix);
     expect(m, 'the matrix header no longer states a probe count in the pinned shape').not.toBeNull();
     expect(Number(m![1])).toBe(MATRIX_HEADER_PROBE_CLAIM);
     expect(Number(m![2])).toBe(PROBE_TABLE.files);
-    // The drift itself, pinned: the prose says 15, the table holds 16. Repairing
-    // the sentence is the follow-up card's, not this measurement's.
-    expect(MATRIX_HEADER_PROBE_CLAIM).not.toBe(PROBE_TABLE.entries);
+    // ⭐ INVERTED. This assertion used to pin the drift (`not.toBe`): the prose
+    // said 15 while the table held 16, and the measurement that found it left
+    // the sentence alone on purpose so its no-repair fence stayed unambiguous.
+    // The sentence is repaired, so the pin becomes the permanent invariant it
+    // should always have been — a probe added without moving the prose is now
+    // RED here instead of a discrepancy recorded in a third file.
+    expect(MATRIX_HEADER_PROBE_CLAIM).toBe(PROBE_TABLE.entries);
+    // …and the header's own text is what was read, not a hand-copied number.
+    expect(Number(m![1])).toBe(PROBE_TABLE.entries);
+  });
+
+  it('every probe DECLARES its instrument kind, and the census records what it declares', () => {
+    // The taxonomy used to live only as prose in the census. It is now data on
+    // each probe, read back out of the companion test's source — so a probe
+    // whose kind changes (a dead ROUTE_ENUMERATION honestly re-declared
+    // TRIPWIRE, say) cannot leave this record describing the old table.
+    for (const row of PROBE_FILE_CENSUS) {
+      const derivedKinds = derived.kinds.get(row.file);
+      expect(derivedKinds, `no kind declaration derived for ${row.file}`).toBeDefined();
+      expect(derivedKinds).toEqual([...row.kinds].sort());
+    }
+  });
+
+  it('every PROBES entry carries a kind — the pairing is complete, not short', () => {
+    // Non-vacuity for the walk above: `kinds` is built by pairing `kind` and
+    // `file` tokens in document order, so an entry missing its `kind` would
+    // silently pair with the wrong file. The total is what catches that.
+    const declared = [...derived.kinds.values()].flat().length;
+    expect(declared).toBeGreaterThanOrEqual(new Set(PROBE_FILE_CENSUS.map((r) => r.file)).size);
+    // All three instruments are still represented — a table that had lost one
+    // would make the kind-specific readings below vacuous.
+    const all = new Set([...derived.kinds.values()].flat());
+    expect([...all].sort()).toEqual(['GATE_PIN', 'ROUTE_ENUMERATION', 'TRIPWIRE']);
   });
 });
