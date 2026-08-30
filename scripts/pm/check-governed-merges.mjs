@@ -2424,7 +2424,14 @@ async function selfTest() {
   const bothEmpty = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: '', remote: { reachable: true, sha: '', error: null, ref: 'origin/main', remoteName: 'origin' } });
   const bothNull = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: null, remote: { reachable: true, sha: null, error: null, ref: 'origin/main', remoteName: 'origin' } });
   assert('two-unreadable-shas-are-a-FAILED-reading-never-a-match', bothEmpty !== null && bothNull !== null && bothEmpty.reason.includes('NOT MEASURED') && bothNull.reason.includes('NOT MEASURED'), JSON.stringify([bothEmpty, bothNull]));
-  assert('a-remote-that-answers-with-no-commit-says-so-rather-than-matching', bothEmpty.reason.includes('named no commit'), bothEmpty.reason);
+  // ⚠️ `?? ''` rather than a bare dereference, here and in the render fixture
+  // below: these read `.reason` off a verdict whose whole job is to be
+  // non-null, so a regression that returns null makes the ASSERTION throw and
+  // the run dies at the first casualty — every later pin then reports neither
+  // green nor red, which is the #10814 collector lesson wearing a different
+  // hat. Measured: ablating the verdict to `return null` crashed this file at
+  // this line instead of listing what broke.
+  assert('a-remote-that-answers-with-no-commit-says-so-rather-than-matching', (bothEmpty?.reason ?? '').includes('named no commit'), JSON.stringify(bothEmpty));
   const noLocal = remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: 'not-a-sha', remote: reached });
   assert('an-unreadable-LOCAL-tip-refuses-too-not-only-the-remote-one', noLocal !== null && noLocal.reason.includes('did not resolve to a commit id'), JSON.stringify(noLocal));
   assert('a-short-or-abbreviated-sha-is-not-an-object-id', remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/x', localSha: liveTip.slice(0, 9), remote: reached }) !== null);
@@ -2564,7 +2571,7 @@ async function selfTest() {
     window: dateWindowFor('2026-08-17T00:00:00Z'),
     repos: [
       ...allAudited.slice(0, 3),
-      { ...byId.cloud, path: '/w/cloud', status: 'unaudited', reason: remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/cloud', localSha: 'a'.repeat(40), remote: { reachable: false, sha: null, error: 'fatal: repository not found', ref: 'origin/main', remoteName: 'origin' } }).reason },
+      { ...byId.cloud, path: '/w/cloud', status: 'unaudited', reason: remoteFreshnessVerdict({ ref: 'origin/main', path: '/w/cloud', localSha: 'a'.repeat(40), remote: { reachable: false, sha: null, error: 'fatal: repository not found', ref: 'origin/main', remoteName: 'origin' } })?.reason ?? '(the verdict returned no refusal — see the reachability pins above)' },
     ],
     scanned: 9,
     entries: [],
