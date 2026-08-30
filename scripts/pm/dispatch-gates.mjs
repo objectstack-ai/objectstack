@@ -101,7 +101,11 @@
  *     unfiltered-workflow count does. A family in that state scores the same
  *     quiet green for every card whether it still works or not, which is #4690
  *     one level up. Counted in the summary on every run and named, with the
- *     reason it could not reach, under `--residue` — see unreachableFamilies;
+ *     reason it could not reach, under `--residue` — see unreachableFamilies.
+ *     The same fact one grain finer no longer hides (#13312): a DEAD literal
+ *     inside a still-reachable family is marked in that family's `names:` line
+ *     and counted under it — one live baseline used to walk three fabricated
+ *     leads past the reader unlabelled — see deadHintSweep;
  *   - a CONVENTION-TRIGGERED check is one the path derivation can never reach,
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
@@ -1484,7 +1488,7 @@ const GIT_REMOTE_NAMES = new Set(['origin']);
  * POPULATION the gate never declared — a literal scraped out of the script's
  * operational constants and read as the corpus it watches.
  *
- * ## The two shapes this refuses, and why each is closed rather than a guess
+ * ## The three shapes this refuses, and why each is closed rather than a guess
  *
  *   MIME type        `type/subtype` headed by one of the ten IANA top-level
  *                    types, with a subtype carrying no dot. The registry is
@@ -1493,6 +1497,27 @@ const GIT_REMOTE_NAMES = new Set(['origin']);
  *                    added) out of the refusal.
  *   git revision     the `refs/…` namespace git reserves for refs, and the
  *                    `origin/…` remote-tracking shorthand for it.
+ *   `@`-headed name  a first segment beginning with `@` is a scope marker,
+ *                    not a directory: an npm package specifier
+ *                    (`@objectstack/spec`, `@typescript-eslint/parser`), a
+ *                    version-suffixed one (`@objectstack/spec@*`), or a
+ *                    bundler alias (`@/lib/i18n` — the bare `@` head is the
+ *                    whole first segment there). Closed by grammar rather
+ *                    than by registry — npm reserves the leading `@` for
+ *                    scopes — and measured on this tree: ZERO tracked paths
+ *                    have a first segment starting with `@` (git ls-files at
+ *                    5f0a9c4ad), so the refusal cannot touch a live hint. A
+ *                    later segment starting with `@` (`packages/@scope/x`,
+ *                    were one ever tracked) stays untouched: only the FIRST
+ *                    segment carries the namespace claim. The bare scope name
+ *                    itself (`@objectstack`, what a trailing-slash literal
+ *                    trims down to) is the same namespace and refused with it.
+ *                    Measured against
+ *                    #13312's population sweep: 353 of the 598 dead hints
+ *                    riding unannotated in reachable families were this one
+ *                    shape — package specifiers scraped out of dependency
+ *                    ledgers and workspace enumerations and read as watched
+ *                    paths.
  *
  * ## Why refusing is the safe direction here (measured, not assumed)
  *
@@ -1530,6 +1555,7 @@ export function isNonPathNamespace(literal) {
   if (segments.length === 2 && MEDIA_TOP_LEVEL_TYPES.has(segments[0]) && !segments[1].includes('.')) {
     return true;
   }
+  if (segments[0].startsWith('@') && (segments[0].length > 1 || segments.length > 1)) return true;
   return segments.length >= 2 && (segments[0] === 'refs' || GIT_REMOTE_NAMES.has(segments[0]));
 }
 
@@ -3912,6 +3938,14 @@ export function hintReachesTree(hint, files) {
  * Families with no hints at all are NOT unreachable. They declare no
  * population, which is the honest `undetermined` verdict and a different fact.
  *
+ * The family bar is for the VERDICT only. What it must not do — and did, for
+ * as long as this was the only sweep (#13312) — is decide what the reader is
+ * SHOWN: a family kept reachable by one live literal printed its dead
+ * siblings verbatim in the residue's `names:` line, three fabricated leads
+ * riding one real baseline. Display is per-hint now: `deadHintSweep` above is
+ * this same sweep at that grain, and the residue renderer marks and counts
+ * dead literals from it without any verdict moving.
+ *
  * ## What it cannot tell you (#9883 H2, answered rather than papered over)
  *
  * A population that is empty TODAY BY DESIGN — a gate whose corpus the repo
@@ -3935,7 +3969,37 @@ export function hintReachesTree(hint, files) {
  * guard: only the degenerate all-or-nothing shape is refused, never a count
  * that is merely larger than someone expected.
  */
-export function unreachableFamilies(entries, files) {
+/**
+ * The same reachability sweep at PER-HINT grain: every declaring family's DEAD
+ * literals, whether or not a live sibling keeps the family reachable.
+ *
+ * ## The class this exists for (#13312)
+ *
+ * `unreachableFamilies` below reports a family only when its WHOLE population
+ * is dead — the right bar for the unreachable VERDICT, and exactly the wrong
+ * one for the `names:` line a `--residue` reader is handed: one live literal
+ * (a baseline artifact is enough) keeps the family reachable, and every dead
+ * sibling then prints VERBATIM with nothing saying it names a file that has
+ * never existed. `isNonPathNamespace`'s docblock called that survivor class
+ * the expensive direction; this sweep is the instance count it did not have.
+ * Measured on this tree at 5f0a9c4ad, before the `@`-scope refusal landed
+ * beside it: 65 of 151 declaring families carried 598 dead literals in
+ * reachable hint sets, three of the five hints shown for
+ * check:query-options-erasure among them.
+ *
+ * ## What a row is, and what it is NOT
+ *
+ * A row is a DISPLAY fact for the residue renderer: this family declares
+ * `declared` distinct literals and `dead` of them reach nothing tracked. It
+ * moves no verdict — matched/undetermined/silent and the unreachable listing
+ * are untouched, for the reason `unreachableFamilies`' docblock gives: a
+ * single dead hint is ordinary (gates name baseline artifacts and example
+ * paths), so it is ANNOTATED where it is shown rather than promoted to a
+ * verdict. The refusals are shared with the family-grain sweep: an empty
+ * corpus throws here (#4690), and the all-dead recognizer refusal stays in
+ * `unreachableFamilies`, which reads its answer off this one.
+ */
+export function deadHintSweep(entries, files) {
   if (!Array.isArray(files) || files.length === 0) {
     throw new Error(
       'the reachability sweep was handed an empty corpus — zero tracked files is a broken scan, not a clean repo (#4690).',
@@ -3950,16 +4014,18 @@ export function unreachableFamilies(entries, files) {
   };
 
   let declaring = 0;
-  const unreachable = [];
+  const byCheck = new Map();
   for (const [check, entry] of entries) {
     const hints = [...new Set(entry.hints ?? [])];
     if (hints.length === 0) continue; // declares no population — that is `undetermined`
     declaring++;
-    if (hints.some(reaches)) continue;
-    unreachable.push({
+    const deadHints = hints.filter((hint) => !reaches(hint));
+    if (deadHints.length === 0) continue;
+    byCheck.set(check, {
       check,
       entry,
-      dead: hints.map((hint) => ({
+      declared: hints.length,
+      dead: deadHints.map((hint) => ({
         hint,
         deepest: deepestTrackedPrefix(hint, prefixes),
         // Carried on the entry beside `deepest`, for the same reason: the
@@ -3969,6 +4035,14 @@ export function unreachableFamilies(entries, files) {
       })),
     });
   }
+  return { declaring, byCheck };
+}
+
+export function unreachableFamilies(entries, files, sweep = null) {
+  const { declaring, byCheck } = sweep ?? deadHintSweep(entries, files);
+  const unreachable = [...byCheck.values()]
+    .filter((row) => row.dead.length === row.declared)
+    .map(({ check, entry, dead }) => ({ check, entry, dead }));
 
   if (declaring > 0 && unreachable.length === declaring) {
     throw new Error(
@@ -4028,6 +4102,40 @@ export function unreachableClass(dead) {
   // "a real miss, worth triaging" with nothing to triage — see that helper.
   const everMoved = dead.some(({ hint, deepest, target }) => !target && deepest && deepest !== collapseHint(hint));
   return everMoved ? 'layout moved' : 'by construction';
+}
+
+/**
+ * The `names:` fragment for one residue row, with each DEAD literal marked.
+ *
+ * Three of the five hints shown for check:query-options-erasure named files
+ * that have never existed in this tree, printed verbatim (#13312) — the
+ * `names:` line is what a dispatching seat reads to decide which gates a
+ * card's edit reaches, so a dead literal shown unmarked is a fabricated lead
+ * in the one place reserved for real ones. The mark is display-only and the
+ * cap is the listing's own: a dead literal hidden behind the `…` is still
+ * counted, and named with its reason, by `deadNamesNote` below.
+ */
+export function residueNames(hints, deadHints = null, cap = 3) {
+  const unique = [...new Set(hints)];
+  const shown = unique.slice(0, cap).map((h) => (deadHints?.has(h) ? `${h} ✗` : h));
+  return `${shown.join(', ')}${unique.length > cap ? ', …' : ''}`;
+}
+
+/**
+ * The one-line account of a family's dead literals, printed under its residue
+ * row. Same voice as the unreachable listing (`unreachableReason` renders the
+ * WHY for both), because it is the same fact one grain finer: the family is
+ * reachable, and `dead` of its `declared` literals still name nothing this
+ * tree has. Without this line the two facts collapse into one — a live
+ * baseline kept the family out of the unreachable listing AND kept its dead
+ * siblings unannotated, which is how three fabricated leads rode a real one
+ * into every reader's residue (#13312).
+ */
+export function deadNamesNote({ declared, dead }, cap = 3) {
+  return (
+    `      ↳ ⚠ ${dead.length} of ${declared} declared literal(s) reach nothing tracked (marked ✗ where shown) — ` +
+    `dead leads, not population: ${unreachableReason(dead, cap)}`
+  );
 }
 
 export function unreachableReason(dead, cap = 3) {
@@ -5916,7 +6024,11 @@ function derive(paths, { showResidue = false } = {}) {
   // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
   const { byCheck, workflows } = discoverFamilies({ tree: watchHintTree(swept) });
-  const unreachable = unreachableFamilies([...byCheck], swept);
+  // ONE per-hint sweep feeds both readers of dead literals: the unreachable
+  // listing (whole-family grain) and the residue annotations (per-hint grain,
+  // #13312) — so the two cannot disagree about which literals are dead.
+  const sweep = deadHintSweep([...byCheck], swept);
+  const unreachable = unreachableFamilies([...byCheck], swept, sweep);
 
   const matched = new Map();
   const undetermined = [];
@@ -5979,10 +6091,16 @@ function derive(paths, { showResidue = false } = {}) {
     const listing = (title, entries, withHints) => {
       console.log(`\n${title}: ${entries.length} famil(ies).`);
       for (const [check, entry] of [...entries].sort()) {
+        // The per-hint dead annotation (#13312): a literal that reaches
+        // nothing tracked is marked where it is SHOWN and counted where it is
+        // not, so a live baseline can no longer walk its dead siblings past
+        // the reader unlabelled.
+        const deadRow = withHints ? sweep.byCheck.get(check) : null;
         const names = withHints && entry.hints.length
-          ? `   names: ${[...new Set(entry.hints)].slice(0, 3).join(', ')}${entry.hints.length > 3 ? ', …' : ''}`
+          ? `   names: ${residueNames(entry.hints, deadRow ? new Set(deadRow.dead.map((d) => d.hint)) : null)}`
           : '';
         console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]${names}`);
+        if (deadRow) console.log(deadNamesNote(deadRow));
         // The gate's own account of why it names nothing (#10542), printed
         // against the family rather than only counted in the residue: a reader
         // looking at this listing is deciding whether to go READ the gate, and
@@ -9935,15 +10053,19 @@ function selfTest() {
   // column that justifies a lead has to say which.
   // The specimen has to be a hint that DECIDES a lead. An inherited path that
   // the family's own gate script covers answers through the IDENTITY key
-  // first, and one CI schedules answers through the TRIGGER key — both correct,
-  // both silent about this label — so the specimen is picked from the pairs
-  // where neither of those can answer.
+  // first, one CI schedules answers through the TRIGGER key, and one a
+  // resolvable job `if:` reaches answers through the JOB-FILTER key (#12956) —
+  // all correct, all silent about this label — so the specimen is picked from
+  // the pairs where none of those can answer. (The third exclusion surfaced
+  // when #13312's @-scope refusal thinned the inherited pairs and the find
+  // landed on a job-filtered family first.)
   const inheritedLead = inheriting
     .flatMap(([, entry]) => [...entry.hintOrigin].map(([hint, mod]) => [entry, hint, mod]))
     .find(
       ([entry, hint]) =>
         !(entry.files ?? []).some((f) => hintCovers(f, hint)) &&
         !coveringTrigger(entry, hint) &&
+        !coveringJobFilter(entry, hint) &&
         coveringKey(entry, hint)?.key === hint,
     );
   t(
@@ -10181,6 +10303,53 @@ function selfTest() {
   const reasonOf = (name) => unreachableReason(sweep.find((u) => u.check === name)?.dead ?? []);
   t('a family whose whole declared population is absent from the tree is unreachable', sweptNames.includes('check:never-was'));
   t('one live hint clears a family, however many dead ones it also names', !sweptNames.includes('check:reaches'));
+
+  // ── The per-hint sweep: a live sibling no longer hides its dead ones (#13312) ──
+  //
+  // check:query-options-erasure printed three fixture filenames that have
+  // never existed in this tree, verbatim and unannotated, because its live
+  // baseline kept the family out of the unreachable listing — the survivor
+  // class isNonPathNamespace's docblock names as the expensive direction.
+  // These pin the finer grain: the dead literal is swept per family, the live
+  // one is untouched, and a family with nothing dead earns no row at all.
+  const perHint = deadHintSweep(sweepEntries, treeFixture);
+  const mixedRow = perHint.byCheck.get('check:reaches');
+  t('a dead literal is swept out of a REACHABLE family, not only an unreachable one', mixedRow?.dead.map((d) => d.hint).join() === 'application/json');
+  t('...with the family total beside it, so the note can say N of M', mixedRow?.declared === 2);
+  t('a fully-dead family carries the same row shape at both grains', perHint.byCheck.get('check:never-was')?.dead.length === 1);
+  t('a family whose hints all reach earns no per-hint row', !perHint.byCheck.has('check:extensionless'));
+  t('a family declaring nothing earns no per-hint row — that is undetermined, a different fact', !perHint.byCheck.has('check:declares-nothing'));
+  t(
+    'the family sweep answers the same from an injected per-hint sweep — one sweep, two grains, no disagreement',
+    unreachableFamilies(sweepEntries, treeFixture, perHint).map((u) => u.check).join() === sweptNames.join(),
+  );
+  let perHintEmpty = false;
+  try {
+    deadHintSweep(sweepEntries, []);
+  } catch {
+    perHintEmpty = true;
+  }
+  t('the per-hint sweep refuses an empty corpus like the family sweep it feeds', perHintEmpty);
+
+  // The renderer half, driven by a PLANTED dead literal in a reachable family
+  // — the delivery control #13312's triage names: the planted literal is
+  // marked where it is shown, the real hint beside it is NOT (the annotation
+  // must not eat the hint set), and the note counts the dead against the
+  // declared total in the unreachable listing's own voice.
+  const planted = ['packages/spec/src', 'scripts/__planted_never_existed__.mjs'];
+  const plantedRow = deadHintSweep([['check:planted', fam(planted)]], treeFixture).byCheck.get('check:planted');
+  t('a planted dead literal in a reachable family IS swept', plantedRow?.dead.map((d) => d.hint).join() === 'scripts/__planted_never_existed__.mjs');
+  const plantedNames = residueNames(planted, new Set(plantedRow.dead.map((d) => d.hint)));
+  t('the names line marks the planted literal as dead', plantedNames.includes('scripts/__planted_never_existed__.mjs ✗'));
+  t('...and leaves the real hint beside it unmarked', plantedNames.startsWith('packages/spec/src,') && !plantedNames.includes('packages/spec/src ✗'));
+  const plantedNote = deadNamesNote(plantedRow);
+  t('the note counts the dead against the declared total', plantedNote.includes('1 of 2 declared literal(s)'));
+  t("...and names WHY in the unreachable listing's own voice", /never was a repo path/.test(plantedNote));
+  t(
+    'the note is capped like the listing it sits under, never an inventory',
+    /…$/.test(deadNamesNote({ declared: 9, dead: [1, 2, 3, 4].map((n) => ({ hint: `no/such/p-${n}`, deepest: '' })) })),
+  );
+  t('a dead literal hidden behind the names cap is still counted, never silently dropped', residueNames(['a/b', 'c/d', 'e/f', 'g/h'], new Set(['g/h'])) === 'a/b, c/d, e/f, …');
   t(
     'a family that declares NO population is NOT unreachable — that is the undetermined verdict, a different fact',
     !sweptNames.includes('check:declares-nothing'),
@@ -10290,6 +10459,18 @@ function selfTest() {
   t('a media-type head with a DOTTED second segment is a path, not a MIME type', !isNonPathNamespace('image/logo.png'));
   t('a bare word is left to the too-generic rule that already owns it', !isNonPathNamespace('examples'));
   t('a directory merely STARTING with a refused word is untouched', !isNonPathNamespace('origins/data.ts') && !isNonPathNamespace('refspec/x.ts'));
+  // The third shape (#13312): an @-headed first segment is a scope marker —
+  // npm's grammar, not this repo's layout — and 353 of the 598 dead literals
+  // riding unannotated in reachable families were exactly this, package
+  // specifiers scraped out of dependency ledgers and read as watched paths.
+  t('an npm package specifier is not a path population', isNonPathNamespace('@objectstack/spec'));
+  t('nor with a version suffix on it', isNonPathNamespace('@objectstack/spec@*'));
+  t('nor a bundler alias whose bare @ is the whole first segment', isNonPathNamespace('@/lib/i18n'));
+  t('nor the bare scope name a trailing-slash literal trims down to', isNonPathNamespace('@objectstack'));
+  t('an owner/repo slug is NOT refusable by shape — two bare words are what a path looks like', !isNonPathNamespace('objectstack-ai/objectstack'));
+  t('a LATER @-segment is untouched — only the first segment carries the namespace claim', !isNonPathNamespace('packages/@scope/x'));
+  t('the extractor drops a scraped package specifier', extractWatchHints("const PKG = '@objectstack/driver-memory';").length === 0);
+  t('while a real path beside a package specifier survives', extractWatchHints("const PKG = '@objectstack/spec'; const P = 'packages/spec/src';").join() === 'packages/spec/src');
   // Through the extractor, which is where it actually bites.
   t('the extractor drops a scraped MIME type', !extractWatchHints("const H = {'content-type': 'application/json'};").includes('application/json'));
   t('the extractor drops a scraped git ref', extractWatchHints("const R = 'refs/remotes/origin/main';").length === 0);
@@ -10311,6 +10492,21 @@ function selfTest() {
     liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel))]);
   }
   t('the repaired families declare no population at all, so the sweep skips them', unreachableFamilies([...liveSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0);
+  // The same live pin for the @-scope refusal (#13312): the two families whose
+  // ENTIRE population was a package-name ledger — the shape os-elon's comment
+  // measured — must be out of the unreachable listing, landed in `undetermined`
+  // rather than renamed into a different phantom.
+  const packageLedgerFamilySources = ['scripts/check-driver-memory-census.mjs', 'scripts/check-test-completeness.mjs'];
+  const ledgerSweepEntries = [];
+  for (const rel of packageLedgerFamilySources) {
+    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+    t(`${rel} no longer declares a phantom package-name population`, !famHints.some((h) => h.startsWith('@')));
+    ledgerSweepEntries.push([rel, fam(famHints)]);
+  }
+  t(
+    'the package-ledger families left the unreachable listing — the phantom is gone, not renamed',
+    unreachableFamilies([...ledgerSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0,
+  );
 
   // ── The unreachable listing prints by DEFAULT (#10097, option A) ──────────
   //

@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   syncAudienceBindingSuggestions,
+  reapOrganizationLessSuggestions,
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
@@ -366,5 +367,130 @@ describe('dismissAudienceBindingSuggestion', () => {
     await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
     await expect(dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
       .rejects.toThrow(SuggestionStateError);
+  });
+});
+
+/**
+ * [#12981] The four `catch {}` sites in this module — three in
+ * `syncAudienceBindingSuggestions` (confirm-observed UPDATE, create INSERT,
+ * prune DELETE) and one in `reapOrganizationLessSuggestions`.
+ *
+ * The pass is CONVERGENT, so its all-zero outcome is the normal steady-state
+ * boot. That is exactly what made a wholly refused pass invisible: it returned
+ * the same zeros, and the summary line is suppressed on those zeros.
+ */
+describe('[#12981] a refused suggestion write is distinguishable from a settled pass', () => {
+  /** A refusal a real driver signals for a genuine failure. */
+  const outage = () => new Error('store is refusing writes');
+  /** The one refusal this module has always documented as benign. */
+  const race = () => Object.assign(new Error('duplicate key value'), { code: '23505' });
+
+  it('counts a refused CREATE and lifts the suppressed summary line', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.insert = async () => { throw outage(); };
+    const infos: Array<{ msg: string; meta?: any }> = [];
+    const warns: Array<{ msg: string; meta?: any }> = [];
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+      info: (msg: string, meta?: any) => { infos.push({ msg, meta }); },
+      warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
+    });
+
+    expect(out.created).toBe(0);
+    expect(out.refused).toBe(1);
+    // ⛔ Before the repair the summary was gated on `created + confirmed +
+    // pruned > 0`, so this pass printed NOTHING. The widened gate is the pin.
+    expect(infos).toHaveLength(1);
+    expect(infos[0].meta).toMatchObject({ refused: 1 });
+    // ...and the refusal is reported in its own right, with the consequence.
+    expect(warns).toHaveLength(1);
+    expect(warns[0].msg).toContain('REFUSED');
+    expect(warns[0].msg).toContain('no admin is ever prompted');
+  });
+
+  it('⭐ EXCLUDES the documented unique-index race — it is not a degradation', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.insert = async () => { throw race(); };
+    const warns: string[] = [];
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+      warn: (m: string) => { warns.push(m); },
+    });
+
+    // A concurrent sync created the row this pass wanted; the end state is
+    // correct, so this must NOT be reported as a lost write. Reporting it
+    // would fire on healthy deployments that reconcile from two entry points.
+    expect(out.created).toBe(0);
+    expect(out.refused).toBe(0);
+    expect(warns).toEqual([]);
+  });
+
+  it('counts a refused CONFIRM of an already-bound suggestion', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    // A pending row whose binding already exists ⇒ the confirm-observed UPDATE.
+    ql.tables.sys_permission_set.push({ id: 'ps_ro', name: 'crm_readonly' });
+    ql.tables.sys_position_permission_set.push({
+      id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_ro',
+    });
+    ql.tables.sys_audience_binding_suggestion.push({
+      id: 'sug_1', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
+      anchor: 'everyone', status: 'pending',
+    });
+    ql.update = async () => { throw outage(); };
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, { warn: () => {} });
+    expect(out.confirmedObserved).toBe(0);
+    expect(out.refused).toBe(1);
+    // The row is still pending — the console goes on nagging for a decision
+    // already made, which is what the count now makes legible.
+    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('pending');
+  });
+
+  it('counts a refused PRUNE of an undeclared suggestion', async () => {
+    const ql = makeQl([]); // nothing declared ⇒ the pending row below is pruned
+    ql.tables.sys_audience_binding_suggestion.push({
+      id: 'sug_gone', package_id: 'com.gone.pkg', permission_set_name: 'gone',
+      anchor: 'everyone', status: 'pending',
+    });
+    ql.delete = async () => { throw outage(); };
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, { warn: () => {} });
+    expect(out.pruned).toBe(0);
+    expect(out.refused).toBe(1);
+    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
+  });
+
+  it('reports a refused REAP, naming what the surviving rows do to every tenant', async () => {
+    const ql = makeQl([]);
+    ql.tables.sys_audience_binding_suggestion.push({
+      id: 'sug_orphan', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
+      anchor: 'everyone', status: 'confirmed', organization_id: null,
+    });
+    ql.delete = async () => { throw outage(); };
+    const warns: Array<{ msg: string; meta?: any }> = [];
+
+    const reaped = await reapOrganizationLessSuggestions(ql, {
+      warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
+    });
+
+    // ⛔ The return type stays `number` — it is exported. The report is the
+    // channel, and before the repair there was none: `reaped === 0` alone is
+    // also what "nothing to reap" returns.
+    expect(reaped).toBe(0);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].msg).toContain('REFUSED');
+    expect(warns[0].msg).toContain('readable by EVERY tenant');
+    expect(warns[0].meta).toMatchObject({ refused: 1 });
+  });
+
+  it('adds no steady-state noise — a settled pass reports no refusal', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    await syncAudienceBindingSuggestions(ql);
+    const warns: string[] = [];
+    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+      warn: (m: string) => { warns.push(m); },
+    });
+    expect(out.refused).toBe(0);
+    expect(warns).toEqual([]);
   });
 });
