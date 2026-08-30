@@ -22,6 +22,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  type EngineDeleteDispatchInput,
+  type EngineUpdateDispatchData,
+  type EngineUpdateDispatchInput,
+} from '@objectstack/metadata-core';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveUserAuthzGrants } from './resolve-authz-context.js';
 import type { ResolveUserAuthzGrantsOptions } from './resolve-authz-context.js';
@@ -94,13 +101,21 @@ function makeSeamQl(tables: Record<string, any[]>) {
     async insert(object: string, row: any) {
       await writeOp(object, 'insert', () => { (tables[object] ??= []).push(row); });
     },
-    async update(object: string, patch: any, where: any) {
+    // Both write verbs open with the PRODUCER's dispatch predicate
+    // (`check:engine-double-contract`): a call the real `ObjectQL.update` /
+    // `ObjectQL.delete` refuses is refused here too, before any row moves —
+    // this double can never become the lax fake of #4434.
+    async update(object: string, data: EngineUpdateDispatchData, options?: EngineUpdateDispatchInput) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
       await writeOp(object, 'update', () => {
-        for (const r of (tables[object] ?? []).filter((r) => matches(r, where))) Object.assign(r, patch);
+        const where = dispatch.kind === 'by-id' ? { id: dispatch.id } : (options?.where ?? {});
+        for (const r of (tables[object] ?? []).filter((r) => matches(r, where))) Object.assign(r, data);
       });
     },
-    async delete(object: string, where: any) {
+    async delete(object: string, options?: EngineDeleteDispatchInput) {
+      const dispatch = assertEngineDeleteDispatch(options);
       await writeOp(object, 'delete', () => {
+        const where = dispatch.kind === 'by-id' ? { id: dispatch.id } : (options?.where ?? {});
         tables[object] = (tables[object] ?? []).filter((r) => !matches(r, where));
       });
     },
@@ -248,7 +263,7 @@ describe('pin 2 — read-after-write on the writing node (invalidation, not TTL)
     await resolveExpectingZeroReads(ql, 'u1', OPTS);
 
     // Revoke through the engine — the same seam a real revoke uses.
-    await ql.delete('sys_user_permission_set', { user_id: 'u1' });
+    await ql.delete('sys_user_permission_set', { where: { user_id: 'u1' }, multi: true });
 
     // ⭐ Assert the END of the chain: the capability is GONE, not "the cache
     // was cleared". Same injected clock — nothing here is allowed to lean on
@@ -287,7 +302,7 @@ describe('pin 2 — read-after-write on the writing node (invalidation, not TTL)
     const epochBefore = ql.epoch.current;
 
     // The once-a-minute `last_activity_at` cadence, through the engine.
-    await ql.update('sys_session', { last_activity_at: T + 60_000 }, { id: 's1' });
+    await ql.update('sys_session', { last_activity_at: T + 60_000 }, { where: { id: 's1' } });
 
     // Control: the write DID advance the engine's epoch — the cache survived
     // by its watched-set filter, not because the write was invisible.
@@ -497,7 +512,7 @@ describe('pin 9 — two nodes over one database', () => {
     expect(before.permissions).toContain('admin_full_access');
     await resolveExpectingZeroReads(node2, 'u1', OPTS); // control: node 2 is serving its entry
 
-    await node1.delete('sys_user_permission_set', { user_id: 'u1' });
+    await node1.delete('sys_user_permission_set', { where: { user_id: 'u1' }, multi: true });
 
     const after = await resolveUserAuthzGrants(node2, 'u1', OPTS);
     expect(after.permissions).not.toContain('admin_full_access');
@@ -514,7 +529,7 @@ describe('pin 9 — two nodes over one database', () => {
     const before = await resolveUserAuthzGrants(node2, 'u1', at(T));
     expect(before.permissions).toContain('admin_full_access');
 
-    await node1.delete('sys_user_permission_set', { user_id: 'u1' });
+    await node1.delete('sys_user_permission_set', { where: { user_id: 'u1' }, multi: true });
 
     // Node 2 heard nothing. Inside the TTL it answers from its entry — this
     // IS the staleness window the deployment accepted by setting a TTL, and
