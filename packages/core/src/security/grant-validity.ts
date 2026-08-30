@@ -59,6 +59,47 @@ export function isGrantActive(row: GrantValidityWindow | null | undefined, nowMs
 }
 
 /**
+ * The earliest FUTURE validity boundary among `rows`, in epoch ms — or
+ * `undefined` when no consulted row can change its `isGrantActive` verdict by
+ * clock movement alone.
+ *
+ * [#11971, #11633 §4 leg B constraint B.1] A cached grants envelope freezes a
+ * validity decision: a grant whose `valid_until` passes DURING the cache TTL
+ * keeps resolving until the entry expires, and a `valid_from` that arrives
+ * during it stays unresolved. **No write occurs at either boundary**, so
+ * write-invalidation is structurally blind to this class and the entry's
+ * expiry timer is the only mechanism that can catch it. The grants cache
+ * therefore expires an entry at `min(ttl, nextBoundary)` — this function is
+ * the `nextBoundary` half, computed with the same parser `isGrantActive`
+ * reads bounds with, so the two can never disagree about when a row flips.
+ *
+ * Both directions of flip count: a future `valid_until` (active → expired)
+ * AND a future `valid_from` (not-yet-active → active). Bounds that are
+ * absent, already past, or present-but-unparseable contribute nothing — an
+ * unparseable bound fails the row closed *permanently* (see `isGrantActive`),
+ * so there is no future instant at which its verdict changes.
+ */
+export function nextGrantValidityBoundary(
+  rows: Iterable<GrantValidityWindow | null | undefined>,
+  nowMs: number,
+): number | undefined {
+  let next: number | undefined;
+  for (const row of rows) {
+    if (!row) continue;
+    const from = toEpochMs((row as any).valid_from ?? (row as any).validFrom);
+    const until = toEpochMs((row as any).valid_until ?? (row as any).validUntil);
+    for (const bound of [from, until]) {
+      // NaN (unparseable) fails both comparisons and is skipped — fail-closed
+      // rows never flip, so they never set a boundary.
+      if (bound !== undefined && bound > nowMs && (next === undefined || bound < next)) {
+        next = bound;
+      }
+    }
+  }
+  return next;
+}
+
+/**
  * True when a grant row carries a `valid_until` that has already passed —
  * i.e. it WAS active and expired (not merely not-yet-active). The explain
  * engine uses this to report the dedicated "held until … — expired"
