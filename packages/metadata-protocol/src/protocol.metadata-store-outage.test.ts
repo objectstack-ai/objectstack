@@ -84,9 +84,17 @@ function emptyRegistry(items: Record<string, any> = {}) {
  * An engine whose every read REJECTS with `error` — the shape of a metadata
  * store the protocol cannot reach.
  */
-function engineThatCannotBeRead(error: () => unknown, registryItems: Record<string, any> = {}) {
+function engineThatCannotBeRead(
+    error: (object: string) => unknown,
+    registryItems: Record<string, any> = {},
+) {
+    // [#13324] The object reaches the factory, so a missing-table fault can be
+    // phrased for the table that was actually read. A driver never names one
+    // table while failing a read of another, and `isMissingTableError` now
+    // tells those two apart — a fixed phrase would make this fixture assert
+    // the benign verdict for a fault no driver produces here.
     const reject = vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
-                                       assertEngineFindOnePredicate(object, query); throw error(); });
+                                       assertEngineFindOnePredicate(object, query); throw error(object); });
     return {
         registry: emptyRegistry(registryItems),
         find: reject,
@@ -104,8 +112,8 @@ function engineWithRows(rows: any[] = [], registryItems: Record<string, any> = {
 }
 
 /** The real driver phrasings for "the table has not been provisioned yet". */
-const missingTable = () =>
-    Object.assign(new Error('SQLITE_ERROR: no such table: sys_metadata'), { code: 'SQLITE_ERROR' });
+const missingTable = (object = 'sys_metadata') =>
+    Object.assign(new Error(`SQLITE_ERROR: no such table: ${object}`), { code: 'SQLITE_ERROR' });
 
 /** An outage: the rows may well exist and simply were not seen. */
 const connectionRefused = () =>
