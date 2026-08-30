@@ -136,7 +136,11 @@
         "$TURBO_ROOT$/packages/services/service-automation/src/**",
         "$TURBO_ROOT$/examples/app-showcase/src/data/objects/contact.object.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/system/translations/index.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts"
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/capability-map.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/command-center-jsx.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/start-here.page.ts",
+        "$TURBO_ROOT$/sdui.manifest.json"
       ]
     },
     "@objectstack/cloud-connection#test": {

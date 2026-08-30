@@ -553,6 +553,23 @@ jobs:
       - name: sdui-parser stays in lockstep with objectui's copy
         run: pnpm check:sdui-lockstep
 
+      # The checked-in SDUI public-tier manifest (#12924, ruled 2026-08-29: wire
+      # it). `resolveSduiManifest()` degrades to parse-only SILENTLY when the
+      # repo-root `sdui.manifest.json` is absent or unreadable, so nothing in
+      # the production path ever says "the gate lost its whitelist" — this step
+      # is the thing that notices. Offline record checks only (existence, shape,
+      # sha256 vs the provenance record, record pin vs `.objectui-sha`): the
+      # regenerate-and-compare half runs where a regeneration can (the Node
+      # generator needs the published @object-ui set — see
+      # scripts/gen-sdui-manifest-node.mjs), and a pin bump goes red HERE until
+      # it has been re-run — the same moment the lockstep step above forces the
+      # parser parity re-verification, with an objectui checkout guaranteed in
+      # hand. Unfiltered for the same reason as its neighbour: filtering to the
+      # artefact would go dormant on exactly the PR that moves the pin.
+      # Direct invocation per the GATE INVOCATION IDIOM at the top of this file.
+      - name: SDUI manifest is present, intact and fresh at the objectui pin
+        run: node scripts/check-sdui-manifest.mjs --self-test && node scripts/check-sdui-manifest.mjs
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved
@@ -4746,6 +4763,18 @@ jobs:
       # neighbours.
       - name: Check docs YAML examples parse against live spec schemas
         run: pnpm --filter @objectstack/spec run check:yaml-examples
+
+      # ADR-0082 D4's spec↔registry react-block declaration-parity ratchet, fed
+      # by the checked-in repo-root manifest (#12924 execution point 1: the same
+      # artefact resolves this gate's EXTERNAL_INPUT_REQUIRED standing — the
+      # input it always lacked now lives in the tree, held fresh by the
+      # check-sdui-manifest step in the lint job). Baseline-ratcheted: only a
+      # divergence NEW since packages/spec/react-declaration-parity.baseline.json
+      # reds, so wiring it per-PR promotes the cut-rc-only run without
+      # manufacturing a standing red. Reads spec src/ through tsx like its
+      # neighbours — no dist. ~5 s.
+      - name: Ratchet spec-vs-registry react declaration parity against the checked-in manifest
+        run: MANIFEST="$PWD/sdui.manifest.json" pnpm --filter @objectstack/spec check:react-declaration-parity --baseline react-declaration-parity.baseline.json --strict
 
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing
