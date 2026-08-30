@@ -4,6 +4,12 @@
  * #4728 / #4825 — the classifications that decide whether a driver failure may
  * be silenced.
  *
+ * [#13279] Moved here with the module it tests, from
+ * `packages/metadata/src/utils/schema-sync-errors.test.ts`. Unchanged except
+ * for the import path: `@objectstack/core`'s authorization resolver now asks
+ * `isMissingTableError`, so the predicate lives in the package both sides
+ * already depend on. See the module's own `## Home` section.
+ *
  * Both directions are pinned deliberately, for both predicates. A test suite
  * that only proves the benign case is recognised would pass just as happily on
  * `() => true`, which is exactly the bug being fixed (one benign reason excusing
@@ -11,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isMissingTableError, isSchemaAlreadyExistsError } from './schema-sync-errors.js';
+import { isMissingTableError, isSchemaAlreadyExistsError } from './driver-error-classification.js';
 
 describe('isSchemaAlreadyExistsError', () => {
     describe('benign — the table/column is already provisioned', () => {

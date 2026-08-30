@@ -20,6 +20,21 @@
  * and "the read failed" are different facts, and only one of them licenses
  * the sentence "this user holds nothing".
  *
+ * ## …and "the read failed" turned out to be TWO facts (ruled 2026-08-30, A)
+ *
+ * A read ALSO throws when the table was never PROVISIONED — a real engine,
+ * wired and reachable, whose `sys_*` tables were never created. There "this
+ * user holds nothing" is TRUE, not invented, so failing loud would refuse
+ * service to a correctly-configured deployment. The first implementation of
+ * this card did exactly that and four CI suites measured it.
+ *
+ * So `tryFind` raises this error only for a read failure that is NOT
+ * positively identified as an unprovisioned table, asking the one relocated
+ * `isMissingTableError` predicate (`@objectstack/types`) rather than a second
+ * copy. The boundary, the ruling's verbatim text and the false-positive risk
+ * signed off with it are written beside that call in `resolve-authz-context.ts`;
+ * both directions are pinned in `authz-store-unavailable.test.ts` §4.
+ *
  * ## Maintainer ruling, 2026-08-30, verbatim 「第一批其余同意」
  *
  * > `tryFind` 区分「无行」与「读失败」,读失败 fail-loud —— 权限库不可达时

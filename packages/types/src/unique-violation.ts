@@ -119,7 +119,9 @@ interface UniqueViolationSignature {
  *    (from `service-messaging`).
  *  - `1062` — the same MySQL condition on the channel mysql2 *also* sets. The
  *    one addition, and not a new dialect: `@objectstack/metadata`'s
- *    `schema-sync-errors.ts` already reads `errno` alongside `code` for exactly
+ *    `driver-error-classification.ts` (this package since #13279; it was
+ *    `metadata/src/utils/schema-sync-errors.ts`) already reads `errno`
+ *    alongside `code` for exactly
  *    these drivers, so a code-only read is a known gap rather than a decision.
  *  - `UNIQUE_VIOLATION` — the PLATFORM's own registered code
  *    (`error-code-ledger.zod.ts`), added by #13197 when `driver-memory` grew

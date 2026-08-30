@@ -246,3 +246,171 @@ describe('[#13279] every transport that authorizes through resolveAuthzContext',
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// 4. ⭐⭐ THE BOUNDARY, PINNED IN BOTH DIRECTIONS.
+//
+//    Maintainer ruling, 2026-08-30, 第 5 场总监席决裁批 #9, verbatim:
+//
+//      > 签字在案:基于 driver 错误码的表缺失判定获准在安全路径上门控响亮性;
+//      > 其假阳方向(误判「表缺失」⇒ 静默恢复安静 403)是本裁定接受的已知风险,
+//      > 须在谓词旁注释写明并以测试钉住两个方向(真 outage ⇒ 响;真未 provision
+//      > ⇒ 零能力为真答案,不响)。
+//
+//    This section IS the "以测试钉住两个方向" half; the "谓词旁注释" half is the
+//    comment beside `isMissingTableError` in `tryFind`'s catch.
+//
+//    Why BOTH are load-bearing, and why neither alone would do:
+//      - only the LOUD direction  ⇒ satisfied by a resolver that throws at
+//        everything, which refuses service to correctly-configured deployments
+//        whose `sys_*` tables were never created (measured: it turned four CI
+//        suites red — client CRUD, runtime notifications, and two integration
+//        noise guards).
+//      - only the QUIET direction ⇒ satisfied by the pre-#13279 `return []`,
+//        i.e. the defect itself: an outage answered as a capability denial.
+//
+//    ⚠️ The accepted risk lives in the first direction. A false POSITIVE from
+//    `isMissingTableError` — an outage mis-read as "not provisioned" — restores
+//    the quiet 403 with no other symptom anywhere. Every case below is a shape
+//    that must NOT be mis-read, so this table is the risk's tripwire. Add to it
+//    rather than relax it.
+// ---------------------------------------------------------------------------
+
+/** The tables `resolveAuthzContext` reads; a fake engine answers all of them alike. */
+const qlThrowing = (make: (object: string) => unknown) => ({
+  find: async (object: string) => { throw make(object); },
+});
+
+/**
+ * Shapes that are NOT "this table was never provisioned", each with the reason
+ * a naive predicate might have said otherwise.
+ */
+const OUTAGE_SHAPES: ReadonlyArray<readonly [string, (object: string) => unknown]> = [
+  ['a bare connection failure', () => new Error('permission store unreachable')],
+  ['ECONNREFUSED from the driver', () => Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })],
+  ['a statement timeout', () => Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })],
+  [
+    'a PERMISSION denial on the table — the row exists, we were refused it',
+    (o: string) => Object.assign(new Error(`permission denied for table ${o}`), { code: '42501' }),
+  ],
+  [
+    '#6347 the Postgres missing-COLUMN phrase, which CONTAINS a legal missing-table phrase',
+    (o: string) => Object.assign(new Error(`column "x" of relation "${o}" does not exist`), { code: '42703' }),
+  ],
+  [
+    '#13324 a missing-table phrase naming a DIFFERENT relation (a view over a dropped base)',
+    () => new Error('no such table: main.some_other_base'),
+  ],
+  ['an unrecognised driver error — unrecognised must never mean benign', () => Object.assign(new Error('opaque'), { code: 'SQLITE_BUSY' })],
+];
+
+describe('[#13279 option A] ⭐ THE OUTAGE DIRECTION — a read failure that is not an unprovisioned table stays LOUD', () => {
+  it.each(OUTAGE_SHAPES)('%s ⇒ AuthzStoreUnavailableError (503 SERVICE_UNAVAILABLE)', async (_label, make) => {
+    const r = await settle(resolveAuthzContext({ ql: qlThrowing(make), headers: {}, ...SESSION }));
+    expect(r.ok).toBe(false);
+    expect(isAuthzStoreUnavailableError((r as any).e)).toBe(true);
+    expect((r as any).e.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+    expect((r as any).e.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+  });
+
+  it('⭐ a store that is provisioned but loses ONE table mid-resolution is still loud', async () => {
+    // The quiet branch must not leak past the table it is about. Everything
+    // resolves normally except `sys_user_permission_set`, which fails for a
+    // reason that is not "never provisioned".
+    const ql = {
+      find: async (object: string) => {
+        if (object === 'sys_user_permission_set') throw new Error('connection terminated unexpectedly');
+        return [];
+      },
+    };
+    const r = await settle(resolveAuthzContext({ ql, headers: {}, ...SESSION }));
+    expect(r.ok).toBe(false);
+    expect(isAuthzStoreUnavailableError((r as any).e)).toBe(true);
+    expect((r as any).e.object).toBe('sys_user_permission_set');
+  });
+});
+
+/**
+ * Genuine "the table was never created", in every spelling a supported driver
+ * produces. This is the shape a first boot against a fresh database makes, and
+ * `packages/runtime`'s `notifications.hono.integration.test.ts` names the
+ * deployment shape `ABSENT_AUTHZ_TABLES`.
+ */
+const UNPROVISIONED_SHAPES: ReadonlyArray<readonly [string, (object: string) => unknown]> = [
+  ['SQLite / libsql message', (o: string) => new Error(`no such table: ${o}`)],
+  ['PostgreSQL SQLSTATE 42P01', (o: string) => Object.assign(new Error(`relation "${o}" does not exist`), { code: '42P01' })],
+  ['MySQL / MariaDB errno 1146', (o: string) => Object.assign(new Error(`Table 'app.${o}' doesn't exist`), { errno: 1146 })],
+  [
+    'the PRODUCTION wrapper shape — driver phrase on `cause`, not on the outer message',
+    // What `SqlDriver.backendStatementFaultError` actually raises: a wrapper
+    // that deliberately withholds the verdict, with the driver's own error
+    // attached. The predicate follows `cause`; if it stopped at the outer
+    // message this would be read as an outage and first boot would 503.
+    (o: string) => Object.assign(new Error('backend statement fault'), { cause: new Error(`no such table: ${o}`) }),
+  ],
+];
+
+describe('[#13279 option A] ⭐ THE UNPROVISIONED DIRECTION — a never-provisioned table resolves QUIETLY', () => {
+  it.each(UNPROVISIONED_SHAPES)(
+    '%s ⇒ zero capabilities, because that is the TRUE answer and not a fabrication',
+    async (_label, make) => {
+      const ctx = await resolveAuthzContext({ ql: qlThrowing(make), headers: {}, ...SESSION });
+      expect(ctx.userId).toBe(USER);
+      expect(ctx.systemPermissions).toEqual([]);
+      expect(ctx.permissions).toEqual([]);
+      // ONLY the unconditional `everyone` audience anchor (ADR-0090 D5), which
+      // every authenticated member holds without any read happening. Asserted
+      // exactly rather than as "empty": the point is that NOTHING was invented
+      // from a read that failed, and `toEqual([])` would have been a claim
+      // about the anchor rather than about this repair.
+      expect(ctx.positions).toEqual(['everyone']);
+    },
+  );
+
+  it('⭐ resolves IDENTICALLY to a reachable, genuinely empty store', async () => {
+    // The strongest statement of "this is the true answer": an unprovisioned
+    // deployment and an empty-but-provisioned one are the same fact — nothing
+    // is granted — so they must be the same envelope, byte for byte. Anything
+    // less means the quiet branch is quietly different.
+    const unprovisioned = await resolveAuthzContext({
+      ql: qlThrowing((o) => new Error(`no such table: ${o}`)), headers: {}, ...SESSION,
+    });
+    const empty = await resolveAuthzContext({ ql: qlEmpty(), headers: {}, ...SESSION });
+    expect(JSON.stringify(unprovisioned)).toBe(JSON.stringify(empty));
+    // CONTROL against a vacuous comparison: a HEALTHY store differs from both.
+    const healthy = await resolveAuthzContext({ ql: qlHealthy(), headers: {}, ...SESSION });
+    expect(JSON.stringify(healthy)).not.toBe(JSON.stringify(empty));
+  });
+
+  it('⭐ `resolveUserAuthzGrants` inherits the quiet direction too', async () => {
+    const grants = await resolveUserAuthzGrants(qlThrowing((o) => new Error(`no such table: ${o}`)), USER);
+    expect(grants.systemPermissions).toEqual([]);
+    expect(grants.org_user_ids).toEqual([USER]);
+  });
+});
+
+describe('[#13279 option A] the classifier is the RELOCATED one, not a second copy', () => {
+  it('⭐ `resolve-authz-context.ts` imports `isMissingTableError` from `@objectstack/types`', () => {
+    // The ruling's structural half, pinned in source. A local re-spelling of
+    // the predicate here would pass every behavioural test above and still be
+    // the duplication-drift the ruling rejected (option B).
+    const src = readFileSync(join(REPO_ROOT, 'packages/core/src/security/resolve-authz-context.ts'), 'utf8');
+    expect(src).toMatch(/import \{ isMissingTableError \} from '@objectstack\/types';/);
+    expect(src).not.toMatch(/function\s+isMissingTableError/);
+    // ⛔ core must not IMPORT `@objectstack/metadata` — metadata depends on
+    // core, and that edge is why the predicate moved rather than being imported.
+    // (Prose mentions of the old home are fine and deliberate; an import is not.)
+    expect(src).not.toMatch(/from '@objectstack\/metadata/);
+  });
+
+  it('⭐ the SIGNED-OFF RISK is written beside the predicate, as the ruling requires', () => {
+    // The audit trail is a deliverable of the ruling, not decoration: the
+    // false-positive direction is accepted only BECAUSE it is recorded where
+    // the next author will read it before widening the predicate.
+    const src = readFileSync(join(REPO_ROOT, 'packages/core/src/security/resolve-authz-context.ts'), 'utf8');
+    const catchBody = src.slice(src.indexOf('} catch (err) {'), src.indexOf('throw new AuthzStoreUnavailableError(object, err);'));
+    expect(catchBody).toContain('THE SIGNED-OFF RISK');
+    expect(catchBody).toContain('签字在案');
+    expect(catchBody).toContain('isMissingTableError(err, object)');
+  });
+});

@@ -1,5 +1,7 @@
 ---
 "@objectstack/core": minor
+"@objectstack/types": minor
+"@objectstack/metadata": patch
 "@objectstack/rest": patch
 "@objectstack/service-datasource": patch
 "@objectstack/service-settings": patch
@@ -28,6 +30,12 @@ Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` �
 与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
 响亮拒绝(与真实能力拒绝的 403 可区分)。
 
+Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+after implementing the first one showed that "the read failed" is two facts:
+采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+`@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+**未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+
 **What changed.** A permission-store read that is issued and throws now raises
 `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
 `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
@@ -43,33 +51,67 @@ code an outage selects. Doors that map thrown errors through
 - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
   an empty-but-valid envelope.
 - Anonymous requests never reach the store, so an outage cannot make them loud.
+- A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+  capabilities, quietly — pinned to be byte-identical to the empty-store
+  envelope, in every dialect spelling and in the production wrapper shape where
+  the driver's phrase is on `cause` rather than the outer message.
 
-⛔ **NOT YET TRUE, and this is why the PR is blocked.** An earlier revision of
+**The boundary between the two kinds of read failure.** An earlier revision of
 this changeset claimed "embedders without a data plane are unaffected". That
-claim was too broad and is retracted. The pinned cases above cover an *unwired*
-engine and an *empty* one; they do NOT cover the far commoner unprovisioned
-shape — a REAL engine whose `sys_*` tables were never created, where `find` is
-issued and THROWS `no such table`. That is currently treated as an outage, and
-it must not be: with no permission tables provisioned, "zero capabilities" is
-the TRUE answer, not a fabrication. Only an UNREACHABLE store — the ruling's own
-word — leaves the capability set unknown.
+claim was too broad; it is retracted here, and the gap it named is now closed
+rather than merely disclosed. A read also throws when the table was never
+PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+never created — and that is a supported deployment shape, not an outage. There
+"zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+own word 不可达 — leaves the capability set unknown, and only an unknown answer
+may not be reported as a denial.
 
-Measured cost of the conflation, all from `no such table` on `sys_user`,
-`sys_member`, `sys_user_position`, `sys_user_permission_set`: ordinary CRUD in
-`@objectstack/client` answers `503`, batch validation errors that owe `400`
-answer `503` because authorization refuses before validation runs, and two
-`.integration.test.ts` noise guards report that the driver and engine
-diagnostics for `sys_position` stopped being emitted — the eager throw aborts
-the resolution before that later read is ever issued, so a change made to stop a
-failed read being silent made two other channels silent.
+Treating the two alike was measured, not theorised: it turned four CI suites
+red, all from `no such table` on `sys_user` / `sys_member` /
+`sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+`@objectstack/client` answered `503`; batch validation errors that owe `400`
+answered `503`, because authorization refused before validation ran; runtime
+notifications answered `401` where authenticated callers must be served `200`;
+and two `.integration.test.ts` noise guards reported that the driver and engine
+diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+the resolution before that later read was ever issued, so a change made to stop
+a failed read being silent had made two other channels silent.
 
-The classifier that draws the boundary correctly already exists and is exactly
-right — `isMissingTableError(error, readObject)`, driver-code based rather than
-prose-sniffing, documented so that "cannot say" never means "be loud" — but it
-lives in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`, so the
-resolver cannot import it; and the SQL driver's `backendStatementFaultError`
-deliberately withholds the distinction from the thrown error. Resolving that is
-a maintainer decision, not an implementation detail.
+`tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+that is NOT positively identified as an unprovisioned table.
+
+**`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+draws that boundary already existed and was already right — driver-code based
+rather than prose-sniffing, documented so that "cannot say" never means "be
+loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+so the resolver could not import it. Rather than keep a second copy of a
+security-relevant predicate, the ruling relocated the one classifier to
+`@objectstack/types` — the package core already depends on, and the repo's own
+stated Home rule for a cross-package error predicate ("every consumer of the
+question already depends on it, so adopting the predicate never adds an edge",
+`packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+exports `isMissingTableError`, re-exported from the new home, so no consumer of
+that published subpath changes.
+
+Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+modules but two signatures over one matcher, and separating them would have
+meant re-rolling the matcher, which is the duplication the module exists to
+prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+deliberately still publishes only `isMissingTableError`, which is the only one
+anything imports through it.
+
+⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+a driver-error predicate was approved with its false-positive direction stated:
+mis-reading a genuine outage as "table not provisioned" silently restores the
+quiet 403 this change removes, with no thrown error and no other failing test.
+That direction is accepted, not overlooked — the predicate keys on driver codes,
+SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+returns `false` for anything it does not positively recognise, so an
+unrecognised outage stays loud by default. The risk is written beside the
+predicate in `resolve-authz-context.ts` and both directions are pinned by name
+in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+make a first boot quieter: every widening moves outages into the quiet branch.
 
 **All-transport, not just REST.** Every transport authorizing through
 `resolveAuthzContext` inherits this. Six of the eight production transports
