@@ -1130,6 +1130,15 @@ export class InMemoryDriver implements IDataDriver {
           continue;
         }
         const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
+        // [#13195] A lowered `$exists` whose mingo key was already taken by a
+        // sibling operator on the same field. It cannot be merged without one
+        // of the two constraints silently overwriting the other, so it becomes
+        // its own `$and` branch — see the merge in normalizeFieldOperators().
+        if (normalized._presenceAnd) {
+          const presence: Record<string, any> = normalized._presenceAnd;
+          delete normalized._presenceAnd;
+          extraAndConditions.push({ [key]: presence });
+        }
         // Handle multiple regex conditions on the same field (e.g. $startsWith + $endsWith)
         if (normalized._multiRegex) {
           const regexConditions: Record<string, any>[] = normalized._multiRegex;
@@ -1176,6 +1185,8 @@ export class InMemoryDriver implements IDataDriver {
     const store = (v: any) => coerceTemporalValue(v, kind);
     const result: Record<string, any> = {};
     const regexConditions: Record<string, any>[] = [];
+    /** [#13195] `$exists`, lowered — see the merge at the end of this method. */
+    let presence: Record<string, any> | undefined;
 
     for (const op of Object.keys(ops)) {
       const val = ops[op];
@@ -1317,11 +1328,9 @@ export class InMemoryDriver implements IDataDriver {
         // evaluation arm for a refused operator is exactly what let this
         // driver's two faces answer one `$regex` differently for so long.
         case '$exists':
-          if (val === true) {
-            result.$ne = null;
-          } else {
-            result.$eq = null;
-          }
+          // Collected, not assigned: the lowering below has to know whether the
+          // key it wants is already spoken for. See the merge at the end.
+          presence = val === true ? { $ne: null } : { $eq: null };
           break;
         default:
           // [#5324] Was `result[op] = val` — a GENERIC passthrough that handed
@@ -1330,6 +1339,39 @@ export class InMemoryDriver implements IDataDriver {
           // envelope as a 500-shaped body. The vocabulary gate refuses these
           // before translation; this throw is the totality floor.
           throw unknownFieldOperatorError(op, field, path);
+      }
+    }
+
+    // [#13195] Merge the lowered `$exists`, and do NOT let it clobber a sibling.
+    //
+    // The lowering the ruling prescribes reuses `$ne` / `$eq` — mingo keys an
+    // AUTHOR can also write on the same field. `{name: {$exists: true, $ne:
+    // 'b'}}` would therefore assign `$ne` twice into one object literal, and
+    // whichever ran last would win: one of the two constraints vanishes, and
+    // WHICH one depends on the author's key order. Measured on this fixture
+    // before the guard existed: `{$exists: true, $ne: 'b'}` answered
+    // `['1','3']` and the key-swapped `{$ne: 'b', $exists: true}` answered
+    // `['1','2']` — one predicate, two row sets — while the reference matcher
+    // said `['1']` for both. Four cells that AGREED with the reference matcher
+    // before the alignment disagreed after it.
+    //
+    // So when the key is free the predicate merges inline (the common case —
+    // `$exists` alone on a field), and when it is taken the field is promoted
+    // to its own `$and` branch, where both constraints survive. `_presenceAnd`
+    // is an internal sentinel consumed by normalizeFilterCondition(), the same
+    // shape `_multiRegex` below uses for the same reason.
+    //
+    // ⚠️ Scope: this guards the operator this card moved, and only it. The
+    // identical clobber is reachable today through `$null`, `$between` and
+    // `$notContains`, which lower to `$ne`/`$eq`, `$gte`/`$lte`/`$lt` and
+    // `$not` respectively — measured, pre-existing, and filed separately rather
+    // than half-fixed here.
+    if (presence) {
+      const presenceKey = Object.keys(presence)[0]!;
+      if (Object.prototype.hasOwnProperty.call(result, presenceKey)) {
+        result._presenceAnd = presence;
+      } else {
+        Object.assign(result, presence);
       }
     }
 

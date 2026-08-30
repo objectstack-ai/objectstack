@@ -662,7 +662,17 @@ function translateCondition(
           const objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
           if (hasOps) {
-            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
+            const translated = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
+            // [#13195] A lowered `$exists` whose MongoDB key was already taken
+            // by a sibling operator on the same field. Merging it would drop one
+            // of the two constraints silently, so it becomes its own `$and`
+            // branch — see the merge in translateFieldOperators().
+            const presenceAnd = translated._presenceAnd as Record<string, unknown> | undefined;
+            if (presenceAnd) {
+              delete translated._presenceAnd;
+              andClauses.push({ [key]: presenceAnd } as Filter<any>);
+            }
+            mongoFilter[key] = translated;
           } else {
             // Nested object — treat as exact match
             mongoFilter[key] = value;
@@ -711,6 +721,8 @@ function translateFieldOperators(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const store = (v: unknown) => coerceTemporalValue(v, kind);
+  /** [#13195] `$exists`, lowered — see the merge at the end of this function. */
+  let presence: Record<string, unknown> | undefined;
 
   for (const [op, value] of Object.entries(ops)) {
     switch (op) {
@@ -747,11 +759,9 @@ function translateFieldOperators(
       // already agreed, is unmoved. Measured on a real mongod 8.2.6 while this
       // cell was pinned.
       case '$exists':
-        if (value === true) {
-          result.$ne = null;
-        } else {
-          result.$eq = null;
-        }
+        // Collected, not assigned: the merge at the end of this function has to
+        // know whether the key this lowers to is already spoken for.
+        presence = value === true ? { $ne: null } : { $eq: null };
         break;
 
       case '$lte': {
@@ -922,6 +932,34 @@ function translateFieldOperators(
             `execute server-side JavaScript or bypass the query's intent (P0).`,
         );
       }
+    }
+  }
+
+  // [#13195] Merge the lowered `$exists`, and do NOT let it clobber a sibling.
+  //
+  // The lowering reuses `$ne` / `$eq` — MongoDB keys an AUTHOR can also write
+  // on the same field. `{name: {$exists: true, $ne: 'b'}}` would assign `$ne`
+  // twice into one object, and whichever ran last would win: one constraint
+  // vanishes, and WHICH one depends on the author's key order. Measured before
+  // this guard existed: that filter emitted `{name: {$ne: 'b'}}` and the
+  // key-swapped `{name: {$ne: 'b', $exists: true}}` emitted `{name: {$ne:
+  // null}}` — one predicate, two different documents, neither carrying both
+  // constraints.
+  //
+  // Free key → merge inline (the common case, `$exists` alone on a field).
+  // Taken → hand the caller a `_presenceAnd` sentinel, which `translateCondition`
+  // lifts into its `$and` list, where both constraints survive.
+  //
+  // ⚠️ Scope: this guards the operator #13195 moved, and only it. The identical
+  // clobber is reachable today through `$null` (`$eq`/`$ne`) and `$between`
+  // (`$gte`/`$lte`/`$lt`) — measured, pre-existing, filed separately rather
+  // than half-fixed here.
+  if (presence) {
+    const presenceKey = Object.keys(presence)[0]!;
+    if (Object.prototype.hasOwnProperty.call(result, presenceKey)) {
+      result._presenceAnd = presence;
+    } else {
+      Object.assign(result, presence);
     }
   }
 
