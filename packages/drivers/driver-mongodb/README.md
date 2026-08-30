@@ -158,10 +158,14 @@ try {
 
 Schema sync creates collections and indexes:
 
-Field-level `unique` and lookup fields index themselves; everything else is
-declared in the object's `indexes[]` — the one surface an index is declared on
-(a field-level `indexed` flag is not a `FieldSchema` key and never built an
-index, #2377 / #6810).
+Field-level `unique` fields index themselves; everything else is declared in the
+object's `indexes[]` — the one surface an index is declared on (a field-level
+`indexed` flag is not a `FieldSchema` key and never built an index,
+#2377 / #6810).
+
+⚠️ Lookup fields are **not** indexed today. The lookup arm gates on
+`reference_to`, a spelling `FieldSchema` refuses, so a canonically-spelled
+`reference` lookup gets no join index — see #13222, which owns that fix.
 
 ```typescript
 await driver.syncSchema('account', {
@@ -169,11 +173,11 @@ await driver.syncSchema('account', {
   fields: {
     name: { type: 'string', unique: true },
     email: { type: 'email' },
-    company_id: { type: 'lookup', reference_to: 'company' },
+    company_id: { type: 'lookup', reference: 'company' },
   },
   indexes: [{ fields: ['email'] }],
 });
-// Creates: idx_id_unique, idx_name_unique, idx_email, idx_company_id_lookup
+// Creates: idx_id_unique, idx_name_unique, idx_email
 ```
 
 ### Aggregation

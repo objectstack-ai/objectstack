@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

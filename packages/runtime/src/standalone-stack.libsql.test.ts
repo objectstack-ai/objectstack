@@ -19,11 +19,14 @@
 //   3. the whole boot — `createStandaloneStack({ databaseUrl: 'libsql://…' })`
 //      no longer produces the "unsupported scheme" refusal.
 //
-// No test here touches a real Turso endpoint: the package is substituted through
-// `importDriverPackage`, which is what makes the "package missing" arm testable
-// even in a workspace where the package happens to be installed.
+// No test here touches a real Turso endpoint. Every loader-level case
+// substitutes the package through `importDriverPackage`; the whole-boot case in
+// ③ has no such seam and stages absence with `vi.doMock` instead (#12943).
+// Both make the "package missing" arm testable in a workspace where the package
+// IS installed — which, since `@objectstack/driver-turso` became a declared
+// optional peer of this package, is now every workspace.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   resolveStandaloneDatabase,
   resolveDatabaseAuthToken,
@@ -287,18 +290,49 @@ describe('loadTursoDriverFactory — the OPTIONAL driver package, both ways (#58
   });
 });
 
-// ③ The whole boot, on the URL the issue is about. `@objectstack/driver-turso`
-// is deliberately NOT a dependency of `@objectstack/runtime` — that is what
-// "optional" means here — so in this workspace the boot takes the missing-package
-// arm. What matters either way is the FIRST assertion: the refusal is no longer
-// "unsupported scheme". (Should the package ever become a dependency of this one,
-// this case turns red and names exactly why in this comment.)
+// ③ The whole boot, on the URL the issue is about.
+//
+// ⭐ This case's old comment predicted its own future and was right: "Should the
+// package ever become a dependency of this one, this case turns red and names
+// exactly why in this comment." #12943 declared `@objectstack/driver-turso` an
+// OPTIONAL PEER of `@objectstack/runtime` — install-time honesty for a
+// relationship the source already had, installing nothing for a consumer — and
+// pnpm LINKS an optional workspace peer. Measured on that change: the boot
+// stopped taking the missing-package arm and SUCCEEDED, building a real driver
+// against `libsql://my-db.turso.io`. Red, and in the worse of the two
+// directions: a green-looking boot pointed at a remote endpoint.
+//
+// So absence is STAGED now. `createStandaloneStack` has no `importDriverPackage`
+// seam of its own — it calls `loadTursoDriverFactory()` bare, which is exactly
+// the standalone default this case exists to cover — so the specifier is mocked
+// with a factory that throws the resolver's own error. ⛔ No `vi.resetModules()`:
+// the assertion below is an `instanceof` against the binding this file imported,
+// and a reset would hand the arm a different class object and make that false
+// for a correct error.
+//
+// What matters either way is still the FIRST assertion: the refusal is no longer
+// "unsupported scheme".
 describe('createStandaloneStack — a libsql:// boot is dispatched, not refused as unknown (#5820)', () => {
   it('fails with the install command instead of "Unsupported database URL scheme"', async () => {
     clearUrlEnv();
+    vi.doMock('@objectstack/driver-turso', () => {
+      throw Object.assign(
+        new Error("Cannot find module '@objectstack/driver-turso' imported from /app/node_modules/x.mjs"),
+        { code: 'ERR_MODULE_NOT_FOUND' },
+      );
+    });
     const err = await createStandaloneStack({ databaseUrl: 'libsql://my-db.turso.io' })
-      .then(() => null, (e: unknown) => e);
+      .then(() => null, (e: unknown) => e)
+      .finally(() => { vi.doUnmock('@objectstack/driver-turso'); });
 
+    if (err === null) {
+      throw new Error(
+        'staging @objectstack/driver-turso as absent no longer makes the standalone libsql boot '
+        + 'refuse, so this case has stopped exercising the missing-package arm — it booted a real '
+        + 'driver against a remote endpoint instead. ⛔ Do not delete it and do not weaken it: '
+        + 'find out why the stub stops short of the arm.',
+      );
+    }
     expect(err).not.toBeNull();
     expect(String((err as Error).message)).not.toMatch(/Unsupported database URL scheme/);
     expect(err).toBeInstanceOf(MissingDriverPackageError);

@@ -446,18 +446,43 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  *
  * ## TWO blindnesses, not one — and the second is why the first is not enough
  *
- * ① POSITION. The object-literal stamp position has no shape (above).
- * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognises
+ * ① POSITION. The object-literal stamp position has no shape (above). OPEN.
+ * ② DECLARATION FORM. `enclosingDeclaration`'s `DECL_HEADER_RE` recognised
  *    `function f(`, `constructor(` and `const|let|var f = (` — and NO class
- *    method. So a code-carrying helper that is a METHOD is out of reach even in
- *    the position `codehelper` already implements: the same body that produces
- *    a site as a free function produces nothing as `private error(code, …)`.
- *    Measured with a same-genre positive control, and pinned below.
+ *    method. So a code-carrying helper that is a METHOD was out of reach even
+ *    in the position `codehelper` already implements: the same body that
+ *    produces a site as a free function produced nothing as
+ *    `private error(code, …)`. [#13226] CLOSED — see `METHOD_HEADER` below.
  *
  * These are independent, and the card's own live instance needs BOTH:
  * `Parser#error(code, message, start?, tag?)` in `packages/sdui-parser` is a
  * class method that stamps through an object literal. Widening the position
  * alone would still not reach it.
+ *
+ * ## [#13226] What closing ② cost, and what it did NOT buy
+ *
+ * ⭐ Closing ② moved NOTHING on this tree: sites and `unresolved` are
+ * byte-identical before and after, measured through the real `deriveSites` over
+ * `packages/**` against a worktree at the parent commit. Two independent
+ * reasons, and the second is the one worth carrying forward:
+ *
+ *   · No class-method helper stamps in the ASSIGNMENT position today. Of the 17
+ *     `.code = ident` matches in `packages/**` non-test source, 5 are true
+ *     helpers (the identifier is a parameter) and every one of those is a
+ *     `function` or a `constructor` — 0 are methods.
+ *   · The 4 helpers ② was blocking all stamp through an OBJECT LITERAL, so
+ *     blindness ① still drops them. ⚠️ The 25 call sites and 3 undischargeable
+ *     `unresolved` in the split below are therefore NOT a cost ② paid; they are
+ *     a cost ① will pay, on the day the position widens. Reading them as ②'s is
+ *     the mistake this paragraph exists to prevent.
+ *
+ * What ② bought is that the widening of ① will REACH those helpers when it
+ * lands. `enclosingDeclaration` at the `Parser#error` stamp offset now answers
+ * `error(code, message, start, tag)`; before it answered the Parser
+ * CONSTRUCTOR. (The constructor's parameter names parsed as `["readonly",
+ * "readonly"]` when this was first measured — that half was a separate defect
+ * in `parseParamNames`, since repaired, and it reads `["src","opts"]` now.
+ * Both halves had to be true for the stamp to resolve; neither alone sufficed.)
  *
  * ## The measurement (blast radius), on `packages/**` non-test source
  *
@@ -470,15 +495,27 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  * a template and `f(a, code, b)` inside an argument list, and then LOST a true
  * positive because a bracket inside a regex literal unbalanced its scan.
  *
- *   predicate matches            13 helpers (12 named, 1 anonymous)
- *   (a) call sites newly reached 106   — 76 reduce to a literal, 30 do not
+ *   predicate matches            14 helpers (13 named, 1 anonymous)
+ *   (a) call sites newly reached 116   — 75 reduce to a literal, 41 do not
  *   (b) NEW verdict rows needed   29   — 0 of them already carry a row
- *   (c) undischargeable `unresolved` findings  4
+ *   (c) undischargeable `unresolved` findings  5
  *
- * Split by whether `enclosingDeclaration` can see the declaration at all:
+ * Split by whether `enclosingDeclaration` could see the declaration at all
+ * BEFORE [#13226] — the split is history now that ② is closed, and it is kept
+ * because it is what the ① widening will actually meet:
  *
- *   reachable today (blindness ① only)   9 helpers · 81 call sites · 29 rows · 1 unresolved
- *   blocked by blindness ②               4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *   reachable then (blindness ① only)  10 helpers · 91 call sites · 29 rows · 2 unresolved
+ *   blocked by blindness ②              4 helpers · 25 call sites ·  0 rows · 3 unresolved
+ *
+ * ⚠️ [#13226] re-derived these on today's tree and they had DRIFTED — upward,
+ * by exactly one helper. The first census read 13 helpers · 106 call sites · 4
+ * unresolved; a 14th helper (`block` in `packages/spec/scripts/`, 10 call sites,
+ * none reducing) landed between the two readings and accounts for the whole
+ * difference (106 + 10 = 116, 4 + 1 = 5). (b) 29 and the ZERO below did not
+ * move, and the blindness-② line reproduced digit for digit. The lesson is not
+ * that the numbers were wrong — they were right when taken — but that this is a
+ * census of a moving tree, so a reader acting on it re-runs it rather than
+ * quoting it.
  *
  * ⚠️ (b) is not the whole cost, and reading it as the whole cost is the trap
  * this note exists to prevent. All 29 new rows are LOWERCASE `FieldErrorCode`
@@ -491,11 +528,18 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  *
  * ## No victim today — verified, not assumed
  *
- * Of the 33 SCREAMING_SNAKE values reached, 33 are already registered; the
+ * Of the 31 SCREAMING_SNAKE values reached, 31 are already registered; the
  * count of values that are BOTH ADR-0112 D1 shaped AND unregistered — i.e. a
  * real wire code hiding behind this blindness — is ZERO. `check:error-code-casing`
  * likewise reports nothing on any of the files involved. So the value of
  * closing this is preventing a future defect, not fixing a present one.
+ *
+ * ⚠️ [#13226] re-measured this number, because it is the one that grades the
+ * work: a single unregistered D1-shaped code hiding here would make this a live
+ * defect rather than a future one. It is still ZERO (the reached population
+ * drifted 33 → 31; every one of them registered). ⛔ It is a property of the
+ * TREE, not of the gate, so it expires: whoever widens ① re-measures it rather
+ * than citing this line.
  *
  * ⚠️ One bound the measurement does NOT have. `helperCodesFor` scans only the
  * DECLARING file, so every count here is over IN-FILE call sites. An exported
@@ -534,17 +578,49 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
   /** Unregistered in both `StandardErrorCode` and the ledger, in both casings. */
   probe: 'HELPER_SCREAMING',
   probeLowercase: 'helper_lowercase',
-  /** Blindness ②: the declaration forms `enclosingDeclaration` cannot see. */
-  invisibleDeclarationForms: Object.freeze(['class method', 'anonymous arrow']),
+  /**
+   * Blindness ②: the declaration forms `enclosingDeclaration` cannot see.
+   *
+   * [#13226] `class method` came OFF this list — `METHOD_HEADER` recognises it.
+   * The anonymous arrow stays, and stays for a reason that is not laziness: it
+   * has no NAME, and every one of `helperCodesFor`'s call scans is built from
+   * the declaration's name. A nameless helper can therefore produce neither a
+   * site nor an `unresolved` — there is nothing to search for — so admitting it
+   * to `DECL_HEADER_RE` would buy exactly nothing and would cost the header
+   * regex its anchor. Reaching it needs call-graph resolution this textual scan
+   * does not have; it is a DIFFERENT card, not a loose end of this one.
+   *
+   * ⛔ Also still unrecognised, and never on this list because no census has
+   * been run on it: a class PROPERTY holding an arrow, `private fail = (code) =>`.
+   */
+  invisibleDeclarationForms: Object.freeze(['anonymous arrow']),
+  /** [#13226] Declaration forms that ARE recognised, in `DECL_HEADER_RE` order. */
+  recognisedDeclarationForms: Object.freeze(['function', 'constructor', 'const/let/var arrow', 'class method']),
   /** The live instance, read as evidence only — it is NOT edited by this card. */
   liveInstance: 'packages/sdui-parser/src/parse.ts  Parser#error(code, message, start?, tag?)',
-  /** Measured blast radius, `packages/**` non-test source. See the prose above. */
+  /**
+   * Measured blast radius of closing blindness ①, `packages/**` non-test source.
+   * [#13226] re-derived on today's tree — see the drift note in the prose above.
+   */
   measured: Object.freeze({
-    helpers: 13,
-    callSitesNewlyReached: 106,
+    helpers: 14,
+    callSitesNewlyReached: 116,
     newVerdictRows: 29,
-    undischargeableUnresolved: 4,
+    undischargeableUnresolved: 5,
     unregisteredWireCodesHiding: 0,
+  }),
+  /**
+   * [#13226] What closing blindness ② actually moved on the tree: NOTHING.
+   * Kept as a number because "the fix changed no output" is the kind of claim
+   * that rots into "the fix did nothing" — the positive control in `--self-test`
+   * is what says the recognizer fires.
+   */
+  declarationFormClosure: Object.freeze({
+    newSites: 0,
+    newUnresolved: 0,
+    methodHelpersInAssignmentPositionToday: 0,
+    helpersNowVisibleToEnclosingDeclaration: 13,
+    helpersStillInvisible: 1,
   }),
 });
 
@@ -1085,23 +1161,169 @@ export function splitTopLevel(args) {
   return out;
 }
 
-/** Parameter NAMES, in order: `readonly a: T = x` → `a`. */
+/**
+ * [#13227] The leading MODIFIER RUN of a TypeScript parameter, enumerated from
+ * the grammar rather than approximated.
+ *
+ * A parameter property admits an accessibility modifier, then `override`, then
+ * `readonly` — in that fixed order, up to THREE of them, and the compiler
+ * rejects any other order (`readonly public x` → "'public' modifier must
+ * precede 'readonly' modifier"; `readonly override x` → "'override' modifier
+ * must precede 'readonly' modifier"). Measured against the repo's own
+ * TypeScript 6.0.3 on a derived class, because `override` is only legal where a
+ * base class exists and a check on a standalone class reports it as a class
+ * error rather than as a parameter one. `static` and `abstract` are rejected on
+ * a parameter outright, and `in`/`out` are TYPE-parameter modifiers, which
+ * never appear in the value-parameter slice `enclosingDeclaration` hands over.
+ *
+ * The order is encoded rather than looped deliberately: a "strip any word in
+ * this set, repeatedly" loop accepts spellings TypeScript does not, which is
+ * the match-everything direction this gate has paid for before.
+ */
+const PARAM_MODIFIER_RUN = /^(?:(?:public|private|protected)\s+)?(?:override\s+)?(?:readonly\s+)?/;
+
+/**
+ * Parameter NAMES, in order: `readonly a: T = x` → `a`,
+ * [#13227] `private readonly code: string` → `code`.
+ *
+ * The strip used to be a single anchored alternation carrying a `g` flag. The
+ * flag reads as "strip them all", but `^` with no `m` matches at position 0
+ * once, so exactly ONE modifier came off: `private readonly code: string`
+ * parsed as a parameter literally named `readonly`, and `helperCodesFor`'s
+ * `indexOf(ident)` then answered -1 — no site, no unresolved, the whole helper
+ * dropped in silence, one layer inside the same failure class as #9223 /
+ * #9460 / #10918 / #13131.
+ *
+ * ⚠️ A modifier word is only a modifier when a NAME follows it. `readonly`,
+ * `override` and the accessibility words are not reserved, so each is a legal
+ * parameter name in its own right — `override: MetricsRegistry | undefined` is
+ * live in this tree three times over. `override:` / `override?:` never enter
+ * the run (no whitespace follows the word), and the guard below covers the
+ * spaced spelling `readonly : T`, where the run would otherwise eat the
+ * parameter's own name and report nothing.
+ *
+ * ⛔ Textual on purpose, and the reason is measured rather than inherited.
+ * `enclosingDeclaration`'s `DECL_HEADER_RE` also matches `const x = someCall(`,
+ * so of the 7646 slices this function is handed on `packages/**` non-test
+ * source, 1218 are not a valid parameter list at all — they are ARGUMENT
+ * lists — and on 1072 of those a recovering TypeScript parse invents MORE THAN
+ * ONE parameter: `authService as any` becomes three confident parameters named
+ * `authService`, `as` and `any`; `await res.json()` becomes `await`, `res`,
+ * `json`. Those names are exactly what `helperCodesFor` searches with
+ * `indexOf(ident)`, so an AST route would MANUFACTURE the wrong-INDEX hazard
+ * this card only warns about — a finding that reads as ordinary while naming a
+ * value from another argument position — across a thousand slices. A textual
+ * reader degrades to one bad name instead of several. The over-matching header
+ * regex is #13226's subject and is deliberately untouched here.
+ */
 export function parseParamNames(params) {
   if (!params.trim()) return [];
   return splitTopLevel(params).map((raw) => {
-    const cleaned = raw.replace(/^\s*(?:readonly|public|private|protected|\.\.\.)\s+/g, '').trim();
-    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned.replace(/^\.\.\./, ''));
+    const rest = raw.trim().replace(/^\.\.\.\s*/, '');
+    const run = PARAM_MODIFIER_RUN.exec(rest)[0];
+    const tail = rest.slice(run.length);
+    const cleaned = /^[A-Za-z_$]/.test(tail) ? tail : rest;
+    const m = /^([A-Za-z_$][\w$]*)/.exec(cleaned);
     return m ? m[1] : '';
   });
 }
 
-/** Declaration headers that own a parameter list, with the offset of their `(`. */
-const DECL_HEADER_RE =
-  /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\bconstructor\s*\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:function\s*[A-Za-z_$][\w$]*\s*)?\(/g;
+/**
+ * [#13226] Words that open a parenthesised head but are NOT a method name.
+ *
+ * The list lives INSIDE the regex as a lookahead rather than in a post-match
+ * `continue`, and the difference is real: a consumed match moves `matchAll`'s
+ * cursor past it, so rejecting a word in JavaScript eats the text a LATER
+ * alternative would have matched at a position further right. Failing the
+ * alternative inside the regex lets the engine advance and try the others.
+ *
+ * ⚠️ `constructor` is in the list DEFENSIVELY, and the honest reason is worth
+ * recording because the obvious one is wrong. On `  public constructor(` the
+ * method alternative does start earlier in the line and does win the position —
+ * but nothing breaks, because `isConstructor` is read off the matched TEXT
+ * rather than off which alternative fired, so the header is still classified as
+ * a constructor and still gets the `new Name(` call scan. Measured by ablation:
+ * removing `constructor` from this list leaves `--self-test` fully GREEN. It is
+ * kept so the alternation means what it looks like it means, NOT because a
+ * caller depends on it — ⛔ do not cite this entry as load-bearing, and ⛔ do
+ * not add a pin claiming an ablation that does not fail.
+ *
+ * Only words that actually produce the `NAME(...) {` shape are listed —
+ * `if (x) {`, `return (a) => {`, `} catch (e) {`. `type`, `interface`, `enum`
+ * and `declare` are NOT here: they never take that shape, and each is a legal
+ * method name a blanket keyword list would silently make unreachable.
+ */
+const NOT_A_METHOD_NAME =
+  'if|for|while|switch|catch|do|else|case|return|throw|new|delete|void|typeof|await|yield|super|function|constructor|class|import|export|const|let|var';
 
 /**
- * The declaration enclosing `offset`: `{ name, params, isConstructor }`, or
- * `null`. Nearest-preceding-header, which is what a textual scan can honestly
+ * [#13226] A class-method HEADER, and why it is spelled as a header SHAPE
+ * rather than as "directly inside a class body".
+ *
+ * The other three forms carry their own keyword (`function`, `constructor`,
+ * `const|let|var`). A method header does not — it is bare `NAME(` — so the
+ * discriminator the card names is CONTEXT: being directly inside a class body.
+ * A textual scan has to earn that, and the honest reading is that it cannot,
+ * for a measured reason rather than a squeamish one. Brace depth is the only
+ * textual route to "inside a class body", and the source this gate scans is
+ * `maskComments`ed, which by contract leaves STRINGS, TEMPLATES and REGEX
+ * LITERALS standing — so a `{` inside a string flips the depth of everything
+ * after it. Masking literals too (`scanSource` exposes the flags) fixes that
+ * half and leaves the other: finding where a class BODY opens means walking
+ * `class X extends Y<{ a: string }>` past a brace that sits inside a type
+ * argument, and telling a type argument from a comparison textually is the
+ * problem TypeScript wrote a parser for. An AST route was weighed and refused
+ * on the evidence already in `parseParamNames` above: over-matching headers
+ * hand this scan 1218 argument lists a recovering parse turns into confident
+ * wrong parameter names, so a parser here MANUFACTURES the wrong-INDEX hazard
+ * across a thousand slices to close one blindness.
+ *
+ * So the discriminator implemented is the header's own shape, which a textual
+ * scan CAN earn:
+ *
+ *   line start · optional modifier run · NAME · balanced `(...)` · optional
+ *   return-type annotation · `{`
+ *
+ * The trailing `{` is the half that does the work. It is what separates a
+ * method from a line-initial CALL (`sendError(res, 400);` — a `;` follows) and
+ * from an interface or `abstract` SIGNATURE (`error(code: string): void;` — no
+ * body, so no stamp can be inside it either). The keyword lookahead above
+ * removes the statement forms that share the shape.
+ *
+ * ⚠️ DECLARED, not accidental: this shape also admits an OBJECT-LITERAL method
+ * (`const handlers = { fail(code, message) { … } }`). That is the same helper
+ * genre — a named parameter list with a body — and admitting it is a widening
+ * beyond the card's `class method`, so it is stated here rather than left to be
+ * discovered. It costs nothing today (measured: zero object-literal methods in
+ * `packages/**` non-test source stamp a code in the assignment position) and it
+ * cannot produce a WRONG site if one appears: `helperCodesFor` admits only a
+ * `this.` receiver, so an `obj.fail(…)` caller matches nothing, the helper
+ * reduces to no literals, and it is REPORTED as `unresolved` — the bound this
+ * gate states, degrading in the safe direction.
+ *
+ * ⛔ Still NOT recognised, and deliberately: a class PROPERTY holding an arrow
+ * (`private fail = (code) => { … }`). It is a fourth declaration form, not this
+ * one, and no census has been run on it.
+ */
+const METHOD_HEADER = String.raw`(?:^|\n)[ \t]*(?:(?:public|private|protected)\s+)?(?:static\s+)?(?:abstract\s+)?(?:override\s+)?(?:async\s+)?(?:\*\s*)?(?:(?:get|set)\s+)?(?!(?:${NOT_A_METHOD_NAME})\s*\()([A-Za-z_$][\w$]*)\s*\(`;
+
+/** A method header owns a BODY: `): void {`, `) {` — never `): void;` or `);`. */
+const METHOD_BODY_FOLLOWS_RE = /^[ \t]*(?::[^\n{;]*)?\{/;
+
+/** Declaration headers that own a parameter list, with the offset of their `(`. */
+const DECL_HEADER_RE = new RegExp(
+  [
+    String.raw`\bfunction\s+([A-Za-z_$][\w$]*)\s*\(`,
+    String.raw`\bconstructor\s*\(`,
+    String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:function\s*[A-Za-z_$][\w$]*\s*)?\(`,
+    METHOD_HEADER,
+  ].join('|'),
+  'g',
+);
+
+/**
+ * The declaration enclosing `offset`: `{ name, params, isConstructor, isMethod }`,
+ * or `null`. Nearest-preceding-header, which is what a textual scan can honestly
  * offer — a helper is a handful of lines and its stamp sits inside it.
  */
 export function enclosingDeclaration(src, offset) {
@@ -1113,7 +1335,17 @@ export function enclosingDeclaration(src, offset) {
     const params = sliceBalanced(src, open);
     if (params === null) continue;
     const isConstructor = /\bconstructor\s*\($/.test(m[0]);
-    let name = m[1] ?? m[2] ?? null;
+    // [#13226] Read off the matched TEXT, not off which alternative fired, so
+    // the two flags cannot both be true: `public constructor(` is matched by
+    // the METHOD alternative (it starts earlier in the line) and is still a
+    // constructor. Every consumer branches on `isConstructor` first, and this
+    // keeps that branch reachable however the header was recognised.
+    const isMethod = m[3] !== undefined && !isConstructor;
+    // [#13226] The header must own a BODY. Checked here rather than in the
+    // regex because it reads past the balanced parameter list, which is
+    // `sliceBalanced`'s job and not a regex's.
+    if (isMethod && !METHOD_BODY_FOLLOWS_RE.test(src.slice(open + params.length + 2))) continue;
+    let name = m[1] ?? m[2] ?? m[3] ?? null;
     if (isConstructor) {
       const before = src.slice(0, m.index);
       // The LAST class declared before this constructor, not the first — a
@@ -1124,7 +1356,7 @@ export function enclosingDeclaration(src, offset) {
       name = cls;
     }
     if (!name) continue;
-    best = { name, params, isConstructor, end: open + params.length + 2 };
+    best = { name, params, isConstructor, isMethod, open, end: open + params.length + 2 };
   }
   return best;
 }
@@ -1140,13 +1372,28 @@ export function helperCodesFor(ident, offset, src, resolveIdent = () => null) {
   const index = parseParamNames(decl.params).indexOf(ident);
   if (index < 0) return null;
 
+  // [#13226] A METHOD is reached through a RECEIVER. The plain form below
+  // excludes a preceding `.` on purpose — without that, a property access
+  // `err.fail(` would read as a call to a free function named `fail` — so a
+  // method needs the receiver spelled back in, or every method helper reduces
+  // to nothing and lands as `unresolved` no matter how literal its callers are.
+  // `this.` and only `this.`: the scan is IN-FILE, so a method helper's callers
+  // here are its own siblings. Any other receiver stays unmatched, which is the
+  // safe direction — the helper reports as `unresolved` rather than borrowing
+  // an argument list from a same-named method on some other object.
   const callRe = decl.isConstructor
     ? new RegExp(`\\bnew\\s+${decl.name}\\s*\\(`, 'g')
-    : new RegExp(`(?:^|[^\\w.$])${decl.name}\\s*\\(`, 'g');
+    : decl.isMethod
+      ? new RegExp(`(?:^|[^\\w.$])(?:this\\.)?${decl.name}\\s*\\(`, 'g')
+      : new RegExp(`(?:^|[^\\w.$])${decl.name}\\s*\\(`, 'g');
   const codes = new Set();
   for (const call of src.matchAll(callRe)) {
     const open = call.index + call[0].length - 1;
-    // The declaration's own header is not a call to itself.
+    // The declaration's own header is not a call to itself. Checked by OFFSET
+    // as well as by text: [#13226] a method header is preceded by a modifier or
+    // by nothing at all, so the textual guard below cannot see it, and the
+    // header's own parameter list would otherwise be read as an argument list.
+    if (open === decl.open) continue;
     if (/\b(?:function|const|let|var)\s*$/.test(src.slice(Math.max(0, call.index - 12), call.index + call[0].length - decl.name.length - 1))) continue;
     const args = sliceBalanced(src, open);
     if (args === null) continue;
@@ -1844,6 +2091,78 @@ function selfTest() {
       'splitTopLevel counted a nested or templated comma as a separator',
     );
     ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
+
+    // [#13227] The MODIFIER RUN, pinned at every length TypeScript admits and
+    // in the order it admits them. `private readonly code: string` parsed as a
+    // parameter named `readonly` because the strip was anchored-plus-`g`,
+    // which takes exactly ONE modifier off. The run is up to three long
+    // (accessibility → `override` → `readonly`), measured against the repo's
+    // own TypeScript rather than assumed from the card's two-modifier example.
+    for (const [params, expected, note] of [
+      ['code: string, msg: string', 'code,msg', 'no modifier'],
+      ['readonly code: string', 'code', 'one modifier'],
+      ['private code: string', 'code', 'one modifier, accessibility'],
+      ['private readonly code: string, private readonly msg: string', 'code,msg', 'two modifiers, both parameters'],
+      ['public readonly code: string, msg: string', 'code,msg', 'two modifiers, mixed list'],
+      ['protected readonly code: string', 'code', 'two modifiers, protected'],
+      ['override readonly code: string', 'code', 'two modifiers, no accessibility'],
+      ['private override readonly code: string', 'code', 'THREE modifiers — the maximum'],
+      ['public override readonly code: string, msg: string', 'code,msg', 'three modifiers, mixed list'],
+      ['private readonly code: Map<string, number> = x, b?: string', 'code,b', 'modifier run plus a generic default'],
+      ['...rest: string[]', 'rest', 'rest parameter, unchanged by the run'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames mis-read a parameter list (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // ⛔ The NEGATIVE half — the strip must not become a match-everything.
+    // None of these words is reserved, so each is a legal parameter name, and
+    // `override` is one THREE TIMES in this repo's own `packages/**` source
+    // (`observability-service-plugin.ts`, `cache-service-plugin.ts`,
+    // `storage-service-plugin.ts`). A run that ate them would rename a real
+    // parameter and hand `helperCodesFor` a wrong INDEX — a finding that reads
+    // as ordinary while naming a value from another argument position.
+    for (const [params, expected, note] of [
+      ['ctx: PluginContext, override?: ErrorReporter', 'ctx,override', 'a parameter named `override`'],
+      ['override: MetricsRegistry | undefined', 'override', '`override` alone'],
+      ['readonly: string, message: string', 'readonly,message', 'a parameter named `readonly`'],
+      ['public: number', 'public', 'a parameter named `public`'],
+      ['readonly : string', 'readonly', '`readonly` spaced off its own colon — no name follows the run'],
+      ['private: string, readonly: string', 'private,readonly', 'two modifier-WORDS used as names'],
+    ]) {
+      ok(
+        parseParamNames(params).join(',') === expected,
+        `parseParamNames ate a real parameter name (${note}): ${JSON.stringify(params)} → ` +
+          `${JSON.stringify(parseParamNames(params))}, expected ${JSON.stringify(expected.split(','))}`,
+      );
+    }
+
+    // [#13227] End to end through the real `deriveSites`, because the parse is
+    // only interesting for what it costs downstream: the whole helper was
+    // DROPPED — no site AND no unresolved — which is the silent-drop class this
+    // gate exists to refuse. Paired with the single-modifier POSITIVE CONTROL,
+    // so the zero on `main` was a reading rather than a dead harness.
+    {
+      const helper = (params, arg) =>
+        `class E {\n  constructor(${params}) {\n    (this as any).code = code;\n  }\n}\n` +
+        `throw new E('${arg}', 'x');\n`;
+      const derive = (source) =>
+        deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+      for (const [params, probe, note] of [
+        ['readonly code: string, readonly message: string', 'ONE_MODIFIER_HELPER', 'the single-modifier positive control'],
+        ['private readonly code: string, readonly message: string', 'PARAM_PROPERTY_HELPER', 'the two-modifier parameter property'],
+      ]) {
+        const { sites, unresolved } = derive(helper(params, probe));
+        ok(
+          sites.some((s) => s.shape === 'codehelper' && s.code === probe),
+          `a constructor code helper was dropped — ${note} derived ${sites.length} site(s) and ` +
+            `${unresolved.length} unresolved, neither naming ${probe}`,
+        );
+      }
+    }
   }
 
   // [#9568] The value-level reduction: a constant holding a TERNARY or a
@@ -2472,12 +2791,13 @@ function selfTest() {
   {
     const B = OBJECT_LITERAL_CODE_HELPER_BLINDNESS;
     const DECISION =
-      'a code-carrying helper that stamps through an OBJECT LITERAL, or one declared as a CLASS ' +
-      'METHOD, is now visible to a gate. That is a gate-POPULATION change: #13131 measured the ' +
-      'blast radius at 106 newly reached call sites, 29 new verdict rows in ' +
-      `${DECLARATION}, and 4 UNDISCHARGEABLE unresolved findings. Land the rows and the ` +
-      'declaration together, and rewrite OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust ' +
-      'this pin to match.';
+      'a code-carrying helper that stamps through an OBJECT LITERAL is now visible to a gate. ' +
+      'That is a gate-POPULATION change, and [#13226] re-measured its blast radius on the current tree: ' +
+      `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} newly reached ` +
+      `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows in ` +
+      `${DECLARATION}, and ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} ` +
+      'UNDISCHARGEABLE unresolved findings. Land the rows and the declaration together, and rewrite ' +
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS — do not adjust this pin to match.';
 
     const helper = (body, probe) =>
       `export function postureError(code: string, message: string) {\n${body}\n}\n` +
@@ -2514,13 +2834,39 @@ function selfTest() {
         );
       }
     }
+    // [#13226] The BOUNDARY between the two blindnesses, pinned as its own
+    // case because closing ② made it reachable to reason about for the first
+    // time. A class method that stamps through an OBJECT LITERAL is the card's
+    // live instance (`Parser#error`), and it must STILL derive nothing: the
+    // declaration form is now seen, the stamp POSITION is not. This is the
+    // assertion that says which half of the work is done — if it starts
+    // failing, ① was widened, and the rows and the declaration owe an update.
+    {
+      const methodObjLit =
+        `class Thing {\n  private fail(code: string, message: string) {\n` +
+        `    return { severity: 'error', code, message };\n  }\n` +
+        `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+      const decl = enclosingDeclaration(methodObjLit, methodObjLit.indexOf('code, message };'));
+      ok(
+        decl && decl.isMethod && parseParamNames(decl.params).includes('code'),
+        'the declaration half of the boundary case is dead — `enclosingDeclaration` cannot see the method, ' +
+          'so the zero below would be blindness ② again rather than blindness ①',
+      );
+      const { sites, unresolved } = derive(methodObjLit);
+      ok(
+        sites.length === 0 && unresolved.length === 0,
+        `a CLASS-METHOD helper stamping through an OBJECT LITERAL now derives ${sites.length} site(s) and ` +
+          `${unresolved.length} unresolved — ${DECISION}`,
+      );
+    }
 
-    // ② BLINDNESS ②, the DECLARATION FORM — and it is pinned on SITES rather
-    //    than on matches, deliberately. Here the recognizer DOES match: the
-    //    body is the very `.code = code` `codehelper` is written for. What
-    //    drops it is structural — `enclosingDeclaration`'s DECL_HEADER_RE has
-    //    no header for a class method, so the identifier is never recognised
-    //    as a parameter. Same body, same probe, one declaration form apart.
+    // ② BLINDNESS ② — [#13226] CLOSED, and this pin is now the EQUIVALENCE
+    //    rather than the zero it used to be. Same body, same probe, one
+    //    declaration form apart: the method must derive exactly what the free
+    //    function derives. Both halves are asserted, and that is the point —
+    //    a fix that makes the method fire while the free-function control
+    //    silently stopped working reads identically in a summary, so the
+    //    control is checked on every run instead of being trusted.
     const body = B.control.replace(/^/gm, '  ');
     const asFunction =
       `export function fail(code: string, message: string) {\n${body}\n}\n` +
@@ -2528,30 +2874,110 @@ function selfTest() {
     const asMethod =
       `class Thing {\n  private fail(code: string, message: string) {\n${body}\n  }\n` +
       `  run(): void { throw this.fail('${B.probe}', 'x'); }\n}\n`;
+    const siteCodes = (source) =>
+      derive(source).sites.filter((s) => s.shape === 'codehelper').map((s) => s.code).sort();
     ok(
-      derive(asFunction).sites.some((s) => s.shape === 'codehelper' && s.code === B.probe),
-      'the free-function control for #13131 blindness ② derives no site — the comparison below is dead',
+      siteCodes(asFunction).includes(B.probe),
+      'the free-function control for the declaration-form comparison derives no site — the comparison is dead',
     );
     ok(matched(asMethod) > 0, 'the class-method form matches no recognizer — blindness ② is not what was measured');
     {
-      const { sites, unresolved } = derive(asMethod);
+      const fn = siteCodes(asFunction);
+      const me = siteCodes(asMethod);
       ok(
-        sites.length === 0 && unresolved.length === 0,
-        `a CLASS-METHOD code helper now derives ${sites.length} site(s) and ${unresolved.length} unresolved — ${DECISION}`,
+        me.join(',') === fn.join(',') && me.includes(B.probe),
+        `[#13226] a CLASS-METHOD code helper no longer derives what the identical free FUNCTION derives: ` +
+          `method ${JSON.stringify(me)} vs function ${JSON.stringify(fn)}. The declaration-form blindness is BACK.`,
+      );
+      ok(
+        derive(asMethod).unresolved.length === 0,
+        'the class-method helper reduces to no literal and falls back to `unresolved` — the RECEIVER half of ' +
+          '#13226 is gone: `helperCodesFor` must admit a `this.` receiver, or every method helper reports as ' +
+          'noise instead of resolving.',
       );
     }
-    // The mechanism itself, named so the failure above is diagnosable.
+    // The mechanism itself, named so the failures above are diagnosable.
     {
       const at = asMethod.indexOf('.code = code');
       const decl = enclosingDeclaration(asMethod, at);
       ok(
-        !decl || !parseParamNames(decl.params).includes('code'),
-        'enclosingDeclaration now resolves a CLASS METHOD, so `codehelper` reaches method helpers — ' + DECISION,
+        decl && decl.isMethod && decl.name === 'fail' && parseParamNames(decl.params).includes('code'),
+        '`enclosingDeclaration` no longer resolves a CLASS METHOD at a stamp inside one — it answered ' +
+          `${decl ? `${decl.name}(${decl.params})` : 'null'}. #13226 is regressed at the recognizer.`,
+      );
+    }
+    // ③ [#13226] The method form must not eat what the OTHER forms own. A
+    //    line-initial `constructor(` is the sharp case: the method alternative
+    //    is anchored at the start of the line, so it starts EARLIER than the
+    //    `constructor` alternative and would win the position — which is why
+    //    the keyword list is a lookahead inside the regex and not a `continue`.
+    {
+      const ctor =
+        `class Thing {\n  public constructor(code: string, message: string) {\n${body}\n  }\n}\n` +
+        `const t = new Thing('${B.probe}', 'x');\n`;
+      const decl = enclosingDeclaration(ctor, ctor.indexOf('.code = code'));
+      ok(
+        decl && decl.isConstructor && !decl.isMethod && decl.name === 'Thing',
+        'a modifier-spelled `public constructor(` is no longer read as a CONSTRUCTOR — the class-method ' +
+          `alternative swallowed it (answered ${decl ? `${decl.name}, isConstructor=${decl.isConstructor}, isMethod=${decl.isMethod}` : 'null'}). ` +
+          'The two flags must stay mutually exclusive: every consumer branches on `isConstructor` first, ' +
+          'and a header that is BOTH would take the `this.Name(` call scan instead of `new Name(`.',
+      );
+      ok(
+        siteCodes(ctor).includes(B.probe),
+        'the constructor-helper control derives no site — the `new Thing(` call scan is broken',
+      );
+    }
+    // ④ [#13226] Shapes that LOOK like a method header and are not. A
+    //    statement keyword (`if (x) {`) and a body-less SIGNATURE must both
+    //    stay unrecognised — the first would make `enclosingDeclaration`
+    //    answer with a control-flow head, the second with a declaration no
+    //    stamp can live inside.
+    //
+    //    ⚠️ Each case below puts the stamp where the SUSPECT header would be
+    //    the nearest preceding one. That placement is the whole assertion, and
+    //    getting it wrong is silent: an earlier draft of the signature case put
+    //    the stamp inside a later `function outer(`, which wins as
+    //    nearest-preceding whether or not the signature is recognised — so the
+    //    pin passed with the body-follows check DELETED. Ablate a pin like this
+    //    before believing it.
+    {
+      // A control-flow head sits BETWEEN the enclosing function and the stamp,
+      // so if `if (` were read as a method it would win as the nearer header.
+      const controlFlow =
+        `function outer(code: string) {\n  if (code) {\n    const e = new Error('x');\n    (e as any).code = code;\n  }\n}\n`;
+      const decl = enclosingDeclaration(controlFlow, controlFlow.indexOf('.code = code'));
+      ok(
+        decl !== null && decl.name === 'outer' && !decl.isMethod,
+        'a control-flow head is now read as a method header — `enclosingDeclaration` answered ' +
+          `${decl ? `${decl.name} (isMethod=${decl.isMethod})` : 'null'} instead of the enclosing function \`outer\`. ` +
+          'The statement keywords must stay in the method lookahead.',
+      );
+    }
+    {
+      // A body-less SIGNATURE, with NOTHING else that could be recognised: the
+      // only honest answer is `null`. If the body-follows check goes, the
+      // signature is read as a declaration and this answers `fail`.
+      const signature =
+        `interface Thing {\n  fail(code: string, message: string): void;\n}\n` +
+        `const e = new Error('x');\n(e as any).code = code;\n`;
+      const decl = enclosingDeclaration(signature, signature.indexOf('.code = code'));
+      ok(
+        decl === null,
+        'a body-less method SIGNATURE is now read as a declaration — `enclosingDeclaration` answered ' +
+          `${decl ? `${decl.name}(${decl.params})` : 'null'}. A signature owns no body, so no stamp can be ` +
+          'inside it; the `{`-follows check is what separates it from a real method header.',
       );
     }
     ok(
-      B.invisibleDeclarationForms.includes('class method'),
-      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS no longer declares the class-method form out',
+      !B.invisibleDeclarationForms.includes('class method') &&
+        B.recognisedDeclarationForms.includes('class method'),
+      'OBJECT_LITERAL_CODE_HELPER_BLINDNESS still declares the class-method form OUT, but #13226 closed it',
+    );
+    ok(
+      B.invisibleDeclarationForms.includes('anonymous arrow'),
+      'the anonymous-arrow form is no longer declared out — #13226 deliberately left it out of scope, so ' +
+        'either it was closed without rewriting this declaration, or the declaration lost its last entry',
     );
   }
 
@@ -2614,10 +3040,14 @@ function main() {
     `${KEBAB_DIAGNOSTIC_VOCABULARY.governedBy}: no grammar in this gate or in check:error-code-casing `+
     `admits a hyphen, so coverage of them is zero BY DECLARATION, not by accident — see `+
     `KEBAB_DIAGNOSTIC_VOCABULARY in this file, pinned by --self-test.` +
-    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) — and one ` +
-    `declared as a CLASS METHOD, in either stamp position — is outside this gate: no shape matches, so ` +
-    `there is no site AND no unresolved. Coverage of them is zero BY DECLARATION, not by accident. ` +
-    `Measured blast radius of closing it: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
+    `\n  [#13131] a code-carrying helper that stamps through an OBJECT LITERAL ({ code }) is outside ` +
+    `this gate: no shape matches, so there is no site AND no unresolved. Coverage of it is zero BY ` +
+    `DECLARATION, not by accident. [#13226] the CLASS-METHOD declaration form is no longer part of ` +
+    `that bound — it is recognised, so a method helper stamping in the ASSIGNMENT position resolves ` +
+    `like any other; what still drops the method helpers in this tree is the stamp POSITION above. ` +
+    `Of the declaration forms, only the ANONYMOUS ARROW remains unseen (it has no name for a call ` +
+    `scan to anchor on). ` +
+    `Measured blast radius of closing the position: ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.callSitesNewlyReached} ` +
     `call sites, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.newVerdictRows} new verdict rows, ` +
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.undischargeableUnresolved} undischargeable unresolved, ` +
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.unregisteredWireCodesHiding} unregistered wire code(s) ` +

@@ -151,9 +151,84 @@ import { join, resolve } from 'node:path';
 const HERE = import.meta.dirname;
 const PKG = resolve(HERE, '..');
 const ROOT = resolve(PKG, '..', '..');
+
+/**
+ * ## The population this gate reads, SPELLED — because the derivation scans it
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives the "local gates for this card" line
+ * of every dispatch prompt by scanning each gate's own source for PATH
+ * LITERALS. Every input below used to be reached with `join(PKG, ...)`, so the
+ * only repo-relative literal this file spelled was `TARGET` — its own guarded
+ * artifact. The derivation could therefore name this gate only once `llms.txt`
+ * had ALREADY been edited, while every edit that actually FALSIFIES it lands
+ * somewhere else entirely.
+ *
+ * #13207 measured that on PR #13186, two consecutive rounds of the same branch:
+ * deleting a `src/` schema module moved `src/kernel/` 32 -> 31 and the
+ * domain-summed total 208 -> 207, and the derived family did not contain this
+ * gate. The red reached CI instead of the local sweep. The direction is the bad
+ * one — a gate that over-matches costs a wasted run, this one under-matched
+ * SILENTLY, and the tool's output gave no signal that a gate was omitted.
+ *
+ * So each input is spelled repo-relative and joined onto `ROOT`. The literals
+ * are LOAD-BEARING: this file opens exactly these paths, which is what keeps
+ * the declaration from drifting away from what the gate really reads. Case 21
+ * of the self-test pins that binding in both directions.
+ */
 const TARGET = 'packages/spec/llms.txt';
 const SELF = 'packages/spec/scripts/check-llms-txt.ts';
+/** The `*.zod.ts` tree the schema-inventory counts are re-derived against. */
+const SRC_DIR = 'packages/spec/src';
+/** The checked-in shards every NAMED claim resolves against. */
+const API_SURFACE_DIR = 'packages/spec/api-surface';
+/** The manifest whose `exports` keys every SUBPATH claim resolves against. */
+const PKG_MANIFEST = 'packages/spec/package.json';
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
+
+/**
+ * The two population entries this file cannot spell as a literal it opens, and
+ * so must DECLARE — same shape as `check-doc-anchors`' and the pm line
+ * ratchet's root-file declarations, for the same reason.
+ *
+ *   `pnpm-workspace.yaml/**`     The gate opens the repo-ROOT workspace file
+ *                                (`WORKSPACE_FILE`, right above), but a bare
+ *                                top-level filename carries no separator, so
+ *                                the extractor builds no hint from it — the
+ *                                class it refuses wholesale, because
+ *                                `package.json` / `turbo.json` basenames are
+ *                                joined with a package directory in dozens of
+ *                                gates. `<file>/**` is the sanctioned escape:
+ *                                `collapseHint` reduces it back to that one
+ *                                path, so it claims the root file and no
+ *                                same-named file inside a directory.
+ *
+ *   `packages/**\/package.json`  The package-ecosystem heading is re-derived
+ *                                against the real non-private `@objectstack/*`
+ *                                workspace set, which this file enumerates by
+ *                                READDIR over the `packages:` globs — there is
+ *                                no literal per manifest to scan. Adding or
+ *                                removing a workspace package moves that
+ *                                denominator and falsifies the heading, in
+ *                                exactly the way a `src/` deletion falsifies
+ *                                the schema counts; leaving it unspelled would
+ *                                keep one hole of this card's own species open.
+ *
+ * Priced rather than assumed, over the 232 commits this checkout holds:
+ * `packages/**\/package.json` matches 8 of them (3.4%), and the whole declared
+ * population matches 47 (20.3%). That is a population, not the "22 leads is the
+ * same as none" failure a blanket `packages/**` would buy.
+ *
+ * ⚠️ Provenance, NOT a lookup key — nothing here is joined with `ROOT` and
+ * stat'd. The glob spellings exist to be SCANNED; using one as a path would
+ * make the read vanish silently, which is the disease this gate's own header
+ * opens with.
+ */
+export const DECLARED_WATCH_HINTS = [
+  'pnpm-workspace.yaml/**',
+  'packages/**/package.json',
+  'apps/*/package.json',
+  'examples/*/package.json',
+];
 
 /** A domain directory with no `*.zod.ts` under it is not a schema domain. */
 const ZOD_SUFFIX = '.zod.ts';
@@ -571,7 +646,7 @@ function countZodFiles(dir: string): number {
 }
 
 function readDomainZodCounts(): Record<string, number> {
-  const src = join(PKG, 'src');
+  const src = join(ROOT, SRC_DIR);
   if (!existsSync(src)) {
     console.error(`\n✗ ${SELF}: packages/spec/src/ not found.\n`);
     console.error(
@@ -590,7 +665,7 @@ function readDomainZodCounts(): Record<string, number> {
 }
 
 function readApiSurface(): { entryExports: Record<string, Set<string>> } {
-  const dir = join(PKG, 'api-surface');
+  const dir = join(ROOT, API_SURFACE_DIR);
   if (!existsSync(dir)) {
     console.error(`\n✗ ${SELF}: packages/spec/api-surface/ not found.\n`);
     console.error(
@@ -623,7 +698,7 @@ function readApiSurface(): { entryExports: Record<string, Set<string>> } {
  * packages would shrink the denominator of the package count and make a stale
  * heading look correct.
  */
-function readWorkspacePackages(): Set<string> {
+function readWorkspaceGlobs(): string[] {
   const file = join(ROOT, WORKSPACE_FILE);
   if (!existsSync(file)) {
     console.error(`\n✗ ${SELF}: ${WORKSPACE_FILE} not found at the repo root.\n`);
@@ -646,6 +721,11 @@ function readWorkspacePackages(): Set<string> {
     console.error(`\n✗ ${SELF}: ${WORKSPACE_FILE} \`packages:\` block is empty.\n`);
     process.exit(1);
   }
+  return globs;
+}
+
+function readWorkspacePackages(): Set<string> {
+  const globs = readWorkspaceGlobs();
   const dirs: string[] = [];
   for (const glob of globs) {
     if (glob.endsWith('/*')) {
@@ -677,7 +757,7 @@ function readWorkspacePackages(): Set<string> {
 }
 
 function readSubpaths(): Set<string> {
-  const j = JSON.parse(readFileSync(join(PKG, 'package.json'), 'utf8')) as {
+  const j = JSON.parse(readFileSync(join(ROOT, PKG_MANIFEST), 'utf8')) as {
     exports?: Record<string, unknown>;
   };
   return new Set(Object.keys(j.exports ?? {}));
@@ -925,12 +1005,60 @@ function selfTest(): void {
     expect('empty contract table is reported', has(findings, /has a table with no rows|has 0 tables/), true);
   }
 
+  // 21. The POPULATION DECLARATION is bound to what this gate really reads
+  //     (#13207). Everything above pins the gate's verdict; this pins the
+  //     other half — that `scripts/pm/dispatch-gates.mjs` can NAME this gate
+  //     for the diffs that falsify it. A declaration nothing binds is how the
+  //     two drift apart silently, which is the defect this card is about one
+  //     level up.
+  {
+    // (a) Load-bearing: the three spelled literals are the paths this file
+    //     opens, not decoration beside a `join(PKG, ...)` that still runs.
+    expect('SRC_DIR is the tree actually read', existsSync(join(ROOT, SRC_DIR)), true);
+    expect('API_SURFACE_DIR is the tree actually read', existsSync(join(ROOT, API_SURFACE_DIR)), true);
+    expect('PKG_MANIFEST is the manifest actually read', existsSync(join(ROOT, PKG_MANIFEST)), true);
+    // …and each still resolves where the package-relative join used to point,
+    // so the respelling moved no read.
+    expect('SRC_DIR still resolves to the package tree', join(ROOT, SRC_DIR), join(PKG, 'src'));
+    expect('API_SURFACE_DIR still resolves to the package tree', join(ROOT, API_SURFACE_DIR), join(PKG, 'api-surface'));
+    expect('PKG_MANIFEST still resolves to the package manifest', join(ROOT, PKG_MANIFEST), join(PKG, 'package.json'));
+
+    // (b) The root-file declaration names the workspace file this gate opens
+    //     — not a second, drifting copy of that filename.
+    expect('the root-file declaration names WORKSPACE_FILE', DECLARED_WATCH_HINTS.includes(`${WORKSPACE_FILE}/**`), true);
+
+    // (c) The manifest declarations really cover the workspace this gate
+    //     enumerates. A manifest declaration reaches only under its own root,
+    //     so a workspace glob rooted anywhere undeclared would leave that part
+    //     of the package-ecosystem denominator unspelled — the same hole as
+    //     this card's, one root over.
+    //
+    //     Derived from the REAL pnpm-workspace.yaml rather than from a list
+    //     repeated here, so a new workspace root fails HERE, at the gate that
+    //     reads it, instead of silently narrowing the derivation months later.
+    //     This case has already earned that: `apps/*` and `examples/*` are
+    //     workspace roots, and the first draft of this declaration named only
+    //     `packages/`. Neither holds a non-private `@objectstack/*` package
+    //     today — but this gate OPENS every manifest under them, and one
+    //     landing there moves the denominator exactly as a `packages/` one
+    //     does.
+    const globs = readWorkspaceGlobs();
+    const declaredRoots = new Set(DECLARED_WATCH_HINTS.map((h) => h.split('/')[0]));
+    const undeclared = globs.map((g) => g.split('/')[0]!).filter((r) => !declaredRoots.has(r));
+    expect(`every workspace root is declared (undeclared: ${undeclared.join(', ') || 'none'})`, undeclared.length, 0);
+
+    // (d) Provenance, not a lookup key: no declared spelling is a real path.
+    //     Using one as a path would make the read vanish behind `existsSync`.
+    for (const h of DECLARED_WATCH_HINTS)
+      expect(`declaration \`${h}\` is not used as a path`, existsSync(join(ROOT, h)), false);
+  }
+
   if (failures.length) {
     console.error('\n✗ check-llms-txt self-test failed:\n');
     for (const f of failures) console.error(f);
     process.exit(1);
   }
-  console.log('✓ check-llms-txt self-test: 20 cases pass.');
+  console.log('✓ check-llms-txt self-test: 21 cases pass.');
 }
 
 // ---------------------------------------------------------------------------

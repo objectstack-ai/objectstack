@@ -392,9 +392,56 @@ export async function buildSchemaMigrationPlugins(opts: {
  *
  * The message names the three things the ruling requires of it: the config
  * file, the underlying failure, and the remedy.
+ *
+ * ## The mutation half (#13118), and why it is a caller's claim
+ *
+ * #12953 ruled the exit STATUS and said nothing about the mutation, so `apply`
+ * shipped writing its DDL over the reduced object set and THEN exiting
+ * non-zero — the same run saying "this result is UNMEASURED" and "…and I
+ * changed your schema on that basis". Maintainer ruling 2026-08-29, verbatim
+ * 「同意」, option 2: `os migrate apply` refuses on this path **without touching
+ * the database**, and the refusal must say so explicitly, so an operator
+ * reading it does not have to guess.
+ *
+ * That extra sentence is opt-in ({@link UnloadableHostConfigRefusalOptions})
+ * rather than automatic. It is a claim about what a particular run did, and the
+ * only site that can honestly make it is one that returned before its own
+ * mutating work.
  */
+export interface UnloadableHostConfigRefusalOptions {
+  /**
+   * Say, in the refusal itself, that this run performed **no DDL** (#13118).
+   *
+   * ⛔ Not a default, and deliberately not deduced from the command name. The
+   * sentence is a claim about what THIS run did to the operator's database,
+   * and only a call site that has actually returned before its mutating work
+   * can make it. `os migrate apply` passes `true` because #13118 moved its
+   * refusal above `flushSchemaDdl()` / `applyMigrationEntries()`; a future
+   * caller that refuses AFTER writing must say nothing here and get the
+   * #12953 wording unchanged, rather than inherit a false all-clear by
+   * omission.
+   *
+   * `os migrate plan` never passes it: `plan` writes nothing on ANY path, so
+   * the sentence would be noise there — and its message is pinned unchanged by
+   * the ruling's "plan 行为不变".
+   */
+  noDdlExecuted?: boolean;
+}
+
+/**
+ * The sentence #13118 requires of the MUTATING command's refusal, verbatim.
+ *
+ * Exported so the pin and the message have one source: an operator reading the
+ * refusal "must not have to guess whether the database was touched", and a
+ * test that re-spells the sentence stops holding it the day the wording moves.
+ */
+export const NO_DDL_EXECUTED_NOTICE =
+  'NO DDL WAS EXECUTED: this run refused before touching the database, so the physical '
+  + 'schema is exactly as it was before the command ran. ';
+
 export function describeUnloadableHostConfig(
   composition: SchemaMigrationComposition,
+  options: UnloadableHostConfigRefusalOptions = {},
 ): string | null {
   if (composition.hostConfigPath === null || composition.hostConfigLoaded) return null;
   const cause = composition.hostConfigError ?? 'the load threw without a message';
@@ -403,6 +450,7 @@ export function describeUnloadableHostConfig(
     + 'This run therefore covered ONLY the objects the data stack registered — a fraction of '
     + 'what this deployment serves — so its result is UNMEASURED, not "in sync", and it is '
     + 'reported as a FAILURE rather than as success. '
+    + (options.noDdlExecuted === true ? NO_DDL_EXECUTED_NOTICE : '')
     + 'Remedy: supply the environment this config needs (the failure named above says which), '
     + 'or fix the config, then re-run.'
   );
@@ -426,12 +474,15 @@ export function describeUnloadableHostConfig(
  * time this runs and must survive. `migrate/plan.ts`'s `run()` wrapper reads
  * `process.exitCode` and hands it to `exitOneShotCommand`.
  *
+ * @param options see {@link UnloadableHostConfigRefusalOptions} — `apply`
+ *   passes `noDdlExecuted: true` (#13118); `plan` passes nothing.
  * @returns `true` when this run was the refused shape.
  */
 export function refuseWhenHostConfigUnloadable(
   composition: SchemaMigrationComposition,
+  options: UnloadableHostConfigRefusalOptions = {},
 ): boolean {
-  const line = describeUnloadableHostConfig(composition);
+  const line = describeUnloadableHostConfig(composition, options);
   if (line === null) return false;
   // eslint-disable-next-line no-console
   console.error(`[migrate] ✗ ${line}`);

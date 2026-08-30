@@ -13,11 +13,29 @@
 //     `console.warn` / `console.error` DIRECTLY, so an unrecognised driver
 //     refusal is loud no matter how the kernel's logger is configured;
 //   * `captureEngine` installs a Proxy whose non-matching branch calls
-//     `target.error(...)` — `target` being the engine's own logger, which the
-//     kernel built from its `logger` config and handed over BY REFERENCE. So
-//     the pass-through is subject to that logger's level: `ObjectLogger.write`
-//     returns early unless `LEVEL_ORDER.error >= LEVEL_ORDER[config.level]`,
-//     which is false for `fatal` and for `silent`.
+//     `target.error(...)` / `target.debug(...)` — `target` being the engine's
+//     own logger, which the kernel built from its `logger` config and handed
+//     over BY REFERENCE. So the pass-through is subject to that logger's level:
+//     `ObjectLogger.write` returns early unless
+//     `LEVEL_ORDER[frame] >= LEVEL_ORDER[config.level]`.
+//
+// ⚠️ [#13273] The frame this probe provokes is a MISSING TABLE, and `engine.ts`
+// now classifies that class onto `debug` rather than `error` (its own
+// `reportFindFailure`). Two mechanical consequences for this instrument, both
+// measured rather than reasoned:
+//
+//   * the threshold the engine channel is compared against is `debug` (rank 0),
+//     not `error` (rank 3) — so the positive control below probes at `debug`,
+//     which is the level that admits this frame, where `error` used to be;
+//   * `ObjectLogger.write` sends `error`/`fatal` to `process.stderr` and every
+//     other level to `process.stdout`, so the instrument patches BOTH streams
+//     and counts their union. Patching stderr alone would have read the
+//     demotion as "the frame stopped being emitted" — a false negative that
+//     looks exactly like the thing this file exists to detect.
+//
+// The asymmetry itself is unchanged in shape and is what stays pinned: the
+// driver channel is loud at any level, the engine channel is only as loud as
+// the fixture's own kernel logger.
 //
 // The correction #11569 ruled is a documentation one — no behaviour moves, no
 // consuming fixture goes loud. This file is what keeps that documentation
@@ -32,11 +50,12 @@
 //
 // ## The instrument, and its deliberate limits
 //
-// The engine pass-through's destination under `environment: 'node'` is
-// `process.stderr` (`ObjectLogger.write` prefers the process streams and only
-// falls back to `console` where they are absent — the same finding the sibling
-// module's #11571 block records). So the engine channel is counted by patching
-// `process.stderr.write`, and the driver channel by spying `console.warn`.
+// The engine pass-through's destination under `environment: 'node'` is a
+// process stream (`ObjectLogger.write` prefers them and only falls back to
+// `console` where they are absent — the same finding the sibling module's
+// #11571 block records): `process.stderr` for `error`/`fatal`, `process.stdout`
+// for everything else. So the engine channel is counted by patching BOTH
+// stream writers, and the driver channel by spying `console.warn`.
 //
 // ⛔ That patch is an INSTRUMENT here, not a capture mechanism: it is installed
 // around one probe kernel's lifetime and removed in a `finally`, which is a
@@ -75,7 +94,12 @@ interface Readout {
   readonly rejected: boolean;
   /** `console.warn` lines naming the driver's refusal envelope for `table`. */
   readonly driverPassThrough: number;
-  /** `process.stderr` lines carrying the engine's `Find operation failed`. */
+  /**
+   * Process-stream lines carrying the engine's `Find operation failed`, from
+   * `stderr` and `stdout` together — [#13273] the frame's level decides which
+   * of the two it lands on, and this file measures whether a reader saw it at
+   * all, not which pipe carried it.
+   */
   readonly enginePassThrough: number;
   /** What the capture withheld and counted, per channel. */
   readonly withheldRefusals: number;
@@ -98,11 +122,12 @@ async function probeRead(
   declared: readonly string[],
 ): Promise<Readout> {
   const warnings: string[] = [];
-  const stderr: string[] = [];
+  const streamed: string[] = [];
 
   const realWarn = console.warn;
   const realError = console.error;
-  const realWrite = process.stderr.write.bind(process.stderr);
+  const realErrWrite = process.stderr.write.bind(process.stderr);
+  const realOutWrite = process.stdout.write.bind(process.stdout);
 
   console.warn = (...args: unknown[]): void => {
     warnings.push(args.map((a) => String(a)).join(' '));
@@ -111,7 +136,11 @@ async function probeRead(
     warnings.push(args.map((a) => String(a)).join(' '));
   };
   (process.stderr as { write: unknown }).write = (chunk: unknown): boolean => {
-    stderr.push(String(chunk));
+    streamed.push(String(chunk));
+    return true;
+  };
+  (process.stdout as { write: unknown }).write = (chunk: unknown): boolean => {
+    streamed.push(String(chunk));
     return true;
   };
 
@@ -142,7 +171,8 @@ async function probeRead(
     } catch {
       /* the probe's verdict does not depend on a clean teardown */
     }
-    (process.stderr as { write: unknown }).write = realWrite;
+    (process.stderr as { write: unknown }).write = realErrWrite;
+    (process.stdout as { write: unknown }).write = realOutWrite;
     console.warn = realWarn;
     console.error = realError;
   }
@@ -150,7 +180,7 @@ async function probeRead(
   return {
     rejected,
     driverPassThrough: warnings.filter((l) => l.includes(`refused a read on '${table}'`)).length,
-    enginePassThrough: stderr.filter((l) => l.includes('Find operation failed')).length,
+    enginePassThrough: streamed.filter((l) => l.includes('Find operation failed')).length,
     withheldRefusals: capture?.totalRefusals() ?? -1,
     withheldEngineFrames: capture?.totalEngineFrames() ?? -1,
     silentChannels: capture?.silentChannels() ?? ['probe never built a capture'],
@@ -159,7 +189,7 @@ async function probeRead(
 
 describe('#11569 expected-read-refusal-noise: the two channels are not equally loud on pass-through', () => {
   it(
-    'engine pass-through: a level ABOVE `error` (silent) drops the frame, while the driver stays loud',
+    'engine pass-through: a level above the frame\'s own (silent) drops it, while the driver stays loud',
     async () => {
       const seen = await probeRead('silent', UNDECLARED_TABLE, [DECLARED_TABLE]);
 
@@ -179,16 +209,21 @@ describe('#11569 expected-read-refusal-noise: the two channels are not equally l
   );
 
   it(
-    'engine pass-through: the SAME unrecognised read is loud at `error` — the instrument produces a positive',
+    'engine pass-through: the SAME unrecognised read is loud at `debug` — the instrument produces a positive',
     async () => {
-      const seen = await probeRead('error', UNDECLARED_TABLE, [DECLARED_TABLE]);
+      // [#13273] `debug` is the level that admits THIS frame: the probe reads a
+      // table that does not exist, and `engine.ts` classifies that class onto
+      // `debug`. Before #13273 the same control was run at `error`. The claim
+      // under test is unchanged — "the engine channel is only as loud as the
+      // kernel's own level" — only the rank it is compared against moved.
+      const seen = await probeRead('debug', UNDECLARED_TABLE, [DECLARED_TABLE]);
 
       expect(seen.rejected).toBe(true);
       expect(seen.withheldEngineFrames).toBe(0);
       expect(seen.driverPassThrough).toBeGreaterThanOrEqual(1);
       // ⭐ The negative above is a real measurement and not a broken probe:
       // the identical read on the identical composition DOES reach the log
-      // when the kernel's level admits `error`.
+      // when the kernel's level admits the frame.
       expect(seen.enginePassThrough).toBeGreaterThanOrEqual(1);
     },
     BOOT_TIMEOUT,
@@ -197,10 +232,11 @@ describe('#11569 expected-read-refusal-noise: the two channels are not equally l
   it(
     'engine pass-through: the condition is the LEVEL THRESHOLD, not the word `silent` — `fatal` drops it too',
     async () => {
-      // `ObjectLogger.isEnabled` compares rank: `error` (3) is admitted only
-      // while the configured level is `debug`/`info`/`warn`/`error`. `fatal`
-      // (4) and `silent` (5) both refuse it, so a fixture that floats its
-      // kernel to `fatal` is just as blind as one at `silent`.
+      // `ObjectLogger.isEnabled` compares rank: this frame ([#13273] `debug`,
+      // rank 0) is admitted only while the configured level is `debug`.
+      // `fatal` (4) and `silent` (5) both refuse it — as do `info` and `warn`
+      // — so a fixture that floats its kernel to `fatal` is just as blind as
+      // one at `silent`. The threshold, not the word `silent`, is the rule.
       const seen = await probeRead('fatal', UNDECLARED_TABLE, [DECLARED_TABLE]);
 
       expect(seen.rejected).toBe(true);

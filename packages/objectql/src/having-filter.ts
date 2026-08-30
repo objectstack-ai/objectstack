@@ -37,9 +37,27 @@
 //    the same vocabulary and was not in that PR's inventory, which left this
 //    file as the lone holdout (#5905) — and the only face no conformance table
 //    covers, since `FILTER_LOGIC_CASES` does not drive the HAVING path.
-//    driver-memory / driver-mongodb still answer the old way only because
-//    #5499 freezes them; the divergence is against a frozen face, not against
-//    the ruling.
+//    ⚠️ [#13166] This paragraph used to end "driver-memory / driver-mongodb
+//    still answer the old way only because #5499 freezes them; the divergence
+//    is against a frozen face, not against the ruling." That sentence was wrong
+//    TWICE, and #13166 settled both halves rather than re-tensing them — a
+//    tense-only rewrite would have turned an actionable defect into
+//    settled-looking prose.
+//      (a) The #5499 freeze DISSOLVED on 2026-08-11 (head note of
+//          `@objectstack/spec`'s `aggregation-conformance.ts`). From that date
+//          it excused nothing, and the divergence was neither excused nor
+//          tracked — the DEBT ledger in `scripts/check-driver-conformance.mjs`
+//          is per (driver × case-set) and never carried it.
+//      (b) `driver-mongodb` was never part of this divergence for THIS operator
+//          family. `translateFieldOperators` passes `$nin` straight through and
+//          compiles `$notContains` to `{ $not: { $regex } }`; both match a
+//          missing or null field in MongoDB, so it has always answered the way
+//          the ruling requires.
+//    The one real holdout was `driver-memory`'s REFERENCE matcher — its own
+//    live mingo path already agreed — and #13166 aligned it. So there is no
+//    frozen face left for this file to be divergent against: every evaluation
+//    face of the vocabulary now gives the answer this section states, and this
+//    one is held to it by agreement rather than by exemption.
 //
 // [#7158] A THIRD divergence has been REMOVED rather than added: this face had
 // no comparand-shape gate, which is what the five sibling faces refuse an

@@ -224,8 +224,11 @@ function missingDriverPackageMessage(
  * command an operator runs to install it.
  *
  * Optional from THIS package's side, which is the side that matters here:
- * `@objectstack/service-datasource` declares it in `devDependencies` only, so a
- * host that installs this service on its own does not get it. Hosts that go
+ * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (#12943) —
+ * which tells an installing consumer the relationship exists while installing
+ * nothing — alongside the `devDependencies` entry this package's own suites
+ * build real drivers from. So a host that installs this service on its own does
+ * not get it. Hosts that go
  * through `@objectstack/runtime` or `@objectstack/cli` DO get it as a hard
  * dependency — for them the reachable case is a half-built workspace, whose
  * `Cannot find module` text `isUnbuiltWorkspaceFailure` re-routes to
@@ -242,10 +245,11 @@ export const SQLITE_WASM_DRIVER_INSTALL_COMMAND = `npm install ${SQLITE_WASM_DRI
  * The optional package that provides the MongoDB driver, and the exact command
  * an operator runs to install it.
  *
- * `@objectstack/service-datasource` declares it in `devDependencies` only and
- * `@objectstack/runtime` carries it as an `optionalDependencies` entry, so
- * `--omit=optional` and a direct install of this service both reach the missing
- * package path. (`@objectstack/cli` depends on it outright.)
+ * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (#12943)
+ * beside its `devDependencies` entry, and `@objectstack/runtime` carries it as
+ * an `optionalDependencies` entry — two different optional idioms, and neither
+ * installs it for a consumer of THIS package — so `--omit=optional` and a direct
+ * install of this service both reach the missing package path. (`@objectstack/cli` depends on it outright.)
  *
  * @see {@link TURSO_DRIVER_PACKAGE} for why these are constants and not inline.
  */

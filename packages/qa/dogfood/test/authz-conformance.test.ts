@@ -74,9 +74,48 @@ const tripwireKey = (surface: string): string => `${surface}(${TRANSPORT_WIRED_M
 // → new key → a missing `covers` fails CI. Keys are derived from source
 // CONTENT (route literals / handler names), never line numbers, so they don't
 // churn on edits.
-const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray) => string }> = [
+// ── the three INSTRUMENT KINDS, declared per probe ────────────────────────
+//
+// The table mixes three instruments with three different promises, and reading
+// them with one number is the mistake this declaration exists to prevent: it
+// reads working tripwires as holes and gate pins as route enumerations. The
+// taxonomy was established by the reach census
+// (`authz-probe-blind-spot.census.ts`) and lived there as PROSE; it lives here
+// now, as data on the probe it describes, because a comment cannot be checked
+// and a `kind` can.
+//
+//   ROUTE_ENUMERATION — pattern-based over a route/handler population. Its
+//     stated promise is auto-discovery: "ANY new route matching this pattern
+//     mints a new key". For these, entry points outside every mintable key
+//     ARE the blind spot.
+//   GATE_PIN — the key exists only while a NAMED gate call still exists in the
+//     file (`shouldDenyAnonymous(`, `buildMcpBridge(deps, context)`,
+//     `resolveStdioExecutionContext(`). It mints exactly one key by
+//     construction; the promise is ANTI-REGRESSION on that one gate, never
+//     route completeness. Zero keys here means "this file funnels through the
+//     pinned gate", NOT "every route here is enumerated".
+//   TRIPWIRE — deliberately matches nothing today. Zero keys is the CORRECT
+//     reading, not a gap; armed alarms are not holes.
+//
+// What the declaration BUYS, beyond saying so: `checkProbeInstrumentIntegrity`
+// below turns it into a checked claim. A ROUTE_ENUMERATION or GATE_PIN probe
+// that mints ZERO keys has lost the population it promises to watch, and that
+// is now RED instead of silent — the second, independent blind-spot mechanism
+// (see that function's header for the measured instance).
+type ProbeKind = 'ROUTE_ENUMERATION' | 'GATE_PIN' | 'TRIPWIRE';
+
+interface Probe {
+  /** Which instrument this is. DECLARED, never inferred from the pattern. */
+  kind: ProbeKind;
+  file: string;
+  re: RegExp;
+  key: (m: RegExpExecArray) => string;
+}
+
+const PROBES: readonly Probe[] = [
   // REST /meta umbrella registrar — one guarded registrar covers all ~17 routes.
   {
+    kind: 'ROUTE_ENUMERATION',
     file: 'packages/rest/src/rest-server.ts',
     re: /private\s+registerMetadataEndpoints\s*\(/g,
     key: () => 'meta:rest-server.ts:registerMetadataEndpoints',
@@ -84,6 +123,7 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // Dispatcher meta handler — curated NAME only (NOT handleAI /
   // handleData / handleSecurity, which are separate surfaces/rows).
   {
+    kind: 'ROUTE_ENUMERATION',
     file: 'packages/runtime/src/http-dispatcher.ts',
     re: /async\s+(handleMetadata)\s*\(/g,
     key: (m) => `meta:http-dispatcher.ts:${m[1]}`,
@@ -97,11 +137,13 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // path from the `@objectstack/rest` one that gates `/data` and `/meta`, which
   // is exactly why they diverged unnoticed.
   {
+    kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/actions.ts',
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'actions:domains/actions.ts:anonymous-gate',
   },
   {
+    kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/automation.ts',
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'automation:domains/automation.ts:anonymous-gate',
@@ -111,14 +153,42 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // `shouldDenyAnonymous`. Delete the domain floor and the key vanishes → the
   // covering `anonymous-deny-packages` row goes STALE → red CI.
   {
+    kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/packages.ts',
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'packages:domains/packages.ts:anonymous-gate',
   },
 
-  // Raw-hono standard /data routes — genuinely pattern-based: ANY new
-  // `rawApp.<verb>(`${prefix}/data...`)` → a new key → CI fails until a row covers it.
+  // ── a probe whose POPULATION WAS DELETED, re-declared for what it is ────
+  //
+  // This probe once read as ROUTE_ENUMERATION and its comment claimed live
+  // discovery: "ANY new `rawApp.<verb>(`${prefix}/data...`)` mints a new key".
+  // That spelling occurs ZERO times in the file and has since 2026-07-31, when
+  // commit e5a4d26901 deleted the plugin CRUD/discovery surface — 3 matching
+  // mounts before, 0 after. The probe stayed behind and has minted nothing
+  // since, IN SILENCE, because STALE fires only for a key some matrix row
+  // `covers` and no row ever covered a `data:hono-plugin.ts` key.
+  //
+  // ⚠️ It is re-declared TRIPWIRE, NOT deleted, and the difference matters:
+  // deleting it would make this gate see LESS. As a declared tripwire its zero
+  // is a CHECKED reading rather than an accident — the census carries a
+  // positive control from this same file so a zero from a moved or emptied
+  // file cannot pass as "nothing found" — and the day a `/data` route is
+  // mounted here again the key appears and the surface is UNCLASSIFIED, which
+  // is exactly a tripwire's promise.
+  //
+  // ⛔ Its key deliberately carries NO `TRANSPORT-WIRED` marker, so the
+  // admission rule below does NOT apply to it. That rule is the realtime
+  // vocabulary's, and it demands a per-recipient DELIVERY authorization site;
+  // a re-mounted `/data` route is an ordinary data surface, and holding it to
+  // a realtime remedy would be the wrong checklist on a red.
+  //
+  // ⚠️ The live spelling this pattern watches for exists one file away, in
+  // `current-user-endpoints.ts` (3 mounts, none of them `/data`), which this
+  // table does not name. Naming it is a POPULATION decision and is deliberately
+  // not taken here — see the census's population-source record.
   {
+    kind: 'TRIPWIRE',
     file: 'packages/plugins/plugin-hono-server/src/hono-plugin.ts',
     re: /rawApp\.(get|post|put|patch|delete)\(\s*`\$\{prefix\}(\/data[^`]*)`/g,
     key: (m) => `data:hono-plugin.ts:${m[1].toUpperCase()} ${m[2]}`,
@@ -128,6 +198,7 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // Realtime delivery fan-out: pins the trusted-internal-only posture of the
   // in-memory adapter's publish loop (`realtime-delivery-authz` row).
   {
+    kind: 'GATE_PIN',
     file: 'packages/services/service-realtime/src/in-memory-realtime-adapter.ts',
     re: /async\s+publish\s*\(/g,
     key: () => 'realtime:in-memory-realtime-adapter.ts:publish(trusted-fan-out)',
@@ -148,21 +219,25 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // classified by a row that is not `enforced`, so the shortest path from red
   // back to green runs through an enforcement site rather than around it.
   {
+    kind: 'TRIPWIRE',
     file: 'packages/services/service-realtime/src/in-memory-realtime-adapter.ts',
     re: /handleUpgrade\s*\(/g,
     key: () => tripwireKey('realtime:in-memory-realtime-adapter.ts:handleUpgrade'),
   },
   {
+    kind: 'TRIPWIRE',
     file: 'packages/services/service-realtime/src/realtime-service-plugin.ts',
     re: /handleUpgrade\s*\(|new\s+WebSocketServer|text\/event-stream/g,
     key: () => tripwireKey('realtime:realtime-service-plugin.ts:transport'),
   },
   {
+    kind: 'TRIPWIRE',
     file: 'packages/runtime/src/http-dispatcher.ts',
     re: /async\s+handle(Realtime|Upgrade|Subscribe)\w*\s*\(/g,
     key: (m) => tripwireKey(`realtime:http-dispatcher.ts:handle${m[1]}`),
   },
   {
+    kind: 'TRIPWIRE',
     file: 'packages/client/src/realtime-api.ts',
     re: /new\s+WebSocket\b|new\s+EventSource\b/g,
     key: () => tripwireKey('realtime:client/realtime-api.ts:transport'),
@@ -212,11 +287,13 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // widened to the documented literal `/api/v1/stream` would have stayed just
   // as blind as the one it replaced.
   {
+    kind: 'TRIPWIRE',
     file: 'packages/rest/src/rest-server.ts',
     re: /handleUpgrade\s*\(|new\s+WebSocketServer\b|new\s+WebSocket\b|new\s+EventSource\b|upgradeWebSocket\b|WebSocketPair\b|Sec-WebSocket-|text\/event-stream|streamSSE\s*\(/g,
     key: () => tripwireKey('realtime:rest-server.ts:transport'),
   },
   {
+    kind: 'TRIPWIRE',
     file: 'packages/rest/src/rest-server.ts',
     // Word-boundary lookaheads on `ws`/`stream` keep the file's 31 unrelated
     // response-streaming references (and paths like `/workspaces`) out: they
@@ -266,11 +343,13 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // Drop the threading (or build a system/unscoped bridge for HTTP) → the
   // context-threaded key vanishes → the mcp-http-identity row goes STALE → red CI.
   {
+    kind: 'ROUTE_ENUMERATION',
     file: 'packages/runtime/src/http-dispatcher.ts',
     re: /async\s+handleMcp\s*\(/g,
     key: () => 'mcp:http-dispatcher.ts:handleMcp',
   },
   {
+    kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/mcp.ts',
     re: /buildMcpBridge\(deps, context\)/g,
     key: () => 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)',
@@ -281,23 +360,85 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
   // reader. Dropping that resolution (reverting to a raw/unscoped bridge) makes
   // this key vanish → the mcp-stdio-authority row goes STALE → red CI.
   {
+    kind: 'GATE_PIN',
     file: 'packages/mcp/src/plugin.ts',
     re: /resolveStdioExecutionContext\s*\(/g,
     key: () => 'mcp:plugin.ts:stdio-principal-bound',
   },
 ];
 
+/**
+ * Keys ONE probe mints against today's source.
+ *
+ * Split out from the walk below so per-probe reach is measurable on its own.
+ * The union is what the ratchet classifies; the per-probe count is what says
+ * whether an instrument is still pointed at anything, and a union cannot
+ * answer that — a probe that has gone blind contributes nothing to the union
+ * and is indistinguishable, there, from a probe that never existed.
+ */
+function keysMintedBy(probe: Probe): Set<string> {
+  const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
+  // Fresh lastIndex per read (the RegExp is shared, `g`-flagged).
+  probe.re.lastIndex = 0;
+  const found = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = probe.re.exec(src)) !== null) found.add(probe.key(m));
+  return found;
+}
+
 /** Statically enumerate the anonymous-deny HTTP entry points from source. */
 function discoverAnonymousDenySurfaces(): Set<string> {
   const found = new Set<string>();
-  for (const probe of PROBES) {
-    const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
-    // Fresh lastIndex per file (the RegExp is shared, `g`-flagged).
-    probe.re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = probe.re.exec(src)) !== null) found.add(probe.key(m));
-  }
+  for (const probe of PROBES) for (const k of keysMintedBy(probe)) found.add(k);
   return found;
+}
+
+// ── a probe whose POPULATION was deleted must not fail SILENTLY ───────────
+//
+// The second, independent blind-spot mechanism — and the one the surface
+// ratchet structurally cannot catch. UNCLASSIFIED fires on a key that APPEARS;
+// STALE fires on a `covers` key that DISAPPEARS. Both are keyed on a KEY. A
+// probe that stops minting a key it never had a `covers` row for produces
+// neither signal: no key appears, no `covers` goes stale, and the table keeps
+// a dead instrument that reads exactly like a healthy one.
+//
+// Measured instance: the raw-hono `/data` probe above watched a spelling that
+// commit e5a4d26901 (2026-07-31) deleted — 3 matching mounts before, 0 after —
+// and said nothing for the entire time since, because no row had ever covered
+// a `data:hono-plugin.ts` key.
+//
+// The check is the declared `kind`, applied:
+//
+//   ROUTE_ENUMERATION / GATE_PIN — both promise a population that EXISTS. One
+//     promises to enumerate a route family, the other to hold a named gate in
+//     place. Either minting zero keys means the thing it watches is gone from
+//     the file, and that is now a failure rather than silence.
+//   TRIPWIRE — exempt BY DECLARATION, because matching nothing is its whole
+//     job. That exemption is exactly why the kind is declared per probe rather
+//     than guessed from the pattern: it must be a written, reviewable claim,
+//     not something an instrument infers about itself.
+//
+// ⛔ The exemption is not an escape hatch for a probe that has gone blind.
+// Re-declaring a ROUTE_ENUMERATION probe as TRIPWIRE to clear a red is only
+// honest when its population really is gone AND the zero is backed by a
+// positive control from that same file (the reach census holds one per file) —
+// the hono probe above is written that way, dated evidence and all.
+function checkProbeInstrumentIntegrity(probes: readonly Probe[]): string[] {
+  const problems: string[] = [];
+  for (const probe of probes) {
+    if (probe.kind === 'TRIPWIRE') continue;
+    if (keysMintedBy(probe).size > 0) continue;
+    problems.push(
+      `DEAD PROBE — ${probe.file}: a ${probe.kind} probe minting ZERO keys. ` +
+        'Its population is gone from that file, and neither UNCLASSIFIED nor STALE can say so ' +
+        '(both are keyed on a key: one that appears, one that disappears). ' +
+        'Three honest exits, and no fourth: repoint the probe at the surface that replaced the ' +
+        'deleted one; re-declare it TRIPWIRE if the population really is gone, with the dated ' +
+        'evidence and a positive control from that same file; or delete the probe TOGETHER WITH ' +
+        'the surface it watched. Silence is what this check exists to remove.',
+    );
+  }
+  return problems;
 }
 
 // ── #9083 — a wired transport is admitted ONLY by an `enforced` row ───────
@@ -400,6 +541,72 @@ describe('ADR-0056 D10 — authorization conformance matrix', () => {
       attribution: ATTRIBUTION,
     });
     expect(problems, problems.join('\n')).toEqual([]);
+  });
+
+  it('every non-tripwire probe is still pointed at a population that exists', () => {
+    // The dead-probe check, on the REAL table and the REAL sources. It is a
+    // separate `it` rather than a member of `checkAuthzLedger` on purpose:
+    // `checkAuthzLedger` grades ROWS against a supplied `discover`, and every
+    // controlled-input case below hands it a synthetic one. Folding a
+    // source-reading probe check into it would make those cases depend on the
+    // repo's real files for a property none of them is about.
+    const problems = checkProbeInstrumentIntegrity(PROBES);
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+});
+
+// ── the dead-probe check BITES, and is not vacuous ────────────────────────
+//
+// Same discipline as every other block here: a check that has never been shown
+// to fail is not evidence. Each case drives `checkProbeInstrumentIntegrity`
+// with synthetic probes, so it is deterministic and needs no source edits.
+describe('a probe that has lost its population is caught, not silent', () => {
+  const REAL_FILE = 'packages/rest/src/rest-server.ts';
+  // A pattern certain to be absent from that file, standing in for a spelling
+  // whose surface was deleted. Paired with a live pattern below, so a zero here
+  // is a reading about the PATTERN and not about a missing file.
+  const ABSENT = /zzz_no_such_spelling_zzz/g;
+  const PRESENT = /private\s+registerMetadataEndpoints\s*\(/g;
+
+  it('CONTROL — the file is readable and the live pattern fires (the zero is a reading)', () => {
+    expect(keysMintedBy({ kind: 'ROUTE_ENUMERATION', file: REAL_FILE, re: PRESENT, key: () => 'k' }).size)
+      .toBeGreaterThan(0);
+    expect(keysMintedBy({ kind: 'ROUTE_ENUMERATION', file: REAL_FILE, re: ABSENT, key: () => 'k' }).size)
+      .toBe(0);
+  });
+
+  it('a ROUTE_ENUMERATION probe minting zero keys is a DEAD PROBE', () => {
+    const problems = checkProbeInstrumentIntegrity([
+      { kind: 'ROUTE_ENUMERATION', file: REAL_FILE, re: ABSENT, key: () => 'k' },
+    ]);
+    expect(problems.some((p) => /DEAD PROBE/.test(p) && p.includes(REAL_FILE))).toBe(true);
+  });
+
+  it('a GATE_PIN whose named gate vanished is caught even when NO row covers it', () => {
+    // The exact hole: STALE needs a `covers` key to fire against. A gate pin
+    // nobody classified loses its gate in total silence under the old gate,
+    // and this is the check that speaks instead.
+    const key = 'gate:no-row-covers-this-one';
+    expect(AUTHZ_CONFORMANCE.flatMap((r) => r.covers ?? [])).not.toContain(key);
+    const problems = checkProbeInstrumentIntegrity([
+      { kind: 'GATE_PIN', file: REAL_FILE, re: ABSENT, key: () => key },
+    ]);
+    expect(problems.some((p) => /DEAD PROBE/.test(p))).toBe(true);
+  });
+
+  it('a TRIPWIRE minting zero keys is CORRECT and stays silent', () => {
+    // The other direction, and the one a uniform count gets wrong: six armed
+    // alarms are not six holes.
+    expect(checkProbeInstrumentIntegrity([
+      { kind: 'TRIPWIRE', file: REAL_FILE, re: ABSENT, key: () => 'k' },
+    ])).toEqual([]);
+  });
+
+  it('the real table is all three kinds — the check is not passing for lack of subjects', () => {
+    const kinds = new Set(PROBES.map((p) => p.kind));
+    expect([...kinds].sort()).toEqual(['GATE_PIN', 'ROUTE_ENUMERATION', 'TRIPWIRE']);
+    // …and it really is grading something: the exempt kind is not the whole table.
+    expect(PROBES.filter((p) => p.kind !== 'TRIPWIRE').length).toBeGreaterThan(0);
   });
 });
 

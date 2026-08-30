@@ -7,7 +7,7 @@ import type {
   CubeMeta,
   DatasetSelection,
 } from '@objectstack/spec/contracts';
-import { percentScaleOf, type Cube, type FilterCondition } from '@objectstack/spec/data';
+import { percentScaleOf, type AggregationFunction, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
 // [#6761] The ONE shared `I18nLabel → string` resolver (#6765, maintainer
@@ -390,15 +390,23 @@ export interface AnalyticsServiceConfig {
   executeAggregate?: (objectName: string, options: {
     groupBy?: string[];
     /**
-     * Per-aggregation `filter` (#10576, the #10413 phase-2 contract field) —
-     * kept in lockstep with `StrategyContext.executeAggregate`
-     * (`packages/spec/src/contracts/analytics-service.ts`), which this local
-     * type otherwise mirrors. A bridge that reconstructs the aggregation
-     * entries (as `AnalyticsServicePlugin`'s auto-bridge does, to rename
-     * `method` → the engine's `function`) MUST forward this field or a
-     * measure-scoped filter `ObjectQLStrategy` lowers never reaches storage.
+     * The local mirror of `StrategyContext.executeAggregate`'s aggregation
+     * entries (`packages/spec/src/contracts/analytics-service.ts`), kept in
+     * lockstep with it member by member. The two that lockstep is load-bearing
+     * for:
+     *
+     * - `filter` (#10576, the #10413 phase-2 contract field) — a bridge that
+     *   reconstructs the aggregation entries (as `AnalyticsServicePlugin`'s
+     *   auto-bridge does, to rename `method` → the engine's `function`) MUST
+     *   forward this field or a measure-scoped filter `ObjectQLStrategy`
+     *   lowers never reaches storage.
+     * - `method` is the spec's OWN six-value `AggregationFunction`, not
+     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   back into line. Widening it here again would not be a local matter —
+     *   a bridge author types their handler against THIS declaration, so what
+     *   they would get is a vocabulary the contract no longer has.
      */
-    aggregations?: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>;
+    aggregations?: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>;
     filter?: Record<string, unknown>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;

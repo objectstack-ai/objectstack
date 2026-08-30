@@ -98,27 +98,9 @@ describe('ManifestSchema', () => {
       expect(() => ManifestSchema.parse(manifest)).not.toThrow();
     });
 
-    it('should accept manifest with extensions', () => {
-      const manifest: ObjectStackManifest = {
-        id: 'com.example.custom',
-        version: '1.0.0',
-        type: 'plugin',
-        name: 'Custom Extensions',
-        extensions: {
-          'ui.components': [
-            {
-              id: 'custom-widget',
-              component: 'CustomWidget',
-            },
-          ],
-          'api.hooks': {
-            'before_save': 'validateData',
-          },
-        },
-      };
-
-      expect(() => ManifestSchema.parse(manifest)).not.toThrow();
-    });
+    // The `extensions` acceptance pin was removed with the key (#11332): the
+    // untyped catch-all had zero readers, so accepting it pinned a silent
+    // no-op. The rejection is pinned with the dead-container retirement below.
   });
 
   describe('Real-World Manifest Examples', () => {
@@ -147,24 +129,7 @@ describe('ManifestSchema', () => {
           './objects/contact.object.ts',
           './objects/campaign.object.ts',
         ],
-        extensions: {
-          'dashboard.widgets': [
-            {
-              id: 'sales-pipeline',
-              name: 'Sales Pipeline',
-              component: 'SalesPipelineWidget',
-            },
-            {
-              id: 'revenue-forecast',
-              name: 'Revenue Forecast',
-              component: 'RevenueForecastWidget',
-            },
-          ],
-          'workflows': {
-            'lead_conversion': './workflows/lead-conversion.yml',
-            'opportunity_close': './workflows/opportunity-close.yml',
-          },
-        },
+        // `extensions` retired (#11332) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(crmManifest)).not.toThrow();
@@ -209,21 +174,7 @@ describe('ManifestSchema', () => {
           'system.auth.configure',
           'system.user.create',
         ],
-        extensions: {
-          'auth.providers': {
-            id: 'saml',
-            name: 'SAML 2.0',
-            configSchema: 'saml-config.schema.json',
-            handler: 'SAMLAuthHandler',
-          },
-          'admin.settings': [
-            {
-              page: 'saml-settings',
-              label: 'SAML Configuration',
-              component: 'SAMLSettingsPage',
-            },
-          ],
-        },
+        // `extensions` retired (#11332) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(authPlugin)).not.toThrow();
@@ -239,14 +190,7 @@ describe('ManifestSchema', () => {
         permissions: [
           'system.datasource.manage',
         ],
-        extensions: {
-          'datasource.types': {
-            id: 'postgresql',
-            name: 'PostgreSQL',
-            driver: 'PostgreSQLDriver',
-            features: ['transactions', 'jsonb', 'full-text-search'],
-          },
-        },
+        // `extensions` retired (#11332) — nothing ever read the container.
       };
 
       expect(() => ManifestSchema.parse(dbDriver)).not.toThrow();
@@ -310,21 +254,8 @@ describe('ManifestSchema', () => {
         type: 'adapter',
         name: 'Express Adapter',
         description: 'Express.js HTTP server adapter for ObjectStack runtime',
-        configuration: {
-          title: 'Express Server Settings',
-          properties: {
-            port: {
-              type: 'number',
-              default: 3000,
-              description: 'HTTP server port',
-            },
-            corsEnabled: {
-              type: 'boolean',
-              default: true,
-              description: 'Enable CORS middleware',
-            },
-          },
-        },
+        // `configuration` retired (#11332) — the settings block had no reader;
+        // a plugin is configured by its host at composition time.
       };
 
       expect(() => ManifestSchema.parse(expressAdapter)).not.toThrow();
@@ -542,5 +473,71 @@ describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-
       { id: 'sys.bi.report', description: 'BI report kind' },
     ]);
     expect(parsed.contributes!.kinds![0]).not.toHaveProperty('globs');
+  });
+});
+
+describe('dead-container retirement (#11332, ADR-0049 — tombstoned, not deleted)', () => {
+  // Three top-level manifest containers had ZERO reads of the container itself
+  // monorepo-wide (objectstack + objectui + cloud, controlled census), which
+  // settles every key beneath them at once — a key cannot be read if the
+  // object holding it never is. `ManifestSchema` is NOT `.strict()`, so a
+  // plain deletion would have silently stripped the keys — `retiredKey()` is
+  // what makes each rejection carry the prescription, and the prescription is
+  // what these pins assert (the specific zod issue, never just "it threw").
+  const base = { id: 'com.example.retired', version: '1.0.0', type: 'plugin', name: 'Retired' };
+  const authored: Array<[container: string, value: unknown, mustMention: RegExp]> = [
+    [
+      'capabilities',
+      { implements: [], provides: [], extensionPoints: [] },
+      // The prescription names the live analogue: dependency resolution runs
+      // off top-level `manifest.dependencies`, never off this block.
+      /manifest\.dependencies/,
+    ],
+    [
+      'configuration',
+      { title: 'Cfg', properties: { apiKey: { type: 'string', secret: true } } },
+      // The false promise is the point of the removal: the prescription must
+      // record that `secret` never encrypted or masked anything.
+      /secret/,
+    ],
+    [
+      'extensions',
+      { 'ui.components': [{ id: 'w' }] },
+      // The prescription redirects to the enforced extension channels.
+      /contributes\.kinds/,
+    ],
+  ];
+
+  it.each(authored)('REJECTS an authored `%s` with the prescription as the issue', (container, value, mustMention) => {
+    const result = ManifestSchema.safeParse({ ...base, [container]: value });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    // The SPECIFIC zod issue: located at the retired key, carrying the
+    // fully-qualified key, the removal record, and the imperative fix.
+    const issue = result.error.issues.find((i) => i.path[0] === container);
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      new RegExp(`manifest\\.${container}.*removed in @objectstack/spec 17.*Delete the key`, 's'),
+    );
+    expect(issue!.message).toMatch(mustMention);
+  });
+
+  it('parses cleanly with the retired containers simply absent', () => {
+    const parsed = ManifestSchema.parse(base);
+    expect(parsed).not.toHaveProperty('capabilities');
+    expect(parsed).not.toHaveProperty('configuration');
+    expect(parsed).not.toHaveProperty('extensions');
+  });
+
+  it('still parses the live neighbours — `dependencies` and `navigationContributions` are untouched', () => {
+    const parsed = ManifestSchema.parse({
+      ...base,
+      dependencies: { '@objectstack/plugin-auth': '^2.0.0' },
+      navigationContributions: [
+        { app: 'setup', items: [{ id: 'nav_x', type: 'url', label: 'X', url: '/x' }] },
+      ],
+    });
+    expect(parsed.dependencies).toEqual({ '@objectstack/plugin-auth': '^2.0.0' });
+    expect(parsed.navigationContributions).toHaveLength(1);
   });
 });

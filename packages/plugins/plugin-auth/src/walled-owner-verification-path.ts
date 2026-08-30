@@ -92,9 +92,9 @@
 import {
   PLATFORM_OWNER_EMAIL_ENV,
   isEmailVerifiedUserRow,
-  resolvePlatformOwnerEmail,
   resolveTenancyPosture,
 } from '@objectstack/types';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { isHumanUserRow } from './audience-posture.js';
@@ -203,13 +203,22 @@ export interface VerificationPathWiring {
  * elevation gate refuses on, so this probe can never forecast a refusal the
  * gate would not make, nor stay quiet about one it would.
  *
+ * [#13147] `OS_PLATFORM_OWNER_EMAIL` takes one address OR a comma-separated
+ * list (#11663 Choice 2B), so the probe asks the ONE shared parser and answers
+ * about the DECLARED SET: `owner-verified` when at least one declared address
+ * has a verified account (one verified administrator is all the elevation gate
+ * needs to promote), `owner-unverified` when accounts exist for declared
+ * addresses but none is verified, `owner-absent` when none exists at all.
+ * Those are exactly the elevation gate's own three outcomes, which is what
+ * keeps this probe from forecasting a refusal the gate would not make.
+ *
  * Never throws: any unanswerable read is `'unknown'`.
  */
 export async function probeWalledOwnerAccountState(
   engine: WalledOwnerProbeEngine | undefined,
 ): Promise<WalledOwnerAccountState> {
-  const ownerEmail = resolvePlatformOwnerEmail();
-  if (!ownerEmail || !engine || typeof engine.find !== 'function') return 'unknown';
+  const config = resolvePlatformAdminEmails();
+  if (config.emails.length === 0 || !engine || typeof engine.find !== 'function') return 'unknown';
   const SYSTEM = { context: { isSystem: true } };
   const PROBE_LIMIT = 50;
   const asRows = (raw: unknown): Record<string, unknown>[] => {
@@ -218,8 +227,10 @@ export async function probeWalledOwnerAccountState(
     return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
   };
   try {
-    const wanted = ownerEmail.toLowerCase();
-    const spellings = [...new Set([wanted, ownerEmail])];
+    // Both spellings for EVERY declared address, exactly as the elevation gate
+    // queries them — the as-typed forms come from the parser's own
+    // `declaredSpellings`, never from splitting the raw value a second time.
+    const spellings = [...new Set([...config.emails, ...config.declaredSpellings])];
     const byId = new Map<unknown, Record<string, unknown>>();
     for (const spelling of spellings) {
       for (const row of asRows(
@@ -231,7 +242,7 @@ export async function probeWalledOwnerAccountState(
     const owners = [...byId.values()].filter(
       (row) =>
         isHumanUserRow(row) &&
-        String((row as { email?: unknown }).email ?? '').trim().toLowerCase() === wanted,
+        isConfiguredPlatformAdminEmail((row as { email?: unknown }).email, config),
     );
     if (owners.length > 0) {
       return owners.some(isEmailVerifiedUserRow) ? 'owner-verified' : 'owner-unverified';
@@ -292,8 +303,13 @@ export function resolveWalledOwnerVerificationPathWarning(
   const posture = resolveTenancyPosture();
   if (!postureEnforcesWall(posture)) return null;
 
-  const ownerEmail = resolvePlatformOwnerEmail();
-  if (!ownerEmail) return null;
+  // [#13147] The declared administrators, from the ONE shared parser. An
+  // unset, blank or REFUSED variable all arrive here as an empty list — and all
+  // three are `null` for the same reason the undeclared case always was: a
+  // walled boot never reaches here (`init()` refuses) and off the boot path the
+  // undeclared case has its own refusal.
+  const config = resolvePlatformAdminEmails();
+  if (config.emails.length === 0) return null;
 
   if (wiring.hasEmailTransport || wiring.hasFederatedSignIn) return null;
 
@@ -311,7 +327,7 @@ export function resolveWalledOwnerVerificationPathWarning(
   // so the [#12751] first-account stamp can never reach the owner).
   const seedArmed = isDevAdminSeedArmed();
   const seedStampsDeclaredOwner =
-    seedArmed && devSeedAdminEmail().toLowerCase() === ownerEmail.toLowerCase();
+    seedArmed && isConfiguredPlatformAdminEmail(devSeedAdminEmail(), config);
 
   if (state === 'no-human-users') {
     if (seedStampsDeclaredOwner) return null;
@@ -327,12 +343,12 @@ export function resolveWalledOwnerVerificationPathWarning(
 
   const situation =
     state === 'owner-unverified'
-      ? 'An account holding that address ALREADY EXISTS and is NOT verified — it was created ' +
+      ? 'An account holding a declared address ALREADY EXISTS and is NOT verified — it was created ' +
         'outside the operator provisioning path (the #12751 stamp applies at operator-provisioned ' +
         'CREATION only), so elevation keeps being refused (walled_owner_not_verified) and the ' +
         'account has no in-product way to satisfy the condition. '
       : state === 'owner-absent'
-        ? 'Human users already exist but none holds that address, so the first-account bootstrap ' +
+        ? 'Human users already exist but none holds a declared address, so the first-account bootstrap ' +
           'window (whose owner-email creation would have been stamped verified) is spent; an ' +
           'invitation-admitted registration arrives UNVERIFIED, would be refused ' +
           '(walled_owner_not_verified), and would have no in-product way to satisfy the condition. '
@@ -341,16 +357,23 @@ export function resolveWalledOwnerVerificationPathWarning(
             'account at kernel:ready, spending the bootstrap carve-out on an address that is not ' +
             'the declared owner — the owner then registers later, is refused ' +
             '(walled_owner_not_verified), and has no in-product way to satisfy the condition. '
-          : "The user store could not be consulted at boot, so the declared owner's account state " +
+          : 'The user store could not be consulted at boot, so the declared administrators\' account state ' +
             'is unknown; an owner account not created through an operator provisioning path is ' +
             'refused (walled_owner_not_verified) with no in-product way to satisfy the condition. ';
 
   return (
     `[auth] ${WALLED_OWNER_NO_VERIFICATION_PATH}: tenancy posture '${posture}' declares its ` +
-    `platform owner (${PLATFORM_OWNER_EMAIL_ENV}=${ownerEmail}) but this deployment has NO way ` +
-    'to verify that address — no email transport is wired AND no trusted federated sign-in ' +
+    // [#13147] NAME each declared administrator, as the operator typed it —
+    // the variable takes a comma-separated LIST, and this line used to print
+    // the whole raw value in a slot an operator reads as one address. The
+    // spellings come from the parser, so what is printed is exactly the set
+    // that was understood: an entry the parse dropped is visibly absent here,
+    // and a refused value never reaches this line at all.
+    `platform administrators (${PLATFORM_OWNER_EMAIL_ENV}=${config.declaredSpellings.join(', ')}) ` +
+    'but this deployment has NO way ' +
+    'to verify those addresses — no email transport is wired AND no trusted federated sign-in ' +
     '(enterprise SSO or a social/OIDC provider) is configured. Boot continues, but ' +
-    "platform-admin elevation requires the declared owner's address to be VERIFIED. " +
+    'platform-admin elevation requires a declared administrator\'s address to be VERIFIED. ' +
     situation +
     'Wire EITHER path: (1) an EMAIL ' +
     'TRANSPORT — register an email service (EmailServicePlugin + OS_EMAIL_*), which delivers ' +

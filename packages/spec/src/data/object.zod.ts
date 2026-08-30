@@ -111,7 +111,7 @@ export function stripLegacyApiMethods(
     const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
     warn(
       `[spec] enable.apiMethods declares retired legacy value(s) [${legacy.join(', ')}] — ` +
-        `the ApiMethod enum is the six primitives get/list/create/update/delete/bulk (#3543). ` +
+        `the ApiMethod enum is the six primitives get/list/create/update/delete/bulk. ` +
         `Legacy values are stripped at parse; their semantics are DERIVED from the primitives:\n` +
         legacy.map((v) => `  • \`${v}\`: ${LEGACY_API_METHOD_GUIDANCE[v]}`).join('\n') +
         (kept.length === 0
@@ -2361,7 +2361,7 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
   return new Error(
     `ObjectSchema.create('${name}'): unknown key(s) — ${unknownKeys.join(', ')}.\n` +
     'These keys would previously have been stripped silently at build, shipping ' +
-    'dead metadata with no diagnostic (ADR-0032 "no silent failure", issue #1535).\n\n' +
+    'dead metadata with no diagnostic (ADR-0032 "no silent failure").\n\n' +
     `${lines.join('\n')}\n\n` +
     'Remove the unknown key(s), fix the typo, or move the logic to a supported mechanism.',
   );
@@ -2502,8 +2502,8 @@ function assertSystemDataIsWritable(
     + '(written via `isSystem` / a service SYSTEM_CTX), or `append-only` for an immutable '
     + 'audit log. If the object IS user-writable, drop the `userActions` entries closing '
     + 'create/edit/delete — the `system-data` default already grants create, edit, delete and '
-    + 'exportCsv, so `userActions` is for NARROWING those (#3355). The one verb it does not '
-    + 'grant is CSV `import`, which is opt-in per object (#4671).',
+    + 'exportCsv, so `userActions` is for NARROWING those. The one verb it does not '
+    + 'grant is CSV `import`, which is opt-in per object.',
   );
 }
 
@@ -2604,7 +2604,7 @@ function forceCbpMasterDetailRequired(
       throw new Error(
         `ObjectSchema.create('${name}'): field \`${fieldName}\` declares \`required: false\` on a `
         + "`master_detail` reference under `sharingModel: 'controlled_by_parent'` — a contradiction "
-        + 'with no honest reading (#8772). A controlled-by-parent detail derives ALL of its record '
+        + 'with no honest reading. A controlled-by-parent detail derives ALL of its record '
         + 'access from the master this field names (ADR-0055); a row allowed to omit the master FK '
         + 'is unreadable by everyone (the derived filter `masterFK IN (accessible master ids)` '
         + 'never matches null) and unwritable thereafter. Remove `required: false` (the builder '

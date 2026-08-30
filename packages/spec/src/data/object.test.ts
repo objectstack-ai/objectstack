@@ -1223,7 +1223,7 @@ describe('ObjectSchema.create()', () => {
       }
       expect(message).toContain('lifecycle hook');
       expect(message).toContain('record_change');
-      expect(message).toContain('#1535');
+      expect(message).toContain('ADR-0032 "no silent failure"');
     });
 
     // #4990 note 1 asked whether this file's own `suggestKey` shares the
@@ -2392,7 +2392,7 @@ describe('#3543 apiMethods legacy-value strip (ObjectCapabilities)', () => {
     expect(result.apiMethods).toEqual(['get', 'list']);
     const msg = warn.mock.calls.map((c) => c[0]).join('\n');
     expect(msg).toContain('export');
-    expect(msg).toContain('#3543');
+    expect(msg).toContain('the six primitives get/list/create/update/delete/bulk');
     expect(msg).toContain("declare ['list']"); // FROM → TO prescription
   });
 

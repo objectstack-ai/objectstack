@@ -711,8 +711,8 @@ const CONTROL = {
     why: 'CROSS_PACKAGE_TEST_INPUTS declares which globs a package tests read. A naive-prototype false positive.',
   },
   'check-doc-authoring.mjs': {
-    expect: 'excluded',
-    why: 'Carries no ratchet at all. ROOTS, SKIP_PATHS and SKIP_FILES are declarations of what the two corpus rules read and what is generated rather than authored; each is path-scoped, and none is offered to the author as something to widen. Its published-catalog id rule reached this corpus by first shipping a per-passage allowlist and being turned red here for offering it — maintainer ruling 2026-08-25 replaced that passage with a placeholder and removed the list. If this flips, that list came back.',
+    expect: 'marked',
+    why: 'Joined the convention on #13297: its cross-package prose-id leg holds measured counts against scripts/doc-authoring-prose-id.baseline.json, and the growth red offers the baseline path marked in the same breath — shrink (burn-down regeneration) stays the landing author\'s, growth is a maintainer\'s. Its published-catalog and spec rules still refuse exemptions outright, unchanged since the 2026-08-25 placeholder ruling replaced the one per-passage allowlist this rule ever shipped.',
   },
   'check-error-code-casing.mjs': {
     expect: 'excluded',

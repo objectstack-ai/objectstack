@@ -93,24 +93,39 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
           // spellings on a data block, all eaten without a single diagnostic —
           // rows rendered, zero data columns). ADR-0078 prohibits exactly this
           // parsed-but-silently-inert state, so name it at compile time, with
-          // the fix in the message. Warning, not error, per the objectui#5709
-          // precedent for inert authored keys — escalation to error (and any
-          // widening of the accepted literal grammar, e.g. single-quoted
-          // strings) is a contract decision tracked on objectui#6598.
+          // the fix in the message.
+          //
+          // The message must name the CURRENT accepted grammar, and objectui#6614
+          // (Q1-A, ruled 2026-08-28) moved it: `interpretBrace` now materializes
+          // the JS literal subset, so single-quoted strings and unquoted
+          // identifier keys REACH the renderer and can no longer draw this
+          // warning. The old wording ("write it as JSON, double-quoted") named a
+          // now-legal spelling as the illegal one — advice that would have sent
+          // an author to edit working source. What is left on this side of the
+          // boundary is a genuine expression, so that is what the message names.
+          //
+          // Warning, not error, per the objectui#5709 precedent for inert
+          // authored keys. ⛔ Escalation to error is objectui#6614 Q2 and is
+          // deliberately NOT part of this change: it belongs at the SAVE GATE,
+          // once the framework wires the registry manifest into
+          // `validate-jsx-pages` (#12719 records that gap).
           //
           // LOCKSTEP: this diagnostic is the byte-equal port of objectui's
-          // `packages/sdui-parser` copy (objectui PR #6613). The two copies
-          // must agree on the accepted grammar AND on diagnostic codes — if
-          // they drift, the save gate and the renderer speak different
-          // dialects and a page can save clean and render inert. Change this
-          // block only together with the objectui copy.
+          // `packages/sdui-parser` copy (objectui#6613, message reworded by
+          // objectui#6614). The two copies must agree on the accepted grammar
+          // AND on diagnostic codes — if they drift, the save gate and the
+          // renderer speak different dialects and a page can save clean and
+          // render inert. Change this block only together with the objectui
+          // copy.
           diagnostics.push({
             severity: 'warning',
             code: 'inert-expression',
             message:
               `<${node.type}> prop "${key}" is a braced expression this tier never evaluates — ` +
-              `the value will be silently ignored at render. Write it as JSON ` +
-              `(double-quoted strings and keys), e.g. columns={["name","amount"]} not columns={['name','amount']}`,
+              `the value will be silently ignored at render. This tier materializes LITERALS only ` +
+              `(strings, numbers, booleans, null, arrays, objects; quotes may be single or double, ` +
+              `object keys may be unquoted), e.g. columns={['name','amount']} works — ` +
+              `columns={rows.map((r) => r.name)} cannot`,
             tag: node.type,
           });
         } else {

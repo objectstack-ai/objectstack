@@ -2496,7 +2496,7 @@ export class ApprovalService implements IApprovalService {
         }, { context: SYSTEM_CTX });
         await this.syncApproverIndex(requestId, stillPending, org, now);
         const fresh = await this.readBackRequest(requestId, context);
-        return { request: fresh!, runId, nodeId, finalized: false, decision: input.decision };
+        return { request: fresh, runId, nodeId, finalized: false, decision: input.decision };
       }
     }
 
@@ -2522,7 +2522,7 @@ export class ApprovalService implements IApprovalService {
       );
     }
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, nodeId, finalized: true, decision: input.decision, outputs: mergedOutputs };
+    return { request: fresh, runId, nodeId, finalized: true, decision: input.decision, outputs: mergedOutputs };
   }
 
   /**
@@ -2887,7 +2887,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
+    return { request: fresh, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   // ── Send back for revision / resubmit (ADR-0044) ─────────────
@@ -2992,7 +2992,7 @@ export class ApprovalService implements IApprovalService {
         });
       }
       const fresh = await this.readBackRequest(requestId, context);
-      return { request: fresh!, runId, resumed, autoRejected: true, ...(resumeError ? { resumeError } : {}) };
+      return { request: fresh, runId, resumed, autoRejected: true, ...(resumeError ? { resumeError } : {}) };
     }
 
     await this.engine.update('sys_approval_request', {
@@ -3035,7 +3035,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
+    return { request: fresh, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   /**
@@ -3110,7 +3110,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, runId, resumed, ...(resumeError ? { resumeError } : {}) };
+    return { request: fresh, runId, resumed, ...(resumeError ? { resumeError } : {}) };
   }
 
   /**
@@ -3283,7 +3283,7 @@ export class ApprovalService implements IApprovalService {
     });
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh! };
+    return { request: fresh };
   }
 
   /**
@@ -3366,7 +3366,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh!, notified };
+    return { request: fresh, notified };
   }
 
   // ── Actionable links (ADR-0043) ──────────────────────────────
@@ -3512,7 +3512,7 @@ export class ApprovalService implements IApprovalService {
     }
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh! };
+    return { request: fresh };
   }
 
   /** Free-form reply on the thread (submitter or any pending approver). */
@@ -3554,7 +3554,7 @@ export class ApprovalService implements IApprovalService {
     });
 
     const fresh = await this.readBackRequest(requestId, context);
-    return { request: fresh! };
+    return { request: fresh };
   }
 
   // ── SLA escalation (ADR-0042) ─────────────────────────────────
@@ -4757,12 +4757,33 @@ export class ApprovalService implements IApprovalService {
    * flow-driven resume, a service-to-service call), turning a successful write
    * into a `null` result. Gating belongs on the read API, not on an
    * operation's own return value.
+   *
+   * [#12769] The read still narrows by the CALLER's organization
+   * (`loadRequest` — a deliberate tenancy wall, untouched here), and an
+   * org-less request row is invisible inside an org-scoped caller's narrowing.
+   * Org-less rows arise by construction on every schedule / time-relative /
+   * api trigger run (#10131; #9132 pinned that behaviour rather than repairing
+   * it), so this is a live state, not an edge case: the write IS recorded and
+   * the echo cannot be built. It used to escape as `null` behind the callers'
+   * `fresh!` non-null assertions — a well-formed 200 whose declared-non-null
+   * `request` was `null` on the wire. Now it refuses loudly instead, which
+   * keeps every declared result type true: a result that cannot be built is
+   * never returned. Callers must NOT catch this to fall back to `null` —
+   * that would re-open the type-lie one level up.
    */
   private async readBackRequest(
     requestId: string,
     context: ExecutionContext,
-  ): Promise<ApprovalRequestRow | null> {
-    return this.loadRequest(requestId, context, false);
+  ): Promise<ApprovalRequestRow> {
+    const fresh = await this.loadRequest(requestId, context, false);
+    if (!fresh) {
+      throw new Error(
+        `READ_BACK_FAILED: the write to approval request '${requestId}' was recorded, but the updated row is `
+        + `not visible inside the caller's organization scope, so the result envelope cannot be built. The write `
+        + `is NOT rolled back — read the request back with a system or matching-organization context.`,
+      );
+    }
+    return fresh;
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {

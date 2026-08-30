@@ -370,13 +370,31 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
       // sync had migrated it, they would all pass for the wrong reason.
       expect(physicalType).toMatch(/char|text/i);
 
-      // And a table built from the SAME metadata on a fresh database gets json —
-      // which is what makes the column above stale rather than simply correct.
+      // And a table built from the SAME metadata on a fresh database gets the
+      // JSON column type FOR THIS DIALECT — which is what makes the column above
+      // stale rather than simply correct.
       const fresh = `${TABLE}_fresh`;
       await driver.execute(`drop table if exists ${fresh}`).catch(() => {});
       await driver.initObjects([{ name: fresh, fields: { tags: { type: 'string', multiple: true } } }] as any);
       const freshType = (await driver.columnsOf(fresh)).find((c) => c.name === 'tags')!.type;
-      expect(freshType).toMatch(/json/i);
+
+      // [#12738] INVERTED on SQLite only, and the inversion REINFORCES this
+      // suite rather than weakening it. `createColumn` used to emit `json` on
+      // every dialect; it now emits the dialect-correct type, and SQLite — which
+      // has no JSON type — gets `text`. So on SQLite a fresh column and the
+      // stale one below are now the same AFFINITY CLASS, differing only in
+      // spelling (`TEXT` vs `varchar(255)`).
+      //
+      // That is exactly why `multiValueColumnTypeIsLoadBearing()` excludes
+      // SQLite and why the next case asserts SQLite does NOT corrupt: on this
+      // dialect the column type was never load-bearing, and after #12738 the
+      // emitter agrees with the differ instead of merely being excused by it.
+      // ⛔ Do not "restore" `/json/i` here — that would assert SQLite declares a
+      // type it does not have.
+      expect(freshType).toMatch(cell.id === 'sqlite' ? /char|clob|text/i : /json/i);
+
+      // Still a real difference on every dialect — on the enforcing ones it is a
+      // difference of TYPE, on SQLite only of spelling.
       expect(freshType).not.toBe(physicalType);
       await driver.execute(`drop table if exists ${fresh}`).catch(() => {});
     });

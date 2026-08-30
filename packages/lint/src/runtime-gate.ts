@@ -164,6 +164,23 @@ export interface RuntimeStackContext {
    * for (#4463 D4).
    */
   datasets?: readonly unknown[];
+  /**
+   * The live page declarations (stack key `pages`).
+   *
+   * [#13216] The resolution universe `validateViewPageRefs` resolves a
+   * `type: 'page'` list view's `pageName` against. It is carried for the
+   * reason `datasets` is carried and states first: without it a per-write
+   * `view` snapshot holds NO pages at all, so every legitimate page mount
+   * reads as dangling. The widening is the "one-key edit here plus a
+   * `CONTEXT_STACK_KEYS` entry, made when a rule that reads the collection
+   * actually crosses the wall" this docblock describes — the rule crossed in
+   * the same change, never in advance.
+   *
+   * Carrying it in BOTH differential passes also cancels page-derived findings
+   * for every other write type, so a stored page's pre-existing condition is
+   * not some unrelated write's to answer for (#4463 D4).
+   */
+  pages?: readonly unknown[];
 }
 
 /**
@@ -267,7 +284,7 @@ const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
  * facts: every entry is a key of {@link RuntimeStackContext} AND a stack key
  * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership).
  */
-const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books', 'datasets'] as const satisfies
+const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books', 'datasets', 'pages'] as const satisfies
   readonly (keyof RuntimeStackContext)[];
 
 /** One rule's verdict at the runtime surface, carrying which rule produced it. */
@@ -369,8 +386,8 @@ export function buildRuntimeWriteSnapshots(args: {
   const baseline: AnyRec = {};
   for (const key of CONTEXT_STACK_KEYS) {
     // [#9612] `objects` — and only `objects` — is reduced to the written
-    // item's package closure. The other three collections are already bounded
-    // by what a tenant authors (permission sets, books, datasets), and the
+    // item's package closure. The other four collections are already bounded
+    // by what a tenant authors (permission sets, books, datasets, pages), and the
     // measured bill is entirely in what the rules walk over `objects`.
     //
     // ⭐ Narrowing here rather than at either call site is what makes this ONE
@@ -400,15 +417,26 @@ export function buildRuntimeWriteSnapshots(args: {
  * The collection-resident stack keys whose TOP-LEVEL index the gate rewrites
  * to a name key before findings leave it (#10064).
  *
- * These are the collections a written item lands INSIDE (`TYPE_TO_STACK_KEY`
- * routes `object` / `permission` / `book` writes into them) — so a finding's
- * `objects[417]` is an offset into this gate's per-write snapshot, an
- * in-memory array the caller has never seen and cannot enumerate. Every other
- * write type is the sole member of its own collection (`flows[0]` IS this
- * write, trivially stable), and `datasets` is context-only — no write type
- * maps into it — so both keep their positional spelling.
+ * These are the collections a written item lands INSIDE **and** that the
+ * context also fills (`TYPE_TO_STACK_KEY` routes `object` / `permission` /
+ * `book` / `page` writes into them) — so a finding's `objects[417]` is an
+ * offset into this gate's per-write snapshot, an in-memory array the caller has
+ * never seen and cannot enumerate. Every other write type is the sole member of
+ * its own collection (`flows[0]` IS this write, trivially stable), and
+ * `datasets` is context-only — no write type maps into it — so both keep their
+ * positional spelling.
+ *
+ * [#13216] `pages` JOINED this list in the same change that made `pages` a
+ * context collection, and the pairing is the rule rather than a coincidence:
+ * before that, a `page` write's snapshot held exactly one page, so `pages[0]`
+ * was this write, trivially stable, and name-keying it would have been
+ * pointless. The moment the live universe joins the snapshot, the index stops
+ * meaning anything to the caller — `validatePresetComparands` already runs on
+ * `page` writes and emits paths into this collection. So: adding a key to
+ * {@link CONTEXT_STACK_KEYS} that some write type ALSO maps into means adding
+ * it here too.
  */
-const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books'] as const;
+const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books', 'pages'] as const;
 
 /**
  * Machine names safe to splice into a dotted path. Matches the spec's
@@ -418,7 +446,7 @@ const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books'] as const;
  */
 const PATH_SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-const TOP_LEVEL_INDEX = /^(objects|permissions|books)\[(\d+)\](.*)$/;
+const TOP_LEVEL_INDEX = /^(objects|permissions|books|pages)\[(\d+)\](.*)$/;
 
 /**
  * `objects[417].sharingModel` → `objects.acme_invoice.sharingModel` (#10064).

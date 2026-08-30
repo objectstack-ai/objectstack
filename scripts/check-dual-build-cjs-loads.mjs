@@ -120,11 +120,74 @@
  * nothing: a manifest walk that discovers nothing, an `exports` resolver that
  * reads no `require` condition, a CommonJS collector that matches no file, a
  * probe table that was emptied. Each produces zero findings, and zero findings
- * is exactly what success looks like. So each carries a floor measured on
- * `8cb96ec41b` and held with margin, and below any of them the gate REFUSES
- * (`exit 2`) rather than passing. Same idiom and same reason as
- * `check-keyed-text-bounds.mjs` (five floors) and
- * `check-undeclared-dep-imports.mjs` (three).
+ * is exactly what success looks like. So each carries a floor derived from the
+ * census recorded in `MEASURED` below and held with margin, and below any of
+ * them the gate REFUSES (`exit 2`) rather than passing. Same idiom and same
+ * reason as `check-keyed-text-bounds.mjs` (five floors) and
+ * `check-undeclared-dep-imports.mjs` (three) -- and, measured 2026-08-29, the
+ * same exposure below: those are the only other two gates in `scripts/` that
+ * record a census beside inequality floors, and both had already drifted from
+ * their own record.
+ *
+ * ## The provenance of a floor, and how to reproduce it
+ *
+ * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
+ * about `main`. It is what this gate's own instrument printed on that tree, and
+ * it is what the floors under it were derived from. It is NOT a statement about
+ * the tree you are running on. To re-derive it, take the ref from `MEASURED`
+ * (every passing run prints it) and:
+ *
+ *   git worktree add --detach ../os-cjs-provenance "$REF"    # $REF = MEASURED.ref
+ *   cd ../os-cjs-provenance
+ *   node scripts/check-dual-build-cjs-loads.mjs --list        # entries + packages
+ *
+ * ⚠️ Two of the four counters are cheap to reproduce and two are not, and that
+ * asymmetry is the thing a reader most needs to know:
+ *
+ *   entries, packages   read from `packages/**\/package.json` ALONE -- no
+ *                       install, no build, because `--list` returns before the
+ *                       prerequisite check. Re-derived at `MEASURED.ref` on
+ *                       2026-08-29: 103 / 67, exactly the record.
+ *   cjsFiles, probes    read from emitted `dist/`, so reproducing them costs a
+ *                       full `pnpm install && pnpm build` AT that ref. ⛔ Do
+ *                       not read a matching `cjsFiles` as corroboration of the
+ *                       other two -- it moves with the BUILD, not with the
+ *                       source. On 2026-08-29 the built tree read 610 against a
+ *                       recorded 613 while `probes` still matched exactly.
+ *
+ * ## This population shrinks for good reasons, not only grows
+ *
+ * A floor reads as if the thing under it only ever rises. This one does not. A
+ * package with no `exports` map publishes its `main` AS a require entry point,
+ * so giving it an accurate ESM-only `exports` map REMOVES it from this
+ * population -- an improvement that decrements `entries` AND `packages`. That
+ * is exactly how this record first parted company with the tree: it was exact
+ * at `MEASURED.ref` and stayed exact for its whole life until
+ * `@objectstack/cli` left the population that way. ⇒ a drop here is not
+ * evidence of a broken walk; only a drop below the floor is.
+ *
+ * ## Why no equality against the tree, and why no band either
+ *
+ * An equality reds on every legitimate move, in both directions -- the very PR
+ * that declared the `exports` map above would have reddened it. A band around
+ * the record is the next thing to reach for, and it fails a derivation rather
+ * than a taste test. Two reasons, either one sufficient:
+ *
+ *   1. The band already exists and is called the FLOOR. `MIN_ENTRIES` IS
+ *      `MEASURED.entries` minus the headroom this gate declared. A second,
+ *      narrower band would be a second tolerance for one fact, and its width
+ *      would be invented rather than measured.
+ *   2. No width measures anything. Measured 2026-08-29, the three gates in
+ *      `scripts/` carrying a record of this shape had drifted -1, -5 and +15
+ *      from theirs, in both directions, within days of landing. A band narrow
+ *      enough to notice this file's -1 reds on the +15 next door; one wide
+ *      enough to survive the +15 cannot see a -1.
+ *
+ * So the repair is not enforcement. What was missing is that a GREEN run never
+ * showed the reader the two numbers side by side, so the record could stop
+ * describing the tree with nothing, anywhere, saying so. `provenanceLine`
+ * prints both on every pass: the drift is a fact in the log now, not a
+ * discovery.
  *
  * ## Where it runs, and why not in the lint job
  *
@@ -248,12 +311,24 @@ const EXIT_REFUSE = 2;
 const EXIT_PREREQ = 3;
 
 // ---------------------------------------------------------------------------
-// Vacuity floors -- see the header. Measured on `8cb96ec41b` (a full `pnpm
-// build`, then this gate), each floor held with margin. Re-measuring UP is
-// free; LOWERING one to make a run pass is the move this block exists to make
+// Vacuity floors, and the provenance of the census they were derived from --
+// the header is the authority on how to reproduce it and on why it is recorded
+// rather than enforced. The ref lives INSIDE the record, so a count and the
+// tree it came from cannot be edited apart, and every site that quotes either
+// interpolates from here instead of restating it. Re-measuring UP is free;
+// LOWERING a floor to make a run pass is the move this block exists to make
 // visible in a diff.
 
-const MEASURED = Object.freeze({ entries: 103, packages: 67, cjsFiles: 613, probes: 1 });
+const MEASURED = Object.freeze({
+  // The commit this census was taken on -- a full install and build, then this
+  // gate. Immutable, so the record stays reproducible forever even as `main`
+  // moves away from it. ⛔ Never repoint it without re-running all four counts.
+  ref: '8cb96ec41b',
+  entries: 103,
+  packages: 67,
+  cjsFiles: 613,
+  probes: 1,
+});
 const MIN_ENTRIES = 90;
 const MIN_PACKAGES = 58;
 const MIN_CJS_FILES = 520;
@@ -279,11 +354,40 @@ export function floorProblem(counts) {
   ];
   for (const [got, min, measured, what, why] of rows) {
     if (got >= min) continue;
-    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on 8cb96ec41b).\n`
+    return `measured only ${got} ${what}, below the floor of ${min} (${measured} on ${MEASURED.ref}).\n`
       + `  ${why}\n`
       + '  ⛔ NOT a pass: nothing, or nearly nothing, was read.';
   }
   return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: the census this run read, the floors
+ * it cleared, the census those floors were derived from, and the ref that
+ * census belongs to -- side by side.
+ *
+ * This is the whole repair. The floors are inequalities on purpose, so no run
+ * can ever contradict the record; without this line the record could stop
+ * describing the tree and every green log would look identical either way. The
+ * delta is reported as INFORMATION and never as a verdict: this population
+ * moves in both directions for good reasons (see the header), and only the
+ * floors decide anything.
+ *
+ * Pure, so `--self-test` drives it with no tree.
+ *
+ * @param {{entries?: number, packages?: number, cjsFiles?: number, probes?: number}} counts
+ * @returns {string}
+ */
+export function provenanceLine(counts) {
+  const got = [counts?.entries ?? 0, counts?.packages ?? 0, counts?.cjsFiles ?? 0, counts?.probes ?? 0];
+  const rec = [MEASURED.entries, MEASURED.packages, MEASURED.cjsFiles, MEASURED.probes];
+  const floors = [MIN_ENTRIES, MIN_PACKAGES, MIN_CJS_FILES, MIN_PROBES];
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  return `  provenance — entries/packages/cjsFiles/probes: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
+    + ' reasons, and only the floors decide. Reproduce the record: see this file\'s header.';
 }
 
 /**
@@ -719,6 +823,12 @@ async function main(argv) {
       (ledgerHits.length ? `; ${ledgerHits.length} declared non-loadable entr(ies) still justified.` : '.'),
   );
   for (const h of ledgerHits) console.log(`  · declared: ${h}`);
+  console.log(provenanceLine({
+    entries: rows.length,
+    packages: new Set(rows.map((r) => r.pkg)).size,
+    cjsFiles: cjsFileCount,
+    probes: probesRun,
+  }));
   return EXIT_OK;
 }
 
@@ -892,20 +1002,49 @@ export async function selfTest() {
   // all — a floor accidentally set above its own measurement would red every
   // real run, which is the opposite failure and just as invisible in review.
   const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes };
-  t('FLOOR — the values measured on 8cb96ec41b clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
+  t('FLOOR — the values in the record clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
   t('FLOOR — entries collapsed onto too few packages refuses', floorProblem({ ...full, packages: 0 }) !== null);
   t('FLOOR — a dead CommonJS collector refuses (PARSES over an empty set)', floorProblem({ ...full, cjsFiles: 0 }) !== null);
   t('FLOOR — an emptied probe table refuses (AGREES satisfied vacuously)', floorProblem({ ...full, probes: 0 }) !== null);
   t('FLOOR — a missing count is zero, not "unmeasured but fine"', floorProblem({}) !== null);
   t('FLOOR — the refusal names the count, the floor and the measurement',
-    /measured only 0 .* below the floor of \d+ \(613 on 8cb96ec41b\)/s.test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
+    new RegExp(`measured only 0 .* below the floor of \\d+ \\(${MEASURED.cjsFiles} on ${MEASURED.ref}\\)`, 's')
+      .test(floorProblem({ ...full, cjsFiles: 0 }) ?? ''),
     JSON.stringify(floorProblem({ ...full, cjsFiles: 0 })));
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_ENTRIES <= MEASURED.entries && MIN_PACKAGES <= MEASURED.packages
     && MIN_CJS_FILES <= MEASURED.cjsFiles && MIN_PROBES <= MEASURED.probes);
   t('FLOOR — the refusal code is distinct from findings and prerequisite',
     EXIT_REFUSE !== EXIT_FINDINGS && EXIT_REFUSE !== EXIT_PREREQ && EXIT_REFUSE !== EXIT_OK);
+
+  // ── provenance: the record must stay reproducible, and visibly so ────────
+  //
+  // None of these can red on a tree that legitimately moved — that is the
+  // point. They red when the RECORD stops being a self-contained, reproducible
+  // claim: a ref that is not a ref, a quotation that restated the ref instead
+  // of reading it, or a pass line that stopped showing the reader both numbers.
+  t('PROVENANCE — the record carries the ref it was measured on',
+    typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref), JSON.stringify(MEASURED.ref));
+  t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
+    (floorProblem({ ...full, entries: 0 }) ?? '').includes(MEASURED.ref),
+    JSON.stringify(floorProblem({ ...full, entries: 0 })));
+  const provDrifted = provenanceLine({ entries: 102, packages: 66, cjsFiles: 610, probes: 1 });
+  t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
+    provDrifted.includes('102/66/610/1')
+    && provDrifted.includes(`${MEASURED.entries}/${MEASURED.packages}/${MEASURED.cjsFiles}/${MEASURED.probes}`)
+    && provDrifted.includes(`${MIN_ENTRIES}/${MIN_PACKAGES}/${MIN_CJS_FILES}/${MIN_PROBES}`)
+    && provDrifted.includes(MEASURED.ref), provDrifted);
+  t('PROVENANCE — drift is reported in BOTH directions, and equality says so',
+    provDrifted.includes('-1/-1/-3/=')
+    && provenanceLine({ ...full }).includes('=/=/=/=')
+    && provenanceLine({ ...full, entries: MEASURED.entries + 15 }).includes('+15/'),
+    provDrifted);
+  t('PROVENANCE — the PASS path actually prints it (a line nothing calls is the defect above)',
+    readFileSync(fileURLToPath(import.meta.url), 'utf8').includes(`console.log(${'provenanceLine'}({`),
+    'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
+  t('PROVENANCE — the delta is marked as information, never as a verdict',
+    /not a verdict/i.test(provDrifted) && !/✗|REFUSES/.test(provDrifted), provDrifted);
 
   // ── the real ledger is well-formed and shrink-only in shape ───────────────
   const realLedger = readLedger(REPO_ROOT);
@@ -923,7 +1062,7 @@ export async function selfTest() {
     console.error(`✗ check-dual-build-cjs-loads self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, and the parse failure the ledger may never silence).`);
+  console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, the parse failure the ledger may never silence, and the record's ref reproducible, quoted from the record and printed on the pass path).`);
   return EXIT_OK;
 }
 

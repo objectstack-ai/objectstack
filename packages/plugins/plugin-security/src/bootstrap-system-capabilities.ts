@@ -212,6 +212,12 @@
 
 import { PLATFORM_CAPABILITIES, type PlatformCapability } from '@objectstack/spec/security';
 import { buildExistingByName } from './seed-name-lookup.js';
+import {
+  createSeedWriteRefusals,
+  logSeedDurabilityFailure,
+  type SeedLogger,
+  type SeedWriteRefusals,
+} from './per-organization-catalog.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -243,11 +249,40 @@ async function tryFind(ql: any, object: string, where: any, limit = 1): Promise<
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: SYSTEM_CTX }); } catch { return null; }
+/**
+ * [#12981] The refusal channel on the two write helpers.
+ *
+ * ⛔ The `catch` still answers `null`/`false` and still never throws: a seeder
+ * that turns a refused row into a broken boot is a behaviour change this
+ * repair does not make. What changes is that the refusal is now COUNTED before
+ * it is absorbed, because `null`/`false` alone cannot tell "the store refused
+ * this write" from "there was nothing to write" — and every counter in
+ * {@link CapabilitySeedResult} is a count of writes that LANDED, so a pass in
+ * which every write was refused produced numbers identical to a steady-state
+ * boot and a `[security] system capabilities seeded` line at `info` over zero
+ * rows. That is #12981's shape verbatim, and this file is where the card
+ * quotes it from.
+ *
+ * `refusals` is OPTIONAL so the helpers stay callable from the read-only
+ * probes that do not run inside a pass; a pass always supplies one.
+ */
+async function tryInsert(
+  ql: any,
+  object: string,
+  data: any,
+  refusals?: SeedWriteRefusals,
+): Promise<any | null> {
+  try { return await ql.insert(object, data, { context: SYSTEM_CTX }); }
+  catch (e) { refusals?.record(object, e); return null; }
 }
-async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
-  try { await ql.update(object, data, { context: SYSTEM_CTX }); return true; } catch { return false; }
+async function tryUpdate(
+  ql: any,
+  object: string,
+  data: any,
+  refusals?: SeedWriteRefusals,
+): Promise<boolean> {
+  try { await ql.update(object, data, { context: SYSTEM_CTX }); return true; }
+  catch (e) { refusals?.record(object, e); return false; }
 }
 
 type CapabilityDef = PlatformCapability;
@@ -267,7 +302,29 @@ function humanize(name: string): string {
 }
 
 interface SeedOptions {
-  logger?: { info?: (m: string, meta?: Record<string, any>) => void; warn?: (m: string, meta?: Record<string, any>) => void };
+  /**
+   * [#12981] The in-package {@link SeedLogger}, not a fourth inline sink
+   * literal.
+   *
+   * Reused rather than re-declared for two measured reasons. It already
+   * carries the OPTIONAL `error` this file now needs (a refused catalog write
+   * is a durability degradation, AGENTS.md "Degradation log levels") beside a
+   * NON-optional `warn` — which is what
+   * `scripts/check-optional-error-sink-contract.mjs` requires of any sink type
+   * declaring `error`: an optional `error` with no guaranteed alternative is a
+   * contract that permits silence. Declaring `{ info?, warn?, error? }` here
+   * instead would enrol a NEW type into that gate's population, red on
+   * arrival.
+   *
+   * `warn` becoming non-optional is an AUTHORING-time tightening with no
+   * published cost: `bootstrapSystemCapabilities` is deliberately absent from
+   * this package's `index.ts` (its only callers are `security-plugin.ts`, which
+   * passes the kernel logger, and this package's own tests). ⛔ The sibling
+   * repairs in `cleanup-package-permissions.ts` and
+   * `suggested-audience-bindings.ts` could NOT do this — their sinks ride on
+   * types that ARE exported — which is why those two stay on `warn`.
+   */
+  logger?: SeedLogger;
   /**
    * [ADR-0066 D1] Capability names that `bootstrapDeclaredCapabilities` has
    * confirmed ALREADY HAVE a `sys_capability` row
@@ -391,6 +448,20 @@ export interface CapabilitySeedResult {
    * with a readable database seeds it.
    */
   unreadable: number;
+  /**
+   * [#12981] Writes the store REFUSED this pass — inserts and updates
+   * together, across both halves.
+   *
+   * ⚠️ Not a spelling of any counter above. Every one of those counts a write
+   * that LANDED (or a definition deliberately left alone); this counts the
+   * ones that were attempted and rejected. Without it the two states that
+   * matter most are the same observation: a steady-state boot with nothing to
+   * do, and a boot whose every write was refused, both report
+   * `seeded: 0, updated: 0`. The refusal is also REPORTED once per pass on the
+   * durability channel — the counter is for callers and tests, the log line is
+   * for the operator.
+   */
+  refused: number;
   /** Definitions considered this pass (curated + derived). */
   total: number;
 }
@@ -403,7 +474,8 @@ export async function bootstrapSystemCapabilities(
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return {
       seeded: 0, updated: 0, skippedAuthored: 0, unseededDerived: 0,
-      platformStampedInOrg: 0, blockedCurated: 0, unchanged: 0, unreadable: 0, total: 0,
+      platformStampedInOrg: 0, blockedCurated: 0, unchanged: 0, unreadable: 0,
+      refused: 0, total: 0,
     };
   }
 
@@ -428,6 +500,12 @@ export async function bootstrapSystemCapabilities(
     }
   }
 
+  // [#12981] ONE refusal log for the whole pass — reported once at the end,
+  // never per row: the seeder walks every declared capability, and the failure
+  // this exists to surface refuses ALL of them, so a line per refused row
+  // would bury its own meaning (the aggregate-then-report discipline
+  // `createSeedWriteRefusals` was built for).
+  const refusals = createSeedWriteRefusals();
   let seeded = 0;
   let updated = 0;
   let skippedAuthored = 0;
@@ -709,7 +787,7 @@ export async function bootstrapSystemCapabilities(
       // is a row this pass has nothing to say about.
       if (row.label === def.label && row.description === def.description) {
         unchanged += 1;
-      } else if (await tryUpdate(ql, 'sys_capability', { id: row.id, label: def.label, description: def.description })) {
+      } else if (await tryUpdate(ql, 'sys_capability', { id: row.id, label: def.label, description: def.description }, refusals)) {
         updated += 1;
       }
     } else {
@@ -722,7 +800,7 @@ export async function bootstrapSystemCapabilities(
         managed_by: 'platform',
         active: true,
       };
-      const created = await tryInsert(ql, 'sys_capability', payload);
+      const created = await tryInsert(ql, 'sys_capability', payload, refusals);
       if (created) {
         seeded += 1;
         // [#10946] Recording the row is what keeps hoisting the read out of the
@@ -815,12 +893,100 @@ export async function bootstrapSystemCapabilities(
       { unreadable, total: byName.size },
     );
   }
+  reportCapabilityWriteRefusals(options.logger, refusals);
   options.logger?.info?.('[security] system capabilities seeded into sys_capability (ADR-0066 D1)', {
     seeded, updated, skippedAuthored, unseededDerived, platformStampedInOrg, blockedCurated,
-    unchanged, unreadable, total: byName.size,
+    unchanged, unreadable, refused: refusals.total, total: byName.size,
   });
   return {
     seeded, updated, skippedAuthored, unseededDerived, platformStampedInOrg, blockedCurated,
-    unchanged, unreadable, total: byName.size,
+    unchanged, unreadable, refused: refusals.total, total: byName.size,
   };
+}
+
+/**
+ * [#12981] Report, ONCE per pass, the `sys_capability` writes the store
+ * refused.
+ *
+ * ## Why the durability channel
+ *
+ * AGENTS.md "Degradation log levels" asks one question: after the degradation,
+ * does the system go on looking normal while something it CLAIMS to have
+ * persisted did not land? Here, exactly. The line below this one —
+ * `[security] system capabilities seeded into sys_capability` — is an `info`
+ * claim of persistence, and every count it carries is a count of rows that
+ * LANDED, so a pass whose every write was refused prints that same reassuring
+ * line over zero rows. #12923 measured the cost of precisely this on the
+ * sibling catalog seeders: a boot logged "RBAC catalog seeded" at `info` over
+ * zero landed rows, on a deployed plane, for weeks.
+ *
+ * ## What is and is NOT lost — stated because overstating it is the other failure
+ *
+ * `sys_capability` is the capability REGISTRY: it is what Setup lists and where
+ * a capability's label and description are read from. Grants and
+ * `requiredPermissions` referencing a capability resolve BY NAME, not by row
+ * (the same fact the two per-name warnings in this file are careful to state),
+ * so a refused write does not silently grant or revoke access. What it leaves
+ * is a capability missing from the registry installation-wide, or one whose
+ * displayed label and description stay drifted from the platform's own
+ * definition — under a clean boot log. That is a durability degradation and
+ * not a functional one, which is why it is reported here and why the report
+ * does not claim an authorization consequence it does not have.
+ *
+ * ## Why ONE line, with the class in `meta`
+ *
+ * `reportSeedWriteRefusals` splits its two classes because their REMEDIES
+ * differ, and both remedies are reachable here — an insert can collide with
+ * the platform bucket's unique key, an update-by-id cannot — so both are named
+ * in the one sentence and the per-(object, class) split travels in `meta`. Its
+ * PROSE is not reused: every sentence of it is about seeding the RBAC catalog
+ * and names a remedy for the legacy platform-wide index on the catalog name
+ * column, which is not this pass (the same deviation
+ * `permission-set-drift.ts` records, and for the same reason — a confident
+ * wrong answer is worse than no answer).
+ *
+ * ## Its relation to the two per-name warnings above
+ *
+ * `blockedCurated` already names each CURATED capability whose insert was
+ * refused, with the blocking row's provenance and a by-hand remedy. This line
+ * does not replace it and does not double-count: it is the pass-level total,
+ * and it is the ONLY report for the two halves that had none — a refused
+ * insert on the DERIVED half (which falls through `else if (!isDerived)` in
+ * silence) and a refused UPDATE on either half (which was counted nowhere and
+ * logged nowhere at all).
+ *
+ * ⚠️ `check:durability-log-level` does not vouch for this level. `ql.insert` /
+ * `ql.update` are not in its `DURABILITY_CRITICAL_CALLEES` vocabulary, so its
+ * green over this file means the site is outside the gate's reach — NOT
+ * MEASURED — never that the level was approved (#12981's standing premise).
+ */
+function reportCapabilityWriteRefusals(
+  logger: SeedLogger | undefined,
+  refusals: SeedWriteRefusals,
+): void {
+  const entries = refusals.report();
+  if (entries.length === 0) return;
+  logSeedDurabilityFailure(
+    logger,
+    `[security] ${refusals.total} sys_capability write(s) were REFUSED while seeding the platform ` +
+      `capability registry — those rows did NOT land, the "system capabilities seeded" line logged ` +
+      `alongside this one counts only the writes that DID, and THE DEPLOYMENT WILL GO ON LOOKING ` +
+      `HEALTHY: nothing else fails, so this line is the only notice. What is missing is registry ` +
+      `state, not authorization — grants and requiredPermissions resolve capabilities BY NAME rather ` +
+      `than by row, so no principal gained or lost access; what a refused INSERT leaves is a ` +
+      `capability absent from sys_capability installation-wide (missing from Setup's list, with no ` +
+      `label or description anywhere), and what a refused UPDATE leaves is a row whose label and ` +
+      `description stay drifted from the platform's own definition. Remedy depends on the class, ` +
+      `which is in this line's meta: a "unique-violation" is a deployment SCHEMA defect — the ` +
+      `platform (NULL-organization) bucket admits one row per name, so a collision means the ` +
+      `database still enforces an index from before per-organization materialization; run ` +
+      `"os migrate plan", where it is reported as a replace_unique_index operation, then ` +
+      `"os migrate apply". Anything in the "other" class is not that and the migrate remedy does ` +
+      `NOT apply to it: it is typically a store outage, which the next boot re-attempts. What the ` +
+      `store actually said is in the query engine's "Insert operation failed" / "Update operation ` +
+      `failed" entries logged just before this one, which keep the driver's own identifier with the ` +
+      `bound statement and its values cut. Until a write lands nothing is lost, and nothing arrives ` +
+      `either.`,
+    { refused: refusals.total, refusals: entries },
+  );
 }

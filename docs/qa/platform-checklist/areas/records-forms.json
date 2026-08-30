@@ -32,7 +32,7 @@
         },
         {
           "step": 2,
-          "call": "PUT /api/v1/meta/objects/qa_nofeeds?package=com.objectstack.qa.feeds",
+          "call": "PUT /api/v1/meta/object/qa_nofeeds?package=com.objectstack.qa.feeds",
           "body": {
             "name": "qa_nofeeds",
             "label": "QA No Feeds",

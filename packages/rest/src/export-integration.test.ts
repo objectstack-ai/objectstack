@@ -33,12 +33,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import ExcelJS from 'exceljs';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { maskFieldValue } from '@objectstack/plugin-security';
 import { RestServer } from './rest-server';
+import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
 // ---------------------------------------------------------------------------
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -211,8 +211,7 @@ describe('export route — real engine + protocol integration', () => {
     expect(headers['Content-Type']).toBe(
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(getBuffer() as any);
+    const wb = await loadXlsxWorkbook(getBuffer());
     const ws = wb.worksheets[0];
     const header = (ws.getRow(1).values as any[]).slice(1).map((v) => String(v));
     expect(header).toEqual(['ID', '标题', '完成', '优先级', '截止', '负责人']);
@@ -227,8 +226,7 @@ describe('export route — real engine + protocol integration', () => {
     // Default limit (10000) is within the style cap, so colours are applied.
     expect(headers['X-Export-Styles']).toBe('applied');
 
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(getBuffer() as any);
+    const wb = await loadXlsxWorkbook(getBuffer());
     const ws = wb.worksheets[0];
     // priority is column 4 (ID, 标题, 完成, 优先级, ...).
     const highCell = ws.getRow(2).getCell(4); // '高' → #e11d48
@@ -247,8 +245,7 @@ describe('export route — real engine + protocol integration', () => {
     );
 
     expect(headers['X-Export-Styles']).toBe('dropped');
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(getBuffer() as any);
+    const wb = await loadXlsxWorkbook(getBuffer());
     const ws = wb.worksheets[0];
     // Data is intact...
     const r1 = (ws.getRow(2).values as any[]).slice(1).map((v) => String(v));
@@ -528,8 +525,7 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
     });
     const { res, getBuffer } = makeBinRes();
     await route.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(getBuffer() as any);
+    const wb = await loadXlsxWorkbook(getBuffer());
     const ws = wb.worksheets[0];
     expect((ws.getRow(1).values as any[]).slice(1)).toEqual(['ID', '完成']);
     expect(ws.rowCount).toBe(1); // header only
@@ -610,8 +606,7 @@ describe('export route — search', () => {
       { params: { object: 'task' }, query: { format: 'xlsx', search: '代码' } } as any,
       res,
     );
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(getBuffer() as any);
+    const wb = await loadXlsxWorkbook(getBuffer());
     expect(wb.worksheets[0].rowCount).toBe(2); // header + one match
   });
 });

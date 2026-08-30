@@ -5,19 +5,6 @@ description: Events Queue protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Event Queue Configuration Schema
-Configuration for async event processing queue
-
-@example
-\{
-  "name": "event_queue",
-  "concurrency": 10,
-  "retryPolicy": \{
-    "maxRetries": 3,
-    "backoffStrategy": "exponential"
-  \}
-\}
-
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/events/queue.zod.ts`
 </Callout>

@@ -190,6 +190,34 @@ export async function handleKeysRequest(
         inserted = await ql.insert('sys_api_key', row, { context: { isSystem: true } });
     } catch {
         // Never surface the underlying error (could echo row contents).
+        //
+        // [#12981] This catch is silent BY DESIGN and it is NOT a durability
+        // swallow. `scripts/measure-durability-swallow-family.mjs` reports this
+        // site as tier-1 DARK because membership is decided on three mechanical
+        // conjuncts -- silent catch, no rethrow, an awaited write in the `try`
+        // -- and the census deliberately leaves the fourth, "and the caller
+        // still reports success", to a person. Here the answer is NO: every
+        // path out of this catch hands the failure to the caller as a 500
+        // envelope and no key material is returned, so nothing claims to have
+        // persisted and the request does not look normal from the outside.
+        //
+        // AGENTS.md "Degradation log levels" names that the third legal answer
+        // and forbids bolting a `logger.error` onto it: this branch's common
+        // case is a rejected request, and one durability `error` per rejected
+        // request is the mirror-image failure that made the founding incident's
+        // `warn` unreadable in the first place.
+        //
+        // Do NOT "repair" this site by adding a log. The correct declaration is
+        // an entry in check-durability-degradation-log-level.mjs's
+        // FAILURE_PROPAGATION_SITES, keyed `keys.ts::handleKeysRequest`, and it
+        // belongs to the LAST step of the #12981 programme -- the one that
+        // widens DURABILITY_CRITICAL_CALLEES. Declared before that step it would
+        // go red as a STALE entry, because that vocabulary has no `insert` and
+        // so matches no seam in this function today.
+        //
+        // The delivery this ruling rests on is pinned in
+        // `http-dispatcher.keys.test.ts`; if you change what this catch
+        // returns, that pin is what will stop you.
         return { handled: true, response: deps.error('Failed to create API key', 500) };
     }
     const id = inserted?.id ?? (Array.isArray(inserted) ? inserted[0]?.id : undefined);

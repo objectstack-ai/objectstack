@@ -158,7 +158,7 @@ describe('#5005 rule 2 — conflicting values throw a prescriptive error', () =>
 // ─── Rule 3 — unhandled keys warn ───────────────────────────────────
 
 describe('#5005 rule 3 — a key with no declared rule warns', () => {
-  it('warns once, names the key and points at #5005', () => {
+  it('warns once, names the key and carries the declare-a-rule prescription', () => {
     // A key the schema does not declare: reaches composeStacks only via
     // `strict: false`, which is exactly how a NEW key looks before someone
     // remembers to teach the composer about it.
@@ -167,11 +167,13 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
 
     const composed = composeStacks([a, b]) as Record<string, unknown>;
 
-    // One warning that both names the key AND points at #5005 — not two
-    // unrelated ones (`defineStack` also warns about undeclared keys).
+    // One warning that both names the key AND carries the prescription — not
+    // two unrelated ones (`defineStack` also warns about undeclared keys).
+    // Anchored on the prescription's own words, never on a tracker id the
+    // author cannot resolve (#13156's strip).
     const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
     expect(
-      warnings.some((w) => w.includes('composeStacks') && w.includes("'futureThing'") && w.includes('#5005')),
+      warnings.some((w) => w.includes('composeStacks') && w.includes("'futureThing'") && w.includes('COMPOSE_KEY_DISPOSITIONS')),
     ).toBe(true);
     // …and it is composed by the default rule rather than dropped.
     expect(composed.futureThing).toEqual({ enabled: true });
@@ -195,7 +197,7 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
     expect(
       warnSpy.mock.calls
         .map((c) => String(c[0]))
-        .some((w) => w.includes('composeStacks') && w.includes("'views'") && w.includes('#5005')),
+        .some((w) => w.includes('composeStacks') && w.includes("'views'") && w.includes('cannot be composed')),
     ).toBe(true);
   });
 

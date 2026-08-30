@@ -40,7 +40,7 @@ describe('[#8793] FilterConditionSchema — bare preset names in ordering compar
         expect(issue.path).toEqual(['created_at', op]);
         expect(issue.message).toContain(preset);
         expect(issue.message).toContain('PRESET');
-        expect(issue.message).toContain('#8793');
+        expect(issue.message).toContain('Refused at authoring time so the error surfaces where the filter is written.');
       }
     }
   });

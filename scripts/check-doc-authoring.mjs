@@ -85,7 +85,8 @@
 // It lives in `collectFiles`, not in `main`, so the self-test drives the
 // invariant itself rather than a proxy for it.
 import {
-  mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -226,7 +227,13 @@ const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);
  * not exist — since #4916 a hard refusal rather than a silent skip, but one
  * that fails naming the wrong problem. The self-test pins both halves.
  */
-const ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**'];
+// `packages/**` joined on #13297: the cross-package prose-id leg walks every
+// sibling package, so the gate genuinely reads any package edit. The same
+// precedent as `check:slot-lookup-ratchet` declaring the whole of
+// `packages/**`; the over-claim (test files, `packages/spec` — which the SPEC
+// leg of this same gate reads anyway) is carve-outs inside a walked root, the
+// tolerated case argued above.
+const ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**', 'packages/**'];
 
 const DOMAINS = [
   'Datasource', 'Connector', 'Policy', 'SharingRule', 'Position', 'PermissionSet',
@@ -455,6 +462,36 @@ const INTERNAL_ID = new RegExp(INTERNAL_ID_SOURCE, 'g');
 // error-map option away from `message`); a plain string there is a `message`,
 // since nothing was built in a function.
 //
+// ## The FIFTH population: plain `function` DECLARATIONS (#13156)
+//
+// The fourth population's clause reaches a function only through the positions
+// a function EXPRESSION can occupy — a property value, a call argument, a const
+// initializer. A plain `function unknownKeyError(key) { … }` declaration
+// occupies none of them: it is a statement, its parent is the SourceFile, so
+// the transparency question ("does the FUNCTION sit in a recognised position?")
+// had no branch that could ever answer yes, and `collectTextSinkConsts` dropped
+// its seeded name at the cleanup pass because only `VariableDeclaration`s were
+// registered as declarations. A declaration-scoped helper building refusal
+// prose was structurally invisible for the same reason the fourth population
+// was — one declaration form over. Adjudicated 2026-08-29 (Class-1, director
+// seat, executing the #13002 ruling verbatim: 「同意」, "the ban follows the
+// audience, not the spelling"): same audience, same moment, so the declaration
+// form joins the sink pass UNDER THE SAME NARROW CLAUSE — a declaration is
+// transparent only when its NAME is consumed from a recognised customer-facing
+// position (seeded or closed over by `collectTextSinkConsts`, exactly like a
+// hoisted const arrow). ⛔ Never an unconditional crawl of arbitrary function
+// bodies: an unconsumed helper's body stays unreachable, pinned in --self-test.
+//
+// Their literals are bucketed `functionDeclared`, NOT folded into
+// `functionBuilt`, for the same reason `functionBuilt` was not folded into
+// `message`: the blindness floor is PER BUCKET, and the arrow/expression
+// members would hold a shared floor up while the declaration clause rotted back
+// to `undefined` — the exact silence this population was found by. (The
+// options-FACTORY clause is form-agnostic and predates this widening: a
+// `function navSurface(): StrictObjectOptions` was already reachable through
+// `buildsStrictObjectOptions`, bucketed `functionBuilt`; it keeps that bucket,
+// since that clause's rot is `functionBuilt`'s floor to catch.)
+//
 // ## Why the positions alone are not enough: the hoisted-const spelling
 //
 // A position-only matcher reads `guidance: { where: '…' }` and stops at the
@@ -570,6 +607,245 @@ const POSITIONAL_MESSAGE_CALLS = new Set([
   'startsWith', 'endsWith', 'includes', 'email', 'url', 'uuid', 'int',
   'positive', 'nonnegative', 'multipleOf', 'nonempty', 'gt', 'gte', 'lt', 'lte',
 ]);
+
+/**
+ * Rule 3's scan boundary, stated BY THE GATE'S OWN OUTPUT — the C half of the
+ * 2026-08-29 adjudication on #13156/#13179, recommended by #13002's triage
+ * under both of its options because the boundary was invisible from the
+ * output: `0 violations` over four populated-but-unreached populations and
+ * `0 violations` over a clean tree printed the same line, and a sweep that was
+ * locally green could not SAY it had never opened a sibling package. Every
+ * clause here is derived from the constants the scan actually reads — never
+ * re-spelled — so a boundary move shows up in the output the same commit it
+ * happens.
+ *
+ * The root limit is deliberate and adjudicated: the root extension beyond
+ * `packages/spec/src` was DEFERRED on #13179 (today's measured cross-package
+ * population: one message), with the revival condition codified there — a
+ * later census finding same-audience ids outside the root reopens it as an
+ * instrument card. This line is what makes that deferral honest: the next
+ * boundary move is visible from the output instead of from an archaeology dig.
+ */
+function scanBoundaryLines() {
+  return [
+    `ℹ Rule 3 scan boundary — root: ${SPEC_SOURCE_ROOT}/ (position-based, no exemption;`
+    + ' *.ts|*.mts, test/spec/bench files excluded). SIBLING PACKAGES are scanned by the'
+    + ` LEDGERED total-string leg — root: ${PACKAGES_PROSE_ROOT}/ (${PACKAGES_PROSE_EXCLUDED}/`
+    + ' excluded there, it belongs to the position-based rule; baseline:'
+    + ` ${PACKAGES_PROSE_LEDGER}) — the #13179 root-extension deferral revived by its own`
+    + ' codified condition (#13297).',
+    '  recognised sink shapes: `message:` / `error:` properties · positional messages on'
+    + ` ${POSITIONAL_MESSAGE_CALLS.size} zod validators · strictObject option keys`
+    + ` (${[...STRICT_OPTION_KEYS].join(', ')}) · ${[...TOMBSTONE_CALLS].join('/')}()`
+    + ' tombstone prescriptions · .describe() prose · hoisted text-sink consts (fixed-point,'
+    + ' per module) · text built inside functions sitting in recognised positions — arrows/'
+    + 'expressions (functionBuilt) and named function declarations (functionDeclared).',
+  ];
+}
+
+// ── Rule 3b: the CROSS-PACKAGE leg — every sibling package, ledgered ────────
+//
+// The #13179 adjudication deferred extending Rule 3's root beyond
+// `packages/spec/src` and codified its own revival condition: a later census
+// finding same-audience tracker ids outside the root reopens the question as an
+// instrument card. #13297 is that card, and this leg is the answer, sized by
+// the AST re-census the card demanded (2026-08-30, this file's `--census`):
+//
+//   grep-shaped estimate on the card:      ~11 candidate sites
+//   AST census, strings only, spec out:    831 sites · 974 id occurrences ·
+//                                          231 files · 632 (file,id) pairs
+//
+// The grep census was ~75× under — this tree's prose is concatenation-split,
+// exactly the shape a line-oriented pattern cannot see (proven in --self-test
+// for the spec leg, re-proven here for a package file).
+//
+// ## Why ROOT WIDENING and not per-package guards
+//
+// One criterion (INTERNAL_ID_SOURCE), one walker, one ledger — a new package
+// is covered the day it appears, and the audience rule cannot drift into N
+// spellings. Per-package guards would copy the id regex and the string walk
+// into ~20 packages and each copy would rot on its own schedule; the family
+// lesson ("a second source of truth while the first is still reachable") is
+// the whole argument, and it is why this leg lives HERE rather than in a new
+// script.
+//
+// ## Why TOTAL string coverage here, when the spec leg is position-based
+//
+// The spec leg's closed position list exists to keep VALUES from being
+// reported as prose (`.default('draft')` is not a message). An INTERNAL_ID
+// match has no such ambiguity: a tracker-shaped token is one wherever it
+// sits, and the audience question that positions cannot answer — the
+// 2026-08-29 triage boundary is "can the reader change what they authored",
+// NOT throw-vs-logger call shape — is not mechanizable from the AST at all.
+// So this leg does not try: it counts every id in every non-test string and
+// holds the count against a pinned baseline. The audience judgment lives in
+// the BASELINE DIFF, where a reviewer can see it, instead of in a heuristic
+// that would silently misfile the next warn-at-authors site. Known residual
+// false-positive family, measured: 3-digit all-numeric CSS colours (`#111`) —
+// 3 strings in one file at census time, absorbed by the baseline; a NEW one
+// reds and the remedy is the 6-digit colour spelling.
+//
+// ## The ratchet
+//
+//   growth (actual > pinned)  → red. Strip the id or move it to a `//` comment
+//                               (comments are the sanctioned home for internal
+//                               anchors — the audience that can resolve #NNNN
+//                               reads the source, not the string at runtime).
+//   shrink (actual < pinned)  → red, stale baseline: regenerate with
+//                               `--census-ledger` in the same PR, so burn-down
+//                               is recorded where review can see it.
+//
+// While the baseline is non-empty, the ratchet IS this leg's blindness floor:
+// a walker or prefilter that goes blind reads 0 sites against 632 pinned
+// pairs and reds as stale. The id regex itself is shared with the spec leg,
+// whose per-bucket floors guard it independently. If the baseline is ever
+// burned to empty, add an explicit seen-floor here in the same PR — at that
+// point the stale arm can no longer catch a dormant walker.
+//
+// ## What this leg deliberately does NOT do
+//
+// It does not judge packages/spec (the position-based rule owns it, with the
+// stricter no-exemption regime), test/spec/bench files (internal audience,
+// and two deliberate test twins pin id-bearing text as range evidence), or
+// comments (the prescribed destination for the ids this rule strips).
+const PACKAGES_PROSE_ROOT = 'packages';
+const PACKAGES_PROSE_EXCLUDED = 'packages/spec';
+const PACKAGES_PROSE_LEDGER = 'scripts/doc-authoring-prose-id.baseline.json';
+
+/**
+ * Cheap byte-level prefilter: a SUPERSET of {@link INTERNAL_ID} (no
+ * lookarounds), deliberately non-global so `.test()` is stateless. A file this
+ * does not match cannot contain a string the real regex matches, so it is
+ * skipped unparsed — the difference is ~4s vs the whole tree parsed for
+ * nothing. The superset property is pinned in --self-test.
+ */
+const PACKAGES_PROSE_PREFILTER = /#[0-9]{3,5}/;
+
+/** Non-test TS sources of every sibling package, spec's subtree excluded. */
+function collectPackageProseFiles(root = PACKAGES_PROSE_ROOT) {
+  assertRootsResolvable([root]);
+  const files = [];
+  (function descend(dir) {
+    for (const e of readdirSync(dir)) {
+      if (e === 'node_modules' || e === '.git' || e === 'dist' || e === '.turbo') continue;
+      const p = join(dir, e);
+      if (posix(p) === PACKAGES_PROSE_EXCLUDED) continue;
+      if (statSync(p).isDirectory()) descend(p);
+      else if (/\.m?tsx?$/.test(e) && !/\.(test|spec|bench)\.m?tsx?$/.test(e)) files.push(posix(p));
+    }
+  })(root);
+  if (files.length === 0) throw new EmptyRootError([root], 0);
+  return files.sort();
+}
+
+/**
+ * A rough consumer classification for ONE literal, census output only — never
+ * enforcement. The climb records what consumes the string (a throw, a callee,
+ * a property key) so a triage reading the census can bucket sites by audience
+ * family; the LEDGER stays classification-free on purpose (a stored verdict
+ * would drift, a recomputed shape cannot).
+ */
+function packageProseShape(node, ts) {
+  let thrown = false;
+  let consumer = '';
+  const props = [];
+  let cur = node;
+  for (let hops = 0; cur.parent && hops < 120; hops++) {
+    const p = cur.parent;
+    if (ts.isThrowStatement(p)) { thrown = true; break; }
+    if (ts.isPropertyAssignment(p) && p.initializer === cur) { props.push(p.name.getText()); cur = p; continue; }
+    if (ts.isCallExpression(p)) {
+      if (!consumer && p.arguments.includes(cur)) consumer = `call:${calleeName(p, ts)}`;
+      cur = p; continue;
+    }
+    if (ts.isNewExpression(p)) { if (!consumer) consumer = `new:${p.expression.getText().slice(0, 40)}`; cur = p; continue; }
+    if (ts.isVariableDeclaration(p)) { if (!consumer) consumer = `const:${p.name.getText()}`; cur = p; continue; }
+    if (ts.isSourceFile(p) || isFunctionLike(p, ts)) break;
+    cur = p;
+  }
+  return { thrown, consumer, prop: props.length ? props[props.length - 1] : '' };
+}
+
+/**
+ * Every INTERNAL_ID occurrence in every string literal of the given sources.
+ *
+ * Template expressions are matched on their FULL source text and never
+ * descended into — an id inside an embedded expression is covered by the
+ * outer `getText()`, and visiting the inner literal too would double-count
+ * it, which a ratchet compared run-to-run cannot afford. Deterministic by
+ * construction: same tree, same counts.
+ *
+ * @returns {{sites: Array<object>, counts: Map<string, Map<string, number>>,
+ *   stringsSeen: number, filesParsed: number}}
+ */
+function scanPackageProseIds(files, ts) {
+  const sites = [];
+  const counts = new Map();
+  let stringsSeen = 0;
+  let filesParsed = 0;
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    if (!PACKAGES_PROSE_PREFILTER.test(source)) continue;
+    const sf = parseSourceFile(file, source);
+    filesParsed += 1;
+    const visit = (node) => {
+      if (
+        ts.isStringLiteral(node)
+        || ts.isNoSubstitutionTemplateLiteral(node)
+        || ts.isTemplateExpression(node)
+      ) {
+        stringsSeen += 1;
+        const text = node.getText(sf);
+        const ids = text.match(INTERNAL_ID);
+        if (ids) {
+          const shape = packageProseShape(node, ts);
+          sites.push({
+            file,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            ids,
+            ...shape,
+            text: text.replace(/\s+/g, ' ').slice(0, 160),
+          });
+          const m = counts.get(file) ?? new Map();
+          counts.set(file, m);
+          for (const id of ids) m.set(id, (m.get(id) ?? 0) + 1);
+        }
+        return; // never descend: see the docblock.
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sf, visit);
+  }
+  return { sites, counts, stringsSeen, filesParsed };
+}
+
+/** `counts` as the baseline's JSON shape: {file: {id: n}}, both levels sorted. */
+function packageProseLedgerShape(counts) {
+  const out = {};
+  for (const file of [...counts.keys()].sort()) {
+    out[file] = Object.fromEntries([...counts.get(file)].sort(([a], [b]) => (a < b ? -1 : 1)));
+  }
+  return out;
+}
+
+/** Growth and shrink of the measured counts against the pinned baseline. */
+function comparePackageProseLedger(counts, ledger) {
+  const growth = [];
+  const stale = [];
+  const files = new Set([...Object.keys(ledger), ...counts.keys()]);
+  for (const file of [...files].sort()) {
+    const actual = counts.get(file) ?? new Map();
+    const pinned = ledger[file] ?? {};
+    const ids = new Set([...Object.keys(pinned), ...actual.keys()]);
+    for (const id of [...ids].sort()) {
+      const a = actual.get(id) ?? 0;
+      const p = pinned[id] ?? 0;
+      if (a > p) growth.push({ file, id, actual: a, pinned: p });
+      else if (a < p) stale.push({ file, id, actual: a, pinned: p });
+    }
+  }
+  return { growth, stale };
+}
 
 const posix = (p) => p.split(sep).join('/');
 
@@ -935,6 +1211,16 @@ function collectTextSinkConsts(sf, ts) {
   };
 
   const visit = (n) => {
+    // The fifth population (#13156): a plain `function` DECLARATION is a
+    // declaration too. Registering its NAME (body as the closure expression,
+    // exactly the role a const arrow's initializer plays) is what lets a seeded
+    // `message: unknownKeyError(k)` survive the cleanup pass below — without
+    // this line the name is deleted as "an import or a parameter" and the whole
+    // body stays invisible. Registration is NOT recognition: the name still
+    // becomes a sink only when a recognised position consumes it.
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) {
+      decls.set(n.name.text, n.body);
+    }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
       decls.set(n.name.text, n.initializer);
       if (/_RETIRED_KEY_GUIDANCE$/.test(n.name.text)) sinks.set(n.name.text, 'tombstone');
@@ -1010,12 +1296,28 @@ function collectTextSinkConsts(sf, ts) {
  * @returns {{where: string, bucket: string}|undefined}
  */
 function customerTextPosition(node, ts, sinkConsts = new Map(), fnDepth = 0) {
+  // The fifth population's clause (#13156): the question "does the FUNCTION
+  // sit in a recognised position?" arrives here recursively with the function
+  // node itself. A function EXPRESSION answers through its parent (a property,
+  // an argument, a const initializer — the climb below). A plain `function`
+  // DECLARATION has no such parent — it is a statement — so its recognised
+  // position is its NAME being consumed from one, which is exactly what
+  // `collectTextSinkConsts` measured. Same fixed point the hoisted const-arrow
+  // spelling rides on, one declaration form over.
+  if (ts.isFunctionDeclaration(node) && node.name && sinkConsts.has(node.name.text)) {
+    return { where: `via ${node.name.text}`, bucket: sinkConsts.get(node.name.text) };
+  }
   let cur = node;
   let strictKey;
   /**
    * The fourth population's clause: `fn` encloses the literal and the climb
    * wants to leave through it. Transparent only if `fn` is itself somewhere
-   * customer-facing.
+   * customer-facing. A function DECLARATION that qualifies gets its own bucket
+   * (`functionDeclared`, the fifth population) — per-bucket floors are the only
+   * thing that can catch THIS clause rotting while the arrow members hold a
+   * shared floor up. The options-factory leg below predates the fifth
+   * population, reaches every function form through the return-type annotation,
+   * and keeps `functionBuilt` — that clause's rot is that bucket's to catch.
    */
   const throughFunction = (fn) => {
     if (!fn || fnDepth >= 4) return undefined;
@@ -1025,9 +1327,10 @@ function customerTextPosition(node, ts, sinkConsts = new Map(), fnDepth = 0) {
       return { where: `strictObject ${strictKey} (built in a function)`, bucket: 'functionBuilt' };
     }
     const outer = customerTextPosition(fn, ts, sinkConsts, fnDepth + 1);
-    return outer
-      ? { where: `${outer.where} (built in a function)`, bucket: 'functionBuilt' }
-      : undefined;
+    if (!outer) return undefined;
+    return ts.isFunctionDeclaration(fn)
+      ? { where: `${outer.where} (built in a function declaration)`, bucket: 'functionDeclared' }
+      : { where: `${outer.where} (built in a function)`, bucket: 'functionBuilt' };
   };
   // A bound, not a belief: refusal prose in this tree reaches ~14 concatenated
   // operands, and an unbounded climb would walk to the SourceFile and start
@@ -1111,7 +1414,7 @@ function customerTextPosition(node, ts, sinkConsts = new Map(), fnDepth = 0) {
  */
 function findCustomerTextIdViolations(source, file, ts) {
   const out = [];
-  const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
+  const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0, functionDeclared: 0 };
   const sf = parseSourceFile(file, source);
   const sinkConsts = collectTextSinkConsts(sf, ts);
   const visit = (node) => {
@@ -1450,6 +1753,7 @@ function selfTest() {
     }
 
     selfTestRule3(expect);
+    selfTestPackagesProse(expect);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -1463,13 +1767,16 @@ function selfTest() {
   // missing from the brief — which is exactly how it stood before this block.
   // Both sides are derived from ROOTS rather than re-spelled, so renaming or
   // widening a root cannot leave the declaration describing the old population.
-  const separatorless = ROOTS.filter((r) => !r.includes('/'));
-  expect('the declaration exists for every ROOT the hint extractor cannot see (a root with no '
-    + 'path separator is refused as too generic, so it needs the subtree spelling)',
+  // The walked roots are the four Markdown ROOTS plus the cross-package leg's
+  // — both sides of the derivation below read the same constants the scans do.
+  const walkedRoots = [...ROOTS, PACKAGES_PROSE_ROOT];
+  const separatorless = walkedRoots.filter((r) => !r.includes('/'));
+  expect('the declaration exists for every walked root the hint extractor cannot see (a root with '
+    + 'no path separator is refused as too generic, so it needs the subtree spelling)',
     separatorless.every((r) => ROOT_WATCH_HINTS.includes(`${r}/**`)), true);
   expect('and it declares no root this gate does not walk (a declaration that can drift from the '
     + 'scan is worse than none — it replaces a silent gate with a lying one)',
-    ROOT_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))), true);
+    ROOT_WATCH_HINTS.every((h) => walkedRoots.includes(h.replace(/\/\*+$/, ''))), true);
   // Provenance, never a lookup key: the glob form appearing in ROOTS would send
   // `walk()` at a directory that does not exist. Since #4916 that is a hard
   // refusal rather than a silent skip, but it fails naming the wrong problem.
@@ -1508,7 +1815,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own) and the dispatch-gates declaration (every separator-less ROOT declared as a subtree, nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored), the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored), the published-catalog internal-id rule (red on a planted id in prose, in a fenced comment and in the repo#NNNN spelling, green when removed; hex colours, version numbers, HTTP codes, array indices and the "#1" ordinal all pass; references/ reached, generated artifacts and the internal roots out; the `#<n>` placeholder passes while the concrete ids it replaced stay red, with no exemption to reach for), the spec customer-facing-text internal-id rule (red on an id planted on a LATER line of a concatenated message — the shape a line-oriented census cannot see, proven here — and in a template chain, a positional validator message, the repo#NNNN spelling, a nested strictObject `guidance` prescription, a HOISTED guidance const, a `KeySetGuidance` const consumed only CROSS-MODULE in both the annotated and the `as const satisfies` spelling, a HOISTED refusal message, a `retiredKey()` tombstone, `new Map` and `Object.freeze` guidance tables, `.describe()` prose, and the nested `guidance` of a whole options table written `satisfies StrictObjectOptions`; green when removed; an ADR id on a tombstone, a `.default()` VALUE, `history`/`guidance` outside a strictObject options position, `extraKeys` key names and an inferred local that merely MENTIONS `KeySetGuidance` all pass; test bodies out; the seen floor is PER BUCKET so one matcher rotting while the others carry the total still reds; and the two TYPE ANCHORS are pinned on the predicate itself — the annotation, `satisfies` and `as const satisfies` spellings all read as a strictObject options position while some other satisfied type does not, and the `*_STRICT_OPTIONS` NAME branch still fires where no type is written at all — which is the only place they can be told apart, since end to end they are redundant), the fourth population — customer-facing text BUILT INSIDE A FUNCTION (red on an id in an inline `error: () =>` callback, in a const the callback only dispatches to, inside a `message:` builder function, RETURNED from a tombstone-prescription builder, in a `: StrictObjectOptions` options factory, and in a plain `error:` string; ⛔ the body of an ordinary helper and a local inside a recognised factory stay unswept, because the climb crosses a function only when the FUNCTION sits in a recognised position; and `functionBuilt` carries its own blindness floor, since an unrecognised spelling produces no flag SILENTLY), the FIFTH population — prose built inside plain `function` DECLARATIONS (#13156: red on an id in a declaration consumed by `message:`, RETURNED to a `retiredKey()` argument, and in a const the declaration only dispatches to; its own `functionDeclared` bucket with its own floor, so the declaration clause rotting cannot hide behind the arrows; ⛔ an unconsumed declaration and one consumed only by an unrecognised call stay unswept — the clause is the fourth population\'s, one declaration form over, never an unconditional crawl), the GENERATED table — a prescription filed under each of a list of keys by `Object.fromEntries(keys.map(…))` rather than written as an object literal (red both HOISTED into a const spread into an options factory\'s `guidance` and generated INLINE at the `guidance:` key itself, green when the id is removed; ⛔ and a generated VALUE table reaching no sink stays unswept, because `.map()` is TRANSPARENT to the climb and never a position of its own), the Rule 3 boundary OUTPUT (names the position-based root AND the ledgered cross-package leg\'s root, exclusion and baseline, no longer claims siblings are unscanned, and lists every floored bucket — derived from the same constants the scans read), the CROSS-PACKAGE prose-id leg (#13297: a concatenation-split id in a plain helper is counted — total-string coverage, no position climb to rot; a `//` comment, a test body and the spec subtree are out; an id inside a template\'s embedded expression counts exactly once; a 6-digit colour never matches while the cross-repo spelling\'s id half does; the prefilter is a superset of the id regex on every counted site; and the ledger arithmetic answers all three verdicts from one measurement — exact baseline green, empty baseline all-growth, over-pinned baseline stale without invented growth) and the dispatch-gates declaration (every separator-less walked root declared as a subtree — `packages/**` included since #13297 — nothing declared this gate does not walk, the over-claim bounded to SKIP_PATHS) all hold.');
 }
 
 /**
@@ -1567,13 +1874,23 @@ function selfTestRule3(expect) {
       "  error: () => 'a machine name is a string — quote it.',",
       '});',
     ];
-    const DOC_CLEAN = [...DOC_CLEAN_BASE, ...DOC_FUNCTION_BUILT].join('\n');
+    // The fifth population, clean: prose built inside a plain `function`
+    // DECLARATION whose name a `message:` consumes (#13156).
+    const DOC_FUNCTION_DECLARED = [
+      'function unknownDocKeyLine(key: string): string {',
+      "  return '`' + key + '` is not a recognised doc key — delete it.';",
+      '}',
+      'export const F = z.object({ x: z.string() }).refine((v) => !!v.x, {',
+      "  message: unknownDocKeyLine('x'),",
+      '});',
+    ];
+    const DOC_CLEAN = [...DOC_CLEAN_BASE, ...DOC_FUNCTION_BUILT, ...DOC_FUNCTION_DECLARED].join('\n');
     write('packages/spec/src/data/doc.ts', DOC_CLEAN);
     const target = write('packages/spec/src/ui/action.zod.ts', CLEAN);
 
     const scan = () => {
       let out = [];
-      const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
+      const seen = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0, functionDeclared: 0 };
       for (const f of collectSpecSourceFiles()) {
         const r = findCustomerTextIdViolations(readFileSync(f, 'utf8'), f, ts);
         out = out.concat(r.violations);
@@ -1594,6 +1911,7 @@ function selfTestRule3(expect) {
     expect('the detector recognised a strictObject option string', r.seen.strictObject >= 1, true);
     expect('the detector recognised a tombstone prescription', r.seen.tombstone >= 1, true);
     expect('the detector recognised text built inside a function', r.seen.functionBuilt >= 1, true);
+    expect('the detector recognised text built inside a function DECLARATION', r.seen.functionDeclared >= 1, true);
     expect('the detector recognised a `.describe()` string', r.seen.describe >= 1, true);
 
     // Scope: a test body is out, an ordinary source is in. Asserted as a pair
@@ -2028,7 +2346,78 @@ function selfTestRule3(expect) {
     expect('a plain `error:` string is a MESSAGE, not function-built',
       r.violations[0]?.bucket, 'message');
 
-    // RED #20 — a GENERATED guidance table: one prescription filed under each
+    // ── The FIFTH population: plain `function` DECLARATIONS (#13156) ────────
+    //
+    // Adjudicated 2026-08-29 under the #13002 ruling's own sentence — the ban
+    // follows the audience, not the spelling — and under the SAME narrow
+    // clause as the fourth population: a declaration is transparent only when
+    // its NAME is consumed from a recognised customer-facing position. The
+    // negative cases at the end of the precision battery are the boundary.
+
+    // RED #20 — the census's founding shape: a helper DECLARATION returning a
+    // `+` chain, its name consumed by `message:`. Both real members measured
+    // live (`listPositionFieldReferenceMessage`, `normalizedMemberMessage`)
+    // are spelled exactly like this.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'function unknownKeyError(key: string): string {',
+      "  return '`' + key + '` has never been an action key — it was removed '",
+      "    + 'from the contract (#12006). Delete it.';",
+      '}',
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      "  message: unknownKeyError('legacyMode'),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id built inside a plain function DECLARATION consumed by `message:` is RED',
+      r.violations.length, 1);
+    expect('the declaration red names the function it travelled through',
+      r.violations[0]?.where, 'via unknownKeyError (built in a function declaration)');
+    expect('the declaration red gets its OWN bucket, not `functionBuilt` — per-bucket floors are '
+      + 'the only thing that can catch this clause rotting on its own',
+      r.violations[0]?.bucket, 'functionDeclared');
+
+    // RED #21 — the tombstone consumption, through the `return` leg.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      "import { retiredKey } from '../shared/retired-key';",
+      'function capRemoved(key: string): string {',
+      '  return `\\`DriverCapabilities.${key}\\` was removed in 17.0.0 (#4634, ADR-0049).`;',
+      '}',
+      'export const S = z.object({',
+      "  joins: retiredKey(capRemoved('joins')),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id RETURNED from a tombstone-builder function DECLARATION is RED',
+      r.violations.length, 1);
+    expect('the tombstone-declaration red names the function',
+      r.violations[0]?.where, 'via capRemoved (built in a function declaration)');
+    expect('the tombstone-declaration red is bucketed with the declaration clause',
+      r.violations[0]?.bucket, 'functionDeclared');
+
+    // RED #22 — the closure INTO a declaration: a module const the declaration
+    // only dispatches to. Registering declarations in the sink pass is what
+    // makes the const a sink — measured live on `SUBMIT_REDIRECT_RULING`
+    // (`ui/view.zod.ts`), which rode exactly this shape unseen.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'const RULING_SENTENCE =',
+      "  'ruled 2026-08-11 on #7496 — the redirect pair is refused at authoring time.';",
+      'function submitRedirectMessage(kind: string): string {',
+      "  return 'One `' + kind + '` declares two destinations. ' + RULING_SENTENCE;",
+      '}',
+      'export const S = z.object({ a: z.string() }).refine((v) => !!v.a, {',
+      "  message: submitRedirectMessage('form'),",
+      '});',
+    ].join('\n'));
+    r = scan();
+    expect('an id in a const dispatched from inside a seeded function DECLARATION is RED',
+      r.violations.length, 1);
+    expect('the dispatched-const red names the const it travelled through',
+      r.violations[0]?.where, 'via RULING_SENTENCE');
+
+    // RED #23 — a GENERATED guidance table: one prescription filed under each
     // of a list of keys via `Object.fromEntries(keys.map(…))`, hoisted into a
     // const and spread into an options FACTORY's `guidance`. This is
     // `SEPARATOR_NAV_ITEM_GUIDANCE` (`ui/app.zod.ts`), reduced. Measured live:
@@ -2057,7 +2446,7 @@ function selfTestRule3(expect) {
     writeFileSync(target, GENERATED_TABLE('is not a separator key.'));
     expect('...and green once the id is gone', scan().violations.length, 0);
 
-    // RED #21 — the same generation written INLINE at the `guidance:` key
+    // RED #24 — the same generation written INLINE at the `guidance:` key
     // rather than hoisted, so it reaches its position with no sink const in the
     // path at all. This is `ui/view.zod.ts`'s container-key prescription,
     // reduced. Both spellings are live, and a fix that closed only one of them
@@ -2121,6 +2510,33 @@ function selfTestRule3(expect) {
     expect('precision — a generated VALUE table reaching no sink is NOT swept',
       scan().violations.length, 0);
 
+    // The same boundary, declaration form (#13156). ⛔ The widening is NOT an
+    // unconditional crawl of function bodies: a plain `function` DECLARATION
+    // nothing customer-facing consumes stays unreachable — a `.default()`
+    // VALUE argument is not a recognised consumer.
+    writeFileSync(target, [
+      "import { z } from 'zod';",
+      'function slugFor(kind: string): string {',
+      "  return kind + '-#4286';",
+      '}',
+      "export const S = z.object({ a: z.string().default(slugFor('x')) });",
+    ].join('\n'));
+    expect('precision — a function DECLARATION nothing customer-facing consumes is NOT swept',
+      scan().violations.length, 0);
+
+    // ...and a declaration consumed only by an UNRECOGNISED call is out too —
+    // this is the honest edge of the clause, stated rather than smuggled: the
+    // `warn()`-fed helpers in the real tree are reached by the CENSUS, not by
+    // this recogniser, until their consumer is a recognised sink.
+    writeFileSync(target, [
+      'function telemetryLine(tag: string): string {',
+      "  return 'sampled ' + tag + ' (#4286)';",
+      '}',
+      'export function record(tag: string) { console.warn(telemetryLine(tag)); }',
+    ].join('\n'));
+    expect('precision — a declaration consumed only by an unrecognised call is NOT swept',
+      scan().violations.length, 0);
+
     // A function that IS recognised still only yields its recognised POSITIONS.
     // A local inside the factory, and a key that is not a STRICT_OPTION_KEY,
     // stay unreachable — crossing the function boundary does not turn the body
@@ -2159,14 +2575,26 @@ function selfTestRule3(expect) {
     // tree, which is exactly how these 28 literals went unseen.
     writeFileSync(target, CLEAN);
     // The same baseline MINUS its one function-built member — the tree an
-    // unrecognised spelling leaves behind.
-    write('packages/spec/src/data/doc.ts', DOC_CLEAN_BASE.join('\n'));
+    // unrecognised spelling leaves behind. The DECLARED member stays, so the
+    // zero is about the arrow/expression clause and nothing else.
+    write('packages/spec/src/data/doc.ts', [...DOC_CLEAN_BASE, ...DOC_FUNCTION_DECLARED].join('\n'));
     r = scan();
     expect('the function-built bucket can go blind on its own (main reds on it)',
       r.seen.functionBuilt, 0);
-    expect('...while the other four stay populated, so the zero above is about THAT clause',
+    expect('...while the other five stay populated, so the zero above is about THAT clause',
       r.seen.message >= 1 && r.seen.strictObject >= 1
-      && r.seen.tombstone >= 1 && r.seen.describe >= 1, true);
+      && r.seen.tombstone >= 1 && r.seen.describe >= 1 && r.seen.functionDeclared >= 1, true);
+
+    // ...and the fifth population's floor, same discipline (#13156): only the
+    // DECLARED member gone — the silence a declaration clause rotting back to
+    // `undefined` leaves is caught by ITS floor, not the arrows'.
+    write('packages/spec/src/data/doc.ts', [...DOC_CLEAN_BASE, ...DOC_FUNCTION_BUILT].join('\n'));
+    r = scan();
+    expect('the function-declared bucket can go blind on its own (main reds on it)',
+      r.seen.functionDeclared, 0);
+    expect('...while the other five stay populated, so the zero above is about the declaration clause',
+      r.seen.message >= 1 && r.seen.strictObject >= 1
+      && r.seen.tombstone >= 1 && r.seen.describe >= 1 && r.seen.functionBuilt >= 1, true);
     write('packages/spec/src/data/doc.ts', DOC_CLEAN);   // restore the baseline
 
     // A validator's VALUE argument is not prose. `.min(3, …)` takes a message;
@@ -2244,13 +2672,14 @@ function selfTestRule3(expect) {
     // gone silent. Emptying only the `.describe()` bucket must still register
     // as blindness in that bucket while the others stay positive.
     write('packages/spec/src/data/doc.ts',
-      [...DOC_CLEAN_BASE.filter((l) => !l.includes('.describe(')), ...DOC_FUNCTION_BUILT].join('\n'));
+      [...DOC_CLEAN_BASE.filter((l) => !l.includes('.describe(')),
+        ...DOC_FUNCTION_BUILT, ...DOC_FUNCTION_DECLARED].join('\n'));
     r = scan();
     expect('one bucket can go blind while the others stay populated — describe', r.seen.describe, 0);
     expect('...and the surviving buckets really did stay positive (so the zero above is about '
       + 'that bucket, not an emptied tree)',
       r.seen.message >= 1 && r.seen.strictObject >= 1 && r.seen.tombstone >= 1
-      && r.seen.functionBuilt >= 1, true);
+      && r.seen.functionBuilt >= 1 && r.seen.functionDeclared >= 1, true);
 
     // ...and the whole-population version: no recognised string of any kind.
     writeFileSync(target, "export const S = 1;\n");
@@ -2259,6 +2688,33 @@ function selfTestRule3(expect) {
     r = scan();
     expect('a tree with no recognised customer-facing string reports every bucket 0 (main reds)',
       Object.values(r.seen).reduce((a, b) => a + b, 0), 0);
+
+    // ── The C half of the 2026-08-29 adjudication: the boundary is STATED ───
+    //
+    // Asserted derived-vs-derived, never re-spelled: the root from the constant
+    // the walk reads, the buckets from the seen map the floor iterates. A
+    // boundary line that names a bucket the floor does not guard, or misses one
+    // it does, is the drift this pin exists to catch — the C output is what
+    // makes the #13179 root-extension deferral honest, so it must not itself
+    // rot into describing a scan that moved.
+    {
+      const boundary = scanBoundaryLines().join('\n');
+      expect('the boundary output names Rule 3\'s scanned root',
+        boundary.includes(SPEC_SOURCE_ROOT), true);
+      // #13297 flipped the deferral: the boundary now STATES the sibling
+      // packages are covered by the ledgered leg, and names root and baseline
+      // derived from the same constants that leg reads — never re-spelled.
+      expect('the boundary output no longer claims sibling packages are unscanned',
+        boundary.includes('is NOT scanned'), false);
+      expect('the boundary output names the cross-package leg\'s root',
+        boundary.includes(`${PACKAGES_PROSE_ROOT}/`), true);
+      expect('...its exclusion', boundary.includes(`${PACKAGES_PROSE_EXCLUDED}/`), true);
+      expect('...and its baseline', boundary.includes(PACKAGES_PROSE_LEDGER), true);
+      expect('the boundary output names every bucket the per-bucket floor guards',
+        Object.keys(r.seen).every((b) => boundary.includes(b)), true);
+      expect('...and the strictObject option keys, derived from the same set the scan reads',
+        [...STRICT_OPTION_KEYS].every((k) => boundary.includes(k)), true);
+    }
 
     // Empty is a hard error, not a pass — same discipline as the other two rules.
     rmSync(join(dir, 'packages', 'spec', 'src'), { recursive: true, force: true });
@@ -2273,8 +2729,152 @@ function selfTestRule3(expect) {
   }
 }
 
+// The #8435 authority token, verbatim — check-ratchet-remedy-authority.mjs
+// sweeps author-facing text for an offer that expands a registry and requires
+// this marker (or an outright refusal) beside it. The prose-id baseline below
+// is exactly such a registry: shrink is the landing author's to take, growth
+// is not.
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * `--census`: the #13297 instrument. Prints every id-bearing string site of
+ * the cross-package leg as JSON — file, line, ids, consumer shape — for
+ * triage to bucket by audience. `--census-ledger` prints the baseline shape
+ * instead, and REFUSES to print one that grows any (file,id) pair beyond the
+ * checked-in baseline: regeneration exists for burn-down, and a grown pair
+ * arriving through a blind regen is the one thing diff review reliably
+ * misses. (Bootstrap — no baseline on disk yet — prints freely.)
+ */
+function census(ledgerOnly) {
+  const ts = requireFromHere('typescript');
+  const { sites, counts, stringsSeen, filesParsed } = scanPackageProseIds(collectPackageProseFiles(), ts);
+  if (!ledgerOnly) {
+    console.log(JSON.stringify({
+      root: PACKAGES_PROSE_ROOT,
+      excluded: PACKAGES_PROSE_EXCLUDED,
+      filesParsed,
+      stringsSeen,
+      sites,
+    }, null, 1));
+    return;
+  }
+  const shape = packageProseLedgerShape(counts);
+  // A BLANK file is the bootstrap/regeneration path itself: `--census-ledger >
+  // baseline` truncates the target before node runs, so "exists but empty"
+  // means this very command's own redirection, not a baseline to defend.
+  const onDisk = existsSync(PACKAGES_PROSE_LEDGER) ? readFileSync(PACKAGES_PROSE_LEDGER, 'utf8') : '';
+  if (onDisk.trim() !== '') {
+    const pinned = JSON.parse(onDisk);
+    const { growth } = comparePackageProseLedger(counts, pinned);
+    if (growth.length > 0) {
+      console.error(
+        `\n✗ --census-ledger refused: the regenerated baseline would GROW ${growth.length} `
+        + `(file,id) pair(s) beyond ${PACKAGES_PROSE_LEDGER}:\n`,
+      );
+      for (const g of growth) console.error(`  ${g.file}  ${g.id}  ${g.pinned} -> ${g.actual}`);
+      console.error(
+        `\nRegeneration exists for BURN-DOWN. Strip the new id(s) first — or, for prose a`
+        + `\nmaintainer has adjudicated ops-facing, ${RATCHET_AUTHORITY_MARKER}: hand-edit the`
+        + `\nbaseline entry. That file is otherwise shrink-only.\n`,
+      );
+      process.exit(1);
+      return;
+    }
+  }
+  console.log(JSON.stringify(shape, null, 1));
+}
+
+/**
+ * Rule 3b's red/green battery, over a real temporary `packages/` tree — the
+ * walker, the prefilter, the count determinism and the ledger arithmetic are
+ * each asserted from the real entry points, never re-derived. Runs with cwd
+ * already inside {@link selfTest}'s temp dir, after the Rule 3 battery (which
+ * leaves `packages/spec/src` behind — deliberately reused here as the
+ * exclusion case).
+ */
+function selfTestPackagesProse(expect) {
+  const ts = requireFromHere('typescript');
+  const write = (rel, body) => {
+    const full = join(...rel.split('/'));
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, body);
+    return full;
+  };
+  const scan = () => scanPackageProseIds(collectPackageProseFiles(), ts);
+
+  // RED — the census's founding shape: a concatenation-split message whose id
+  // sits on a LATER line than any `message:`/callee anchor, inside a plain
+  // helper the spec leg's position climb would never recognise. Total-string
+  // coverage is the whole point of this leg: the site is counted anyway.
+  write('packages/widgets/src/refuse.ts', [
+    "export function refuseWidget(kind: string): string {",
+    "  return 'The widget kind \"' + kind + '\" was retired ' +",
+    "    'and is refused (#4242).';",
+    "}",
+  ].join('\n'));
+  // A comment is the SANCTIONED home for an internal anchor — never counted.
+  write('packages/widgets/src/ops.ts', [
+    '// #4242 explains this workaround, and belongs exactly here.',
+    'export const N = 1;',
+  ].join('\n'));
+  // Test bodies are out (two deliberate test twins pin id-bearing text as
+  // range evidence, and their audience is internal).
+  write('packages/widgets/src/pin.test.ts', "export const T = 'pinned (#4242)';\n");
+  // The spec subtree belongs to the position-based rule, not this leg.
+  write('packages/spec/src/data/excluded.ts', "export const S = 'spec-only (#4242)';\n");
+  // Determinism: an id inside a template's EMBEDDED expression is covered by
+  // the outer getText() and must be counted exactly ONCE.
+  write('packages/widgets/src/tmpl.ts',
+    "export const T = (flag: boolean) => `outer ${flag ? 'inner (#5151)' : ''} tail`;\n");
+  // A 6-digit colour never matches; the cross-repo spelling matches its #NNNN.
+  write('packages/widgets/src/edge.ts', [
+    "export const COLOUR = '#123456';",
+    "export const CROSS = 'tracked in objectui#7777';",
+    "export const THROWN = () => { throw new Error('nope (#6161)'); };",
+  ].join('\n'));
+
+  const r = scan();
+  const byFile = (f) => r.sites.filter((s) => s.file === f);
+  expect('a concatenation-split id in a plain helper is counted', byFile('packages/widgets/src/refuse.ts').length, 1);
+  expect('...and the recorded id is the one planted', byFile('packages/widgets/src/refuse.ts')[0]?.ids.join(','), '#4242');
+  expect('a `//` comment is never counted — it is the remedy, not a violation',
+    byFile('packages/widgets/src/ops.ts').length, 0);
+  expect('test bodies are not scanned', byFile('packages/widgets/src/pin.test.ts').length, 0);
+  expect('the spec subtree is excluded from this leg', byFile('packages/spec/src/data/excluded.ts').length, 0);
+  expect('an id inside a template\'s embedded expression is counted exactly once',
+    r.counts.get('packages/widgets/src/tmpl.ts')?.get('#5151'), 1);
+  expect('a 6-digit colour does not match', r.counts.get('packages/widgets/src/edge.ts')?.has('#12345'), false);
+  expect('the cross-repo spelling matches its id half', r.counts.get('packages/widgets/src/edge.ts')?.get('#7777'), 1);
+  expect('a thrown literal records the throw in its census shape',
+    byFile('packages/widgets/src/edge.ts').find((s) => s.ids.includes('#6161'))?.thrown, true);
+  expect('the prefilter is a SUPERSET of the id regex on every counted site',
+    r.sites.every((s) => PACKAGES_PROSE_PREFILTER.test(s.text)), true);
+  expect('strings were seen at all (the walker is not dormant)', r.stringsSeen > 0, true);
+
+  // ── The ledger arithmetic, all three verdicts from one measurement ────────
+  const exact = packageProseLedgerShape(r.counts);
+  const green = comparePackageProseLedger(r.counts, exact);
+  expect('an exact baseline is green — no growth', green.growth.length, 0);
+  expect('an exact baseline is green — no staleness', green.stale.length, 0);
+
+  const empty = comparePackageProseLedger(r.counts, {});
+  expect('every measured (file,id) pair is GROWTH against an empty baseline',
+    empty.growth.length, [...r.counts.values()].reduce((a, m) => a + m.size, 0));
+  expect('...and none of it reads as staleness', empty.stale.length, 0);
+
+  const overPinned = JSON.parse(JSON.stringify(exact));
+  overPinned['packages/widgets/src/gone.ts'] = { '#9999': 2 };
+  const stale = comparePackageProseLedger(r.counts, overPinned);
+  expect('a pinned pair the tree no longer carries is STALE (the burn-down/blindness arm)',
+    stale.stale.length, 1);
+  expect('...named precisely', stale.stale[0]?.file, 'packages/widgets/src/gone.ts');
+  expect('...without inventing growth', stale.growth.length, 0);
+}
+
 function main() {
   if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--census')) return census(false);
+  if (process.argv.includes('--census-ledger')) return census(true);
 
   let files;
   try {
@@ -2343,7 +2943,7 @@ function main() {
     return;
   }
   const messageIdViolations = [];
-  const seenByBucket = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0 };
+  const seenByBucket = { message: 0, strictObject: 0, tombstone: 0, describe: 0, functionBuilt: 0, functionDeclared: 0 };
   for (const file of specSources) {
     const r = findCustomerTextIdViolations(readFileSync(file, 'utf8'), file, ts);
     messageIdViolations.push(...r.violations);
@@ -2351,6 +2951,36 @@ function main() {
   }
   const blindBuckets = Object.keys(seenByBucket).filter((b) => seenByBucket[b] === 0);
   const totalTextSeen = Object.values(seenByBucket).reduce((a, b) => a + b, 0);
+
+  // ── Rule 3b: the cross-package ledgered leg ───────────────────────────────
+  if (!existsSync(PACKAGES_PROSE_LEDGER)) {
+    console.error(
+      `\n✗ doc authoring guard: the prose-id baseline (${PACKAGES_PROSE_LEDGER}) is missing,`
+      + `\nso the cross-package leg has nothing to hold its measurement against. Restore it`
+      + `\nfrom git — deleting the baseline is not a remedy this gate offers.\n`,
+    );
+    process.exit(1);
+    return;
+  }
+  let packageProse;
+  try {
+    packageProse = scanPackageProseIds(collectPackageProseFiles(), ts);
+  } catch (err) {
+    console.error(
+      `\n✗ doc authoring guard: the sibling-package root (${PACKAGES_PROSE_ROOT}/) could not be`
+      + `\nscanned for internal issue-id references in string prose, so this run cannot vouch`
+      + `\nfor it:\n\n  ${err.message}\n`,
+    );
+    process.exit(1);
+    return;
+  }
+  const prosePinned = JSON.parse(readFileSync(PACKAGES_PROSE_LEDGER, 'utf8'));
+  const { growth: proseGrowth, stale: proseStale } = comparePackageProseLedger(packageProse.counts, prosePinned);
+
+  // The boundary is stated on EVERY verdict, red or green — a reader of the
+  // green line must be able to see what the clean bill covers, and a reader of
+  // a red must be able to see what a fix inside the root cannot have swept.
+  for (const line of scanBoundaryLines()) console.log(line);
 
   let failed = false;
 
@@ -2400,11 +3030,12 @@ function main() {
       + `\n\nso "no violations" below would be a verdict on a population this run never located.`
       + `\n\nThat is the dormant-gate shape, not a clean tree: the spec really does declare refusal`
       + `\nprose, unknown-key guidance, tombstone prescriptions, \`.describe()\` docs AND prose built`
-      + `\ninside \`error: () =>\` callbacks and message-builder functions, so a zero here means the`
-      + `\nDETECTOR stopped matching how one of them is spelled — an options-object key renamed away`
-      + `\nfrom \`message\`, a new validator helper, a \`strictObject\` wrapper under a new name, a`
-      + `\nguidance table moved behind a helper \`customerTextPosition()\` does not climb through, or`
-      + `\n— for \`functionBuilt\` — the function-boundary clause silently back to \`undefined\`.`
+      + `\ninside \`error: () =>\` callbacks, message-builder functions and plain \`function\``
+      + `\ndeclarations, so a zero here means the DETECTOR stopped matching how one of them is`
+      + `\nspelled — an options-object key renamed away from \`message\`, a new validator helper, a`
+      + `\n\`strictObject\` wrapper under a new name, a guidance table moved behind a helper`
+      + `\n\`customerTextPosition()\` does not climb through, or — for \`functionBuilt\` /`
+      + `\n\`functionDeclared\` — a function-boundary clause silently back to \`undefined\`.`
       + `\n\nThe floor is PER BUCKET and not on the total, deliberately: \`.describe()\` alone would`
       + `\nhold a total positive forever while the \`guidance\` matcher rotted unseen.`
       + `\n\nFix \`customerTextPosition()\` / \`collectTextSinkConsts()\` / STRICT_OPTION_KEYS /`
@@ -2450,6 +3081,46 @@ function main() {
     );
   }
 
+  if (proseGrowth.length > 0) {
+    failed = true;
+    console.error(`\n✗ NEW internal issue-id reference(s) in sibling-package string prose:\n`);
+    for (const g of proseGrowth) {
+      console.error(`  ${g.file}  ${g.id}  (${g.pinned} pinned, ${g.actual} measured)`);
+      for (const s of packageProse.sites.filter((s2) => s2.file === g.file && s2.ids.includes(g.id))) {
+        console.error(`    :${s.line}  ${s.text}`);
+      }
+    }
+    console.error(
+      `\n${proseGrowth.length} (file,id) pair(s) above ${PACKAGES_PROSE_LEDGER}. A runtime string`
+      + `\nreaches authors, operators and generated surfaces — none of whom can resolve \`#NNNN\``
+      + `\n(no tracker, no git log, no ADRs). Strip the id from the string, or move it to an`
+      + `\nadjacent \`//\` comment — the reader who CAN resolve it reads the source, and git`
+      + `\nhistory keeps the anchor either way. A 3-digit all-numeric CSS colour tripped this?`
+      + `\nSpell it 6-digit. Keep customer-resolvable references (an ADR id, a protocol version,`
+      + `\nan error code) — only the tracker id goes.`
+      + `\n\nAdding a baseline entry instead is ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option:`
+      + `\nthat file pins the adjudicated pre-#13297 population and is otherwise shrink-only, so`
+      + `\nan entry weakens a ratchet and needs a maintainer to agree first — do not take this`
+      + `\npath to get CI green.`
+      + `\n\nMaintainer ruling 2026-08-12, verbatim: 「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」\n`,
+    );
+  }
+
+  if (proseStale.length > 0) {
+    failed = true;
+    console.error(`\n✗ doc authoring guard: the prose-id baseline is STALE — pinned entries exceed the tree:\n`);
+    for (const s of proseStale) console.error(`  ${s.file}  ${s.id}  (${s.pinned} pinned, ${s.actual} measured)`);
+    console.error(
+      `\n${proseStale.length} (file,id) pair(s) in ${PACKAGES_PROSE_LEDGER} now over-pin the tree.`
+      + `\nThis is the ratchet recording burn-down — regenerate the baseline in this same PR:`
+      + `\n\n  node scripts/check-doc-authoring.mjs --census-ledger > ${PACKAGES_PROSE_LEDGER}`
+      + `\n\n(That command refuses to GROW the baseline, so it is safe to run as the shrink`
+      + `\nremedy. While the baseline is non-empty this staleness check doubles as the leg's`
+      + `\nblindness floor: a walker that goes blind measures 0 against every pinned pair and`
+      + `\nlands here rather than printing green.)\n`,
+    );
+  }
+
   if (failed) process.exit(1);
 
   console.log(`✓ doc authoring guard: ${files.length} files clean — no bare metadata literals.`);
@@ -2459,7 +3130,13 @@ function main() {
     + `${specSources.length} spec sources clean — no internal issue-id references `
     + `(message ${seenByBucket.message} · strictObject ${seenByBucket.strictObject} · `
     + `tombstone ${seenByBucket.tombstone} · describe ${seenByBucket.describe} · `
-    + `functionBuilt ${seenByBucket.functionBuilt}).`,
+    + `functionBuilt ${seenByBucket.functionBuilt} · functionDeclared ${seenByBucket.functionDeclared}).`,
+  );
+  console.log(
+    `✓ doc authoring guard: sibling-package prose ids hold the baseline — `
+    + `${packageProse.sites.length} pinned site(s) across ${packageProse.counts.size} file(s), `
+    + `${packageProse.stringsSeen} string(s) read in ${packageProse.filesParsed} parsed source(s), `
+    + `no growth, no burn-down unrecorded.`,
   );
 }
 

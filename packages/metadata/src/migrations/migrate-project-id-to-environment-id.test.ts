@@ -191,9 +191,37 @@ describe('migrateProjectIdToEnvironmentId — behaviour against a physically-sta
         expect(statements.filter((s) => s.startsWith('ALTER TABLE'))).toEqual([]);
     });
 
-    it('still refuses a driver without .raw()', async () => {
-        await expect(migrateProjectIdToEnvironmentId({} as any)).rejects.toThrow(
-            /must expose a \.raw\(sql, bindings\?\) method/,
+    it('still refuses a driver without .raw(), stating the remedy exactly once', async () => {
+        // #13219 — the guard concatenated its instruction sentence TWICE, so an
+        // operator with a raw-less driver read the same remedy twice in one
+        // message. The assertion that used to stand here
+        // (`rejects.toThrow(/must expose a \.raw\(sql, bindings\?\) method/)`)
+        // passed either way: a substring match cannot see a second copy. So
+        // these pin the PROPERTIES of the assembled message, not a full-string
+        // copy of today's wording.
+        const outcome: unknown = await migrateProjectIdToEnvironmentId({} as any).then(
+            (value) => value,
+            (error: unknown) => error,
         );
+        expect(outcome, 'a driver with no .raw() must be refused').toBeInstanceOf(Error);
+        const message = (outcome as Error).message;
+
+        // 1. The remedy is stated exactly ONCE. Counted, not compared, so a
+        //    later rewording of the sentence still leaves this asserting.
+        const instruction = /driver must expose a \.raw\(sql, bindings\?\) method\./g;
+        expect(message.match(instruction) ?? []).toHaveLength(1);
+
+        // 2. ...and the sentences stay SEPARATED. Deleting the duplicate by
+        //    trimming the surviving line's trailing space would satisfy (1)
+        //    while gluing `method.SqlDriver` — this defect inverted, so it is
+        //    pinned in the same case. A run-together sentence boundary is a
+        //    lowercase letter, a period, then a capital; the `.raw(` in the
+        //    text is lowercase-after-period and so is correctly not one.
+        expect(message).not.toMatch(/[a-z]\.[A-Z]/);
+
+        // 3. Non-vacuity: deleting the SUPPORTING sentence instead would also
+        //    satisfy (1) and (2). It names the drivers that do conform, which
+        //    is the half of the message an operator acts on.
+        expect(message).toMatch(/SqlDriver/);
     });
 });

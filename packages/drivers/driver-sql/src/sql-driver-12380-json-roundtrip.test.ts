@@ -172,6 +172,35 @@ async function catalogType(driver: SqlDriver, cell: DialectCell, table: string):
   return String(rows[0].ty).toLowerCase();
 }
 
+/**
+ * [#12738] The stored `CREATE TABLE` statement for a table, from SQLite's own
+ * catalog. Used to build a LEGACY-shaped table out of the table the driver
+ * actually emits, so the legacy fixture cannot drift from the real one.
+ */
+async function createStatementOf(driver: SqlDriver, cell: DialectCell, table: string): Promise<string> {
+  const rows = rowsOf(cell, await driver.execute(`select sql from sqlite_master where name = ?`, [table]));
+  expect(rows, `no CREATE statement for ${table}`).toHaveLength(1);
+  return String(rows[0].sql);
+}
+
+/**
+ * [#12738] Turn a driver-emitted `CREATE TABLE` into the PRE-#12738 one: rename
+ * the table and put `val` back to its old `json` declaration.
+ *
+ * ⚠️ The rewrite is ASSERTED, not assumed. A regex that silently matched
+ * nothing would produce a table declared `text` and every "legacy" expectation
+ * below would then be measuring the new column while claiming to measure the
+ * old one — green, and about the wrong table.
+ */
+function legacyDdlFrom(create: string, from: string, to: string): string {
+  const renamed = create.replace(new RegExp(`(["\`]?)${from}\\1`), `"${to}"`);
+  expect(renamed, `table ${from} was not renamed to ${to}`).toContain(to);
+  const legacy = renamed.replace(/(["`]?val["`]?)\s+text\b/i, '$1 json');
+  expect(legacy, 'the `val` column was not put back to its legacy `json` declaration').toMatch(/val["`]?\s+json\b/i);
+  expect(legacy).not.toMatch(/val["`]?\s+text\b/i);
+  return legacy;
+}
+
 function declareRoundTrip(cell: DialectCell): void {
 describe(`[#12380] driver-sql — Field.json round-trips faithfully (${cell.label})`, () => {
   let driver: SqlDriver;
@@ -251,69 +280,140 @@ describe(`[#12380] driver-sql — Field.json round-trips faithfully (${cell.labe
 
   // ─── §3 The column type, and the affinity it still carries ───────────────
 
-  it('the physical column type is `json`, read from the catalog', async () => {
-    expect(await catalogType(driver, cell, TABLE)).toBe('json');
+  it('the physical column type is the dialect-correct JSON type, read from the catalog', async () => {
+    // [#12738] INVERTED for SQLite only; `json` was asserted on all three
+    // dialects before. `createColumn` now emits the type each dialect actually
+    // has: Postgres `json` and MySQL `json` are native and UNTOUCHED, while
+    // SQLite — which has no JSON type — declares `text`, the type its own JSON1
+    // functions operate on and the one that carries TEXT affinity instead of
+    // the NUMERIC affinity `json` silently picks up there.
+    expect(await catalogType(driver, cell, TABLE)).toBe(cell.id === 'sqlite' ? 'text' : 'json');
   });
 });
 }
 
 /**
- * ⚠️ SQLite only, and the point of the whole design: the DDL is UNCHANGED, so
- * the `json`-declared column still has NUMERIC affinity. This proves the
- * affinity is still in force AND that the driver's encoded form survives it —
- * both in one statement, so neither half can be true of a different column.
+ * ⚠️ SQLite only. **[#12738] INVERTED, and split in two.**
+ *
+ * This block used to assert that the DDL was UNCHANGED — that a `Field.json`
+ * column was still declared `json`, still carried NUMERIC affinity, and that
+ * #12380's encoded form survived it. #12738 changed the DDL: the SQLite family
+ * now declares `text`, so NUMERIC affinity is gone from NEW columns and the
+ * exposure is closed at the root rather than encoded around.
+ *
+ * Both facts still need pinning, and they are now about two different columns,
+ * which is why this describe covers both:
+ *
+ *  - **§A the column the driver emits today** — declared `text`, TEXT affinity,
+ *    so a bare number-like value written by raw SQL is no longer destroyed.
+ *  - **§B a LEGACY column** — declared `json` by hand, which is what every
+ *    database created before #12738 holds. NUMERIC affinity is still in force
+ *    there and #12380's encoding still defeats it. This is the half the #12738
+ *    ruling requires to stay green: existing columns keep their declared type,
+ *    so the codec that protects them stays load-bearing forever.
+ *
+ * §B is also §A's negative control. Without it, a §A that answered `text`
+ * because the write silently stopped happening would read exactly like a pass.
  */
 function declareAffinity(): void {
-describe('[#12380] SQLite NUMERIC affinity is still in force, and the encoding defeats it', () => {
+describe('[#12738] SQLite affinity: gone from new columns, still defeated on legacy ones', () => {
   const cell = dialectCell('sqlite');
   const T = 'json_affinity_12380';
+  const LEGACY_T = 'json_affinity_legacy_12738';
   let driver: SqlDriver;
 
   beforeAll(async () => {
     driver = new SqlDriver(cell.config());
     await driver.execute(`drop table if exists ${T}`).catch(() => {});
     await driver.initObjects([{ name: T, fields: { ...FIELDS } }]);
+
+    // The legacy shape, built by hand from the table the driver just made so
+    // nothing about it is guessed: same columns, same constraints, with `val`
+    // declared the pre-#12738 way. Reproducing the old deployment is the only
+    // way to keep measuring the affinity that old deployments still have.
+    await driver.execute(`drop table if exists ${LEGACY_T}`).catch(() => {});
+    await driver.execute(legacyDdlFrom(await createStatementOf(driver, cell, T), T, LEGACY_T));
   }, 60_000);
 
   afterAll(async () => {
     await driver.execute(`drop table if exists ${T}`).catch(() => {});
+    await driver.execute(`drop table if exists ${LEGACY_T}`).catch(() => {});
     await driver.disconnect();
   });
 
-  it('the declared type is still `json` — no DDL change was needed', async () => {
-    expect(await catalogType(driver, cell, T)).toBe('json');
+  // ─── §A the column the driver emits today ────────────────────────────────
+
+  it('[#12738] the declared type is now `text` — the DDL DID change, and that is the fix', async () => {
+    // INVERTED from `toBe('json')`. ⛔ Do not restore it: `json` names a type
+    // SQLite does not have, and its affinity fallback is the whole defect.
+    expect(await catalogType(driver, cell, T)).toBe('text');
   });
 
   it.each(['123', '  123  ', '0123', '1e5', '1.0', '-0'])(
-    'raw %j becomes a numeric storage class, but its JSON encoding stays TEXT',
+    'raw %j now SURVIVES as text on the emitted column, and so does its JSON encoding',
     async (raw) => {
       const bare = `bare_${raw}`;
       const enc = `enc_${raw}`;
-      // ONE statement, one column, two bindings: the pre-fix form and the form
-      // `formatInput` now produces. Bound through raw SQL so nothing but SQLite's
-      // own affinity rule can be responsible for the difference.
+      // ONE statement, one column, two bindings: the pre-#12380 form and the
+      // form `formatInput` produces. Bound through raw SQL so nothing but
+      // SQLite's own affinity rule can be responsible for the outcome.
       await driver.execute(
         `insert into "${T}" ("id", "label", "val") values (?, ?, ?), (?, ?, ?)`,
         [`i_${bare}`, bare, raw, `i_${enc}`, enc, JSON.stringify(raw)],
       );
       const bareDisk = await diskCell(driver, cell, T, bare);
       const encDisk = await diskCell(driver, cell, T, enc);
-      // The affinity is REAL — this is the mechanism the card could not repair.
-      expect(['integer', 'real'], `bare ${raw} must be eaten by NUMERIC affinity`).toContain(bareDisk.t);
-      // …and the quotes defeat it, with no DDL change.
+      // INVERTED. This asserted `['integer','real']` — the affinity eating the
+      // value — before #12738. The bare value is now preserved BYTE FOR BYTE,
+      // which is what "removed at the root" means: raw SQL against this column
+      // no longer needs the codec to be safe.
+      expect(bareDisk.t, `bare ${raw} must now stay TEXT`).toBe('text');
+      expect(bareDisk.v, `bare ${raw} bytes`).toBe(raw);
+      // …and the encoded form is unaffected by the change, as it always was.
       expect(encDisk.t, `encoded ${raw} must stay TEXT`).toBe('text');
       expect(encDisk.v, `encoded ${raw} bytes`).toBe(JSON.stringify(raw));
       expect(JSON.parse(encDisk.v!), `encoded ${raw} parses back`).toBe(raw);
     },
   );
 
-  it('a native number still lands as a numeric storage class — unchanged by this fix', async () => {
+  it('[#12738] a native number now lands as TEXT on disk — and still reads back as a number', async () => {
+    // INVERTED from `toBe('integer')`. The READ is the half that must not move,
+    // and it does not: `formatOutput` parses the encoded form, so the value is
+    // still the number 4200. Only the storage class changed.
     await driver.create(T, { label: 'num', val: 4200 }, { bypassTenantAudit: true });
     const d = await diskCell(driver, cell, T, 'num');
-    expect(d.t).toBe('integer');
+    expect(d.t).toBe('text');
+    expect(d.v).toBe('4200');
     const rows = (await driver.find(T, { where: { label: 'num' } } as DriverQuery)) as any[];
     expect(rows[0].val).toBe(4200);
   });
+
+  // ─── §B the legacy column — #12380 still in force, and still needed ───────
+
+  it('[#12738] a LEGACY column is still declared `json` — the fixture is real', async () => {
+    expect(await catalogType(driver, cell, LEGACY_T)).toBe('json');
+  });
+
+  it.each(['123', '  123  ', '0123', '1e5', '1.0', '-0'])(
+    'raw %j is STILL eaten by NUMERIC affinity on a legacy column, and #12380 still defeats it',
+    async (raw) => {
+      const bare = `bare_${raw}`;
+      const enc = `enc_${raw}`;
+      await driver.execute(
+        `insert into "${LEGACY_T}" ("id", "label", "val") values (?, ?, ?), (?, ?, ?)`,
+        [`i_${bare}`, bare, raw, `i_${enc}`, enc, JSON.stringify(raw)],
+      );
+      const bareDisk = await diskCell(driver, cell, LEGACY_T, bare);
+      const encDisk = await diskCell(driver, cell, LEGACY_T, enc);
+      // Unchanged from the pre-#12738 assertion, on purpose: this is the exact
+      // measurement #12380 made, still true, now correctly scoped to the
+      // columns it is still true OF.
+      expect(['integer', 'real'], `bare ${raw} must be eaten by NUMERIC affinity`).toContain(bareDisk.t);
+      expect(encDisk.t, `encoded ${raw} must stay TEXT`).toBe('text');
+      expect(encDisk.v, `encoded ${raw} bytes`).toBe(JSON.stringify(raw));
+      expect(JSON.parse(encDisk.v!), `encoded ${raw} parses back`).toBe(raw);
+    },
+  );
 });
 }
 
@@ -324,6 +424,16 @@ describe('[#12380] SQLite NUMERIC affinity is still in force, and the encoding d
  * Legacy rows are planted through raw SQL with the values the PRE-fix
  * `formatInput` would have bound — so the same affinity rule that produced the
  * legacy corpus produces this one.
+ *
+ * ⚠️ [#12738] The table is now built with an explicit `json` column instead of
+ * being taken from `initObjects`, and that is a STRENGTHENING rather than a
+ * workaround. The corpus's defining property is that its number-like cells were
+ * eaten by NUMERIC affinity — which only a `json`-declared column does. Since
+ * #12738 the emitter produces `text`, so letting `initObjects` create this table
+ * would have quietly produced a corpus with no legacy cells in it, and every
+ * assertion below would have passed while measuring nothing. The migration
+ * itself is unchanged and untouched by #12738: it selects on
+ * `typeof(col) = 'text' and json_valid(col) = 0`, never on the declared type.
  */
 function declareMigration(): void {
 describe('[#12380] the storage-format migration over legacy SQLite json rows', () => {
@@ -370,9 +480,22 @@ describe('[#12380] the storage-format migration over legacy SQLite json rows', (
 
   beforeAll(async () => {
     driver = new SqlDriver(cell.config());
+    const shape = `${LEGACY_TABLE}_shape`;
     await driver.execute(`drop table if exists ${LEGACY_TABLE}`).catch(() => {});
-    // Pass 1 CREATES the table, so the backfill correctly does nothing.
+    await driver.execute(`drop table if exists ${shape}`).catch(() => {});
+    // Pass 1 CREATES the table, so the backfill correctly does nothing. It is
+    // created in the PRE-#12738 shape: the driver emits the table, and `val` is
+    // put back to `json` so the corpus below really is a legacy corpus.
+    await driver.initObjects([{ name: shape, fields: { ...FIELDS } }]);
+    await driver.execute(
+      legacyDdlFrom(await createStatementOf(driver, cell, shape), shape, LEGACY_TABLE),
+    );
+    await driver.execute(`drop table if exists ${shape}`).catch(() => {});
+    // Register the metadata over the now-existing legacy table. Additive sync
+    // adds nothing (every column is present) and the backfill converts nothing
+    // (no rows yet), so this is the "old database boots on new code" moment.
     await driver.initObjects([{ name: LEGACY_TABLE, fields: { ...FIELDS } }]);
+    expect(await catalogType(driver, cell, LEGACY_TABLE), 'the legacy fixture must be `json`').toBe('json');
     await plant();
     beforeDisk = await snapshot();
     beforeRead = await readAll();
