@@ -174,8 +174,8 @@ function refuseRejectedReferenceAlias(collectionName: string, fieldName: string)
     `(\`syncSchema(object, schema: unknown)\` casts and forwards it verbatim, with no Zod). ` +
     `Rename the key. Note that renaming does not, by itself, get the field a join index: this ` +
     `driver's join-index arm still reads the refused spelling, so a canonical \`reference\` lookup ` +
-    `is unindexed here — that is part (2) of #13222, a separate open ruling, deliberately ` +
-    `unchanged by the door you just hit.`,
+    `is unindexed here. That is a separate, still-open question — deliberately unchanged by the ` +
+    `door you just hit — and not something the rename above regresses.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
