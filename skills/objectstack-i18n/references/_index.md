@@ -15,11 +15,11 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Transitive dependencies
 
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 
 ## How to read these

@@ -10,10 +10,10 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Driver Identifier
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Hook Lifecycle Events
-- `node_modules/@objectstack/spec/src/data/object.zod.ts` — API Operations Enum
-- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Seed Import Strategy
+- `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
+- `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
 - `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Entity (Object) Level Permissions
 
@@ -21,8 +21,8 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
-- `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — SQL Dialect Enumeration
-- `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Common Driver Options
+- `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
+- `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.
 - `node_modules/@objectstack/spec/src/data/driver/config-registry.zod.ts` — The driver-id → `datasource.config` shape registry.
 - `node_modules/@objectstack/spec/src/data/driver/memory.zod.ts` — Memory Driver Configuration Schema
@@ -40,7 +40,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/system/deploy-bundle.zod.ts` — Deploy Bundle Protocol
