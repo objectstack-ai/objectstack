@@ -128,8 +128,16 @@ async function readTables(projectDir: string): Promise<string[]> {
     useNullAsDefault: true,
   });
   try {
-    const rows = await (probe as unknown as { knex: (t: string) => unknown }).knex('sqlite_master')
-      .select('type', 'name') as Array<{ type: string; name: string }>;
+    // The driver's own knex handle, typed structurally to exactly the two calls
+    // made here. `duplicates.integration.test.ts` reaches it as `(probe as any)`;
+    // spelling the shape instead keeps this file free of `any` and keeps the
+    // package's TEST_DEBT ratchet where it was.
+    type CatalogRow = { type: string; name: string };
+    type KnexLike = (table: string) => {
+      select: (...columns: string[]) => Promise<CatalogRow[]>;
+    };
+    const knex = (probe as unknown as { knex: KnexLike }).knex;
+    const rows = await knex('sqlite_master').select('type', 'name');
     return rows
       .filter((r) => r.type === 'table' && !r.name.startsWith('sqlite_'))
       .map((r) => r.name)
