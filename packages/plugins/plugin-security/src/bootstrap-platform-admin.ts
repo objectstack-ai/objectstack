@@ -8,23 +8,28 @@
  *  1. **Seed `sys_permission_set` rows** for each `defaultPermissionSets`
  *     entry (admin_full_access / member_default / viewer_readonly).
  *
- *  2. **Promote the platform OWNER to platform admin** by inserting a
- *     `sys_user_permission_set` row that points at `admin_full_access` with
- *     `organization_id = NULL` (= cross-tenant). If a platform admin already
- *     exists, this is a no-op forever. WHO the owner is depends on the
- *     tenancy posture (#11184, maintainer ruling 2026-08-23):
- *       - `single`: the first registered human user (unchanged);
- *       - walled (`group`/`isolated`): ONLY the account matching the
- *         env-declared `OS_PLATFORM_OWNER_EMAIL` — never the first
- *         registrant, and never anyone at all while that var is undeclared
- *         (fail-closed; the boot-refusal half lives in plugin-auth `init()`).
- *         [#11343] The match must additionally be VERIFIED (`email_verified`):
- *         an unverified account holding the owner's email string is refused
- *         like any stranger, because with verification off by default the
- *         string alone proves nothing about who registered it. The verifying
- *         write is a sys_user UPDATE, so `shouldReplayBootstrapFor` (below)
- *         gives the replay middleware an update trigger — without it the
- *         genuine owner would verify and never be elevated at all.
+ *  2. **Answer the platform-admin question, POSTURE-KEYED** (#11184 ruling
+ *     2026-08-23; re-anchored by #11663, maintainer acceptance 2026-08-25,
+ *     leg L4 = #11974):
+ *       - `single`: promote the first registered human user by inserting a
+ *         `sys_user_permission_set` row pointing at `admin_full_access` with
+ *         `organization_id = NULL`. Unchanged — Choice 4A keeps first-user
+ *         promotion and its grant row for this posture (4B is the sequenced
+ *         follow-up, not dropped).
+ *       - walled (`group`/`isolated`): **NO grant row is written, ever.**
+ *         Standing is CONFIG-DERIVED at the one derivation site
+ *         (`resolve-authz-context.ts` §6b-config): each account whose stored
+ *         `sys_user` row holds a declared `OS_PLATFORM_OWNER_EMAIL` address
+ *         AND reads VERIFIED resolves PLATFORM_ADMIN at request time. What
+ *         this bootstrap still owns under walled postures is reporting: it
+ *         logs the resolved admin list's standing (the same answer the
+ *         read-only `platformAdmin` service serves — see
+ *         `platform-admin-service.ts`), and points any LEGACY unscoped grant
+ *         holder at the config path via the shared once-per-process
+ *         deprecation reporter (`reportLegacyPlatformAdminGrant`, pin #5:
+ *         loud migration, never a silent dual-track). Undeclared/blank/
+ *         refused config still refuses loudly (fail-closed backstop; the
+ *         boot-refusal half lives in plugin-auth `init()`).
  *
  * The "create a Default Organization for the freshly-promoted admin"
  * behavior moved to `@objectstack/organizations` (see
@@ -60,19 +65,18 @@
 
 import { postureEnforcesWall, type PermissionSet } from '@objectstack/spec/security';
 import { SystemUserId } from '@objectstack/spec/system';
+import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/types';
 import {
-  PLATFORM_OWNER_EMAIL_ENV,
-  isEmailVerifiedUserRow,
-  resolveTenancyPosture,
-} from '@objectstack/types';
-import { resolvePlatformAdminEmails } from '@objectstack/core';
+  reportLegacyPlatformAdminGrant,
+  resolvePlatformAdminEmails,
+} from '@objectstack/core';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
-import { matchesDeclaredOwnerEmail } from './platform-owner-wall-bypass.js';
+import { resolvePlatformAdminStanding } from './platform-admin-service.js';
 
 interface BootstrapOptions {
   /** Logger from PluginContext. */
@@ -155,38 +159,32 @@ function genId(prefix: string): string {
 }
 
 /**
- * [#11343] Verified-email predicate for the walled elevation match.
- *
- * [#12751] The predicate itself moved to `@objectstack/types`
- * (`isEmailVerifiedUserRow`) so the owner-verification boot diagnostic in
- * `plugin-auth` reads the SAME allow-list this gate refuses on — the
- * fail-closed semantics (absent-means-unverified) are documented and pinned
- * at the definition. This alias keeps the gate's call sites reading in the
- * gate's own vocabulary.
- */
-const isEmailVerified = isEmailVerifiedUserRow;
-
-/**
- * [#11343] Which `sys_user` writes can change the answer of the elevation
- * query in {@link bootstrapPlatformAdmin} — the trigger predicate for the
+ * Which `sys_user` writes can change the answer of the promotion in
+ * {@link bootstrapPlatformAdmin} — the trigger predicate for the
  * bootstrap-replay middleware in `security-plugin.ts`. Exported so the
  * middleware and its pins consume the SAME predicate instead of re-deriving
  * it (the `resolveEngineUpdateDispatch` pattern).
  *
- *  - `create` / `insert`: a new account may be the declared owner (walled) or
- *    the first human user (`single`) — the original re-run trigger, unchanged.
- *  - `update` whose payload touches `email_verified` or `email`: email
- *    verification is an UPDATE (better-auth flips `emailVerified` when the
- *    link is clicked, and change-email writes `{ email, emailVerified: true }`
- *    — both reach the engine snake_cased via the adapter mapping). A re-run
- *    bound to insert alone would refuse the unverified owner at sign-up and
- *    then never look again, so the genuine owner would NEVER be elevated —
- *    trading the wrong-person-elevated defect for a nobody-can-administer
- *    one. These two columns are exactly the `sys_user` columns the walled
- *    owner-match reads.
- *  - any other operation, or an update touching neither column: cannot change
- *    the elevation answer — no re-run. The bootstrap is idempotent but not
- *    free; it must not run on every profile edit.
+ * [#11974 / #11663 L4] NARROWED with the walled elevation's retirement. The
+ * #11343 `update` arm (payload touching `email_verified` / `email`) existed
+ * for exactly one reason: walled elevation was a WRITE that had to be
+ * re-attempted after the owner's verifying update. Under walled postures the
+ * bootstrap no longer writes a grant at all — standing is derived from config
+ * at request time (`resolve-authz-context.ts` §6b-config), so there is
+ * nothing to re-attempt and NO `sys_user` write can change this function's
+ * answer. What remains:
+ *
+ *  - walled (`group`/`isolated`): never replay. Seeding and the standing log
+ *    are `kernel:ready` work; re-running them per sign-up would only re-log
+ *    and re-query. (The REQUESTED posture is read, same fail-stricter
+ *    direction as the bootstrap itself.)
+ *  - `single` + `create`/`insert`: a new account may be the first human user
+ *    — the original first-user-promotion trigger, unchanged (Choice 4A).
+ *  - `single` + any update: could never change the promotion answer —
+ *    `single` promotes the OLDEST human user and never reads
+ *    `email`/`email_verified`. The pre-#11974 update arm fired here for the
+ *    walled match's sake only; with that gone it would be a pure re-run tax
+ *    on every verification write.
  */
 export function shouldReplayBootstrapFor(opCtx: {
   object?: string;
@@ -195,15 +193,8 @@ export function shouldReplayBootstrapFor(opCtx: {
 }): boolean {
   if (opCtx?.object !== 'sys_user') return false;
   const op = opCtx?.operation;
-  if (op === 'create' || op === 'insert') return true;
-  if (op === 'update') {
-    const data = opCtx?.data;
-    if (!data || typeof data !== 'object') return false;
-    return ['email_verified', 'email'].some((column) =>
-      Object.prototype.hasOwnProperty.call(data, column),
-    );
-  }
-  return false;
+  if (op !== 'create' && op !== 'insert') return false;
+  return !postureEnforcesWall(resolveTenancyPosture());
 }
 
 /**
@@ -241,8 +232,10 @@ function platformOwnedFields(ps: PermissionSet): Record<string, any> {
 }
 
 /**
- * Persist seed permission sets and promote the first registered user to
- * platform admin. Safe to call multiple times.
+ * Persist seed permission sets and answer the posture-keyed platform-admin
+ * question: promote the first registered human user under `single`, report
+ * config-derived standing (and write nothing) under walled postures. Safe to
+ * call multiple times.
  */
 export async function bootstrapPlatformAdmin(
   ql: any,
@@ -352,7 +345,24 @@ export async function bootstrapPlatformAdmin(
   // that already has an admin returns `already_have_admin`).
   const resyncCounts = { resynced, resyncSkipped };
 
-  // 2. First-user platform admin promotion.
+  // 2. The platform-admin question, POSTURE-KEYED (#11184 ruling 2026-08-23,
+  //    verbatim: 「1509 选择 env 指定 owner 邮箱」; re-anchored by #11663 L4):
+  //
+  //   - `single`: first human user is promoted — ruled reasonable, unchanged
+  //     (Choice 4A keeps first-user promotion and its grant row).
+  //   - walled (`group` / `isolated`): NO grant row is written. Standing is
+  //     config-derived at the one derivation site (`resolve-authz-context.ts`
+  //     §6b-config): a stored `sys_user` row holding a declared
+  //     `OS_PLATFORM_OWNER_EMAIL` address AND reading VERIFIED resolves
+  //     PLATFORM_ADMIN at request time. This branch only reports.
+  //
+  // The REQUESTED posture (`resolveTenancyPosture()`, what the operator asked
+  // for) is deliberately the input here rather than the enforced one: a
+  // deployment that requested a wall must not fall back to first-registrant
+  // promotion even while running degraded (OS_ALLOW_DEGRADED_TENANCY=1) —
+  // fail toward the stricter reading, same direction ADR-0093 D5 fails.
+  const walled = postureEnforcesWall(resolveTenancyPosture());
+
   const adminPsId = seeded['admin_full_access'];
   if (!adminPsId) {
     return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
@@ -364,72 +374,95 @@ export async function bootstrapPlatformAdmin(
     { permission_set_id: adminPsId },
     50,
   );
-  // A platform admin "already exists" only if a *human* holds the
-  // cross-tenant grant. The seed-data owner `usr_system` (provisioned by
-  // the SeedLoader, see runtime/app-plugin.ts `ensureSeedIdentity`) must
-  // never count — otherwise a DB where it was wrongly promoted would block
-  // every real admin forever. Ignoring it here makes the bootstrap
-  // self-healing on restart.
-  if (existingAdminLinks.some((r) => !r.organization_id && r.user_id !== SystemUserId.SYSTEM)) {
+  // Human holders of the cross-tenant grant. The seed-data owner `usr_system`
+  // (provisioned by the SeedLoader, see runtime/app-plugin.ts
+  // `ensureSeedIdentity`) never counts — otherwise a DB where it was wrongly
+  // promoted would block every real admin forever. Ignoring it here makes the
+  // bootstrap self-healing on restart.
+  const humanUnscopedHolders = existingAdminLinks.filter(
+    (r) => !r.organization_id && r.user_id !== SystemUserId.SYSTEM,
+  );
+  // `single`: a platform admin "already exists" — the promotion is a no-op
+  // forever. Under walled postures that same row is the LEGACY anchor and gets
+  // the deprecation pointer below instead of a silent early exit.
+  if (!walled && humanUnscopedHolders.length > 0) {
     return { seeded: seededCount, adminPromoted: false, reason: 'already_have_admin', ...resyncCounts };
   }
 
-  // [#11184 / cloud#1509] Elevation is POSTURE-KEYED (maintainer ruling
-  // 2026-08-23, verbatim: 「1509 选择 env 指定 owner 邮箱」):
-  //
-  //   - `single`: first human user is promoted — ruled reasonable, unchanged.
-  //   - walled (`group` / `isolated`): the first-registrant path is REMOVED.
-  //     Platform admin is granted ONLY to the account matching the
-  //     env-declared owner email (`OS_PLATFORM_OWNER_EMAIL`). On a walled
-  //     deployment with self-registration reachable, whoever curls sign-up
-  //     first would otherwise receive the cross-tenant `admin_full_access`
-  //     grant AND (via `ensureDefaultOrganization`, which binds "the platform
-  //     admin") the operator's Default Organization — measured on a real
-  //     walled SaaS in cloud#1509.
-  //
-  // The REQUESTED posture (`resolveTenancyPosture()`, what the operator asked
-  // for) is deliberately the input here rather than the enforced one: a
-  // deployment that requested a wall must not fall back to first-registrant
-  // elevation even while running degraded (OS_ALLOW_DEGRADED_TENANCY=1) —
-  // fail toward the stricter reading, same direction ADR-0093 D5 fails.
-  //
-  // The startup half of the fail-closed clause (walled + undeclared owner ⇒
-  // REFUSE BOOT, naming the variable) lives in plugin-auth's `init()`, which
-  // every standard walled composition runs and where a throw aborts the boot.
-  // This branch is the defense-in-depth backstop for paths that reach the
-  // bootstrap without that guard (`os meta resync`, embeddings without
-  // plugin-auth): it refuses the ELEVATION, loudly, and never silently
-  // reverts to promoting the first registrant.
-  //
-  // [#13147] `OS_PLATFORM_OWNER_EMAIL` takes one address OR a comma-separated
-  // list (#11663 Choice 2B), so this gate reads the PARSED config from the one
-  // shared parser (`@objectstack/core`) rather than the raw string. Before, it
-  // held the operator's whole value as if it were a single address: a list
-  // matched no account at all, and this gate logged "will be promoted when
-  // that account registers" forever — fail-closed, but the deployment silently
-  // never got its platform admin.
-  //
-  // "Declared" is now `emails.length > 0`, which folds in the third state the
-  // raw read could not see: a list REFUSED for an unparseable entry yields zero
-  // administrators, and refusing the elevation is the same correct answer as
-  // for an unset variable. The parser has already said WHY, loudly and once
-  // per process, so the refusal below does not have to distinguish them.
-  const walled = postureEnforcesWall(resolveTenancyPosture());
-  const platformAdminConfig = walled ? resolvePlatformAdminEmails() : undefined;
-  if (walled && platformAdminConfig!.emails.length === 0) {
-    const message =
-      `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
-      'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
-      'REFUSING platform-admin elevation. Under walled postures the first registrant is ' +
-      'never promoted; platform admin is granted only to an account matching a declared ' +
-      `owner email. Set ${PLATFORM_OWNER_EMAIL_ENV} to the operator's email address ` +
-      '(or a comma-separated list of addresses).';
-    if (logger?.error) logger.error(message);
-    else logger?.warn?.(message);
+  if (walled) {
+    // [#11974 / #11663 L4, Choice 5A first half] The walled promotion is
+    // RETIRED: no `sys_user_permission_set` row is minted, whatever accounts
+    // exist. Nothing is revoked either — an existing legacy grant still
+    // confers (P5's honoured window, enforced at the derivation site) — but
+    // it is now the OLD anchor, so its holder is pointed at the config path
+    // ONCE per process through the same latch the derivation-site reporter
+    // uses (`reportLegacyPlatformAdminGrant`): boot-time detection here and
+    // request-time detection there can never add up to two lines.
+    if (humanUnscopedHolders.length > 0) {
+      const holder = humanUnscopedHolders[0];
+      const holderRows = await tryFind(ql, 'sys_user', { id: holder.user_id }, 1);
+      reportLegacyPlatformAdminGrant({
+        userId: String(holder.user_id),
+        email: holderRows[0]?.email,
+      });
+    }
+
+    // Fail-closed backstop for an unusable config (unset, blank, or a list
+    // REFUSED for an unparseable entry — #11663 Choice 2B folds all three
+    // into `emails.length === 0`; the parser has already said WHY, once per
+    // process). The startup half (walled + undeclared ⇒ REFUSE BOOT, naming
+    // the variable) lives in plugin-auth's `init()`; this is the
+    // defense-in-depth line for paths that reach the bootstrap without that
+    // guard (`os meta resync`, embeddings without plugin-auth). With a legacy
+    // holder present the deprecation pointer above already carries the
+    // remedy, so the extra error line is skipped — the deployment HAS an
+    // administrator, on the old anchor.
+    const platformAdminConfig = resolvePlatformAdminEmails();
+    if (platformAdminConfig.emails.length === 0) {
+      if (humanUnscopedHolders.length === 0) {
+        const message =
+          `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
+          'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
+          'this deployment has ZERO config-derived platform administrators. Under walled ' +
+          'postures the first registrant is never promoted and no grant row is written; ' +
+          `platform admin standing is derived from ${PLATFORM_OWNER_EMAIL_ENV} at request ` +
+          "time. Set it to the operator's email address (or a comma-separated list of " +
+          'addresses) and make sure the account verifies its email.';
+        if (logger?.error) logger.error(message);
+        else logger?.warn?.(message);
+      }
+      return {
+        seeded: seededCount,
+        adminPromoted: false,
+        reason: 'walled_owner_email_undeclared',
+        ...resyncCounts,
+      };
+    }
+
+    // The operator's first sight of the answer — the SAME answer the
+    // read-only `platformAdmin` service serves (one implementation, see
+    // platform-admin-service.ts). Per declared entry: does an account exist,
+    // is it verified, which account holds standing.
+    const standing = await resolvePlatformAdminStanding(ql, platformAdminConfig);
+    const summary = standing
+      .map((s) =>
+        s.registered
+          ? s.verified
+            ? `${s.email}: registered + verified (${s.userId})`
+            : `${s.email}: registered, NOT verified — no standing until the address verifies`
+          : `${s.email}: not registered yet`,
+      )
+      .join('; ');
+    logger?.info?.(
+      `[security] walled posture — platform-admin standing is CONFIG-DERIVED (${PLATFORM_OWNER_EMAIL_ENV}); ` +
+        'no grant row is written. Each declared, VERIFIED account resolves PLATFORM_ADMIN ' +
+        `at request time. ${summary}`,
+      { standing: standing.map((s) => ({ ...s })) },
+    );
     return {
       seeded: seededCount,
       adminPromoted: false,
-      reason: 'walled_owner_email_undeclared',
+      reason: 'walled_config_derived',
       ...resyncCounts,
     };
   }
@@ -466,94 +499,18 @@ export async function bootstrapPlatformAdmin(
       return ta - tb;
     })[0];
 
-  let target: any;
-  if (walled) {
-    // Query BY EMAIL rather than scanning the first N users: on a walled
-    // deployment any number of self-registrants may exist before the owner
-    // registers, and the owner must be found regardless of arrival order.
-    // Email comparison is case-insensitive; better-auth stores sign-up emails
-    // lowercased, but imported/legacy rows may not be, so both the lowercased
-    // and the verbatim spellings are queried and matches are de-duplicated.
-    //
-    // [#13147] Both spellings, now for EVERY declared administrator. The
-    // as-typed spellings come from the parser's own `declaredSpellings` — ⛔ the
-    // raw value is never split a second time here, which is the whole point of
-    // the card: one separator, one normalization, one meaning.
-    const config = platformAdminConfig!;
-    const spellings = [...new Set([...config.emails, ...config.declaredSpellings])];
-    const byId = new Map<string, any>();
-    for (const spelling of spellings) {
-      for (const u of await tryFind(ql, 'sys_user', { email: spelling }, 5)) {
-        if (u?.id) byId.set(u.id, u);
-      }
-    }
-    // [#12974] The email comparison is the SHARED canonical one — the same
-    // predicate the Layer 0 owner wall bypass keys on (see
-    // `platform-owner-wall-bypass.ts`, which names this gate as its twin).
-    const owners = [...byId.values()].filter(
-      (u) => isHumanUser(u) && matchesDeclaredOwnerEmail(u, config),
-    );
-    if (owners.length === 0) {
-      logger?.info?.(
-        `[security] walled posture — platform admin will be granted to a declared owner ` +
-          `(${PLATFORM_OWNER_EMAIL_ENV}=${config.declaredSpellings.join(', ')}) when that account ` +
-          `registers; self-registrants are never promoted`,
-      );
-      return {
-        seeded: seededCount,
-        adminPromoted: false,
-        reason: 'walled_owner_not_registered',
-        ...resyncCounts,
-      };
-    }
-    // [#11343] The email STRING alone is not identity: with self-registration
-    // reachable and email verification off by default, anyone who knows the
-    // declared owner's address and registers before the owner would match here
-    // and be elevated. Elevation therefore requires the match to be VERIFIED —
-    // an account row whose `email_verified` better-auth has confirmed (the
-    // verification link, or a trusted SSO provider at insert). An owner-email
-    // account that is not verified is refused exactly like a stranger, loudly,
-    // and never falls back — same fail-closed direction as the undeclared-owner
-    // refusal above. The refusal is transient for the genuine owner: the
-    // verifying write is a sys_user UPDATE, and the bootstrap-replay middleware
-    // (security-plugin.ts, via `shouldReplayBootstrapFor`) re-runs this
-    // function on exactly that update.
-    //
-    // [#13147] With a comma-separated list, several declared administrators may
-    // hold verified accounts. Exactly ONE grant row is still written, and it is
-    // the oldest — unchanged, and deliberately not widened to "grant every
-    // declared owner". The row written here is `admin_full_access`, the LEGACY
-    // anchor that #11663 is retiring; standing for every declared+verified
-    // administrator already comes from the configuration anchor in the one
-    // derivation site (`resolve-authz-context.ts` section 6b-config), so minting
-    // one legacy row per list member would add nothing but rows to retire.
-    const verifiedOwners = owners.filter(isEmailVerified);
-    if (verifiedOwners.length === 0) {
-      logger?.warn?.(
-        `[security] walled posture — an account matching a declared owner email ` +
-          `(${PLATFORM_OWNER_EMAIL_ENV}) exists but its email is NOT VERIFIED; ` +
-          `REFUSING platform-admin elevation until the owner account verifies its address. ` +
-          `Unverified accounts are never promoted, whoever registered them. If this ` +
-          `deployment has no verification path, wire an email transport (or sign the ` +
-          `owner in through a trusted SSO provider) — elevation will not fall back.`,
-      );
-      return {
-        seeded: seededCount,
-        adminPromoted: false,
-        reason: 'walled_owner_not_verified',
-        ...resyncCounts,
-      };
-    }
-    target = oldestOf(verifiedOwners);
-  } else {
-    const allUsers = await tryFind(ql, 'sys_user', {}, 50);
-    const humanUsers = allUsers.filter(isHumanUser);
-    if (humanUsers.length === 0) {
-      logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
-      return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
-    }
-    target = oldestOf(humanUsers);
+  // [#11974 / #11663 L4] `single` is the ONLY posture that still selects a
+  // target and writes the grant row (Choice 4A). The walled selection — query
+  // by declared email, verified-only, oldest wins — moved with the decision
+  // itself into the derivation site (`resolve-authz-context.ts` §6b-config)
+  // and, for the audit answer, `platform-admin-service.ts`.
+  const allUsers = await tryFind(ql, 'sys_user', {}, 50);
+  const humanUsers = allUsers.filter(isHumanUser);
+  if (humanUsers.length === 0) {
+    logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
+    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
   }
+  const target = oldestOf(humanUsers);
 
   const inserted = await tryInsert(ql, 'sys_user_permission_set', {
     id: genId('ups'),
@@ -566,11 +523,7 @@ export async function bootstrapPlatformAdmin(
     logger?.warn?.(`[security] failed to grant admin_full_access to first user ${target.email ?? target.id}`);
     return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
   }
-  logger?.info?.(
-    walled
-      ? `[security] a declared platform owner (${PLATFORM_OWNER_EMAIL_ENV}) promoted to platform admin: ${target.email ?? target.id}`
-      : `[security] first user promoted to platform admin: ${target.email ?? target.id}`,
-  );
+  logger?.info?.(`[security] first user promoted to platform admin: ${target.email ?? target.id}`);
 
   // Hand seeded business records (owner_id NULL / usr_system) to the freshly
   // promoted admin so owner-keyed UX works out of the box. Best-effort and

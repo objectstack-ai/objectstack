@@ -31,6 +31,19 @@ export {
   autoOrgAdminGrantReason,
 } from './auto-org-admin-grant.js';
 export { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+// [#11974 / #11663 L4] The read-only platform-admin audit surface (registered
+// as the `platformAdmin` service by SecurityPlugin) — config-derived standing
+// for the deployment's declared administrators, since walled postures mint no
+// grant row to query any more.
+export {
+  createPlatformAdminService,
+  resolvePlatformAdminStanding,
+} from './platform-admin-service.js';
+export type {
+  PlatformAdminService,
+  PlatformAdminStandingEntry,
+  PlatformAdminConfiguredEmails,
+} from './platform-admin-service.js';
 // [ADR-0105 D8] Scoped-invitation placement — issuance gate + accept-time apply.
 export {
   INVITATION_PLACEMENT_SERVICE,

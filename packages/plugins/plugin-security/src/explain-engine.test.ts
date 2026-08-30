@@ -2,7 +2,7 @@
 // ADR-0090 D6 — explain engine: layer verdicts, attribution, machine artifact.
 
 import { describe, it, expect } from 'vitest';
-import { resolveUserAuthzGrants } from '@objectstack/core';
+import { resolveUserAuthzGrants, resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
@@ -692,6 +692,34 @@ describe('buildContextForUser', () => {
     // D2) and resolves the rung once — both now reach the panel unchanged.
     expect(ctx.positions).toContain('platform_admin');
     expect(ctx.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('[#11974 / #11663 L4, P8] CONFIG-derived standing reaches the panel: a declared+verified admin with ZERO grant rows explains as PLATFORM_ADMIN', async () => {
+    // Under walled postures the bootstrap mints no grant row any more, so this
+    // is the ONLY shape a fresh walled deployment's administrator has. Explain
+    // must agree with enforcement about it — and does so structurally, because
+    // `buildContextForUser` delegates to the resolver whose §6b-config branch
+    // is the one derivation site (pinned in core's
+    // `resolve-authz-context.platform-admin-config.test.ts`). This pin holds
+    // the panel side of that agreement.
+    const prev = process.env.OS_PLATFORM_OWNER_EMAIL;
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+    resetPlatformAdminEmailMemo();
+    try {
+      const qlConfig = makeGrantQl({
+        // No sys_user_permission_set rows at all — the row anchor is absent.
+        sys_user: [{ id: 'u9', email: 'operator@corp.example', email_verified: true }],
+      });
+      const ctx = await buildContextForUser(qlConfig, 'u9');
+      expect(ctx.hasPlatformAdminGrant).toBe(true);
+      expect(ctx.posture).toBe('PLATFORM_ADMIN');
+      expect(ctx.permissions).toContain('admin_full_access');
+      expect(ctx.positions).toContain('platform_admin');
+    } finally {
+      if (prev === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+      else process.env.OS_PLATFORM_OWNER_EMAIL = prev;
+      resetPlatformAdminEmailMemo();
+    }
   });
 
   it('a SCOPED (org-specific) admin_full_access user grant does NOT set hasPlatformAdminGrant', async () => {
