@@ -3540,3 +3540,115 @@ describe('ViewSchema → JSON Schema derivation (Studio inspector path)', () => 
     expect(() => z.toJSONSchema(FormFieldSchema, TO_JSON)).not.toThrow();
   });
 });
+
+// ============================================================================
+// [#13216] `type: 'page'` — mounting an already-published page on an object view
+// ============================================================================
+
+/**
+ * The three doors a list view is judged by. Named ONE place because the binding
+ * check is attached at three separate points (zod 4 refuses `.omit()` and
+ * key-overwriting `.extend()` on a refined object, so the overlay and
+ * object-scoped shapes are built from the unrefined shape and re-attach it) —
+ * and a missing re-attachment is invisible: the door keeps accepting, which
+ * reads as "no rule violated" rather than "no rule ran".
+ *
+ * The overlay entry is the one that matters most and is the easiest to lose:
+ * it is `PUT /api/v1/meta/view`, the only door a Studio tenant or an MCP/AI
+ * author has.
+ */
+const viewDoorsCarryingPageMountCheck = [
+  ['ListViewSchema', (body: Record<string, unknown>) => ListViewSchema.safeParse(body)],
+  ['ObjectListViewSchema', (body: Record<string, unknown>) => ObjectListViewSchema.safeParse(body)],
+  [
+    'flattened overlay (PUT /api/v1/meta/view)',
+    (body: Record<string, unknown>) =>
+      ViewMetadataSchema.safeParse({ name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list', ...body }),
+  ],
+] as const;
+
+describe("ListViewSchema — the `page` view type (#13216)", () => {
+  it('accepts a page mount: `type: page` + `pageName` + empty columns', () => {
+    const parsed = ListViewSchema.parse({ type: 'page', pageName: 'sales_dashboard', columns: [] });
+    expect(parsed.type).toBe('page');
+    expect(parsed.pageName).toBe('sales_dashboard');
+  });
+
+  it('keeps every pre-existing view type accepting exactly as before', () => {
+    const types = ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+    for (const type of types) {
+      expect(ListViewSchema.safeParse({ type, columns: ['name'] }).success, type).toBe(true);
+    }
+  });
+
+  // The refusal that makes the enum member worth adding. Every OTHER view type
+  // degrades to a wrong-but-visible list when its binding is missing (which is
+  // why `checkViewCompleteness` only warns about those); a `page` view with no
+  // `pageName` has no rows to fall back to and renders nothing at all.
+  describe.each(viewDoorsCarryingPageMountCheck)('%s', (_label, parse) => {
+    it('REFUSES `type: page` with no `pageName`', () => {
+      const r = parse({ type: 'page', columns: [] });
+      expect(r.success).toBe(false);
+      const issue = (r as { error: z.ZodError }).error.issues
+        .find((i) => i.path.join('.').endsWith('pageName'));
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('needs to say WHICH page');
+    });
+
+    it('REFUSES `pageName` on a view that is not `type: page` — the inert-key direction', () => {
+      const r = parse({ type: 'grid', pageName: 'sales_dashboard', columns: ['name'] });
+      expect(r.success).toBe(false);
+      const issue = (r as { error: z.ZodError }).error.issues
+        .find((i) => i.path.join('.').endsWith('pageName'));
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain("only read by a `type: 'page'` view");
+    });
+
+    it('REFUSES a page mount that also declares columns — they are never read', () => {
+      const r = parse({ type: 'page', pageName: 'sales_dashboard', columns: ['name'] });
+      expect(r.success).toBe(false);
+      const issue = (r as { error: z.ZodError }).error.issues
+        .find((i) => i.path.join('.').endsWith('columns'));
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain('columns: []');
+    });
+
+    it('accepts a well-formed page mount', () => {
+      expect(parse({ type: 'page', pageName: 'sales_dashboard', columns: [] }).success).toBe(true);
+    });
+  });
+
+  // `pageName` carries `SnakeCaseIdentifierSchema` — the SAME grammar
+  // `PageSchema.name` is declared with — so the accepted set is exactly the set
+  // of strings that could name a page. A value outside it names nothing that
+  // can exist, and no collection lookup is needed to say so.
+  it('REFUSES a `pageName` outside the page-name grammar', () => {
+    const r = ListViewSchema.safeParse({ type: 'page', pageName: 'SalesDashboard', columns: [] });
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.error.issues.some((i) => i.path.join('.') === 'pageName')).toBe(true);
+  });
+
+  // `columns` stays REQUIRED on the list arm. The union tells its list and form
+  // overlay members apart by "no required `columns`, disjoint `type` enum" with
+  // the list arm tried first, so relaxing it to spare a page view the `[]`
+  // would let a flattened FORM overlay match the list arm and have its
+  // `sections` stripped. This pins the property the relaxation would break.
+  it('still tells a flattened FORM overlay apart from a list overlay', () => {
+    const form = ViewMetadataSchema.safeParse({
+      name: 'crm_lead.edit',
+      object: 'crm_lead',
+      viewKind: 'form',
+      type: 'simple',
+      sections: [{ label: 'Basics', fields: [{ field: 'name' }] }],
+    });
+    expect(form.success).toBe(true);
+    expect((form as { data: { sections?: unknown[] } }).data.sections).toHaveLength(1);
+  });
+
+  // `page` is deliberately NOT a visualization users can switch to: the
+  // switcher offers alternative ways to draw the same ROWS, and a page draws
+  // none. Pinned so the omission reads as a decision rather than an oversight.
+  it('does NOT add `page` to the visualization switcher whitelist', () => {
+    expect(VisualizationTypeSchema.safeParse('page').success).toBe(false);
+  });
+});

@@ -84,6 +84,7 @@ import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
+import { validateViewPageRefs } from './validate-view-page-refs.js';
 import { validateNavObjectServability } from './validate-nav-object-servability.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { validateTranslatableSections } from './validate-translatable-sections.js';
@@ -194,6 +195,24 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `action` is deliberately absent (validateActionNameRefs owns it) and so is
   // `component` (an unregistered ref renders a named diagnostic, not silence).
   { name: 'validateNavTargetRefs', run: validateNavTargetRefs },
+  // [#13216] The SAME reference — `{ type: 'page', pageName }` — one surface
+  // over: a `type: 'page'` list view mounting a published page. It restores the
+  // coverage its nav twin restores, when `defineStack`'s own check switches
+  // itself off, and carries the same advisory severity for the same reason (no
+  // curated cross-package page registry exists to tell "unresolved" from
+  // "provided by a package we cannot see").
+  //
+  // The first member crossed onto `view` snapshots for something that is not a
+  // field-existence question, and the crossing is the point rather than a
+  // bonus: the mount is authored through `PUT /api/v1/meta/view` by an agent
+  // that never runs a CLI (#13100's measured path), so a build-time-only rule
+  // would never reach its author. Safe to cross ONLY because the per-write
+  // snapshot now carries `pages` (`RuntimeStackContext.pages`, landed with this
+  // member) — without that collection the member would report every legitimate
+  // mount as dead, which is the missing-collection false-positive channel
+  // `runtimeTypes` exists to keep closed. Measured both ways in
+  // `runtime-gate.view-page-refs.test.ts`.
+  { name: 'validateViewPageRefs', runtimeTypes: ['flow', 'view'], run: validateViewPageRefs },
   // [#7912] The THIRD question about a nav entry, after "does the target
   // resolve?" (above) and "is it granted?" (`validateNavAccess`): can the
   // destination serve at all? An object's own `enable` block can make its list

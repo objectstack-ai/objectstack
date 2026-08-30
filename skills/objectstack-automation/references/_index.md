@@ -11,22 +11,22 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/automation/approval.zod.ts` — Exports: ApproverType, ApprovalDecision, ApprovalNodeApproverSchema, DecisionOutputDefSchema, ApprovalEscalationSchema
 - `node_modules/@objectstack/spec/src/automation/execution.zod.ts` — Automation Execution Protocol
-- `node_modules/@objectstack/spec/src/automation/flow.zod.ts` — Flow Node Types — **built-in seed set** (ADR-0018).
+- `node_modules/@objectstack/spec/src/automation/flow.zod.ts` — Exports: FlowNodeAction, FlowVariableSchema, FlowNodeSchema, FlowEdgeSchema, FlowSchema
 - `node_modules/@objectstack/spec/src/automation/node-executor.zod.ts` — Node Executor Plugin Protocol — Wait Node Pause/Resume
 - `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol — hierarchical states, guarded
 - `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts` — Time-Relative Trigger Protocol
-- `node_modules/@objectstack/spec/src/automation/webhook.zod.ts` — Webhook Trigger Event
+- `node_modules/@objectstack/spec/src/automation/webhook.zod.ts` — Exports: WebhookTriggerType, WebhookSchema
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
 
 ## Transitive dependencies
 
 - `node_modules/@objectstack/spec/src/automation/control-flow.zod.ts` — Structured control-flow constructs (ADR-0031) — the **native + AI-authored**
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
+- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/retry-policy.zod.ts` — The **single declaration** of the exponential-backoff retry policy.
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities

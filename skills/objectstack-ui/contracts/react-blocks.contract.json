@@ -329,7 +329,7 @@
         },
         {
           "name": "type",
-          "type": "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree'",
+          "type": "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree' | 'page'",
           "kind": "data",
           "required": false,
           "description": ""

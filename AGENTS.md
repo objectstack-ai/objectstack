@@ -232,8 +232,8 @@ localStorage / auth gotchas.
 11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**;
     the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
     branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file
-    edit**, be in a dedicated worktree on a feature branch: `git fetch origin main &&
-    git worktree add ../objectstack-<task> -b <branch> origin/main && cd ../objectstack-<task> && pnpm install`. Two
+    edit**, be in a dedicated worktree on a feature branch: `git fetch origin main && git worktree add --no-track
+    ../objectstack-<task> -b <branch> origin/main && cd ../objectstack-<task> && pnpm install`. Two
     PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`,
     and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
@@ -394,7 +394,7 @@ git worktree add ../objectstack-<task>-cmp <ref>        # a second tree to compa
 
 **⛔ The stash is one CASE — a worktree isolates your checkout and exactly four ref
 namespaces (`HEAD`, `refs/bisect`, `refs/worktree`, `refs/rewritten`) and NOTHING else:**
-not the object store, not the config, not any other ref, so "worktrees isolate refs,
+not the object store, not `.git/config`, not any other ref, so "worktrees isolate refs,
 except stash" is exactly backwards. **`refs/remotes/*` is shared** — a sibling's fetch
 advances **your** `origin/main` (measured next door: three moves in ten minutes), so
 `git checkout origin/main -- <paths>` restores wherever that ref points **now**, possibly
