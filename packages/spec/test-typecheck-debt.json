@@ -1,59 +1,259 @@
 {
-  "_comment": "Per-file tsc error debt of the @objectstack/spec TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/spec gen:test-typecheck-debt",
+  "_comment": "Per-file tsc error debt of the @objectstack/spec TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it carries NO line or column — so the pin survives edits that move code around, and only stops matching when the error itself becomes a different error. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, a signature that ARRIVES or VANISHES is red even when the file total is unchanged, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/spec gen:test-typecheck-debt",
   "entries": {
-    "src/ai/conversation.test.ts": 5,
-    "src/api/documentation.test.ts": 1,
-    "src/api/errors.test.ts": 1,
-    "src/api/odata.test.ts": 1,
-    "src/api/package-api.test.ts": 4,
-    "src/api/rest-server.test.ts": 2,
-    "src/api/router.test.ts": 1,
-    "src/automation/control-flow.test.ts": 5,
-    "src/automation/schemaless-node-config.test.ts": 1,
-    "src/compose-stacks-key-loss.test.ts": 7,
-    "src/compose-stacks.test.ts": 8,
-    "src/contracts/ai-service.test.ts": 1,
-    "src/contracts/analytics-service.test.ts": 1,
-    "src/contracts/automation-service.test.ts": 1,
-    "src/contracts/core-service-contracts.test.ts": 15,
-    "src/contracts/data-engine.test.ts": 1,
-    "src/contracts/http-server.test.ts": 3,
-    "src/contracts/logger.test.ts": 2,
-    "src/contracts/metadata-service.test.ts": 2,
-    "src/contracts/package-service.test.ts": 2,
-    "src/contracts/plugin-lifecycle-events.test.ts": 2,
-    "src/contracts/service-registry.test.ts": 7,
-    "src/contracts/storage-service.test.ts": 1,
-    "src/data/data-engine.test.ts": 6,
-    "src/data/display-name.test.ts": 18,
-    "src/data/driver-nosql.test.ts": 2,
-    "src/data/driver-sql.test.ts": 1,
-    "src/data/driver.test.ts": 11,
-    "src/data/field.test.ts": 2,
-    "src/data/object-strictness-batch20.test.ts": 1,
-    "src/data/query.test.ts": 25,
-    "src/identity/scim.test.ts": 7,
-    "src/integration/connector.test.ts": 7,
-    "src/kernel/cluster.test.ts": 2,
-    "src/kernel/metadata-plugin.test.ts": 1,
-    "src/kernel/public-auth-features.test.ts": 6,
-    "src/shared/metadata-collection.test.ts": 1,
-    "src/stack.test.ts": 33,
-    "src/system/collaboration.test.ts": 2,
-    "src/system/deploy-bundle.test.ts": 2,
-    "src/system/disaster-recovery.test.ts": 3,
-    "src/system/i18n-resolver.test.ts": 11,
-    "src/system/logging.test.ts": 1,
-    "src/system/metrics.test.ts": 1,
-    "src/system/object-storage.test.ts": 14,
-    "src/system/tracing.test.ts": 1,
-    "src/system/worker.test.ts": 2,
-    "src/ui/action.test.ts": 1,
-    "src/ui/app.test.ts": 13,
-    "src/ui/chart.test.ts": 1,
-    "src/ui/i18n.test.ts": 1,
-    "src/ui/report.test.ts": 3,
-    "src/ui/view.test.ts": 8,
-    "src/ui/widget.test.ts": 1
+    "src/ai/conversation.test.ts": {
+      "TS2353: Object literal may only specify known properties, and 'tags' does not exist in type '…'.": 2,
+      "TS6133: 'ConversationMessage' is declared but its value is never read.": 1,
+      "TS6133: 'FunctionCallSchema' is declared but its value is never read.": 1,
+      "TS6133: 'ToolCallSchema' is declared but its value is never read.": 1
+    },
+    "src/api/documentation.test.ts": {
+      "TS18046: 'result.body' is of type 'unknown'.": 1
+    },
+    "src/api/errors.test.ts": {
+      "TS18046: 'error.details' is of type 'unknown'.": 1
+    },
+    "src/api/odata.test.ts": {
+      "TS6133: 'ODataQuery' is declared but its value is never read.": 1
+    },
+    "src/api/package-api.test.ts": {
+      "TS6133: 'GetInstalledPackageRequestSchema' is declared but its value is never read.": 1,
+      "TS6133: 'UninstallPackageApiRequestSchema' is declared but its value is never read.": 1,
+      "TS6133: '…' is declared but its value is never read.": 2
+    },
+    "src/api/rest-server.test.ts": {
+      "TS18048: 'config.patterns.create' is possibly 'undefined'.": 1,
+      "TS6133: 'RestApiConfigType' is declared but its value is never read.": 1
+    },
+    "src/api/router.test.ts": {
+      "TS2353: Object literal may only specify known properties, and 'maxAge' does not exist in type '…'.": 1
+    },
+    "src/automation/control-flow.test.ts": {
+      "TS2345: Argument of type '\"parallel\"' is not assignable to parameter of type '\"loop\"'.": 1,
+      "TS2739: Type '…' is missing the following properties from type '…': type, isDefault": 4
+    },
+    "src/automation/schemaless-node-config.test.ts": {
+      "TS18046: 'branch' is of type 'unknown'.": 1
+    },
+    "src/compose-stacks-key-loss.test.ts": {
+      "TS7006: Parameter 'c' implicitly has an 'any' type.": 4,
+      "TS7006: Parameter 'w' implicitly has an 'any' type.": 3
+    },
+    "src/compose-stacks.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'undefined'.": 2,
+      "TS2322: Type '…' is not assignable to type '…'.": 2,
+      "TS2353: Object literal may only specify known properties, and 'object' does not exist in type '…'.": 2,
+      "TS2353: Object literal may only specify known properties, and 'route' does not exist in type '…'.": 2
+    },
+    "src/contracts/ai-service.test.ts": {
+      "TS2739: Type '…' is missing the following properties from type 'IAIConversationService': getTurnState, update": 1
+    },
+    "src/contracts/analytics-service.test.ts": {
+      "TS6133: 'query' is declared but its value is never read.": 1
+    },
+    "src/contracts/automation-service.test.ts": {
+      "TS2739: Type '…' is missing the following properties from type '…': type, isDefault": 1
+    },
+    "src/contracts/core-service-contracts.test.ts": {
+      "TS6196: '_Alias' is declared but never used.": 1,
+      "TS6196: '_Automation' is declared but never used.": 2,
+      "TS6196: '_Data' is declared but never used.": 1,
+      "TS6196: '_Http' is declared but never used.": 1,
+      "TS6196: '_I18n' is declared but never used.": 1,
+      "TS6196: '_IsFull' is declared but never used.": 1,
+      "TS6196: '_Mcp' is declared but never used.": 1,
+      "TS6196: '_NotSame' is declared but never used.": 1,
+      "TS6196: '_Notification' is declared but never used.": 1,
+      "TS6196: '_Protocol' is declared but never used.": 1,
+      "TS6196: '_Security' is declared but never used.": 1,
+      "TS6196: '_ShareLinks' is declared but never used.": 1,
+      "TS6196: '_Ui' is declared but never used.": 1,
+      "TS6196: '_Widens' is declared but never used.": 1
+    },
+    "src/contracts/data-engine.test.ts": {
+      "TS6133: 'options' is declared but its value is never read.": 1
+    },
+    "src/contracts/http-server.test.ts": {
+      "TS6133: 'code' is declared but its value is never read.": 1,
+      "TS6133: 'name' is declared but its value is never read.": 1,
+      "TS6133: 'value' is declared but its value is never read.": 1
+    },
+    "src/contracts/logger.test.ts": {
+      "TS6133: 'context' is declared but its value is never read.": 1,
+      "TS6133: 'traceId' is declared but its value is never read.": 1
+    },
+    "src/contracts/metadata-service.test.ts": {
+      "TS6133: 'options' is declared but its value is never read.": 1,
+      "TS6133: 'type' is declared but its value is never read.": 1
+    },
+    "src/contracts/package-service.test.ts": {
+      "TS6133: 'input' is declared but its value is never read.": 1,
+      "TS6196: 'InstallPackageInput' is declared but never used.": 1
+    },
+    "src/contracts/plugin-lifecycle-events.test.ts": {
+      "TS6196: '_EveryDeclaredNameFires' is declared but never used.": 1,
+      "TS6196: '_EveryFiredNameIsDeclared' is declared but never used.": 1
+    },
+    "src/contracts/service-registry.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'T'.": 4,
+      "TS2322: Type '…' is not assignable to type '…'.": 3
+    },
+    "src/contracts/storage-service.test.ts": {
+      "TS6133: 'key' is declared but its value is never read.": 1
+    },
+    "src/data/data-engine.test.ts": {
+      "TS18046: 'request.command' is of type 'unknown'.": 1,
+      "TS2339: Property 'created_at' does not exist on type '…'.": 2,
+      "TS2339: Property 'name' does not exist on type '…'.": 3
+    },
+    "src/data/display-name.test.ts": {
+      "TS2339: Property 'fields' does not exist on type '…'.": 1,
+      "TS2339: Property 'name' does not exist on type '…'.": 2,
+      "TS2339: Property 'nameField' does not exist on type '…'.": 15
+    },
+    "src/data/driver-nosql.test.ts": {
+      "TS6133: 'NoSQLIndexTypeSchema' is declared but its value is never read.": 1,
+      "TS6133: 'NoSQLOperationTypeSchema' is declared but its value is never read.": 1
+    },
+    "src/data/driver-sql.test.ts": {
+      "TS6133: 'SQLDialect' is declared but its value is never read.": 1
+    },
+    "src/data/driver.test.ts": {
+      "TS6133: 'ids' is declared but its value is never read.": 1,
+      "TS6133: 'object' is declared but its value is never read.": 8,
+      "TS6133: 'query' is declared but its value is never read.": 1,
+      "TS6133: 'schema' is declared but its value is never read.": 1
+    },
+    "src/data/field.test.ts": {
+      "TS2322: Type 'string' is not assignable to type '…'.": 2
+    },
+    "src/data/object-strictness-batch20.test.ts": {
+      "TS2352: Conversion of type '…' to type '…' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1
+    },
+    "src/data/query.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 12,
+      "TS2339: Property 'fuzzy' does not exist on type '…'.": 1,
+      "TS2339: Property 'highlight' does not exist on type '…'.": 1,
+      "TS2339: Property 'operator' does not exist on type '…'.": 2,
+      "TS2353: Object literal may only specify known properties, and 'filters' does not exist in type 'QueryAST'.": 6,
+      "TS2353: Object literal may only specify known properties, and 'skip' does not exist in type 'QueryAST'.": 2,
+      "TS2741: Property 'order' is missing in type '…' but required in type '…'.": 1
+    },
+    "src/identity/scim.test.ts": {
+      "TS18048: 'group.members' is possibly 'undefined'.": 1,
+      "TS18048: 'result.emails' is possibly 'undefined'.": 2,
+      "TS18048: 'result.members' is possibly 'undefined'.": 2,
+      "TS18048: 'user.emails' is possibly 'undefined'.": 2
+    },
+    "src/integration/connector.test.ts": {
+      "TS6133: 'BasicAuthSchema' is declared but its value is never read.": 1,
+      "TS6133: 'BearerAuthSchema' is declared but its value is never read.": 1,
+      "TS6133: 'ConnectorStatusSchema' is declared but its value is never read.": 1,
+      "TS6133: 'ConnectorTypeSchema' is declared but its value is never read.": 1,
+      "TS6133: 'NoAuthSchema' is declared but its value is never read.": 1,
+      "TS6133: 'SyncStrategySchema' is declared but its value is never read.": 1,
+      "TS6133: 'WebhookEventSchema' is declared but its value is never read.": 1
+    },
+    "src/kernel/cluster.test.ts": {
+      "TS6133: 'ServiceClusterScopeSchema' is declared but its value is never read.": 1,
+      "TS6133: 'ServiceLeaderStrategySchema' is declared but its value is never read.": 1
+    },
+    "src/kernel/metadata-plugin.test.ts": {
+      "TS2367: This comparison appears to be unintentional because the types '…' and '\"validation\"' have no overlap.": 1
+    },
+    "src/kernel/public-auth-features.test.ts": {
+      "TS2339: Property 'exempt' does not exist on type '…'.": 2,
+      "TS2339: Property 'gatedInputs' does not exist on type '…'.": 4
+    },
+    "src/shared/metadata-collection.test.ts": {
+      "TS2339: Property 'hooks' does not exist on type '…'.": 1
+    },
+    "src/stack.test.ts": {
+      "TS18048: 'result.manifest' is possibly 'undefined'.": 4,
+      "TS2345: Argument of type '…' is not assignable to parameter of type 'ObjectStackDefinitionInput'.": 27,
+      "TS2739: Type '…' is missing the following properties from type '…': label, type, edges": 1,
+      "TS2741: Property 'label' is missing in type '…' but required in type '…'.": 1
+    },
+    "src/system/collaboration.test.ts": {
+      "TS2339: Property 'attributes' does not exist on type '…'.": 2
+    },
+    "src/system/deploy-bundle.test.ts": {
+      "TS6133: 'DeployValidationIssueSchema' is declared but its value is never read.": 1,
+      "TS6133: 'MigrationStatementSchema' is declared but its value is never read.": 1
+    },
+    "src/system/disaster-recovery.test.ts": {
+      "TS6133: 'BackupConfig' is declared but its value is never read.": 1,
+      "TS6133: 'DisasterRecoveryPlan' is declared but its value is never read.": 1,
+      "TS6133: 'FailoverConfig' is declared but its value is never read.": 1
+    },
+    "src/system/i18n-resolver.test.ts": {
+      "TS2339: Property 'actions' does not exist on type '…'.": 1,
+      "TS2339: Property 'description' does not exist on type '…'.": 1,
+      "TS2339: Property 'helpText' does not exist on type '…'.": 1,
+      "TS2339: Property 'label' does not exist on type '…'.": 2,
+      "TS2339: Property 'subtitle' does not exist on type '…'.": 1,
+      "TS2339: Property 'title' does not exist on type '…'.": 2,
+      "TS2551: Property 'fields' does not exist on type '…'. Did you mean 'field'?": 3
+    },
+    "src/system/logging.test.ts": {
+      "TS6133: '…' is declared but its value is never read.": 1
+    },
+    "src/system/metrics.test.ts": {
+      "TS6133: 'TimeSeriesDataPointSchema' is declared but its value is never read.": 1
+    },
+    "src/system/object-storage.test.ts": {
+      "TS6133: 'AccessControlConfig' is declared but its value is never read.": 1,
+      "TS6133: 'BucketConfig' is declared but its value is never read.": 1,
+      "TS6133: 'LifecycleActionSchema' is declared but its value is never read.": 1,
+      "TS6133: 'LifecyclePolicyConfig' is declared but its value is never read.": 1,
+      "TS6133: 'LifecyclePolicyRule' is declared but its value is never read.": 1,
+      "TS6133: 'MultipartUploadConfig' is declared but its value is never read.": 1,
+      "TS6133: 'ObjectMetadata' is declared but its value is never read.": 1,
+      "TS6133: 'ObjectStorageConfig' is declared but its value is never read.": 1,
+      "TS6133: 'PresignedUrlConfig' is declared but its value is never read.": 1,
+      "TS6133: 'StorageAcl' is declared but its value is never read.": 1,
+      "TS6133: 'StorageClass' is declared but its value is never read.": 1,
+      "TS6133: 'StorageConnection' is declared but its value is never read.": 1,
+      "TS6133: 'StorageProvider' is declared but its value is never read.": 1,
+      "TS6133: 'StorageScope' is declared but its value is never read.": 1
+    },
+    "src/system/tracing.test.ts": {
+      "TS6133: 'TraceStateSchema' is declared but its value is never read.": 1
+    },
+    "src/system/worker.test.ts": {
+      "TS2538: Type 'undefined' cannot be used as an index type.": 2
+    },
+    "src/ui/action.test.ts": {
+      "TS4104: The type '…' is 'readonly' and cannot be assigned to the mutable type '…'.": 1
+    },
+    "src/ui/app.test.ts": {
+      "TS2339: Property 'actionDef' does not exist on type 'NavigationItem'.": 1,
+      "TS2339: Property 'badge' does not exist on type 'NavigationItem'.": 4,
+      "TS2339: Property 'children' does not exist on type 'NavigationItem'.": 2,
+      "TS2339: Property 'reportName' does not exist on type 'NavigationItem'.": 1,
+      "TS2339: Property 'requiredPermissions' does not exist on type 'NavigationItem'.": 3,
+      "TS6133: 'NavigationArea' is declared but its value is never read.": 1,
+      "TS6133: 'NavigationItem' is declared but its value is never read.": 1
+    },
+    "src/ui/chart.test.ts": {
+      "TS6133: 'ChartType' is declared but its value is never read.": 1
+    },
+    "src/ui/i18n.test.ts": {
+      "TS6133: 'measureDoors' is declared but its value is never read.": 1
+    },
+    "src/ui/report.test.ts": {
+      "TS18046: 'b' is of type 'unknown'.": 1,
+      "TS18048: 'r.blocks' is possibly 'undefined'.": 1,
+      "TS2571: Object is of type 'unknown'.": 1
+    },
+    "src/ui/view.test.ts": {
+      "TS2322: Type 'string' is not assignable to type '…'.": 1,
+      "TS2322: Type '…' is not assignable to type 'FormField'.": 4,
+      "TS2339: Property 'description' does not exist on type '…'.": 1,
+      "TS2339: Property 'visibleOn' does not exist on type 'FormField'.": 2
+    },
+    "src/ui/widget.test.ts": {
+      "TS18046: 'result.options.editor' is of type 'unknown'.": 1
+    }
   }
 }
