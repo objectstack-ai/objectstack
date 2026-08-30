@@ -35,7 +35,7 @@ import type { ResolveUserAuthzGrantsOptions } from './resolve-authz-context.js';
 import {
   makeRecordingQl,
   FIXTURES,
-} from './resolve-authz-context.batch-equivalence.testkit.js';
+} from './__tests__/resolve-authz-context.batch-equivalence.testkit.js';
 
 // ── An engine double that carries the #11968 seams ──────────────────────────
 

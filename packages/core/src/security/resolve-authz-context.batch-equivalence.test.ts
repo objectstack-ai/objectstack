@@ -49,7 +49,7 @@ import {
   makeRecordingQl,
   FIXTURES,
   type RecordedCall,
-} from './resolve-authz-context.batch-equivalence.testkit.js';
+} from './__tests__/resolve-authz-context.batch-equivalence.testkit.js';
 
 // ── Goldens captured from the SEQUENTIAL implementation ─────────────────────
 

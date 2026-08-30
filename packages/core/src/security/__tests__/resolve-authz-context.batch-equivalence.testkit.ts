@@ -12,9 +12,24 @@
  * resolution did with them. Moving a golden here would put the record of what
  * the sequential code DID one import away from the code being tested — the
  * drift the differential control exists to prevent.
+ *
+ * ## Why this file lives under `__tests__/`
+ *
+ * It is TEST SCAFFOLDING — consumed only by test suites, and extracted from a
+ * `.test.ts` file — and the `isSystem` census (`scripts/isystem-census.mjs`,
+ * published on `content/docs/permissions/system-context.mdx`) classifies test
+ * code BY PATH: `.test.` / `.spec.` or a `tests/` / `__tests__/` / `qa/`
+ * segment. The recording double reads `opts?.context?.isSystem` — that is a
+ * RECORDER of what the resolver passed (the goldens assert every resolver read
+ * runs as system), not a shipped elevation behaviour, and as a sibling
+ * `security/*.testkit.ts` it would enter the census population the `.test.ts`
+ * file it came from was never in. The `__tests__/` segment states what this
+ * file is in the census's own published vocabulary. ⚠️ Whether `.testkit.ts`
+ * should join that path rule generally is the census owner's call, not this
+ * file's — see the #11971 report.
  */
 
-import type { ResolveUserAuthzGrantsOptions } from './resolve-authz-context.js';
+import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js';
 
 // ── Recording ObjectQL double ───────────────────────────────────────────────
 
