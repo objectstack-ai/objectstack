@@ -4597,20 +4597,44 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     in the "undetermined" bucket;
  *   - the three test-file RATCHETS (`check:query-options-erasure`,
  *     `check:engine-double-contract`, `check:where-matcher`) each walk the tree
- *     for `*.test.*` files and reconcile the count against a baseline JSON. What
- *     their sources name is that baseline and, for two of them, the git ref they
- *     diff against — never the population. Measured on this tree, their entire
- *     hint sets are:
+ *     for `*.test.*` files and reconcile the count against a baseline JSON. For
+ *     two of the three, what the source names is that baseline — an artifact
+ *     roster, never the population — so those two score `silent` for every card
+ *     in the tree, and they HAVE hints, so the "undetermined" bucket never sees
+ *     them either. Before this entry named them they were printed in NEITHER
+ *     half of the output for every card in the tree.
  *
- *       check:query-options-erasure   scripts/query-options-erasure-baseline.json, origin/main
- *       check:where-matcher           scripts/where-matcher-conformance.baseline.json, origin/main
- *       check:engine-double-contract  scripts/engine-double-contract.baseline.json,
- *                                     @objectstack/{core,objectql,metadata-core}
+ *     ⛔ Their hint sets are NOT transcribed here, and a freshly re-measured
+ *     copy must not be put back. The copy that used to sit here listed all
+ *     three sets and read as measured; by the time anyone re-derived it,
+ *     exactly one of its five claims — the `check:engine-double-contract` row —
+ *     was still true. It named a git ref as a hint for two of the rows, a class
+ *     `isNonPathNamespace` refuses (this file's own self-test pins that
+ *     refusal); it gave `check:query-options-erasure` a one-hint set its source
+ *     has since outgrown; and it drew the conclusion below from both. Not one
+ *     of those drifts touched THIS file, so nothing here could have reported
+ *     them. `--residue` prints every family's live `names:` set and re-derives
+ *     it on every run: that is the authority for this question, and a reader
+ *     who wants the sets should run it rather than trust a paragraph.
  *
- *     Not one of those can cover a card's path, so all three score `silent` —
- *     they HAVE hints, so the "undetermined" bucket never sees them either, and
- *     before this entry named them they were printed in NEITHER half of the
- *     output for every card in the tree;
+ *     ⚠ `check:where-matcher` is the exception to the paragraph above, and it
+ *     stays in this entry anyway. Since #13231 its source declares its
+ *     `*.test.ts` population as a literal, so the ORDINARY path derivation
+ *     MATCHES it for a test file under `packages/` and it is no longer silent.
+ *     That is the shape the `check:cross-package-test-inputs` measurement in
+ *     the deletion criterion below describes, and it is answered the same way:
+ *     the declaration is set-equal to that gate's own walk, which is rooted at
+ *     `packages/`, so it reaches no test file outside that root, while the KIND
+ *     reaches every one — and the KIND reaches a card dispatched BEFORE its
+ *     code exists, which no path derivation can. Two routes to one gate is
+ *     redundancy, not a defect; the KIND is the load-bearing one. That gate's
+ *     own source says the same thing in the docblock above its literal, so
+ *     neither side of the pair asserts it alone.
+ *
+ *     Every membership claim in the two paragraphs above is re-derived in
+ *     `--self-test` against the live tree rather than restated here, so a tree
+ *     that moves one turns a case RED instead of leaving this prose quietly
+ *     false — which is the failure this entry has now paid for twice;
  *   - `check:i18n` walks `packages/` at runtime for files NAMED
  *     `i18n-extract.config.ts` and re-extracts each owning package's bundles.
  *     Its source names only three hints (measured, post-#9144): the shared
@@ -9257,6 +9281,55 @@ function selfTest() {
   const xpkgResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(xpkgEntry.hints, f));
   t(`the tree still holds test files no hint of this gate reaches (${xpkgResidue.length}), so the entry is not redundant`,
     xpkgResidue.length > 0);
+
+  // ── The test-file entry's hint-set prose, re-derived (#13232) ─────────────
+  //
+  // This entry's docblock used to TRANSCRIBE the three ratchets' hint sets and
+  // conclude from the copy that all three score `silent`. Both halves went
+  // false without anything editing this file — one ratchet grew a real
+  // population literal (#13231), and the git ref two of the rows named stopped
+  // being admitted as a hint at all — so the transcription is gone and what it
+  // asserted is re-derived here instead. A red in this block means the prose
+  // above is due a re-reading, not that the derivation broke.
+  const WM = 'check:where-matcher';
+  const QOE = 'check:query-options-erasure';
+  const EDC = 'check:engine-double-contract';
+  const ratchetEntries = new Map([WM, QOE, EDC].map((c) => [c, discoverFamilies().byCheck.get(c)]));
+  t('all three ratchets are still discovered with hints, so nothing below is vacuous',
+    [...ratchetEntries.values()].every((e) => (e?.hints ?? []).length > 0));
+  // The half that survived: two of the three still name only artifacts, so
+  // `silent` for every card in the tree is still the right description of them.
+  const ORDINARY_TEST = 'packages/spec/src/x.test.ts';
+  t(`${QOE} still names nothing that can cover a card's test file — the surviving half of the old paragraph`,
+    !covers(ratchetEntries.get(QOE).hints, ORDINARY_TEST) && !covers(ratchetEntries.get(QOE).hints, OUTSIDE_PACKAGES));
+  t(`…and so does ${EDC}`,
+    !covers(ratchetEntries.get(EDC).hints, ORDINARY_TEST) && !covers(ratchetEntries.get(EDC).hints, OUTSIDE_PACKAGES));
+  // The half that broke, pinned in the direction that broke it: the moment this
+  // reddens, `check:where-matcher` is silent again and the ⚠ paragraph is wrong.
+  t(`${WM} IS reached by the ordinary path derivation for a packages test file — the exception the prose states`,
+    covers(ratchetEntries.get(WM).hints, ORDINARY_TEST));
+  t('…and that covering hint is the gate\'s OWN declared population, not one inherited from a module it imports',
+    !ratchetEntries.get(WM).hintOrigin?.get(ratchetEntries.get(WM).hints.find((h) => hintCovers(h, ORDINARY_TEST))));
+  // Why it stays in the table regardless — the same two-direction argument the
+  // #11199 block above makes for check:cross-package-test-inputs.
+  t(`but no hint of ${WM} reaches a test file outside its scan root, while the KIND does`,
+    !covers(ratchetEntries.get(WM).hints, OUTSIDE_PACKAGES)
+      && changeKindLines([OUTSIDE_PACKAGES], (n) => n).some((l) => l.includes(`- ${WM}   —`)));
+  const wmResidue = trackedFiles().filter((f) => isTestFilePath(f) && !covers(ratchetEntries.get(WM).hints, f));
+  t(`the tree still holds test files no hint of ${WM} reaches (${wmResidue.length}), so its line is not redundant either`,
+    wmResidue.length > 0);
+  // The drift the deleted transcription could not report, closed at the source
+  // rather than by re-copying: both sources still SPELL the ref, and neither
+  // yields it as a hint. This is the case that reddens if the refusal is ever
+  // relaxed and a row naming `origin/main` becomes writable again.
+  const REF = ['origin', 'main'].join('/');
+  const refSpellers = [ratchetEntries.get(QOE), ratchetEntries.get(WM)]
+    .flatMap((e) => e.files ?? [])
+    .filter((f) => existsSync(join(ROOT, f)) && readFileSync(join(ROOT, f), 'utf8').includes(`'${REF}'`));
+  t(`both ratchet sources still spell ${REF} (${refSpellers.length}), so the next case is about the extractor and not a missing literal`,
+    refSpellers.length === 2);
+  t(`…and not one of them yields it as a hint, which is why no row here may name it`,
+    refSpellers.every((f) => !extractWatchHints(readFileSync(join(ROOT, f), 'utf8'), f).includes(REF)));
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
