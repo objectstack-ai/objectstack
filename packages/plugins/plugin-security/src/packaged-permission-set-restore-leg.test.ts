@@ -1,21 +1,30 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * THE RESTORE LEG — the one write point of `createPermissionSetWriteThrough`
- * that the 2026-08-24 "lock the base, clone to customize" ruling does NOT
- * guard, pinned as a MEASUREMENT plus a reachability fence.
+ * THE RESTORE LEG — the fourth write point of `createPermissionSetWriteThrough`
+ * under the 2026-08-24 "lock the base, clone to customize" ruling: guarded
+ * since #12020, with the refusal on the DURABILITY channel, plus the
+ * reachability fence.
  *
- * The lock (`packaged-permission-set-lock.ts`, wired into the `insert` and
- * `update` legs of `permission-set-projection.ts`) refuses a save that targets
- * a package-declared permission set. Its author named the gap rather than
- * leaving it to be found: the `restore` leg re-authors a restored record's
- * body into metadata with no provenance check at all, and — unlike its
- * neighbours — it CATCHES rather than throws, because it runs after the engine
- * has already un-trashed the row.
+ * The lock (`packaged-permission-set-lock.ts`) refuses a save that targets a
+ * package-declared permission set. The `insert` and `update` legs of
+ * `permission-set-projection.ts` THROW it; this leg cannot — it runs after
+ * the engine has already un-trashed the row, so a throw would misreport a
+ * completed engine operation and half-apply a multi-row restore. It consults
+ * the SAME lock before its one guarded write (the `saveMetaItem` mint),
+ * refuses the mint, and reports on the durability channel (#4632) through the
+ * #9754 error→warn chain. The un-trash stands: with no overlay minted, boot
+ * reconciliation re-projects the DECLARED body onto the record, so the
+ * environment converges to the package truth rather than to a fork. The full
+ * argument — why not refuse BEFORE the un-trash (no trashed-row read exists;
+ * a pre-pass would go green in doubles and resolve nothing on a real engine),
+ * why not compensate (this middleware's own delete leg guarantees the record
+ * survives, so a re-trash through the data door cannot happen, and a failed
+ * compensation makes the refusal a lie) — lives at the leg itself.
  *
  * ## What this file pins, and what it deliberately does not
  *
- * It pins four facts, in the order they answer the question:
+ * It pins six facts, in the order they answer the question:
  *
  *  1. ⭐ CONTROL — the harness reaches the LOCK, and the lock is what answers.
  *     An `update` on an artifact-backed name is refused with `NOT_OVERRIDABLE`
@@ -26,16 +35,31 @@
  *     writes". Without this leg, case 2 below could pass for the wrong reason
  *     — a probe answered by a gate that is not the one under test.
  *
- *  2. THE MEASUREMENT — the same fixture, the same set, through `restore`:
- *     the body is re-authored, no refusal is raised, and the definition of a
- *     package-declared set lands in the environment overlay store.
+ *  2. THE LOCK AT THE RESTORE LEG — the same fixture, the same set, through
+ *     `restore`: the engine un-trash runs (the leg stays a post-pass), the
+ *     mint is refused BEFORE the metadata write, no overlay lands, and the
+ *     refusal is REPORTED on the durability channel with the lock's own error
+ *     — never thrown.
  *
- *     ⚠️ This case pins the RESIDUAL, not a desired behaviour. The follow-up
- *     that extends the lock to this leg MUST invert this case in the same PR;
- *     that inversion is the whole point of pinning it. Do not "fix" the
- *     assertion to match a lock you added elsewhere.
+ *     This case is the INVERSION #11725's MEASURED RESIDUAL demanded of the
+ *     follow-up (#12020): it used to pin the re-authoring of a packaged body
+ *     through this leg with no lock consulted. The deliberate red for the
+ *     inversion is recorded on #12020's PR: with the leg's lock consultation
+ *     removed, this case fails on `saves.length` — so it does not pass with
+ *     the lock absent.
  *
- *  3. THE FENCE — why the residual is not a live defect: the write-through's
+ *  2b. NON-PACKAGED CONTROL — an org-owned set through the same leg is
+ *     re-authored exactly as before the lock arrived. The ruling's scope is
+ *     "packaged sets cannot be re-authored via restore" and nothing else;
+ *     this case is the evidence the extension did not grow past it.
+ *
+ *  2c. FAIL-CLOSED — provenance that cannot be answered refuses the mint
+ *     too, reported with the lock's `unknown` error. Accepting on a failed
+ *     read would reopen the hatch-open gap on every transient — the lock's
+ *     three-verdict contract (see its header) applies at every door it
+ *     guards, this one included.
+ *
+ *  3. THE FENCE — why the trashed-packaged-row scenario stays remote: the write-through's
  *     `delete` leg cannot put a package-declared set into a restorable state.
  *     An artifact-backed definition tombstones its overlay (an ADR-0005 RESET)
  *     and the record re-projects to the shipped body; the driver delete never
@@ -63,17 +87,16 @@
  *    `enable.trash` was retired (#2377 / ADR-0049); a real recycle bin is
  *    parked at #3146.
  *
- * Those two are what make this leg unreachable TODAY. The day either goes red,
- * case 2 stops being a curiosity and becomes the defect it describes.
+ * Those two are what make this leg unreachable TODAY. The day either goes
+ * red — #3146 landing a real recycle bin is the expected way — the lock
+ * pinned by case 2 is what stands between a trashed packaged row and a
+ * silent fork, and this file is the proof it was already in place.
  */
 
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
-import {
-  createPermissionSetWriteThrough,
-  permissionSetBodyFromRow,
-} from './permission-set-projection.js';
+import { createPermissionSetWriteThrough } from './permission-set-projection.js';
 import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 
 /** The package-declared body every case in this file turns on. */
@@ -273,13 +296,16 @@ describe('[#11725] the restore leg of the permission-set write-through', () => {
     expect(ql.overlays.length, 'no overlay of a packaged set was minted').toBe(0);
   });
 
-  it('MEASURED RESIDUAL: the same set through RESTORE is re-authored with no lock consulted and no refusal', async () => {
-    // ⚠️ Pins the residual, not a desired behaviour. See this file's header:
-    // the follow-up that extends the lock to this leg inverts this case.
+  it('LOCK AT THE RESTORE LEG: the same set through RESTORE keeps the engine un-trash but the re-author is REFUSED — reported on the durability channel, never thrown', async () => {
+    // ⭐ The INVERSION of #11725's MEASURED RESIDUAL, demanded by that case's
+    // own comment and delivered by #12020. It used to assert: no refusal, one
+    // save, the packaged body in the overlay store. Now the lock is consulted
+    // before the leg's one guarded write, and every half inverts.
     //
     // Identical fixture to the CONTROL above — same ql, same registry, same
     // protocol posture, same row. The ONLY difference is the operation, so the
-    // difference in outcome is attributable to the leg and nothing else.
+    // difference in outcome is attributable to the leg and nothing else. The
+    // hatch is OPEN, so anything that refuses can only be the write-door lock.
     const ql = makeQl([packagedRow('package')], [declaredBody()]);
     const protocol = makeProtocol(ql, ['crm_rep'], 'open');
     const errors: any[] = [];
@@ -296,18 +322,102 @@ describe('[#11725] the restore leg of the permission-set write-through', () => {
       context: userCtx,
     });
 
+    // The engine operation is NOT misreported: the leg stays a post-pass and
+    // the caller of a completed restore hears success, not a throw.
     expect(nextCalled, 'the engine un-trash runs first — the leg is a post-pass').toBe(true);
-    expect(errors, 'nothing was refused, so nothing was reported').toEqual([]);
-    expect(protocol.saves.length, 'the package-declared body WAS re-authored').toBe(1);
-    expect(protocol.saves[0].name).toBe('crm_rep');
-    // The definition of a package-declared set now lives in the environment
-    // overlay store — authored through a door that never asked the lock.
-    expect(ql.overlays.map((o: any) => o.name)).toEqual(['crm_rep']);
-    expect(ql.overlays[0].item).toEqual(permissionSetBodyFromRow(packagedRow('package')));
+
+    // The refusal is LOUD, and it is the LOCK's — same gate identification as
+    // the CONTROL: the error names the package and teaches the clone path,
+    // which ADR-0005's tier gate (the only other 403 on this row) does not.
+    expect(errors.length, 'the refusal reached the durability channel').toBe(1);
+    expect(errors[0].e).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(errors[0].e.name).toBe('PackagedPermissionSetLockedError');
+    expect(errors[0].e.message).toContain("is declared by package 'com.example.crm'");
+    expect(errors[0].e.message).toContain('clone');
+    // The leg's own report is the REFUSAL wording, not the failed-write one
+    // (#5240 — one condition, one wording): it says the skip was deliberate.
+    expect(errors[0].m).toContain('deliberately NOT re-authored');
+    expect(errors[0].m).toContain('clone');
+
+    // And the mint never happened: refused BEFORE the metadata write, so no
+    // overlay of a package-declared set exists to win over upgrades.
+    expect(protocol.saves.length, 'refused BEFORE the metadata write').toBe(0);
+    expect(ql.overlays, 'no overlay of a packaged set was minted').toEqual([]);
+  });
+
+  it('NON-PACKAGED CONTROL: an org-owned set through RESTORE is re-authored exactly as before — the lock changes nothing for it', async () => {
+    // The ruled scope is "packaged sets cannot be re-authored via restore"
+    // and NOTHING else — this case is the evidence the extension did not grow
+    // past it. Same registry as above (crm_rep IS declared), so the classifier
+    // is answering `org` for THIS name, not `org` for everything.
+    const orgRow = {
+      id: 'ps_org',
+      name: 'my_own_set',
+      label: 'My Own Set',
+      managed_by: 'user',
+      object_permissions: JSON.stringify({ crm_lead: { allowRead: true } }),
+      field_permissions: JSON.stringify({}),
+      system_permissions: JSON.stringify([]),
+      row_level_security: JSON.stringify([]),
+      tab_permissions: JSON.stringify({}),
+    };
+    const ql = makeQl([orgRow], [declaredBody()]);
+    const protocol = makeProtocol(ql, ['crm_rep'], 'open');
+    const errors: any[] = [];
+    const mw = createPermissionSetWriteThrough({
+      ql,
+      getProtocol: () => protocol,
+      logger: { error: (m: string, e?: Error) => errors.push({ m, e }), info: () => {}, warn: () => {} },
+    });
+
+    const nextCalled = await run(mw, {
+      object: 'sys_permission_set',
+      operation: 'restore',
+      options: { where: { id: 'ps_org' } },
+      context: userCtx,
+    });
+
+    expect(nextCalled, 'the engine un-trash runs').toBe(true);
+    expect(errors, 'nothing was refused, nothing was reported').toEqual([]);
+    expect(protocol.saves.length, 'the org-owned body IS re-authored, as always').toBe(1);
+    expect(protocol.saves[0].name).toBe('my_own_set');
+    expect(ql.overlays.map((o: any) => o.name)).toEqual(['my_own_set']);
+  });
+
+  it('FAIL-CLOSED: provenance that cannot be answered refuses the re-author too — reported with the lock\'s unknown error, never guessed', async () => {
+    // Both artifact sources are broken: the registry read throws and the
+    // layered probe fails. The lock's three-verdict contract (its header says
+    // why accepting on `unknown` is the one guess a write door must not make)
+    // applies at this door exactly as at insert/update — except the refusal
+    // is reported, not thrown, like every refusal on this leg.
+    const ql = makeQl([packagedRow('package')], [declaredBody()]);
+    (ql as any).registry = { listItems: () => { throw new Error('registry offline'); } };
+    const protocol = makeProtocol(ql, ['crm_rep'], 'open');
+    (protocol as any).getMetaItemLayered = async () => { throw new Error('metadata layer unreadable'); };
+    const errors: any[] = [];
+    const mw = createPermissionSetWriteThrough({
+      ql,
+      getProtocol: () => protocol,
+      logger: { error: (m: string, e?: Error) => errors.push({ m, e }), info: () => {}, warn: () => {} },
+    });
+
+    const nextCalled = await run(mw, {
+      object: 'sys_permission_set',
+      operation: 'restore',
+      options: { where: { id: 'ps_pkg' } },
+      context: userCtx,
+    });
+
+    expect(nextCalled, 'the engine un-trash runs').toBe(true);
+    expect(errors.length, 'the fail-closed refusal reached the durability channel').toBe(1);
+    expect(errors[0].e).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(errors[0].e.name).toBe('PackagedPermissionSetProvenanceUnknownError');
+    expect(protocol.saves.length, 'no mint on a guess').toBe(0);
+    expect(ql.overlays).toEqual([]);
   });
 
   it('FENCE: DELETE cannot produce a restorable row — the packaged definition RESETS and the driver delete never runs', async () => {
-    // Why the residual above is not a live defect through this door: there is
+    // Why a trashed packaged row cannot arise through this door: there is
     // nothing to restore. The write-through owns the delete, tombstones the
     // overlay, and returns WITHOUT calling `next()` — so the engine never
     // removes (or trashes) the record.

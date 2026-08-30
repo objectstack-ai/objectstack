@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+import { httpRequestForRoute } from './http-request-test-builder.js';
 
 function createMockServer() {
   return {
@@ -149,12 +150,9 @@ describe('cross-object batch reports the cap like everyone else (#3939)', () => 
     const { rest, ql } = setup(5);
     const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/batch');
     const res = makeRes();
-    await route!.handler({
-      method: 'POST',
-      params: {},
-      query: {},
+    await route!.handler(httpRequestForRoute(route!, {
       body: { operations: ids(6).map((id) => ({ object: 'invoice', action: 'delete', id })) },
-    }, res);
+    }), res);
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toMatchObject({ code: 'BATCH_TOO_LARGE', count: 6, max: 5 });
