@@ -1,33 +1,43 @@
 /**
- * `inert-expression` — the html tier's silent-vanish hole for braced non-JSON
- * values, ported into this copy in lockstep with objectui PR #6613.
+ * `inert-expression` — the html tier's silent-vanish hole for braced values
+ * this tier cannot materialize. Ported into this copy in lockstep with
+ * objectui's `packages/sdui-parser` (objectui#6613, message reworded by
+ * objectui#6614).
  *
- * `interpretBrace` materializes strict-JSON values only; anything else — the
- * single-quoted array every JSX author writes, unquoted object keys, any JS
- * expression — becomes the deferred `{ $expr }` marker, and NOTHING downstream
- * evaluates that marker (this tier parses, never executes — ADR-0080; no
- * renderer consumes `$expr`). So `columns={['name','amount']}` used to compile
- * with ZERO diagnostics into a value every renderer's defensive non-array read
- * degrades to "no columns declared": rows render, the author's whole data
- * binding is eaten, and no surface ever says why. That is ADR-0078's prohibited
- * parsed-but-silently-inert state, reported from production as objectui#6598.
+ * `interpretBrace` materializes strict JSON plus the JS LITERAL SUBSET
+ * (objectui#6614 Q1-A, ruled 2026-08-28); a GENUINE EXPRESSION still becomes
+ * the deferred `{ $expr }` marker, and NOTHING downstream evaluates that marker
+ * (this tier parses, never executes — ADR-0080; no renderer consumes `$expr`).
+ * Such a value reaches the renderer as an opaque object, every defensive
+ * non-array read degrades it to "not declared", and the author's binding is
+ * eaten in silence. That is ADR-0078's prohibited parsed-but-silently-inert
+ * state, reported from production as objectui#6598.
  *
  * WHY THIS FILE EXISTS HERE AND NOT ONLY THERE. There are two copies of this
  * parser — objectui's `packages/sdui-parser` and this repo's hoisted
- * `@objectstack/sdui-parser` — and the invariant is that both copies agree on
- * the accepted grammar AND on diagnostic codes. If they drift, the save gate
- * and the renderer speak different dialects: a page can save clean and render
- * inert, or the reverse — surface-dependent, and therefore intermittent from
- * the author's point of view. These pins are the objectstack half of that
- * lockstep; the emitted diagnostic is byte-equal to objectui's.
+ * `@objectstack/sdui-parser` — and the invariant (#12719) is that both copies
+ * agree on the accepted grammar AND on diagnostic codes. If they drift, the
+ * save gate and the renderer speak different dialects: a page can save clean
+ * and render inert, or the reverse — surface-dependent, and therefore
+ * intermittent from the author's point of view. These pins are the objectstack
+ * half of that lockstep.
  *
- * Severity is pinned as WARNING deliberately (the objectui#5709 precedent for
- * inert authored keys), and `ok` is pinned true alongside it: this port reports
- * an ALREADY-inert state, so it must leave the accept/reject set exactly where
- * it stood. Escalating to error, widening the accepted literal grammar (single
- * quotes / unquoted keys — objectui#6614), and base-prop (`style`) coverage are
- * open contract decisions; a change to any of those should move these pins
- * consciously, not by accident.
+ * ⭐ WHAT MOVED IN #6614 Q1-A, AND WHY IT IS NOT AN ACCIDENT. This file
+ * originally pinned `columns={['name','amount']}`, `columns={[{field:"name"}]}`
+ * and `options={{pageSize: 25}}` as WARNING cases, and said in so many words
+ * that widening the literal grammar "should move these pins consciously, not by
+ * accident". Q1-A widened it, so those three spellings now MATERIALIZE and are
+ * correct — the whole point of the ruling. They moved to
+ * `literal-subset-6614.test.ts`, which pins their values; each was replaced
+ * here by a genuine expression, so this file still pins the same FACT (an inert
+ * braced value is never silent) on the same side of the new boundary.
+ *
+ * Severity stays WARNING deliberately (the objectui#5709 precedent for inert
+ * authored keys), and `ok` is pinned true alongside it: this diagnostic reports
+ * an ALREADY-inert state, so it leaves the accept/reject set exactly where it
+ * stood. ⛔ Escalation to error is objectui#6614 **Q2**, which lands at the SAVE
+ * GATE once the framework wires the registry manifest into `validate-jsx-pages`
+ * (#12719 records that gap) — not here, and not at render.
  */
 import { describe, expect, it } from 'vitest';
 import { compile } from '../index.js';
@@ -47,9 +57,12 @@ const manifest: Manifest = {
   },
 };
 
-describe('inert-expression: braced non-JSON on a declared input warns instead of vanishing', () => {
-  it('single-quoted array — the JSX habit — draws the warning and stays in the tree as $expr', () => {
-    const r = compile(`<list-view objectName="account" columns={['name','amount']} />`, manifest);
+describe('inert-expression: a braced EXPRESSION on a declared input warns instead of vanishing', () => {
+  it('a method call — the shape #6598 could not materialize — warns and stays as $expr', () => {
+    const r = compile(
+      `<list-view objectName="account" columns={rows.map((r) => r.name)} />`,
+      manifest,
+    );
     expect(r.diagnostics).toEqual([
       expect.objectContaining({
         severity: 'warning',
@@ -60,33 +73,37 @@ describe('inert-expression: braced non-JSON on a declared input warns instead of
     ]);
     // The marker itself is unchanged — the tree still carries the deferred
     // value; only the silence is gone.
-    expect(r.tree?.columns).toEqual({ $expr: "['name','amount']" });
+    expect(r.tree?.columns).toEqual({ $expr: 'rows.map((r) => r.name)' });
+    // Warning, not error: the page still compiles (the objectui#5709 posture).
+    expect(r.ok).toBe(true);
   });
 
-  it('the message carries the FIX, not merely the complaint', () => {
+  it('the message names the CURRENT accepted grammar, not a now-legal spelling', () => {
     // An arrival pin, not a departure pin: "stopped being silent" is satisfied
-    // by any diagnostic at all. What this port owes the author is the remedy —
-    // name JSON, and show the corrected spelling next to the broken one. A
-    // message rewrite that drops the remedy turns this red.
+    // by any diagnostic at all. What this port owes the author is advice that
+    // is still TRUE after objectui#6614 Q1-A — the pre-#6614 wording told the
+    // author to "write it as JSON (double-quoted strings and keys)" and named
+    // `columns={['name','amount']}` as the wrong form, which would now send
+    // them to edit working source.
     const [d] = compile(
-      `<list-view objectName="account" columns={['name','amount']} />`,
+      `<list-view objectName="account" columns={rows.map((r) => r.name)} />`,
       manifest,
     ).diagnostics;
-    expect(d.message).toMatch(/JSON/);
-    expect(d.message).toContain('double-quoted strings and keys');
-    expect(d.message).toContain('columns={["name","amount"]}');
-    expect(d.message).toContain(`columns={['name','amount']}`);
+    expect(d.message).not.toMatch(/double-quoted/);
+    expect(d.message).toContain('LITERALS only');
+    expect(d.message).toContain(`columns={['name','amount']} works`);
+    expect(d.message).toContain('columns={rows.map((r) => r.name)} cannot');
   });
 
-  it('unquoted object keys draw the same warning', () => {
-    const r = compile(`<list-view objectName="account" columns={[{field:"name"}]} />`, manifest);
+  it('a bare identifier draws the same warning', () => {
+    const r = compile(`<list-view objectName="account" columns={savedColumns} />`, manifest);
     expect(r.diagnostics).toEqual([
       expect.objectContaining({ severity: 'warning', code: 'inert-expression' }),
     ]);
   });
 
   it('an $expr on an object-typed input is covered too', () => {
-    const r = compile(`<list-view objectName="account" options={{pageSize: 25}} />`, manifest);
+    const r = compile(`<list-view objectName="account" options={{...defaults}} />`, manifest);
     expect(r.diagnostics).toEqual([
       expect.objectContaining({ severity: 'warning', code: 'inert-expression', tag: 'list-view' }),
     ]);
@@ -108,14 +125,14 @@ describe('inert-expression: braced non-JSON on a declared input warns instead of
   });
 
   it('the accept/reject set does not move — every inert spelling still compiles', () => {
-    // The load-bearing property of this port: it reports an ALREADY-inert
+    // The load-bearing property: this diagnostic reports an ALREADY-inert
     // state, so `ok` (no error-severity diagnostic — the save gate's pass/fail)
     // is exactly what it was before the diagnostic existed. Escalating the
     // severity to error is objectui#6614's Q2 and would land here first.
     for (const source of [
-      `<list-view objectName="account" columns={['name','amount']} />`,
-      `<list-view objectName="account" columns={[{field:"name"}]} />`,
-      `<list-view objectName="account" options={{pageSize: 25}} />`,
+      `<list-view objectName="account" columns={rows.map((r) => r.name)} />`,
+      `<list-view objectName="account" columns={savedColumns} />`,
+      `<list-view objectName="account" options={{...defaults}} />`,
     ]) {
       const r = compile(source, manifest);
       expect(r.ok).toBe(true);
@@ -124,7 +141,7 @@ describe('inert-expression: braced non-JSON on a declared input warns instead of
   });
 
   it('an $expr on an UNKNOWN prop keeps drawing unknown-prop, not a double report', () => {
-    const r = compile(`<list-view objectName="account" aggregate={{field:'amount'}} />`, manifest);
+    const r = compile(`<list-view objectName="account" aggregate={someTotal(amount)} />`, manifest);
     expect(r.diagnostics).toEqual([
       expect.objectContaining({ severity: 'warning', code: 'unknown-prop' }),
     ]);

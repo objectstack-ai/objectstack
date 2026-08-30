@@ -4637,6 +4637,24 @@ jobs:
       - name: Check docs object examples pass the os validate security posture
         run: pnpm --filter @objectstack/lint run check:doc-security-posture
 
+      # The YAML half of the same surface (#13086, ruled 2026-08-29).
+      # check:skill-examples reads only ts/tsx fences — while metadata
+      # AUTHORING examples are written in YAML, so the format carrying most of
+      # what an author copies was in no gate's population at all
+      # (layout-dsl.mdx taught a phantom field-level `visible` map through two
+      # hand sweeps of the same page, #8251/#8306/#12935). Each ```yaml block
+      # tagged `os:check-yaml <schema>` is safeParsed against the LIVE spec
+      # schema it declares — resolved through the same registry
+      # `PUT /api/v1/meta/:type/:name` validates with — so a rejection here is
+      # the one a runtime save would print, rename hint included. Also prints
+      # the tagged/untagged fence census so opt-in adoption stays visible
+      # rather than becoming a permanent excuse. Reads src/ through tsx (no
+      # dist), so its place in this job is cohesion with the example-gate
+      # cluster above, not a build dependency. Self-tests first, like its
+      # neighbours.
+      - name: Check docs YAML examples parse against live spec schemas
+        run: pnpm --filter @objectstack/spec run check:yaml-examples
+
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing
       # regenerated them either, so they rotted three ways at once (#3670):
