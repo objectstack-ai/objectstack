@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { deriveCrudCases } from './derive';
+// `.js` extension, deliberately: under `moduleResolution: NodeNext` a relative
+// import without it does not RESOLVE, so every symbol it names becomes `any` —
+// and the type-layer ratchet reads this file (`TEST_DEBT`, via the package's
+// tsconfig with the test exclusion lifted). The bare specifier here was
+// costing 1 × TS2835 plus one TS7006 per callback parameter in the file.
+import { deriveCrudCases } from './derive.js';
 
 describe('deriveCrudCases — federated (external) objects (ADR-0015)', () => {
   it('blocks a read-only external object so verify never probe-inserts it', () => {

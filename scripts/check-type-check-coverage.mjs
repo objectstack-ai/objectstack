@@ -1088,7 +1088,16 @@ const TEST_DEBT = {
       + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
-  '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
+  '@objectstack/verify': {
+    errors: 3,
+    note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '
+      + 'import `./harness` without the `.js` extension. Re-tallied from the 8 measured at 5ab08428 '
+      + '(TS2835 x4, TS7006 x4) when `derive.test.ts` gained its own extension: that ONE unresolved '
+      + 'import was carrying 1 x TS2835 plus every TS7006 in the file, because a specifier that does '
+      + 'not resolve under NodeNext makes every symbol it names `any` and so every callback parameter '
+      + 'implicitly any. The remainder is the same NodeNext pair from the top-of-ledger note, and the '
+      + 'same one-line fix graduates this entry.',
+  },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
