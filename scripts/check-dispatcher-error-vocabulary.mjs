@@ -1152,13 +1152,95 @@ export function parseParamNames(params) {
   });
 }
 
-/** Declaration headers that own a parameter list, with the offset of their `(`. */
-const DECL_HEADER_RE =
-  /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\bconstructor\s*\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:function\s*[A-Za-z_$][\w$]*\s*)?\(/g;
+/**
+ * [#13226] Words that open a parenthesised head but are NOT a method name.
+ *
+ * The list lives INSIDE the regex as a lookahead rather than in a post-match
+ * `continue`, and that placement is load-bearing. A consumed match moves
+ * `matchAll`'s cursor past it, so rejecting a word in JavaScript would eat the
+ * very text a LATER alternative needs: the method form below is anchored at
+ * the start of a line, so on `  public constructor(` it starts EARLIER than
+ * the `constructor` alternative and wins the position. Reject it in code and
+ * the constructor form goes blind the moment a class spells its constructor
+ * with an accessibility modifier. Failing the alternative inside the regex
+ * lets the engine advance and try the others at the next position.
+ *
+ * Only words that actually produce the `NAME(...) {` shape are listed —
+ * `if (x) {`, `return (a) => {`, `} catch (e) {`. `type`, `interface`, `enum`
+ * and `declare` are NOT here: they never take that shape, and each is a legal
+ * method name a blanket keyword list would silently make unreachable.
+ */
+const NOT_A_METHOD_NAME =
+  'if|for|while|switch|catch|do|else|case|return|throw|new|delete|void|typeof|await|yield|super|function|constructor|class|import|export|const|let|var';
 
 /**
- * The declaration enclosing `offset`: `{ name, params, isConstructor }`, or
- * `null`. Nearest-preceding-header, which is what a textual scan can honestly
+ * [#13226] A class-method HEADER, and why it is spelled as a header SHAPE
+ * rather than as "directly inside a class body".
+ *
+ * The other three forms carry their own keyword (`function`, `constructor`,
+ * `const|let|var`). A method header does not — it is bare `NAME(` — so the
+ * discriminator the card names is CONTEXT: being directly inside a class body.
+ * A textual scan has to earn that, and the honest reading is that it cannot,
+ * for a measured reason rather than a squeamish one. Brace depth is the only
+ * textual route to "inside a class body", and the source this gate scans is
+ * `maskComments`ed, which by contract leaves STRINGS, TEMPLATES and REGEX
+ * LITERALS standing — so a `{` inside a string flips the depth of everything
+ * after it. Masking literals too (`scanSource` exposes the flags) fixes that
+ * half and leaves the other: finding where a class BODY opens means walking
+ * `class X extends Y<{ a: string }>` past a brace that sits inside a type
+ * argument, and telling a type argument from a comparison textually is the
+ * problem TypeScript wrote a parser for. An AST route was weighed and refused
+ * on the evidence already in `parseParamNames` above: over-matching headers
+ * hand this scan 1218 argument lists a recovering parse turns into confident
+ * wrong parameter names, so a parser here MANUFACTURES the wrong-INDEX hazard
+ * across a thousand slices to close one blindness.
+ *
+ * So the discriminator implemented is the header's own shape, which a textual
+ * scan CAN earn:
+ *
+ *   line start · optional modifier run · NAME · balanced `(...)` · optional
+ *   return-type annotation · `{`
+ *
+ * The trailing `{` is the half that does the work. It is what separates a
+ * method from a line-initial CALL (`sendError(res, 400);` — a `;` follows) and
+ * from an interface or `abstract` SIGNATURE (`error(code: string): void;` — no
+ * body, so no stamp can be inside it either). The keyword lookahead above
+ * removes the statement forms that share the shape.
+ *
+ * ⚠️ DECLARED, not accidental: this shape also admits an OBJECT-LITERAL method
+ * (`const handlers = { fail(code, message) { … } }`). That is the same helper
+ * genre — a named parameter list with a body — and admitting it is a widening
+ * beyond the card's `class method`, so it is stated here rather than left to be
+ * discovered. It costs nothing today (measured: zero object-literal methods in
+ * `packages/**` non-test source stamp a code in the assignment position) and it
+ * cannot produce a WRONG site if one appears: `helperCodesFor` admits only a
+ * `this.` receiver, so an `obj.fail(…)` caller matches nothing, the helper
+ * reduces to no literals, and it is REPORTED as `unresolved` — the bound this
+ * gate states, degrading in the safe direction.
+ *
+ * ⛔ Still NOT recognised, and deliberately: a class PROPERTY holding an arrow
+ * (`private fail = (code) => { … }`). It is a fourth declaration form, not this
+ * one, and no census has been run on it.
+ */
+const METHOD_HEADER = String.raw`(?:^|\n)[ \t]*(?:(?:public|private|protected)\s+)?(?:static\s+)?(?:abstract\s+)?(?:override\s+)?(?:async\s+)?(?:\*\s*)?(?:(?:get|set)\s+)?(?!(?:${NOT_A_METHOD_NAME})\s*\()([A-Za-z_$][\w$]*)\s*\(`;
+
+/** A method header owns a BODY: `): void {`, `) {` — never `): void;` or `);`. */
+const METHOD_BODY_FOLLOWS_RE = /^[ \t]*(?::[^\n{;]*)?\{/;
+
+/** Declaration headers that own a parameter list, with the offset of their `(`. */
+const DECL_HEADER_RE = new RegExp(
+  [
+    String.raw`\bfunction\s+([A-Za-z_$][\w$]*)\s*\(`,
+    String.raw`\bconstructor\s*\(`,
+    String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:function\s*[A-Za-z_$][\w$]*\s*)?\(`,
+    METHOD_HEADER,
+  ].join('|'),
+  'g',
+);
+
+/**
+ * The declaration enclosing `offset`: `{ name, params, isConstructor, isMethod }`,
+ * or `null`. Nearest-preceding-header, which is what a textual scan can honestly
  * offer — a helper is a handful of lines and its stamp sits inside it.
  */
 export function enclosingDeclaration(src, offset) {
@@ -1170,7 +1252,12 @@ export function enclosingDeclaration(src, offset) {
     const params = sliceBalanced(src, open);
     if (params === null) continue;
     const isConstructor = /\bconstructor\s*\($/.test(m[0]);
-    let name = m[1] ?? m[2] ?? null;
+    const isMethod = m[3] !== undefined;
+    // [#13226] The header must own a BODY. Checked here rather than in the
+    // regex because it reads past the balanced parameter list, which is
+    // `sliceBalanced`'s job and not a regex's.
+    if (isMethod && !METHOD_BODY_FOLLOWS_RE.test(src.slice(open + params.length + 2))) continue;
+    let name = m[1] ?? m[2] ?? m[3] ?? null;
     if (isConstructor) {
       const before = src.slice(0, m.index);
       // The LAST class declared before this constructor, not the first — a
@@ -1181,7 +1268,7 @@ export function enclosingDeclaration(src, offset) {
       name = cls;
     }
     if (!name) continue;
-    best = { name, params, isConstructor, end: open + params.length + 2 };
+    best = { name, params, isConstructor, isMethod, open, end: open + params.length + 2 };
   }
   return best;
 }
@@ -1197,13 +1284,28 @@ export function helperCodesFor(ident, offset, src, resolveIdent = () => null) {
   const index = parseParamNames(decl.params).indexOf(ident);
   if (index < 0) return null;
 
+  // [#13226] A METHOD is reached through a RECEIVER. The plain form below
+  // excludes a preceding `.` on purpose — without that, a property access
+  // `err.fail(` would read as a call to a free function named `fail` — so a
+  // method needs the receiver spelled back in, or every method helper reduces
+  // to nothing and lands as `unresolved` no matter how literal its callers are.
+  // `this.` and only `this.`: the scan is IN-FILE, so a method helper's callers
+  // here are its own siblings. Any other receiver stays unmatched, which is the
+  // safe direction — the helper reports as `unresolved` rather than borrowing
+  // an argument list from a same-named method on some other object.
   const callRe = decl.isConstructor
     ? new RegExp(`\\bnew\\s+${decl.name}\\s*\\(`, 'g')
-    : new RegExp(`(?:^|[^\\w.$])${decl.name}\\s*\\(`, 'g');
+    : decl.isMethod
+      ? new RegExp(`(?:^|[^\\w.$])(?:this\\.)?${decl.name}\\s*\\(`, 'g')
+      : new RegExp(`(?:^|[^\\w.$])${decl.name}\\s*\\(`, 'g');
   const codes = new Set();
   for (const call of src.matchAll(callRe)) {
     const open = call.index + call[0].length - 1;
-    // The declaration's own header is not a call to itself.
+    // The declaration's own header is not a call to itself. Checked by OFFSET
+    // as well as by text: [#13226] a method header is preceded by a modifier or
+    // by nothing at all, so the textual guard below cannot see it, and the
+    // header's own parameter list would otherwise be read as an argument list.
+    if (open === decl.open) continue;
     if (/\b(?:function|const|let|var)\s*$/.test(src.slice(Math.max(0, call.index - 12), call.index + call[0].length - decl.name.length - 1))) continue;
     const args = sliceBalanced(src, open);
     if (args === null) continue;
