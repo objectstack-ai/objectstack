@@ -6,12 +6,35 @@ import {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
   FORM_COLSPAN_ABSOLUTE,
+  FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 
 type AnyRec = Record<string, unknown>;
 
 const objects = [
   { name: 'contract', fields: { name: {}, amount: {}, status: {}, notes: {} } },
+];
+
+/**
+ * [#13855] The same object, plus the declared field groups a section may now
+ * reference. Kept separate from `objects` so every pre-existing test above
+ * still runs against an object with NO groups — which is also the state the
+ * `declares no field groups at all` hint is written for.
+ */
+const groupedObjects = [
+  {
+    name: 'contract',
+    fieldGroups: [
+      { key: 'basics', label: 'Basics' },
+      { key: 'money', label: 'Money' },
+    ],
+    fields: {
+      name: { group: 'basics' },
+      amount: { group: 'money' },
+      status: {},
+      notes: {},
+    },
+  },
 ];
 
 describe('validateFormLayout (#2578)', () => {
@@ -113,6 +136,83 @@ describe('validateFormLayout (#2578)', () => {
   it('tolerates an empty / shapeless stack', () => {
     expect(validateFormLayout({})).toEqual([]);
     expect(validateFormLayout({ views: [], objects: [] })).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #13855 — `section.group` names a field group on the bound object.
+//
+// The spec door takes any well-formed snake_case key (the cross-schema
+// existence question is not one a section schema can answer — the
+// `UserFilterFieldSchema.field` precedent), so THIS is where a dangling key is
+// reported. A miss is total, not partial: the reference form and the enumerated
+// form are mutually exclusive at parse, so a key that resolves to nothing
+// leaves the section with no member source at all and it does not render.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('#13855 — dangling `section.group` references', () => {
+  const viewWith = (sections: unknown, bucket: 'sections' | 'groups' = 'sections') => ({
+    objects: groupedObjects,
+    views: [{
+      name: 'contract_form',
+      data: { provider: 'object', object: 'contract' },
+      [bucket]: sections,
+    }],
+  });
+
+  it('is clean when the key names a declared group', () => {
+    expect(validateFormLayout(viewWith([{ group: 'basics' }, { group: 'money' }]))).toEqual([]);
+  });
+
+  it('flags a key that names no declared group, with the declared set in the hint', () => {
+    const findings = validateFormLayout(viewWith([{ group: 'contact_info' }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FORM_SECTION_GROUP_UNKNOWN);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('views[0].sections[0].group');
+    expect(findings[0].message).toContain('field group "contact_info"');
+    // The consequence, in the words the severity is argued from.
+    expect(findings[0].message).toContain('silently does not render');
+    expect(findings[0].hint).toContain('Declared groups on contract: basics, money.');
+  });
+
+  it('reads the LEGACY `groups` bucket too — a rule silent on the alias is half a rule', () => {
+    const findings = validateFormLayout(viewWith([{ group: 'nope' }], 'groups'));
+    expect(findings.map(f => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_SECTION_GROUP_UNKNOWN}@views[0].groups[0].group`,
+    ]);
+  });
+
+  it('tells an author with NO declared groups what to do instead', () => {
+    // `objects` (not `groupedObjects`) declares no `fieldGroups` at all.
+    const findings = validateFormLayout({
+      objects,
+      views: [{ name: 'f', data: { provider: 'object', object: 'contract' }, sections: [{ group: 'basics' }] }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].hint).toContain('declares no field groups at all');
+  });
+
+  it('says nothing about an object this stack does not define', () => {
+    // Same skip the field-existence rule takes: the object may come from
+    // another installed package, and a group cannot be judged on a schema we
+    // cannot see. A finding here would be one the author cannot act on.
+    const findings = validateFormLayout({
+      objects: groupedObjects,
+      views: [{ name: 'f', data: { provider: 'object', object: 'from_another_package' }, sections: [{ group: 'nope' }] }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('reports the group miss alongside — not instead of — the field misses', () => {
+    const findings = validateFormLayout(viewWith([
+      { group: 'ghost_group' },
+      { fields: ['name', 'ghost_field'] },
+    ]));
+    expect(findings.map(f => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_SECTION_GROUP_UNKNOWN}@views[0].sections[0].group`,
+      `${FORM_FIELD_UNKNOWN}@views[0].sections[1].fields[1]`,
+    ]);
   });
 });
 
