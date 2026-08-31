@@ -155,6 +155,26 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
  *    Either way a stored copy is a secret served in cleartext, and serving it
  *    back is a leak under any boundary (the same asymmetry with the write
  *    door this module already documents for the inline keys).
+ *  - `options.autoEncryption.kmsProviders.{aws.secretAccessKey,
+ *    aws.sessionToken, azure.clientSecret, gcp.privateKey, local.key}` —
+ *    CSFLE KMS key material, measured both ways the client's OPTIONAL
+ *    `mongodb-client-encryption` dependency can go (the answer differs, so
+ *    both were run). With it installed (7.2.1, inside the pin's `^7.2.0`
+ *    optional-peer range): an instrumented `new MongoClient(url,
+ *    { …, ...options })` READS every one of these leaves at construction —
+ *    the kmsProviders record is BSON-serialized into the native MongoCrypt —
+ *    and `connect()` proceeds into live CSFLE machinery. Without it: the same
+ *    construction throws `MongoMissingDependencyError` before reading any of
+ *    them. Either way a stored copy is decryption-capable material served in
+ *    cleartext (the AWS_SESSION_TOKEN posture: a loud client failure does not
+ *    make serving the secret back acceptable). Still WRITABLE — the binder's
+ *    one slot is the login password, the proxyPassword posture — but never
+ *    SERVED. The same families' identity halves (`aws.accessKeyId`,
+ *    `azure.tenantId` / `clientId`, `gcp.email`) are read by the client too
+ *    but are not credential material (#8876's asymmetry), and the unmeasured
+ *    neighbours (`kmip.endpoint`, `keyVaultNamespace`, `schemaMap`) mirror no
+ *    credential spelling — deliberately not here: entries land on this table
+ *    with a measurement quoted, never by name-shape.
  *
  * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
  * so a stored legacy `driver: 'mongo'` row is scrubbed identically to
@@ -168,6 +188,11 @@ const PASSTHROUGH_SECRET_PATHS: Readonly<Record<string, readonly (readonly strin
     ['options', 'key'],
     ['options', 'passphrase'],
     ['options', 'authMechanismProperties', 'AWS_SESSION_TOKEN'],
+    ['options', 'autoEncryption', 'kmsProviders', 'aws', 'secretAccessKey'],
+    ['options', 'autoEncryption', 'kmsProviders', 'aws', 'sessionToken'],
+    ['options', 'autoEncryption', 'kmsProviders', 'azure', 'clientSecret'],
+    ['options', 'autoEncryption', 'kmsProviders', 'gcp', 'privateKey'],
+    ['options', 'autoEncryption', 'kmsProviders', 'local', 'key'],
   ],
 };
 

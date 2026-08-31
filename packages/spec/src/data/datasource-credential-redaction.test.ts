@@ -341,6 +341,80 @@ describe('passthrough secret redaction (#9040) — the nested spellings the key-
     ]);
   });
 
+  it('drops CSFLE `kmsProviders` key material in every family, keeps the identity halves', () => {
+    // Measured against mongodb@7.5.0 BOTH ways the optional
+    // `mongodb-client-encryption` dependency can go: with it installed (7.2.1,
+    // inside the pin's ^7.2.0 optional-peer range) an instrumented constructor
+    // reads every one of these leaves (BSON-serialized into the native
+    // MongoCrypt); without it the same construction throws
+    // MongoMissingDependencyError before reading any of them. Either way a
+    // stored copy is decryption-capable material served in cleartext — the
+    // AWS_SESSION_TOKEN posture.
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: {
+        replicaSet: 'rs0',
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          kmsProviders: {
+            aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE', secretAccessKey: 'AWS-SECRET', sessionToken: 'AWS-SESSION' },
+            azure: { tenantId: 'tenant-id', clientId: 'client-id', clientSecret: 'AZURE-SECRET' },
+            gcp: { email: 'svc@example.iam.gserviceaccount.com', privateKey: 'R0NQLUtFWQ==' },
+            local: { key: 'TE9DQUwtS0VZ' },
+          },
+        },
+      },
+    });
+    expect(config).toEqual({
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: {
+        replicaSet: 'rs0',
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          kmsProviders: {
+            // The identity halves the client also reads are NOT credential
+            // material (#8876's asymmetry) and stay served.
+            aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE' },
+            azure: { tenantId: 'tenant-id', clientId: 'client-id' },
+            gcp: { email: 'svc@example.iam.gserviceaccount.com' },
+            local: {},
+          },
+        },
+      },
+    });
+    expect(redactedKeys).toEqual([
+      'options.autoEncryption.kmsProviders.aws.secretAccessKey',
+      'options.autoEncryption.kmsProviders.aws.sessionToken',
+      'options.autoEncryption.kmsProviders.azure.clientSecret',
+      'options.autoEncryption.kmsProviders.gcp.privateKey',
+      'options.autoEncryption.kmsProviders.local.key',
+    ]);
+  });
+
+  it('unmeasured `autoEncryption` neighbours stay served — the table is measurement-only', () => {
+    // Negative control for the CSFLE rows: positions the measurement did NOT
+    // establish as secret material (`kmip.endpoint`, `keyVaultNamespace`,
+    // `schemaMap`, `bypassAutoEncryption`) are not on the table, mirror no
+    // credential spelling, and come back byte-identical — the discipline that
+    // entries land only with a measurement quoted, never by name-shape.
+    const table = passthroughSecretPaths('mongodb').map((p) => p.join('.'));
+    expect(table).not.toContain('options.autoEncryption.kmsProviders.kmip.endpoint');
+    expect(table).not.toContain('options.autoEncryption.keyVaultNamespace');
+    const stored = {
+      options: {
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          bypassAutoEncryption: false,
+          schemaMap: { 'appdb.people': { bsonType: 'object' } },
+          kmsProviders: { kmip: { endpoint: 'kmip.internal:5696' } },
+        },
+      },
+    };
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', stored);
+    expect(config).toEqual(stored);
+    expect(redactedKeys).toEqual([]);
+  });
+
   it('a config without the passthrough — or with a malformed one — is untouched', () => {
     expect(redactDatasourceConfig('mongodb', { database: 'events' }).redactedKeys).toEqual([]);
     // Off-shape walks fall off silently rather than throwing on a stored row.
