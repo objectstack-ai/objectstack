@@ -1482,6 +1482,16 @@ function normaliseVersionToken(v: unknown): NormalisedVersion | null {
     if (!token) return null;
     if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
         token = token.slice(1, -1);
+        // ⚠️ The emptiness test runs on BOTH sides of the strip, and the second
+        // one is load-bearing: `If-Match: ""` is empty only once the RFC-7232
+        // quotes come off. Before this seam returned an object it returned the
+        // bare string, so that case handed every caller the falsy `''` and they
+        // short-circuited into "no token supplied" — the opt-out was riding
+        // implicitly on the empty string's falsiness. An object is always
+        // truthy, so without this line an empty entity-tag would stop skipping
+        // the check and start earning a 409: an accept-to-refuse flip on a
+        // shipped API, which is precisely what this change promises not to do.
+        if (!token) return null;
     }
     return { token, instant: canonicalVersionInstant(v, token) };
 }

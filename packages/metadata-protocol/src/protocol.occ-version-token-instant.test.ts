@@ -43,7 +43,11 @@
  *      defect, not a nicety.
  *   5. **Nothing accepted before is refused now.** The change is strictly
  *      widening — including for a client still holding a pre-fix 409's
- *      `Date.toString()` token across the upgrade.
+ *      `Date.toString()` token across the upgrade. This one is not left as
+ *      prose: the last block sweeps a corpus of (stored value, client token)
+ *      pairs against the pre-fix comparison reproduced verbatim, because the
+ *      prose version of this claim was believed by three readers while
+ *      `If-Match: ""` had already flipped from accept to 409.
  *
  * ## What is deliberately NOT claimed here
  *
@@ -367,7 +371,122 @@ describe('[#13382] the change cannot refuse a token that was accepted before', (
         expect(await guardedPatch(new Date(INSTANT), '   ')).toMatchObject({ accepted: true });
     });
 
+    it('an EMPTY If-Match entity-tag — a bare pair of quotes — still opts out', async () => {
+        // `If-Match: ""` is empty only AFTER the RFC-7232 quotes come off, so the
+        // emptiness test has to run on the stripped token and not just the raw
+        // one. This is the shipped behaviour, not a new one: the pre-fix seam
+        // returned the empty STRING here and every caller short-circuited on its
+        // falsiness. Wrapping the result in an object made it truthy and turned
+        // this token from "skip the check" into a 409 — an accept-to-refuse flip
+        // on a live API, which is exactly what the widening guarantee forbids.
+        expect(await guardedPatch(new Date(INSTANT), '""')).toMatchObject({ accepted: true });
+        expect(await guardedPatch(ISO, '""')).toMatchObject({ accepted: true });
+    });
+
+    it('the DELETE door opts out on the same empty tag — it has its own call site', async () => {
+        // `assertVersionMatch` tests the token's truthiness itself, before it
+        // probes, so it can regress independently of the PATCH door.
+        const { p, del, findOne } = makeProtocol(new Date(INSTANT));
+        await p.deleteData({ object: 'task', id: 'rec_1', expectedVersion: '""' });
+        expect(del).toHaveBeenCalledOnce();
+        // Opting out also means NOT paying for the probe the OCC check needs.
+        expect(findOne).not.toHaveBeenCalled();
+    });
+
     it('a record with no `updated_at` still skips the check', async () => {
         expect(await guardedPatch(undefined, ISO)).toMatchObject({ accepted: true });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. The widening guarantee, checked against the OLD implementation rather than
+//    asserted in prose
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The pre-fix normalisation, verbatim from `70fe54891e` — the reference this
+ * change promises to be a superset of.
+ *
+ * It is reproduced here rather than described because the claim "no token a
+ * client sends today starts being refused" is a claim ABOUT this function, and
+ * the `""` regression above is what a prose-only version of the claim costs: it
+ * read as true to three separate readers while one token had already flipped.
+ * A sweep over a corpus can be wrong about coverage; it cannot be wrong about
+ * the pairs it covers.
+ */
+function preFixNormalise(v: unknown): string | null {
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+        return s.slice(1, -1);
+    }
+    return s;
+}
+
+/** The pre-fix verdict for one (stored value, client token) pair. */
+function preFixAccepts(updatedAt: unknown, expectedVersion: string): boolean {
+    const expected = preFixNormalise(expectedVersion);
+    if (!expected) return true;              // no token supplied -> no check
+    const current = preFixNormalise(updatedAt);
+    if (!current) return true;               // no version on the record -> no check
+    return current === expected;
+}
+
+describe('[#13382] every pair the OLD comparison accepted is still accepted', () => {
+    /** What a driver can put in the column, across the enumerated input domain. */
+    const STORED: ReadonlyArray<[string, unknown]> = [
+        ['Date (Postgres/MySQL/Mongo)', new Date(INSTANT)],
+        ['canonical ISO text (SQLite family, memory)', ISO],
+        ['epoch ms (pre-canonical SQLite)', INSTANT],
+        ['an opaque host version', 'rowversion-7'],
+        ['a zone-less date-time', '2026-08-30 18:19:25.947'],
+        ['absent', undefined],
+        ['null', null],
+        ['empty string', ''],
+    ];
+
+    /** What a client can put in `If-Match` / `expectedVersion`. */
+    const TOKENS: readonly string[] = [
+        ISO,
+        `"${ISO}"`,
+        '""',
+        '',
+        '   ',
+        '"  "',
+        String(new Date(INSTANT)),
+        '2026-08-30T18:19:25.947+08:00',
+        '2026-08-30T10:19:25.947123Z',
+        '2026-08-30 18:19:25.947',
+        'rowversion-7',
+        '"rowversion-7"',
+        'rowversion-8',
+        String(INSTANT),
+        new Date(INSTANT + 1).toISOString(),
+    ];
+
+    it('over the whole corpus, the accept set only GROWS', async () => {
+        const regressions: string[] = [];
+        let acceptedBefore = 0;
+        let newlyAccepted = 0;
+        for (const [label, stored] of STORED) {
+            for (const token of TOKENS) {
+                const before = preFixAccepts(stored, token);
+                const after = (await guardedPatch(stored, token)).accepted;
+                if (before) acceptedBefore += 1;
+                if (before && !after) {
+                    regressions.push(`${label} + ${JSON.stringify(token)}: accepted before, REFUSED now`);
+                }
+                if (!before && after) newlyAccepted += 1;
+            }
+        }
+        expect(regressions, regressions.join('\n')).toEqual([]);
+        // Non-vacuity: a sweep where nothing was ever accepted, or where the two
+        // implementations never disagree, would pass while proving nothing.
+        expect(acceptedBefore).toBeGreaterThan(0);
+        expect(
+            newlyAccepted,
+            'the corpus must contain at least one pair this change newly accepts, or it is not exercising the repair',
+        ).toBeGreaterThan(0);
     });
 });
