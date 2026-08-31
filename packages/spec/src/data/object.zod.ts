@@ -2275,7 +2275,7 @@ const ObjectSchemaBase = strictObject(
      *
      * Evaluator is the same one used by sharing rules.
      */
-    eligibility: z.string().optional().describe('CEL expression that must evaluate to true on the target record. Enforced at BOTH mint and every redemption (#13608): a record that stops qualifying stops being served through links already minted for it. Fail-closed — a predicate that will not compile or faults on the record refuses.'),
+    eligibility: z.string().optional().describe('CEL expression that must evaluate to true on the target record. Enforced at BOTH points in a link\'s life: when the link is minted, and again on every redemption — a record that stops qualifying stops being served through links already minted for it. Fail-closed: a predicate that will not compile, or that faults on the record, refuses.'),
   }).optional().describe('Public share-link policy (Notion/Figma-style link sharing)'),
 
   // [ADR-0085] The former `detail: { … }.passthrough()` UI-hints block is
