@@ -1402,6 +1402,58 @@ jobs:
           node scripts/check-system-context-census.mjs --self-test
           node scripts/check-system-context-census.mjs
 
+      # #13548 tenant-audit census. `content/docs/permissions/tenant-audit-census.mdx`
+      # carries the population `SqlDriver.auditMissingTenant` acts on: every
+      # application-surface write call site against a tenancy-enabled object, and
+      # what execution context each one threads.
+      #
+      # ⭐ The reason it is an in-tree artefact at all is the failure it replaces.
+      # That census used to live in a COMMENT on an issue; the issue became
+      # unreachable (404 on three independent channels while its neighbours
+      # answer 200) and took the list with it, while three open cards still named
+      # it as their input and nothing noticed. What survived did so because a
+      # changeset author had happened to quote two of the figures in prose. A
+      # measurement that decides a repair family's severity and a ruling's scope
+      # is not a comment.
+      #
+      # ⚠️ It is a DRIFT gate, deliberately NOT an anchor gate like its `isSystem`
+      # sibling above. The generated region aggregates by (file, verb, object,
+      # tenancy, context posture) and carries no line numbers, so a pure
+      # displacement — an import inserted above a site — cannot move it. That
+      # skips the sibling's whole open defect class: anchors that rot on
+      # displacement, and a repair arm that then misreads displacement as a
+      # population change and asserts it on a security-relevant surface. There is
+      # exactly one repair path here (`node scripts/tenant-audit-census.mjs
+      # --write`), it is mechanical, and it has no case where it must guess.
+      #
+      # It lives in THIS job, next to its sibling, for the same reason that one
+      # does: the job has no paths filter, so the census runs on code-only PRs —
+      # the ones that ADD a write call site. The `--self-test` invocation is what
+      # `check:self-test-wired` requires, and it is the only instrument on this
+      # gate's matching rules; a clean tree cannot tell a working rule from a
+      # weakened one.
+      #
+      # ⭐ THREE commands, not two. The GENERATOR carries a self-test of its own
+      # because its classifiers are published FIGURES rather than findings: the
+      # gate's verdict is "no unplaceable receiver", and the elevation and
+      # tenant-context verdicts are not part of it. Nothing else reads them, so a
+      # clean tree cannot tell a working classifier from a weakened one. Both of
+      # the shapes it pins were measured WRONG on the first edition — a spread
+      # read as a denial of the flag it might carry, and an unreadable options
+      # argument folded into "carries no tenant context" — and six of its
+      # eighteen cases red against that reading.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. AST walk over every
+      # tracked non-test source under the two roots plus the object registry, no
+      # spawns; ~8s. ⛔ The source COUNT is deliberately not quoted here: it is
+      # corpus scale, it moves on any file added under those roots, and a comment
+      # nothing checks is exactly where a stale number hides.
+      - name: Tenant-audit census matches the tree
+        run: |
+          node scripts/check-tenant-audit-census.mjs --self-test
+          node scripts/check-tenant-audit-census.mjs
+
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
       # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside

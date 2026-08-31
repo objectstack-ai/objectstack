@@ -6,6 +6,7 @@
     "sso",
     "authorization",
     "system-context",
+    "tenant-audit-census",
     "profiles",
     "permission-sets",
     "positions",

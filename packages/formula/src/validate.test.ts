@@ -48,6 +48,68 @@ describe('validateExpression (ADR-0032)', () => {
     it('still accepts a registered stdlib function (isBlank)', () => {
       expect(validateExpression('predicate', '!isBlank(record.target_channels)').ok).toBe(true);
     });
+
+    // #13594 — the RECEIVER/member-call form of an unknown function had NO pin
+    // anywhere in this package. Every unknown-function pin written for #1877 —
+    // the two above, plus `celEngine.compile`'s and the fault-classification
+    // suite's — spells the call as a GLOBAL one (`PRIOR(...)`, `size(1)`). A
+    // regression that lost only the receiver arm of cel-js's type check would
+    // therefore have kept this whole suite green while `validateExpression`
+    // passed a predicate the runtime then faults on, and on the ObjectUI action
+    // surfaces that fault is fail-CLOSED and near-silent:
+    // `ActionEngine.getActionsForLocation` and `DeclaredActionsBar` both
+    // evaluate with `throwOnError: true` and HIDE the action — for every user,
+    // including ones who hold the grant — leaving one deduped `console.warn` as
+    // the only signal. A plausible-looking function name that does not exist is
+    // exactly what a generator invents, so the half with no pin was the half an
+    // AI-authored app is most likely to hit.
+    //
+    // MEASURED while writing these, on the source tree AND on the published
+    // `@objectstack/formula@17.2.0` / `@marcbachmann/cel-js@8.0.0` that #13594
+    // names: BOTH call forms are already rejected at this entry point, and
+    // `upper('a')` is still clean. #13594's table (`validate.ok= true` for both)
+    // did not reproduce here. The surface that does accept them is
+    // `@objectstack/lint`'s `validate-visibility-predicates`, which stays
+    // parse-only by a maintainer ruling and carries its own pin for that. These
+    // cases exist so that measured verdict cannot quietly stop being true.
+    it('rejects an unknown method in the receiver/member-call form (#13594)', () => {
+      const r = validateExpression('predicate', "record.x.nosuchmethod('a')");
+      expect(r.ok).toBe(false);
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0].message).toMatch(/invalid CEL predicate/i);
+      // cel-js names the RECEIVER's static type, not the source spelling, so the
+      // author sees `dyn.nosuchmethod`. Pinned as the author sees it — the same
+      // `found no matching overload` vocabulary the runtime fault uses, which is
+      // what makes publish time and run time read as one system.
+      expect(r.errors[0].message).toContain("found no matching overload for 'dyn.nosuchmethod(string)'");
+      expect(r.errors[0].source).toBe("record.x.nosuchmethod('a')");
+      expect(r.warnings).toHaveLength(0);
+    });
+
+    it('rejects an invented method on the canonical user root (#13594)', () => {
+      // The authored predicate that motivated the card (objectui#4421): a
+      // capability method on `current_user` that reads plausibly and does not
+      // exist. `current_user` is a declared SCOPE_ROOT, so this is NOT caught as
+      // an unbound root — only the unknown call catches it.
+      const r = validateExpression('predicate', 'current_user.can(record, "read")');
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toContain('found no matching overload');
+      expect(r.errors[0].message).toContain('can');
+    });
+
+    it('the global form rejects and the stdlib control stays clean (#13594)', () => {
+      // Both directions in ONE case, deliberately. A pin asserting only the
+      // rejection stays green under a change that rejects EVERY call — which
+      // would close the hole by breaking every authored predicate instead.
+      const bogus = validateExpression('predicate', 'totallyBogusFn(1,2)');
+      expect(bogus.ok).toBe(false);
+      expect(bogus.errors[0].message).toContain("found no matching overload for 'totallyBogusFn(int, int)'");
+
+      const control = validateExpression('predicate', "upper('a')");
+      expect(control.ok).toBe(true);
+      expect(control.errors).toHaveLength(0);
+      expect(control.warnings).toHaveLength(0);
+    });
   });
 
   // #7073 — the trailer used to be undifferentiated: EVERY `celEngine.compile`

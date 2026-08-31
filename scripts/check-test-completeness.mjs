@@ -478,9 +478,13 @@ function prerequisiteNotMet({ headline, detail, fix }) {
       '  this result says NOTHING about whether every test vitest counted actually ran,',
       '  nor about whether every scheduled package reported.',
       '  ⛔ It is NOT a finding, and it is not evidence that anything in the tree is wrong.',
-      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — but a pipe reports the PIPE's`,
-      '  status, so `node scripts/check-test-completeness.mjs | tail -4` reads green either',
-      '  way. Capture `echo "EXIT=$?"` BEFORE any pipe.)',
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:`,
+      '  `node scripts/check-test-completeness.mjs > /tmp/test-completeness.log 2>&1; echo "EXIT=$?"`.',
+      "  Piped, `$?` is the LAST command's status, and `head`/`tail` essentially never fail — that",
+      '  is the false green, and no pipe shape repairs it. `${PIPESTATUS[0]}`/`pipefail` do recover',
+      "  this gate's own code: `| tail` reads to EOF and forwards it, while `| head -N` closes the",
+      '  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that',
+      '  dies on SIGPIPE reports 141 rather than what it meant to say.)',
     ],
   };
 }

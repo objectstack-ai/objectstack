@@ -991,9 +991,11 @@ function reportPrerequisiteNotMet(headline, detail, options = {}) {
       alsoFix.map((l) => `        ${l}\n`).join('') +
       `\n${nothingChecked}\n` +
       `  (Exit code 1 — capture it BEFORE any pipe: \`pnpm check:i18n > /tmp/i18n.log 2>&1; echo "EXIT=$?"\`.\n` +
-      `  Piped, \`$?\` is the pipe's status, and \`| head -N\` turns even \`\${PIPESTATUS[0]}\`/\`pipefail\` green:\n` +
-      `  \`head\` closes the read end early, so this gate takes EPIPE and exits 0 — the pipe changed the\n` +
-      `  exit code itself. \`| tail\` reads to EOF; \`\${PIPESTATUS[0]}\` after it is the true status.)`,
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
   process.exit(1);
 }

@@ -63,8 +63,16 @@
  * `label`, form inputs' `value`/`label`, …) — those rows are deliberately NOT
  * declared yet: form-control `value` is interactive state rather than display
  * text, and each row is an accept-surface widening that should arrive with its
- * own measurement, not ride this one (startup scope discipline). Adding a row
- * is additive and spec-first; do it here, never as a renderer-side inference.
+ * own measurement, not ride this one (startup scope discipline). `text` reads
+ * back `schema.content || schema.value` (`basic/text.tsx`) — unlike the rows
+ * above, its omission is not merely unmeasured: `value` there is a fallback
+ * spelling for the same slot `content` already evaluates (see `content` NOT a
+ * member, above), not a second read point, so a `text: ['value']` row would
+ * legitimize the fallback spelling and give one slot two declared evaluation
+ * paths. The objectstack#13670 ruling settled `text`'s intended evaluation
+ * channel as `content` alone and declared `text.value` OUT on those grounds —
+ * this omission is deliberate, not pending measurement. Adding a row is
+ * additive and spec-first; do it here, never as a renderer-side inference.
  */
 
 import { z } from 'zod';
