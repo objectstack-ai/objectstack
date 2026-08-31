@@ -154,7 +154,7 @@ The simplest filter — field equals value:
 | Operator | Purpose | SQL / NoSQL |
 |:---------|:--------|:------------|
 | `$null` | Is null check | `IS NULL` / `IS NOT NULL` |
-| `$exists` | Field exists (NoSQL) | MongoDB `$exists` |
+| `$exists` | Has a value | `IS NOT NULL` / `IS NULL` |
 
 ```typescript
 { where: { deleted_at: { $null: true } } }
