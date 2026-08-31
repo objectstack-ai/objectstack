@@ -8502,8 +8502,13 @@ function reportPrerequisiteNotMet(v, options = {}) {
       `  per label", because a first page is not a count and this gate could not be run to get one.\n` +
       `  ⇒ Treat this exit as an unread instrument, never as a quiet board: the H39 census below\n` +
       `  does not appear at all in a run that ends here.\n` +
-      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from the unclassified failure's 2 — but piping this\n` +
-      `  reports the PIPE's status, so \`… | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from the unclassified failure's 2 — capture it BEFORE\n` +
+      `  any pipe: \`node scripts/pm/check-half-states.mjs > /tmp/half-states.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
   process.exit(EXIT_PREREQUISITE_NOT_MET);
 }

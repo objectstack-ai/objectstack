@@ -1133,8 +1133,13 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
-      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
   process.exit(1);
 }
@@ -1188,8 +1193,13 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  \`--update\` would freeze the survivors while silently dropping the rest. So this\n` +
       `  result says NOTHING about whether any declared label went untranslated, and the\n` +
       `  baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
-      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
   process.exit(1);
 }
@@ -1217,8 +1227,13 @@ function reportEmptyPopulation(verdict) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
-      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
   process.exit(1);
 }
