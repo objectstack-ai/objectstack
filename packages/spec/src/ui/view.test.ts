@@ -43,6 +43,7 @@ import {
   defineForm,
   ViewItemSchema,
   ViewMetadataSchema,
+  VIEW_METADATA_MEMBERS,
 } from './view.zod';
 
 import {
@@ -551,12 +552,20 @@ describe('FormViewSchema', () => {
   });
 
   it('should accept all form view types', () => {
-    const types = ['simple', 'tabbed', 'wizard'] as const;
-    
+    // [#13704] `wizard` left this bare-type loop: a wizard with no `sections`
+    // is REFUSED since the D7 tightening (it used to silently render as a
+    // plain simple form) — the bare spelling is pinned red in the wizard
+    // block below, and acceptance here carries the steps a wizard requires.
+    const types = ['simple', 'tabbed'] as const;
+
     types.forEach(type => {
       const view: FormView = { type };
       expect(() => FormViewSchema.parse(view)).not.toThrow();
     });
+    expect(() => FormViewSchema.parse({
+      type: 'wizard',
+      sections: [{ label: 'Step 1', fields: ['name'] }],
+    })).not.toThrow();
   });
 
   it('should accept form view with sections', () => {
@@ -713,6 +722,188 @@ describe('FormViewSchema', () => {
       expect(FormViewSchema.safeParse({
         sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }],
       }).success).toBe(false);
+    });
+  });
+
+  // [#13704] Wizard v1 — the declaration-and-refusal tightening ruled on
+  // #13622 (maintainer 2026-08-31, director batch #12, 「同意」): wizard steps
+  // carry no predicate slot and do not collapse (objectui#6237's ruled split,
+  // upgraded from a renderer fact to a parse refusal), a wizard must declare
+  // its steps, and the `steps:` spelling gets a guidance-refusal — never an
+  // alias. Breadth is ruled NARROW: exactly this step-key family.
+  describe('wizard tightening (#13704)', () => {
+    const STEP = { label: 'Step', fields: ['name'] };
+    const issueAt = (r: ReturnType<typeof FormViewSchema.safeParse>, path: string) =>
+      r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === path);
+
+    it('ACCEPT pin — the showcase author shape parses green, values preserved', () => {
+      // examples/app-showcase/src/ui/views/task.view.ts `wizard:` — the one
+      // real in-tree author, verbatim step shape (census of 2026-08-31: it and
+      // its lint-fixture mirror are the whole authored wizard corpus).
+      const parsed = FormViewSchema.parse({
+        type: 'wizard',
+        sections: [
+          { name: 'step_basics', label: 'Basics', columns: 1, fields: ['title', 'project'] },
+          { name: 'step_assign', label: 'Assignment', columns: 1, fields: ['assignee', 'priority'] },
+          { name: 'step_schedule', label: 'Schedule', columns: 2, fields: ['start_date', 'end_date', 'due_date'] },
+        ],
+      });
+      expect(parsed.type).toBe('wizard');
+      expect(parsed.sections?.map((s) => s.name))
+        .toEqual(['step_basics', 'step_assign', 'step_schedule']);
+      expect(parsed.sections?.[2]?.columns).toBe(2);
+      expect(parsed.sections?.[1]?.fields).toEqual(['assignee', 'priority']);
+    });
+
+    it('a ONE-step wizard is legal (no arbitrary step floor)', () => {
+      expect(FormViewSchema.safeParse({ type: 'wizard', sections: [STEP] }).success).toBe(true);
+    });
+
+    it('refuses `visibleWhen` on a wizard step, naming the path and the remedy', () => {
+      const r = FormViewSchema.safeParse({
+        type: 'wizard',
+        sections: [STEP, { label: 'Later', visibleWhen: 'record.stage == "won"', fields: ['amount'] }],
+      });
+      expect(r.success).toBe(false);
+      const issue = issueAt(r, 'sections.1.visibleWhen');
+      expect(issue?.message).toMatch(/no predicate slot/);
+      expect(issue?.message).toMatch(/fields inside the step/);
+      // Customer-facing sink text carries no internal issue ids (the
+      // doc-authoring gate's rule) — the #6237 provenance lives in the
+      // adjacent source comment, not in the message.
+      expect(issue?.message).not.toMatch(/#\d+/);
+    });
+
+    it('refuses the deprecated `visibleOn` spelling the same way (folded to `visibleWhen` pre-refine)', () => {
+      const r = FormViewSchema.safeParse({
+        type: 'wizard',
+        sections: [{ label: 'Later', visibleOn: 'record.stage == "won"', fields: ['amount'] }, STEP],
+      });
+      expect(r.success).toBe(false);
+      // The fold runs at SECTION parse, so the reported path names the
+      // canonical key — the message says so out loud.
+      const issue = issueAt(r, 'sections.0.visibleWhen');
+      expect(issue?.message).toMatch(/`visibleOn` alias folds into `visibleWhen`/);
+    });
+
+    it.each(['collapsible', 'collapsed'] as const)('refuses `%s: true` on a wizard step', (key) => {
+      const r = FormViewSchema.safeParse({
+        type: 'wizard',
+        sections: [{ label: 'Step', [key]: true, fields: ['name'] }],
+      });
+      expect(r.success).toBe(false);
+      const issue = issueAt(r, `sections.0.${key}`);
+      expect(issue?.message).toMatch(/wizard steps do not collapse/);
+    });
+
+    it('an authored `collapsible: false` stays ACCEPTED — the deliberate boundary', () => {
+      // `collapsible`/`collapsed` carry `.default(false)`, so post-parse an
+      // authored `false` is indistinguishable from the default — and needs no
+      // refusal: it declares exactly the behavior a wizard delivers. Only
+      // `true` declares behavior a wizard step does not have.
+      expect(FormViewSchema.safeParse({
+        type: 'wizard',
+        sections: [{ label: 'Step', collapsible: false, collapsed: false, fields: ['name'] }],
+      }).success).toBe(true);
+    });
+
+    it('the refusal is wizard-scoped: the SAME step keys stay accepted on tabbed/simple (#6237\'s split)', () => {
+      for (const type of ['simple', 'tabbed'] as const) {
+        const r = FormViewSchema.safeParse({
+          type,
+          sections: [
+            { label: 'A', collapsible: true, collapsed: true, fields: ['name'] },
+            { label: 'B', visibleWhen: 'record.stage == "won"', fields: ['amount'] },
+          ],
+        });
+        expect(r.success, `type: ${type}`).toBe(true);
+      }
+    });
+
+    it('covers the legacy `groups` bucket at the authored path', () => {
+      const r = FormViewSchema.safeParse({
+        type: 'wizard',
+        groups: [{ label: 'Step', visibleWhen: 'record.x', fields: ['name'] }],
+      });
+      expect(r.success).toBe(false);
+      expect(issueAt(r, 'groups.0.visibleWhen')?.message).toMatch(/no predicate slot/);
+    });
+
+    it('covers the runtime-overlay door for step KEYS (the pane precedent\'s reach)', () => {
+      const r = VIEW_METADATA_MEMBERS.formOverlay.safeParse({
+        type: 'wizard',
+        object: 'crm_lead',
+        viewKind: 'form',
+        sections: [{ label: 'Step', collapsible: true, fields: ['name'] }],
+      });
+      expect(r.success).toBe(false);
+      expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.')))
+        .toContain('sections.0.collapsible');
+    });
+
+    it('refuses the `steps:` spelling with the sections prescription — never an alias', () => {
+      const r = FormViewSchema.safeParse({
+        type: 'wizard',
+        steps: [STEP],
+        sections: [STEP],
+      });
+      expect(r.success).toBe(false);
+      const messages = r.success ? [] : r.error.issues.map((i) => i.message);
+      expect(messages.join('\n')).toMatch(/there is no `steps` key/);
+      expect(messages.join('\n')).toMatch(/array order is step order/);
+    });
+
+    describe('a wizard must declare its steps (D7)', () => {
+      it('refuses ABSENT sections, at `sections`', () => {
+        const r = FormViewSchema.safeParse({ type: 'wizard' });
+        expect(r.success).toBe(false);
+        expect(issueAt(r, 'sections')?.message).toMatch(/must declare its steps/);
+        expect(issueAt(r, 'sections')?.message).toMatch(/absent/);
+      });
+
+      it('refuses EMPTY sections', () => {
+        const r = FormViewSchema.safeParse({ type: 'wizard', sections: [] });
+        expect(r.success).toBe(false);
+        expect(issueAt(r, 'sections')?.message).toMatch(/empty/);
+      });
+
+      it('a populated legacy `groups` bucket IS steps (the #6926 fold feeds the wizard)', () => {
+        expect(FormViewSchema.safeParse({ type: 'wizard', groups: [STEP] }).success).toBe(true);
+      });
+
+      it('an empty `groups` bucket is refused at `groups`', () => {
+        const r = FormViewSchema.safeParse({ type: 'wizard', groups: [] });
+        expect(r.success).toBe(false);
+        expect(issueAt(r, 'groups')?.message).toMatch(/empty/);
+      });
+
+      it('empty `sections` beside populated `groups` is refused — mirrors the fold\'s `sections`-wins rule', () => {
+        const r = FormViewSchema.safeParse({ type: 'wizard', sections: [], groups: [STEP] });
+        expect(r.success).toBe(false);
+        expect(issueAt(r, 'sections')?.message).toMatch(/empty/);
+      });
+
+      it('the flattened runtime overlay stays EXEMPT — a partial patch is its contract (#7025 membership)', () => {
+        // `{ type: 'wizard' }` beside the required binding, `sections` supplied
+        // by the shadowed base view — the `overlay.form.identity` shape the
+        // #7025 corpus pins as ACCEPTED. Moving that membership needs its own
+        // ruling (#7741's precedent); this pin keeps the D7 refusal off it.
+        expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse({
+          type: 'wizard',
+          object: 'crm_lead',
+          viewKind: 'form',
+        }).success).toBe(true);
+      });
+
+      it('…but the ViewItem record door carries a COMPLETE view, so D7 fires there', () => {
+        const r = ViewMetadataSchema.safeParse({
+          name: 'crm_lead.wiz',
+          object: 'crm_lead',
+          viewKind: 'form',
+          config: { type: 'wizard' },
+        });
+        expect(r.success).toBe(false);
+      });
     });
   });
 });
