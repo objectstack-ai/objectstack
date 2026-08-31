@@ -204,19 +204,22 @@ A structured `writes` declaration was considered and dropped ([#3700](https://gi
 
 #### What still happens at runtime
 
-An unknown field is **not** caught at runtime, and it does not fail quietly either. The write-path validator walks the object's *declared* fields, so an undeclared key is neither rejected nor stripped, and the sandbox's mutations are copied back onto the payload verbatim. What happens next is the driver's call:
+An unknown field **is** caught at runtime, and the answer is the same on every driver. The sandbox's mutations are copied back onto the payload verbatim (`applyMutationsToInput` is a plain `Object.assign`) and the write-path validator still walks only the object's *declared* fields — but since [#13657](https://github.com/objectstack-ai/objectstack/issues/13657) the declared-field door runs a **second** time, over the payload the `before*` hooks produced, before any statement is built:
 
-- **SQL drivers** put the stray column into the statement, so the **whole write fails** with a driver-level error (`table deal has no column named stagee`) — nothing is stored, and the error surfaces far from the authoring mistake.
-- **Schemaless drivers** (memory, MongoDB) silently persist the stray key alongside the real ones.
+```
+INVALID_FIELD / 400 / Unknown field 'stagee' on object 'deal'
+```
 
-Neither outcome is the one you wanted, and the advisory warning is the earliest signal you get.
+Identical on `memory`, `driver-sql` and `sqlite-wasm`, because none of them is reached. Before #13657 the driver decided instead, and the two families disagreed — SQL failed the whole write with an untyped `SQLITE_ERROR`, while schemaless drivers silently persisted the stray key as a column nothing downstream reads (and which field-level security, keyed by *declared* field name, could never gate). One app, one body, two meanings decided by which driver a deployment happened to run.
+
+The runtime refusal is now the backstop; the advisory warning is still the earliest signal you get, and the one that names the mistake where it was made.
 
 Because the existence check is advisory, and every write-side check here is literal-only:
 
 - **Treat `hook-body-write-unknown-field` as a build failure by convention.** It does not gate, but the rule is tuned for near-zero false positives — in practice a warning is a real typo.
 - **Check by hand what the parser cannot see.** Computed keys, spreads, aliased input and dynamic object names are invisible to the rule; for an array or `"*"` hook, every field must exist on every target.
 - **Prefer a flow `update_record` node when the write set is fixed — and for *this* check most of all.** A flow node's writes are structured config: they diff field-by-field, render in the Console designer, and since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271) the field-existence check gates there too — `flow-node-write-unknown-field` is an **error**, not the advisory warning a body gets, because a node's `fields` is a literal map next to a literal `objectName`: there is no parser in between that could have mis-extracted it, so a finding is a certainty rather than a best effort. (The *writability* check now has a hook-side counterpart — see [Writing a `readonly` field](#writing-a-readonly-field) below — but it covers only the `ctx.api` channel.)
-- **Exercise the hook against a real object before shipping** — on SQL drivers the mistake surfaces on the first write; schemaless drivers won't tell you.
+- **Exercise the hook against a real object before shipping** — the mistake surfaces on the first write, identically on every driver.
 
 ### Signature conventions
 
