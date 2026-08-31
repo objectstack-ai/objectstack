@@ -7,6 +7,17 @@
  *
  *   node scripts/tenant-audit-census.mjs            # human summary
  *   node scripts/tenant-audit-census.mjs --json     # the whole census, machine-readable
+ *   node scripts/tenant-audit-census.mjs --write    # rewrite both committed artefacts
+ *
+ * ⚠️ This module deliberately exposes NO `--self-test` flag of its own, and that
+ * is a wiring decision rather than an omission. {@link selfTest} below is real
+ * and is run on every CI pass -- `check-tenant-audit-census.mjs --self-test`
+ * calls it. Giving it a flag would mean CI invoking this file directly, which
+ * makes it a GATE FILE, and `scripts/pm/dispatch-gates.mjs` refuses to follow a
+ * gate file: the 22 path literals this module spells would stop being inherited
+ * by the gate that imports it, so a PR touching `packages/services/**` would
+ * silently stop being told this gate reads its diff. Measured, by that tool's
+ * own self-test, the first time this was wired the other way.
  *
  * `content/docs/permissions/tenant-audit-census.mdx` is the page this builds.
  * `check-tenant-audit-census.mjs` is the gate that holds the page to what this
@@ -1135,7 +1146,8 @@ export function spliceRegion(pageText, region) {
 }
 
 // ---------------------------------------------------------------------------
-// Self-test -- the only instrument on the elevation classifier
+// Self-test -- the only instrument on the classifiers. Run by the GATE's
+// `--self-test`, never by a flag of this module's own (see the header).
 // ---------------------------------------------------------------------------
 
 /**
@@ -1259,7 +1271,6 @@ export function selfTest() {
 }
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
 
   const c = runCensus();
   if (argv.includes('--write')) {

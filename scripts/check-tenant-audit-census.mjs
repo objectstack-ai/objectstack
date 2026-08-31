@@ -86,9 +86,50 @@ import {
   renderCountsFile,
   renderGeneratedRegion,
   runCensus,
+  selfTest as censusSelfTest,
 } from './tenant-audit-census.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+/**
+ * The paths this gate operates on, written where `scripts/pm/dispatch-gates.mjs`
+ * can see them. Provenance ONLY: nothing in this gate reads this list, and every
+ * check below behaves exactly as it did without it.
+ *
+ * ## The gap this closes, measured rather than argued
+ *
+ * That tool builds a card's gate list by scanning each gate's own source for the
+ * path literals it operates on, and it refuses to FOLLOW a module that is itself
+ * a gate file. This gate spelled **zero** literals of its own and inherited all
+ * 22 from `tenant-audit-census.mjs` — until that module became a gate file in its
+ * own right, the moment CI began invoking its `--self-test` directly.
+ *
+ * ⇒ The inheritance was cut, and the loss is silent in exactly the way this repo
+ *   treats as worse than a red: a lead that stops appearing is indistinguishable
+ *   from a lead that was never earned. A PR touching `packages/services/**` — the
+ *   population this census exists to count — would simply stop being told that
+ *   this gate reads its diff. `dispatch-gates --self-test` catches it, by name:
+ *   "promoting N module(s) to gate files subtracts no inherited hint from any
+ *   other family — LOST: scripts/check-tenant-audit-census.mjs <- …".
+ *
+ * The two subtrees are the census corpus, and they cover every `UNTYPED_RECEIVERS`
+ * path the generator spells — `hintCovers('packages/services', …)` is true for all
+ * of them — so restoring the roots restores the whole inherited population rather
+ * than a sample of it. The two artefacts are here because a HAND-EDIT to either is
+ * precisely what this gate exists to reject, and that edit must derive it.
+ *
+ * ⚠️ Kept in sync by nothing but review, which is why it is provenance and never
+ * a lookup key: `PAGE` and `COUNTS` are imported for every real use below, and the
+ * corpus roots live in `SURFACE_ROOTS`. This list may only ever be a WIDER-or-equal
+ * restatement of those; a narrower one silently shrinks the gate's discoverability
+ * again, which is the defect above wearing a different hat.
+ */
+const ROOT_DIR_WATCH_HINTS = [
+  'packages/services/**',
+  'packages/plugins/**',
+  'content/docs/permissions/tenant-audit-census.mdx',
+  'docs/audits/2026-08-tenant-audit-write-call-sites.counts.md',
+];
 
 /**
  * The census-derived numbers the page states in its own prose.
@@ -415,6 +456,19 @@ export function selfTest() {
   if (failed.length > 0) {
     console.error(`✗ check-tenant-audit-census self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
+  }
+
+  // ⭐ The GENERATOR's classifier cases run here, and this is the only place
+  // they run. They cannot be a flag on that module: CI invoking it directly
+  // makes it a gate file, and `dispatch-gates` then refuses to follow it, which
+  // silently cuts the 22 path literals this gate inherits from it. Running them
+  // from here keeps the instrument AND the inheritance. ⛔ Never let this
+  // swallow the exit code -- a green gate self-test over a red census self-test
+  // is exactly the shape both of them exist to refuse.
+  const censusExit = censusSelfTest();
+  if (censusExit !== 0) {
+    console.error('✗ check-tenant-audit-census self-test: the census self-test it drives FAILED (above).');
+    return censusExit;
   }
   console.log(
     `✓ check-tenant-audit-census self-test: ${cases.length} cases pass `

@@ -134,8 +134,10 @@ provable count.
 
 ⭐ Both are the same shape as the failure this artefact exists for, wearing
 opposite hats: one scored an unread thing as *nothing to report*, the other
-scored an unread thing as *a finding*. `node scripts/tenant-audit-census.mjs
---self-test` pins all of it — 18 cases, 6 of which red against the old reading.
+scored an unread thing as *a finding*. `node
+scripts/check-tenant-audit-census.mjs --self-test` pins all of it — 18 classifier
+cases, 6 of which red against the old reading, driven from the gate's own
+self-test rather than from a flag on the generator.
 
 ## ⭐ Deviations from the carried figures, untrimmed
 
