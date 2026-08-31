@@ -47,3 +47,5 @@ Eviction is per-replica, matching how driver registration already works
 (each replica registers pools from the shared datasource records at boot);
 propagating it cluster-wide would need a broadcast channel the driver registry
 does not have today.
+
+<!-- adr-0087: not-required (no-migration-prescription) this change is purely ADDITIVE: `IObjectQLEngine` gains a member and nothing is renamed, retired or converted, so there is no authored metadata for `objectstack migrate meta` to rewrite and no migration to prescribe. The breaking half is compile-time only, against third-party IMPLEMENTERS of the interface; consumers are unaffected. Deliberately NOT claimed as runtime-interface-only: this gate classifies packages/spec/src/contracts/** as a metadata surface, so that category is false here even though the symbol is a TypeScript interface with no Zod schema behind it. -->
