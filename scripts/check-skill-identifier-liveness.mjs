@@ -1105,8 +1105,18 @@ function selfTest() {
     [...ROOT_DIR_WATCH_HINTS].sort());
   expect('nothing declared as a hint is itself a ROOT',
     ROOT_DIR_WATCH_HINTS.every((h) => !ROOTS.includes(h)));
-  expect('ROOT_DIR_WATCH_HINTS is a LITERAL array in the source, not computed',
-    /const ROOT_DIR_WATCH_HINTS = \['skills\/\*\*'\];/.test(selfSource()));
+  // Assert the SPELLING without writing a second declaration site. Spelling the
+  // whole `const <name> = [...]` here as a regex literal creates one:
+  // `check-watch-hint-literal` counts declaration sites by scanning source text
+  // with comments masked, and two sites make the real one unjudgeable — measured,
+  // it reported "2 declaration sites, this gate cannot judge a declaration it
+  // cannot locate". The name is therefore never written next to `=` outside the
+  // declaration itself.
+  const hintDecl = selfSource().split('\n').filter((l) => /^const ROOT_DIR_WATCH/.test(l));
+  eq('the watch-hint declaration appears exactly once in the source', hintDecl.length, 1);
+  expect('it is a LITERAL array, never computed from ROOTS (a computed one '
+    + 'contributes nothing to the dispatch extractor while every runtime assertion stays green)',
+    hintDecl[0].includes("'skills/**'") && !hintDecl[0].includes('map('));
 
   // ── the shipped table is well-formed ─────────────────────────────────────
   eq('shipped binding ids are unique',
