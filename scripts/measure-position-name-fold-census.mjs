@@ -329,15 +329,31 @@ function scanJunctionBindings(consts, permissionSets) {
   const bindings = [];
   const everyone = consts.get('EVERYONE_POSITION') ?? 'everyone';
 
+  // ⚠️ Anchored on the tuple TYPE, not on the constant's NAME. The first
+  // version of this scan looked for the identifier
+  // `POSITION_PERMISSION_SET_BINDINGS` -- which is what app-showcase happens to
+  // call its list. app-crm calls the identical structure `BINDINGS`, so three
+  // real junction rows (sales_rep / sales_manager / finance_approver ->
+  // crm_sales_user) were invisible, and `finance_approver` was reported INERT
+  // while it is in fact bound. Under-collection on the junction side is how a
+  // census hands 要点 2 a worklist that deletes a live grant.
+  //
+  // The labelled tuple `[position: string, permissionSet: string]` is what both
+  // binders actually share, and it is a declaration a new binder cannot omit
+  // without also giving up the type.
+  const TUPLE_TYPE = /\[\s*position:\s*string\s*,\s*permissionSet:\s*string\s*\]/;
   for (const rel of [
     ...walk(path.join(REPO_ROOT, 'examples'), new Set(['.ts'])),
     ...walk(path.join(REPO_ROOT, 'packages'), new Set(['.ts'])),
+    ...walk(path.join(REPO_ROOT, 'apps'), new Set(['.ts'])),
   ]) {
     if (rel.includes('.test.')) continue;
     const src = read(rel);
-    const anchor = src.indexOf('POSITION_PERMISSION_SET_BINDINGS');
-    if (anchor === -1) continue;
-    const open = src.indexOf('[', anchor);
+    const typed = TUPLE_TYPE.exec(src);
+    const named = src.indexOf('POSITION_PERMISSION_SET_BINDINGS');
+    const anchor = typed ? typed.index : named;
+    if (anchor === -1 || anchor === undefined) continue;
+    const open = src.indexOf('[', src.indexOf('=', anchor));
     const close = src.indexOf('];', open);
     if (open === -1 || close === -1) continue;
     const re = /\[\s*'([^']+)'\s*,\s*'([^']+)'\s*\]/g;
@@ -598,6 +614,20 @@ const CONTROLS = {
    * governed and SUPPRESSES a name-fold, so it must stay red-able.
    */
   isDefaultBleed: { bound: 'showcase_member_default', unbound: ['showcase_ops', 'showcase_client_liaison'] },
+  /**
+   * Second binder control -- a DIFFERENT app, whose binding list is named
+   * `BINDINGS`, not `POSITION_PERMISSION_SET_BINDINGS`. The first version of the
+   * binder scan keyed on that identifier and silently missed all three of
+   * app-crm's rows, reporting `finance_approver` as an INERT position while it
+   * is bound. One binder is not a population: if this control ever goes red,
+   * the scan has gone back to recognising one app's spelling.
+   *
+   * It also pins the distinction 要点 2 turns on: `sales_manager` IS junction
+   * bound (to `crm_sales_user`) and is STILL a name-fold, because the fold is
+   * about the pair (position N, set N) -- binding N to some other set does not
+   * retire it.
+   */
+  secondBinder: { position: 'finance_approver', set: 'crm_sales_user' },
 };
 
 /** Synthetic inputs -- they exercise the `--audit` GENERATOR, never a reading. */
@@ -699,6 +729,21 @@ function selfTest({ quiet = false } = {}) {
       + ' the binder scan is blind, so every junction-bound pair would be misfiled as unbound.');
   }
 
+  const sb = CONTROLS.secondBinder;
+  if (!c.bindings.some((x) => x.position === sb.position && x.set === sb.set)) {
+    problems.push(`second-binder control missed: \`${sb.position} -> ${sb.set}\` is a junction binding declared by`
+      + ' a binder whose list is NOT named POSITION_PERMISSION_SET_BINDINGS. The scan is recognising one app\'s'
+      + ' spelling again, so other apps\' junction rows are invisible and their positions read as inert.');
+  }
+  if (c.inert.some((i) => i.name === sb.position)) {
+    problems.push(`second-binder control: \`${sb.position}\` was reported INERT while a binder binds it.`);
+  }
+  if (!c.nameFolds.some((f) => f.name === 'sales_manager')) {
+    problems.push('a position junction-bound to a DIFFERENT set must still count as a name-fold on its own name'
+      + ' (sales_manager is bound to crm_sales_user and still folds onto the HotCRM `sales_manager` set).'
+      + ' Losing this would tell 要点 2 the pair is already governed.');
+  }
+
   const bleed = CONTROLS.isDefaultBleed;
   if (!c.bindings.some((x) => x.position === 'everyone' && x.set === bleed.bound)) {
     problems.push(`regression control: \`${bleed.bound}\` declares \`isDefault: true\` and must appear as an`
@@ -734,7 +779,8 @@ function selfTest({ quiet = false } = {}) {
     process.stdout.write(
       `✓ measure-position-name-fold-census self-test: junction anchor (${a.position} -> ${a.set}) classified as`
       + ` a junction binding and absent from the name-dependency list; name-fold anchor (${b.name}) detected`
-      + ` against the composed artifact; negative control (${n.position}) clear; ${CONTROLS.builtinPositions.length}`
+      + ` against the composed artifact; negative control (${n.position}) clear; second-binder control`
+      + ` (${sb.position} -> ${sb.set}) seen and not inert; ${CONTROLS.builtinPositions.length}`
       + ` + ${CONTROLS.builtinPermissionSets.length} parse-integrity anchors present;`
       + ` ${AUDIT_CONTROLS.length} audit-generator controls pass\n`,
     );
