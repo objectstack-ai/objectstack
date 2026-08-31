@@ -9,13 +9,13 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Driver Identifier
+- `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Exports: DriverType, DriverDefinitionSchema, SchemaModeSchema, ExternalDatasourceSettingsSchema, DatasourceSchema
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
-- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Hook Lifecycle Events
+- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookEvent, HookSchema, HookContextSchema
 - `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
 - `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
-- `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Entity (Object) Level Permissions
+- `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Exports: ObjectAccessScopeSchema, ObjectPermissionSchema, EffectiveObjectPermissionSchema, AdminScopeSchema, FieldPermissionSchema
 
 ## Transitive dependencies
 
@@ -45,7 +45,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/system/deploy-bundle.zod.ts` — Deploy Bundle Protocol
 - `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action Parameter Schema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.

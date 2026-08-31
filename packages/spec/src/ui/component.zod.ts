@@ -6,6 +6,15 @@ import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
+import { lazySchema } from '../shared/lazy-schema';
+import { ExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
+// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
+// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
+// shared source rather than re-spelled here (#6276).
+import { SortItemSchema } from '../shared/enums.zod';
+import { strictObject } from '../shared/strict-object';
+import type { KeySetGuidance } from '../shared/suggestions.zod';
 
 // ---------------------------------------------------------------------------
 // CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
@@ -211,19 +220,6 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
 
 /**
- * Empty Properties Schema
- */
-import { lazySchema } from '../shared/lazy-schema';
-import { ExpressionInputSchema } from '../shared/expression.zod';
-import { retiredKey } from '../shared/retired-key';
-// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
-// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
-// shared source rather than re-spelled here (#6276).
-import { SortItemSchema } from '../shared/enums.zod';
-import { strictObject } from '../shared/strict-object';
-import type { KeySetGuidance } from '../shared/suggestions.zod';
-
-/**
  * What silently happened to an undeclared prop before these shapes were closed
  * — the one sentence every rejection on this file carries.
  *
@@ -312,6 +308,10 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
   COMPONENT_NODE_VISIBILITY_GUIDANCE,
   COMPONENT_NODE_KEYS_GUIDANCE,
 ];
+
+/**
+ * Empty Properties Schema
+ */
 
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
