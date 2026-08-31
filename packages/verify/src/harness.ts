@@ -725,23 +725,22 @@ export async function bootStack(
       // still reports success", to a person. Here the answer is NO, on two
       // independent grounds:
       //
-      //   1. NOTHING CLAIMS TO HAVE PERSISTED. This helper returns
-      //      `Promise<void>`: no return value, no counter, no report out of
-      //      which any caller could read a landed row. Its ONLY caller is
-      //      `signUp` immediately below, whose very next statement POSTs
+      //   1. NOTHING CLAIMS TO HAVE PERSISTED. This helper answers a `Promise`
+      //      of `void`: no return value, no counter, no report out of which
+      //      any caller could read a landed row. Its ONLY caller is `signUp`
+      //      immediately below, whose very next statement POSTs
       //      `/auth/sign-up/email` -- the operation this row is a
       //      precondition for.
       //   2. THE LOSS IS ANSWERED ONE LINE LATER, LOUDLY. Under the default
       //      `invite_only` posture a missing invitation makes that POST
-      //      refuse, and `signUp` throws
-      //      `verify signUp failed: <status> <body>` carrying the gate's real
-      //      verdict. Under `open` / `email_domain` the sign-up succeeds on
-      //      its own merits and the row was never needed. Those are the only
-      //      two branches -- which is what "the gate answers either way"
-      //      above means, stated here so it can be checked rather than
-      //      taken on faith. The row is write-only besides:
-      //      `org_verify_audience_gate` exists precisely so nothing ever
-      //      reads these rows back, and nothing does.
+      //      refuse, and `signUp` throws `verify signUp failed:` carrying the
+      //      audience gate's own response status and body. Under `open` or
+      //      `email_domain` the sign-up succeeds on its own merits and the row
+      //      was never needed. Those are the only two branches -- which is
+      //      what "the gate answers either way" above means, stated here so it
+      //      can be checked rather than taken on faith. The row is write-only
+      //      besides: `org_verify_audience_gate` exists precisely so nothing
+      //      ever reads these rows back, and nothing does.
       //
       // The case this catch was written for is an app under verification that
       // carries no `sys_invitation` object at all: there is no store to
