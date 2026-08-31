@@ -3,12 +3,23 @@
 /**
  * [#13214] Does `GET /api/v1/ui/view/:object/:type` cross ENVIRONMENTS?
  *
- * ## What this file is, and what it is not
+ * ## ⭐ What this file is NOW: the regression pin for the repair it measured
  *
- * ⛔ A MEASUREMENT file. It repairs nothing, gates nothing, proposes nothing.
- * `rest-server.ts` is byte-identical on this branch. Access-control behaviour
- * is a human floor in this repo: if a reading below is a problem, the repair is
- * a card of its own with a human decision on it.
+ * It was written as a MEASUREMENT file and it measured a live cross-environment
+ * disclosure: every assertion below pinned the LEAK as present. The maintainer
+ * ruled the repair on 2026-08-30 (option C — the seam must require that the
+ * resolved environment belong to the caller), and this file has been INVERTED
+ * onto the repaired behaviour rather than deleted or softened. ⛔ Nothing here
+ * was weakened into vagueness: each reading that said "B's view crosses to a
+ * caller with no claim on B" now says "it is refused", against the same
+ * instrument, the same fixtures and the same controls.
+ *
+ * A suite that measured a leak is the best available regression pin once
+ * flipped: it fails if the leak returns by ANY of the routes it drove.
+ *
+ * ⚠️ The 2026-08-29 readings recorded here were TRUE WHEN TAKEN. Where a case
+ * changed colour, the history stays in the comment — a reader who finds only
+ * the post-repair assertion cannot tell whether the leak ever existed.
  *
  * ## Why it exists separately from `ui-view-route-identity.measurement.test.ts`
  *
@@ -300,6 +311,27 @@ const ENTITLED = {
     systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
 };
 
+/**
+ * ⭐ An execution context ANCHORED in one environment — the shape the repaired
+ * seam reads, and the reason this helper exists rather than a bare `ENTITLED`.
+ *
+ * `instrument()` below replaces `resolveExecCtx` wholesale, so every context in
+ * this file is synthetic and must MODEL what the real producer emits.
+ * `computeExecCtx` records which environment's auth service actually validated
+ * the caller on `__authEnvironmentId`, and `enforceEnvironmentOwnership`
+ * compares that against the environment the request resolved to. A synthetic
+ * context that omits the key is a caller whose credential is anchored NOWHERE,
+ * which the seam refuses — fail-closed, and deliberately so.
+ *
+ * ⚠️ That the real producer sets this key truthfully — including the
+ * cross-environment fallback branch where it does NOT equal the resolved
+ * environment — is not assertable through a stub, so it is pinned separately
+ * against the unstubbed method in `ui-view-environment-ownership.test.ts`.
+ * Without that file every assertion here would be reading a fact this file
+ * supplies to itself.
+ */
+const entitledIn = (environmentId: string) => ({ ...ENTITLED, __authEnvironmentId: environmentId });
+
 interface DriveOptions {
     route?: string;
     params?: Record<string, string>;
@@ -400,7 +432,13 @@ describe('[#13214] §0 the instrument can tell environment A from environment B'
     it("C2 — with NO header and an UNBOUND hostname the route answers with environment A's view", async () => {
         // This is the "would otherwise resolve to A" baseline every §1/§2
         // reading is measured against. It is driven, not assumed.
-        const observed = await drive({ host: HOST_NEUTRAL, ctx: undefined });
+        //
+        // ⚠️ FLIPPED INPUT, not a flipped claim: the baseline used to be taken
+        // with `ctx: undefined`, because before the repair an anonymous caller
+        // was served. The environment resolution being measured is unchanged;
+        // reaching it now requires a caller entitled to the environment it
+        // resolves to, so the baseline is taken with one.
+        const observed = await drive({ host: HOST_NEUTRAL, ctx: entitledIn(ENV_A) });
 
         expect(observed.status).toBe(200);
         expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
@@ -409,6 +447,14 @@ describe('[#13214] §0 the instrument can tell environment A from environment B'
         // ...and NOT the control-plane protocol, which is a third distinct
         // answer precisely so this cannot silently be that instead.
         expect(labelOf(observed.body)).not.toBe('Control Plane Accounts');
+
+        // ⭐ The same request with NO caller is refused — so C2's 200 is a
+        // statement about an entitled caller and not about the route being
+        // open. This is the anonymous floor the route did not have.
+        const anonymous = await drive({ host: HOST_NEUTRAL, ctx: undefined });
+        expect(anonymous.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(anonymous.code).toBe(ANONYMOUS_DENY_CODE);
+        expect(labelOf(anonymous.body)).toBeUndefined();
     }, 120_000);
 
     it("C3 — the SCOPED mount, where naming an environment is declared and URL-visible, DOES deliver environment B's view", async () => {
@@ -419,21 +465,33 @@ describe('[#13214] §0 the instrument can tell environment A from environment B'
             route: UI_ROUTE_SCOPED,
             params: { environmentId: ENV_B, object: 'account', type: 'list' },
             host: HOST_NEUTRAL,
-            ctx: undefined,
+            ctx: entitledIn(ENV_B),
         });
 
         expect(observed.status).toBe(200);
         expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
         expect(columnsOf(observed.body)).toContain('beta_only_field');
         expect(observed.acquired).toEqual([ENV_B]);
+
+        // ⭐ And the scoped mount is gated too — naming an environment in the
+        // URL is no more of an entitlement than naming it in a header. A caller
+        // anchored in A is refused the same URL.
+        const foreign = await drive({
+            route: UI_ROUTE_SCOPED,
+            params: { environmentId: ENV_B, object: 'account', type: 'list' },
+            host: HOST_NEUTRAL,
+            ctx: entitledIn(ENV_A),
+        });
+        expect(foreign.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(foreign.body)).toBeUndefined();
     }, 120_000);
 
     it('C4 — the kernel-acquisition recorder is an observable, not a constant', async () => {
-        const a = await drive({ host: HOST_A, ctx: undefined });
+        const a = await drive({ host: HOST_A, ctx: entitledIn(ENV_A) });
         const b = await drive({
             route: UI_ROUTE_SCOPED,
             params: { environmentId: ENV_B, object: 'account', type: 'list' },
-            ctx: undefined,
+            ctx: entitledIn(ENV_B),
         });
         expect(a.acquired).toEqual([ENV_A]);
         expect(b.acquired).toEqual([ENV_B]);
@@ -447,61 +505,95 @@ describe('[#13214] §0 the instrument can tell environment A from environment B'
 // ---------------------------------------------------------------------------
 
 describe('[#13214] §1 channel: the `X-Environment-Id` header', () => {
-    it("⭐ an ANONYMOUS request naming environment B on an unscoped URL receives environment B's view", async () => {
+    it("⭐ an ANONYMOUS request naming environment B on an unscoped URL is REFUSED — it used to receive B's view", async () => {
+        // ⚠️ 2026-08-29, on the unrepaired seam, this same drive answered 200
+        // with `Beta Environment Accounts`, B's kernel ACQUIRED, and
+        // `execCtxCalls` at 0. That was the finding. The assertions below are
+        // its inverse, one for one.
         const observed = await drive({
             host: HOST_NEUTRAL,          // resolves to nothing → would fall to A
             environmentIdHeader: ENV_B,  // the only thing the caller supplies
             ctx: undefined,              // ⭐ no execution context whatsoever
         });
 
-        expect(observed.status).toBe(200);
-        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
-        expect(columnsOf(observed.body)).toContain('beta_only_field');
-        expect(columnsOf(observed.body)).not.toContain('alpha_only_field');
+        expect(observed.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(observed.code).toBe(ANONYMOUS_DENY_CODE);
 
-        // Three independent observations, not one:
-        //   - the answer is B's, not the A baseline C2 measured;
-        expect(labelOf(observed.body)).not.toBe('Alpha Environment Accounts');
-        //   - B's kernel was actually ACQUIRED by an anonymous request;
+        // Three independent observations, inverted one for one:
+        //   - NO view of any environment is in the body — not B's, and not the
+        //     A baseline either, so this is a refusal and not a redirection;
+        expect(labelOf(observed.body)).toBeUndefined();
+        expect(columnsOf(observed.body)).toEqual([]);
+        expect(JSON.stringify(observed.body)).not.toContain('Beta');
+        expect(JSON.stringify(observed.body)).not.toContain('Alpha');
+        //   - identity WAS asked for, which is the step the seam did not have;
+        expect(observed.execCtxCalls).toBeGreaterThan(0);
+        //   - ⚠️ B's kernel is still ACQUIRED before the refusal. Recorded, NOT
+        //     repaired: the deny sits at the seam, after environment
+        //     resolution, exactly as it does on the guarded sibling route in §5.
+        //     The ruling names that ordering as input knowledge and puts it out
+        //     of this card's scope, so it is pinned as the CURRENT fact rather
+        //     than asserted away.
         expect(observed.acquired).toEqual([ENV_B]);
-        //   - and identity was never asked for, on any site the request reached.
-        expect(observed.execCtxCalls).toBe(0);
     }, 120_000);
 
-    it('the answer does not depend on the caller — an ENTITLED caller naming B gets byte-identical bytes', async () => {
-        const anon = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
-        const entitled = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: ENTITLED });
-        expect(JSON.stringify(anon.body)).toBe(JSON.stringify(entitled.body));
-        expect(entitled.execCtxCalls).toBe(0);
+    it('⭐ POSITIVE CONTROL — a caller ENTITLED TO B naming B is served, so the refusal above is a decision', async () => {
+        // Without this the whole section is satisfied by a route that refuses
+        // everyone, which would be a different defect wearing the same green.
+        const owner = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
+        expect(owner.status).toBe(200);
+        expect(labelOf(owner.body)).toBe('Beta Environment Accounts');
+        expect(columnsOf(owner.body)).toContain('beta_only_field');
+        expect(owner.acquired).toEqual([ENV_B]);
+
+        // ...and the caller's ENTITLEMENT is what decides, not the mere
+        // presence of a session: an authenticated caller anchored in A, naming
+        // B, is refused. This is the case the rejected option B would have
+        // served — anonymous-deny alone never compares the two environments.
+        const outsider = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A) });
+        expect(outsider.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(outsider.body)).toBeUndefined();
+        expect(JSON.stringify(outsider.body)).not.toContain('Beta');
     }, 120_000);
 
-    it('⭐ NEGATIVE CONTROL — a header naming an environment the registry does NOT know does not cross', async () => {
-        // So the crossing is not "any string in the header wins". The id is
-        // validated through `envRegistry.resolveById`, and an unknown one falls
-        // through to the default. This is what makes §4's precondition precise.
+    it('⭐ a header naming an environment the registry does NOT know is REFUSED, not answered with the default', async () => {
+        // ⚠️ This case inverted the hardest, and it is the ruling's 「信号化拒绝」.
+        // Before: an unknown id fell through `envRegistry.resolveById` to the
+        // DEFAULT environment and answered 200 with A's view — a validation
+        // failure served as a success. Now the caller named an environment the
+        // chain did not serve, and that is refused.
         const observed = await drive({
             host: HOST_NEUTRAL,
             environmentIdHeader: 'env_ghost_does_not_exist',
-            ctx: undefined,
+            ctx: entitledIn(ENV_A),      // ⭐ a real caller, entitled to the default
         });
 
-        expect(observed.status).toBe(200);
-        expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
-        expect(observed.acquired).toEqual([ENV_A]);
-        // The registry WAS consulted — a green above is a decision, not a
-        // header the server never looked at.
+        expect(observed.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(observed.body)).toBeUndefined();
+        // ⛔ Specifically NOT the default environment's view, which is the
+        // silent fallback the ruling forbids.
+        expect(labelOf(observed.body)).not.toBe('Alpha Environment Accounts');
+        // The registry WAS consulted — the refusal is a decision, not a header
+        // the server never looked at.
         expect(observed.idLookups).toContain('env_ghost_does_not_exist');
+
+        // CONTROL: the same caller with no header is served the default
+        // environment, so the refusal is caused by the unresolvable NAME and
+        // not by this caller being unable to read anything.
+        const noHeader = await drive({ host: HOST_NEUTRAL, ctx: entitledIn(ENV_A) });
+        expect(noHeader.status).toBe(200);
+        expect(labelOf(noHeader.body)).toBe('Alpha Environment Accounts');
     }, 120_000);
 
-    it('the caller supplies nothing but the header — no cookie, no authorization, no session', async () => {
+    it('a caller supplying nothing but the header — no cookie, no authorization, no session — gets the anonymous refusal', async () => {
         const observed = await drive({
             host: HOST_NEUTRAL,
             environmentIdHeader: ENV_B,
             ctx: undefined,
             headers: {}, // nothing added; the request carries `host` + the one header
         });
-        expect(observed.status).toBe(200);
-        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
+        expect(observed.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(observed.body)).toBeUndefined();
     }, 120_000);
 });
 
@@ -511,49 +603,116 @@ describe('[#13214] §1 channel: the `X-Environment-Id` header', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#13214] §2 channel: the request hostname', () => {
-    it("⭐ an ANONYMOUS request whose hostname is bound to environment B receives environment B's view", async () => {
+    it("⭐ an ANONYMOUS request whose hostname is bound to environment B is REFUSED — it used to receive B's view", async () => {
+        // ⚠️ The hostname channel had the LOWER bar of the two: a Host header is
+        // caller-controlled on any HTTP request and a tenant hostname is
+        // typically public. On the unrepaired seam this answered 200 with B's
+        // view, `execCtxCalls` at 0. Fixing only the header channel would have
+        // left this open, which is why the ruling names both.
         const observed = await drive({ host: HOST_B, ctx: undefined });
 
-        expect(observed.status).toBe(200);
-        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
-        expect(columnsOf(observed.body)).toContain('beta_only_field');
-        expect(observed.acquired).toEqual([ENV_B]);
-        expect(observed.execCtxCalls).toBe(0);
+        expect(observed.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(observed.code).toBe(ANONYMOUS_DENY_CODE);
+        expect(labelOf(observed.body)).toBeUndefined();
+        expect(JSON.stringify(observed.body)).not.toContain('Beta');
+        expect(observed.execCtxCalls).toBeGreaterThan(0);
+        // The hostname WAS resolved — the refusal is not "the host was ignored".
         expect(observed.hostnameLookups).toContain(HOST_B);
     }, 120_000);
 
+    it('⭐ POSITIVE CONTROL — the hostname channel still SERVES the environment it is bound to, to a caller entitled there', async () => {
+        const owner = await drive({ host: HOST_B, ctx: entitledIn(ENV_B) });
+        expect(owner.status).toBe(200);
+        expect(labelOf(owner.body)).toBe('Beta Environment Accounts');
+        expect(owner.acquired).toEqual([ENV_B]);
+
+        // ...and refuses a caller anchored in the OTHER environment reaching the
+        // same public hostname. Ownership, not reachability, is the gate.
+        const outsider = await drive({ host: HOST_B, ctx: entitledIn(ENV_A) });
+        expect(outsider.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(outsider.body)).toBeUndefined();
+    }, 120_000);
+
     it('⭐ CONTROL — the same channel answers with A when the hostname is bound to A, so it is bidirectional', async () => {
-        const observed = await drive({ host: HOST_A, ctx: undefined });
+        const observed = await drive({ host: HOST_A, ctx: entitledIn(ENV_A) });
         expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
         expect(observed.acquired).toEqual([ENV_A]);
     }, 120_000);
 
     it('⭐ NEGATIVE CONTROL — an unbound hostname does not cross; it falls to the default environment', async () => {
-        const observed = await drive({ host: 'unbound.example.test', ctx: undefined });
+        const observed = await drive({ host: 'unbound.example.test', ctx: entitledIn(ENV_A) });
         expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
         expect(observed.acquired).toEqual([ENV_A]);
         expect(observed.hostnameLookups).toContain('unbound.example.test');
     }, 120_000);
 
-    it('PRECEDENCE — hostname is consulted BEFORE the header, so a bound host wins over a header naming the other environment', async () => {
-        // Matters for §4: on a hostname-routed deployment the header is not an
-        // additional lever, and on a non-hostname deployment it is the lever.
-        const observed = await drive({ host: HOST_A, environmentIdHeader: ENV_B, ctx: undefined });
-        expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
-        expect(observed.acquired).toEqual([ENV_A]);
-        // The header was never even looked up, which is the mechanism.
+    it('PRECEDENCE — hostname is still consulted BEFORE the header; a request naming BOTH is now refused rather than silently served one of them', async () => {
+        // The mechanism is unchanged and still measured: a bound host wins and
+        // the header is never looked up. What changed is the ANSWER to a
+        // self-contradictory request. It used to be served environment A while
+        // the caller asked for B — an answer about an environment the caller
+        // did not name. Now a named environment that is not the one served is
+        // refused, which is the same rule that closes the id oracle in §4.
+        const observed = await drive({ host: HOST_A, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A) });
+        expect(observed.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(observed.body)).toBeUndefined();
+        // The header was never even looked up, which is the mechanism — the
+        // refusal comes from the seam's comparison, not from the registry.
         expect(observed.idLookups).not.toContain(ENV_B);
+        expect(observed.hostnameLookups).toContain(HOST_A);
+
+        // CONTROL: drop the contradictory header and the same caller on the
+        // same host is served, so the refusal is caused by the contradiction.
+        const consistent = await drive({ host: HOST_A, ctx: entitledIn(ENV_A) });
+        expect(consistent.status).toBe(200);
+        expect(labelOf(consistent.body)).toBe('Alpha Environment Accounts');
     }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
-// 3. BLAST RADIUS on the CROSS-ENVIRONMENT path — measured here, ⛔ not
-//    inherited from #13244's single-tenant result
+// 3. WHAT THE ROUTE DISCLOSES — the inventory that was the blast radius
+//
+// ⚠️ These cases were written as the blast-radius reading for the CROSSING: an
+// anonymous caller naming environment B, and what B handed it. The crossing is
+// closed, so the same inventory is now taken on the OWNED path — the caller is
+// entitled to B — because it is still the payload this route serves and a
+// regression that re-opened the crossing would disclose exactly this.
+// The FIRST case below is the crossing's own pin: a caller with no claim on B
+// receives none of it.
 // ---------------------------------------------------------------------------
 
-describe('[#13214] §3 what the crossed response actually contains', () => {
+describe('[#13214] §3 what the response contains, on the owned path and on the refused one', () => {
+    it('⭐ THE PIN — a caller with no claim on environment B receives NONE of the inventory below', async () => {
+        // One assertion per disclosure the crossing used to carry, stated as an
+        // absence. This is the case that fails if any future change lets the
+        // route answer a non-owner, whatever else stays green.
+        const refused = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A) });
+        const serialized = JSON.stringify(refused.body);
+
+        expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
+        // The object label, and every field label/name B declares.
+        for (const disclosed of [
+            'Beta Environment Accounts', 'Beta Account Name', 'Beta Only', 'Beta Status',
+            'Beta Secret', 'beta_only_field', 'beta_secret',
+        ]) {
+            expect(serialized.includes(disclosed), `refusal carried \`${disclosed}\``).toBe(false);
+        }
+        expect(labelOf(refused.body)).toBeUndefined();
+        expect(columnsOf(refused.body)).toEqual([]);
+
+        // ⭐ CONTROL — every one of those strings IS present when the OWNER
+        // asks, so the absences above are a refusal and not a fixture that
+        // stopped producing.
+        const owned = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
+        const ownedSerialized = JSON.stringify(owned.body);
+        expect(owned.status).toBe(200);
+        for (const disclosed of ['Beta Environment Accounts', 'Beta Account Name', 'Beta Only', 'beta_only_field']) {
+            expect(ownedSerialized.includes(disclosed), `owner did not receive \`${disclosed}\``).toBe(true);
+        }
+    }, 120_000);
+
     it('the list body is exactly the view envelope — object, view type, label, columns, sort, searchable fields', async () => {
-        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
+        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
         const body = observed.body;
 
         // ⭐ Pinned to the CROSSED body first, so this is an inventory of what
@@ -573,7 +732,7 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
     }, 120_000);
 
     it('⛔ NO record data crosses — the payload carries metadata only', async () => {
-        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
+        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
         const serialized = JSON.stringify(observed.body);
         // Same pinning as above: this is a statement about B's payload.
         expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
@@ -589,7 +748,7 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
 
     it('the FORM branch crosses too, and carries the per-field required/readonly/type declarations', async () => {
         const observed = await drive({
-            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined,
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B),
             params: { object: 'account', type: 'form' },
         });
         expect(observed.status).toBe(200);
@@ -633,7 +792,7 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
         // the blast-radius reading for the crossing: what the disclosure this
         // file measures actually contains. A regression reachable only through
         // that chain would leave the producer-level pin green.
-        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
+        const observed = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
         const columns = columnsOf(observed.body);
         const labels = (observed.body.list.columns as any[]).map((c) => c.label);
 
@@ -660,7 +819,7 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
 
         // The name-agnostic form of the same statement, computed from the
         // fixture rather than from a copy of the producer's priority list: no
-        // column the crossed body emits is declared hidden. A tenth priority
+        // column the served body emits is declared hidden. A tenth priority
         // name added without the filter fails this even though nothing here
         // knows its spelling.
         const hiddenKeys = Object.keys(SCHEMA_B.fields)
@@ -678,7 +837,7 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
         // two branches now AGREE is the other half of the repair, and it is
         // what would say so if a future change moved only one of them.
         const form = await drive({
-            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined,
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B),
             params: { object: 'account', type: 'form' },
         });
         expect(formFieldsOf(form.body)).not.toContain('status');
@@ -686,21 +845,37 @@ describe('[#13214] §3 what the crossed response actually contains', () => {
         expect(formFieldsOf(form.body)).toContain('beta_only_field'); // control
     }, 120_000);
 
-    it('⚠️ the crossed route is also an OBJECT-EXISTENCE ORACLE for the named environment', async () => {
-        // A present object answers 200 and an absent one does not, so the same
-        // anonymous request distinguishes "environment B has an object called
-        // X" from "it does not" — a second reading, distinct from the payload.
-        const present = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
-        const absent = await drive({
-            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined,
+    it('⭐ the OBJECT-EXISTENCE ORACLE is closed for a non-owner — present and absent objects answer identically', async () => {
+        // ⚠️ The second finding of the crossing, distinct from the payload: a
+        // present object answered 200 and an absent one did not, so an
+        // anonymous request could enumerate environment B's object namespace.
+        // The discriminator is gone for anyone without a claim on B — the two
+        // requests are refused with the SAME status and the SAME bytes.
+        const presentToOutsider = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A),
+        });
+        const absentToOutsider = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A),
             params: { object: 'no_such_object_here', type: 'list' },
         });
-        expect(present.status).toBe(200);
-        // Pinned to B, so the oracle is a reading about the NAMED environment's
-        // object namespace rather than about the default one.
-        expect(labelOf(present.body)).toBe('Beta Environment Accounts');
-        expect(absent.acquired).toEqual([ENV_B]);
-        expect(absent.status).not.toBe(200);
+        expect(presentToOutsider.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(absentToOutsider.status).toBe(presentToOutsider.status);
+        expect(JSON.stringify(absentToOutsider.body)).toBe(JSON.stringify(presentToOutsider.body));
+
+        // ⭐ CONTROL — the discriminator still EXISTS for the owner, so the
+        // equality above is the outsider being refused and not the route having
+        // lost the ability to tell the two objects apart.
+        const presentToOwner = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B),
+        });
+        const absentToOwner = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B),
+            params: { object: 'no_such_object_here', type: 'list' },
+        });
+        expect(presentToOwner.status).toBe(200);
+        expect(labelOf(presentToOwner.body)).toBe('Beta Environment Accounts');
+        expect(absentToOwner.status).not.toBe(200);
+        expect(absentToOwner.acquired).toEqual([ENV_B]);
     }, 120_000);
 });
 
@@ -715,22 +890,33 @@ describe('[#13214] §4 preconditions', () => {
         // sections: it reproduces the previous harness's wiring and shows the
         // header is inert there. So §1's crossing is a function of the tenancy
         // wiring, not of anything else this file changed.
+        // ⚠️ The header is dropped from this drive and that is deliberate. With
+        // no registry the chain resolves NOTHING, so a request naming an
+        // environment is now refused for naming one that was not served — a
+        // true reading, but a different one from the wiring fact this case is
+        // about. The header's own case is the last one in this section.
         const observed = await drive({
             host: HOST_B,
-            environmentIdHeader: ENV_B,
-            ctx: undefined,
+            ctx: entitledIn('anything'),
             wiring: { defaultEnvironmentId: undefined },
         });
         expect(observed.status).toBe(200);
         expect(labelOf(observed.body)).toBe('Control Plane Accounts');
+
+        // ⭐ A control-plane boot resolves no environment, so there is nothing
+        // to own and the anonymous floor is the whole gate — which the route
+        // now has. Anonymous is refused here too.
+        const anonymous = await drive({
+            host: HOST_B, ctx: undefined, wiring: { defaultEnvironmentId: undefined },
+        });
+        expect(anonymous.status).toBe(ANONYMOUS_DENY_STATUS);
     }, 120_000);
 
     it('an envRegistry WITHOUT a kernelManager does not cross either — the chain needs both', async () => {
         const shared = tenantWiring();
         const observed = await drive({
             host: HOST_B,
-            environmentIdHeader: ENV_B,
-            ctx: undefined,
+            ctx: entitledIn(ENV_A),
             wiring: { envRegistry: shared.envRegistry, defaultEnvironmentId: ENV_A },
         });
         // Env resolution is skipped entirely (the guard is `envRegistry &&
@@ -747,8 +933,7 @@ describe('[#13214] §4 preconditions', () => {
         const shared = tenantWiring();
         const observed = await drive({
             host: HOST_B,                 // bound to B
-            environmentIdHeader: ENV_B,   // and naming B
-            ctx: undefined,
+            ctx: entitledIn(ENV_A),
             wiring: {
                 envRegistry: shared.envRegistry,
                 kernelManager: shared.kernelManager,
@@ -757,13 +942,28 @@ describe('[#13214] §4 preconditions', () => {
             },
         });
         expect(labelOf(observed.body)).toBe('Alpha Environment Accounts');
+
+        // ...and the resolver's answer is what ownership is measured against:
+        // the same host, the same resolver, a caller anchored in B instead — B
+        // is not what was resolved, so it is refused.
+        const anchoredElsewhere = await drive({
+            host: HOST_B,
+            ctx: entitledIn(ENV_B),
+            wiring: {
+                envRegistry: shared.envRegistry,
+                kernelManager: shared.kernelManager,
+                defaultEnvironmentId: ENV_A,
+                requestEnvResolver: { async resolveRequestEnvironmentId() { return ENV_A; } },
+            },
+        });
+        expect(anchoredElsewhere.status).toBe(ANONYMOUS_DENY_STATUS);
     }, 120_000);
 
     it('⭐ CONTROL — the same injected resolver CAN send the request to B, so the reading above is the resolver deciding, not a dead channel', async () => {
         const shared = tenantWiring();
         const observed = await drive({
             host: HOST_NEUTRAL,
-            ctx: undefined,
+            ctx: entitledIn(ENV_B),
             wiring: {
                 envRegistry: shared.envRegistry,
                 kernelManager: shared.kernelManager,
@@ -778,46 +978,88 @@ describe('[#13214] §4 preconditions', () => {
         // Named because it is the difference between "wiring a resolver closes
         // this" and "wiring a resolver closes this unless it throws".
         const shared = tenantWiring();
-        const observed = await drive({
-            host: HOST_NEUTRAL,
-            environmentIdHeader: ENV_B,
-            ctx: undefined,
-            wiring: {
-                envRegistry: shared.envRegistry,
-                kernelManager: shared.kernelManager,
-                defaultEnvironmentId: ENV_A,
-                requestEnvResolver: { async resolveRequestEnvironmentId() { throw new Error('resolver down'); } },
-            },
+        const degraded = {
+            envRegistry: shared.envRegistry,
+            kernelManager: shared.kernelManager,
+            defaultEnvironmentId: ENV_A,
+            requestEnvResolver: { async resolveRequestEnvironmentId() { throw new Error('resolver down'); } },
+        };
+        // The legacy chain is reached and the header still DECIDES the
+        // environment — that mechanism is unchanged and still measured.
+        const owner = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B), wiring: degraded,
         });
-        expect(labelOf(observed.body)).toBe('Beta Environment Accounts');
+        expect(labelOf(owner.body)).toBe('Beta Environment Accounts');
+
+        // ⭐ But a degraded resolver no longer degrades the GATE: the caller
+        // still has to own what the legacy chain resolved. Before the repair
+        // this drive with `ctx: undefined` answered 200 with B's view.
+        const outsider = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A), wiring: degraded,
+        });
+        expect(outsider.status).toBe(ANONYMOUS_DENY_STATUS);
+        const anonymous = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined, wiring: degraded,
+        });
+        expect(anonymous.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(labelOf(anonymous.body)).toBeUndefined();
     }, 120_000);
 
-    it('⚠️ the route is also an ENVIRONMENT-ID ORACLE — a valid id and an invalid one get observably different answers', async () => {
-        // Bears directly on "what must an attacker already know". The id is
-        // validated, but the FAILURE is not signalled: an unknown id silently
-        // falls through to the default environment and answers 200 with THAT
-        // environment's view. So a caller with no credential can tell a real
-        // environment id from a made-up one by comparing two 200s — which is
-        // the difference between "must possess an id" and "can discover one".
-        const valid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
-        const invalid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: 'env_not_real', ctx: undefined });
+    it('⭐ the ENVIRONMENT-ID ORACLE is closed — a valid id and an invalid one now get BYTE-IDENTICAL answers', async () => {
+        // ⚠️ This is the case that decided the refusal's SHAPE, and it is worth
+        // reading before changing either.
+        //
+        // Before: the id was validated through `envRegistry.resolveById`, but
+        // the failure was not signalled — an unknown id fell through to the
+        // DEFAULT environment and answered 200 with that environment's view.
+        // Two 200s with different bytes let a caller with no credential tell a
+        // real environment id from an invented one, which is the difference
+        // between "must possess an id" and "can discover one".
+        //
+        // ⭐ Closing it takes more than refusing: the two refusals have to be
+        // INDISTINGUISHABLE. A caller naming a real foreign environment is
+        // refused because their credential is not valid there; a caller naming
+        // an invented one is refused because the chain served something else.
+        // Two different reasons — one response, byte for byte. That is why
+        // `enforceEnvironmentOwnership` answers with the anonymous-deny
+        // envelope verbatim instead of minting a 403 or a 404 of its own: a
+        // distinct status for either reason would rebuild the oracle one layer
+        // up.
+        const anonValid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: undefined });
+        const anonInvalid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: 'env_not_real', ctx: undefined });
+        expect(anonValid.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(anonInvalid.status).toBe(anonValid.status);
+        expect(JSON.stringify(anonInvalid.body)).toBe(JSON.stringify(anonValid.body));
 
-        expect(valid.status).toBe(200);
-        expect(invalid.status).toBe(200);
-        // Same status, different bytes — the oracle.
-        expect(JSON.stringify(valid.body)).not.toBe(JSON.stringify(invalid.body));
-        expect(labelOf(valid.body)).toBe('Beta Environment Accounts');
-        expect(labelOf(invalid.body)).toBe('Alpha Environment Accounts');
-        // ...and the same holds for the OTHER known environment, so the signal
-        // is "this id resolves" rather than "this id is B".
-        const otherValid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_A, ctx: undefined });
-        expect(labelOf(otherValid.body)).toBe('Alpha Environment Accounts');
-        expect(otherValid.idLookups).toContain(ENV_A);
+        // ...and for an AUTHENTICATED caller who owns neither of the two ids in
+        // play. This leg is the one that would still leak if the refusals had
+        // been given different statuses.
+        const outsiderValid = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_A),
+        });
+        const outsiderInvalid = await drive({
+            host: HOST_NEUTRAL, environmentIdHeader: 'env_not_real', ctx: entitledIn(ENV_A),
+        });
+        expect(outsiderValid.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(outsiderInvalid.status).toBe(outsiderValid.status);
+        expect(JSON.stringify(outsiderInvalid.body)).toBe(JSON.stringify(outsiderValid.body));
+        // ⛔ And neither is the silent default-environment answer.
+        expect(labelOf(outsiderInvalid.body)).not.toBe('Alpha Environment Accounts');
+
+        // ⭐ CONTROL — the registry IS still consulted for the valid id, so the
+        // equality above is a refusal rather than a header nobody looked at;
+        // and the OWNER of a valid id still gets a distinguishable answer, so
+        // the route has not simply stopped resolving environments.
+        expect(outsiderValid.idLookups).toContain(ENV_B);
+        const ownerValid = await drive({ host: HOST_NEUTRAL, environmentIdHeader: ENV_B, ctx: entitledIn(ENV_B) });
+        expect(ownerValid.status).toBe(200);
+        expect(JSON.stringify(ownerValid.body)).not.toBe(JSON.stringify(outsiderValid.body));
     }, 120_000);
 
-    it('the unscoped mount passes `environmentId: undefined` — read off the registrar body, not off a grep of the file', () => {
+    it('⭐ the registrar body itself carries the three steps — read off the registrar, not off a grep of the file', () => {
         // The source half of the mechanism, scoped to the registrar so a
-        // neighbour's code cannot satisfy it.
+        // neighbour's code cannot satisfy it. ⚠️ Inverted: the two `false`
+        // assertions here were the card's source-level finding.
         const start = SOURCE.indexOf('private registerUiEndpoints(');
         const end = SOURCE.indexOf('private registerCrudEndpoints(');
         expect(start).toBeGreaterThan(0);
@@ -825,15 +1067,29 @@ describe('[#13214] §4 preconditions', () => {
         const body = SOURCE.slice(start, end);
 
         expect(body).toContain("const isScoped = basePath.includes('/environments/:environmentId')");
-        expect(body).toContain('const environmentId = isScoped ? req.params?.environmentId : undefined;');
+        // The environment is decided ONCE, through the shared entry point, and
+        // that one answer is what identity, ownership and the protocol all use.
+        expect(body).toContain('this.resolveRequestEnvironmentId(routeEnvironmentId, req)');
         expect(body).toContain('this.resolveProtocol(environmentId, req)');
-        // ⛔ Reverse-checked zeros: the same two terms are counted over the
-        // WHOLE file, so a zero here is "absent from this registrar", never
-        // "misspelled".
-        expect(body.includes('this.enforceAuth(')).toBe(false);
-        expect(body.includes('this.resolveExecCtx(')).toBe(false);
+        // The three steps the seam did not have.
+        expect(body).toContain('this.resolveExecCtx(environmentId, req)');
+        expect(body).toContain('this.enforceAuth(req, res, context)');
+        expect(body).toContain('this.enforceEnvironmentOwnership(req, res, environmentId, context)');
+
+        // ⭐ ORDER, not just presence — anonymity is refused before ownership is
+        // compared, and both before any protocol is resolved. A guard that ran
+        // after the answer was produced would satisfy a presence check.
+        expect(body.indexOf('this.resolveExecCtx(')).toBeLessThan(body.indexOf('this.enforceAuth('));
+        expect(body.indexOf('this.enforceAuth(')).toBeLessThan(body.indexOf('this.enforceEnvironmentOwnership('));
+        expect(body.indexOf('this.enforceEnvironmentOwnership(')).toBeLessThan(body.indexOf('this.resolveProtocol('));
+
+        // ⛔ Reverse-checked: the same terms counted over the WHOLE file, so
+        // these readings are about this registrar and not about a misspelling.
         expect(SOURCE.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(SOURCE.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
+        // ...and the ownership guard is NOT sprayed across the file — it is a
+        // single new call site plus its definition.
+        expect(SOURCE.split('this.enforceEnvironmentOwnership(').length - 1).toBe(1);
     });
 });
 

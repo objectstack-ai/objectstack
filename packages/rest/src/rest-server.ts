@@ -1278,6 +1278,103 @@ export class RestServer {
     }
 
     /**
+     * [#13214] Refuse a request whose RESOLVED environment is not one the CALLER
+     * holds — the comparison this server did not have.
+     *
+     * ## The defect this closes, and why the anonymous gate alone did not
+     *
+     * `GET /api/v1/ui/view/:object/:type` mounts UNSCOPED as well as scoped, and
+     * on the unscoped mount the environment is named by the REQUEST: the bound
+     * hostname, else the `X-Environment-Id` header. Both were honoured with no
+     * identity resolved at all, so an ANONYMOUS caller received another
+     * environment's UI view — object label plus every field's name / label /
+     * type / required — and the route doubled as an object-existence oracle for
+     * whatever environment it named. Driven and reported on #13214 (PRs #13244,
+     * #13258).
+     *
+     * Adding `resolveExecCtx` + `enforceAuth` was measured NOT to be the repair
+     * (it was the rejected option B of the 2026-08-30 ruling): it stops the
+     * anonymous caller and nothing else, because an AUTHENTICATED caller could
+     * still name a foreign environment and nothing downstream ever compared the
+     * environment that was RESOLVED with the environment the caller is entitled
+     * to. That comparison is this method.
+     *
+     * ## What "entitled to" means here, mechanically
+     *
+     * There was no ownership predicate in this package to reuse — searched
+     * before writing one — and `ExecutionContext` carries no environment field,
+     * so the fact had to come from where identity is established.
+     * {@link computeExecCtx} validates the caller against an auth service it
+     * looks up in a KERNEL, and it records which environment that kernel belongs
+     * to on `__authEnvironmentId`. A credential is good for the environment
+     * whose auth service accepted it; if the request resolved to a different
+     * environment, the caller is not entitled to what is about to be served.
+     *
+     * That difference is not hypothetical — `computeExecCtx`'s second branch
+     * produces it: when the resolved environment's kernel carries no `auth`
+     * service, the lookup falls back to the DEFAULT environment's, and a session
+     * minted there then authenticates a request naming another environment.
+     *
+     * Two refusable shapes, both handled:
+     *
+     *  1. **Named but not served.** The caller named an environment through
+     *     `X-Environment-Id` and the chain resolved a DIFFERENT one — which is
+     *     what an unresolvable id does today: `resolveRequestEnvironmentId`
+     *     swallows the `envRegistry.resolveById` miss and falls through to the
+     *     default environment, answering 200 with THAT environment's view. Two
+     *     200s with different bytes is how a caller with no credential tells a
+     *     real environment id from an invented one. Refused here rather than
+     *     answered — the ruling's 「信号化拒绝」, and ⛔ never a silent fallback.
+     *  2. **Anchored elsewhere.** The credential was validated in an environment
+     *     other than the one resolved.
+     *
+     * ## ⚠️ Why the refusal is the ANONYMOUS-DENY response, verbatim
+     *
+     * Deliberate, and the reason is the oracle rather than tidiness. A caller
+     * naming a REAL foreign environment already receives 401 from
+     * {@link enforceAuth} — their session is not valid in that environment, so
+     * no context resolves there. Answering the two cases above with anything
+     * else (403, or a 404 of this seam's own) would leave "this environment id
+     * exists" distinguishable from "it does not" by the status alone, which is
+     * the same oracle one layer up. One shape, byte-identical, for every way a
+     * caller can fail to be entitled to the environment it named.
+     *
+     * ⚠️ The cost is diagnosability, and it is named rather than discovered: an
+     * operator whose environment genuinely lacks an `auth` service sees the
+     * anonymous 401, not a wiring error. That is the same trade the sibling
+     * seams already make (`computeExecCtx` answers a faulting resolver and a
+     * genuinely anonymous caller identically, #12537).
+     *
+     * `undefined` and `'platform'` are NOT environments: a control-plane boot
+     * resolves no environment, so there is nothing to own and the anonymous
+     * floor above is the whole gate. A caller that NAMED one anyway (case 1)
+     * is still refused.
+     *
+     * @returns `true` when the response was sent and the caller must stop.
+     */
+    private enforceEnvironmentOwnership(
+        req: any,
+        res: any,
+        environmentId: string | undefined,
+        context: any,
+    ): boolean {
+        // 1. Named through the header, but the chain served something else.
+        const named = this.extractProjectIdHeader(req);
+        const namedButNotServed = named !== undefined && named !== environmentId;
+
+        // 2. The credential is anchored in a different environment.
+        const scopesAnEnvironment = environmentId !== undefined && environmentId !== 'platform';
+        const anchoredElsewhere =
+            scopesAnEnvironment && (context as any)?.__authEnvironmentId !== environmentId;
+
+        if (namedButNotServed || anchoredElsewhere) {
+            res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Enforce object-level API exposure (ObjectSchema `enable.apiEnabled` /
      * `enable.apiMethods`) on the REST data surface — the *external* API boundary
      * only. Internal callers (hooks, flows, raw objectql) are unaffected, which is
@@ -1872,9 +1969,16 @@ export class RestServer {
             // environmentId.
             let authService: any;
             let kernel: any;
+            // [#13214] WHICH environment's auth service actually validated this
+            // caller — the fact an ownership check needs and the one this method
+            // used to compute and drop. Three branches below can answer, and the
+            // SECOND of them answers for a DIFFERENT environment than the one the
+            // request resolved to; see `enforceEnvironmentOwnership`.
+            let authEnvironmentId: string | undefined;
             if (environmentId && environmentId !== 'platform' && this.kernelManager) {
                 kernel = await this.kernelManager.getOrCreate(environmentId);
                 authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                if (authService) authEnvironmentId = environmentId;
             }
             if (!authService && this.defaultEnvironmentIdProvider && this.kernelManager) {
                 try {
@@ -1882,6 +1986,13 @@ export class RestServer {
                     if (def) {
                         kernel = await this.kernelManager.getOrCreate(def);
                         authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                        // ⚠️ The CROSS-ENVIRONMENT branch. The request resolved to
+                        // `environmentId`, but the credential is being checked
+                        // against `def`'s auth service — so a session minted in the
+                        // default environment authenticates a request naming
+                        // another one. Recorded truthfully rather than as
+                        // `environmentId`; that difference IS the ownership fact.
+                        if (authService) authEnvironmentId = def;
                     }
                 } catch { /* fall through */ }
             }
@@ -1890,6 +2001,10 @@ export class RestServer {
             // local kernel directly.
             if (!authService && this.authServiceProvider) {
                 authService = await this.authServiceProvider(environmentId).catch(() => undefined);
+                // The provider is asked FOR this environment and answers for it
+                // (`rest-api-plugin` wires it to the lone local kernel), so the
+                // credential is anchored where the request resolved.
+                if (authService) authEnvironmentId = environmentId;
             }
             if (!authService) return undefined;
             // The auth service may be the AuthManager wrapper (which exposes
@@ -2031,8 +2146,17 @@ export class RestServer {
                 // requiresService capability gates (ADR-0057 D10). NOT an
                 // authorization input — never read by RLS/permission logic, and
                 // NOT an `ExecutionContext` field — hence the cast, which now
-                // covers this key alone.
+                // covers this key and `__authEnvironmentId` below.
                 __kernel: kernel,
+                // [#13214] Internal: the environment whose auth service actually
+                // validated this caller — the left-hand side of the ownership
+                // comparison at the UI-view seam. ⚠️ Unlike `__kernel` this one IS
+                // an authorization input, at exactly one reader
+                // (`enforceEnvironmentOwnership`); it is deliberately NOT an
+                // `ExecutionContext` field, because it describes how the context
+                // was OBTAINED rather than what the principal may do, and nothing
+                // downstream of this transport may branch on it.
+                __authEnvironmentId: authEnvironmentId,
             } as any;
 
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure gate
@@ -6891,6 +7015,32 @@ export class RestServer {
 
     /**
      * Register UI endpoints
+     *
+     * ## [#13214] This registrar's one route is identity- AND ownership-gated
+     *
+     * It used to be the single route in this server's table that resolved NO
+     * identity: it went straight from `resolveProtocol` to `getUiView`, so it
+     * answered 200 to an anonymous caller, byte-identically to an entitled one,
+     * having called `resolveExecCtx` zero times — while all 52 identity-touching
+     * siblings answered 401. Because the unscoped mount lets the REQUEST name
+     * its environment (bound hostname, else `X-Environment-Id`), that made
+     * another environment's object metadata anonymously readable and turned the
+     * route into an object-existence oracle for any environment a caller could
+     * name.
+     *
+     * Maintainer ruling, 2026-08-30 (option C): the seam must require that the
+     * RESOLVED environment belong to the caller — identity resolution PLUS an
+     * ownership check — on BOTH naming channels, and an `envRegistry.resolveById`
+     * validation failure must be a signalled refusal, ⛔ never a silent fallback
+     * to the default environment. ⛔ Anonymous-deny alone was explicitly the
+     * rejected option B.
+     *
+     * The order below is the ruling, step by step, and it is load-bearing:
+     * resolve the environment ONCE through the shared entry point, resolve
+     * identity IN that environment, refuse anonymity, then compare. Resolving
+     * identity before the environment is decided would authenticate the caller
+     * somewhere other than where the answer comes from, which is the very
+     * mismatch {@link enforceEnvironmentOwnership} exists to catch.
      */
     private registerUiEndpoints(basePath: string): void {
         const uiPath = `${basePath}/ui`;
@@ -6902,13 +7052,31 @@ export class RestServer {
             path: `${uiPath}/view/:object/:type`,
             handler: async (req: any, res: any) => {
                 try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const routeEnvironmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#13214] THE environment decision for this request, taken
+                    // once through the shared entry point and then reused — so
+                    // the identity below, the ownership comparison and the
+                    // protocol that answers cannot be about three different
+                    // environments.
+                    const environmentId = await this.resolveRequestEnvironmentId(routeEnvironmentId, req);
+                    const context = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    if (this.enforceAuth(req, res, context)) return;
+                    if (this.enforceEnvironmentOwnership(req, res, environmentId, context)) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (p.getUiView) {
                         const view = await p.getUiView({
                             object: req.params.object,
                             type: req.params.type as any,
-                            ...(environmentId ? { environmentId } : {}),
+                            // [#13214] `routeEnvironmentId`, NOT the resolved id.
+                            // The gate above changed WHO may reach the producer;
+                            // it deliberately did not change WHAT the producer is
+                            // told. This key has only ever been present on the
+                            // scoped mount, and the shipped `getUiView` declares
+                            // `{ object, type }` alone — widening the argument on
+                            // the unscoped mount would be an unrelated behaviour
+                            // change riding on a security fix.
+                            ...(routeEnvironmentId ? { environmentId: routeEnvironmentId } : {}),
                         } as any);
                         res.json(view);
                     } else {
