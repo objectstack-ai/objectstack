@@ -7047,6 +7047,431 @@ export function renderClosedResidueCensus(census, { markdown = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// H40 — the `#` reference that no longer RESOLVES (#13634, A-half only).
+//
+// ## The incident, and why every existing instrument here was silent
+//
+// Between 2026-08-30T14:32Z and ~02:45Z the next morning, content authored by
+// one GitHub account became unreachable to every other seat: two issues
+// answered `Could not resolve to an Issue with the number of…`, and two ruling
+// COMMENTS vanished from a card that had carried at least four, while the same
+// card's comments by other accounts stayed intact. The signature is
+// account-level suppression, ⛔ not deletion — and this row asserts nothing
+// about the cause, then or now (the filing card's own boundary, kept verbatim:
+// no claim about WHY, and no claim that the loss is permanent).
+//
+// ⭐ The part that makes it a patrol rather than a lesson: a ruling's
+// durability turned out to be bounded by WHOSE CARD it happened to sit on. Two
+// of the unreachable cards carried rulings written by the maintainer — those
+// comments were not themselves suppressed, and they were unreachable anyway,
+// because they lived on someone else's card.
+//
+// Nothing here could see it. `assignee` still renders; a card referring to a
+// suppressed number keeps its text unchanged; no label moves and no check
+// turns red. Discovery was by ACCIDENT, at point of use — a seat reaching for
+// one specific card and getting a resolution error. Triage independently hit
+// three more the same way while doing ordinary work (#13178, #12924, #13456),
+// which is how a defect with no detector announces itself: repeatedly, to
+// whoever happens to be standing there.
+//
+// ⚠️ And the blast radius is not enumerable from inside: suppressed content is
+// invisible, so ⛔ no seat can list what is missing. Every count this row
+// prints is a LOWER BOUND over the corpus it read, and it says so.
+//
+// ## ⛔ closed ≠ unreachable — the distinction the whole row stands on
+//
+// A closed card resolves perfectly well. If the predicate confused the two it
+// would report the entire backlog and be switched off in a day, so the
+// separation is measured rather than assumed. Read 2026-08-31, one session,
+// one channel, one token:
+//
+//   #13398 #13399 #13178 #12924 #13456   HTTP 404 — do not resolve
+//   #13324 #13571 (closed) · #13592 (closed PR)   resolve normally
+//   #13438 #13440 #12775 #12708 (open)            resolve normally
+//
+// Twelve reads, same instrument, both verdicts present ⇒ the failures are
+// facts about those five NUMBERS, not about the channel. The closed control is
+// the load-bearing half: `state: "closed"` is a successful resolution and this
+// row is silent about it, forever.
+//
+// ## The four states, and why 404 alone means unresolvable
+//
+// Three-valued is not enough here (#4690, and H19/H20's own three-state folds):
+//
+//   resolvable    HTTP 200 — open OR closed, both healthy, both silent.
+//   unresolvable  HTTP 404 and ONLY 404 — the finding.
+//   unjudged      any other failure (403, 429, 5xx, transport). A rate-limited
+//                 read is not evidence a card is gone, and publishing it as one
+//                 would assert exactly the cause this card forbids.
+//   not attempted the budget below ran out before this number. Distinct from
+//                 unjudged — nothing was asked — and it must not read as clean.
+//
+// ## The two bounds, both measured, both stated in the report
+//
+// ① CORPUS — the LIVE BOARD: the open issues and open PRs this sweep already
+//    holds, plus the comment threads already in the comment cache. Zero extra
+//    requests: every byte scanned was fetched for some other item. Comment
+//    coverage is therefore the GATED subset (H2/H4/H9/H17/H32 candidates), not
+//    the whole board, and the report says so rather than implying a full read.
+//    ⛔ Merged PRs and closed cards are deliberately NOT referrers even though
+//    this sweep holds them: they are archive nobody re-reads, and every number
+//    they add competes for the finite resolution budget below with numbers on
+//    cards a seat will actually open.
+//
+// ② RESOLUTIONS — `H40_RESOLUTION_BUDGET`, spent NEWEST-FIRST over the numbers
+//    no listing in hand already answers. Measured 2026-08-31 on this board:
+//    445 live bodies carry 1,619 distinct `#` references, of which 260 are
+//    answered free from the open listings and 1,359 would each cost a request
+//    at ~366 ms — ~8.3 minutes, against a patrol whose whole job already
+//    measured 228 s inside a 15-minute `timeout-minutes`. So the budget is a
+//    wall-clock bound, not a quota one (400 reads is ~0.1% of one hour's core
+//    quota and ~146 s of that job).
+//
+//    Newest-first, for the same recency logic every window in this file uses:
+//    the measured population is recent, a dangling reference to a recent card
+//    still has live work hanging off it, and the tail is announced as NOT
+//    ATTEMPTED rather than skipped in silence.
+//
+// ## ⛔ Two cheaper shapes, measured and declined — do not re-derive them
+//
+// A bulk `state=all&sort=created&direction=asc` listing maps 100 consecutive
+// numbers per request (creation order IS number order, verified: page 1 is
+// #1–#100, page 5 is #401–#500), which would beat one-GET-per-number ten to
+// one. It cannot work: **the issues listing refuses deep pagination — page 99
+// answers 200 and page 100 answers HTTP 422** (measured 2026-08-31), so an
+// ascending pass reaches #9,900 and stops, and this repo is past #13,900. The
+// descending half that would cover the rest reorders under every new issue, so
+// a row shifting across a page boundary mid-pass would be published as a
+// dangling reference — a false accusation about a live card, which is the one
+// error this row must never make.
+//
+// A batched GraphQL alias query would resolve a hundred numbers per request.
+// Declined for a structural reason rather than a cost one: this file's entire
+// transport story — the prerequisite classifier, its verdict vocabulary, the
+// proxy re-exec — is REST-shaped, and a second transport would run outside all
+// of it, so a GraphQL-side failure would arrive as an unclassified throw in the
+// one script whose contract is that an unread input never reads as a clean one.
+//
+// ## Report-only, and rendered where a trim cannot reach it (#13947)
+//
+// ⛔ Never rewrites a reference, never closes a card, never names a cause. The
+// row hands a human two facts — this number does not resolve, and these cards
+// point at it — and stops.
+//
+// It renders as a RESERVED SECTION rather than as finding rows, and that is a
+// deliberate answer to a measured hazard: the anchor body's renderer drops rows
+// from the tail of one flat list to fit the issue-body limit (#13947 measured
+// 157 of 231 omitted on a live run), so a new family added as ordinary rows can
+// be computed and then silently dropped. A row family whose entire subject is a
+// defect that no instrument reports must not be droppable — so it takes the
+// reservation `renderTriggerIndex`, the census and the rate premise already
+// have (their length is subtracted from the budget BEFORE finding rows are laid
+// out), keeps its own `H40_ROW_CAP` so the reservation stays bounded, and
+// speaks unconditionally on the summary line — the one sentence that renders
+// above the fold on every run, clean or not.
+// ---------------------------------------------------------------------------
+
+/**
+ * The resolution budget: distinct referenced numbers this sweep will ask about
+ * when no listing in hand already answers them.
+ *
+ * ⚠️ It is a WALL-CLOCK bound and the number only means anything beside the two
+ * measurements that set it (both 2026-08-31): ~366 ms per resolution, and a
+ * baseline sweep of 228 s against `half-state-patrol.yml`'s 15-minute
+ * `timeout-minutes`. 400 reads ≈ 146 s, taking the patrol to ~6 minutes. Raise
+ * it against those two numbers re-measured, never against the quota — the quota
+ * has never been the binding constraint here.
+ */
+export const H40_RESOLUTION_BUDGET = 400;
+
+/** Dangling rows rendered in the reserved section before it announces omission. */
+export const H40_ROW_CAP = 25;
+
+/** Referrers named per dangling number — the `H19_TARGET_LIST_CAP` shape. */
+export const H40_REFERRER_LIST_CAP = 5;
+
+/** The measured cost of one resolution, and the corpus it was measured over. */
+export const MEASURED_REFERENCE_RESOLUTION_MS = 366;
+export const MEASURED_DISTINCT_REFERENCES = 1619;
+export const MEASURED_UNANSWERED_REFERENCES = 1359;
+export const MEASURED_REFERENCE_CORPUS_AT = '2026-08-31';
+
+/**
+ * One `#N` into the swept repo.
+ *
+ * Group 1 is the character before the reference (or the empty string at the
+ * start of the text), group 2 the optional `owner/repo` qualifier, group 3 the
+ * number. The preceding character is CAPTURED rather than expressed as a
+ * lookbehind so the shape stays the same kind of object as `closingKeywordRe`
+ * and `partOfRe` — one global regex a self-test can drive over raw strings.
+ *
+ * Three rejections are built in, each with a measured false positive behind it:
+ *
+ *   `[1-9]\d{0,5}`      — no leading zero, and a bound at six digits. GitHub
+ *                         itself would read `#0123` as nothing.
+ *   `(?![0-9A-Za-z_-])` — the reference ends at a non-word boundary, so
+ *                         `#13634-ish` and `#123abc` are not references.
+ *   preceding character — must not be a word character or `/`. The `/` is the
+ *                         load-bearing half: it is what keeps a URL fragment
+ *                         (`…/objectstack#123`) and a path segment from being
+ *                         read as a card reference.
+ */
+export function referenceRe() {
+  return /(^|[\s\S])(?:([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)#|#)([1-9]\d{0,5})(?![0-9A-Za-z_-])/g;
+}
+
+/**
+ * The distinct `#N` a text refers INTO this repo.
+ *
+ * ## Fences stripped, inline spans KEPT — the opposite call from H7/H21/H23
+ *
+ * Every other extractor in this file blanks inline code spans, and the reason
+ * is specific to what those rows are about: GitHub's closing-keyword parser
+ * does NOT fire inside a span, so a backticked keyword is genuinely inert and
+ * reporting it would flag the careful author (`stripMarkdownCode`, measured).
+ *
+ * That reason does not transfer here, and copying the call would delete the
+ * signal. A reference is not an instruction to GitHub — it is a POINTER A
+ * READER FOLLOWS — and 「`Blocked-by: #9612`」 is the natural markdown for a
+ * line meant to be grepped (H4's own note, and reading such a line as absent
+ * once left a card blocked in silence). A seat that opens `` `#13398` `` and
+ * gets a resolution error has hit exactly the defect this row exists to find,
+ * backticks or not.
+ *
+ * Fenced blocks still go, for H17's reason rather than H7's: a fence carries
+ * quoted logs, diffs and pasted `git log` output, and a number inside one is a
+ * citation of something that already happened, not a pointer anybody follows.
+ *
+ * @param {string} text
+ * @param {string} repo — `owner/name`; a qualifier naming any OTHER repo is
+ *   skipped, because each install reads its own board (H19's cross-repo rule).
+ * @returns {Set<number>}
+ */
+export function referencedNumbers(text, repo) {
+  const out = new Set();
+  const body = stripMarkdownCode(text, { inline: false });
+  const want = String(repo ?? '').toLowerCase();
+  for (const m of body.matchAll(referenceRe())) {
+    const [, before, qualifier, digits] = m;
+    if (qualifier) {
+      if (qualifier.toLowerCase() !== want) continue;
+    }
+    // The character before the whole reference — the qualifier's first
+    // character when one is present, the `#` otherwise.
+    if (before !== '' && /[A-Za-z0-9_/]/.test(before)) continue;
+    out.add(Number(digits));
+  }
+  return out;
+}
+
+/**
+ * The reference index: distinct referenced number -> the cards pointing at it.
+ *
+ * `ceiling` is the highest number this sweep actually observed, and numbers
+ * above it are held OUT of the resolution set rather than resolved. It is a
+ * measurement, never a guess — a number the board has not issued yet cannot be
+ * suppressed content, so asking about it would spend budget to manufacture a
+ * 404 and publish a typo as an incident. They are counted and disclosed
+ * (`beyond`), never silently dropped.
+ *
+ * @param {Array<{number: number, html_url?: string, texts: string[]}>} referrers
+ * @param {{ repo: string, ceiling?: number|null }} options
+ */
+export function buildReferenceIndex(referrers, { repo, ceiling = null } = {}) {
+  const refs = new Map();
+  const beyond = new Set();
+  let bodies = 0;
+  for (const referrer of referrers ?? []) {
+    for (const text of referrer?.texts ?? []) {
+      bodies++;
+      for (const n of referencedNumbers(text, repo)) {
+        // A card citing its own number is not a reference to anywhere.
+        if (n === referrer.number) continue;
+        if (ceiling !== null && Number.isFinite(ceiling) && n > ceiling) {
+          beyond.add(n);
+          continue;
+        }
+        if (!refs.has(n)) refs.set(n, new Map());
+        refs.get(n).set(referrer.number, { number: referrer.number, html_url: referrer.html_url });
+      }
+    }
+  }
+  return {
+    refs: new Map([...refs].map(([n, by]) => [n, [...by.values()].sort((a, b) => a.number - b.number)])),
+    beyond: [...beyond].sort((a, b) => a - b),
+    texts: bodies,
+  };
+}
+
+/**
+ * Which numbers this sweep will ASK about, and which it will not.
+ *
+ * Pure, and separated from the fetching on purpose: the cost-control clause of
+ * this row (「每个号码解析一次，不是每个引用方一次」) is a decision, and a
+ * decision the self-test can drive offline is one that cannot quietly stop
+ * holding when the sweep around it changes.
+ *
+ * @param {Iterable<number>} numbers — distinct referenced numbers.
+ * @param {Set<number>|Map<number, any>} known — numbers a listing already answers.
+ * @param {number} budget
+ * @returns {{ free: number[], attempt: number[], deferred: number[], floor: number|null }}
+ */
+export function h40ResolutionPlan(numbers, known, budget = H40_RESOLUTION_BUDGET) {
+  const has = (n) => Boolean(known?.has?.(n));
+  const all = [...(numbers ?? [])];
+  const free = all.filter(has).sort((a, b) => a - b);
+  // Newest first — see the bounds section. `slice` on a descending sort is the
+  // whole mechanism, so the deferred tail is always the OLDEST numbers and the
+  // floor the report states is exact rather than approximate.
+  const unanswered = all.filter((n) => !has(n)).sort((a, b) => b - a);
+  const cap = Number.isFinite(budget) && budget >= 0 ? budget : 0;
+  const attempt = unanswered.slice(0, cap);
+  return {
+    free,
+    attempt,
+    deferred: unanswered.slice(cap),
+    floor: attempt.length > 0 ? attempt[attempt.length - 1] : null,
+  };
+}
+
+/**
+ * One resolution observation -> one of the three READ states.
+ *
+ * ⛔ 404 and only 404 is `unresolvable`. Widening this to "any failure" is the
+ * one change that would turn this row from a patrol into an accusation
+ * generator: a 403 during a rate-limit window would publish every reference it
+ * touched as a vanished card, and the filing card's boundary — no cause
+ * asserted — cannot survive an instrument that cannot tell a refusal from an
+ * absence.
+ *
+ * @param {{ ok?: boolean, status?: number }} observation
+ */
+export function h40Verdict(observation) {
+  if (observation?.ok) return 'resolvable';
+  return observation?.status === 404 ? 'unresolvable' : 'unjudged';
+}
+
+/**
+ * The report this row renders from — assembled from the index and whatever the
+ * resolutions came back as.
+ *
+ * @param {{ refs: Map<number, object[]>, beyond: number[], texts: number }} index
+ * @param {{ free: number[], attempt: number[], deferred: number[], floor: number|null }} plan
+ * @param {Map<number, {ok?: boolean, status?: number}>} observations
+ * @param {{ threads?: number, cards?: number, ceiling?: number|null }} [context]
+ */
+export function h40Report(index, plan, observations, context = {}) {
+  const referrersOf = (n) => index?.refs?.get?.(n) ?? [];
+  const dangling = [];
+  const unjudged = [];
+  let resolved = 0;
+  for (const n of plan?.attempt ?? []) {
+    const verdict = h40Verdict(observations?.get?.(n));
+    if (verdict === 'resolvable') resolved++;
+    else if (verdict === 'unresolvable') dangling.push({ number: n, referrers: referrersOf(n) });
+    else {
+      const obs = observations?.get?.(n);
+      unjudged.push({
+        number: n,
+        referrers: referrersOf(n),
+        detail: obs?.status ? `HTTP ${obs.status}` : 'unreadable',
+      });
+    }
+  }
+  return {
+    distinct: index?.refs?.size ?? 0,
+    texts: index?.texts ?? 0,
+    threads: context.threads ?? 0,
+    cards: context.cards ?? 0,
+    ceiling: context.ceiling ?? null,
+    beyond: index?.beyond?.length ?? 0,
+    free: plan?.free?.length ?? 0,
+    attempted: plan?.attempt?.length ?? 0,
+    deferred: plan?.deferred?.length ?? 0,
+    floor: plan?.floor ?? null,
+    resolved,
+    dangling: dangling.sort((a, b) => b.number - a.number),
+    unjudged: unjudged.sort((a, b) => b.number - a.number),
+  };
+}
+
+/** `#N` referrers, capped and linked, in either medium. */
+function namedReferrers(referrers, markdown) {
+  const rows = referrers ?? [];
+  const shown = rows
+    .slice(0, H40_REFERRER_LIST_CAP)
+    .map((r) => (markdown && r.html_url ? `[#${r.number}](${r.html_url})` : `#${r.number}`));
+  const rest = rows.length - shown.length;
+  return `${shown.join(', ')}${rest > 0 ? ` (+${rest} more)` : ''}`;
+}
+
+/**
+ * The H40 section, in either medium.
+ *
+ * Returns `[]` only when no report was supplied at all, so every existing
+ * two-argument renderer call stays byte-identical. Once a report exists the
+ * section ALWAYS renders — including the clean state — for the reason the rate
+ * premise renders healthy: a check visible only when it fires cannot be told
+ * apart from a check that was removed, and this row's whole subject is a defect
+ * that nothing reported.
+ *
+ * @param {ReturnType<typeof h40Report>} [report]
+ * @param {{ markdown?: boolean }} [options]
+ */
+export function renderDanglingReferences(report, { markdown = false } = {}) {
+  if (!report) return [];
+  const coverage =
+    `${report.attempted} resolution(s) attempted of ${report.distinct} distinct \`#\` reference(s) ` +
+    `read off ${report.texts} live-board text(s) (${report.cards} open card(s)/PR(s) + ` +
+    `${report.threads} already-cached comment thread(s)); ${report.free} answered free from listings ` +
+    `in hand` +
+    `${report.deferred > 0 ? `, ${report.deferred} NOT ATTEMPTED at the ${H40_RESOLUTION_BUDGET}-resolution budget (attempted down to #${report.floor})` : ''}` +
+    `${report.beyond > 0 ? `, ${report.beyond} above #${report.ceiling}, the highest number this sweep saw` : ''}.`;
+
+  const head = markdown
+    ? ['### Dangling references (H40)', '']
+    : ['', 'Dangling references (H40)'];
+
+  if (report.dangling.length === 0 && report.unjudged.length === 0) {
+    const clean =
+      `No reference in the corpus failed to resolve. Every number above was READ — ⛔ a CLOSED card ` +
+      `resolves normally and is not a finding here, so this line is a clean reading rather than a ` +
+      `predicate that reports nothing. ${coverage} Lower bound by construction: suppressed content ` +
+      `is invisible, so ⛔ no sweep can enumerate what is missing.`;
+    return [...head, markdown ? `_${clean}_` : `  ${clean}`];
+  }
+
+  head.push(
+    `${report.dangling.length} number(s) referred to by the live board do NOT resolve, and ` +
+      `${report.unjudged.length} could not be judged. ⛔ Report-only, and ⛔ no cause is asserted: a ` +
+      `number can fail to resolve because it was deleted, transferred, or made unreachable, and this ` +
+      `sweep cannot tell those apart — a reference that fails is a fact, everything after it is a ` +
+      `question for a human. ⛔ Do not rewrite the referring text and do not close anything; if a ` +
+      `number returns, the reference was always correct. ${coverage}`,
+    '',
+  );
+
+  const rows = [
+    ...report.dangling.map((row) => ({ ...row, lead: `**#${row.number}** — HTTP 404, does not resolve` })),
+    ...report.unjudged.map((row) => ({
+      ...row,
+      lead: `${UNJUDGED_MARKER} **#${row.number}** — ${row.detail}, so it is UNJUDGED, not confirmed dangling`,
+    })),
+  ];
+  const shown = rows.slice(0, H40_ROW_CAP);
+  for (const row of shown) {
+    const lead = markdown ? row.lead : row.lead.replace(/\*\*/g, '');
+    const text = `${lead}; referred to by ${namedReferrers(row.referrers, markdown)}`;
+    head.push(markdown ? `- ${text}` : `  ${text}`);
+  }
+  if (rows.length > shown.length) {
+    const omitted = `… ${rows.length - shown.length} further number(s) omitted at the H40_ROW_CAP render budget; the full list is in the workflow run log.`;
+    head.push(markdown ? `- _${omitted}_` : `  ${omitted}`);
+  }
+  return head;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -7191,6 +7616,23 @@ export const SWEEP_COUNT_KEYS = [
   'commitWindowTruncated',
   'openListingPages',
   'openListingsTruncated',
+  // H40's coverage numbers (#13634). The pair that matters is
+  // `refAttempted`/`refDeferred`: a budget-bound pass that printed only what it
+  // FOUND would read as a complete sweep of the reference surface, which is the
+  // #4690 inversion in this row's own uniform. `refFloor` rides along because
+  // "attempted down to #N" is what makes the budget's reach checkable rather
+  // than merely stated.
+  'refDistinct',
+  'refCards',
+  'refThreads',
+  'refFree',
+  'refAttempted',
+  'refResolved',
+  'refDangling',
+  'refUnjudged',
+  'refDeferred',
+  'refFloor',
+  'refBeyond',
 ];
 
 /**
@@ -7290,6 +7732,18 @@ export function summaryLine(counts, findingCount) {
   const commits = counts.commits ?? 0;
   const commitBindings = counts.commitBindings ?? 0;
   const commitBindingMessages = counts.commitBindingMessages ?? 0;
+  // H40's numbers (#13634). Every one defaults, for `summaryLine({}, 0)`'s sake
+  // — the bare line is a pinned shape and must never render `undefined`.
+  const refDistinct = counts.refDistinct ?? 0;
+  const refCards = counts.refCards ?? 0;
+  const refThreads = counts.refThreads ?? 0;
+  const refFree = counts.refFree ?? 0;
+  const refAttempted = counts.refAttempted ?? 0;
+  const refResolved = counts.refResolved ?? 0;
+  const refDangling = counts.refDangling ?? 0;
+  const refUnjudged = counts.refUnjudged ?? 0;
+  const refDeferred = counts.refDeferred ?? 0;
+  const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
@@ -7427,6 +7881,28 @@ export function summaryLine(counts, findingCount) {
           'landed.'
         : ''
     } ` +
+    // H40's disclosure (#13634). It is UNCONDITIONAL and it is here rather than
+    // only in the section for one reason: H40's findings do not enter the
+    // finding COUNT this sentence opens with (they render as a reserved
+    // section, see `renderDanglingReferences`), so without this clause a board
+    // carrying dangling references could print a small finding count and read
+    // as quiet. The `read X of Y` shape is the same duty every other pass owes:
+    // a budget-bound pass must never read as a complete one.
+    `Dangling references (H40): ${refResolved} of ${refAttempted} attempted resolution(s) answered, ` +
+    `over ${refDistinct} distinct \`#\` reference(s) read off the LIVE board — ${refCards} open ` +
+    `card(s)/PR(s) and ${refThreads} already-cached comment thread(s), so comment coverage is the ` +
+    `gated subset rather than the whole board, and merged/closed archive is out of the corpus by ` +
+    `design. ${refFree} number(s) were answered free from listings already in hand` +
+    `${
+      refDeferred > 0
+        ? `, and ${refDeferred} were NOT ATTEMPTED at the ${H40_RESOLUTION_BUDGET}-resolution budget ` +
+          `(newest-first; this pass reached down to #${counts.refFloor}) — not attempted is not clean`
+        : ''
+    }` +
+    `${refBeyond > 0 ? `; ${refBeyond} reference(s) name a number above the highest this sweep saw and were held out rather than resolved` : ''}. ` +
+    `${refDangling} do(es) not resolve and ${refUnjudged} could not be judged — ⛔ only HTTP 404 is ` +
+    'read as unresolvable, a CLOSED card resolves normally and is never a finding, and no cause is ' +
+    'asserted for any of them. Suppressed content is invisible, so every count here is a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -7472,6 +7948,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h35GatePatrol', 'Gate-removal patrol (H35): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
   ['h37Folds', 'Family folds (H37): '],
+  ['h40References', 'Dangling references (H40): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -7636,6 +8113,7 @@ export function renderPlain(findings, counts, options = {}) {
   const lines = findings.map(
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
+  lines.push(...renderDanglingReferences(options.references, { markdown: false }));
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
   lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
   lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
@@ -7761,7 +8239,11 @@ export function renderMarkdown(findings, counts, options = {}) {
   // be able to truncate away. The census in particular is the leg that exists
   // because a population grew unobserved — losing it to a body trim would
   // reproduce that defect inside its own fix.
+  // H40 leads the reserved block (#13634): it is the only section here that can
+  // carry an ALARM, and the reservation is the whole point of putting it in a
+  // section rather than in the finding rows the trim eats (#13947).
   const indexBlock = [
+    ...renderDanglingReferences(options.references, { markdown: true }),
     ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
     ...renderClosedResidueCensus(options.census, { markdown: true }),
     ...renderRatePremise(options.ratePremise, { markdown: true }),
@@ -8717,13 +9199,31 @@ async function sweep(options = {}) {
     commitWindowTruncated: false,
     openListingPages: 0,
     openListingsTruncated: [],
+    // H40's numbers (#13634), initialised for the reason the window pairs are:
+    // a sweep that throws before the reference pass must render numbers, and a
+    // zero attempted beside a zero distinct is visibly a pass that did not run.
+    refDistinct: 0,
+    refCards: 0,
+    refThreads: 0,
+    refFree: 0,
+    refAttempted: 0,
+    refResolved: 0,
+    refDangling: 0,
+    refUnjudged: 0,
+    refDeferred: 0,
+    refFloor: null,
+    refBeyond: 0,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
   // summary line the same `read X of Y`.
   const hold = { entries: [], candidates: 0, probed: 0 };
+  // H40's report rides out the same way and for the same reason: it is rendered
+  // as a reserved SECTION rather than as finding rows, so it cannot travel back
+  // on `findings` (#13634).
+  const references = { report: null };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
@@ -8778,8 +9278,14 @@ async function sweep(options = {}) {
           triggerIndex,
           census,
           ratePremise,
+          references: references.report,
         })
-      : renderPlain(findings, counts, { triggerIndex, census, ratePremise }),
+      : renderPlain(findings, counts, {
+          triggerIndex,
+          census,
+          ratePremise,
+          references: references.report,
+        }),
   );
 }
 
@@ -9760,7 +10266,7 @@ async function listAllOpenIssues(stats = {}) {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
   // `pm:awaiting-maintainer` is listed like every other state label (#11196
   // fix 5). H25's exclusivity carriers would be reachable through the label
   // they wrongly coexist with, but a card in the state ALONE would otherwise be
@@ -10560,6 +11066,98 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // counted as probed and not as unreadable.
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
+
+  // -- H40 — the dangling-reference patrol (#13634) --------------------------
+  //
+  // Runs LAST, deliberately. It is the only pass here whose cost is a budget
+  // rather than a population, so every other item's findings are already
+  // gathered before it spends a request: a reference pass that runs out of
+  // quota or wall clock costs this report its own section, never anyone else's
+  // rows. It is also why its corpus is free — every text it scans was fetched
+  // for some other item, and the comment threads it reads are the ones already
+  // in `commentCache`.
+  if (references) {
+    const referrers = [];
+    // The live board: open cards (label pages ∪ the unscoped inventory) and
+    // open PRs. ⛔ Not `seenMerged`/`seenClosed` — archive, see the section
+    // header's corpus bound.
+    const liveCards = new Map();
+    for (const [number, issue] of seenUnscoped) liveCards.set(number, issue);
+    for (const [number, issue] of seen) liveCards.set(number, issue);
+    for (const [number, pr] of seenPrs) liveCards.set(number, pr);
+    for (const [number, row] of liveCards) {
+      const texts = [row.body ?? ''];
+      // The comment channel, from the cache and ONLY from the cache: a thread
+      // this sweep already paid for is free, and buying one per card would be a
+      // second request on every open card — the cost this row's own clause
+      // forbids. The report states the gated coverage rather than implying more.
+      for (const comment of commentCache.get(number) ?? []) texts.push(comment?.body ?? '');
+      referrers.push({ number, html_url: row.html_url, texts });
+    }
+    const threads = [...liveCards.keys()].filter((n) => commentCache.has(n)).length;
+    // The ceiling is a MEASUREMENT: the highest number this sweep actually saw
+    // anywhere, archive included (a merged PR is perfectly good evidence that a
+    // number exists). Numbers above it are held out rather than resolved.
+    const ceiling = Math.max(
+      0,
+      ...[...liveCards.keys(), ...seenMerged.keys(), ...seenClosed.keys()],
+    );
+    const index = buildReferenceIndex(referrers, { repo: OWNER_REPO, ceiling: ceiling || null });
+
+    // Numbers a listing in hand already answers — the free half of the cost
+    // control. Archive counts HERE even though it is not a referrer: a merged
+    // PR in the window is proof its number resolves, and using it spends no
+    // request. `blockerCache` joins in for the same reason — H19 already paid
+    // for those resolutions, and 「每个号码解析一次」 is a claim about the whole
+    // sweep, not about this pass.
+    const known = new Set([
+      ...liveCards.keys(),
+      ...seenMerged.keys(),
+      ...seenClosed.keys(),
+    ]);
+    const observations = new Map();
+    for (const resolved of blockerCache.values()) {
+      if (!resolved?.local || !Number.isFinite(resolved.number)) continue;
+      if (resolved.state === 'unresolved') {
+        // Not put in `known`: H19 already asked and got no answer, so this
+        // number still owes a verdict — it is carried as an OBSERVATION so the
+        // plan can attempt it without paying twice.
+        observations.set(resolved.number, { status: resolved.detail === 'HTTP 404' ? 404 : 0 });
+      } else {
+        known.add(resolved.number);
+      }
+    }
+    const plan = h40ResolutionPlan(index.refs.keys(), known, H40_RESOLUTION_BUDGET);
+    for (const n of plan.attempt) {
+      if (observations.has(n)) continue;
+      try {
+        await rest(`/repos/${OWNER_REPO}/issues/${n}`);
+        observations.set(n, { ok: true });
+      } catch (err) {
+        // Per-number, never fatal — H19's reasoning, and one step further: the
+        // status is kept RAW so `h40Verdict` is the only place that decides
+        // what 404 means. A transport failure mid-budget leaves that number
+        // UNJUDGED and every earlier answer intact.
+        observations.set(n, { status: err?.status ?? 0 });
+      }
+    }
+    references.report = h40Report(index, plan, observations, {
+      threads,
+      cards: liveCards.size,
+      ceiling: ceiling || null,
+    });
+    stats.refDistinct = references.report.distinct;
+    stats.refCards = references.report.cards;
+    stats.refThreads = references.report.threads;
+    stats.refFree = references.report.free;
+    stats.refAttempted = references.report.attempted;
+    stats.refResolved = references.report.resolved;
+    stats.refDangling = references.report.dangling.length;
+    stats.refUnjudged = references.report.unjudged.length;
+    stats.refDeferred = references.report.deferred;
+    stats.refFloor = references.report.floor;
+    stats.refBeyond = references.report.beyond;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -15129,6 +15727,171 @@ function selfTest() {
   t('H37: all three count keys ride the enumerated contract', ['liveFolds', 'memberReadCandidates', 'memberReadProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   // The markdown medium renders an H37 row like every other finding row.
   t('markdown: an H37 row links the card it names', renderMarkdown([[{ number: 11680, html_url: 'https://example.test/11680' }, 'H37', 'member pointer without the label']], { repo: 'r', issues: 1, unscoped: 0, prs: 0, merged: 0 }).includes('- **H37** [#11680](https://example.test/11680)'), true);
+
+  // -- H40 — the dangling-reference patrol (#13634 A-half, report-only) ------
+  //
+  // The four verdicts are the whole item, and two of them are the ones every
+  // naive version gets wrong: a CLOSED card resolves and is not a finding, and
+  // a failure that is not a 404 is UNJUDGED rather than a vanished card. Both
+  // are pinned as controls beside the positive case, because a predicate that
+  // reports the entire backlog and one that reports a rate-limit window as an
+  // incident are the two ways this row could ship broken.
+  const REPO_40 = 'objectstack-ai/objectstack';
+  const refs40 = (text) => [...referencedNumbers(text, REPO_40)].sort((a, b) => a - b).join(',');
+
+  // The extractor.
+  t('H40 refs: a bare reference is read', refs40('blocked on #13398 for now'), '13398');
+  t('H40 refs: several in one text, distinct', refs40('see #13398, #13399 and #13398 again'), '13398,13399');
+  t('H40 refs: a reference at the very start of the text is read', refs40('#13398 is unreachable'), '13398');
+  t('H40 refs: this repo\'s own qualifier is read', refs40(`waiting on ${REPO_40}#12924`), '12924');
+  t('H40 refs: …case-insensitively, as GitHub resolves it', refs40('OBJECTSTACK-AI/OBJECTSTACK#12924'), '12924');
+  t('H40 refs: ⛔ a SIBLING repo qualifier is out of scope', refs40('objectstack-ai/objectui#3430 is theirs'), '');
+  t('H40 refs: …and its bare-looking tail is not harvested either', refs40('objectstack-ai/cloud#77'), '');
+  // The `/` rejection: a URL fragment is not a card reference.
+  t('H40 refs: a repo URL fragment is not a reference', refs40('https://github.com/objectstack-ai/objectstack#13398'), '');
+  t('H40 refs: a path segment is not a reference', refs40('see docs/adr/0112#3 for the envelope'), '');
+  t('H40 refs: a comment permalink names no bare number', refs40('https://github.com/objectstack-ai/objectstack/issues/13634#issuecomment-5477064578'), '');
+  // Word-boundary and numeral rejections.
+  t('H40 refs: a word character before the hash rejects it', refs40('release v1.2#3'), '');
+  t('H40 refs: a trailing word character rejects it', refs40('#13398abc'), '');
+  t('H40 refs: a hyphenated tail rejects it', refs40('#13398-ish'), '');
+  t('H40 refs: a leading zero is not an issue number', refs40('#0123'), '');
+  t('H40 refs: #0 is not an issue number', refs40('#0'), '');
+  t('H40 refs: a markdown heading is not a reference', refs40('### 13398 things'), '');
+  t('H40 refs: a hash with a space is not a reference', refs40('# 13398'), '');
+  // ⭐ The deliberate divergence from H7/H21/H23: fences go, inline spans STAY.
+  t('H40 refs: ⭐ a BACKTICKED reference is still a reference', refs40('`Blocked-by: #9612` is the line'), '9612');
+  t('H40 refs: …which is the opposite call from the keyword extractors', closingKeywordTargets('`Fixes #9612`').size, 0);
+  t('H40 refs: a fenced block is a citation, not a pointer', refs40('text\n```\nsee #13398\n```\n'), '');
+  t('H40 refs: …and prose outside the fence still counts', refs40('see #13399\n```\nsee #13398\n```\n'), '13399');
+  t('H40 refs: a tilde fence is stripped too', refs40('~~~\n#13398\n~~~\n'), '');
+
+  // The index: distinct numbers, referrers, self-references, the ceiling.
+  const referrer40 = (number, ...texts) => ({ number, html_url: `https://example.test/${number}`, texts });
+  const index40 = buildReferenceIndex(
+    [
+      referrer40(13634, 'refs #13398 and #13399', 'a comment naming #13398 again'),
+      referrer40(13792, 'the 08-29 batch: #13398'),
+      referrer40(13766, 'this card refers to itself #13766 and to #12924'),
+    ],
+    { repo: REPO_40, ceiling: 13959 },
+  );
+  t('H40 index: distinct numbers, not occurrences', index40.refs.size, 3);
+  t('H40 index: ⭐ one number, every referrer that names it', index40.refs.get(13398).map((r) => r.number).join(','), '13634,13792');
+  t('H40 index: …counted once per referrer, not once per mention', index40.refs.get(13398).length, 2);
+  t('H40 index: a card citing its own number is not a referrer', index40.refs.has(13766), false);
+  t('H40 index: comments are referrer texts like bodies', index40.texts, 4);
+  t('H40 index: referrers carry their URL for the renderer', index40.refs.get(12924)[0].html_url, 'https://example.test/13766');
+  const beyond40 = buildReferenceIndex([referrer40(1, 'see #99999 and #13398')], { repo: REPO_40, ceiling: 13959 });
+  t('H40 index: a number above the measured ceiling is held OUT', beyond40.refs.has(99999), false);
+  t('H40 index: …and counted rather than dropped in silence', beyond40.beyond.join(','), '99999');
+  t('H40 index: …while a number under the ceiling is unaffected', beyond40.refs.has(13398), true);
+  t('H40 index: no ceiling means no holding out', buildReferenceIndex([referrer40(1, 'see #99999')], { repo: REPO_40 }).refs.has(99999), true);
+
+  // The plan — the cost-control decision, offline.
+  const plan40 = h40ResolutionPlan([13398, 13399, 12924, 13634], new Set([13634]), 2);
+  t('H40 plan: a number a listing already answers costs nothing', plan40.free.join(','), '13634');
+  t('H40 plan: …and is not attempted', plan40.attempt.includes(13634), false);
+  t('H40 plan: the budget is spent NEWEST-first', plan40.attempt.join(','), '13399,13398');
+  t('H40 plan: the rest is deferred, never silently dropped', plan40.deferred.join(','), '12924');
+  t('H40 plan: the floor is the lowest number actually attempted', plan40.floor, 13398);
+  t('H40 plan: a budget that covers everything defers nothing', h40ResolutionPlan([1, 2, 3], new Set(), 10).deferred.length, 0);
+  t('H40 plan: …and its floor is the lowest of the corpus', h40ResolutionPlan([1, 2, 3], new Set(), 10).floor, 1);
+  t('H40 plan: a zero budget attempts nothing and states no floor', h40ResolutionPlan([1, 2], new Set(), 0).floor, null);
+  t('H40 plan: …and defers all of it', h40ResolutionPlan([1, 2], new Set(), 0).deferred.length, 2);
+  t('H40 plan: ⛔ one resolution per DISTINCT number, never per referrer', h40ResolutionPlan(index40.refs.keys(), new Set(), 10).attempt.length, index40.refs.size);
+
+  // ⛔ The four verdicts — the item's whole correctness.
+  t('H40 verdict: an OPEN card resolves', h40Verdict({ ok: true }), 'resolvable');
+  t('H40 verdict: ⛔ a CLOSED card resolves too — 200 is 200', h40Verdict({ ok: true }), 'resolvable');
+  t('H40 verdict: only 404 is unresolvable', h40Verdict({ status: 404 }), 'unresolvable');
+  t('H40 verdict: ⛔ a 403 is UNJUDGED, never a vanished card', h40Verdict({ status: 403 }), 'unjudged');
+  t('H40 verdict: ⛔ a rate-limit 429 is UNJUDGED', h40Verdict({ status: 429 }), 'unjudged');
+  t('H40 verdict: a 5xx is UNJUDGED', h40Verdict({ status: 502 }), 'unjudged');
+  t('H40 verdict: a transport failure with no status is UNJUDGED', h40Verdict({ status: 0 }), 'unjudged');
+  t('H40 verdict: an absent observation is UNJUDGED, not clean', h40Verdict(undefined), 'unjudged');
+
+  // The report: what the section and the summary line both read from.
+  const obs40 = new Map([
+    [13398, { status: 404 }],
+    [13399, { status: 404 }],
+    [12924, { status: 403 }],
+  ]);
+  const plan40b = h40ResolutionPlan(index40.refs.keys(), new Set(), 10);
+  const report40 = h40Report(index40, plan40b, obs40, { threads: 1, cards: 3, ceiling: 13959 });
+  t('H40 report: dangling numbers are the 404s', report40.dangling.map((r) => r.number).join(','), '13399,13398');
+  t('H40 report: …carrying their referrers', report40.dangling.find((r) => r.number === 13398).referrers.map((r) => r.number).join(','), '13634,13792');
+  t('H40 report: ⛔ a non-404 failure lands in UNJUDGED, not in dangling', report40.unjudged.map((r) => r.number).join(','), '12924');
+  t('H40 report: …and is not counted as resolved either', report40.resolved, 0);
+  const clean40 = h40Report(index40, plan40b, new Map([[13398, { ok: true }], [13399, { ok: true }], [12924, { ok: true }]]), {});
+  t('H40 report: ⛔ an all-CLOSED board is CLEAN, not a backlog of findings', clean40.dangling.length, 0);
+  t('H40 report: …and says how many it actually answered', clean40.resolved, 3);
+  t('H40 report: the deferred tail reaches the report', h40Report(index40, h40ResolutionPlan(index40.refs.keys(), new Set(), 1), new Map(), {}).deferred, 2);
+
+  // The section renderer — the three states, and the report-only wording.
+  const rendered40 = (report, markdown = true) => renderDanglingReferences(report, { markdown }).join('\n');
+  t('H40 render: no report at all renders nothing', renderDanglingReferences(undefined).length, 0);
+  t('H40 render: ⭐ a CLEAN pass still renders — a silent check reads as a deleted one', rendered40(clean40).includes('No reference in the corpus failed to resolve'), true);
+  t('H40 render: …and says a closed card is not a finding', rendered40(clean40).includes('a CLOSED card'), true);
+  t('H40 render: …and states the coverage it actually had', rendered40(clean40).includes('3 resolution(s) attempted of 3 distinct'), true);
+  t('H40 render: …and calls its own numbers a lower bound', rendered40(clean40).includes('LOWER BOUND') || rendered40(clean40).includes('Lower bound'), true);
+  t('H40 render: a dangling number is named', rendered40(report40).includes('**#13398** — HTTP 404'), true);
+  t('H40 render: …with its referrers linked', rendered40(report40).includes('[#13634](https://example.test/13634)'), true);
+  t('H40 render: …and the plain medium names them without links', rendered40(report40, false).includes('#13634, #13792'), true);
+  t('H40 render: an unjudged number carries the marker', rendered40(report40).includes(`${UNJUDGED_MARKER} **#12924**`), true);
+  t('H40 render: …and says UNJUDGED, not confirmed', rendered40(report40).includes('UNJUDGED, not confirmed dangling'), true);
+  t('H40 render: ⛔ no cause is asserted', rendered40(report40).includes('no cause is asserted'), true);
+  t('H40 render: ⛔ it prescribes no rewrite and no close', rendered40(report40).includes('Do not rewrite the referring text and do not close anything'), true);
+  t('H40 render: report-only is stated in as many words', rendered40(report40).includes('Report-only'), true);
+  // The referrer and row caps.
+  const wide40 = { ...report40, dangling: [{ number: 1, referrers: Array.from({ length: 9 }, (_, i) => ({ number: 100 + i })) }], unjudged: [] };
+  t('H40 render: the referrer list is capped', rendered40(wide40).includes(`+${9 - H40_REFERRER_LIST_CAP} more`), true);
+  const many40 = { ...report40, dangling: Array.from({ length: H40_ROW_CAP + 4 }, (_, i) => ({ number: 9000 + i, referrers: [] })), unjudged: [] };
+  t('H40 render: the row list is capped', rendered40(many40).includes(`… 4 further number(s) omitted`), true);
+  t('H40 render: …and names the cap that produced the omission', rendered40(many40).includes('H40_ROW_CAP'), true);
+
+  // ⭐⭐ #13947 — the reservation. The anchor renderer trims finding rows from
+  // the TAIL of one flat list to fit the body limit (157 of 231 omitted on a
+  // measured run), so a family added as ordinary rows can be computed and then
+  // silently dropped. These two cases are the acceptance for the placement
+  // choice: the section survives a body whose findings ARE being trimmed.
+  const flood40 = Array.from({ length: 900 }, (_, i) => [
+    { number: 20000 + i, html_url: `https://example.test/${20000 + i}` },
+    'H10',
+    'a long enough finding sentence to push this body past its rendering budget and force the trim to fire',
+  ]);
+  const floodedBody = renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: report40 });
+  t('#13947: the flood really does trigger the row trim', floodedBody.includes('further row(s) omitted'), true);
+  t('#13947: ⭐ …and the H40 section is STILL rendered', floodedBody.includes('### Dangling references (H40)'), true);
+  t('#13947: …naming the dangling number itself, not just the heading', floodedBody.includes('**#13398** — HTTP 404'), true);
+  t('#13947: the body still fits the renderer budget it was trimmed for', floodedBody.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947: a clean H40 section is rendered on a flooded body too', renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: clean40 }).includes('No reference in the corpus failed to resolve'), true);
+  // …and the SECTION is absent when no reference pass ran, so every existing
+  // caller of the two renderers keeps its byte-identical output. ⚠️ Asserted on
+  // the section's own heading and sentence, never on the anchor phrase: the
+  // summary CLAUSE is unconditional by design and carries that phrase on every
+  // run, so a bare `.includes('Dangling references (H40)')` here would be
+  // answered by the summary line and could never fail.
+  t('#13947: no reference report renders no section heading', renderMarkdown([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('### Dangling references (H40)'), false);
+  t('#13947: …and no section body', renderMarkdown([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('No reference in the corpus'), false);
+  t('#13947: …in the plain medium either', renderPlain([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('No reference in the corpus'), false);
+  t('#13947: …while the summary clause speaks on every run, section or not', renderPlain([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('Dangling references (H40): '), true);
+
+  // The summary clause — the second half of the anti-trim answer, and the one
+  // that renders above the fold whether the section is read or not.
+  t('H40 summary: the coverage pair is reported', saidBy('h40References', summaryLine({ refResolved: 380, refAttempted: 400 }, 0)).includes('380 of 400 attempted resolution(s)'), true);
+  t('H40 summary: …and the free half beside it', saidBy('h40References', summaryLine({ refFree: 260 }, 0)).includes('260 number(s) were answered free'), true);
+  t('H40 summary: a deferred tail is announced, with the floor it reached', saidBy('h40References', summaryLine({ refDeferred: 959, refFloor: 12874 }, 0)).includes('959 were NOT ATTEMPTED'), true);
+  t('H40 summary: …and says not-attempted is not clean', saidBy('h40References', summaryLine({ refDeferred: 1, refFloor: 2 }, 0)).includes('not attempted is not clean'), true);
+  t('H40 summary: …and names the floor the budget reached', saidBy('h40References', summaryLine({ refDeferred: 1, refFloor: 12874 }, 0)).includes('down to #12874'), true);
+  t('H40 summary: a fully-covered pass claims no deferral', saidBy('h40References', summaryLine({ refAttempted: 3 }, 0)).includes('NOT ATTEMPTED'), false);
+  t('H40 summary: ⛔ the closed/404 distinction is stated where a reader sees it', saidBy('h40References', summaryLine({}, 0)).includes('a CLOSED card resolves normally and is never a finding'), true);
+  t('H40 summary: ⛔ no cause is asserted, on the summary line too', saidBy('h40References', summaryLine({}, 0)).includes('no cause is asserted'), true);
+  t('H40 summary: the corpus bound is stated, not implied', saidBy('h40References', summaryLine({}, 0)).includes('comment coverage is the gated subset'), true);
+  t('H40 summary: …including what is deliberately OUT of it', saidBy('h40References', summaryLine({}, 0)).includes('merged/closed archive is out of the corpus'), true);
+  t('H40 summary: the lower-bound caveat survives into the sentence', saidBy('h40References', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H40 summary: a bare line renders numbers, never `undefined`', saidBy('h40References', summaryLine({}, 0)).includes('undefined'), false);
+  t('H40 summary: every count key rides the enumerated contract', ['refDistinct', 'refCards', 'refThreads', 'refFree', 'refAttempted', 'refResolved', 'refDangling', 'refUnjudged', 'refDeferred', 'refFloor', 'refBeyond'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
