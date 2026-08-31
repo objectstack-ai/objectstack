@@ -165,6 +165,28 @@ export const LIVE_READING_MARKERS = [
 ];
 
 /**
+ * Phrasings that SCOPE a present-tense word to the past, so the sentence carries
+ * no claim about this tree any more.
+ *
+ * Having a vocabulary is the point. The cheapest honest repair for a rotting
+ * stamp is almost never re-running the measurement — it is saying WHEN the
+ * reading was taken. "the installed better-auth 1.7.1" rots at the next bump;
+ * "the then-installed better-auth 1.7.1" is true for good, and neither sentence
+ * claims anything the other does not about the behaviour itself.
+ */
+export const HISTORICAL_SCOPE_MARKERS = [
+  'then-installed',
+  'then installed',
+  'at the time',
+  'was installed',
+  'was the installed',
+  'not re-measured',
+  'no longer the installed',
+  'as of',
+  'historical',
+];
+
+/**
  * What makes a stamp historical, and therefore permanent. A measurement date or
  * an issue reference says WHEN the reading was taken, which is exactly the
  * coordinate a frozen version number is missing.
@@ -347,17 +369,22 @@ export function classifySite(site, text, resolvedFor) {
   const i = site.line - 1;
   const sentence = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 2)).join(' ');
   const low = sentence.toLowerCase();
-  const live = LIVE_READING_MARKERS.some((m) => low.includes(m));
+  // Scoping beats liveness: "the then-installed 1.7.1" contains the word
+  // "installed" and yet claims nothing about this tree, so the scope check runs
+  // first and disarms the live marker rather than fighting it.
+  const scoped = HISTORICAL_SCOPE_MARKERS.some((m) => low.includes(m));
+  const live = !scoped && LIVE_READING_MARKERS.some((m) => low.includes(m));
   const anchored = ANCHOR_PATTERN.test(sentence);
+
+  // Synthetic test input, declared as such on the line it sits on.
+  if (sentence.includes(FIXTURE_MARKER)) {
+    return { verdict: 'fixture', live, anchored, drifted: false, resolved: undefined };
+  }
 
   // No attributable package, or a package this gate does not resolve, means the
   // gate cannot say whether the number drifted. It is counted as a site and
   // reported, never judged — a gate that guessed here would red on
   // `better-auth 1.7.1 behaves identically on 13.0.3 and on 12.11.1`.
-  if (sentence.includes(FIXTURE_MARKER)) {
-    return { verdict: 'fixture', live, anchored, drifted: false, resolved: undefined };
-  }
-
   const resolved = site.pkg ? resolvedFor(site.pkg) : undefined;
   if (!resolved) return { verdict: 'unattributed', live, anchored, drifted: false, resolved: undefined };
 
@@ -379,9 +406,12 @@ export function liveStaleMessage(file, site, resolved) {
     `    measurement manufactures a claim nobody made, which is worse than a stale one.\n` +
     `    Three honest fixes:\n` +
     `      (a) re-verify the behaviour against ${resolved}, then restamp AND date it;\n` +
-    `      (b) keep ${site.version} and make the sentence historical — add the measurement date\n` +
-    `          or the issue reference, so it reads as a fact about when it was true\n` +
-    `          (the shape PR #13962 landed for a frozen reading of a live value);\n` +
+    `      (b) keep ${site.version} and SCOPE the sentence to when it was true — the\n` +
+    `          cheapest honest repair, and it re-measures nothing. Add the measurement\n` +
+    `          date or the issue reference, or write "the then-installed ${site.version}"\n` +
+    `          where it now says "the installed ${site.version}" (the shape PR #13962 landed\n` +
+    `          for a frozen reading of a live value). Recognised scoping words:\n` +
+    `          ${HISTORICAL_SCOPE_MARKERS.slice(0, 5).join(", ")};\n` +
     `      (c) drop the version from the live clause and point at the resolved pin instead.`
   );
 }
@@ -503,6 +533,12 @@ function selfTest() {
     findStampSites(sibling, family).every((x) => x.pkg === null),
     JSON.stringify(findStampSites(sibling, family)));
 
+  const scopedLive = '// Measured on the then-installed better-auth 1.7.1, whose handler';
+  check('"then-installed" scopes the present tense without needing a date',
+    classifySite({ line: 1, version: '1.7.1', pkg: 'better-auth' }, scopedLive, R('1.7.2')).verdict === 'historical');
+  check('...and the remedy teaches that vocabulary',
+    liveStaleMessage('a.ts', { line: 1, version: '1.7.1', text: 'x' }, '1.7.2').includes('then-installed'));
+
   const fixture = `// ${FIXTURE_MARKER} — synthetic registry payload\n// the installed better-auth 1.7.1 does X`;
   check('a declared fixture is not judged',
     classifySite({ line: 2, version: '1.7.1', pkg: 'better-auth' }, fixture, R('1.7.2')).verdict === 'fixture');
@@ -511,7 +547,7 @@ function selfTest() {
   const msg = liveStaleMessage('a.ts', { line: 3, version: '1.7.1', text: 'x' }, '1.7.2');
   check('remedy refuses a blind restamp', msg.includes('⛔ Do NOT just rewrite'), msg);
   check('remedy offers re-verification', /re-verify the behaviour/.test(msg));
-  check('remedy offers the historical shape', /make the sentence historical/.test(msg));
+  check('remedy offers the historical shape', /SCOPE the sentence to when it was true/.test(msg));
   check('remedy offers the live-pointer shape', /point at the resolved pin/.test(msg));
   check('remedy names why restamping is worse', /manufactures a claim nobody made/.test(msg));
 
@@ -638,20 +674,28 @@ for (const family of WATCHED_FAMILIES) {
 if (sweepMode) process.exit(0);
 
 if (jsonMode) {
+  // `process.exitCode`, never `process.exit()`. stdout to a PIPE is async, so
+  // exiting immediately after a large write truncates it — measured here: the
+  // JSON came back cut mid-string at ~65KB through a pipe while the identical
+  // run redirected to a file was complete. A gate whose machine-readable output
+  // is silently short under exactly the usage that consumes it is worse than one
+  // with no JSON mode at all.
   console.log(JSON.stringify({ scanned, report }, null, 2));
-  process.exit(errors.length > 0 ? 1 : 0);
+  process.exitCode = errors.length > 0 ? 1 : 0;
 }
 
-if (errors.length > 0) {
+if (jsonMode) {
+  // nothing further to print; the JSON above is the whole report
+} else if (errors.length > 0) {
   console.error(`\ncheck:vendor-version-stamps: ${errors.length} live-reading stamp(s) name a version that is not installed.\n`);
   for (const e of errors) console.error(`  ✗ ${e}\n`);
-  process.exit(1);
-}
-
-console.log(`check:vendor-version-stamps: OK — ${scanned} file(s) scanned.`);
-for (const r of report) console.log(censusLine(r.total, r.drifted, r.resolved, r.family));
-console.log(
+  process.exitCode = 1;
+} else {
+  console.log(`check:vendor-version-stamps: OK — ${scanned} file(s) scanned.`);
+  for (const r of report) console.log(censusLine(r.total, r.drifted, r.resolved, r.family));
+  console.log(
   '  Drifted stamps are ANCHORED (they carry a measurement date or an issue reference), so they\n' +
   '  are reported and not enforced: restamping them without re-measuring would manufacture\n' +
-  '  attestations. Re-verify one and you may restamp it; otherwise it stays a historical fact.',
-);
+    '  attestations. Re-verify one and you may restamp it; otherwise it stays a historical fact.',
+  );
+}
