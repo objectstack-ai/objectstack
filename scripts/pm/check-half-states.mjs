@@ -7186,6 +7186,19 @@ export function summaryLine(counts, findingCount) {
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    // H8's window disclosure (#13499). The TRUNCATED half is the load-bearing
+    // one: a ceiling-bound window is a page cap again, and a page cap that
+    // reads as a completed time window is the exact inversion this repair
+    // removed. Gathering the flag and never printing it would be a measurement
+    // nobody can act on, so it is stated on every run, both ways.
+    `H8's merged window is a TIME cap of ${MERGED_WINDOW_DAYS} day(s), read in ${counts.mergedPages ?? 0} page(s)` +
+    `${
+      counts.mergedWindowTruncated
+        ? ` — ⛔ TRUNCATED at the ${MERGED_WINDOW_PAGE_CEILING}-page quota ceiling BEFORE reaching that horizon, so ` +
+          'this pass is a page cap and a delivery older than what those pages reached is invisible; ' +
+          'the merge rate has outgrown the ceiling and it needs raising'
+        : ' (horizon reached: a delivery inside the window was seen, not merely the first N rows)'
+    }. ` +
     `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
     `older closed carriers are outside it by design` +
     `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
@@ -13005,6 +13018,19 @@ function selfTest() {
   t('rate premise: …and says nothing was checked', premise(null).message.includes('not checked against'), true);
   t('rate premise: the pin carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_MERGES_PER_DAY_AT), true);
   t('rate premise: both window counters ride the enumerated contract', SWEEP_COUNT_KEYS.includes('mergedPages') && SWEEP_COUNT_KEYS.includes('mergedWindowTruncated'), true);
+
+  // The window's DISCLOSURE. A gathered flag that is never printed is a
+  // measurement nobody can act on, so both directions are pinned on the one
+  // line every run ends with.
+  const h8win = (extra) => summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, ...extra }, 0);
+  t('H8 summary: the window is stated as a TIME cap', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes(`TIME cap of ${MERGED_WINDOW_DAYS} day(s)`), true);
+  t('H8 summary: …with the pages it actually cost', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('read in 9 page(s)'), true);
+  t('H8 summary: a completed window says the horizon was reached', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('horizon reached'), true);
+  // ⛔ The inversion this repair removed: a ceiling-bound pass is a page cap
+  // again and must never read as a completed time window (#4690).
+  t('H8 summary: a ceiling-bound window says TRUNCATED', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('TRUNCATED'), true);
+  t('H8 summary: …and does NOT claim the horizon was reached', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('horizon reached'), false);
+  t('H8 summary: …and says a delivery past it is invisible', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('is invisible'), true);
 
   // -- The EGRESS prerequisite: proxy relaunch (#13526 leg 1) ----------------
   //
