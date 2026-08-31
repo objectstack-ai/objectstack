@@ -97,7 +97,7 @@ that silently does not happen.
 | 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3827` |
 | 9 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `anonymous-deny.ts:154` |
 | 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:1015` |
-| 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1288` |
+| 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1296` |
 | 12 | Per-request performance timings disclosed | observability | Get: timing headers a normal caller cannot pull | `perf-timing.ts:474` |
 | 13 | Permission-set **overlay discard** skips the tenant-admin assertion | plugin-security | Get: an overlay can be discarded with no authenticated tenant administrator | `permission-set-overlay-discard.ts:142` |
 | 14 | MCP stdio bridge skips the object API-exposure gate | mcp | Get: the bridge reaches objects whose `apiEnabled` / `apiMethods` would refuse an external caller | `stdio-data-bridge.ts:246` |
@@ -198,7 +198,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:9457`–`9474` |
 | "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1451` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
-| "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:273` |
+| "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:286` |
 | "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1240`, `:1269`; `domains/actions.ts:404` |
 
 ---
