@@ -663,8 +663,8 @@
         "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
         "capture status + code per route",
         "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
-        "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts:66-75, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts:138-165, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
-        "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts:104-122 — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
+        "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
+        "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
         "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
         "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control",
         "compare GET /api/v1/discovery capability bits against the families that answered (search/export/transactionalBatch at minimum)"
@@ -719,7 +719,7 @@
           "evidence": "the two traces + the ledger-file citations"
         },
         {
-          "clause": "the datasource-admin floor holds on BOTH sides (#9391/#9593): every sampled /api/v1/datasources route — the drivers catalog INCLUDED (its pre-#9391 posture was 'always-available static catalog'; that is history, kept in the ledger header on purpose) — answers 401 UNAUTHENTICATED anonymous and 403 PERMISSION_DENIED to an authed caller without manage_platform_settings, BEFORE any service is resolved (admin-routes.ts:85-99), while the admin's same request answers the real payload. An anonymous prober must read the 401 as 'mounted, floor holds', never as 'route missing' and never as a regression of the old open catalog",
+          "clause": "the datasource-admin floor holds on BOTH sides (#9391/#9593): every sampled /api/v1/datasources route — the drivers catalog INCLUDED (its pre-#9391 posture was 'always-available static catalog'; that is history, kept in the ledger header on purpose) — answers 401 UNAUTHENTICATED anonymous and 403 PERMISSION_DENIED to an authed caller without manage_platform_settings, BEFORE any service is resolved (admin-routes.ts), while the admin's same request answers the real payload. An anonymous prober must read the 401 as 'mounted, floor holds', never as 'route missing' and never as a regression of the old open catalog",
           "oracle": "api",
           "verify": "three-persona trace of GET /api/v1/datasources/drivers (anonymous 401 / non-admin 403 / admin 200) plus one more family route anonymous → 401; compare the 401/403 bodies against the routing-404 control to prove they are handler answers",
           "evidence": "the per-persona traces + the control diff"
@@ -789,8 +789,8 @@
         "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
         "packages/services/service-settings/src/settings-route-ledger.ts (#7526 — the /api/settings family, ledgered; guarded by the parity dogfood gate, no per-package test by design)",
         "packages/services/service-datasource/src/datasource-route-ledger.ts + datasource-route-ledger.conformance.test.ts (#7744 — the admin family, ledgered)",
-        "packages/services/service-datasource/src/admin-routes.ts:85-99 (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
-        "packages/metadata/src/metadata-route-ledger.ts:104-122 (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
+        "packages/services/service-datasource/src/admin-routes.ts (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
+        "packages/metadata/src/metadata-route-ledger.ts (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
         "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (#11882 — 16 rows / four registrar families, raw-app mounts unfindable by the parity gate by construction)",
         "packages/cli/src/utils/console-route-ledger.ts (#11882 — the four static-asset rows)",
@@ -1611,13 +1611,13 @@
         ]
       },
       "steps": [
-        "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts:149 — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg at :86-96/:157-161) and DateGranularity (:174 — 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
+        "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg) and DateGranularity (— 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
         "boot showcase isolated; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
         "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
         "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string)",
-        "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts:52): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
-        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist, :8883); aggregations as a non-array → the shape refusal with the worked example",
-        "secured-aggregate leg: run one grouped count as the restricted persona over an object where their visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts:328 states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
+        "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
+        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → the shape refusal with the worked example",
+        "secured-aggregate leg: run one grouped count as the restricted persona over an object where their visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
       ],
       "acceptance": [
         {
@@ -1633,19 +1633,19 @@
           "evidence": "the 5-row bucket table + the recorded clock/zone"
         },
         {
-          "clause": "empty-set values are the RULED identities, on both the empty-where and the #10576 measure-scoped-filter paths: count/count_distinct/sum → 0 (measured facts), avg/min/max → null (undefined, never flattened to a zero that reads as a measurement) — matching emptyGroupValueFor, the contract in-memory-aggregation.ts:180-246 implements",
+          "clause": "empty-set values are the RULED identities, on both the empty-where and the #10576 measure-scoped-filter paths: count/count_distinct/sum → 0 (measured facts), avg/min/max → null (undefined, never flattened to a zero that reads as a measurement) — matching emptyGroupValueFor, the contract in-memory-aggregation.ts implements",
           "oracle": "api",
           "verify": "the six per-function empty-set values on both paths; a sibling unfiltered measure in the same request keeps its full-bucket value (the #10576 isolation half)",
           "evidence": "both responses + the expected-value table"
         },
         {
-          "clause": "retired functions refuse with their PRESCRIPTIONS and unknown functions with the enum listing: array_agg/string_agg answer 400 carrying their registered retirement messages (query.zod.ts:86-96 — no replacement exists; the message says to reshape and names 'os migrate meta --from 16'), while an invented function gets zod's own enum error listing the six legal members — the two error classes must not blur (the enum error map returns the retirement text ONLY for the two spellings that used to be legal)",
+          "clause": "retired functions refuse with their PRESCRIPTIONS and unknown functions with the enum listing: array_agg/string_agg answer 400 carrying their registered retirement messages (query.zod.ts — no replacement exists; the message says to reshape and names 'os migrate meta --from 16'), while an invented function gets zod's own enum error listing the six legal members — the two error classes must not blur (the enum error map returns the retirement text ONLY for the two spellings that used to be legal)",
           "oracle": "api",
           "verify": "the three rejection bodies: two carry the retirement prescriptions, the third lists count/sum/avg/min/max/count_distinct; all are 400, never 500",
           "evidence": "the three rejections"
         },
         {
-          "clause": "aggregation is SECURED: the restricted persona's aggregate equals the expectation computed from THEIR visible rows only — an aggregate that matches the admin's over rows the persona cannot read is the raw-driver bypass (the exact hazard action-execution.ts:328 forbids: only the engine's middleware chain injects RLS/tenant scoping and the FLS aggregate-input gate)",
+          "clause": "aggregation is SECURED: the restricted persona's aggregate equals the expectation computed from THEIR visible rows only — an aggregate that matches the admin's over rows the persona cannot read is the raw-driver bypass (the exact hazard action-execution.ts forbids: only the engine's middleware chain injects RLS/tenant scoping and the FLS aggregate-input gate)",
           "oracle": "api",
           "verify": "restricted persona's grouped count vs their own filtered baseline AND vs the admin's differing answer — both comparisons recorded",
           "evidence": "both personas' responses + both baselines"
@@ -1687,19 +1687,19 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/spec/src/data/query.zod.ts:86-165 (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), :174 (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
-        "packages/objectql/src/in-memory-aggregation.ts (:180-246 the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; :300-347 bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
-        "packages/spec/src/data/aggregation-policy.ts:52 (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
-        "packages/runtime/src/action-execution.ts:328 (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
-        "packages/rest/src/rest-server.ts:7086 (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
-        "packages/metadata-protocol/src/protocol.ts:8883 (assertAggregationFieldsExist — the located unknown-field refusal)",
+        "packages/spec/src/data/query.zod.ts (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
+        "packages/objectql/src/in-memory-aggregation.ts (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
+        "packages/spec/src/data/aggregation-policy.ts (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
+        "packages/runtime/src/action-execution.ts (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
+        "packages/rest/src/rest-server.ts (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
+        "packages/metadata-protocol/src/protocol.ts (assertAggregationFieldsExist — the located unknown-field refusal)",
         "#10576, #11152, #3839, #3773"
       ],
       "history": [
         {
           "revision": 1,
           "date": "2026-08-30",
-          "change": "new — the aggregation vocabulary (6 functions × 5 granularities) had no matrix item: api-backend.query-contract-matrix covers the filter/select/sort axes of the same door and stops short of groupBy/aggregations. Register claims verified against source before authoring: the 6/5 member counts, the empty-set ruling (count/count_distinct/sum→0, avg/min/max→null — the register's 'count→0, avg/min/max→null' was correct but incomplete), the ISO-Monday week rule, the two retirement messages, and the engine-only security rule at action-execution.ts:328. Only one enumSource pin fits an item, so AggregationFunction carries it and DateGranularity (also a named export, pinnable in principle) is hand-counted in step 1",
+          "change": "new — the aggregation vocabulary (6 functions × 5 granularities) had no matrix item: api-backend.query-contract-matrix covers the filter/select/sort axes of the same door and stops short of groupBy/aggregations. Register claims verified against source before authoring: the 6/5 member counts, the empty-set ruling (count/count_distinct/sum→0, avg/min/max→null — the register's 'count→0, avg/min/max→null' was correct but incomplete), the ISO-Monday week rule, the two retirement messages, and the engine-only security rule at action-execution.ts. Only one enumSource pin fits an item, so AggregationFunction carries it and DateGranularity (also a named export, pinnable in principle) is hand-counted in step 1",
           "ref": "#sweep-2026-08-30"
         }
       ]
@@ -1719,7 +1719,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the two stock formula fields for the live leg: showcase_field_zoo.f_formula (field-zoo.object.ts:130) and showcase_project.budget_remaining (project.object.ts:65)",
+          "the two stock formula fields for the live leg: showcase_field_zoo.f_formula (field-zoo.object.ts) and showcase_project.budget_remaining (project.object.ts)",
           "runtime metadata authoring (PUT /meta/object on a scratch object) for the stdlib-through-the-live-door leg"
         ],
         "knownGaps": [
@@ -1727,13 +1727,13 @@
         ]
       },
       "steps": [
-        "count the registration chain: packages/formula/src/stdlib.ts registerStdLib (:101-236) registers exactly 27 functions by registerFunction call — now, today, daysFromNow, daysAgo, isBlank, coalesce, trim, joinNonEmpty, daysBetween, addDays, addMonths, date, datetime, abs, round, floor, ceil, min, max, upper, lower, contains, startsWith, endsWith, matches, len, isEmpty. NOT enumSource-pinnable (a builder chain, not a named z.enum) — re-count the calls in source at run time and fail the matrix stale if the count moved; cross-check the docs catalog (content/docs/data-modeling/formulas.mdx:171-190) advertises the same set, no more, no fewer",
+        "count the registration chain: packages/formula/src/stdlib.ts registerStdLib registers exactly 27 functions by registerFunction call — now, today, daysFromNow, daysAgo, isBlank, coalesce, trim, joinNonEmpty, daysBetween, addDays, addMonths, date, datetime, abs, round, floor, ceil, min, max, upper, lower, contains, startsWith, endsWith, matches, len, isEmpty. NOT enumSource-pinnable (a builder chain, not a named z.enum) — re-count the calls in source at run time and fail the matrix stale if the count moved; cross-check the docs catalog (content/docs/data-modeling/formulas.mdx) advertises the same set, no more, no fewer",
         "build the workspace (or confirm dist freshness — the stale-dist trap is the known false-negative here, same as api-backend.formula-gates); the harness must import the BUILT package and record the resolved module path",
         "drive every one of the 27 with a pinned now and a known-answer expectation, at minimum: floor(-1.2)==-2 and ceil(-1.2)==-1 (round toward −∞/+∞, NOT toward zero); addMonths(date('2026-01-31'), 1) == 2026-02-28T00:00:00Z (month-end clamp, never a March overflow); daysBetween(a,b) sign convention (b−a, negative when b earlier); date()/datetime() alias parity on the same ISO input; coalesce(null,'x')=='x' but coalesce('', 'x')=='' (null/undefined only); joinNonEmpty(['a', null, ' ', 'b'], '-')=='a-b' (null AND blank-after-trim dropped); isBlank vs isEmpty on null/''/[]; trim(null)==''; upper/lower/contains/startsWith/endsWith on mixed input; matches regex truthiness; len over string/list/map; min/max returning the SMALLER/LARGER OPERAND VERBATIM (type preserved, numeric comparison); abs/round; now() === the pinned instant",
         "calendar-day timezone contract (ADR-0053 Phase 2 D1): pin now to an instant whose calendar day DIFFERS between UTC and the reference zone (e.g. 2026-08-30T22:00:00Z with timezone Asia/Shanghai — locally already 08-31) and assert today() == 2026-08-31T00:00:00Z (the reference-tz calendar day expressed as UTC MIDNIGHT — never an instant carrying wall-clock time), daysFromNow/daysAgo offset from that same day; an unknown zone falls back to the UTC calendar day, never throws",
-        "mixed-arithmetic overloads (registerNumericCoercions, stdlib.ts:262-276): a double-typed record field divided/multiplied by an int literal (record.amount / 100) evaluates to the promoted double instead of faulting 'no such overload' to silent null (#1928), while pure int 7/2 == 3 keeps integer-division semantics untouched",
+        "mixed-arithmetic overloads (registerNumericCoercions, stdlib.ts): a double-typed record field divided/multiplied by an int literal (record.amount / 100) evaluates to the promoted double instead of faulting 'no such overload' to silent null (#1928), while pure int 7/2 == 3 keeps integer-division semantics untouched",
         "live-door parity: GET a showcase_project row and confirm budget_remaining materializes (read-path evaluation); author a scratch object through the metadata channel whose formula field composes two stdlib calls (e.g. joinNonEmpty + upper) and read back the known answer — the stdlib reaching the LIVE read path, not just the harness",
-        "the expected-fail probe: author (or evaluate in-harness) a formula calling an UNregistered function (e.g. sqrt(4)); capture what actually happens at each door driven. At head the runtime contract is: a formula that compiles but does not EVALUATE yields null — applyFormulaPlan's own `r.ok ? … : null` (packages/objectql/src/engine.ts:1331-1348) — so the read answers 200 with the field null and no error surfaced (#3306 class; stdlib.ts:205-211 documents this exact failure mode as the reason floor/ceil got registered). Record the observed shape verbatim; if an authoring-time gate refuses the formula before it is stored, record THAT as the (better) behavior instead"
+        "the expected-fail probe: author (or evaluate in-harness) a formula calling an UNregistered function (e.g. sqrt(4)); capture what actually happens at each door driven. At head the runtime contract is: a formula that compiles but does not EVALUATE yields null — applyFormulaPlan's own `r.ok ? … : null` (packages/objectql/src/engine.ts) — so the read answers 200 with the field null and no error surfaced (#3306 class; stdlib.ts documents this exact failure mode as the reason floor/ceil got registered). Record the observed shape verbatim; if an authoring-time gate refuses the formula before it is stored, record THAT as the (better) behavior instead"
       ],
       "acceptance": [
         {
@@ -1769,7 +1769,7 @@
         {
           "clause": "EXPECTED-FAIL — the unregistered-function fault is silent-null at head, and this clause exists to RECORD that, not to bless it: the probe's actual behavior (200, field null, no surfaced error — applyFormulaPlan's r.ok?…:null; or a louder authoring-time refusal if one has since landed) is captured verbatim. A run must NOT tick this clause green: silent-null is the standing #3306-class hazard, and the clause flips to a positive assertion only when the platform grows a loud refusal",
           "oracle": "api",
-          "verify": "the probe's captured behavior, compared against the engine.ts:1331-1348 contract; any run recording 'pass' here without a platform change is a false green",
+          "verify": "the probe's captured behavior, compared against the engine.ts contract; any run recording 'pass' here without a platform change is a false green",
           "evidence": "the captured probe trace + the run-record note naming which behavior was observed"
         }
       ],
@@ -1784,10 +1784,10 @@
         "timezone-boundary"
       ],
       "source": [
-        "packages/formula/src/stdlib.ts:101-236 (registerStdLib — the 27 registerFunction calls; calendarDayUtc :41-51 ADR-0053 D1; addMonthsUtc clamp :83-91; the floor/ceil #3306 note :205-211), :262-276 (registerNumericCoercions #1928)",
-        "packages/objectql/src/engine.ts:1331-1348 (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
-        "content/docs/data-modeling/formulas.mdx:171-190 (the advertised catalog the matrix cross-checks)",
-        "examples/app-showcase/src/data/objects/field-zoo.object.ts:130 + project.object.ts:65 (the stock live-leg formulas)",
+        "packages/formula/src/stdlib.ts (registerStdLib — the 27 registerFunction calls; calendarDayUtc ADR-0053 D1; addMonthsUtc clamp; the floor/ceil #3306 note), (registerNumericCoercions #1928)",
+        "packages/objectql/src/engine.ts (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
+        "content/docs/data-modeling/formulas.mdx (the advertised catalog the matrix cross-checks)",
+        "examples/app-showcase/src/data/objects/field-zoo.object.ts + project.object.ts (the stock live-leg formulas)",
         "ADR-0053 Phase 2 D1 (calendar-day timezone contract)",
         "#3306, #1928, #5504",
         "sibling item api-backend.formula-gates (runtime shapes + the date-arithmetic build gate — this item covers the FUNCTION CATALOG that item samples three members of)"
@@ -1817,7 +1817,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "stock system objects as free negatives — no provisioning at all: sys_session apiMethods ['get','list'] (sys-session.object.ts:300), sys_device_code ['get'] (sys-device-code.object.ts:159), sys_api_key ['get','list','update'] (sys-api-key.object.ts:369), and sys_oauth_consent enable.apiEnabled false (sys-oauth-consent.object.ts:108) for the 404 fork",
+          "stock system objects as free negatives — no provisioning at all: sys_session apiMethods ['get','list'] (sys-session.object.ts), sys_device_code ['get'] (sys-device-code.object.ts), sys_api_key ['get','list','update'] (sys-api-key.object.ts), and sys_oauth_consent enable.apiEnabled false (sys-oauth-consent.object.ts) for the 404 fork",
           "runtime metadata authoring (manage_metadata) for the scratch-object legs"
         ],
         "knownGaps": [
@@ -1825,20 +1825,20 @@
         ]
       },
       "steps": [
-        "read the contract sources: ApiMethod (packages/spec/src/data/object.zod.ts:18-22 — SIX authored primitives get/list/create/update/delete/bulk) and the derivation table (packages/spec/src/data/api-derivation.ts — resolveEffectiveApiMethods :264: undefined/null → unrestricted, [] or stripped-to-empty or NON-ARRAY → deny-all, subset → restricted closure; isApiOperationAllowed :327: bulk∧child, writeMode-precise import, restore/purge permanently closed)",
+        "read the contract sources: ApiMethod (packages/spec/src/data/object.zod.ts — SIX authored primitives get/list/create/update/delete/bulk) and the derivation table (packages/spec/src/data/api-derivation.ts — resolveEffectiveApiMethods: undefined/null → unrestricted, [] or stripped-to-empty or NON-ARRAY → deny-all, subset → restricted closure; isApiOperationAllowed: bulk∧child, writeMode-precise import, restore/purge permanently closed)",
         "free negatives, as ADMIN (the gate keys on the object, not the caller): PATCH /api/v1/data/sys_session/{id} → 405 OBJECT_API_METHOD_NOT_ALLOWED with the allowed[] array; GET /api/v1/data/sys_device_code (list against a get-only whitelist) → 405; GET /api/v1/data/sys_oauth_consent → 404 OBJECT_API_DISABLED (existence hidden); capture full bodies",
         "ordering leg: repeat the sys_session PATCH as the NON-ADMIN member and compare with the admin's 405 — the object-level gate answers before any caller-level 403 (the identity-auth.session-list-revoke precedent, '405 before 403'); the anonymous twin answers the 401 floor first",
         "scratch subset leg: author qa_verb_gate_probe with enable.apiMethods ['get','list','create']; verify update/delete → 405 whose allowed[] is the EFFECTIVE closure in API_OPERATION_ORDER (get, list, create + derived aggregate/search/export/import — and NEVER restore/purge, and NOT the raw 3-element whitelist); POST createMany → refused (bulk not granted); re-author adding 'bulk' → createMany passes the gate, updateMany still refused (bulk∧child: the child verb must itself be granted)",
-        "import precision leg (on the scratch object granting create but not update): the import door with writeMode insert clears the gate, writeMode update → 405 (rest-server.ts:7383 — the writeMode-precise check, not the coarse create∨update)",
-        "legacy strip leg: author enable.apiMethods ['upsert'] and capture BOTH the parse-time warning (object.zod.ts:98-126 — names the FROM→TO guidance 'declare [create,update] — upsert derives from create ∧ update' AND the deny-all cliff sentence, since stripping leaves []) and the runtime effect (every op → 405, allowed: []); then ['get','history'] → kept ['get'], warn names the history derivation; the registration-time diagnostic (packages/objectql/src/registry.ts:1020 warnStrippedLegacyApiMethods) adds the per-object line for schemas that skip Zod",
-        "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (rest-server.ts:11298-11311) and the valid sibling row never lands",
+        "import precision leg (on the scratch object granting create but not update): the import door with writeMode insert clears the gate, writeMode update → 405 (rest-server.ts — the writeMode-precise check, not the coarse create∨update)",
+        "legacy strip leg: author enable.apiMethods ['upsert'] and capture BOTH the parse-time warning (object.zod.ts — names the FROM→TO guidance 'declare [create,update] — upsert derives from create ∧ update' AND the deny-all cliff sentence, since stripping leaves []) and the runtime effect (every op → 405, allowed: []); then ['get','history'] → kept ['get'], warn names the history derivation; the registration-time diagnostic (packages/objectql/src/registry.ts warnStrippedLegacyApiMethods) adds the per-object line for schemas that skip Zod",
+        "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (rest-server.ts) and the valid sibling row never lands",
         "both-sides control: GET and list on sys_session as an entitled caller still answer 200 — the whitelist GRANTS what it lists"
       ],
       "acceptance": [
         {
-          "clause": "the 404/405 fork holds: enable.apiEnabled false answers 404 OBJECT_API_DISABLED (existence hidden — 'is not exposed via the API'), while a whitelist miss on an exposed object answers 405 OBJECT_API_METHOD_NOT_ALLOWED naming the operation and object — both codes ledgered (error-code-ledger.zod.ts:202-203), and the fork is decided by apiExposureDenialReason's two-step order: apiEnabled first and independently, the whitelist second (#7912)",
+          "clause": "the 404/405 fork holds: enable.apiEnabled false answers 404 OBJECT_API_DISABLED (existence hidden — 'is not exposed via the API'), while a whitelist miss on an exposed object answers 405 OBJECT_API_METHOD_NOT_ALLOWED naming the operation and object — both codes ledgered (error-code-ledger.zod.ts), and the fork is decided by apiExposureDenialReason's two-step order: apiEnabled first and independently, the whitelist second (#7912)",
           "oracle": "api",
-          "verify": "the sys_oauth_consent 404 vs the sys_session/sys_device_code 405s — codes, messages, and the fork per apiAccessDenialFromEnable (rest-server.ts:316-347)",
+          "verify": "the sys_oauth_consent 404 vs the sys_session/sys_device_code 405s — codes, messages, and the fork per apiAccessDenialFromEnable (rest-server.ts)",
           "evidence": "the captured bodies"
         },
         {
@@ -1854,7 +1854,7 @@
           "evidence": "the three per-state traces"
         },
         {
-          "clause": "bulk∧child and writeMode precision: a bulk door (createMany/updateMany/deleteMany, per-object batch — each passes bulkChild, rest-server.ts:11445-11551) requires the bulk primitive AND the child verb; the import door refines to the exact writeMode (insert⇒create, update⇒update, upsert⇒both)",
+          "clause": "bulk∧child and writeMode precision: a bulk door (createMany/updateMany/deleteMany, per-object batch — each passes bulkChild, rest-server.ts) requires the bulk primitive AND the child verb; the import door refines to the exact writeMode (insert⇒create, update⇒update, upsert⇒both)",
           "oracle": "api",
           "verify": "the four scratch-object probes: createMany refused without bulk, allowed with bulk+create, updateMany still refused, import insert-vs-update fork",
           "evidence": "the four traces"
@@ -1872,7 +1872,7 @@
           "evidence": "the four traces"
         },
         {
-          "clause": "the cross-object batch door enforces the same gate PER-OP BEFORE opening the transaction: a batch containing one whitelist-refused op is refused up front and no sibling op's row lands (each distinct object×action checked once, rest-server.ts:11298-11311)",
+          "clause": "the cross-object batch door enforces the same gate PER-OP BEFORE opening the transaction: a batch containing one whitelist-refused op is refused up front and no sibling op's row lands (each distinct object×action checked once, rest-server.ts)",
           "oracle": "api",
           "verify": "the batch refusal + a follow-up read proving the valid sibling create never persisted",
           "evidence": "the trace + the absent-row read"
@@ -1903,12 +1903,12 @@
         "auth-state-leak"
       ],
       "source": [
-        "packages/spec/src/data/object.zod.ts:18-22 (ApiMethod — the six primitives), :34-56 (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), :98-126 (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), :265 (the z.preprocess wiring)",
-        "packages/spec/src/data/api-derivation.ts:264-380 (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
-        "packages/rest/src/rest-server.ts:316-347 (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), :1276-1331 (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), :7383 (writeMode-precise import), :11298-11311 (batch per-op before txn), :11445-11551 (bulk doors with bulkChild)",
-        "packages/objectql/src/registry.ts:1020 (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
-        "packages/spec/src/api/error-code-ledger.zod.ts:202-203 (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
-        "packages/platform-objects/src/identity/sys-session.object.ts:300 + sys-device-code.object.ts:159 + sys-api-key.object.ts:369 + sys-oauth-consent.object.ts:108 (the stock narrowed objects)",
+        "packages/spec/src/data/object.zod.ts (ApiMethod — the six primitives), (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), (the z.preprocess wiring)",
+        "packages/spec/src/data/api-derivation.ts (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
+        "packages/rest/src/rest-server.ts (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), (writeMode-precise import), (batch per-op before txn), (bulk doors with bulkChild)",
+        "packages/objectql/src/registry.ts (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
+        "packages/spec/src/api/error-code-ledger.zod.ts (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
+        "packages/platform-objects/src/identity/sys-session.object.ts + sys-device-code.object.ts + sys-api-key.object.ts + sys-oauth-consent.object.ts (the stock narrowed objects)",
         "ADR-0049 / #1889 (shipping a non-enforcing apiEnabled is false security), #3391 (three-state), #3543 (enum shrink + strip), #3545 (non-array fails closed), #7912 (apiExposureDenialReason order)",
         "sibling clause: identity-auth.session-list-revoke (the sys_session 405-before-403 precedent this item generalizes)"
       ],
@@ -1916,7 +1916,7 @@
         {
           "revision": 1,
           "date": "2026-08-30",
-          "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts:98-126 wired via z.preprocess at :265 (the register's ':70-85' pointed at the guidance table); the enforcement docblock is rest-server.ts:1276-1331 with the denial producer at :316-347; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
+          "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts wired via z.preprocess (the register's '' pointed at the guidance table); the enforcement docblock is rest-server.ts with the denial producer; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
           "ref": "#sweep-2026-08-30"
         }
       ]

@@ -225,7 +225,19 @@ export const CEILINGS = new Map([
   // only in-place payment available was deleting a ruled clause. Landed count,
   // headroom 0 again, same convention.
   ['.claude/skills/pm-dispatch/references/state-machine.md', 44],
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 48],
+  // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
+  // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
+  // `skills/**` changes making a falsifiable operator/contract semantic claim fall
+  // under the CONTENT limb, with the criterion narrowed to 「可证伪的语义主张」 and
+  // NOT 「提到契约」). The ruling sizes it at 补一句 and it landed as three lines,
+  // which could not be paid in place: the file's 41 content lines carry 577 bytes
+  // of total slack under the 120-byte cap (mean width 105.9), so absorbing the
+  // addition's 332 bytes without a new line means re-wrapping the whole file —
+  // re-wrap funding is refused per the 2026-08-17 rule, exactly as on the
+  // dispatch-runbook entry above — and the only other in-place payment available
+  // was deleting a ruled clause, refused on the state-machine precedent. Landed
+  // count, headroom 0 again, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 51],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).

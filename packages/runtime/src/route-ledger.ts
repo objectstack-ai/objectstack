@@ -149,6 +149,47 @@ export interface RouteLedgerEntry {
    * resolution belongs in the guard that can import the spec, not in the data.
    */
   responseSchema?: string;
+  /**
+   * The AUTHORIZATION posture this route has been REVIEWED to have, named by
+   * the `authz-conformance.matrix.ts` row that classifies it (ADR-0056 D10).
+   *
+   * WHY A DECLARED FACT AND NOT A DERIVED ONE. Every other field here grades
+   * SDK expressibility; none of them says whether a caller must be
+   * authenticated, and `public` states INTENT for a handful of browser-facing
+   * routes rather than measuring a gate. Deriving the answer from source
+   * syntax instead was measured and rejected: scanning all 80
+   * `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
+   * reads 50 gated / 30 ungated, and 22 of those 30 are FALSE — a wrapping
+   * `guardedRouteManager` gates 19 of them with no `enforceAuth` at the call
+   * site, and one registrar shares a handler const across its 3 mounts. A 73%
+   * false-ungated rate on the largest registrar is a written-down false
+   * assurance, which is strictly worse than an honest blank. So the posture is
+   * DECLARED at the producer, where a new route is already reviewed, instead of
+   * guessed at the consumer.
+   *
+   * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
+   * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
+   * above and for the same ruled reason: mass-producing declarations nobody
+   * validated is how "declared but unverified" surfaces come to exist. A blank
+   * one changes no behaviour and is not a defect.
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE. The rule the seeded
+   * rows were chosen by, and the one to keep applying: the matrix row named
+   * here must be `enforced`, its cited dogfood proof must DRIVE this route at a
+   * literal wire path (no parameter binding inferred from a sibling), and its
+   * enforcement text must name the site that serves it. A name written ahead of
+   * the test it points at would BE the surface this programme exists to remove.
+   *
+   * A NAME rather than a live reference, deliberately — this module stays
+   * import-free, and the resolution belongs in the guard that can import the
+   * vocabulary. `packages/qa/dogfood/test/authz-conformance.test.ts` resolves
+   * every name written here against the live matrix and refuses two things: a
+   * name that is not a row id (a typo, or a row renamed out from under it), and
+   * a row that is not `enforced` (an `experimental` or `removed` row records an
+   * ABSENCE, so pointing a route at one would declare "reviewed" over "there is
+   * nothing here").
+   */
+  authz?: string;
   /** One-line rationale. Required for every non-`sdk` disposition. */
   note?: string;
 }
@@ -360,7 +401,16 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'routes come from service-ai buildAIRoutes() at plugin start — service-ai is a Cloud/EE package in the `cloud` repo, so this repo cannot enumerate them and the dispatcher only proxies (or 404s "AI service is not configured"). Enumerated on the other side of that boundary since #3718: cloud packages/service-ai/src/ai-route-ledger.ts, whose conformance test drives client.ai.* against the table buildAIRoutes() really returns. The client now expresses that table — ai.chat / ai.chatStream / ai.complete / ai.models / ai.conversations.* — but do NOT read a `sdk` disposition into this row: it stays `dynamic` because THIS repo still cannot see the routes. An earlier note here claimed the client "expresses nlq/suggest/insights against the REST AI routes"; that was never verified and was FALSE — nothing has ever mounted those three paths, and both they and the methods calling them are gone (#3718)' },
 
   // ── meta (legacy chain) ───────────────────────────────────────────────────
-  { route: 'GET /meta', domain: '/meta', disposition: 'sdk', client: 'meta.getTypes' },
+  // [2026-08-31] SEEDED under the field's fill rule: `anonymous-deny-meta` is
+  // `enforced`, its enforcement text names both the REST guarded registrar and
+  // the dispatcher mirror, and its cited proof
+  // (`showcase-anonymous-deny-surfaces.dogfood.test.ts`) drives THIS wire path
+  // literally on a booted showcase — anonymous 401, authenticated not-401 as
+  // the positive control. ⛔ The sibling rows in this family are deliberately
+  // left blank: the family-wide gate is a real property, but writing it onto
+  // 19 rows in one change is the mass production the field's rule forbids.
+  { route: 'GET /meta', domain: '/meta', disposition: 'sdk', client: 'meta.getTypes',
+    authz: 'anonymous-deny-meta' },
   { route: 'GET /meta/types', domain: '/meta', disposition: 'server-only', note: 'richer types listing consumed by Studio tooling directly; client uses GET /meta' },
   { route: 'GET /meta/:type', domain: '/meta', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.getItem' },
@@ -372,7 +422,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /meta/_drafts', domain: '/meta', disposition: 'sdk', client: 'meta.listDrafts',
     responseSchema: 'ListDraftsResponseSchema',
     note: '[#12038] enveloped on THIS surface — the named schema is the `data`; the REST twin answers the same payload BARE. Describe-only transcription of `listDrafts`\'s declared return; conformance: spec `api/protocol.test.ts`' },
+  // [2026-08-31] SEEDED — same rule as `GET /meta` above.
   { route: 'POST /meta/_migrate-stored', domain: '/meta', disposition: 'sdk', client: 'meta.migrateStored',
+    authz: 'anonymous-deny-meta',
     note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }. DELIBERATELY UNBOUND (#12038 ruling 2C) — this row would name the schema, but the report\'s only named type, `StoredMigrationReport`, lives in `@objectstack/metadata-protocol` (unreachable from the spec/api namespace this field resolves against); a second declaration in spec would drift against the CLI rendering the same report. Enveloped on this surface, BARE on the REST twin' },
   { route: 'GET /meta/object/:name/state/:field', domain: '/meta', disposition: 'sdk', client: 'meta.getLegalNextStates',
     note: '#9180 step 2 moved the SDK to the singular spelling and retired the plural REST registration; this row follows the client. DELIBERATE ASYMMETRY, not residue nobody has got to yet: the legacy if-chain branch in `domains/meta.ts` still matches BOTH literals (`objects` and `object`), so `/meta/objects/:name/state/:field` is REFUSED by a REST-fronted deployment (transport 404 — no registration left to match it) and ANSWERED wherever `dispatch()` is the front door (the `createHonoApp` catch-all, the documented embed shape). It stays by the maintainer re-weigh of the #9180 ruling, 2026-08-17 item 3: the tolerance is kept for external callers, no new refusals beyond what step 1 shipped, the external break deferred with no scheduled window — narrowing this arm is a NEW refusal on a SECOND surface and is the maintainer call, not a step of the ruling. ⛔ It is NOT the `META_URL_TO_SINGULAR` fold whose retirement was deferred: that is a map consulted for `/meta/:type`, this is a literal `||` that no request reaches through the fold — separate mechanisms under separate decisions, and conflating them is the specific error to avoid. So this row lists the canonical spelling of a branch that answers two, and `domains/meta-state-plural-tolerance.test.ts` pins BOTH halves so this note cannot quietly stop being true (#10179)' },
@@ -387,7 +439,15 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
 
   // ── mcp ───────────────────────────────────────────────────────────────────
   { route: 'GET /mcp/skill', domain: '/mcp/skill', disposition: 'server-only', note: 'public SKILL.md for agents; not JS-SDK surface' },
-  { route: '* /mcp/**', domain: '/mcp', disposition: 'server-only', note: 'MCP Streamable HTTP transport — consumed by MCP clients, not this SDK' },
+  // [2026-08-31] SEEDED, and the cleanest case in either ledger: `/mcp` is a
+  // one-row domain, so the family-granular classification is route-granular
+  // here with nothing inferred from a sibling. `mcp-http-identity` is
+  // `enforced`, names `handleMcp` as its enforcement site, and its cited proof
+  // drives POST /api/v1/mcp end to end (anonymous 401 before any tool runs; a
+  // member's tool call RLS-scoped as the positive control).
+  { route: '* /mcp/**', domain: '/mcp', disposition: 'server-only',
+    authz: 'mcp-http-identity',
+    note: 'MCP Streamable HTTP transport — consumed by MCP clients, not this SDK' },
 
   // ── actions ───────────────────────────────────────────────────────────────
   { route: 'POST /actions/:object/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invoke' },

@@ -309,7 +309,23 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('73 invocation sites, 92 mentions — the thread\'s two control numbers hold', () => {
+    it('75 invocation sites, 95 mentions — the thread\'s two control numbers hold', () => {
+        // [#13406] 73 → 75 sites / 92 → 95 mentions. The `/meta/:type/:name/
+        // history` and `/diff` read doors resolved NO identity, so neither
+        // could state which organization's `sys_metadata_history` partition it
+        // was reading — they read the env one and answered an empty change log
+        // for org-scoped overlays. Both join as LOCALLY CAUGHT sites (the
+        // continuation-line `.catch(rethrowAuthzStoreUnavailable)` spelling),
+        // which is the family the next case describes: neither door sits behind
+        // the shared anonymous floor, so each must decide the outage for
+        // itself — the same shape the `/audit` twin and the `/layers` door
+        // already carry.
+        //
+        // ⚠️ Again the two numbers moved by DIFFERENT amounts (+2 and +3): two
+        // call sites, and ONE prose mention in the history door's new
+        // doc-comment recording that `resolveExecCtx` is memoised per request
+        // and so this is not a new org-resolution seam.
+        //
         // [#13214] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
         // the ONE metadata-touching route in the table that resolved no
         // identity at all — the exception this census surfaced — and the
@@ -324,11 +340,11 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // `enforceAuth` was measured NOT to be the repair). A mention count
         // that tracked the site count exactly would be measuring one thing
         // twice.
-        expect(SITES.length).toBe(73);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(92);
+        expect(SITES.length).toBe(75);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(95);
     });
 
-    it('the split is 20 locally caught / 53 bare — NOT 16 / 53, which does not add to 73', () => {
+    it('the split is 22 locally caught / 53 bare — NOT 16 / 53, which does not add to 75', () => {
         // 16 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 16 and the arithmetic
         // silently loses four sites.
@@ -338,12 +354,12 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(16);
-        expect(CAUGHT.length).toBe(20);
+        expect(CAUGHT.length).toBe(22);
         expect(BARE.length).toBe(53);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 20 caught ones is', () => {
+    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 22 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
