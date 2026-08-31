@@ -521,7 +521,7 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     });
     return {
       insert,
-      update: vi.fn(async (object: string, doc: Record<string, unknown>, options?: unknown) => {
+      update: vi.fn(async (_object: string, doc: Record<string, unknown>, options?: unknown) => {
         assertEngineUpdateDispatch(doc, options as never);
         return { id: String(doc.id ?? 'updated') };
       }),
