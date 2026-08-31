@@ -847,22 +847,62 @@ export function slugFromRemote(url) {
 
 /**
  * Where each governed repo's checkout is, and whether it can be audited at
- * all. Pure: `probe(path)` answers `{ exists, slug }`, so the whole
- * absent/wrong-origin/present fork is offline-testable. An unresolvable repo
- * is `status: 'unaudited'` with a stated reason — the #4690 rule in code:
- * absence must be loud, and must never render as a clean repo.
+ * all. Pure: `probe(path)` answers `{ exists, slug, origin }`, so the whole
+ * absent/unparseable/wrong-origin/present fork is offline-testable. An
+ * unresolvable repo is `status: 'unaudited'` with a stated reason — the #4690
+ * rule in code: absence must be loud, and must never render as a clean repo.
+ *
+ * ⚠️ IDENTITY IS PROVEN, NEVER ASSUMED (#13423). The wrong-origin refusal used
+ * to be spelled `if (seen.slug && seen.slug !== repo.slug)`, so a checkout
+ * whose origin `slugFromRemote` could not parse — a filesystem path, an SSH
+ * shorthand, no origin remote at all — had a falsy `seen.slug`, slipped the
+ * guard, and fell straight through to `status: 'audited'` UNDER THE GOVERNED
+ * NAME with no evidence it is that repo. Same class as the #13307 leg one
+ * function down: "a local checkout is not evidence it is the repo you think",
+ * and it failed in the direction that reads as safety. The #13421 reachability
+ * probe raised the bar without closing this — a local or mirror remote is
+ * REACHABLE, so it passed the new probe and still slipped the slug check. The
+ * enumeration of every "parse failure ⇒ success branch" shape this function
+ * held is now zero by construction: `audited` is the single fall-through, and
+ * it is reachable only with `seen.slug === repo.slug` — a parsed, matching
+ * identity. (A `probe` that answers null/undefined coerces to
+ * `exists: false`, which refuses too.)
+ *
+ * What an unparseable origin SHOULD do is the judgment #13421 deliberately
+ * left unfixed (a legitimate mirror URL and a bogus one are both unparseable,
+ * and the tree has no basis for telling them apart) — so the answer is the
+ * register's standing one: NOT MEASURED. Never a policy of which spellings
+ * are trustworthy; the row states what is missing (proof of identity) and the
+ * remedy, and the sweep is INCOMPLETE while it stands.
  */
 export function resolveRepoCheckouts({ repos = GOVERNED_REPOS, selfId = SELF_REPO_ID, selfRoot, siblingDir, overrides = {}, probe }) {
   return repos.map((repo) => {
     const candidate = overrides[repo.id] ?? (repo.id === selfId ? selfRoot : join(siblingDir, repo.id));
-    const seen = probe(candidate) ?? { exists: false, slug: null };
+    const seen = probe(candidate) ?? { exists: false, slug: null, origin: null };
     if (!seen.exists) {
-      return { ...repo, path: candidate, status: 'unaudited', reason: `no git checkout at ${candidate}` };
+      return { ...repo, path: candidate, status: 'unaudited', precondition: 'no-checkout', reason: `no git checkout at ${candidate}` };
     }
-    if (seen.slug && seen.slug !== repo.slug) {
-      return { ...repo, path: candidate, status: 'unaudited', reason: `the checkout at ${candidate} has origin ${seen.slug}, not ${repo.slug}` };
+    if (!seen.slug) {
+      const declared = seen.origin ? `origin '${seen.origin}'` : 'no origin remote (or an unreadable one)';
+      return {
+        ...repo,
+        path: candidate,
+        status: 'unaudited',
+        precondition: 'unparseable-origin',
+        reason:
+          `NOT MEASURED: the checkout at ${candidate} has ${declared}, which does not parse to a ` +
+          `github.com owner/name slug — nothing proves this checkout is ${repo.slug}, so auditing it under ` +
+          `that name would certify an arbitrary tree (#13423). A reachable remote is not identity: a local ` +
+          `or mirror remote passes the #13307 probe and is still not evidence of WHICH repo this is. ` +
+          `Remedy: point the checkout's origin at https://github.com/${repo.slug} (a transport rewrite ` +
+          `belongs in \`url.<base>.insteadOf\`, which keeps the declared origin readable), or pass ` +
+          `--repo-root ${repo.id}=<a checkout whose origin declares ${repo.slug}>.`,
+      };
     }
-    return { ...repo, path: candidate, status: 'audited', reason: null };
+    if (seen.slug !== repo.slug) {
+      return { ...repo, path: candidate, status: 'unaudited', precondition: 'wrong-origin', reason: `the checkout at ${candidate} has origin ${seen.slug}, not ${repo.slug}` };
+    }
+    return { ...repo, path: candidate, status: 'audited', precondition: null, reason: null };
   });
 }
 
@@ -1547,17 +1587,28 @@ export function commitPaths(root, sha) {
   return out.split('\n').filter((p) => p !== '');
 }
 
-/** Is `path` a git checkout, and of what? The real `probe` for resolveRepoCheckouts. */
+/**
+ * Is `path` a git checkout, and of what? The real `probe` for
+ * resolveRepoCheckouts. The identity read is the DECLARED origin —
+ * `git config --get remote.origin.url`, the URL the checkout claims — never
+ * `git remote get-url origin`, which applies `url.<base>.insteadOf` rewrites
+ * first (measured: with a rewrite in force, `get-url` answers the rewrite
+ * target — a filesystem path — while the raw config still names github.com).
+ * A transport rewrite is an operator's routing choice; the declared URL is the
+ * identity claim this sweep audits under, and `git ls-remote` (#13307) applies
+ * the same rewrites itself, so transport stays exactly as git resolves it.
+ */
 function probeCheckout(path) {
   try {
     git(path, ['rev-parse', '--git-dir']);
   } catch {
-    return { exists: false, slug: null };
+    return { exists: false, slug: null, origin: null };
   }
   try {
-    return { exists: true, slug: slugFromRemote(git(path, ['remote', 'get-url', 'origin']).trim()) };
+    const origin = git(path, ['config', '--get', 'remote.origin.url']).trim();
+    return { exists: true, slug: slugFromRemote(origin), origin: origin || null };
   } catch {
-    return { exists: true, slug: null };
+    return { exists: true, slug: null, origin: null };
   }
 }
 
@@ -2388,6 +2439,34 @@ async function selfTest() {
     probe: () => ({ exists: true, slug: 'someone-else/objectui' }),
   })[0];
   assert('a-checkout-with-the-wrong-origin-is-UNAUDITED-not-audited-under-the-wrong-name', wrongOrigin.status === 'unaudited' && wrongOrigin.reason.includes('someone-else/objectui'), JSON.stringify(wrongOrigin));
+  // ── the #13423 hole: a slug the parser cannot read must refuse, not audit ──
+  // The old guard was `if (seen.slug && seen.slug !== repo.slug)` — a null
+  // slug slipped it and fell through to `audited` under the governed name.
+  // Both null-slug shapes are pinned (an unparseable URL, and no origin remote
+  // at all), plus the property the fix makes structural: `audited` is
+  // reachable only through a parsed, MATCHING slug.
+  const unparseable = resolveRepoCheckouts({
+    repos: [GOVERNED_REPOS[2]],
+    selfRoot: '/w/objectstack',
+    siblingDir: '/w',
+    probe: () => ({ exists: true, slug: null, origin: '/srv/mirrors/cloud' }),
+  })[0];
+  assert('an-origin-no-slug-parses-from-is-UNAUDITED-never-audited-under-the-governed-name',
+    unparseable.status === 'unaudited' && unparseable.reason.includes('NOT MEASURED') && unparseable.reason.includes('/srv/mirrors/cloud') && unparseable.reason.includes('objectstack-ai/cloud'),
+    JSON.stringify(unparseable));
+  assert('and-that-refusal-says-a-reachable-remote-is-not-identity', unparseable.reason.includes('not evidence of WHICH repo'), unparseable.reason);
+  const noRemote = resolveRepoCheckouts({
+    repos: [GOVERNED_REPOS[2]],
+    selfRoot: '/w/objectstack',
+    siblingDir: '/w',
+    probe: () => ({ exists: true, slug: null, origin: null }),
+  })[0];
+  assert('a-checkout-with-no-origin-remote-refuses-too-and-names-that-shape',
+    noRemote.status === 'unaudited' && noRemote.reason.includes('no origin remote'), JSON.stringify(noRemote));
+  assert('a-probe-that-answers-nothing-at-all-still-refuses',
+    resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w', siblingDir: '/w', probe: () => null })[0].status === 'unaudited');
+  assert('the-only-fall-through-to-audited-is-a-parsed-MATCHING-slug',
+    resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w', siblingDir: '/w', probe: () => ({ exists: true, slug: 'objectstack-ai/cloud', origin: 'https://github.com/objectstack-ai/cloud.git' }) })[0].status === 'audited');
   const overridden = resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w/objectstack', siblingDir: '/w', overrides: { cloud: '/srv/cloud' }, probe: (p) => (p === '/srv/cloud' ? { exists: true, slug: 'objectstack-ai/cloud' } : { exists: false, slug: null }) })[0];
   assert('--repo-root-relocates-a-checkout', overridden.status === 'audited' && overridden.path === '/srv/cloud');
 
@@ -2474,6 +2553,17 @@ async function selfTest() {
     const coGone = join(fxRoot, 'co-gone');
     g(fxRoot, 'clone', '-q', bareLive, coLive);
     g(fxRoot, 'clone', '-q', bareGone, coGone);
+    // Each checkout DECLARES the governed origin and routes its transport to
+    // the local bare via `url.<base>.insteadOf` — the split the #13423 fix
+    // reads deliberately: identity is the raw configured URL, transport is
+    // git's own resolution (ls-remote applies the rewrite; measured, so these
+    // fixtures stay offline while carrying a parseable governed identity).
+    const declareOrigin = (co, bare) => {
+      g(co, 'remote', 'set-url', 'origin', 'https://github.com/objectstack-ai/cloud');
+      g(co, 'config', `url.${bare}.insteadOf`, 'https://github.com/objectstack-ai/cloud');
+    };
+    declareOrigin(coLive, bareLive);
+    declareOrigin(coGone, bareGone);
     rmSync(bareGone, { recursive: true, force: true }); // the repo leaves the fleet's scope
 
     const liveProbe = probeRemoteTip(coLive, 'origin/main');
@@ -2528,6 +2618,21 @@ async function selfTest() {
     assert('and-the-same-sweep-over-a-LIVE-mirror-still-audits-and-still-says-a-true-zero',
       liveSweep.status === 0 && auditedRow.test(liveOut) && liveOut.includes('✅'),
       `status=${liveSweep.status} out=${liveOut.slice(0, 500)}`);
+
+    // ── #13423, end to end: a raw clone-from-a-path keeps its local-path
+    // origin — exactly the spelling the card names — and the SWEEP must
+    // refuse it. Wired like the dead-mirror pin above and for the same
+    // reason: the pure refusal alone stays green if `probeCheckout` stops
+    // reading the raw declared URL, or if `resolveRepoCheckouts` stops being
+    // consulted. This run never touches the network — the identity refusal
+    // comes before the reachability probe.
+    const coLocal = join(fxRoot, 'co-local');
+    g(fxRoot, 'clone', '-q', bareLive, coLocal);
+    const localSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLocal}`], { encoding: 'utf8', env: sweepEnv });
+    const localOut = `${localSweep.stdout ?? ''}${localSweep.stderr ?? ''}`;
+    assert('the-SWEEP-refuses-a-checkout-whose-origin-parses-to-no-slug',
+      localSweep.status !== 0 && localOut.includes('does not parse') && localOut.includes('NOT MEASURED') && !auditedRow.test(localOut) && !localOut.includes('✅'),
+      `status=${localSweep.status} out=${localOut.slice(0, 500)}`);
 
     // Freshness by IDENTITY: advance the remote, leave the mirror untouched.
     const pusher = join(fxRoot, 'pusher');
