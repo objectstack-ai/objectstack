@@ -653,6 +653,34 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
     // statusCode → validation 400 → 500), so the two reads cannot disagree. A
     // non-string `.code` (a driver errno) stays in `details`, as context.
     const declaredCode = demotedDeclaredCode(thrown);
+    // [#13241] The author-facing text channel the withhold above assumes as its
+    // compensation. `resolveThrownHttpError` ALREADY answered whether the throw
+    // declared one — `thrown.userMessage` is `declaredUserMessage`'s non-empty
+    // string rule, the ONE read every boundary applies (`@objectstack/types`) —
+    // and this exit simply did not read the answer, making it the only ADR-0112
+    // boundary that dropped the field (`/data` carries it via
+    // `boundedDeclaredUserMessage`, the caught-path sibling `errorFromThrown`
+    // via this same `extra` mechanism). ⛔ Not a second definition of "marked":
+    // re-deriving the predicate here is the per-door drift #12509 exists to
+    // stop, which is why the shared resolver's field is read rather than
+    // `err.userMessage` probed inline.
+    //
+    // ⚠️ Status-agnostic on purpose (#9934's second constraint) — a 400, 403 or
+    // 409 refusal may carry the mark too, so this is NOT gated on the 5xx limb
+    // above. The withhold touches only the diagnostic `message`; the marked
+    // channel is text an author deliberately addressed to the end user, so it
+    // survives on its own channel exactly as the ruling says it should.
+    //
+    // ⛔ ONE `extra` object, not two conditional spreads. Two `...( ? {extra:…})`
+    // spreads on the same literal do not merge — the second REPLACES the first,
+    // so a throw carrying both a demoted `declaredCode` and a `userMessage`
+    // would silently ship only whichever spread came last. This mirrors
+    // `errorFromThrown`'s expression byte for byte, which is what keeps the two
+    // runtime doors agreeing by construction rather than by review.
+    const extra = {
+        ...(declaredCode !== undefined ? { declaredCode } : {}),
+        ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+    };
     const details =
         (err?.code && typeof err.code !== 'string') || validation
             ? { ...(err?.code && typeof err.code !== 'string' ? { code: err.code } : {}), ...(validation ?? {}) }
@@ -664,7 +692,7 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
             httpStatus,
             code: thrown.code,
             details,
-            ...(declaredCode !== undefined ? { extra: { declaredCode } } : {}),
+            ...(Object.keys(extra).length > 0 ? { extra } : {}),
         }),
     });
 }
