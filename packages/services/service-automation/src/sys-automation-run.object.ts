@@ -125,7 +125,7 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Node Type',
       required: false,
       maxLength: 255,
-      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows.',
+      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows — except (since #13909) the one class of terminal row that carries a restorable consumed suspension (a run whose resume consumed its pause and then failed downstream), which keeps the paused node\'s type so a restore re-arms the gate.',
       group: 'State',
     }),
 
@@ -163,9 +163,12 @@ export const SysAutomationRun = ObjectSchema.create({
     // filter on `trigger_object` + `trigger_record_id`; "was last night's
     // failure storm scheduled or record-driven?" is a group-by on
     // `trigger_type`. Folded into `context_json` they would be legible one row
-    // at a time and unqueryable in aggregate — and `context_json` is not even
-    // written on terminal history rows, which is how the durable copy of the
-    // run log ended up strictly less informative than the in-memory one.
+    // at a time and unqueryable in aggregate — and `context_json` is not
+    // written on terminal history rows (except, since #13909, the one class of
+    // terminal row that carries a restorable consumed suspension — a run whose
+    // resume consumed its pause and then failed downstream; every other
+    // terminal row still has none), which is how the durable copy of the run
+    // log ended up strictly less informative than the in-memory one.
     trigger_type: Field.text({
       label: 'Trigger Type',
       required: false,
@@ -230,7 +233,7 @@ export const SysAutomationRun = ObjectSchema.create({
     variables_json: Field.textarea({
       label: 'Variables',
       required: false,
-      description: 'JSON snapshot of the flow variable map at suspend time.',
+      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator (#13909): nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row carries a restorable suspension — the store\'s deserializer keys off exactly this.',
       group: 'State',
     }),
 

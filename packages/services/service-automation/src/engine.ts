@@ -1244,10 +1244,13 @@ export interface ConsumedSuspension {
  *  - `'RUN_COMPLETED'` — the run finished. Nothing to exit from.
  *  - `'RUN_CANCELLED'` — the run was cancelled (ADR-0044). A restore would
  *    undo a decision somebody made on purpose.
- *  - `'NO_CONSUMED_SUSPENSION'` — the run exists and is terminal, but no
- *    consumed suspension is available for it: it never paused, or its snapshot
- *    is gone (no store configured and the in-memory journal evicted it, or a
- *    later terminal record cleared it). Deliberately does NOT claim which —
+ *  - `'NO_CONSUMED_SUSPENSION'` — the run exists, but no consumed suspension
+ *    is available for it: it never paused, or its snapshot is gone (no store
+ *    configured and the in-memory journal evicted it, or a later terminal
+ *    record cleared it). Usually a terminal (`failed`) run, but this arm also
+ *    answers when the log's last word on the run is non-terminal
+ *    (`running` / `pending`) — the fall-through does not require terminality.
+ *    Deliberately does NOT claim which cause —
  *    nothing in the engine can tell those apart, and the result's `reason`
  *    names the status actually observed instead of overclaiming.
  *  - `'RUN_NOT_FOUND'` — no record of this run at all.

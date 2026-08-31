@@ -52,6 +52,15 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { AutomationEngine, type SuspendedRunStore } from './engine.js';
+// ⛔ BARREL imports, on purpose — everything else in this file imports from
+// './engine.js', which is exactly why the missing barrel export had no witness
+// (#13951 contract review, finding 1). These lines and the pin at the bottom
+// of this file are that witness; see the describe block for what fails where.
+import {
+    AutomationEngine as BarrelAutomationEngine,
+    type SuspensionRestoreResult,
+    type SuspensionRestoreRefusal,
+} from './index.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
@@ -587,5 +596,59 @@ describe('#13909 — what this slice deliberately does NOT do', () => {
         await new Promise(r => setTimeout(r, 10));
         expect(await engine.hasSuspendedRun(runId)).toBe(false);
         expect((await engine.getRun(runId))?.status).toBe('failed');
+    });
+});
+
+/**
+ * The exhaustive switch the export exists to make writable (#13951 finding 1):
+ * an operator surface maps each refusal to its remedy, because the remedy
+ * differs for each. Compile-time exhaustive — the `default` arm types the
+ * scrutinee `never`, so growing {@link SuspensionRestoreRefusal} without
+ * extending every consumer is a tsc error here, which is exactly the
+ * protection a consumer could not buy while the union was unnameable.
+ */
+function remedyFor(refusal: SuspensionRestoreRefusal): string {
+    switch (refusal) {
+        case 'RESTORE_IN_PROGRESS': return 'wait: this process is already restoring it';
+        case 'RESUME_IN_PROGRESS': return 'wait: its outcome is not decided yet';
+        case 'RUN_SUSPENDED': return 'nothing to do: it is already resumable';
+        case 'STORE_UNAVAILABLE': return 'fix the store failure, then re-issue the restore';
+        case 'RUN_COMPLETED': return 'nothing to do: it finished';
+        case 'RUN_CANCELLED': return 'ask who cancelled it before undoing their decision';
+        case 'NO_CONSUMED_SUSPENSION': return 'read the reason: it names the status observed';
+        case 'RUN_NOT_FOUND': return 'check the run id';
+        default: {
+            const unhandled: never = refusal;
+            return unhandled;
+        }
+    }
+}
+
+// Barrel nameability (#13951 contract review, finding 1). The refusal
+// vocabulary was published de facto — a consumer could call the
+// barrel-reachable verb and receive the eight values at runtime — but
+// unnameable de jure: the barrel exported neither result type, and the exports
+// map publishes only '.', so no exhaustive switch was writable. This block
+// does, with BARREL names only, the things the finding says a consumer must be
+// able to do, and it FAILS if the barrel export is removed — split across the
+// two channels that actually check each half:
+//  - the type half breaks at `tsc --noEmit` (TS2305 on the type-only imports
+//    above; vitest transpiles without type-checking, so tsc IS its witness);
+//  - the runtime half (the verb on the class the barrel itself exports) breaks
+//    right here in vitest.
+describe('#13951 — the restore vocabulary is nameable from the barrel', () => {
+    it('publishes the verb on the same class the barrel exports', () => {
+        expect(BarrelAutomationEngine).toBe(AutomationEngine);
+        expect(typeof BarrelAutomationEngine.prototype.restoreConsumedSuspension).toBe('function');
+    });
+
+    it('a consumer can annotate the result and switch exhaustively over the refusal', async () => {
+        const { engine } = newEngine(new InMemorySuspendedRunStore());
+        // The annotation is the point: this is the line the missing export
+        // made unwritable.
+        const res: SuspensionRestoreResult = await engine.restoreConsumedSuspension('no-such-run');
+        expect(res.restored).toBe(false);
+        expect(res.refusal).toBe('RUN_NOT_FOUND');
+        expect(remedyFor(res.refusal!)).toBe('check the run id');
     });
 });
