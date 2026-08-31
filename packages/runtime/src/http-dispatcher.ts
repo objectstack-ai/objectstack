@@ -7,6 +7,7 @@ import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE,
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
 import { readServiceSelfInfo, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
@@ -238,6 +239,43 @@ const SEARCH_IN_PROCESS_MESSAGE =
     + 'serves it, is reported separately by capabilities.search.';
 
 /**
+ * What `/ready` learned about the data plane on one probe (#13408).
+ *
+ * The two readings travel together because they are read together and expire
+ * together: `primary` is only ever consulted to decide what `unhealthy` MEANS,
+ * so a memo holding one without the other could answer a probe from a fresh
+ * health reading and a stale verdict about which datasource matters.
+ */
+interface DriverReadiness {
+    /** Registered drivers that cannot serve a query right now. */
+    readonly unhealthy: string[];
+    /**
+     * Which datasource is the primary one — `undefined` when the question was
+     * not asked because nothing was unhealthy (see {@link HttpDispatcher} —
+     * `driverReadiness`), and an unresolved verdict when it was asked and could
+     * not be answered.
+     */
+    readonly primary?: PrimaryDatasourceReading;
+}
+
+/**
+ * The readiness handler's view of the #13408 primary-datasource criterion.
+ *
+ * Collapsed from {@link PrimaryDatasourceVerdict} to exactly two shapes on
+ * purpose: the ruling gives every "cannot tell" the SAME consequence —
+ *
+ * > 判据解析失败或歧义时 ⇒ fail toward draining(宁可误摘不可静默保留)
+ *
+ * — so an engine that predates the probe, a probe that throws, and a
+ * deployment whose system objects are genuinely split must be indistinguishable
+ * at the point the status code is chosen. `reason` is carried for the operator,
+ * ⛔ never to branch on.
+ */
+type PrimaryDatasourceReading =
+    | { readonly kind: 'resolved'; readonly datasource: string }
+    | { readonly kind: 'unresolved'; readonly reason: string };
+
+/**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
  * request into a kernel response. Used directly by the framework's HTTP adapters
  * (express / fastify / nextjs / nestjs / nuxt / sveltekit / hono) and plugin-msw,
@@ -283,8 +321,13 @@ export class HttpDispatcher {
      * would be a database round-trip. One second is short enough that the
      * verdict tracks an outage within a single probe interval and long enough
      * that concurrent probes collapse onto one query.
+     *
+     * Holds the whole {@link DriverReadiness} reading, not just the unhealthy
+     * names (#13408): the primary-datasource verdict is what decides whether
+     * those names drain the replica, so caching one without the other would let
+     * a fresh health reading be judged by a stale verdict.
      */
-    private driverHealthMemo?: { at: number; unhealthy: string[] };
+    private driverHealthMemo?: DriverReadiness & { at: number };
     private static readonly DRIVER_HEALTH_TTL_MS = 1_000;
     /**
      * When `true`, scoped data-plane routes enforce a
@@ -576,13 +619,32 @@ export class HttpDispatcher {
             }),
         });
         // GET /ready — k8s / load-balancer readiness probe (was branch "0b2").
-        // 200 only when the kernel is fully running AND the data drivers can
-        // serve a query. 503 while booting (idle/initializing) or shutting down
-        // (stopping/stopped) so a load balancer stops routing to this replica
-        // BEFORE in-flight requests are drained and the server closes (graceful
-        // rolling restart) — and 503 when a driver is down, so a replica that
-        // would fail 100% of its requests leaves the rotation instead of
-        // absorbing traffic (framework#3756).
+        // 200 only when the kernel is fully running AND the data plane this
+        // replica depends on can serve a query. 503 while booting
+        // (idle/initializing) or shutting down (stopping/stopped) so a load
+        // balancer stops routing to this replica BEFORE in-flight requests are
+        // drained and the server closes (graceful rolling restart).
+        //
+        // WHICH driver failures drain the replica is the #13408 ruling
+        // (2026-08-31, 第 6 场总监席决裁批 #12, maintainer verbatim 「同意」):
+        // only the PRIMARY/default datasource. A secondary/tenant datasource's
+        // failure is reported in the 200 body and drains nothing.
+        //
+        // ⚠️ framework#3756 is NOT overturned by that, and its comment is
+        // rewritten here rather than deleted. Its reasoning was a QUANTIFIED
+        // claim — "a replica that would fail 100% of its requests" — and that
+        // antecedent still holds wherever it was measured: in a
+        // single-datasource deployment the primary IS the only source, so this
+        // handler still answers 503 for exactly the case #3756 fixed. What
+        // #3756's reasoning never covered is the multi-datasource shape, where
+        // a tenant's misconfigured datasource fails SOME requests and the old
+        // implementation drained every replica anyway — including replicas
+        // serving a perfectly healthy Postgres. #13408 carves out that branch;
+        // it does not revisit the single-datasource one.
+        //
+        // ⛔ The rejected fourth option stays rejected: a failed driver is
+        // never filtered OUT of this response to make it green. It is named in
+        // `degraded.drivers` on the 200 precisely so alerting still sees it.
         this.domainRegistry.register({
             prefix: '/ready', match: 'exact', methods: ['GET'],
             handler: async () => {
@@ -596,16 +658,41 @@ export class HttpDispatcher {
                 if (state !== 'running') {
                     return { handled: true, response: this.error('Service not ready', 503, { state }) };
                 }
-                const unhealthy = await this.unhealthyDrivers();
-                return unhealthy.length === 0
-                    ? { handled: true, response: this.success({ status: 'ready', state }) }
-                    : {
+                const { unhealthy, primary } = await this.driverReadiness();
+                if (unhealthy.length === 0) {
+                    return { handled: true, response: this.success({ status: 'ready', state }) };
+                }
+                // #13408: drain only when the PRIMARY datasource is the one
+                // that is down — or when we could not establish which
+                // datasource that is. Every other path below falls through to
+                // the 503, which is the ruled fail-toward-draining direction
+                // written as control flow: staying in rotation needs a POSITIVE
+                // reading (a resolved primary, absent from the unhealthy set),
+                // never the absence of a negative one.
+                if (primary?.kind === 'resolved' && !unhealthy.includes(primary.datasource)) {
+                    return {
                         handled: true,
-                        response: this.error('Data driver unavailable', 503, {
+                        // The healthy 200 body is untouched — `degraded` appears
+                        // only on this branch, so a probe consumer that never
+                        // sees a degraded secondary sees exactly what it saw
+                        // before #13408.
+                        response: this.success({
+                            status: 'ready',
                             state,
-                            drivers: unhealthy,
+                            degraded: { drivers: unhealthy, primaryDatasource: primary.datasource },
                         }),
                     };
+                }
+                // Byte-identical to the pre-#13408 envelope, deliberately: this
+                // is still framework#3756's answer, and a single-datasource
+                // deployment must not be able to tell that this handler changed.
+                return {
+                    handled: true,
+                    response: this.error('Data driver unavailable', 503, {
+                        state,
+                        drivers: unhealthy,
+                    }),
+                };
             },
         });
         this.domainRegistry.register(createAnalyticsDomain(this.domainDeps));
@@ -640,9 +727,90 @@ export class HttpDispatcher {
     }
 
     /**
+     * One readiness reading of the data plane, memoized for
+     * {@link DRIVER_HEALTH_TTL_MS} (framework#3756 — k8s polls every few
+     * seconds and this must not become a database round-trip per poll).
+     *
+     * ⭐ The primary-datasource criterion is resolved ONLY when something is
+     * already unhealthy, and that ordering is load-bearing rather than a
+     * micro-optimization. It is what makes #13408 a strict carve-out: every
+     * deployment whose drivers are all healthy takes the identical path it took
+     * before, so the new criterion cannot introduce a way to LOSE a 200. The
+     * only transition this change can produce is 503 → 200, on the one branch
+     * the ruling opened.
+     */
+    private async driverReadiness(): Promise<DriverReadiness> {
+        const memo = this.driverHealthMemo;
+        if (memo && Date.now() - memo.at < HttpDispatcher.DRIVER_HEALTH_TTL_MS) {
+            return memo;
+        }
+        const unhealthy = await this.unhealthyDrivers();
+        const reading: DriverReadiness = unhealthy.length === 0
+            ? { unhealthy }
+            : { unhealthy, primary: this.primaryDatasource() };
+        this.driverHealthMemo = { at: Date.now(), ...reading };
+        return reading;
+    }
+
+    /**
+     * WHICH datasource is the primary one, as this replica can read it —
+     * the #13408 criterion, consulted through the engine because the ruling
+     * requires 「判据的判定逻辑单点实现」 and the five-step routing order that
+     * decides it lives in `ObjectQL.resolvePrimaryDatasource()`. ⛔ Never
+     * re-derive it here: a second implementation of "which datasource carries
+     * `sys_*`" is exactly the drift the single-point requirement forbids.
+     *
+     * ⭐ Fails toward DRAINING — the opposite direction from
+     * {@link unhealthyDrivers}, and the asymmetry is the ruling, not an
+     * oversight:
+     *
+     * > 判据解析失败或歧义时 ⇒ fail toward draining(宁可误摘不可静默保留),
+     * > 并有钉断言这个方向
+     *
+     * `unhealthyDrivers` fails open because an inconclusive HEALTH probe must
+     * not black-hole a working deployment. This one fails closed because it is
+     * only ever reached when a driver IS positively unhealthy: the question on
+     * the table is no longer "is anything wrong" but "may we keep serving
+     * anyway", and an unreadable criterion is not permission. Every failure
+     * class — no engine, an engine predating the probe, a throwing probe, a
+     * malformed verdict, a genuinely split deployment — lands on `unresolved`,
+     * and the handler drains on all of them.
+     */
+    private primaryDatasource(): PrimaryDatasourceReading {
+        try {
+            // Same slot and same [#4251] argument as `unhealthyDrivers`: the
+            // `data` ledger entry stays the narrow `IDataEngine` view, and the
+            // one wider member probed is named structurally.
+            let engine: (IDataEngine & { resolvePrimaryDatasource?: () => PrimaryDatasourceVerdict })
+                | undefined;
+            try {
+                // [#5155] Host kernel — see the `/ready` handler.
+                engine = (this.defaultKernel as any)?.getService?.('data');
+            } catch {
+                return { kind: 'unresolved', reason: 'data-service-unreadable' };
+            }
+            if (typeof engine?.resolvePrimaryDatasource !== 'function') {
+                return { kind: 'unresolved', reason: 'engine-cannot-name-a-primary-datasource' };
+            }
+            const verdict = engine.resolvePrimaryDatasource();
+            // `resolved === true` is required positively: a verdict that is
+            // undefined, malformed, or carries an empty name must not be able
+            // to keep a replica in rotation.
+            if (verdict && verdict.resolved === true
+                && typeof verdict.datasource === 'string' && verdict.datasource.length > 0) {
+                return { kind: 'resolved', datasource: verdict.datasource };
+            }
+            const reason = verdict && verdict.resolved === false ? verdict.reason : 'malformed-verdict';
+            return { kind: 'unresolved', reason };
+        } catch {
+            return { kind: 'unresolved', reason: 'primary-datasource-probe-threw' };
+        }
+    }
+
+    /**
      * Names of the data drivers that cannot serve a query right now, for
-     * `/ready` (framework#3756). Empty means "no reason to leave the LB
-     * rotation" — which includes every case where we cannot tell.
+     * `/ready` (framework#3756). Empty means "no driver positively reports
+     * itself down" — which includes every case where we cannot tell.
      *
      * Fails OPEN by design, and the asymmetry is deliberate: readiness gates
      * whether this replica receives ANY traffic, so an inconclusive probe must
@@ -651,12 +819,13 @@ export class HttpDispatcher {
      * `checkDriversHealth`, or a probe that itself throws all read as ready —
      * exactly as they did before this check existed. Only a driver that
      * positively reports itself unhealthy takes the replica out.
+     *
+     * ⚠️ This answers WHICH drivers are down, never whether that should drain
+     * the replica — {@link primaryDatasource} answers the second question and
+     * fails in the OPPOSITE direction. Reading this method's fail-open posture
+     * as the whole readiness posture is the #13408 mistake in miniature.
      */
     private async unhealthyDrivers(): Promise<string[]> {
-        const memo = this.driverHealthMemo;
-        if (memo && Date.now() - memo.at < HttpDispatcher.DRIVER_HEALTH_TTL_MS) {
-            return memo.unhealthy;
-        }
         let unhealthy: string[] = [];
         try {
             // [#4251] `checkDriversHealth` is ObjectQL's (IObjectQLEngine), not
@@ -681,7 +850,6 @@ export class HttpDispatcher {
             // The probe itself failed — inconclusive, not unhealthy. See above.
             unhealthy = [];
         }
-        this.driverHealthMemo = { at: Date.now(), unhealthy };
         return unhealthy;
     }
 

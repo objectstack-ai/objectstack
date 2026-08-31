@@ -110,6 +110,8 @@ export type {
   DriverHealth,
   DatasourceUnavailableInfo,
   DatasourceUnavailableKind,
+  PrimaryDatasourceVerdict,
+  PrimaryDatasourceUnresolvedReason,
 } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
