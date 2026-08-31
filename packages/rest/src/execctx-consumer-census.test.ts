@@ -62,6 +62,10 @@ import {
     // propagation it observes is the one production raises.
     AuthzStoreUnavailableError, AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
+// [#13538] §9 drives an ORG-OVERRIDABLE type on purpose, and asserts that
+// choice against the registry rather than trusting a literal — the same
+// predicate the read door itself consults.
+import { declaresOrgOverride } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -625,6 +629,14 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
 //    door ANSWERS; §7 pins what each SITE spells. Only §7 fails on one reverted
 //    site, and that is the division of labour to keep.
 //
+//    ⚠️ [#13538] CORRECTED, by ablation, without touching the paragraph above:
+//    the mechanism named there is not the operative one. Reverting the `:type`
+//    site and driving THIS section leaves it green because `resolveObjectMasker`
+//    resolves the context again, guarded — and that method early-returns unless
+//    `metaType === 'object'`, which is exactly the type this section sweeps. The
+//    handler's 'app' and 'dashboard' resolves never run for `object`. §9 carries
+//    the measurement.
+//
 //    ⚠️ Which also names what neither section covers: a PARTIAL outage, where
 //    only the first read fails. There the swallow returns `undefined`, the
 //    handler proceeds with no `organizationId`, and the door answers the
@@ -707,5 +719,203 @@ describe('[#13279] §8 an outage at the four continuation sites is not served as
             const ok = r.threw !== undefined || r.status === AUTHZ_STORE_UNAVAILABLE_STATUS;
             expect({ route: r.route, status: r.status, ok }).toEqual({ route: r.route, status: r.status, ok: true });
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 9. ⭐ BEHAVIOURAL: a PARTIAL outage — only the CHOSEN read fails
+//
+//    [#13538] §7 pins what each site SPELLS. §8 pins what a door ANSWERS, but
+//    only under a TOTAL outage: `instrumentRejecting` throws on every call. The
+//    case in between — the store answering one read and failing another — is
+//    where a swallowing site does its damage, because the swallow returns
+//    `undefined`, the handler proceeds with NO tenant, and the read it issues
+//    is env-wide. The door then answers an org-unscoped `200`: a fabricated
+//    success carrying rows from outside the caller's organization. Not a
+//    refusal, so nothing downstream notices.
+//
+//    ⭐ WHICH EXISTING PIN COULD HAVE CAUGHT IT — the question this section is
+//    the answer to. Not §7: it reads catch ARGUMENTS out of the source, so a
+//    regression that changes no spelling is invisible to it by construction,
+//    and a stricter spelling assertion would be the non-fix. It is §8. §8 is
+//    already behavioural, already drives these doors, already mounts them
+//    ISOLATED and already records which sites each route touched — every part
+//    of the instrument except the fault MODEL. Two things in that model, both
+//    measured here rather than assumed, keep it away from this case:
+//
+//      (a) the fault is UNCONDITIONAL, so "the first read fails and the next
+//          succeeds" cannot be expressed; and
+//      (b) it drives `type: 'object'`, and `declaresOrgOverride('object')` is
+//          FALSE — that type is env-wide BY DESIGN, healthy or faulted. So the
+//          difference this card is about does not exist on the type §8 drives,
+//          whatever fault model it were given. The first CONTROL below pins
+//          both halves of that, so the reason §8 stops short stays measured
+//          instead of becoming folklore.
+//
+//    ⚠️ AND THE TWO ARE THE SAME FIXTURE, which is the part worth keeping.
+//    Ablation (collapse + swallow, both restored) recorded the list door's
+//    sites and answers directly:
+//
+//        TOTAL outage   → status 503, sites [2821, 4388]
+//        PARTIAL (1st)  → status 200, sites [4388], read carried NO organizationId
+//
+//    Site 2821 is `resolveObjectMasker`'s guarded resolve, and that method
+//    early-returns unless `metaType === 'object'`. So what actually keeps §8
+//    green under a swallow is a SECOND GUARDED RESOLVE THAT ONLY EXISTS FOR
+//    `object` — the same fixture choice that makes its org-scope question
+//    vacuous. ⛔ It is NOT the reading the card and §8's own note below record
+//    (three resolves inside the `:type` handler): the handler's other two sit
+//    behind `metaTypeSingular(...) === 'app'` and `=== 'dashboard'` and never
+//    run for `object` at all. The conclusion those notes drew was right; the
+//    mechanism they named was not, and re-deriving it by SYMBOL rather than by
+//    line is what separated the two.
+//
+//    ⇒ What is owed is therefore a changed CRITERION on §8's harness — fault
+//    selection per read, driven at an ORG-OVERRIDABLE type — not a new
+//    source-text case. This section is that criterion; §8 keeps its own subject
+//    (a total outage is a real shape and still must not be served as success).
+//
+//    ⚠️ The assertion that carries the weight is on the REQUEST the handler
+//    BUILT, not on the status code. An org-unscoped read is the harm; a status
+//    is downstream of it. That is what lets this survive a refactor which
+//    changes no spelling — reordering the resolves, or collapsing them so the
+//    first read is the only one — which is precisely what §7 cannot do.
+// ---------------------------------------------------------------------------
+
+/**
+ * As {@link instrumentRejecting}, but the fault is SELECTED per read.
+ *
+ * `failOrdinal` is 1-based and counted PER DRIVEN REQUEST (the sweep resets
+ * it), so `1` means "only the first read fails" and every later read of the
+ * same request fulfils with an entitled context. `0` never fails: that is the
+ * healthy leg, run on the SAME instrument as the fault legs so the two rows are
+ * comparable rather than two different experiments.
+ */
+function instrumentSelective(err: unknown, ctxValue: any, failOrdinal: number) {
+    const proto: any = (RestServer as any).prototype;
+    const original = proto.resolveExecCtx;
+    const hits = new Map<string, Set<number>>();
+    const state = { route: '', reads: 0 };
+    proto.resolveExecCtx = async function () {
+        const m = (new Error().stack ?? '').match(/rest-server\.ts:(\d+):\d+/);
+        if (m) {
+            if (!hits.has(state.route)) hits.set(state.route, new Set());
+            hits.get(state.route)!.add(Number(m[1]));
+        }
+        state.reads += 1;
+        if (state.reads === failOrdinal) throw err;
+        return { ...ctxValue };
+    };
+    return { hits, state, restore: () => { proto.resolveExecCtx = original; } };
+}
+
+/** `metaProtocol`, plus the LIST requests the handlers actually handed it. */
+function recordingMetaProtocol(doc: any, reads: MetaRead[], state: { route: string }) {
+    const inner: any = metaProtocol(doc);
+    return new Proxy({}, {
+        get: (_t, k: string) => {
+            if (k === 'then' || k === 'constructor') return undefined;
+            if (k === 'getMetaItems') {
+                return vi.fn(async (request: any) => {
+                    reads.push({ route: state.route, request });
+                    return [doc];
+                });
+            }
+            return inner[k];
+        },
+    });
+}
+
+interface MetaRead { route: string; request: any }
+
+async function sweepSelective(failOrdinal: number, doc: any, type: string) {
+    const probe = instrumentSelective(
+        new AuthzStoreUnavailableError('sys_user_permission_set'), ENTITLED, failOrdinal,
+    );
+    const reads: MetaRead[] = [];
+    const { rs, table } = makeServer(recordingMetaProtocol(doc, reads, probe.state));
+    // ISOLATED for the reason §8 records: the FULL mount's umbrella guard
+    // resolves first and refuses there, so the sites under test never run.
+    rs.registerMetadataEndpointsInner(BASE);
+    const rows: Row[] = [];
+    for (const [key, handler] of table) {
+        probe.state.route = key;
+        probe.state.reads = 0;
+        const [method, pattern] = key.split(' ');
+        const observed = await call(handler, method, pattern, paramsFor(pattern, type, doc.name));
+        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort((a, b) => a - b), ...observed });
+    }
+    probe.restore();
+    return { rows, reads };
+}
+
+/** The list door, found by its PATTERN rather than by a transcribed key. */
+const listRow = (rows: Row[]) =>
+    rows.find((r) => r.route.startsWith('GET ') && r.route.endsWith('/meta/:type'));
+
+// An ORG-OVERRIDABLE type, so the org-scope question is not vacuous — asserted
+// against the registry in the first CONTROL rather than trusted here.
+const ORG_SCOPED_TYPE = 'dashboard';
+const ORG_SCOPED_DOC = { name: 'ops', type: 'dashboard', widgets: [] };
+
+describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', () => {
+    it('CONTROL: this section drives an ORG-OVERRIDABLE type; the type §8 drives is env-wide BY DESIGN', () => {
+        // The second half is why §8's green is not coverage of this card. On
+        // `object`, `organizationIdForMetaRead` returns `undefined` for an
+        // entitled caller too — so no fault model whatsoever could make §8
+        // observe an org-scope difference on the type it sweeps.
+        expect({ driven: declaresOrgOverride(ORG_SCOPED_TYPE), section8: declaresOrgOverride(OBJECT_DOC.type) })
+            .toEqual({ driven: true, section8: false });
+    });
+
+    it('CONTROL: healthy, the list door serves 200 and its read NAMES the caller\'s organization', async () => {
+        // Without this, "no unscoped read" below is satisfied by an instrument
+        // that never scoped anything in the first place.
+        const { rows, reads } = await sweepSelective(0, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
+        const list = listRow(rows);
+        expect({ found: list !== undefined, status: list?.status }).toEqual({ found: true, status: 200 });
+        const listReads = reads.filter((r) => r.route === list!.route);
+        expect(listReads.length).toBeGreaterThan(0);
+        expect(listReads.map((r) => r.request?.organizationId))
+            .toEqual(listReads.map(() => ENTITLED.tenantId));
+    });
+
+    it('CONTROL: the injector is SELECTIVE — with the second read faulted, the first still fulfils', async () => {
+        // Two distinct sites recorded on one request ⇒ the first read RESOLVED,
+        // because the second is only reachable when the first did not throw.
+        // Without this the pin below is unfalsifiable: an instrument that fails
+        // everything satisfies "the first read failed" vacuously.
+        const { rows } = await sweepSelective(2, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
+        // Any route with two recorded sites will do. Pinning this to ONE
+        // handler would make the control fail on a legitimate collapse of that
+        // handler's reads, which is a refactor this section must tolerate
+        // rather than police.
+        const multi = rows.filter((r) => r.sites.length >= 2);
+        expect(multi.length).toBeGreaterThan(0);
+        expect(multi.filter((r) => r.status === 200).map((r) => r.route)).toEqual([]);
+    });
+
+    it('⭐ with ONLY the first read faulted, the list door does not answer 200', async () => {
+        const { rows } = await sweepSelective(1, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
+        const list = listRow(rows);
+        expect(list!.sites.length).toBeGreaterThan(0);
+        // Named, so a regression says WHICH answer the door invented.
+        // Named, so a regression says WHICH door started inventing an answer.
+        expect({ route: list!.route, fabricated200: list!.status === 200 })
+            .toEqual({ route: list!.route, fabricated200: false });
+    });
+
+    it('⭐ and it issues NO metadata read without an organization while the tenant is unresolvable', async () => {
+        // ⭐ THE PROPERTY. The harm is the READ, not the status: a door that
+        // proceeds with `listCtx === undefined` asks `getMetaItems` for the
+        // env-wide partition and serves rows from outside the caller's org.
+        // Asserting on the request the handler BUILT is what survives a
+        // refactor that changes no spelling.
+        const { rows, reads } = await sweepSelective(1, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
+        const list = listRow(rows);
+        const unscoped = reads.filter(
+            (r) => r.route === list!.route && r.request?.organizationId === undefined,
+        );
+        expect(unscoped.map((r) => r.route)).toEqual([]);
     });
 });

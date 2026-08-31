@@ -569,13 +569,20 @@ export const ERROR_CODE_LEDGER = {
     //     re-claimed the row mid-call — both `SqlHttpOutbox` and
     //     `MemoryHttpOutbox` report that miss instead of a false success
     //     (#11009).
-    //   - `INotificationOutbox.ack` (`NotificationAckError`; #11453) refuses a
-    //     row that is not `in_flight` — which covers BOTH an unclaimed
-    //     `pending` row (the ack-as-cancel trap) and an already-terminal one,
-    //     because `ack` records the outcome of a delivery the caller CLAIMED.
-    //     Also raised by `SqlNotificationOutbox` when its compare-and-set
-    //     read-back shows the claim was lost mid-ack (a slow send outrunning
-    //     `claimTtlMs`), so nothing was written.
+    //   - `INotificationOutbox.ack` (`NotificationAckError`; #11453, #11859)
+    //     refuses a row that is not `in_flight` — an unclaimed `pending` row
+    //     (the ack-as-cancel trap) or an already-terminal one, because `ack`
+    //     records the outcome of a delivery the caller CLAIMED — AND, since
+    //     #11859, an `in_flight` row no longer held by the claim being
+    //     completed: `ack` takes back the record `claim()` returned and the
+    //     compare-and-set binds its (`claimed_by`, `claimed_at`) credential,
+    //     so a claim lost to the `claimTtlMs` reap plus a re-claim (by ANY
+    //     node, including the caller's own later claim) matches nothing and
+    //     nothing is written. Also raised for a record handed back carrying
+    //     no claim credential at all. BOTH backends raise every one of these
+    //     refusals — `SqlNotificationOutbox` and `MemoryNotificationOutbox`,
+    //     pinned on one table in
+    //     `outbox-ack-claim-ownership.integration.test.ts`.
     // Distinct from DELIVERY_NEVER_SENT: this one says "wrong state for THIS
     // operation, try when it settles"; that one says "never, fix the
     // configuration instead".

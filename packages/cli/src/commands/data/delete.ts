@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
-import { printError, printSuccess, emitJson } from '../../utils/format.js';
+import { printError, printSuccess, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -83,6 +83,7 @@ export default class DataDelete extends Command {
         await emitJson({
           success: false,
           error: error.message,
+          ...errorCodeFields(error),
         });
         this.exit(1);
       }

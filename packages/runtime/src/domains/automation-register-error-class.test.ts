@@ -123,6 +123,9 @@ function makeDispatcher(options?: { registerFlow?: (name: string, definition: un
             }
             registered.set(name, parsed);
             flows.set(name, parsed);
+            // [#12206] Faithful to the real engine: `registerFlow` answers
+            // the canonicalized parsed flow it stored, which the doors relay.
+            return parsed;
         })),
         getFlow: vi.fn(async (name: string) => flows.get(name) ?? null),
         toggleFlow: vi.fn(async (name: string) => {
@@ -349,8 +352,10 @@ describe('#8055 — what must not change', () => {
         expect(result.response?.body?.success).toBe(true);
         expect(spies.registerFlow).toHaveBeenCalledWith('welcome_flow', WELL_FORMED);
         expect(registered.has('welcome_flow')).toBe(true);
-        // The definition is echoed back unchanged, as it always was.
-        expect(result.response?.body?.data ?? result.response?.body).toMatchObject({ name: 'welcome_flow' });
+        // [#12206, Option A] The door answers the canonicalized PARSED flow
+        // the service stored — not an echo of the caller's bytes: `version`
+        // is a schema default WELL_FORMED never wrote.
+        expect(result.response?.body?.data).toMatchObject({ name: 'welcome_flow', version: 1 });
     });
 
     it('the #3899 body checks still refuse BEFORE the engine is asked', async () => {

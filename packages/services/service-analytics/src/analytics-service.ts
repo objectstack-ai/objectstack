@@ -191,8 +191,10 @@ function isMissingColumnOfRelation(message: string): boolean {
  * object "O"`, where the "relation" is inside "relationship" and the missing
  * thing is a RELATIONSHIP, not a table. The anchor is the same pattern the
  * sibling {@link missingSourceRelation} already uses for postgres (and the same
- * shape as `metadata/src/utils/schema-sync-errors.ts`), so "is something
- * missing" and "what is missing" can no longer disagree on this limb.
+ * shape as `packages/types/src/driver-error-classification.ts` — #13279
+ * moved it there from `metadata/src/utils/schema-sync-errors.ts`), so "is
+ * something missing" and "what is missing" can no longer disagree on this
+ * limb.
  *
  * MEASURED over the wordings this repo actually carries — 13 strings: the three
  * driver families' phrasings (including sql-prefixed and schema-qualified

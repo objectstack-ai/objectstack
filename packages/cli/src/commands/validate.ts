@@ -32,6 +32,7 @@ import {
   printMetadataStats,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../utils/format.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 
@@ -519,6 +520,7 @@ export default class Validate extends Command {
         await emitJson({
           valid: false,
           error: error.message,
+          ...errorCodeFields(error),
           // [#12047] Whatever the run had reached before the throw. A config
           // that dies in `loadConfig` reports `[]` here honestly — nothing was
           // computed yet — while a throw from a later step (a `src/docs` that

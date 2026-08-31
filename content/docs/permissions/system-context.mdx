@@ -64,7 +64,7 @@ not on any flag.
 ## How the flag is set
 
 `isSystem` is **server-constructed and never client-supplied**. Inbound HTTP
-cannot set it (`packages/rest/src/rest-server.ts:1238`, `:1267`), and neither
+cannot set it (`packages/rest/src/rest-server.ts:1239`, `:1268`), and neither
 can an action body (`packages/runtime/src/domains/actions.ts:404`). It is
 written by internal callers only, as an option on the engine call:
 
@@ -87,14 +87,14 @@ that silently does not happen.
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–6 at once — this is the single largest behaviour on the page | `security-plugin.ts:1565` |
-| 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | guard at `security-plugin.ts:2491` (the step 3.5 block), skipped by `:1565` |
-| 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `security-plugin.ts:4295` |
-| 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `security-plugin.ts:4446` |
-| 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `security-plugin.ts:4524` |
-| 6 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `security-plugin.ts:1392`, `:1414` |
+| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–6 at once — this is the single largest behaviour on the page | `security-plugin.ts:1585` |
+| 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | guard at `security-plugin.ts:2511` (the step 3.5 block), skipped by `:1585` |
+| 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `security-plugin.ts:4314` |
+| 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `security-plugin.ts:4465` |
+| 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `security-plugin.ts:4543` |
+| 6 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `security-plugin.ts:1412`, `:1434` |
 | 7 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `object-schema-fls.ts:228` |
-| 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3808` |
+| 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3827` |
 | 9 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `anonymous-deny.ts:154` |
 | 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:1015` |
 | 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1288` |
@@ -103,7 +103,7 @@ that silently does not happen.
 | 14 | MCP stdio bridge skips the object API-exposure gate | mcp | Get: the bridge reaches objects whose `apiEnabled` / `apiMethods` would refuse an external caller | `stdio-data-bridge.ts:246` |
 | 15 | **Read-audit rows are not written** | plugin-audit | Lose: the "a person opened this record" trail. `sudo()` keeps the caller's `userId`, so this flag is the only thing separating a human read from a platform one | `read-audit.ts:556` |
 | 16 | Approval snapshot payload redaction skipped | plugin-approvals | Get: the whole snapshot on `find` / `findOne` — the audit/replay channel. Lose: field-visibility redaction over approval payloads | `payload-redaction-middleware.ts:115` |
-| 17 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `rest-server.ts:1270` |
+| 17 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `rest-server.ts:1271` |
 
 ### 2. Write pipeline and data integrity
 
@@ -112,7 +112,7 @@ that silently does not happen.
 | 18 | **`readonly` strip bypassed — UPDATE, single row** | objectql | Get: a `readonly` field CAN be written. Lose: the protection that stops a caller seeding e.g. `approval_status` | `objectql/src/engine.ts:10581` |
 | 19 | **`readonly` strip bypassed — UPDATE, bulk/predicate** | objectql | Same, on the multi-row path | `objectql/src/engine.ts:10743` |
 | 20 | **`readonly` strip bypassed — INSERT (engine pass)** | objectql | Same, on create | `objectql/src/engine.ts:9474` |
-| 21 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `metadata-protocol/src/protocol.ts:1451` |
+| 21 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `metadata-protocol/src/protocol.ts:1576` |
 | 22 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing | `objectql/src/engine.ts:9511`, `readonly-strict-errors.ts:66` |
 | 23 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `objectql/src/engine.ts:5603` |
 | 24 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `objectql/src/engine.ts:3571`, `:3573`, `:3600` |
@@ -158,7 +158,7 @@ The largest single consumer — **20 of the 109 sites**.
 |:--|:---|:---|:---|:---|
 | 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:136` |
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:399` |
-| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4282`, `:5645`, `:5877`, `:6222`, `:6415` |
+| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4283`, `:5646`, `:5878`, `:6241`, `:6434` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
 | 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:246`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
@@ -199,7 +199,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1451` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:273` |
-| "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1238`, `:1267`; `domains/actions.ts:404` |
+| "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1239`, `:1268`; `domains/actions.ts:404` |
 
 ---
 

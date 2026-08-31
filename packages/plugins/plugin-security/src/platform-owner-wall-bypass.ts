@@ -5,13 +5,13 @@
  * #11343 verified-owner family makes, extracted so its two in-package
  * consumers can never drift:
  *
- *  - **The platform-admin elevation gate** (`bootstrap-platform-admin.ts`,
- *    the twin this comparison is extracted FROM): its walled arm elevates
- *    only an account for which BOTH halves below answer yes. It keeps
- *    consuming the halves separately ({@link matchesDeclaredOwnerEmail} +
- *    `isEmailVerifiedUserRow`) because its two refusal diagnostics —
- *    `walled_owner_not_registered` vs `walled_owner_not_verified` — must
- *    stay distinct.
+ *  - **The platform-admin standing surface** (`platform-admin-service.ts`,
+ *    plus the walled bootstrap's standing log that consumes it): both halves
+ *    below answer its per-entry `registered` / `verified` report. [#11974]
+ *    The walled ELEVATION twin this comparison was extracted from is retired
+ *    — `bootstrap-platform-admin.ts` writes no grant row under walled
+ *    postures; standing is config-derived at the one derivation site
+ *    (`resolve-authz-context.ts` §6b-config), which asks the same parser.
  *  - **The Layer 0 owner wall bypass** (`security-plugin.ts`
  *    `isVerifiedPlatformOwnerSession`, maintainer ruling 2026-08-29 on the
  *    tracking card, verbatim and untranslated: 「能不能简单点，对于超级管理员，

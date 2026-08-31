@@ -136,9 +136,15 @@ export type CreateFlowRequestParsed = z.infer<typeof CreateFlowRequestSchema>;
 
 /**
  * Response after creating a flow.
+ *
+ * `data` is the CANONICALIZED flow the engine stored (#12206, Option A):
+ * `FlowSchema.parse` output with schema defaults materialized (`version`,
+ * `status`, `runAs`, per-edge `type`/`isDefault`) and `edge.condition`
+ * strings lowered to their `{dialect, source}` envelopes — the same shape
+ * `GET /api/automation/:name` answers, never an echo of the request bytes.
  */
 export const CreateFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: FlowSchema.describe('The created flow definition'),
+  data: FlowSchema.describe('The created flow, canonicalized — the parsed shape the engine stored, identical to what a subsequent GET answers'),
 }));
 export type CreateFlowResponse = z.input<typeof CreateFlowResponseSchema>;
 /** Post-parse shape of {@link CreateFlowResponse} — defaults applied, transforms run (ADR-0122). */
@@ -151,11 +157,17 @@ export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
 /**
  * Request body for updating an existing flow.
  *
+ * `definition` is the COMPLETE flow definition (#12206, inherited item ②):
+ * the engine's `registerFlow` runs `FlowSchema.parse` on it, so a partial
+ * body (e.g. a bare `{ label }`) is a 400 against a real server — the old
+ * `.partial()` here declared a partial-update capability nothing implements.
+ * A real partial-update capability would be its own feature card.
+ *
  * @example PUT /api/automation/approval_flow
- * { label: 'Updated Label', nodes: [...], edges: [...] }
+ * { name: 'approval_flow', definition: { name: 'approval_flow', label: 'Approval Flow', type: 'autolaunched', nodes: [...], edges: [...] } }
  */
 export const UpdateFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
-  definition: FlowSchema.partial().describe('Partial flow definition to update'),
+  definition: FlowSchema.describe('Complete flow definition to store — the engine requires a full flow; partial update is not implemented'),
 }));
 export type UpdateFlowRequest = z.input<typeof UpdateFlowRequestSchema>;
 /** Post-parse shape of {@link UpdateFlowRequest} — defaults applied, transforms run (ADR-0122). */
@@ -163,9 +175,13 @@ export type UpdateFlowRequestParsed = z.infer<typeof UpdateFlowRequestSchema>;
 
 /**
  * Response after updating a flow.
+ *
+ * `data` is the canonicalized flow the engine stored — see
+ * {@link CreateFlowResponseSchema}; the two write doors answer the same
+ * shape (#12206, Option A). Unlike the old echo, it always carries `name`.
  */
 export const UpdateFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: FlowSchema.describe('The updated flow definition'),
+  data: FlowSchema.describe('The updated flow, canonicalized — the parsed shape the engine stored, identical to what a subsequent GET answers'),
 }));
 export type UpdateFlowResponse = z.input<typeof UpdateFlowResponseSchema>;
 /** Post-parse shape of {@link UpdateFlowResponse} — defaults applied, transforms run (ADR-0122). */

@@ -2074,6 +2074,183 @@ describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
   });
 });
 
+import { HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema } from './protocol.zod';
+import type { HistoryMetaItemRequest, HistoryMetaItemResponse } from './protocol.zod';
+
+describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type (#12005)', () => {
+  // The history door is the audit door's explicitly named twin
+  // (`rest-server.ts` says so at the `Number(...)`-shape comment) and was in
+  // exactly the state the audit door left via #11678/PR #12003: NEITHER side
+  // declared, the REST call site reaching the verb through `(p as any)` twice
+  // (guard + call). The measure is the implementation's parameter type in
+  // `@objectstack/metadata-protocol` —
+  // `{ type, name, organizationId?: string, sinceSeq?: number, limit?: number }`
+  // — and the REST door's actual sends; nothing else is declared because
+  // nothing else is enforced. As in the #11678 block above, accept-pins
+  // assert the parsed VALUE: this is a non-strict object, so `success` alone
+  // is exactly the silent-strip state this family of cards closes.
+
+  const base = { type: 'view', name: 'account_list' } as const;
+
+  it('accepts the full request and PRESERVES every member through parse', () => {
+    const full = { ...base, organizationId: 'org_alpha', sinceSeq: 3, limit: 50 };
+    const result = HistoryMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(full);
+    }
+  });
+
+  it('requires type AND name — the change log is per item', () => {
+    expect(HistoryMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(HistoryMetaItemRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(HistoryMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+
+  it('organizationId is an optional string — the implementation\'s declared type, not the audit twin\'s nullable', () => {
+    // The audit twin declares `string | null` because ITS implementation
+    // does and its door always sends `ctx?.tenantId ?? null`. This
+    // implementation declares plain `organizationId?: string`, and this door
+    // sends no organization at all — so the mirror is `.optional()` without
+    // `.nullable()`. (Whether the door SHOULD send one is the #8747-family
+    // measurement the card fences to a future issue, deliberately not
+    // answered by this declaration.)
+    const withOrg = HistoryMetaItemRequestSchema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(withOrg.success).toBe(true);
+    if (withOrg.success) {
+      expect((withOrg.data as { organizationId?: string }).organizationId).toBe('org_alpha');
+    }
+    expect(HistoryMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(HistoryMetaItemRequestSchema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
+  });
+
+  it('sinceSeq and limit are optional numbers — values, not bags', () => {
+    expect(HistoryMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(HistoryMetaItemRequestSchema.safeParse({ ...base, sinceSeq: '3' }).success).toBe(false);
+    expect(HistoryMetaItemRequestSchema.safeParse({ ...base, limit: '50' }).success).toBe(false);
+    // The implementation forwards `limit` to the repository UNCLAMPED (no
+    // [1, 500] clamp here, unlike the audit twin), so the schema deliberately
+    // declares no bounds — `.max()` would refuse a value the shipped verb
+    // accepts.
+    const unclamped = HistoryMetaItemRequestSchema.safeParse({ ...base, limit: 9999 });
+    expect(unclamped.success).toBe(true);
+  });
+
+  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+    // Same regression guard as the audit block above, with one twist the
+    // audit twin no longer has: this door STILL spreads `environmentId` into
+    // its outgoing payload (dead weight — the implementation never declares
+    // or reads it). That wire member rides the door's
+    // `TransportScopedMetaRequest` wrapper in `packages/rest`; it must never
+    // become a protocol key here.
+    const result = HistoryMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+    const shape = (HistoryMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+});
+
+describe('HistoryMetaItemResponseSchema declares the change-log body (#12005)', () => {
+  /**
+   * A verbatim-shaped capture of a real `historyMetaItem` return: one update
+   * (all optional members present) followed by the delete tombstone
+   * (`hash: null`, system actor, the sys-repository's fallback `source`, no
+   * `version`/`message` recorded — `rowToEvent` omits both when the row
+   * carries neither).
+   */
+  const realResponse = {
+    events: [
+      {
+        seq: 12,
+        op: 'update',
+        ref: { org: 'org_alpha', type: 'view', name: 'account_list' },
+        hash: 'sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b',
+        parentHash: 'sha256:d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35',
+        version: 3,
+        actor: 'admin@objectos.ai',
+        message: 'tweak columns',
+        ts: '2026-08-25T02:11:09.000Z',
+        source: 'studio',
+      },
+      {
+        seq: 13,
+        op: 'delete',
+        ref: { org: 'org_alpha', type: 'view', name: 'account_list' },
+        hash: null,
+        parentHash: 'sha256:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b',
+        actor: null,
+        ts: '2026-08-25T02:12:41.000Z',
+        source: 'sys-metadata-repo',
+      },
+    ],
+  };
+
+  it('parses the real event shapes and PRESERVES every member', () => {
+    const result = HistoryMetaItemResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(realResponse);
+    }
+  });
+
+  it('the honest-empty answer parses — {events: []} is a declared, legal body', () => {
+    // `[]` is the honest answer for a clean change log AND for a non-overlay
+    // metadata type (no history by construction — the implementation answers
+    // `[]` instead of throwing). The capability gap is NOT in this body: a
+    // protocol without the verb is refused 501 before the call.
+    const result = HistoryMetaItemResponseSchema.safeParse({ events: [] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as { events: unknown[] }).events).toEqual([]);
+    }
+  });
+
+  it('keeps the op vocabulary closed, and ref.type deliberately open', () => {
+    const bad = (patch: Record<string, unknown>) =>
+      HistoryMetaItemResponseSchema.safeParse({ events: [{ ...realResponse.events[0], ...patch }] });
+    // `op` mirrors the producer's own closed enum (ADR-0008 §2.4)…
+    expect(bad({ op: 'save' }).success).toBe(false);
+    // …while `ref.type` is a plain string BY INTENT: plugin runtime-create
+    // types flow through this door and are registry-absent by design, so the
+    // static registry enum would refuse real rows (the schema-level note
+    // carries the #12038 1C reasoning).
+    const pluginType = bad({ ref: { org: 'org_alpha', type: 'capability', name: 'account_list' } });
+    expect(pluginType.success).toBe(true);
+  });
+});
+
+describe('MetadataProtocol declares historyMetaItem (#12005)', () => {
+  // Type-level pins, same pattern as the #11678 audit block above: before
+  // this declaration the casts at the REST call site carried MEMBER-EXISTENCE
+  // weight (TS2339, not TS2353), so the request literal there was typed by
+  // nothing. These pins are what turns red if the member is dropped again or
+  // drifts off the history schemas.
+
+  it('declares the member optional, against the history request/response schemas', () => {
+    expectTypeOf<MetadataProtocol['historyMetaItem']>().toEqualTypeOf<
+      ((request: HistoryMetaItemRequest) => Promise<HistoryMetaItemResponse>) | undefined
+    >();
+    // An implementation without the verb still type-checks against the
+    // interface — the CONFORMING-deployment half of the door's 501 refusal.
+    const absent: Pick<MetadataProtocol, 'historyMetaItem'> = {};
+    expect('historyMetaItem' in absent).toBe(false);
+  });
+
+  it('refuses an undeclared key at the member call shape', () => {
+    const good: HistoryMetaItemRequest = { type: 'view', name: 'account_list', sinceSeq: 3, limit: 50 };
+    expect(good.type).toBe('view');
+    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member (the REST door's spread of it rides the TransportScopedMetaRequest wrapper, never this shape).
+    const withEnv: HistoryMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
+    expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
+    const misspelt: HistoryMetaItemRequest = { type: 'view', name: 'account_list', sinceSeqs: 3 };
+    expect(misspelt.name).toBe('account_list');
+  });
+});
+
 import { DeleteMetaItemRequestSchema } from './protocol.zod';
 // `DeleteMetaItemResponse` is imported once, above, beside the response-side
 // suite that pins its two #13155 keys — the member pin below reads it from

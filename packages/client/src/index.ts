@@ -3913,15 +3913,13 @@ export class ObjectStackClient {
       /**
        * Create (register) a new flow
        *
-       * [#8140] ⛔ `Promise<any>` is DELIBERATE here, and it is a missing
-       * CONTRACT rather than a missing annotation. The route ends
-       * `deps.success(body)` — the request body, echoed — and
-       * `IAutomationService.registerFlow(name, definition: unknown): void`
-       * returns nothing, so no published type describes what comes back.
-       * Naming `Flow` would be a claim about the REQUEST that no validation
-       * backs. Authoring the response contract is `packages/spec`'s call.
+       * [#12206, Option A] Answers the canonicalized PARSED flow the engine
+       * stored (schema defaults materialized, `edge.condition` strings
+       * lowered to their `{dialect, source}` envelopes) — the same shape
+       * `get` answers, so a write-then-read on the resource is stable.
+       * `CreateFlowResponseSchema` declares the wire envelope this unwraps.
        */
-      create: async (name: string, definition: any): Promise<any> => {
+      create: async (name: string, definition: any): Promise<FlowParsed> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}`, {
               method: 'POST',
@@ -3933,11 +3931,13 @@ export class ObjectStackClient {
       /**
        * Update an existing flow
        *
-       * [#8140] ⛔ `Promise<any>` is DELIBERATE — same missing contract as
-       * `create` above: the route ends `deps.success(definition)`, echoing
-       * what was sent.
+       * [#12206, Option A] Same contract as `create` above: answers the
+       * canonicalized parsed flow the engine stored — always carrying `name`,
+       * which the old echo could omit on PUT. The engine requires a COMPLETE
+       * definition (`UpdateFlowRequestSchema`); partial update is not
+       * implemented.
        */
-      update: async (name: string, definition: any): Promise<any> => {
+      update: async (name: string, definition: any): Promise<FlowParsed> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${name}`, {
               method: 'PUT',

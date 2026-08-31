@@ -113,6 +113,7 @@ import {
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
+import { createPlatformAdminService } from './platform-admin-service.js';
 import {
   backfillOrgAdminGrants,
   extractMemberPairs,
@@ -1008,6 +1009,25 @@ export class SecurityPlugin implements Plugin {
     // one and falls back to `[fallbackPermissionSet]` on a stack too old to
     // register it.
     ctx.registerService('security.baselinePermissionSets', this.baselinePermissionSets);
+    // [#11974 / #11663 L4, pin #3] The read-only platform-admin AUDIT surface.
+    // Under walled postures no grant row is minted any more, so "who
+    // administers this deployment?" loses its row-based answer; this service
+    // serves the config-derived one (`OS_PLATFORM_OWNER_EMAIL` through the ONE
+    // parser, plus per-entry sys_user standing) for Setup / discovery /
+    // health. Registered beside the other security services; deliberately has
+    // no writable member — there is no runtime path that changes who a
+    // platform administrator is (#11663 Choice 3A). The engine is resolved
+    // lazily so registration does not depend on objectql's start order.
+    ctx.registerService(
+      'platformAdmin',
+      createPlatformAdminService(() => {
+        try {
+          return ctx.getService('objectql');
+        } catch {
+          return undefined;
+        }
+      }),
+    );
 
     ctx.getService<{ register(m: any): void }>('manifest').register({
       ...securityPluginManifestHeader,
@@ -3564,19 +3584,18 @@ export class SecurityPlugin implements Plugin {
       void runBootstrap();
     }
 
-    // Re-run bootstrap after a sys_user write that can change the elevation
+    // Re-run bootstrap after a sys_user write that can change the promotion
     // answer, so the platform admin is promoted without a server restart:
     //
-    //  - INSERT: the user that signs up after boot may be the promotion
-    //    target (and, in multi-tenant mode, gets bound to the seeded default
-    //    organization).
-    //  - UPDATE touching `email_verified` / `email` (#11343): under walled
-    //    postures elevation requires the declared owner's email to be
-    //    VERIFIED, and the verifying write is an update (better-auth flips
-    //    `emailVerified` when the link is clicked; change-email rewrites
-    //    both columns). Insert-only replay would refuse the owner at sign-up
-    //    and then never look again — the genuine owner would never be
-    //    elevated at all.
+    //  - `single` posture + INSERT: the user that signs up after boot may be
+    //    the first-user promotion target (and, in multi-tenant mode, gets
+    //    bound to the seeded default organization).
+    //  - [#11974 / #11663 L4] That is the WHOLE trigger set now. Under walled
+    //    postures the bootstrap writes no grant — standing is config-derived
+    //    at request time (`resolve-authz-context.ts` §6b-config) — so no
+    //    `sys_user` write can change its answer and the replay never fires.
+    //    The #11343 UPDATE arm (`email_verified` / `email`) retired with the
+    //    walled elevation it existed to re-attempt.
     //
     // The trigger set is `shouldReplayBootstrapFor` — the SAME predicate its
     // pins consume — and the function itself is idempotent, bailing out as

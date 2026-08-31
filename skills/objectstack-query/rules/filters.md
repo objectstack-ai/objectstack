@@ -20,7 +20,7 @@ Comprehensive guide for building ObjectStack query filters.
 | String | `$startsWith` | `LIKE ?%` | `{ code: { $startsWith: 'PRJ-' } }` |
 | String | `$endsWith` | `LIKE %?` | `{ file: { $endsWith: '.pdf' } }` |
 | Null | `$null` | `IS NULL` / `IS NOT NULL` | `{ deleted_at: { $null: true } }` |
-| Existence | `$exists` | (NoSQL) `$exists` | `{ metadata: { $exists: true } }` |
+| Null | `$exists` | `IS NOT NULL` / `IS NULL` | `{ metadata: { $exists: true } }` |
 
 ## Implicit Equality (Shorthand)
 

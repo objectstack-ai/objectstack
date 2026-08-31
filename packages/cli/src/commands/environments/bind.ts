@@ -4,7 +4,7 @@ import { Command, Flags, Args } from '@oclif/core';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { printError, printStep, printKV, emitJson, isExitSignal } from '../../utils/format.js';
+import { printError, printStep, printKV, emitJson, isExitSignal, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -147,7 +147,7 @@ export default class EnvironmentsBind extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.format === 'json') {
-        await emitJson({ success: false, error: error.message });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

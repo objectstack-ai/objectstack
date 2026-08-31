@@ -813,10 +813,12 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
  * platform accepts — expressly outside this ruling.
  *
  * That predicate already follows `error.cause` up to four levels, with its own
- * pins (`schema-sync-errors.test.ts`, "follows an error wrapped as `cause`"),
- * because "drivers commonly re-throw with the original attached as `cause`" is
- * a case it was built for. So the wrap is transparent to it and to every other
- * cause-following consumer, and ⛔ the predicate itself is untouched.
+ * pins (`packages/types/src/driver-error-classification.test.ts` — #13279
+ * moved it there from `metadata/src/utils/schema-sync-errors.test.ts` —
+ * "follows an error wrapped as `cause`"), because "drivers commonly re-throw
+ * with the original attached as `cause`" is a case it was built for. So the
+ * wrap is transparent to it and to every other cause-following consumer, and
+ * ⛔ the predicate itself is untouched.
  *
  * The property is defined NON-ENUMERABLE, the same shape `new Error(msg, {
  * cause })` produces. An enumerable `cause` would ride out through

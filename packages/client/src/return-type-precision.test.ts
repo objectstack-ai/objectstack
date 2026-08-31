@@ -129,6 +129,14 @@ export async function returnTypePrecisionPins(): Promise<void> {
     expectTypeOf(await client.automation.execute('flow_a')).toEqualTypeOf<AutomationResult>();
     expectTypeOf(await client.automation.getRun('flow_a', 'run_1')).toEqualTypeOf<ExecutionLog>();
 
+    // [#12206, Option A] The two write doors answer the canonicalized parsed
+    // flow — the single true return type the read door already binds. These
+    // pins retire the last two DELIBERATE `Promise<any>` declarations of the
+    // automation family (`exported-any-returns.json` entries deleted in the
+    // same change).
+    expectTypeOf(await client.automation.create('flow_a', {})).toEqualTypeOf<FlowParsed>();
+    expectTypeOf(await client.automation.update('flow_a', {})).toEqualTypeOf<FlowParsed>();
+
     // Explicit type arguments still work for a LEGITIMATE narrowing — the
     // parameter was kept, its default moved off `any`, and a constraint was
     // added. This is the compatibility half of the narrowing.

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printSuccess, printError, printKV, emitJson } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printKV, emitJson, errorCodeFields } from '../utils/format.js';
 import { writeAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
@@ -152,7 +152,7 @@ export default class Register extends Command {
       }
     } catch (error: any) {
       if (flags.json) {
-        await emitJson({ success: false, error: error.message });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

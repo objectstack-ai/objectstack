@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 // classes themselves left two unused bindings (TS6133) the moment this file
 // entered a tsc program (#5449).
 import { WELL_KNOWN_CAPABILITY_KEYS } from '@objectstack/spec/api';
+import { FlowSchema } from '@objectstack/spec/automation';
 import { ObjectStackClient, createQuery, createFilter } from './index';
 import type { QueryOptions, QueryOptionsV2 } from './index';
 
@@ -1264,30 +1265,68 @@ describe('ObjectStackClient.automation', () => {
         expect(result.name).toBe('my_flow');
     });
 
-    it('should create a flow', async () => {
+    // [#12206, inherited item ③] These two bodies used to be `{ label }`
+    // fragments — 400 against a real server (`registerFlow` runs
+    // `FlowSchema.parse`), passing only because `fetch` is mocked. They are
+    // now REGISTRABLE, and each test pins that with a real parse of the exact
+    // wire body the SDK sends, so the fixture cannot silently rot again.
+    it('should create a flow (registrable body)', async () => {
+        const definition = {
+            label: 'New Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        };
+        // `create` sends `{ name, ...definition }` — that merged object is
+        // what the engine parses; prove it is registrable.
+        expect(() => FlowSchema.parse({ name: 'new_flow', ...definition })).not.toThrow();
+
         const { client, fetchMock } = createMockClient({
             success: true,
-            data: { name: 'new_flow' },
+            data: FlowSchema.parse({ name: 'new_flow', ...definition }),
         });
 
-        await client.automation.create('new_flow', { label: 'New' });
+        const result = await client.automation.create('new_flow', definition);
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/automation',
             expect.objectContaining({ method: 'POST' }),
         );
+        // The door answers the canonicalized parsed flow (#12206, Option A):
+        // schema defaults the caller never wrote are materialized.
+        expect(result.name).toBe('new_flow');
+        expect(result.version).toBe(1);
+        expect(result.status).toBe('draft');
     });
 
-    it('should update a flow', async () => {
+    it('should update a flow (registrable body)', async () => {
+        const definition = {
+            name: 'my_flow',
+            label: 'Updated',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        };
+        // `update` sends `{ definition }`; the engine parses the definition.
+        expect(() => FlowSchema.parse(definition)).not.toThrow();
+
         const { client, fetchMock } = createMockClient({
             success: true,
-            data: { name: 'my_flow', label: 'Updated' },
+            data: FlowSchema.parse(definition),
         });
 
-        await client.automation.update('my_flow', { label: 'Updated' });
+        const result = await client.automation.update('my_flow', definition);
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost:3000/api/v1/automation/my_flow',
             expect.objectContaining({ method: 'PUT' }),
         );
+        expect(result.name).toBe('my_flow');
+        expect(result.label).toBe('Updated');
     });
 
     it('should delete a flow', async () => {

@@ -2638,7 +2638,7 @@ export class AutomationEngine implements IAutomationService {
         };
     }
 
-    registerFlow(name: string, definition: unknown): void {
+    registerFlow(name: string, definition: unknown): FlowParsed {
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
@@ -2728,6 +2728,12 @@ export class AutomationEngine implements IAutomationService {
         if (this.isFlowEnabled(name)) {
             this.activateFlowTrigger(name);
         }
+
+        // #12206 (Option A) — hand the caller the canonicalized flow this
+        // registration stored: the same object `this.flows` now holds and
+        // {@link getFlow} answers. The `/automation` write doors relay it, so
+        // a write answers the shape the subsequent read serves.
+        return parsed;
     }
 
     unregisterFlow(name: string): void {

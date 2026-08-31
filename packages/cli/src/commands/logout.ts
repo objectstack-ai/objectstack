@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printSuccess, printError, emitJson } from '../utils/format.js';
+import { printHeader, printSuccess, printError, emitJson, errorCodeFields } from '../utils/format.js';
 import { deleteAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 
@@ -53,6 +53,7 @@ export default class Logout extends Command {
         await emitJson({
           success: false,
           error: error.message,
+          ...errorCodeFields(error),
         });
         this.exit(1);
       }

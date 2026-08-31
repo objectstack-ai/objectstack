@@ -237,10 +237,31 @@ describe('CreateFlowResponseSchema', () => {
 // ==========================================
 
 describe('UpdateFlowRequestSchema', () => {
-  it('should accept a partial update', () => {
-    const result = UpdateFlowRequestSchema.parse({
+  // [#12206, inherited item ②] The old `.partial()` declared a partial-update
+  // capability nothing implements: the engine's `registerFlow` runs
+  // `FlowSchema.parse` on the definition, so a bare `{ label }` has always
+  // been a 400 against a real server. The request schema now requires the
+  // complete definition the engine actually requires.
+  it('should reject a partial definition — the engine requires a complete flow', () => {
+    expect(() => UpdateFlowRequestSchema.parse({
       name: 'my_flow',
       definition: { label: 'Updated Label' },
+    })).toThrow();
+  });
+
+  it('should accept a complete flow definition', () => {
+    const result = UpdateFlowRequestSchema.parse({
+      name: 'my_flow',
+      definition: {
+        name: 'my_flow',
+        label: 'Updated Label',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      },
     });
     expect(result.name).toBe('my_flow');
     expect(result.definition.label).toBe('Updated Label');

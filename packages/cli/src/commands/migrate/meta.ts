@@ -25,6 +25,7 @@ import {
   printStep,
   createTimer,
   emitJson,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -418,7 +419,7 @@ export default class MigrateMeta extends Command {
         return;
       }
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         this.exit(1);
       }
       printError(error.message || String(error));
@@ -538,7 +539,7 @@ export default class MigrateMeta extends Command {
         extraPlugins: await buildDataMigrationPlugins({ automation: true }),
       });
     } catch (error: any) {
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); return; }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); return; }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -612,7 +613,7 @@ export default class MigrateMeta extends Command {
       }
     } catch (error: any) {
       exitCode = 1;
-      if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
+      if (flags.json) await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
       else printError(error.message || String(error));
     } finally {
       await stack.shutdown();

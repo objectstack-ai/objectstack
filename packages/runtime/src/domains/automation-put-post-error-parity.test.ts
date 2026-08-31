@@ -93,6 +93,9 @@ function makeDispatcher() {
                 }
             }
             registered.set(name, parsed);
+            // [#12206] Faithful to the real engine: `registerFlow` answers the
+            // canonicalized parsed flow it stored, which the doors relay.
+            return parsed;
         },
         getFlow: async (name: string) => registered.get(name) ?? null,
     };

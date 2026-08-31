@@ -95,7 +95,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import type { CliExitCode } from '../utils/format.js';
-import { printHeader, printSuccess, printError, printKV, emitJson } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printKV, emitJson, errorCodeFields } from '../utils/format.js';
 import { writeAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
@@ -367,7 +367,7 @@ export default class AuthLogin extends Command {
         // written (an expired code, a denied approval, a poll failure), so an
         // indented payload here recreated the exact two-document stream #6531
         // is about — on the path a consumer is least able to recover from.
-        await emitRecord({ success: false, error: error.message });
+        await emitRecord({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

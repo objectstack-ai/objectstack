@@ -100,16 +100,16 @@ describe('SecurityPlugin', () => {
   });
 
   // -------------------------------------------------------------------------
-  // [#11343] Bootstrap-replay wiring — the middleware registered in start()
-  // re-runs the bootstrap for exactly the writes `shouldReplayBootstrapFor`
-  // admits. The predicate itself is pinned exhaustively next to its producer
+  // Bootstrap-replay wiring — the middleware registered in start() re-runs
+  // the bootstrap for exactly the writes `shouldReplayBootstrapFor` admits.
+  // The predicate itself is pinned exhaustively next to its producer
   // (bootstrap-platform-admin-walled-owner.test.ts); THIS pin is that the
-  // middleware actually consults it — i.e. that a sys_user UPDATE touching
-  // `email_verified` re-runs the bootstrap. Insert-only replay + the verified
-  // requirement would strand the genuine owner unelevated forever, so the
-  // update leg is load-bearing, not an optimization.
+  // middleware actually consults it. [#11974 / #11663 L4] The trigger set is
+  // NARROWED: the #11343 update arm (email_verified / email) retired with the
+  // walled elevation it existed to re-attempt — under `single` (this suite's
+  // posture) only a sys_user insert/create can change the promotion answer.
   // -------------------------------------------------------------------------
-  it('re-runs the bootstrap on the verifying sys_user update, and not on an unrelated profile edit (#11343)', async () => {
+  it('re-runs the bootstrap on a sys_user insert, and no longer on the verifying update (#11974 narrowed #11343)', async () => {
     const plugin = new SecurityPlugin();
     const middlewares: any[] = [];
     const manifestService = { register: vi.fn() };
@@ -170,19 +170,20 @@ describe('SecurityPlugin', () => {
       }
     };
 
-    // The verifying write (better-auth flips emailVerified on link click,
-    // snake_cased by the adapter) ⇒ ONE re-run.
+    // The formerly-verifying write (better-auth flips emailVerified on link
+    // click) ⇒ NO re-run any more: the walled elevation it re-attempted is
+    // retired, and `single` never read this column.
     await drive({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } });
-    expect(completions()).toBe(2);
+    expect(completions()).toBe(1);
 
-    // An unrelated profile edit ⇒ NO re-run.
+    // An unrelated profile edit ⇒ NO re-run (unchanged).
     await drive({ object: 'sys_user', operation: 'update', data: { id: 'u1', name: 'New Name' } });
-    expect(completions()).toBe(2);
+    expect(completions()).toBe(1);
 
-    // The original insert trigger still fires (control that the update leg
-    // did not narrow the existing behavior).
+    // The original insert trigger still fires — the over-denial control: the
+    // narrowing must not retire `single`'s first-user promotion path.
     await drive({ object: 'sys_user', operation: 'insert', data: { email: 'a@b.c' } });
-    expect(completions()).toBe(3);
+    expect(completions()).toBe(2);
   });
 
   // [ADR-0105 D2 / #3623] start() hands the engine a posture accessor so the

@@ -8,7 +8,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import { ObjectStackClient } from '@objectstack/client';
-import { printHeader, printSuccess, printError, emitJson } from '../../utils/format.js';
+import { printHeader, printSuccess, printError, emitJson, errorCodeFields } from '../../utils/format.js';
 import { deleteCloudConfig, tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudLogout extends Command {
@@ -46,7 +46,7 @@ export default class CloudLogout extends Command {
       }
     } catch (error: any) {
       if (flags.json) {
-        await emitJson({ success: false, error: error.message });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

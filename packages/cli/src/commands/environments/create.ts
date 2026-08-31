@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import { printError, emitJson, isExitSignal } from '../../utils/format.js';
+import { printError, emitJson, isExitSignal, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
@@ -127,7 +127,7 @@ export default class EnvironmentsCreate extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.format === 'json') {
-        await emitJson({ success: false, error: error.message });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

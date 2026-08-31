@@ -1,0 +1,13 @@
+---
+"@objectstack/spec": minor
+---
+
+**`MetadataProtocol` declares the optional `historyMetaItem` member, and the history door's request/response schemas join the spec** (#12005 — the #11006 maintainer-ruled pattern, 2026-08-22 option B, carried one door over exactly as #11678/PR #12003 carried it to the audit twin).
+
+`GET /api/v1/meta/:type/:name/history` — the durable change-log behind Studio's History tab — was the last undeclared read door of the audit/history pair: `historyMetaItem` appeared nowhere in `packages/spec`, so the REST door reached the verb through `(p as any)` twice (feature-detection guard + call) and its request literal was compiled against nothing.
+
+Additive, not breaking:
+
+- `HistoryMetaItemRequestSchema` / `HistoryMetaItemRequest` — `{ type, name, organizationId?, sinceSeq?, limit? }`, mirroring the implementation's parameter type in `@objectstack/metadata-protocol` member for member. `organizationId` is a plain optional `string` (not nullable like the audit twin's) because that is this implementation's declared type — and this door currently sends no organization at all (the #8747-family tenant-scoping question stays a separate measurement, deliberately unanswered here). `sinceSeq` is the exclusive lower bound on `seq` for pagination. `limit` declares no bounds because the implementation forwards it unclamped with no default (unlike the audit twin's [1, 500] clamp). `environmentId` stays out by the #9741 ruling (transport-level routing key); this door still spreads it on the wire, and that member rides the REST `TransportScopedMetaRequest` wrapper, never the protocol schema.
+- `HistoryMetaItemResponseSchema` / `HistoryMetaItemResponse` — the `{ events: [...] }` body, oldest first, transcribing `MetadataEventSchema` from `@objectstack/metadata-core` (ADR-0008 §2.4) with the closed `op` vocabulary (create/update/delete/rename/publish/revert). Two deliberate widenings against the source schema so the contract cannot refuse bodies the shipped verb yields: `ref.type` is a plain string rather than the static registry enum (plugin runtime-create types flow through this door — the #12038 1C anti-freezing reasoning), and `ref.name` carries no spelling regex. `{ events: [] }` is the honest answer for a clean change log or a non-overlay type — never for a missing capability (501 before the call).
+- `MetadataProtocol.historyMetaItem?(request: HistoryMetaItemRequest): Promise<HistoryMetaItemResponse>` — optional like its `auditMetaItem` / `deleteMetaItem` / `getMetaItemLayered` siblings: additive to a shipped contract, implementation predating declaration. An undeclared key in a request literal at the member's call shape is now a compile error.
