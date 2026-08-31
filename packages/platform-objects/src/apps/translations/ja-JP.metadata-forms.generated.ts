@@ -120,6 +120,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最小長",
         helpText: "最小文字数"
       },
+      "fields.rows": {
+        label: "Rows",
+        helpText: "Inline editor height (text rows)"
+      },
       "fields.min": {
         label: "最小値",
         helpText: "最小値"
@@ -383,6 +387,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxLength: {
         label: "最大長",
         helpText: "最大文字数"
+      },
+      rows: {
+        label: "Rows",
+        helpText: "Inline editor height in text rows"
       },
       min: {
         label: "最小値",
