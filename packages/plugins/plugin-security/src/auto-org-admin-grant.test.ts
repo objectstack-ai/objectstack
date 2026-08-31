@@ -92,6 +92,27 @@ function assertSystemContext(operation: string, object: string, context: any): v
 }
 
 /**
+ * [#11670] `SqlDriver.applyTenantScope`, as much of it as this module can
+ * observe.
+ *
+ * A scoped read returns the caller's rows AND organization-less ones — that
+ * compatibility arm is exactly why "the first row wins" stopped being right for
+ * a catalog read, so a double without it would answer the scoped question the
+ * unscoped way and prove nothing about the repair. It also makes `limit` mean
+ * what it means in production: a scoped page holds this organization's rows
+ * plus the platform bucket, not every tenant's copy.
+ *
+ * Absent `tenantId` is the unscoped system read (`SYSTEM_CTX`), which sees
+ * everything — the question every other read in this module asks.
+ */
+function tenantVisible(row: any, context: any): boolean {
+  const tenantId = context?.tenantId;
+  if (typeof tenantId !== 'string' || tenantId === '') return true;
+  const owner = row?.organization_id ?? null;
+  return owner === tenantId || owner === null;
+}
+
+/**
  * Tiny in-memory ObjectQL double: just enough surface for the reconciler
  * (find / insert / delete), with the engine's call shapes ENFORCED.
  */
@@ -107,6 +128,12 @@ function makeStub(seed: {
   };
   /** Every delete the module issued, as the engine received it. */
   const deleteCalls: Array<{ object: string; options: any }> = [];
+  /**
+   * [#11670] Every read the module issued, as the engine received it — the
+   * `single`-posture invariance pin measures this multiset, and a query is the
+   * only place a leak of the walled scoping into `single` could show up.
+   */
+  const findCalls: Array<{ object: string; where: any; limit: any; context: any }> = [];
 
   const matches = (row: any, where: any) => {
     for (const [k, v] of Object.entries(where ?? {})) {
@@ -124,13 +151,18 @@ function makeStub(seed: {
   return {
     tables,
     deleteCalls,
+    findCalls,
     // find(object, query, options) — `where`/`limit` in the query, execution
     // context in either bag (`options.context` wins, as in the engine).
     async find(object: string, query?: any, options?: any) {
       assertOptionBag('find', object, query, FIND_QUERY_KEYS);
       assertOptionBag('find', object, options, TRAILING_OPTION_KEYS);
-      assertSystemContext('find', object, options?.context ?? query?.context);
-      const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
+      const context = options?.context ?? query?.context;
+      assertSystemContext('find', object, context);
+      findCalls.push({ object, where: query?.where, limit: query?.limit, context });
+      const rows = (tables[object] ?? [])
+        .filter((r) => tenantVisible(r, context))
+        .filter((r) => matches(r, query?.where));
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
     // insert(object, data, options) — context in the TRAILING bag.
@@ -168,9 +200,39 @@ function makeStub(seed: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// [#11670] What `sys_permission_set` actually holds for these two names.
+//
+// It is not one row each, and the fixtures used to say it was — which is why
+// every walled case in this file described a deployment shape that stopped
+// existing at #10103. Post-#10103 the catalog is materialized PER ORGANIZATION
+// and the name is unique per organization (ADR-0120 D3), so one name carries:
+//
+//   - the ORGANIZATION-LESS platform-bucket row, minted by
+//     `bootstrapPlatformAdmin` on every boot and ruled to stay (2026-08-20).
+//     On a fresh walled rig it is written 1.3 s BEFORE the first
+//     `sys_organization` exists (#11532), so it is also the OLDEST row bearing
+//     the name — the one a name-only `limit: 1` read has every reason to
+//     return;
+//   - one row per organization, created by the per-organization catalog
+//     seeding on organization creation and on every boot sweep.
+//
+// The `single` carve-out keeps the bucket rows FIRST, because `single` reads
+// unscoped with `limit: 1` and the first row is the row — that ordering is part
+// of what the invariance pin measures.
+// ---------------------------------------------------------------------------
 const ORG_ADMIN_SET = { id: 'ps_org_admin', name: 'organization_admin' };
 // [ADR-0105 D4] The wall-less variant a `single`-posture deployment grants instead.
 const ORG_ADMIN_NO_BYPASS_SET = { id: 'ps_org_admin_nb', name: 'organization_admin_no_bypass' };
+/** The organization-less platform bucket — both names, no `organization_id`. */
+const PLATFORM_BUCKET = [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET];
+/** One organization's own catalog copies of both names. */
+const ownSets = (org: string) => [
+  { id: `ps_org_admin_${org}`, name: 'organization_admin', organization_id: org },
+  { id: `ps_org_admin_nb_${org}`, name: 'organization_admin_no_bypass', organization_id: org },
+];
+/** The bucket plus each named organization's own copies, bucket first. */
+const catalogFor = (...orgs: string[]) => [...PLATFORM_BUCKET, ...orgs.flatMap(ownSets)];
 
 // Every pre-ADR-0105 case in this file exercised the WALLED behavior (the only
 // behavior that existed), so they pin `isolated` explicitly. The wall-less
@@ -182,7 +244,7 @@ describe('reconcileOrgAdminGrant', () => {
 
   beforeEach(() => {
     stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [],
       sys_user_permission_set: [],
     });
@@ -195,7 +257,9 @@ describe('reconcileOrgAdminGrant', () => {
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
     const row = stub.tables.sys_user_permission_set[0];
     expect(row.organization_id).toBe('o1');
-    expect(row.permission_set_id).toBe('ps_org_admin');
+    // [#11670] o1's OWN copy of the set — not the organization-less bucket row
+    // (`ps_org_admin`) that an unscoped, name-only, `limit: 1` read returns.
+    expect(row.permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('grants when membership role is "admin"', async () => {
@@ -275,19 +339,22 @@ describe('reconcileOrgAdminGrant', () => {
 describe('backfillOrgAdminGrants', () => {
   it('grants for every owner/admin membership and revokes orphans', async () => {
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1', 'o2'),
       sys_member: [
         { id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' },
         { id: 'm2', user_id: 'u2', organization_id: 'o1', role: 'admin' },
         { id: 'm3', user_id: 'u3', organization_id: 'o1', role: 'member' },
       ],
       sys_user_permission_set: [
-        // Orphan grant — no matching membership in o2.
+        // Orphan grant — no matching membership in o2. [#11670] It points at
+        // O2'S OWN copy, which is what a post-repair grant looks like; the
+        // sweep's set ids are resolved installation-wide precisely so a grant
+        // written for another organization stays reachable.
         {
           id: 'ups_orphan',
           user_id: 'u4',
           organization_id: 'o2',
-          permission_set_id: 'ps_org_admin',
+          permission_set_id: 'ps_org_admin_o2',
         },
       ],
     });
@@ -316,7 +383,7 @@ describe('backfillOrgAdminGrants', () => {
 describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
   const seedBoth = () =>
     makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
       sys_user_permission_set: [],
     });
@@ -333,13 +400,13 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
     const stub = seedBoth();
     const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
     expect(res.action).toBe('granted');
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('grants the full set under `group` (the union wall bounds them too)', async () => {
     const stub = seedBoth();
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'group' });
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('defaults to the de-VAMA\'d variant when no posture is supplied (fail safe)', async () => {
@@ -353,8 +420,14 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
   it('revokes the superseded variant when the posture changes', async () => {
     const stub = seedBoth();
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
 
+    // [#11670] The flip crosses COPIES: the standing grant names o1's own row,
+    // the `single` pass resolves the organization-less one. Convergence
+    // therefore depends on the revoke matching every copy of the superseded
+    // name — a revoke narrowed to the posture's own copy converges on nothing
+    // and leaves the unbounded bits in force, which is the F2 outcome this test
+    // is the close-out for.
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
     expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
@@ -362,12 +435,12 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
     // ...and back again.
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('backfill converges every pair onto the posture\'s variant', async () => {
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [
         { id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' },
         { id: 'm2', user_id: 'u2', organization_id: 'o1', role: 'admin' },
@@ -400,7 +473,7 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
 describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
   const seedBoth = () =>
     makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
       sys_user_permission_set: [],
     });
@@ -413,7 +486,7 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
     });
     expect(res.action).toBe('granted');
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb_o1');
   });
 
   it('suppression ON: `group` grants the de-VAMA\'d variant too', async () => {
@@ -422,7 +495,7 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
       posture: 'group',
       suppressUnboundedOrgAdminGrant: true,
     });
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb_o1');
   });
 
   it('suppression OFF (explicit false) is byte-identical to today: `isolated` grants the full set', async () => {
@@ -431,37 +504,43 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
       posture: 'isolated',
       suppressUnboundedOrgAdminGrant: false,
     });
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('turning suppression on REVOKES a standing unbounded grant (superseded-variant convergence)', async () => {
     const stub = seedBoth();
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
 
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', {
       posture: 'isolated',
       suppressUnboundedOrgAdminGrant: true,
     });
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb_o1');
 
     // ...and a deployment that withdraws the declaration converges back —
     // the fail-closed default protects any deployment RELYING on the auto-grant.
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'isolated' });
     expect(stub.tables.sys_user_permission_set).toHaveLength(1);
-    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
   });
 
   it('backfill threads the suppression to every pair AND the orphan sweep', async () => {
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [
         { id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' },
         { id: 'm2', user_id: 'u2', organization_id: 'o1', role: 'admin' },
       ],
       // Pre-existing unbounded grants from a pre-suppression walled boot, plus
       // one orphan (no membership row) that only the sweep can reach.
+      //
+      // [#11670] They point at the ORGANIZATION-LESS row, which is what every
+      // walled grant written before this repair looks like. Converging them is
+      // a revoke, so it stays reachable: the sweep and the per-pair revoke both
+      // match every copy of the name. (⛔ Nothing re-points them — a row still
+      // held by someone who qualifies is left exactly as it is.)
       sys_user_permission_set: [
         { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
         { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
@@ -476,7 +555,7 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
 
     const grants = stub.tables.sys_user_permission_set;
     expect(grants).toHaveLength(2);
-    expect(grants.every((g) => g.permission_set_id === 'ps_org_admin_nb')).toBe(true);
+    expect(grants.every((g) => g.permission_set_id === 'ps_org_admin_nb_o1')).toBe(true);
     expect(grants.some((g) => g.user_id === 'u9')).toBe(false);
   });
 });
@@ -494,7 +573,7 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
 describe('[#4586] the auto-grant records its provenance', () => {
   const seed = () =>
     makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'mem_42', user_id: 'u1', organization_id: 'o1', role: 'admin' }],
       sys_user_permission_set: [],
     });
@@ -537,7 +616,7 @@ describe('[#4586] the auto-grant records its provenance', () => {
     // The threaded human is attribution, not authority: a member-grade row does
     // not become grantable because an admin triggered the write.
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'mem_9', user_id: 'u1', organization_id: 'o1', role: 'member' }],
       sys_user_permission_set: [],
     });
@@ -567,7 +646,7 @@ describe('[#4586] the auto-grant records its provenance', () => {
 
   it('the backfill grants with no human — it is machine-originated by construction', async () => {
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'mem_7', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
       sys_user_permission_set: [],
     });
@@ -590,7 +669,7 @@ describe('[#4586] the auto-grant records its provenance', () => {
 describe('[#4640] revoke speaks the engine\'s delete signature', () => {
   const seedDemoted = () =>
     makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'member' }],
       sys_user_permission_set: [
         { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
@@ -647,7 +726,7 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
     // `noop` and `skipped/delete_failed` are different facts about the
     // platform's state; collapsing them is how the failure hid.
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'member' }],
       sys_user_permission_set: [],
     });
@@ -659,7 +738,7 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
   it('membership removal revokes through the same channel', async () => {
     // The `sys_member` delete path: no membership row at all, grant still there.
     const stub = makeStub({
-      sys_permission_set: [ORG_ADMIN_SET, ORG_ADMIN_NO_BYPASS_SET],
+      sys_permission_set: catalogFor('o1'),
       sys_member: [],
       sys_user_permission_set: [
         { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
@@ -669,5 +748,317 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
     expect(res.action).toBe('revoked');
     expect(stub.tables.sys_user_permission_set).toHaveLength(0);
     expect(stub.deleteCalls[0].options.where).toEqual({ id: 'ups1' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#11670] The grant target is resolved PER ORGANIZATION; the revoke reach is
+// not.
+//
+// The defect was three properties that each read as deliberate and combine into
+// an answer nobody chose: the permission-set read was name-only (no
+// `organization_id` predicate, not routed through the governed
+// `resolveOwnOrganizationRow`), `limit: 1` (whichever row the driver returned
+// first WAS the answer), and cached per ObjectQL instance on the NAME alone (so
+// the first organization reconciled in a process picked the row every later one
+// got). Post-#10103 one name carries a row per organization PLUS the
+// organization-less platform-bucket row, and #11532 measured that the
+// organization-less row is the OLDEST of them — so the grant, a foreign key,
+// pointed at a row belonging to no organization.
+//
+// Nothing observable broke, which is why it survived: `resolve-authz-context`
+// resolves permission sets BY ID without tenant scoping, so the grant still
+// evaluated. The pins below are therefore about WHICH ROW, not about whether
+// access works.
+// ---------------------------------------------------------------------------
+describe('[#11670] the org-admin permission set is resolved per organization', () => {
+  /** Reads of the catalog table, as the engine received them. */
+  const catalogReads = (stub: ReturnType<typeof makeStub>) =>
+    stub.findCalls.filter((c) => c.object === 'sys_permission_set');
+
+  it('grants against THIS organization\'s own row, never the organization-less one', async () => {
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [],
+    });
+    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+
+    expect(res.action).toBe('granted');
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_o1');
+    // The bucket row is visible to the scoped read through the driver's
+    // compatibility arm — it is REACHABLE and still not chosen.
+    expect(stub.tables.sys_permission_set.some((r) => r.id === 'ps_org_admin')).toBe(true);
+  });
+
+  it('routes the catalog read through the tenant scope rather than a local predicate', async () => {
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [],
+    });
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+
+    // The governed spelling: the organization rides the CONTEXT (so the read
+    // goes through `SqlDriver.applyTenantScope`), never a hand-rolled
+    // `organization_id` key in `where`. A local predicate would be a second
+    // implementation of the wall — the shape this repair exists to retire.
+    const scoped = catalogReads(stub).filter((c) => c.context?.tenantId === 'o1');
+    expect(scoped.length).toBeGreaterThan(0);
+    expect(scoped.every((c) => Object.keys(c.where).length === 1 && 'name' in c.where)).toBe(true);
+    // …and `limit: 1` is gone from the scoped read: a scoped page holds this
+    // organization's row AND the organization-less one, so one row would again
+    // be whichever the driver ordered first.
+    expect(scoped.every((c) => c.limit > 1)).toBe(true);
+  });
+
+  it('two organizations in ONE process resolve to DIFFERENT ids (the cache key)', async () => {
+    // The property the `name`-only cache made impossible to hold. A test with
+    // one organization cannot detect it: the first answer of the process was
+    // the answer for every organization for the rest of the process, and with
+    // one organization that is indistinguishable from correct.
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1', 'o2'),
+      sys_member: [
+        { id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' },
+        { id: 'm2', user_id: 'u2', organization_id: 'o2', role: 'owner' },
+      ],
+      sys_user_permission_set: [],
+    });
+
+    // Same `ql` instance, so the same WeakMap entry — that is the point.
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+    await reconcileOrgAdminGrant(stub, 'u2', 'o2', WALLED);
+
+    const byUser = Object.fromEntries(
+      stub.tables.sys_user_permission_set.map((g) => [g.user_id, g.permission_set_id]),
+    );
+    expect(byUser.u1).toBe('ps_org_admin_o1');
+    expect(byUser.u2).toBe('ps_org_admin_o2');
+    expect(byUser.u1).not.toBe(byUser.u2);
+  });
+
+  it('caching still holds WITHIN one organization — the repair keys it, it does not drop it', async () => {
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [],
+    });
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+    const first = catalogReads(stub).filter((c) => c.context?.tenantId === 'o1').length;
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+    const second = catalogReads(stub).filter((c) => c.context?.tenantId === 'o1').length;
+    // The grant-target resolution is memoized per (organization, name), so the
+    // second reconcile adds no scoped read for it.
+    expect(second).toBe(first);
+  });
+
+  describe('no own row — the refusal, and the half it does NOT refuse', () => {
+    const bucketOnly = () =>
+      makeStub({
+        // A walled rig whose per-organization catalog seeding has not run (or
+        // failed): only the platform bucket exists, and it is visible to o3's
+        // scoped read through the driver's compatibility arm.
+        sys_permission_set: [...PLATFORM_BUCKET],
+        sys_member: [],
+        sys_user_permission_set: [],
+      });
+
+    it('REFUSES to grant, loudly, rather than pointing a new grant at the bucket row', async () => {
+      const stub = bucketOnly();
+      stub.tables.sys_member = [{ id: 'm1', user_id: 'u1', organization_id: 'o3', role: 'owner' }];
+      const warnings: string[] = [];
+      const res = await reconcileOrgAdminGrant(stub, 'u1', 'o3', {
+        ...WALLED,
+        logger: { warn: (m: string) => warnings.push(m) },
+      });
+
+      expect(res).toEqual({ action: 'skipped', reason: 'permission_set_missing' });
+      expect(stub.tables.sys_user_permission_set).toHaveLength(0);
+      // The refusal reaches an operator, and says what it did NOT do. Silence
+      // here is the failure mode: the bucket row is visible, so without this an
+      // operator sees a plausible row and a missing grant with nothing
+      // connecting them.
+      expect(warnings.some((m) => m.includes('no org-admin capability can be GRANTED'))).toBe(true);
+    });
+
+    it('still REVOKES in that same state — the refusal is one-directional', async () => {
+      // The half that keeps the repair from being a permission loosening. A
+      // narrowed grant target must not narrow the revoke: this pair no longer
+      // qualifies, and its standing grant points at the organization-less row,
+      // which is what every walled grant written before this repair looks like.
+      const stub = bucketOnly();
+      stub.tables.sys_user_permission_set = [
+        { id: 'ups_old', user_id: 'u1', organization_id: 'o3', permission_set_id: 'ps_org_admin' },
+      ];
+      const res = await reconcileOrgAdminGrant(stub, 'u1', 'o3', WALLED);
+
+      expect(res.action).toBe('revoked');
+      expect(stub.tables.sys_user_permission_set).toHaveLength(0);
+    });
+
+    it('warns once per (organization, name), not once per membership pair', async () => {
+      const stub = bucketOnly();
+      stub.tables.sys_member = [
+        { id: 'm1', user_id: 'u1', organization_id: 'o3', role: 'owner' },
+        { id: 'm2', user_id: 'u2', organization_id: 'o3', role: 'admin' },
+      ];
+      const warnings: string[] = [];
+      const logger = { warn: (m: string) => warnings.push(m) };
+      await reconcileOrgAdminGrant(stub, 'u1', 'o3', { ...WALLED, logger });
+      await reconcileOrgAdminGrant(stub, 'u2', 'o3', { ...WALLED, logger });
+
+      const refusals = warnings.filter((m) => m.includes('no org-admin capability can be GRANTED'));
+      expect(refusals).toHaveLength(1);
+    });
+  });
+
+  it('leaves an EXISTING mis-targeted grant exactly as it is (⛔ no repair claimed)', async () => {
+    // The card's boundary, pinned so a later reader does not mistake the repair
+    // for a migration: this makes NEW resolutions correct. A row already
+    // pointing at the organization-less set, held by someone who still
+    // qualifies, is neither re-pointed nor deleted — counting and repairing
+    // those is the reap card's census. The visible consequence is a second row,
+    // and that is the honest state: two grants, both conferring the same
+    // capability, one of them the census's to deal with.
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [
+        { id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+      ],
+    });
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
+
+    const rows = stub.tables.sys_user_permission_set;
+    expect(rows.find((r) => r.id === 'ups_pre')).toEqual({
+      id: 'ups_pre',
+      user_id: 'u1',
+      organization_id: 'o1',
+      permission_set_id: 'ps_org_admin',
+    });
+    expect(rows.map((r) => r.permission_set_id).sort()).toEqual([
+      'ps_org_admin',
+      'ps_org_admin_o1',
+    ]);
+  });
+
+  it('the backfill sweep reaches an orphan grant pointing at ANY organization\'s copy', async () => {
+    // Post-repair every organization's grants name its own row, so a sweep
+    // holding one unscoped id would match none of them and an orphaned grant
+    // would stop being revocable — a capability left standing.
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1', 'o2'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [
+        { id: 'ups_o2', user_id: 'u9', organization_id: 'o2', permission_set_id: 'ps_org_admin_o2' },
+      ],
+    });
+    const summary = await backfillOrgAdminGrants(stub, WALLED);
+
+    expect(summary.revoked).toBe(1);
+    expect(stub.tables.sys_user_permission_set.map((g) => g.user_id)).toEqual(['u1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#11670] The `single` carve-out, measured.
+//
+// Under `single` there is no organization for a catalog row to belong to, so
+// the organization-less row IS the row and the unscoped answer stays correct.
+// This block is the leak detector for the scoping above: if any of it reaches
+// the wall-less posture, these go red.
+// ---------------------------------------------------------------------------
+describe('[#11670] `single` posture is carved out', () => {
+  const seedSingle = () =>
+    makeStub({
+      sys_permission_set: catalogFor('o1'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [],
+    });
+
+  it('grants the organization-less row even where an organization copy exists', async () => {
+    const stub = seedSingle();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
+    // The ANSWER, unchanged: the first row of an unscoped read, which is the
+    // organization-less one. o1's own copy exists in this fixture and is
+    // deliberately NOT preferred — `single` has no wall for it to belong to.
+    expect(stub.tables.sys_user_permission_set[0].permission_set_id).toBe('ps_org_admin_nb');
+  });
+
+  it('NO read on a `single` path carries a tenantId', async () => {
+    // The one-line statement of the carve-out, and the assertion that goes red
+    // first if the scoping leaks: threading an organization is what routes a
+    // read through the wall, so its absence is the whole property.
+    const stub = seedSingle();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
+    await backfillOrgAdminGrants(stub, { posture: 'single' });
+    expect(stub.findCalls.every((c) => c.context?.tenantId === undefined)).toBe(true);
+    expect(stub.findCalls.length).toBeGreaterThan(0);
+  });
+
+  it('the grant-target read is the unscoped `limit: 1` it always was', async () => {
+    const stub = seedSingle();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
+    const target = stub.findCalls.find(
+      (c) => c.object === 'sys_permission_set' && c.where?.name === 'organization_admin_no_bypass',
+    );
+    expect(target).toEqual({
+      object: 'sys_permission_set',
+      where: { name: 'organization_admin_no_bypass' },
+      limit: 1,
+      context: { isSystem: true },
+    });
+  });
+
+  it('DECLARED DEVIATION: the revoke reads are wide in `single` too', async () => {
+    // ⚠️ Not an accident and not the scoping leaking — the one place this diff
+    // is visible under `single`, recorded here rather than left for a reader to
+    // discover.
+    //
+    // Before this diff the revoke legs matched a scalar id resolved by the same
+    // unscoped `limit: 1` read as the grant target. That is enough only while
+    // one row per name exists. The F2 close-out (ADR-0105 D4) is exactly the
+    // deployment that DROPS its wall: every grant standing at that moment names
+    // a per-organization copy, which `single`'s own resolution cannot see, so a
+    // narrow revoke converges on nothing and leaves the unbounded
+    // `organization_admin` bits in force with nothing left to bound them.
+    //
+    // So the revoke reach is posture-independent by design: `{ $in: [every copy
+    // of the name] }` at `ORG_ADMIN_SET_COPY_SCAN_LIMIT`, in every posture. The
+    // grant target is unchanged; the reads below are the price, and they are
+    // still unscoped — no `tenantId`, per the pin above.
+    const stub = seedSingle();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
+    const superseded = stub.findCalls.find(
+      (c) => c.object === 'sys_permission_set' && c.where?.name === 'organization_admin',
+    );
+    expect(superseded?.limit).toBeGreaterThan(1);
+    expect(superseded?.context).toEqual({ isSystem: true });
+    const staleRead = stub.findCalls.find(
+      (c) => c.object === 'sys_user_permission_set' && c.where?.permission_set_id?.$in,
+    );
+    // Pre-diff this predicate was the scalar `permission_set_id: 'ps_org_admin'`
+    // — the organization-less row alone. The second id is the whole point: it
+    // is o1's copy, written while the deployment was walled, and it is the row
+    // a `single` pass has to be able to revoke.
+    expect(staleRead?.where.permission_set_id).toEqual({
+      $in: ['ps_org_admin', 'ps_org_admin_o1'],
+    });
+  });
+
+  it('the read ORDER and the objects read are unchanged under `single`', async () => {
+    // The rest of the multiset: same objects, same order, same predicates —
+    // only the two reads named in the deviation above differ, and only in
+    // `limit`/`$in`.
+    const stub = seedSingle();
+    await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
+    expect(stub.findCalls.map((c) => c.object)).toEqual([
+      'sys_permission_set', // grant-target resolution (limit 1, unchanged)
+      'sys_member', // does the pair qualify
+      'sys_permission_set', // superseded-variant ids (widened — see above)
+      'sys_user_permission_set', // superseded grants for the pair (widened)
+      'sys_user_permission_set', // does the grant already exist (scalar, unchanged)
+    ]);
   });
 });
