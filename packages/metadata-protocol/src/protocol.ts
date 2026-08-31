@@ -1371,18 +1371,133 @@ export class ConcurrentUpdateError extends Error {
 }
 
 /**
- * Normalises a version token for comparison. Strips RFC-7232-style quotes
- * (`"…"`) that an HTTP `If-Match` header may carry, trims whitespace, and
- * returns null for empty / nullish input.
+ * An ISO-8601 date-time that denotes an ABSOLUTE instant — it carries an
+ * explicit `Z` or a numeric `±HH:mm` offset, so reading it never consults the
+ * process timezone.
+ *
+ * Deliberately narrower than a bare `Date.parse`, which falls back to
+ * implementation-specific heuristics outside this shape and reads a zone-LESS
+ * date-time as *local* time — the one thing an OCC verdict must never depend on.
+ * A string this pattern rejects is not reinterpreted: it stays an opaque token
+ * and is compared verbatim, exactly as before.
  */
-function normaliseVersionToken(v: unknown): string | null {
-    if (v === null || v === undefined) return null;
-    const s = String(v).trim();
-    if (!s) return null;
-    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-        return s.slice(1, -1);
+const ABSOLUTE_ISO_INSTANT =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** Largest magnitude a JS time value may hold; `toISOString()` throws beyond it. */
+const MAX_TIME_VALUE = 8.64e15;
+
+/**
+ * A version token read into the two forms the OCC comparison may need.
+ *
+ * `token` is the tidied verbatim string — the whole normalisation this seam used
+ * to do. `instant` is the canonical absolute-instant spelling, present only when
+ * the token really denotes one.
+ */
+interface NormalisedVersion {
+    /** The token as compared verbatim: trimmed, RFC-7232 quotes stripped. */
+    readonly token: string;
+    /** Canonical ISO-8601 UTC (`…Z`), or null when the token is opaque. */
+    readonly instant: string | null;
+}
+
+/**
+ * The canonical absolute-instant spelling of a version token, or null when the
+ * token does not denote an instant.
+ *
+ * The input domain is the set of things a DRIVER puts in `updated_at`, measured
+ * rather than listed from memory (#13382):
+ *
+ *  - **JS `Date`** — `driver-sql` on Postgres and MySQL (`timestamptz` /
+ *    `DATETIME(3)` are instants, and the driver materialises them as `Date` on
+ *    purpose; `SqlDriver.withPostgresCalendarDayAsText` says so in as many
+ *    words) and `driver-mongodb` (it stamps `new Date()`, and BSON round-trips
+ *    it). Canonical form: `toISOString()`.
+ *  - **`string`, already canonical ISO-8601 UTC with milliseconds** —
+ *    `driver-sql` on SQLite, its `driver-turso` / `driver-sqlite-wasm` siblings,
+ *    and `driver-memory`. Canonical form: itself, re-derived through `Date`.
+ *  - **`number`, epoch milliseconds** — a pre-canonical or hand-migrated SQLite
+ *    column. Reachable: the driver's legacy datetime repair is keyed on declared
+ *    `Field.datetime` columns, and the engine-injected audit columns are not in
+ *    that set, so such a value passes through unrepaired. Canonical form:
+ *    `new Date(ms).toISOString()`.
+ *  - **`null` / `undefined`** — timestamps disabled, or no such column. No
+ *    check runs at all; handled by the caller, not here.
+ *  - **anything else** a host stamps into the column — opaque, and compared
+ *    verbatim rather than guessed at.
+ *
+ * Milliseconds are the resolution, because that is what a JS `Date` — and so
+ * every driver's materialised instant — can carry. A token with more fractional
+ * digits (a Postgres microsecond rendering, say) truncates to the same
+ * millisecond as the record it is compared against, which is the point: two
+ * spellings of one instant must not conflict.
+ */
+function canonicalVersionInstant(value: unknown, token: string): string | null {
+    let ms: number;
+    if (value instanceof Date) {
+        ms = value.getTime();
+    } else if (typeof value === 'number') {
+        ms = value;
+    } else if (ABSOLUTE_ISO_INSTANT.test(token)) {
+        ms = Date.parse(token);
+    } else {
+        return null;
     }
-    return s;
+    if (!Number.isFinite(ms) || Math.abs(ms) > MAX_TIME_VALUE) return null;
+    return new Date(ms).toISOString();
+}
+
+/**
+ * Reads a version token into the forms `assertVersionOf` compares. Strips
+ * RFC-7232-style quotes (`"…"`) that an HTTP `If-Match` header may carry, trims
+ * whitespace, and returns null for empty / nullish input — a null is the
+ * caller's "no token supplied", which opts out of the check.
+ *
+ * ## Why this returns two forms rather than one string (#13382)
+ *
+ * It used to return `String(v).trim()` alone, and the two sides of the OCC
+ * comparison do not agree on how to spell one instant. On Postgres the record's
+ * `updated_at` arrives as a JS `Date`, whose `String()` is
+ * `"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)"` — **milliseconds
+ * dropped and the process timezone baked in** — while the client echoes back
+ * the `"2026-08-30T10:19:25.947Z"` the GET served it. One instant, two
+ * spellings, strict string compare: every guarded save on the production
+ * default driver answered `409 CONCURRENT_UPDATE`, on records nobody had ever
+ * touched. SQLite stores and returns ISO text, so both sides matched by
+ * accident and the defect never surfaced in development.
+ *
+ * So the comparison normalises to ONE representation before comparing — a
+ * canonical absolute instant — and falls back to the verbatim token when either
+ * side is not an instant. That fallback is what makes the change **strictly
+ * widening**: any pair that matched before still matches (their verbatim
+ * strings were equal, so they either canonicalise equally or are compared as
+ * strings again), so no token a client sends today starts being refused —
+ * including a client still echoing a pre-fix 409's `Date.toString()` value.
+ * Only pairs denoting the same instant in different spellings change verdict,
+ * from conflict to match, which is the defect.
+ */
+function normaliseVersionToken(v: unknown): NormalisedVersion | null {
+    if (v === null || v === undefined) return null;
+    let token = String(v).trim();
+    if (!token) return null;
+    if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
+        token = token.slice(1, -1);
+    }
+    return { token, instant: canonicalVersionInstant(v, token) };
+}
+
+/**
+ * Do two version tokens name the same record version?
+ *
+ * Instants are compared as instants — that is the repair. When either side is
+ * opaque the tokens are compared verbatim, which is what this seam has always
+ * done and what keeps an opaque host-stamped version working.
+ */
+function versionTokensAgree(current: NormalisedVersion, expected: NormalisedVersion): boolean {
+    if (current.instant !== null && expected.instant !== null) {
+        return current.instant === expected.instant;
+    }
+    return current.token === expected.token;
 }
 
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
@@ -10002,6 +10117,13 @@ export class ObjectStackProtocolImplementation implements
      *    Logging would be noisy here; OCC is opt-in and the absence of a
      *    version column is an explicit "this object doesn't support OCC"
      *    signal.
+     *  - Both tokens are normalised to ONE representation before they are
+     *    compared (#13382): a canonical absolute instant when they denote one,
+     *    the verbatim token otherwise. Which spelling of an instant a driver
+     *    hands back — a JS `Date` on Postgres/MySQL/Mongo, ISO text on the
+     *    SQLite family — must not decide whether a save is a conflict. See
+     *    `normaliseVersionToken` for the measured input domain and for why the
+     *    change cannot refuse a token that is accepted today.
      */
     private assertVersionOf(
         object: string,
@@ -10012,13 +10134,23 @@ export class ObjectStackProtocolImplementation implements
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
         if (!current) return;
-        const currentVersion = normaliseVersionToken((current as any).updated_at);
-        if (!currentVersion) return;
-        if (currentVersion !== expected) {
+        const currentToken = normaliseVersionToken((current as any).updated_at);
+        if (!currentToken) return;
+        if (!versionTokensAgree(currentToken, expected)) {
+            // Publish the CANONICAL spelling, not `String(updated_at)` (#13382).
+            // Two reasons, and the second is not optional: it is what
+            // `content/docs/api/wire-format.mdx` documents this field to be, and
+            // it is the token the client echoes back as its next `If-Match` when
+            // the user chooses "Overwrite anyway" — so a 409 whose
+            // `currentVersion` is a `Date.toString()` (milliseconds already
+            // dropped) hands the client a token that can never match the record
+            // it names, turning a resolvable conflict into an unresolvable one.
+            const currentVersion = currentToken.instant ?? currentToken.token;
+            const expectedVersionText = expected.instant ?? expected.token;
             throw new ConcurrentUpdateError({
                 currentVersion,
                 currentRecord: current,
-                message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expected})`,
+                message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expectedVersionText})`,
             });
         }
     }
