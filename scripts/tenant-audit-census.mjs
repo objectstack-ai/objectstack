@@ -98,8 +98,11 @@
  *
  * `isTenancyDisabled()` reads `tenancy.enabled === false` and nothing else, so an
  * object is tenancy-enabled unless it says otherwise. {@link declaredObjects}
- * walks every `*.object.ts` in the tree: 297 objects, of which exactly two
- * (`sys_api_key`, `sys_sso_provider`) opt out.
+ * walks every `*.object.ts` in the tree; of those, exactly two (`sys_api_key`,
+ * `sys_sso_provider`) opt out. ⛔ The object COUNT is corpus scale and is not
+ * quoted here -- it is emitted, dated and unenforced in the artefacts' own
+ * corpus-scale block, and a number repeated into a comment is a number that
+ * rots where nothing can see it.
  *
  * ## What is DECIDABLE, and why that is reported rather than smoothed over
  *
@@ -110,6 +113,23 @@
  * rather than assumed either way, because a census that quietly guesses on 30%
  * of its own population is the "73% coverage that reads like full coverage"
  * failure the class-level control was warned about.
+ *
+ * ## ⭐ Two kinds of number, rendered apart
+ *
+ * Both artefacts carry the POPULATION this census certifies (`census.totals`:
+ * every write call site and its tenancy/context verdict) and, separately, the
+ * CORPUS SCALE it walked ({@link corpusScaleRows}: sources read, engine-shaped
+ * types recognised, objects declared, same-named calls subtracted). The gate
+ * enforces the first and deliberately does not enforce the second -- a
+ * maintainer ruling of 2026-08-31 adopting the split the sibling `isSystem`
+ * census had already proved.
+ *
+ * ⇒ That is why the scale numbers are rendered in their own DATED block rather
+ *   than mixed in among the totals. An artefact whose unenforced numbers sit
+ *   inside its enforced ones cannot tell a reader which is which, and the reader
+ *   is the person the split is FOR. {@link renderCorpusScale} emits the block,
+ *   {@link measuredAt} dates it, and `check-tenant-audit-census.mjs` carries the
+ *   reasoning and the measurement that draws the line where it is drawn.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -150,6 +170,30 @@ export function collectSources(root = ROOT, roots = SURFACE_ROOTS) {
   const out = trackedTs(root, roots).filter((f) => !isTestPath(f));
   if (out.length === 0) throw new Error('tenant-audit-census: corpus resolved to ZERO source files');
   return out;
+}
+
+/**
+ * When the corpus-scale numbers were true, and against which tree.
+ *
+ * ⛔ Read at CENSUS time, not at check time, and deliberately NOT compared by the
+ * gate -- requiring it to be RECENT would re-introduce exactly the churn the
+ * enforced/unenforced split removes. Its job is to tell a reader how old the
+ * unenforced numbers are, not to be fresh.
+ *
+ * A tree whose HEAD cannot be read REFUSES rather than emitting a marker that
+ * reads as a measurement and is not one (#4690).
+ */
+export function measuredAt(root = ROOT) {
+  let ref;
+  try {
+    ref = execFileSync('git', ['-C', root, 'rev-parse', '--short=9', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch (error) {
+    throw new Error(`tenant-audit-census: cannot read HEAD to date the corpus-scale numbers -- ${error.message}`);
+  }
+  if (!/^[0-9a-f]{7,40}$/.test(ref)) {
+    throw new Error(`tenant-audit-census: HEAD did not resolve to a sha -- got ${JSON.stringify(ref)}`);
+  }
+  return { date: new Date().toISOString().slice(0, 10), ref };
 }
 
 /** Does this member declaration look like an ObjectQL data-engine door? */
@@ -956,6 +1000,7 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
     engineTypes: index.size,
     declaredObjects: objects.size,
     scannedSources: sources.length,
+    measuredAt: measuredAt(root),
   };
 }
 
@@ -1015,6 +1060,50 @@ function aggregate(census) {
       || a.cells[1].localeCompare(b.cells[1]));
 }
 
+/**
+ * The CORPUS-SCALE numbers: how big the haystack was, not what was found in it.
+ *
+ * ## ⭐ Why these four are rendered apart from the totals
+ *
+ * `census.totals` is the POPULATION this artefact certifies -- the write call
+ * sites and the tenancy/context verdict on each. These four are properties of the
+ * CORPUS the instrument walked: how many sources it read, how many engine-shaped
+ * types it recognised, how many objects the registry declares, and how many
+ * same-named calls on a non-engine receiver it declined to count. None of them is
+ * a property of the population. That is the line the enforced/unenforced split
+ * follows, and the code already drew it: everything inside `totals` is enforced,
+ * these four are not. `scripts/check-tenant-audit-census.mjs` carries the reason
+ * and the measurement.
+ *
+ * ⛔ They are still EMITTED and still DATED. "Not enforced" must not decay into
+ * "not there": a number nobody checks and nobody dates reads as current, which is
+ * the disease this whole artefact exists to treat one level down.
+ */
+export function corpusScaleRows(census) {
+  return [
+    ['tracked non-test sources scanned', census.scannedSources],
+    ['engine-shaped types recognised', census.engineTypes],
+    ['declared objects in the registry', census.declaredObjects],
+    ['same-named calls subtracted as non-engine', census.nonEngineCalls],
+  ];
+}
+
+/** The corpus-scale block, identical in both artefacts apart from heading depth. */
+export function renderCorpusScale(census, heading) {
+  const out = [];
+  out.push(`${heading} Corpus scale — present and dated, ⛔ NOT enforced`, '');
+  out.push('⛔ These four describe the CORPUS this census walked, not the population it');
+  out.push('certifies, and the gate deliberately does not hold them to the tree — a source');
+  out.push('file arriving anywhere under the two roots moves them while every verdict above');
+  out.push('holds still. They are required to be HERE and to say WHEN they were true;');
+  out.push('their values are not compared. The reasoning, and the measurement behind it,');
+  out.push('are in `scripts/check-tenant-audit-census.mjs`.', '');
+  out.push(`Measured on ${census.measuredAt.date} at \`${census.measuredAt.ref}\`.`, '');
+  out.push('| corpus scale (not enforced) | count |', '| :--- | ---: |');
+  for (const [label, value] of corpusScaleRows(census)) out.push(`| ${label} | ${value} |`);
+  return out;
+}
+
 /** The page's generated region: the figures its prose reasons about. */
 export function renderGeneratedRegion(census) {
   const t = census.totals;
@@ -1047,12 +1136,13 @@ export function renderGeneratedRegion(census) {
   out.push(`| object name is an \`object: string\` parameter | ${t.objectNameParameter} |`);
   out.push(`| object name is some other run-time expression | ${t.objectNameRuntime} |`);
   out.push('');
-  out.push(`Scanned ${census.scannedSources} tracked non-test sources under \`packages/services/\` and`);
-  out.push(`\`packages/plugins/\`, against ${census.engineTypes} engine-shaped types and`);
-  out.push(`${census.declaredObjects} declared objects. ${census.nonEngineCalls} calls to a same-named`);
-  out.push(`method on something that is not a data engine were subtracted. Every site is`);
-  out.push(`listed in [\`${COUNTS}\`](https://github.com/objectstack-ai/objectstack/blob/main/${COUNTS}),`);
+  out.push(`The corpus walked is every tracked non-test source under \`packages/services/\``);
+  out.push(`and \`packages/plugins/\`; calls to a same-named method on something that is not`);
+  out.push(`a data engine were subtracted. Every site is listed in`);
+  out.push(`[\`${COUNTS}\`](https://github.com/objectstack-ai/objectstack/blob/main/${COUNTS}),`);
   out.push(`regenerated by the same command.`);
+  out.push('');
+  out.push(...renderCorpusScale(census, '###'));
   out.push('');
   out.push(END_MARKER);
   return out.join('\n');
@@ -1114,10 +1204,8 @@ export function renderCountsFile(census) {
   out.push(`| Threading a decidably elevated context | ${t.elevatedContext} |`);
   out.push(`| Threading a decidably non-elevated context | ${t.nonElevatedContext} |`);
   out.push(`| Threading a context of undecidable elevation | ${t.elevationUndecidable} |`);
-  out.push(`| Sources scanned | ${census.scannedSources} |`);
-  out.push(`| Engine-shaped types recognised | ${census.engineTypes} |`);
-  out.push(`| Declared objects in the registry | ${census.declaredObjects} |`);
-  out.push(`| Same-named calls subtracted as non-engine | ${census.nonEngineCalls} |`);
+  out.push('');
+  out.push(...renderCorpusScale(census, '##'));
   out.push('');
   out.push('## Every site');
   out.push('');

@@ -1423,8 +1423,11 @@ jobs:
       # eighteen cases red against that reading.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file. AST walk over 534
-      # tracked sources plus the object registry, no spawns; ~8s.
+      # GATE INVOCATION IDIOM note at the top of this file. AST walk over every
+      # tracked non-test source under the two roots plus the object registry, no
+      # spawns; ~8s. ⛔ The source COUNT is deliberately not quoted here: it is
+      # corpus scale, it moves on any file added under those roots, and a comment
+      # nothing checks is exactly where a stale number hides.
       - name: Tenant-audit census matches the tree
         run: |
           node scripts/check-tenant-audit-census.mjs --self-test

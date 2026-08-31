@@ -42,10 +42,24 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Threading a decidably elevated context | 97 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
-| Sources scanned | 534 |
-| Engine-shaped types recognised | 56 |
-| Declared objects in the registry | 297 |
-| Same-named calls subtracted as non-engine | 119 |
+
+## Corpus scale — present and dated, ⛔ NOT enforced
+
+⛔ These four describe the CORPUS this census walked, not the population it
+certifies, and the gate deliberately does not hold them to the tree — a source
+file arriving anywhere under the two roots moves them while every verdict above
+holds still. They are required to be HERE and to say WHEN they were true;
+their values are not compared. The reasoning, and the measurement behind it,
+are in `scripts/check-tenant-audit-census.mjs`.
+
+Measured on 2026-08-31 at `fc8858a24`.
+
+| corpus scale (not enforced) | count |
+| :--- | ---: |
+| tracked non-test sources scanned | 534 |
+| engine-shaped types recognised | 56 |
+| declared objects in the registry | 297 |
+| same-named calls subtracted as non-engine | 119 |
 
 ## Every site
 
