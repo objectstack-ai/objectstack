@@ -6745,6 +6745,211 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 }
 
 // ---------------------------------------------------------------------------
+// H39 — the CLOSED `pm:*` RESIDUE CENSUS (#13526). An inventory, not a
+// predicate: H17's register, and deliberately not H22's.
+//
+// ## Why a census when H22 already reports closed residue
+//
+// H22 judges the closed cards inside a bounded, UPDATE-ordered window (four
+// pages ≈ 1.7 days of update-recency) and reports them one row each. That is
+// the right shape for a patrol — recent residue, while the paired write is
+// still a live duty someone remembers — and it is the wrong shape for the
+// question #13526 asks, which is about the SIZE and AGE of the whole
+// population. The filing seat measured ≥100 closed carriers per lane per label
+// across at least three lanes, back to 2026-08-05, and could not say more,
+// because a first page is not a count.
+//
+// So this leg counts rather than lists: fully paginated, per lane, per label.
+//
+// ## ⛔ The one rule this block exists to enforce: A PAGE CAP IS NOT A COUNT
+//
+// The filing card was explicit, and stated its reason as a measurement about
+// this board rather than as a preference: the last three cards whose headline
+// number was an upper or capped bound all had that number quoted back as if it
+// were exact. So a truncated reading here is NEVER rendered as a number — it
+// renders as `≥N (PAGE CAP …)` with the word "cap" in it, and
+// `censusIsCountable` is the predicate a caller must consult before treating
+// any of these figures as a count.
+//
+// ## The control, and why a zero here is not automatically a reading
+//
+// The card also prescribed the control it did not have room to run: the same
+// query shape WITHOUT the `pm:*` label must return rows. If it does not, the
+// instrument is broken and every zero below is "nothing was read" rather than
+// "nothing is there" — #4690, on a leg whose whole output is counts. The
+// renderer refuses to present a clean census when the control came back empty.
+//
+// ## ⛔ What this leg must never grow into
+//
+// ⛔ NO relabelling. The remedy for hundreds of closed cards across three-plus
+// lanes is a maintainer decision and a per-label DELETE (a whole-set label PUT
+// silently strips concurrent labels — the standing hazard this board records),
+// and it belongs to its own card. This file writes no label anywhere, and this
+// leg — which is the one that finally makes the population visible — is exactly
+// where that discipline would be most tempting to break. The census comes
+// first; the cleanup is a separate decision with its own approval.
+//
+// ⚠️ The `issues` endpoint returns PULL REQUESTS too, and they are filtered out
+// by `pull_request` presence — a PR counted as a card would inflate every
+// figure here in the direction that makes the problem look worse than it is.
+// ---------------------------------------------------------------------------
+
+/**
+ * The quota backstop on each label's pagination. Generous on purpose: this leg
+ * is worthless if it binds routinely, since a bound page cap is precisely the
+ * non-answer the filing card refused to publish. 50 pages = 5,000 cards per
+ * label, against a population measured in the hundreds.
+ */
+export const CENSUS_PAGE_CEILING = 50;
+
+/** How many contradictory-pair card numbers are listed before the rest are counted. */
+export const CENSUS_PAIR_LIST_CAP = 25;
+
+/** Has this label's stream ended? A short page is the end; a full one never is. */
+export function censusPageExhausted(batch) {
+  return !Array.isArray(batch) || batch.length < 100;
+}
+
+/**
+ * The lanes a card belongs to — `domain:*` for domain lanes and `repo:*` for
+ * single-lane seats, the same two spellings the seat posts name.
+ *
+ * A card carrying neither is bucketed under `(no lane)` rather than dropped: an
+ * unrouted closed card with `pm:` residue is still residue, and silently
+ * excluding it would make the total disagree with the per-lane rows for reasons
+ * a reader could not see.
+ */
+export function censusLanesOf(issue) {
+  const lanes = labelNames(issue ?? {}).filter((l) => /^(?:domain|repo):/u.test(l));
+  return lanes.length > 0 ? lanes : ['(no lane)'];
+}
+
+/**
+ * Fold the per-label corpora into the census.
+ *
+ * @param {Map<string, { rows: any[], truncated: boolean }>} byLabel
+ * @param {{ controlRows?: number }} [context]
+ */
+export function summariseClosedResidue(byLabel, context = {}) {
+  const rows = [];
+  const seenByLabel = new Map();
+  let anyTruncated = false;
+  for (const [label, corpus] of byLabel ?? []) {
+    const cards = (corpus?.rows ?? []).filter((i) => !i?.pull_request);
+    seenByLabel.set(label, new Set(cards.map((i) => i.number)));
+    if (corpus?.truncated) anyTruncated = true;
+    const perLane = new Map();
+    let oldest = null;
+    for (const card of cards) {
+      for (const lane of censusLanesOf(card)) perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
+      const closed = Date.parse(card?.closed_at ?? '');
+      if (Number.isFinite(closed) && (oldest === null || closed < oldest.at)) {
+        oldest = { at: closed, number: card.number };
+      }
+    }
+    rows.push({
+      label,
+      total: cards.length,
+      truncated: Boolean(corpus?.truncated),
+      oldest,
+      lanes: [...perLane.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    });
+  }
+  // The contradictory pair, intersected LOCALLY — the listing endpoints'
+  // `labels` filter is a UNION (measured), so asking for both labels at once
+  // returns cards carrying EITHER and would overstate this by the sum.
+  const queue = seenByLabel.get('pm:queue') ?? new Set();
+  const dispatched = seenByLabel.get('pm:dispatched') ?? new Set();
+  const pairs = [...queue].filter((n) => dispatched.has(n)).sort((a, b) => a - b);
+  return {
+    rows: rows.sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    pairs,
+    truncated: anyTruncated,
+    controlRows: Number(context.controlRows ?? 0),
+  };
+}
+
+/**
+ * May these figures be quoted as counts? The predicate the filing card's whole
+ * warning reduces to — consult it before repeating any number from this leg.
+ */
+export function censusIsCountable(census) {
+  return Boolean(census) && !census.truncated && Number(census.controlRows ?? 0) > 0;
+}
+
+/**
+ * The census block, in either medium. Returns [] when no census ran, so a
+ * caller that did not gather one renders nothing rather than an empty table
+ * that reads as a clean board.
+ */
+export function renderClosedResidueCensus(census, { markdown = false } = {}) {
+  if (!census) return [];
+  const h = (s) => (markdown ? `**${s}**` : s);
+  // A census that could not RUN must not render as a census that found nothing
+  // — the same inversion this file refuses everywhere (#4690), and the exact
+  // failure the filing card was written about.
+  if (census.failed) {
+    return [
+      '',
+      h('Closed cards still carrying `pm:*` state (H39 census, #13526)'),
+      '',
+      `  ⚠️ CENSUS DID NOT RUN — ${census.failed}. ⛔ This is not a clean population: it is no reading.`,
+    ];
+  }
+  if (!Array.isArray(census.rows) || census.rows.length === 0) return [];
+  const out = [];
+  out.push('');
+  out.push(h('Closed cards still carrying `pm:*` state (H39 census, #13526)'));
+  out.push('');
+
+  if (Number(census.controlRows ?? 0) <= 0) {
+    out.push(
+      `⚠️ CONTROL FAILED — the control query (closed issues, no \`pm:*\` filter) returned 0 rows, so ` +
+        `this instrument read NOTHING. Every figure below is "not read", ⛔ not "not there" (#4690).`,
+    );
+    out.push('');
+  }
+
+  for (const row of census.rows) {
+    // ⛔ The one formatting rule this leg exists to enforce.
+    const figure = row.truncated
+      ? `≥${row.total} (PAGE CAP at ${CENSUS_PAGE_CEILING} pages — ⛔ NOT a count)`
+      : `${row.total}`;
+    const oldest = row.oldest
+      ? `, oldest closed ${new Date(row.oldest.at).toISOString().slice(0, 10)} (#${row.oldest.number})`
+      : '';
+    out.push(`  ${row.label}: ${figure}${oldest}`);
+    for (const [lane, n] of row.lanes) out.push(`      ${lane}: ${n}`);
+  }
+
+  out.push('');
+  if (census.pairs.length === 0) {
+    out.push('  contradictory `pm:queue` + `pm:dispatched` on a closed card: none');
+  } else {
+    const shown = census.pairs.slice(0, CENSUS_PAIR_LIST_CAP);
+    const rest = census.pairs.length - shown.length;
+    out.push(
+      `  contradictory \`pm:queue\` + \`pm:dispatched\` on a closed card: ${census.pairs.length}` +
+        ` — ${shown.map((n) => `#${n}`).join(', ')}${rest > 0 ? `, and ${rest} more` : ''}`,
+    );
+  }
+  out.push('');
+  out.push(
+    census.truncated
+      ? '  ⛔ At least one label hit the page cap. A cap is NOT a count — the true figures are larger' +
+          ' and unknown, and no reader may quote these as exact (the three cards whose capped bounds' +
+          ' were quoted back as exact are why this sentence is here).'
+      : '  Fully paginated: every figure above is a real count, not a page cap.',
+  );
+  out.push(
+    '  ⛔ Report-only, and ⛔ census only: no label is written by this script. A bulk strip of closed' +
+      " cards is a maintainer decision on its own card — a whole-set label PUT silently strips" +
+      ' concurrent labels, so the cleanup is per-label DELETE and is not this leg.',
+  );
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -7145,8 +7350,27 @@ export function renderPlain(findings, counts, options = {}) {
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
+  lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
+  lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
+}
+
+/**
+ * The rate-premise line (#13499 repair ②). Rendered in both media because it is
+ * an assertion about the INSTRUMENT rather than about the board: a reader who
+ * takes a window's stated coverage at face value needs to know whether the
+ * divisor behind it still describes the repo.
+ *
+ * The healthy state prints too, deliberately. A check that is only visible when
+ * it fires cannot be distinguished from a check that was removed — which is the
+ * whole shape of the defect this repair exists to close.
+ */
+export function renderRatePremise(premise, { markdown = false } = {}) {
+  if (!premise) return [];
+  const loud = premise.state !== 'ok';
+  const text = loud ? `⚠️ ${premise.message}` : premise.message;
+  return ['', markdown ? (loud ? `**${text}**` : `_${text}_`) : `  ${text}`];
 }
 
 /**
@@ -7245,7 +7469,16 @@ export function renderMarkdown(findings, counts, options = {}) {
   // finding rows, which announce their own omission and are recoverable from
   // the run log. An index silently missing from the anchor would restore
   // exactly the 0-for-19 silence this section exists to end.
-  const indexBlock = renderTriggerIndex(options.triggerIndex, { markdown: true });
+  // The census and the rate premise are RESERVED alongside the H17 index, for
+  // the same reason it is: both are instrument readings a noisy board must not
+  // be able to truncate away. The census in particular is the leg that exists
+  // because a population grew unobserved — losing it to a body trim would
+  // reproduce that defect inside its own fix.
+  const indexBlock = [
+    ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
+    ...renderClosedResidueCensus(options.census, { markdown: true }),
+    ...renderRatePremise(options.ratePremise, { markdown: true }),
+  ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
 
   if (rows.length === 0) {
@@ -8043,10 +8276,27 @@ async function sweep(options = {}) {
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
   };
+  // H39's census (#13526) — gathered AFTER the findings, so a census that
+  // cannot run costs the report nothing that was already gathered. Its failure
+  // is rendered as a failure rather than swallowed: this leg's whole output is
+  // counts, and an absent count that reads as zero is the defect the card filed.
+  let census = null;
+  try {
+    census = await censusClosedPmResidue(stats);
+  } catch (err) {
+    census = { failed: err?.status ? `HTTP ${err.status}` : (err?.message ?? 'unreadable') };
+  }
+  // The rate premise, checked against what this very sweep observed (#13499).
+  const ratePremise = classifyRatePremise({ observed: stats.mergedRateObserved });
   console.log(
     options.format === 'markdown'
-      ? renderMarkdown(findings, counts, { provenance: options.provenance, triggerIndex })
-      : renderPlain(findings, counts, { triggerIndex }),
+      ? renderMarkdown(findings, counts, {
+          provenance: options.provenance,
+          triggerIndex,
+          census,
+          ratePremise,
+        })
+      : renderPlain(findings, counts, { triggerIndex, census, ratePremise }),
   );
 }
 
@@ -8554,6 +8804,48 @@ async function listRecentlyClosedIssues() {
  * surface GitHub's parser reads too — wider, never wrong.
  */
 export const COMMIT_WINDOW_PAGES = 3;
+
+/**
+ * H39's gathering (#13526) — one fully-paginated pass per residue label, plus
+ * the control.
+ *
+ * ⚠️ ONE label per request, intersected locally afterwards: the listing
+ * endpoint's `labels` filter is a UNION, so a two-label query answers a
+ * different question than the one being asked and answers it larger.
+ *
+ * Cost: ~6 labels x (population / 100) requests, four times a day, against a
+ * 15,000/h core quota — the same trade every window here makes, and the reason
+ * a census that finally produces real numbers is affordable at all.
+ */
+async function censusClosedPmResidue(stats = {}) {
+  const byLabel = new Map();
+  let requests = 0;
+  for (const label of PM_RESIDUE_LABELS) {
+    const rows = [];
+    let truncated = true;
+    for (let page = 1; page <= CENSUS_PAGE_CEILING; page++) {
+      const batch = await rest(
+        `/repos/${OWNER_REPO}/issues?state=closed&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
+      );
+      requests += 1;
+      rows.push(...batch);
+      if (censusPageExhausted(batch)) {
+        truncated = false;
+        break;
+      }
+    }
+    byLabel.set(label, { rows, truncated });
+  }
+  // The control the filing card prescribed and could not run: the same shape
+  // with no `pm:*` filter. Rows here mean the instrument works, so a zero above
+  // is a reading; no rows mean nothing above is one (#4690).
+  const control = await rest(`/repos/${OWNER_REPO}/issues?state=closed&per_page=100&page=1`);
+  requests += 1;
+  stats.censusRequests = requests;
+  return summariseClosedResidue(byLabel, {
+    controlRows: (Array.isArray(control) ? control : []).filter((i) => !i?.pull_request).length,
+  });
+}
 
 async function listRecentDefaultBranchCommits() {
   const out = [];
@@ -13453,6 +13745,89 @@ function selfTest() {
   t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
+
+  // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
+  //
+  // The card's central fence, restated as an assertion rather than as prose:
+  // ⛔ a page cap is NOT a count. Its reason was a measurement about this board
+  // — the last three cards whose headline number was a capped bound all had it
+  // quoted back as exact — so the rendering, not just the docblock, has to
+  // refuse it.
+  const censusCard = (number, labels, closed_at = '2026-08-20T00:00:00Z', extra = {}) => ({
+    number,
+    state: 'closed',
+    closed_at,
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const corpus = (rows, truncated = false) => ({ rows, truncated });
+  const censusOf = (byLabel, controlRows = 42) => summariseClosedResidue(new Map(byLabel), { controlRows });
+
+  const DEVX = ['pm:dispatched', 'domain:devx'];
+  const baseCensus = censusOf([
+    ['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX), censusCard(3, ['pm:dispatched', 'domain:spec'])])],
+    ['pm:queue', corpus([censusCard(1, ['pm:queue', 'domain:devx']), censusCard(9, ['pm:queue', 'domain:spec'])])],
+  ]);
+
+  t('H39: a label total is the count of its cards', baseCensus.rows.find((r) => r.label === 'pm:dispatched').total, 3);
+  t('H39: lanes are counted locally, per label', baseCensus.rows.find((r) => r.label === 'pm:dispatched').lanes.find((l) => l[0] === 'domain:devx')[1], 2);
+  t('H39: rows sort by size so the worst lane leads', baseCensus.rows[0].label, 'pm:dispatched');
+  t('H39: the oldest closure is carried, for the "how old is this" question', baseCensus.rows[0].oldest.number, 1);
+  // The contradictory pair, intersected LOCALLY — the endpoint's `labels`
+  // filter is a UNION, so asking for both at once answers a larger question.
+  t('H39: the contradictory pair is the INTERSECTION', baseCensus.pairs.length, 1);
+  t('H39: …and names the card carrying both', baseCensus.pairs[0], 1);
+  t('H39: a card in only one set is not a pair', baseCensus.pairs.includes(9), false);
+
+  // ⛔ The page-cap rule, in both directions.
+  const cappedCensus = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)], true)]]);
+  t('H39 cap: a truncated corpus marks the census truncated', cappedCensus.truncated, true);
+  t('H39 cap: …and its figures are NOT countable', censusIsCountable(cappedCensus), false);
+  t('H39 cap: …and the render says PAGE CAP, not a bare number', renderClosedResidueCensus(cappedCensus).join('\n').includes('PAGE CAP'), true);
+  t('H39 cap: …and says NOT a count in as many words', renderClosedResidueCensus(cappedCensus).join('\n').includes('NOT a count'), true);
+  t('H39 cap: …and prefixes the figure with ≥ rather than stating it', renderClosedResidueCensus(cappedCensus).join('\n').includes('≥1'), true);
+  t('H39 cap: a fully paginated census IS countable', censusIsCountable(baseCensus), true);
+  t('H39 cap: …and says so, so a reader can quote it', renderClosedResidueCensus(baseCensus).join('\n').includes('Fully paginated'), true);
+  t('H39 cap: …and does NOT cry page cap', renderClosedResidueCensus(baseCensus).join('\n').includes('PAGE CAP'), false);
+
+  // The control the filing card prescribed: without rows, a zero is "not read".
+  const noControl = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)])]], 0);
+  t('H39 control: an empty control makes the census uncountable', censusIsCountable(noControl), false);
+  t('H39 control: …and the render says the instrument read nothing', renderClosedResidueCensus(noControl).join('\n').includes('CONTROL FAILED'), true);
+  t('H39 control: …and refuses the "not there" reading explicitly', renderClosedResidueCensus(noControl).join('\n').includes('not "not there"'), true);
+
+  // ⚠️ The `issues` endpoint returns PRs too — one counted as a card inflates
+  // every figure in the direction that makes the problem look worse.
+  const withPr = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX, '2026-08-20T00:00:00Z', { pull_request: { url: 'x' } })])]]);
+  t('H39: a pull request is not a card', withPr.rows[0].total, 1);
+
+  // Pagination termination, and the ceiling behind it.
+  t('H39 paging: a short page ends the stream', censusPageExhausted(Array.from({ length: 40 })), true);
+  t('H39 paging: a FULL page never does', censusPageExhausted(Array.from({ length: 100 })), false);
+  t('H39 paging: a non-array is an ended stream', censusPageExhausted(null), true);
+  t('H39 paging: the ceiling is generous enough not to bind routinely', CENSUS_PAGE_CEILING >= 50, true);
+
+  // Lane bucketing — an unrouted card is still residue and must not vanish.
+  t('H39 lanes: a domain label is a lane', censusLanesOf(censusCard(1, ['pm:queue', 'domain:spec'])).includes('domain:spec'), true);
+  t('H39 lanes: a repo label is a lane too (single-lane seats)', censusLanesOf(censusCard(1, ['pm:queue', 'repo:cloud'])).includes('repo:cloud'), true);
+  t('H39 lanes: an unrouted card is bucketed, not dropped', censusLanesOf(censusCard(1, ['pm:queue']))[0], '(no lane)');
+
+  // ⛔ A census that could not RUN must not render as a clean population.
+  t('H39 failure: a failed census says it did not run', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('CENSUS DID NOT RUN'), true);
+  t('H39 failure: …and refuses the clean reading', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('no reading'), true);
+  t('H39 failure: no census at all renders nothing', renderClosedResidueCensus(null).length, 0);
+  // ⛔ And the discipline that must never be relaxed here.
+  t('H39: the block states that it writes no label', renderClosedResidueCensus(baseCensus).join('\n').includes('no label is written'), true);
+  t('H39: …and that cleanup is a separate decision', renderClosedResidueCensus(baseCensus).join('\n').includes('maintainer decision'), true);
+
+  // The rate-premise renderer — the healthy state prints too, because a check
+  // visible only when it fires is indistinguishable from a deleted one.
+  t('rate render: an OK premise is still shown', renderRatePremise(classifyRatePremise({ observed: 82.1, nowMs: NOW13499 })).join('\n').includes('rate premise OK'), true);
+  t('rate render: a drifted premise is marked loud', renderRatePremise(classifyRatePremise({ observed: 1, nowMs: NOW13499 })).join('\n').includes('⚠️'), true);
+  t('rate render: no premise renders nothing', renderRatePremise(null).length, 0);
 
   // -- H37 — family-dispatch member drift (report-only patrol input, #12629) --
   //
