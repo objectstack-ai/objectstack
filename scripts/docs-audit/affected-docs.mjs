@@ -13,6 +13,33 @@
 // Scope: hand-written docs only = content/docs/**/*.mdx MINUS content/docs/references/**
 // (references are generated from packages/spec and handled by a separate regenerate pass).
 //
+// THE ABOVE SCOPE IS THE RECALL DENOMINATOR (#13306, maintainer ruling 2026-08-31). Any
+// recall figure for this tool — "of the docs pages that should have been listed, how many
+// were" — MUST use the scope above (hand-written docs, generated pages excluded) as its
+// denominator. Excluding `content/docs/references/**` is not a gap this tool happens to
+// have: those pages are AUTO-GENERATED and nobody hand-edits them, so telling an author
+// "you may have affected this page" would be WRONG ADVICE, not missing advice — the
+// exclusion is constructive, by design, same as the Scope line states.
+//
+// ⇒ a recall ratio computed against a WIDER denominator — every edit under content/docs,
+// generated pages included — is not measuring this tool at all. It is measuring how often
+// the docs generator happened to run inside whatever window was sampled, because every one
+// of those runs counts as a "miss" this tool could structurally never have avoided. This is
+// exactly how the one such figure ever computed got it wrong: measured 2026-08-30 over a
+// 91-commit window ending at `c4ecf0c49` (method, replay and the corrected re-derivation in
+// #13306), 31 of its 46 ground-truth entries were `content/docs/references/**` pages this
+// tool cannot list on any run, at any recall — the ratio moved by a factor of 2.7 just from
+// widening the sampling window, which is the signature of a denominator not measuring the
+// thing.
+//
+// ⛔ Maintainer ruling: this ceiling is honest, not a defect, and does not license widening
+// the corpus to improve the number — that trades a real regression (prompting authors about
+// pages they must never touch) for a paper gain. The tool's advisory-only posture (see
+// .github/workflows/docs-drift-check.yml's own header) is unchanged. That file documents
+// the OTHER half of "why a listed number can still miss something" — a page already IN this
+// scope that goes unlisted because it restates a rule without naming what this tool anchors
+// on. Read both; they compose into one picture, not two competing ones.
+//
 // DERIVATION (#9192): a doc is "affected" when it NAMES SOMETHING THE CHANGE TOUCHED —
 // an ANCHOR — not when it merely mentions the changed package.
 //
