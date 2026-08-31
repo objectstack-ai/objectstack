@@ -461,3 +461,258 @@ describe('#12981 batch 5 — plugin-auth durability swallows report instead of v
     });
   });
 });
+
+/**
+ * [#12981 batch 6] The two `plugin-auth` admin-AUDIT swallows, pinned.
+ *
+ * ## What is different about these two, and why the probe is the repair
+ *
+ * The eight batch-5 seams above swallowed a bookkeeping write outright. These
+ * two swallowed something subtler: a `catch` that was doing TWO jobs and was
+ * only right about one of them.
+ *
+ *   - plugin-audit UNINSTALLED  -> there is no `sys_audit_log` object at all,
+ *     nothing ever claimed the action would be audited, and silence is the
+ *     CORRECT answer. Reporting here would put a line on every admin action in
+ *     every deployment that does not run plugin-audit — the "warn nobody
+ *     reads" that #4420 is the historical accident for.
+ *   - plugin-audit INSTALLED, write REFUSED -> the admin action landed, the
+ *     endpoint answered 200, and its audit row did not exist. That is #12981's
+ *     shape exactly.
+ *
+ * Both spelled `catch { }`. The repair asks `getSchema('sys_audit_log')` —
+ * the registry that owns the answer — instead of reading the driver's error
+ * text, which would decide the same question by guessing.
+ *
+ * ⚠️ So each site needs BOTH directions pinned, and the silent direction is
+ * the load-bearing one: a repair that warned unconditionally would pass every
+ * "it reports" case in this file while making the channel worthless.
+ *
+ * ## Level
+ *
+ * `warn`, and NOT because the consequence is small — an administrative
+ * password reset losing its only audit record is the distorted-audit class
+ * #12970 named. `AdminUserEndpointDeps.logger` and `IdentityImportDeps.logger`
+ * are both `{ warn(msg: string): void }` and both PUBLISHED (`index.ts` carries
+ * `export * from './admin-user-endpoints.js'` and `export *` for
+ * `./admin-import-users.js`). Neither declares `error`, so raising the level
+ * means widening a published sink — refused as actively harmful by the
+ * maintainer's #13398 ruling, which routes that question there and leaves the
+ * SILENCE here. The assertions below pin the channel, so a later level change
+ * is a deliberate edit rather than a drift.
+ */
+describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead of vanishing', () => {
+  const AUDIT_REFUSAL = new Error('write refused: no permission on sys_audit_log');
+
+  /**
+   * The engine the admin endpoints see.
+   *
+   * `getSchema` is the discriminator under test, so it is a real member here
+   * rather than a convenience: `registered` decides whether the double is a
+   * deployment that runs plugin-audit. `update` is pinned to ObjectQL's own
+   * dispatch predicate BEFORE any refusal branch, for the reason the batch-5
+   * double states — a case must not be able to pass by handing the engine a
+   * call the real engine would have thrown on.
+   */
+  const createAuditEngine = (opts: { registered: boolean; refuseAudit?: boolean }) => {
+    const insert = vi.fn(async (object: string) => {
+      if (object === 'sys_audit_log' && opts.refuseAudit) throw AUDIT_REFUSAL;
+      return { id: 'row-1' };
+    });
+    return {
+      insert,
+      update: vi.fn(async (object: string, doc: Record<string, unknown>, options?: unknown) => {
+        assertEngineUpdateDispatch(doc, options as never);
+        return { id: String(doc.id ?? 'updated') };
+      }),
+      find: vi.fn(async () => []),
+      // `undefined` is exactly what ObjectQL answers for an object no package
+      // registered — the uninstalled-plugin case, not an error.
+      getSchema: vi.fn((object: string) =>
+        opts.registered && object === 'sys_audit_log' ? { name: object } : undefined,
+      ),
+    };
+  };
+
+  const auditInserts = (engine: { insert: ReturnType<typeof vi.fn> }): unknown[][] =>
+    engine.insert.mock.calls.filter((c) => c[0] === 'sys_audit_log');
+
+  describe('admin-user-endpoints :: writeAdminAudit (`warn` — level is #13398\'s)', () => {
+    const ACTOR = { id: 'admin-1', email: 'admin@example.com' };
+
+    const makeDeps = (engine: ReturnType<typeof createAuditEngine>, logger: Capture) => ({
+      getAuthApi: async () =>
+        ({
+          createUser: vi.fn(async ({ body }: never) => ({
+            user: { id: 'user-9', email: (body as { email: string }).email },
+          })),
+        }) as never,
+      getAuthContext: async () =>
+        ({
+          password: {
+            hash: vi.fn(async (pw: string) => `hashed(${pw})`),
+            config: { minPasswordLength: 8, maxPasswordLength: 128 },
+          },
+          internalAdapter: {
+            findUserById: vi.fn(async () => ({ id: 'user-9' })),
+            findAccounts: vi.fn(async () => [{ providerId: 'credential' }]),
+            updatePassword: vi.fn(async () => ({})),
+            createAccount: vi.fn(async () => ({})),
+          },
+        }) as never,
+      getDataEngine: () => engine as never,
+      assertPasswordComplexity: vi.fn(async () => undefined),
+      noteMustChangePasswordIssued: vi.fn(),
+      logger: logger as never,
+    });
+
+    const createUserRequest = () =>
+      new Request('http://localhost/api/v1/auth/admin/create-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'new@example.com', generatePassword: true }),
+      });
+
+    it('a refused audit row is reported, and names the action that still succeeded', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: true, refuseAudit: true });
+      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
+
+      const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
+
+      // Control flow is UNCHANGED: the account exists and the caller sees 200.
+      // That is precisely why the line below is the operator's only evidence.
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(auditInserts(engine)).toHaveLength(1);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warnText(logger)).toContain('sys_audit_log');
+      // The two facts that make the line actionable: the row did NOT land, and
+      // the operation it describes DID.
+      expect(warnText(logger)).toContain('NOT written');
+      expect(warnText(logger)).toContain('SUCCEEDED');
+      // The consequence, not merely the failure — this is the record that has
+      // no substitute, because sys_account is in plugin-audit's SKIP_OBJECTS.
+      expect(warnText(logger)).toContain('sys_account');
+      // The driver's own text survives, so the line is greppable against the
+      // datasource log instead of being prose about a failure nobody can find.
+      expect(warnText(logger)).toContain('no permission on sys_audit_log');
+    });
+
+    it('plugin-audit UNINSTALLED stays silent, and does not attempt the write', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: false });
+      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
+
+      const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      // The declared skip: nothing claimed an audit row, so none is attempted
+      // and nothing is reported. A repair that warned here would fire on every
+      // admin action in every deployment without plugin-audit.
+      expect(engine.getSchema).toHaveBeenCalledWith('sys_audit_log');
+      expect(auditInserts(engine)).toHaveLength(0);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('a healthy audit write reports nothing on this channel', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: true });
+      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
+
+      const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      expect(auditInserts(engine)).toHaveLength(1);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('an engine without `getSchema` cannot measure the difference, so it REPORTS', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: true, refuseAudit: true });
+      // A lean host/mock: the probe is optional, and its absence must fail
+      // toward the loud answer, never toward the silent one.
+      const lean = { insert: engine.insert, update: engine.update, find: engine.find };
+      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
+
+      const res = await runAdminCreateUser(makeDeps(lean as never, logger) as never, createUserRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warnText(logger)).toContain('sys_audit_log');
+    });
+  });
+
+  describe('admin-import-users :: the run-level audit row (`warn` — level is #13398\'s)', () => {
+    const ACTOR = { id: 'admin-1', email: 'admin@example.com' };
+
+    const makeDeps = (engine: ReturnType<typeof createAuditEngine>, logger: Capture) => ({
+      getAuthApi: async () => ({
+        createUser: vi.fn(async ({ body }: never) => ({
+          user: { id: 'u-1', email: (body as { email: string }).email },
+        })),
+        requestPasswordReset: vi.fn(async () => ({ status: true })),
+      }),
+      getDataEngine: () => engine as never,
+      phoneNumberEnabled: () => false,
+      emailServiceAvailable: () => true,
+      smsInviteAvailable: () => false,
+      sendInviteSms: vi.fn(async () => undefined),
+      noteMustChangePasswordIssued: vi.fn(),
+      logger: logger as never,
+    });
+
+    const importRequest = () =>
+      new Request('http://localhost/api/v1/auth/admin/import-users', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ format: 'json', rows: [{ email: 'a@b.co' }] }),
+      });
+
+    it('a refused run-level row is reported, and says the per-row trail survived', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: true, refuseAudit: true });
+      const { runAdminImportUsers } = await import('./admin-import-users.js');
+
+      const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      expect(auditInserts(engine)).toHaveLength(1);
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warnText(logger)).toContain('sys_audit_log');
+      expect(warnText(logger)).toContain('NOT written');
+      // The dangerous part, and the one an operator cannot infer: the per-row
+      // `create` rows DID land, so the trail looks complete while the only
+      // record of who ran the import and under which policy is gone.
+      expect(warnText(logger)).toContain('per-row');
+      expect(warnText(logger)).toContain('no permission on sys_audit_log');
+    });
+
+    it('plugin-audit UNINSTALLED stays silent, and does not attempt the write', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: false });
+      const { runAdminImportUsers } = await import('./admin-import-users.js');
+
+      const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      expect(engine.getSchema).toHaveBeenCalledWith('sys_audit_log');
+      expect(auditInserts(engine)).toHaveLength(0);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('a healthy run reports nothing on this channel', async () => {
+      const logger = createLogger();
+      const engine = createAuditEngine({ registered: true });
+      const { runAdminImportUsers } = await import('./admin-import-users.js');
+
+      const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
+
+      expect(res.status).toBe(200);
+      expect(auditInserts(engine)).toHaveLength(1);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+});

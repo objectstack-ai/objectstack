@@ -89,6 +89,19 @@ export interface IdentityImportEngine {
   find(objectName: string, query?: any): Promise<any[]>;
   update(objectName: string, data: any, options?: any): Promise<any>;
   insert(objectName: string, data: any, options?: any): Promise<any>;
+  /**
+   * [#12981] Optional registry probe — `ObjectQL.getSchema`, which answers
+   * `undefined` for an object no package registered.
+   *
+   * Separates the two outcomes the run-level audit `catch` used to spell
+   * identically: plugin-audit UNINSTALLED (no `sys_audit_log` object — nothing
+   * was ever claimed, so silence is correct) from plugin-audit INSTALLED AND
+   * THE WRITE REFUSED (the import ran, its only run-level record did not land,
+   * and the endpoint still answers 200). Optional, therefore additive: a host
+   * or mock without it keeps type-checking, and a site that cannot measure the
+   * difference REPORTS rather than going quiet.
+   */
+  getSchema?(objectName: string): unknown;
 }
 
 export interface IdentityImportDeps {
@@ -510,23 +523,56 @@ export async function runAdminImportUsers(
     // `sys_audit_log` table, and an import must not fail over its own audit.
     // Both facts are pinned in
     // `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`.
-    try {
-      await engine.insert('sys_audit_log', {
-        action: 'import',
-        user_id: actor.id,
-        actor: actor.id,
-        object_name: 'sys_user',
-        metadata: JSON.stringify({
-          event: 'user.import_run',
-          mode, matchBy, passwordPolicy: policy,
-          total: prepared.rows.length,
-          created: summary.created, updated: summary.updated,
-          skipped: summary.skipped, errors: summary.errors + preErrors,
-          // How `auto` (and the fixed policies) split the batch across channels.
-          delivery,
-        }),
-      }, { context: SYSTEM_CTX } as any);
-    } catch { /* audit table may not exist — never fail the import */ }
+    //
+    // [#12981] "Best-effort" was doing two jobs and only one of them was
+    // right. plugin-audit UNINSTALLED means no `sys_audit_log` object, so
+    // nothing ever claimed the run would be audited — a declared skip, taken
+    // silently by the probe below. A REFUSED write is the other thing
+    // entirely, and it was wearing the same `catch`.
+    const auditRegistered = !engine.getSchema || Boolean(engine.getSchema('sys_audit_log'));
+    if (auditRegistered) {
+      try {
+        await engine.insert('sys_audit_log', {
+          action: 'import',
+          user_id: actor.id,
+          actor: actor.id,
+          object_name: 'sys_user',
+          metadata: JSON.stringify({
+            event: 'user.import_run',
+            mode, matchBy, passwordPolicy: policy,
+            total: prepared.rows.length,
+            created: summary.created, updated: summary.updated,
+            skipped: summary.skipped, errors: summary.errors + preErrors,
+            // How `auto` (and the fixed policies) split the batch across channels.
+            delivery,
+          }),
+        }, { context: SYSTEM_CTX } as any);
+      } catch (e) {
+        // [#12981] An import must not fail over its own audit — control flow is
+        // unchanged and the run still answers 200 with its summary. It must not
+        // be SILENT either. `sys_audit_log` is registered (checked above), so
+        // this is a refused write, and the run-level row is the ONLY record of
+        // it: plugin-audit's `actionFor` maps afterInsert/Update/Delete to
+        // create/update/delete and nothing else, so `action: 'import'` with a
+        // null `record_id` is a shape its writer structurally cannot emit. The
+        // per-row `create` rows survive, which is what makes this dangerous —
+        // the trail looks populated while WHO ran the import, under WHICH
+        // policy, and WHAT the run did overall is simply gone.
+        deps.logger?.warn(
+          `[AuthPlugin] the run-level sys_audit_log row for this user import was NOT written — `
+            + `the import itself SUCCEEDED (created ${summary.created}, updated ${summary.updated}, `
+            + `skipped ${summary.skipped}) and the endpoint answers 200, so nothing looks wrong. `
+            + 'plugin-audit is installed (sys_audit_log is registered), so this is a REFUSED '
+            + "write, not an absent plugin. plugin-audit's per-row create rows still landed, so "
+            + 'the audit trail LOOKS complete while the only record of who ran this import, under '
+            + 'which password policy, and what it did in aggregate is absent. Nothing retries it '
+            + 'and no later boot reconstructs it. Remedy: restore write access to sys_audit_log '
+            + `(permissions, driver connectivity) before the next import. Cause: ${
+              (e as Error)?.message ?? e
+            }`,
+        );
+      }
+    }
   }
 
   const errors = summary.errors + preErrors;
