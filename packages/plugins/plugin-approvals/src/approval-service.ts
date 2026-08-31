@@ -248,6 +248,76 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
 const STRANDABLE_REQUEST_STATUSES = ['approved', 'rejected', 'returned'] as const;
 
 /**
+ * The second oracle's verdict: which unrecoverable shape this run is in, or
+ * `undefined` for every run that must NOT be reported (#13909).
+ *
+ * Written as an explicit switch, not `status !== 'completed'`, because the
+ * negatives are the load-bearing half — a widening that reports everything the
+ * old `if (terminal) continue` used to skip would bury the finding it exists to
+ * surface. Each skip below is a distinct reason, and each is pinned by its own
+ * test.
+ *
+ * The engine writes exactly four run statuses (`paused`, `completed`, `failed`,
+ * `cancelled`); the spec's `ExecutionStatus` vocabulary is wider (`timed_out`,
+ * `retrying`, …) and nothing in the engine writes the rest today. The `default`
+ * arm therefore stays SILENT rather than reporting: a status this code does not
+ * recognise is not evidence a decision was stranded, and condemning on it would
+ * make every future status a false positive until someone noticed.
+ */
+function classifyStrandedRunState(run: { status?: string } | null | undefined): StrandedRunState | undefined {
+  // No history row at all — the #4469 shape this inspection was built for.
+  if (!run) return 'missing';
+  switch (run.status) {
+    // The resume consumed the pause and a downstream node threw. Reported.
+    case 'failed':
+      return 'failed';
+
+    // ── The negatives, each for its own reason ──────────────────────────────
+    // The decision advanced the flow and the flow finished. Healthy.
+    case 'completed':
+      return undefined;
+    // Deliberately terminated by an operator (`cancelRun`, ADR-0044). The run
+    // stopping is the intended outcome, exactly as `recalled` is on the request
+    // side — reporting it would bury the real findings under expected ones.
+    case 'cancelled':
+      return undefined;
+    // The history's last row says `paused` while the suspension store says no
+    // live pause. That is AMBIGUOUS, and the ambiguity is not resolvable from
+    // one scan: a resume in flight right now has consumed the suspension and
+    // not yet written its terminal row, and reads exactly like a process that
+    // died in the same window. Condemning it would name every concurrently
+    // resuming approval — so this stays SKIPPED, the conservative arm this
+    // whole method is built on.
+    case 'paused':
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * WHY a terminal request's run is unrecoverable — the two shapes the inspection
+ * reports, which have different causes and different remedies (#13909).
+ *
+ *  - `missing` — `getRun` finds no history row at all (#4469's original shape):
+ *    the run was lost before it could record anything, typically a pause that
+ *    never reached a durable store and did not survive a restart.
+ *  - `failed` — the run DID record a terminal `failed` row. The engine consumes
+ *    a suspension *before* running the downstream nodes
+ *    (`AutomationEngine.resumeInternal`: `forgetSuspendedRun(run, 'resumed')`
+ *    precedes `traverseNext`), so a downstream node that merely THREW threw with
+ *    the pause already gone — the catch arm recorded `failed` and there is no
+ *    suspension left to resume. The decision is durable, the flow stopped
+ *    mid-continuation, and no verb moves the run out of that state.
+ *
+ * ⚠️ This names the shapes for the REPORT only. It is not a run state: the
+ * engine's own vocabulary is still `'completed' | 'paused' | 'failed'`
+ * (`AutomationResult.status`) and nothing persists or queries "stranded".
+ * Giving the condition a platform-level name is #13909's own deliverable.
+ */
+export type StrandedRunState = 'missing' | 'failed';
+
+/**
  * One terminal request whose owning flow run is unrecoverable (#4469) — the
  * decision was recorded and the flow never moved. Reporting shape only: the
  * sweep never rewrites these rows (see
@@ -259,6 +329,13 @@ export interface StrandedApprovalRequest {
   status: string;
   /** The `flow_run_id` that resolves to neither a suspension nor a run history row. */
   runId: string;
+  /**
+   * Which unrecoverable shape this is — see {@link StrandedRunState}. Carried
+   * because the two need different remedies: a `missing` run has no history to
+   * read, while a `failed` one has a step log and an error message naming the
+   * node that threw.
+   */
+  runState: StrandedRunState;
   flowName?: string;
   /** Approval node the run should have continued from. */
   nodeId?: string;
@@ -3679,9 +3756,35 @@ export class ApprovalService implements IApprovalService {
    *    live pause exists. It THROWS when the store cannot be read, and that
    *    case is SKIPPED, never counted as dead: an unreadable store means
    *    "unknown", and a storage outage must not be published as a lost run.
-   *  - `getRun(runId) == null` — no terminal history row either (the `run_`
-   *    prefixed rows in `sys_automation_run`). A run that merely finished is
-   *    not stranded; a request whose run neither waits nor ever completed is.
+   *  - {@link classifyStrandedRunState} over `getRun(runId)` — the run's own
+   *    history row (the `run_` prefixed rows in `sys_automation_run`). A run
+   *    that merely finished is not stranded; a request whose run neither waits
+   *    nor completed is.
+   *
+   * **The second oracle was widened (#13909), and this is the whole point of
+   * that card's first slice.** It used to be `if (terminal) continue` — the
+   * existence of ANY history row ended the check, on the reading "the run ran to
+   * a terminal state, it is not dangling". That is true of a run that COMPLETED
+   * and false of one that FAILED: the engine consumes a suspension *before*
+   * running the downstream nodes (`AutomationEngine.resumeInternal` calls
+   * `forgetSuspendedRun(run, 'resumed')` and only then `traverseNext`), so a
+   * downstream node that merely threw threw with the pause already gone, and the
+   * catch arm wrote a terminal `failed` row. The decision is durable, the
+   * continuation stopped half-way, `resume` answers `RUN_NOT_FOUND` and
+   * `cancelRun` is a no-op — and the terminal row this oracle used to read as
+   * health is written BY the very failure that stranded it. So this inspection
+   * reported `0` for the one shape an operator most needs to see.
+   *
+   * ⚠️ The widening does NOT reverse the conservatism: `completed`, `cancelled`
+   * and `paused` are each still skipped, for reasons named one at a time in
+   * {@link classifyStrandedRunState}, and an unrecognised status is skipped too.
+   * What the widening buys is that a `failed` run is now reported with
+   * `runState: 'failed'` instead of counted as healthy.
+   *
+   * ⚠️ **What this can and cannot size.** It makes the condition *visible* in a
+   * deployment; it is not itself a census, and it says nothing about this
+   * repository. How many runs are already in this state can only be answered
+   * against a real deployment's tables — see the card.
    *
    * **Reports; never rewrites.** No status is changed and no run is cancelled.
    * The decision genuinely happened — a human approved or rejected — and
@@ -3748,10 +3851,15 @@ export class ApprovalService implements IApprovalService {
         });
         continue;
       }
-      if (terminal) continue;    // the run ran to a terminal state — it is not dangling
+      // #13909 — the widened verdict. `undefined` means "not a shape this
+      // reports": healthy, deliberate, or unresolvable. See
+      // `classifyStrandedRunState` for which, and why each one.
+      const runState = classifyStrandedRunState(terminal);
+      if (!runState) continue;
 
-      // Neither suspended nor ever finished: the run this decision was supposed
-      // to advance is genuinely gone.
+      // Neither suspended nor recoverable: the run this decision was supposed to
+      // advance is gone (`missing`) or terminally failed mid-continuation with
+      // its pause already consumed (`failed`).
       const config = parseJson<ApprovalNodeConfig>(
         raw.node_config_json, { approvers: [], behavior: 'first_response' } as any,
       );
@@ -3770,6 +3878,7 @@ export class ApprovalService implements IApprovalService {
         requestId: String(raw.id),
         status: raw.status,
         runId,
+        runState,
         flowName: typeof raw.process_name === 'string' ? raw.process_name.replace(/^flow:/, '') : undefined,
         nodeId: raw.flow_node_id ?? raw.current_step ?? undefined,
         objectName: raw.object_name,
@@ -3782,9 +3891,14 @@ export class ApprovalService implements IApprovalService {
     }
 
     if (stranded.length || undetermined) {
-      this.logger?.warn?.('[approvals] stranded terminal requests (decision recorded, flow run gone)', {
+      // The two shapes are counted separately: they have different causes and
+      // different remedies, and an operator reading one number could not tell a
+      // pre-existing #4469 zombie from a run that failed mid-resume (#13909).
+      this.logger?.warn?.('[approvals] stranded terminal requests (decision recorded, flow run unrecoverable)', {
         scanned: rows.length, stranded: stranded.length, undetermined,
-        requests: stranded.map(s => `${s.requestId}@${s.nodeId ?? '?'} → run ${s.runId}`),
+        runMissing: stranded.filter(s => s.runState === 'missing').length,
+        runFailed: stranded.filter(s => s.runState === 'failed').length,
+        requests: stranded.map(s => `${s.requestId}@${s.nodeId ?? '?'} → run ${s.runId} (${s.runState})`),
       });
     }
     return { scanned: rows.length, stranded, undetermined };
