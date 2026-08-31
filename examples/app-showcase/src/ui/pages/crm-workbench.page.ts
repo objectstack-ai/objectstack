@@ -35,7 +35,9 @@ function Page() {
       // a normalized QueryResult with a "data" array, NOT the REST envelope with
       // a "records" array. Reading .records here always missed, so the KPI cards
       // silently stuck at 0 even though the ListView beside them showed the same
-      // rows. Read .data first, with .records/array fallbacks for robustness.
+      // rows. Read .data: it is the only row shape QueryResult declares, so a
+      // tolerant '.data || .records' alias would render correctly while
+      // teaching a spelling the producer cannot emit.
       //
       // The cap is $top, not 'limit': QueryParams declares only $-prefixed keys
       // and the adapter copies only those, so a bare 'limit' is dropped without
@@ -46,7 +48,7 @@ function Page() {
       // "Active" stays a per-row verdict over the 200 rows actually fetched;
       // an exact one would need its own filtered count query.
       const all = await adapter.find('showcase_project', { $top: 200 });
-      const rows = Array.isArray(all) ? all : (all && (all.data || all.records)) || [];
+      const rows = Array.isArray(all) ? all : (all && all.data) || [];
       const total = typeof (all && all.total) === 'number' ? all.total : rows.length;
       setStats({ total, active: rows.filter((r) => r.status === 'active').length });
     } catch (e) { console.warn('[CRM Workbench] failed to refresh stats', e); }

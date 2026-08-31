@@ -142,7 +142,7 @@ function Page() {
         $filter: ['status', '!=', 'paid'],
         $top: 200,
       });
-      const records = result?.data ?? result?.records ?? (Array.isArray(result) ? result : []);
+      const records = result?.data ?? (Array.isArray(result) ? result : []);
       if (alive) setRows(records);
     })();
     return () => { alive = false; };
