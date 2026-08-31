@@ -701,6 +701,27 @@ const CONTROL = {
     why: 'PR for #11341. Refuses by binding a negation to the verb, over a shrink-only baseline holding only the child-environment leaks that predate the gate; their repair is a card per neighbourhood, so no authority is missing.',
   },
 
+  // The tenth, and the fourth to join as a NEW gate rather than by retrofit
+  // (#13582). Marking rather than refusal, on the same reading as the seventh
+  // through ninth: there IS a legitimate act here and it has an owner. The gate
+  // is a lexical anti-drift ratchet over the teaching corpus, and its ledger
+  // holds four claim sites that are TRUE — prose in the ObjectQL and HTTP
+  // protocol pages that names "key presence" precisely in order to say `$exists`
+  // is not one. A fifth sentence could legitimately need the same construction,
+  // so the ledger cannot be demanded to zero and the act of admitting one is
+  // real. It expands a shrink-only baseline, which makes it the maintainer's
+  // rather than the landing author's, and the gate's NEW-claim message says so
+  // beside the offer while its reword remedy — the author's own — is offered
+  // first and unmarked.
+  //
+  // ⚠️ Recorded from the sweep's own verdict (this gate reported it as `marked`
+  // before the row was written), not from the author's intent. The two agreeing
+  // is the point of the corpus.
+  'check-corpus-claim-drift.mjs': {
+    expect: 'marked',
+    why: 'PR for #13582. Its per-file, per-rule baseline is shrink-only; the author\'s remedy is to reword the sentence, and the baseline path that admits a genuinely true construction beside a pinned spelling is offered only as a maintainer\'s.',
+  },
+
   // ── Declaration registries and near-misses: recording the fact IS the fix ──
   'check-agent-model-declared.mjs': {
     expect: 'excluded',
