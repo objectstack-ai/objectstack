@@ -142,10 +142,52 @@ describe('DbJobAdapter — interval schedules are leader-elected (#13686)', () =
     expect(acquire).toHaveBeenCalledWith('job:sla_escalation', { ttlMs: 60000, waitMs: 0 });
   });
 
-  it('two simulated replicas contending for ONE fire: exactly one executes, the loser SKIPS', async () => {
+  it('two simulated replicas, ONE tick: exactly one execution and ONE run row', async () => {
     // One engine and one lock, two adapter stacks — the shared postgres + redis
     // of a 3-replica deployment, minus the process boundary this harness has no
     // way to cross.
+    vi.useFakeTimers();
+    const engine = makeFakeEngine();
+    const fence = sharedLock();
+    // The winner HOLDS its lease until this opens, so the loser's acquire is
+    // guaranteed to land while the lock is held rather than after it is
+    // released — which is what makes the count below a fact about the lock and
+    // not about how many microtasks the timer flush happened to run.
+    let open!: () => void;
+    const lease = new Promise<void>((resolve) => { open = resolve; });
+    const handler = vi.fn(async () => { await lease; });
+
+    const replica = () => {
+      const cron = new CronJobAdapter({ cluster: { lock: fence.lock } });
+      return { cron, db: track(new DbJobAdapter({ engine, cron })) };
+    };
+    const a = replica();
+    const b = replica();
+    await a.db.schedule('sla_escalation', IV, handler);
+    await b.db.schedule('sla_escalation', IV, handler);
+
+    // One tick of the wall clock reaches BOTH replicas.
+    await vi.advanceTimersByTimeAsync(TICK);
+
+    expect(handler, 'one tick must execute the job once across the cluster, not once per replica').toHaveBeenCalledTimes(1);
+    expect(fence.acquire).toHaveBeenCalledTimes(2);
+    // waitMs:0 is the "skip", spelled structurally — a waiting acquire would let
+    // the loser run the same tick a moment later.
+    expect(fence.acquire).toHaveBeenCalledWith('job:sla_escalation', { ttlMs: 60000, waitMs: 0 });
+
+    open();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The durable record agrees: one tick, ONE run row, run_count +1. Unrouted,
+    // this shared engine took one row per replica — the shape the field report
+    // caught as six notification inserts inside 54 ms.
+    const runs = engine.rows('sys_job_run').filter((r) => r.job_name === 'sla_escalation');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe('success');
+    expect(engine.rows('sys_job')[0].run_count).toBe(1);
+  });
+
+  it('the replica that loses the lock SKIPS: it resolves, it does not throw and it does not retry', async () => {
     const engine = makeFakeEngine();
     const fence = sharedLock();
     const handler = vi.fn(async () => {});
@@ -159,26 +201,15 @@ describe('DbJobAdapter — interval schedules are leader-elected (#13686)', () =
     await a.db.schedule('sla_escalation', IV, handler);
     await b.db.schedule('sla_escalation', IV, handler);
 
-    // Both replicas reach the same fire. Started together on purpose: `b` calls
-    // acquire while `a` still holds the lease.
+    // Driven at the fire seam so both promises are observable: `b` calls acquire
+    // while `a` still holds the lease.
     const fireA = (a.cron as any).runScheduled('sla_escalation');
     const fireB = (b.cron as any).runScheduled('sla_escalation');
-    // The loser SKIPS: it resolves, it does not throw and it does not retry.
     await expect(Promise.all([fireA, fireB])).resolves.toHaveLength(2);
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(fence.acquire).toHaveBeenCalledTimes(2);
-    // waitMs:0 is the "skip", spelled structurally — a waiting acquire would let
-    // the loser run the same tick a moment later.
-    expect(fence.acquire).toHaveBeenCalledWith('job:sla_escalation', { ttlMs: 60000, waitMs: 0 });
-
-    // The durable record agrees: one tick, ONE run row, run_count +1. Unrouted,
-    // this shared engine took one row per replica — the shape the field report
-    // caught as six notification inserts inside 54 ms.
-    const runs = engine.rows('sys_job_run').filter((r) => r.job_name === 'sla_escalation');
-    expect(runs).toHaveLength(1);
-    expect(runs[0].status).toBe('success');
-    expect(engine.rows('sys_job')[0].run_count).toBe(1);
+    expect(fence.held.has('job:sla_escalation'), 'the winner must release its lease when the fire ends').toBe(false);
   });
 
   it('single-replica, no cluster driver: the interval job still fires (the regression that would be worse than the defect)', async () => {
