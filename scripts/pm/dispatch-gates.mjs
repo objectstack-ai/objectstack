@@ -9798,50 +9798,73 @@ function selfTest() {
   t('a bare file set is REFUSED, never answered — it is the shape that mis-categorises silently', rosterRefusedBareSet);
 
   // ⭐ THE CLASS GUARD, and the reason this card is not "nine gate names added
-  // to a table". The defect was one predicate holding a private, weaker copy
-  // of the covering rule; the copy is gone, and this holds the two EQUAL over
-  // the LIVE fleet, per declared literal:
+  // to a table". The defect was ONE PREDICATE holding a private, weaker copy of
+  // the covering rule; the copy is gone, and this holds the two instruments
+  // EQUAL over the LIVE fleet, at FAMILY grain:
   //
-  //   for every literal `hintCovers` judges as a LITERAL and the tree does not
-  //   have as a DIRECTORY — `declaredFileTarget` names a file exactly when the
-  //   covering rule reaches exactly one tracked file, and it is that file.
+  //   for every discovered family — `artifactOnlySilence` returns a roster
+  //   exactly when every declared literal of that family names exactly one
+  //   tracked file under `hintCovers`, and the roster IS those files.
   //
-  // Non-tautological on purpose: the two sides are computed by different code
-  // (a membership test plus the extension resolver, against a full sweep of the
-  // corpus through `hintCovers`). Measured while writing this: BEFORE the
-  // repair the two disagreed about 40 of 754 declared literals; after it, 0.
-  // The day someone teaches `hintCovers` a further spelling — the way #12514
-  // taught it the extension list — and forgets this reader, this reds, for
-  // whatever family happens to carry it. No gate name appears in it.
+  // ⚠️ Family grain, not literal grain, and the difference was measured rather
+  // than reasoned. Written against `declaredFileTarget` this case was GREEN
+  // against the very bug it exists to catch: the ablation that put the old rule
+  // back inside `artifactOnlySilence` left the resolver untouched, so a guard
+  // comparing resolver to covering rule saw nothing wrong. A guard on the OWNER
+  // does not hold the CALLER to it. Stated over the classifier's own output it
+  // reds, because the classifier is what the reader is shown.
+  //
+  // Non-tautological in both directions: the right side is computed by sweeping
+  // the whole tracked corpus through `hintCovers`, which shares no code with the
+  // membership test and resolver the classifier composes. Measured while
+  // writing this — before the repair the two disagreed about 40 of 754 declared
+  // literals and 9 of 192 families; after it, 0 and 0. The day someone teaches
+  // `hintCovers` a further spelling (the way #12514 taught it the extension
+  // list) and forgets this reader, or reintroduces a private test in the
+  // classifier, this reds for whatever family happens to carry it. No gate name
+  // appears in it, which is the whole point.
   const classFiles = trackedFiles();
   const classTree = watchHintTree(classFiles);
-  const classHints = new Set();
-  for (const [, entry] of discoverFamilies({ tree: classTree }).byCheck) {
-    for (const h of entry.hints ?? []) classHints.add(h);
-  }
+  const classFams = [...discoverFamilies({ tree: classTree }).byCheck];
   const isTrackedDirHint = (h) => {
     const plain = collapseHint(h);
     return classTree.prefixes.has(plain) && !classTree.files.has(plain);
   };
+  // The covering rule's own answer to "this literal names exactly one tracked
+  // FILE": swept, not resolved. A pattern and a directory are declared
+  // POPULATIONS and are excluded before the sweep — `apps/*/package.json`
+  // reaches exactly one file on this tree only because the repo has one app.
   const coveringRuleFile = (h) => {
     if (judgedAsPattern(h) || isTrackedDirHint(h)) return null;
     const reached = classFiles.filter((f) => hintCovers(h, f));
     return reached.length === 1 ? reached[0] : null;
   };
-  const classDisagreements = [...classHints].filter((h) => coveringRuleFile(h) !== declaredFileTarget(h, classTree));
+  const ruleRoster = (entry) => {
+    const declaredHints = [...new Set(entry.hints ?? [])];
+    if (declaredHints.length === 0) return null;
+    const named = declaredHints.map(coveringRuleFile);
+    return named.every(Boolean) ? named : null;
+  };
+  const classSplit = classFams.map(([check, entry]) => [
+    check,
+    JSON.stringify(artifactOnlySilence(entry, [], classTree)?.artifacts ?? null),
+    JSON.stringify(ruleRoster(entry)),
+  ]);
+  const classDisagreements = classSplit.filter(([, mine, rule]) => mine !== rule);
   t(
-    `the roster classifier and the covering rule name the SAME file for every declared literal in the fleet (${classHints.size} literals)`,
+    `the roster classifier and the covering rule agree about every family in the fleet (${classFams.length} families)`,
     classDisagreements.length === 0,
-    classDisagreements
-      .slice(0, 5)
-      .map((h) => `${h}: rule=${coveringRuleFile(h)} classifier=${declaredFileTarget(h, classTree)}`)
-      .join(' · '),
+    classDisagreements.slice(0, 5).map(([c, mine, rule]) => `${c}: classifier=${mine} rule=${rule}`).join(' · '),
   );
-  // Non-vacuity for the case above — an empty population would assert nothing,
-  // and the fleet really does carry the shape this card was filed for.
+  // Non-vacuity for the case above — an agreement over an empty or all-null
+  // population asserts nothing, and the fleet really does carry both the shape
+  // this card was filed for and rosters that predate it.
   t(
-    '…non-vacuously: the fleet really contains literals that name their file only through a dropped extension',
-    [...classHints].some((h) => declaredFileTarget(h, classTree) && !classTree.files.has(collapseHint(h))),
+    '…non-vacuously: the fleet carries families whose roster is named only through a dropped extension',
+    classFams.some(([, entry]) => {
+      const r = artifactOnlySilence(entry, [], classTree);
+      return r && r.artifacts.some((a, i) => a !== collapseHint([...new Set(entry.hints ?? [])][i]));
+    }),
   );
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
