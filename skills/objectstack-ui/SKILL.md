@@ -60,6 +60,7 @@ App navigation, Dashboards, Reports, and Actions.
 | `map` | Geospatial records with `location` fields |
 | `chart` | Aggregate visualisation over the object (mini chart view) |
 | `tree` | Self-referencing hierarchy (tree-grid) |
+| `page` | Mounts a published Page (`pageName`); no rows of its own |
 
 ### Form Views
 
@@ -322,11 +323,11 @@ Rules:
   Want both demos? Put them on different views.
 - **On an object list view (`*.view.ts` `list` / `listViews`), only
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
-  (ADR-0047 amendment). An object view's
-  saved-view `ViewTabBar` already owns the tab-bar role, so a `tabs`
-  user-filter would render a second, colliding tab bar. The spec narrows it
-  (`ObjectUserFiltersSchema` — a `tabs` element is untypable at author time
-  and dropped at parse) and the `validate` list-view-mode lint reports it.
+  (ADR-0047 amendment). An object view's saved-view `ViewTabBar` already owns
+  the tab-bar role, so a `tabs` user-filter would render a second, colliding
+  tab bar. The spec narrows it (`ObjectUserFiltersSchema` — a `tabs` element is
+  untypable at author time and **rejected** at parse, not dropped) and the
+  `validate` list-view-mode lint reports it.
   Need named presets on an object? Add a `listViews` entry instead. The full
   `dropdown | tabs | toggle` range applies only to **page lists** /
   `interfaceConfig.userFilters` (the block above).
@@ -558,7 +559,7 @@ Field shapes:
 | `bands[].label` | yes | Header text for the band (白班 / 夜班). |
 | `bands[].start` / `bands[].end` | yes | `'HH:mm'`. When `end <= start` the band crosses midnight. Bands must tile the 24h day from `dayStart`. |
 | `bands[].color` | no | Any CSS color. Tints that band's column; **omit for no tint**. |
-| `showMidnight` | no | Draw the dashed calendar-midnight cue inside cross-midnight bands. Default `true`; set `false` to hide it. |
+| `showMidnight` | no | Draw the dashed local-0:00 cue inside cross-midnight bands (the 排班日 cell itself stays unbroken). Default `true`; set `false` to hide it. |
 
 Behavior:
 
@@ -570,11 +571,7 @@ Behavior:
   in, so a 夜班 spanning 20:00→次日08:00 stays in a single column.
 - **Drag-snaps to band boundaries** (the band duration, e.g. 12h) instead of
   whole days.
-- **Calendar-midnight cue.** A subtle dashed vertical line marks local 0:00
-  *inside* a cross-midnight band — the 排班日 cell itself stays unbroken. Set
-  `showMidnight: false` to turn it off.
-- **Default off = zero regression.** Omit `timeSegments` and the gantt behaves
-  exactly as before. Tints render only for bands that declare `color`.
+- **Default off.** Omit `timeSegments` and the gantt renders unsegmented.
 
 ---
 
@@ -669,6 +666,7 @@ A widget's `type` is its **chart type** (`ChartTypeSchema`; defaults to
 | Single value | `metric`, `kpi`, `gauge`, `solid-gauge`, `bullet` (all render the number today; gauge variants gain a dial when a gauge renderer lands) |
 | Comparison | `bar`, `horizontal-bar`, `column` |
 | Trend | `line`, `area` |
+| Mixed | `combo` (bar/line/area on shared dual axes) |
 | Distribution | `pie`, `donut`, `funnel` |
 | Relationship | `scatter` |
 | Composition | `treemap`, `sankey` |
@@ -688,9 +686,9 @@ dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset
 and select named `dimensions` + `values`**; the dataset owns the base object,
 allowed joins, intrinsic filter, dimensions, and certified measures. The legacy
 per-widget inline query (`object` + `categoryField` + `valueField` + `aggregate`)
-**was removed** — a widget now requires `dataset` + `values`; the inline fields are
-dropped and a widget lacking `dataset` fails `os validate`. Reports bind the same
-way (`dataset` + `rows` + `values` + `runtimeFilter`). The dataset shape is
+**was removed** — a widget now requires `dataset` + `values`; the closed schema
+REJECTS the inline keys by name, and one lacking `dataset` fails `os validate`.
+Reports bind the same way (`dataset` + `rows` + `values` + `runtimeFilter`). The dataset shape is
 `DatasetSchema` — see `node_modules/@objectstack/spec/src/ui/dataset.zod.ts`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
@@ -1523,9 +1521,9 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
   and overwrites it.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
-  with `variant: 'comparison'` and styled as a muted overlay (`opacity: 0.5`
-  + `strokeDasharray: '4 4'` for line/area/scatter; `opacity: 0.4` for
-  bars). Override per-series with `series.dashArray` / `series.opacity`.
+  with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
+  line/area only; reduced opacity on all). Override per-series with
+  `series.dashArray` / `series.opacity`.
 * **Pie / donut / funnel** — `compareTo` is silently ignored; there is no
   meaningful "two-period" composition for part-of-whole charts.
 * **Requirements** — a comparison needs a **dated window** to shift. When the
@@ -1663,12 +1661,12 @@ Both `{token}` and `${token}` forms are accepted.
 | Instants | `today`, `yesterday`, `tomorrow`, `now` |
 | Current period | `current_week_start` / `_end`, `current_month_start` / `_end`, `current_quarter_start` / `_end`, `current_year_start` / `_end` |
 | Last period | `last_week_start` / `_end`, `last_month_start` / `_end`, `last_quarter_start` / `_end`, `last_year_start` / `_end` |
-| Next period | `next_week_start`, `next_month_start`, `next_quarter_start`, `next_year_start` |
+| Next period | `next_week_start` / `_end`, `next_month_start` / `_end`, `next_quarter_start` / `_end`, `next_year_start` / `_end` |
 | Bare aliases | `week_start`, `week_end`, `month_start`, `month_end`, `quarter_start`, `quarter_end`, `year_start`, `year_end` (same as `current_*`) |
 
 ### Parameterised tokens — `{N_<unit>_(ago|from_now)}`
 
-`N` is any positive integer; `<unit>` is one of
+`N` is any non-negative integer; `<unit>` is one of
 `minute(s) | hour(s) | day(s) | week(s) | month(s) | year(s)`.
 `minute`/`hour` resolve to a full ISO timestamp; coarser units resolve to
 `YYYY-MM-DD`.
@@ -2053,11 +2051,11 @@ the selected row in `list_item` contexts.
    "My Records" filter using `$currentUser`.
 
 5. **Putting widget grid placement in `position`.**
-   The grid-placement field is `layout: { x, y, w, h }` — there is no
-   `position` key on a widget, so a `position` object is silently dropped.
-   `layout` is optional: omit it and the widget auto-flows (the Studio
-   designer relies on this); set it only when you want an explicit grid
-   position.
+   The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
+   widget key and the closed schema REJECTS it by name (it was silently
+   dropped before protocol 17). `layout` is optional: omit it and the widget
+   auto-flows (the Studio designer relies on this); set it only when you want
+   an explicit grid position.
 
 ---
 
