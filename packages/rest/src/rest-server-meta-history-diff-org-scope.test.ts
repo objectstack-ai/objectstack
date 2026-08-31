@@ -137,11 +137,22 @@ const keyOf = (w: Record<string, unknown>) =>
 function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
+            // Conjoined with its siblings, not early-returned: the loop
+            // CONTINUES, so the remaining keys still have to match.
             const clauses = v as Array<Record<string, unknown>>;
             if (!clauses.some((c) => matchesWhere(r, c))) return false;
             continue;
         }
-        if (k === 'context') continue;
+        // ⛔ REFUSE any other combinator rather than reading it as a field
+        // name. `$or` is the only one the read paths under test emit
+        // (`auditMetaItem`'s union, and the repository's draft lookup), and a
+        // double that answered `$and` by looking for a column literally called
+        // `$and` would return a well-formed WRONG answer — the silent class
+        // `check:where-matcher` exists to catch. Refusing loudly is the
+        // convention most doubles in this repo already follow.
+        if (k.startsWith('$')) {
+            throw new Error(`stub engine: unsupported WHERE combinator \`${k}\``);
+        }
         if (v === undefined) continue;
         if (r[k] !== v) return false;
     }

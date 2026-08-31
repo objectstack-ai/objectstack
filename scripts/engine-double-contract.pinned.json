@@ -2857,6 +2857,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
       "verb": "delete",
       "pinned": 1
