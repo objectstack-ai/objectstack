@@ -57,11 +57,12 @@
  *   > OR-s its BRANCHES; it does not change how the contents within a branch
  *   > combine.
  *
- * The predicates are deliberately boring: string equality, `$in`, `$ne`, `$gte`
- * / `$lt` on lexicographic strings. Dates, numeric coercion, `LIKE` escaping and
- * case sensitivity are still out — those legitimately differ between a SQL
- * engine and a JS matcher, and folding them in would make the table unpassable
- * rather than more useful. Keep it that way: a case belongs here only if
+ * The predicates are deliberately boring: string equality, `$in` / `$nin`,
+ * `$ne`, `$gte` / `$lt` on lexicographic strings, `$notContains` over plain
+ * substrings, and the value-presence pair `$null` / `$exists`. Dates, numeric
+ * coercion, `LIKE` escaping and case sensitivity are still out — those
+ * legitimately differ between a SQL engine and a JS matcher, and folding them
+ * in would make the table unpassable rather than more useful. Keep it that way: a case belongs here only if
  * **every** backend must agree on it.
  *
  * **Null handling is IN, as of #5298** — it used to be excluded by the same
@@ -70,7 +71,7 @@
  * #5146 made `$not` NULL-safe and #5298 did the same for the non-negated
  * `$ne` / `$nin` / `$notContains`, so "the column has no value" now has ONE
  * cross-backend answer and belongs to the standard like any other. The
- * {@link FilterLogicRow.d} column carries it, and the six `d`-column cases
+ * {@link FilterLogicRow.d} column carries it, and the eight `d`-column cases
  * below enforce it on every backend.
  *
  * ⚠️ That answer — the INCLUDE direction — was reversed by a ruling on
@@ -162,7 +163,10 @@
  *   measured, and re-affirmed with the reversal option on the table.
  * - **`$exists` means "has a value"** (`!= null`), never key-presence — cell 2,
  *   the leg of the 07:33Z ruling that was never in conflict with #5298 and had
- *   already shipped in PR #5962. It stands.
+ *   already shipped in PR #5962 on the surfaces the ruling named. It stands —
+ *   and since PR #13529 (#13195) moved the last three key-presence exits, it
+ *   is enforced here too: enrolled in {@link FILTER_LOGIC_CASES} in BOTH
+ *   directions (#13531).
  *
  * So the four enrolled negation rows — `$ne` / `$not` / `$nin` /
  * `$notContains` `… returns the rows with no value` — state the affirmed
@@ -172,18 +176,21 @@
  * ### Why the reversal was declined — the measurement
  *
  * Taken on `60f0dd8` by adding the candidate rows to this table and running
- * every suite that drives it. `MATCH` = a no-value row satisfies the operator,
- * i.e. the include direction — the affirmed one:
+ * every suite that drives it; re-taken on `b997272` with the four candidate
+ * rows ENROLLED below, after PR #13356 and PR #13529 moved the last divergent
+ * cells — the dated per-cell notes say which cells moved and what moved them.
+ * `MATCH` = a no-value row satisfies the operator, i.e. the include direction
+ * — the affirmed one:
  *
  * | Surface | `$notContains` | `$nin` | `$exists: true` on a null value |
  * |---|---|---|---|
  * | `formula` `matchesFilterCondition` | MATCH | MATCH | no — already ruled-correct (#5962) |
  * | `driver-memory` reference matcher | MATCH — realigned by PR #13356 | MATCH on both readings — realigned by PR #13356 | no — ruled-correct (#5962) |
- * | `driver-memory` live mingo path | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
- * | `driver-memory` analytics face | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
+ * | `driver-memory` live mingo path | MATCH | MATCH | no — has-value since PR #13529 |
+ * | `driver-memory` analytics face | MATCH | MATCH | no — has-value since PR #13529 |
  * | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local | MATCH | MATCH | no — `IS NOT NULL` |
  * | `driver-turso` REMOTE | MATCH | MATCH | no — `IS NOT NULL` |
- * | `driver-mongodb` `translateFilter` | MATCH | MATCH | MATCH — mongo `$exists` IS key-presence |
+ * | `driver-mongodb` `translateFilter` | MATCH | MATCH | no — has-value since PR #13529 (lowered to a null test, never mongo `$exists`) |
  * | `service-analytics` `read-scope-sql` | MATCH | MATCH | no — `IS NOT NULL` |
  * | `service-analytics` `filter-normalizer` | MATCH | MATCH | no — `IS NOT NULL` |
  *
@@ -208,25 +215,29 @@
  * silent absence for visible surplus. With no business pull behind it, the
  * maintainer kept include.
  *
- * ⚠️ One cell of the three is still short of its ruling, and it is the cell that
- * SURVIVED. `$exists` = has-value is settled and shipped on the surfaces the
- * ruling named — `formula` and `driver-memory`'s reference matcher both read it
- * that way (#5298 ③ / #5369, landed in #5962). Still reading key-presence:
- * `driver-memory`'s live mingo path and `driver-mongodb`, both among the FIVE
- * drivers this gate scores. The #5499 investment freeze that once explained why
- * neither had moved was lifted on 2026-08-11 (recorded in
- * `./aggregation-conformance.ts`), so the gap is now unexcused rather than
- * deferred — but it is still a gap, so a `$exists` row cannot be enrolled here
- * yet.
+ * ⚠️ The `$exists` column was the cell of the three that SURVIVED the
+ * withdrawal, and for a while it ran short of its own ruling. `$exists` =
+ * has-value shipped first on the surfaces the ruling named — `formula` and
+ * `driver-memory`'s reference matcher (#5298 ③ / #5369, landed in #5962) —
+ * while three exits still read key-presence: `driver-memory`'s live mingo
+ * path, its analytics face (a third divergent exit the earlier prose never
+ * named; measured in PR #13420), and `driver-mongodb`'s `translateFilter`.
+ * The #5499 investment freeze that once excused the lag dissolved on
+ * 2026-08-11 (recorded in `./aggregation-conformance.ts`), and PR #13529
+ * (#13195) moved all three to has-value — the gap is closed, the stated
+ * blocker on enrolment is gone with it, and the two `$exists` rows below are
+ * enrolled in BOTH directions (#13531).
  *
- * ⛔ And the blocker on that row is NOT a missing wording, which is worth
- * stating because the obvious workaround does not exist: **the DEBT ledger in
+ * ⛔ The granularity rule that made that wait mandatory is still the standing
+ * rule for every future row, and it is NOT a missing wording — the obvious
+ * workaround does not exist: **the DEBT ledger in
  * `scripts/check-driver-conformance.mjs` is per (driver × case-set), not per
  * case.** An entry says "this driver's suite does not import this marker at
  * all". There is no spelling for "this driver fails one row while passing the
- * other thirty-five", so a row added ahead of a backend is simply a red gate —
- * the thing #5903's note calls "a gate that reports a known red", which teaches
- * every agent reading CI to discount the colour.
+ * rest", so a row added ahead of a backend is simply a red gate — the thing
+ * #5903's note calls "a gate that reports a known red", which teaches every
+ * agent reading CI to discount the colour. Enrolment stays all-green-first:
+ * every row in the table below landed only once every scored driver passed it.
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -410,8 +421,9 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
   // section is what makes that true of every harness: a fixture that quietly
   // stored `''` instead of NULL, or a `NOT NULL` column that rejected the seed,
   // fails THERE rather than by turning one of the negation cases here green
-  // for the wrong reason. Read the six together — a no-value row is either
-  // inside the negation or outside it, and the partition says which rows are
+  // for the wrong reason. Read the eight together — a no-value row is either
+  // inside the negation or outside it, and the two partition pairs (`$null`
+  // and `$exists`, opposite polarities of one question) say which rows are
   // which.
   //
   // The family completed here in #5903, the PR that made `driver-turso` REMOTE
@@ -484,6 +496,30 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     filter: { d: { $null: false } },
     expected: ['1', '2'],
     note: 'The complement, so `$null` is pinned as a partition of the table rather than one half of one. Together with the row-count control this makes a NOT NULL fixture column fail loudly instead of quietly passing everything.',
+  },
+
+  // [#13531] The value-presence predicate, enrolled in BOTH directions once
+  // PR #13529 (#13195) moved the last three key-presence exits to has-value.
+  // The stored-null seeding is what makes these rows discriminating: a
+  // key-presence reading answers MATCH on rows 3-4 for `$exists: true`
+  // precisely because every harness stores `d: null` with the key present —
+  // every exit that historically diverged did so on this reading, while on a
+  // key-absent document the two readings agree. Single-direction enrolment is
+  // the recorded blind spot: `$exists: false` — the harm the maintainer's
+  // ruling called the hardest live one — stayed invisible for as long as
+  // only `$exists: true` was measured (PR #13420's pins were inverted on
+  // exactly that axis).
+  {
+    name: '$exists true selects exactly the valued rows',
+    filter: { d: { $exists: true } },
+    expected: ['1', '2'],
+    note: '#5299 cell 2 / #5962: `$exists` means HAS A VALUE, never key-presence. A key-presence reading returns all four rows here, because the fixture stores `d: null` with the key present — the reading every divergent exit failed on.',
+  },
+  {
+    name: '$exists false selects exactly the no-value rows',
+    filter: { d: { $exists: false } },
+    expected: ['3', '4'],
+    note: 'The direction the ruling called the hardest live harm: a key-presence reading returns NOTHING here, silently emptying every "field is not set" scope. Enrolled beside its twin so a single-direction blind spot cannot rebuild.',
   },
 
   // ── Shapes read scopes are actually written in ────────────────────────────
