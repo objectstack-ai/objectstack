@@ -4855,7 +4855,7 @@ export function h27NeedsClaimLivenessRead(issue, claim, nowMs = Date.now()) {
  *
  * Counted per channel because the two windows have different reach: the open
  * listing is effectively complete (paged to exhaustion), while the merged one
- * is a bounded recency window (`MERGED_WINDOW_PAGES`). That asymmetry is what
+ * is a bounded recency window (`MERGED_WINDOW_DAYS`). That asymmetry is what
  * the finding sentence has to disclose, so it is preserved here rather than
  * collapsed into a boolean.
  */
@@ -4978,7 +4978,7 @@ export function h27DeadClaimNoProgress(issue, claim, refStates, delivery, nowMs 
     "sit there — the next PM's round-open mutual-exclusion read treats a dead `Claim:` as a live " +
     'claim by another session and stays off the card, so one dead agent blocks the lane. ⛔ Rule ' +
     'out one reading first: a delivery that merged BEFORE this sweep\'s merged window ' +
-    `(${MERGED_WINDOW_PAGES} pages) is invisible here, so a card whose PR landed days ago and ` +
+    `(${MERGED_WINDOW_DAYS} days) is invisible here, so a card whose PR landed days ago and ` +
     'whose branch was never deleted can reach this row — check the card for a merged delivery ' +
     'before treating it as a death.' +
     recovery
@@ -6686,6 +6686,357 @@ export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
 }
 
 // ---------------------------------------------------------------------------
+// H38 — a SEAT POST that a whole shift ran behind (#13493, half ① only).
+//
+// ## The observation, and why it is a gate rather than a lesson
+//
+// The `domain:services` seat post last wrote 2026-08-29T07:09Z. Over the next
+// ~31 hours a full shift ran to wave 4 and dispatched at least five cards, three
+// with live remote branches, while the post's title still read 「R4 派发中 · 在飞
+// 3 · 队列 11 可派」. Every number in it was wrong, and `updated_at` matched the
+// body's last edit exactly — so the post read as SETTLED rather than as stale.
+//
+// ⭐ What makes this mechanisable rather than a reminder: that same seat post
+// already carried this exact lesson, written one shift EARLIER (ledger item 16,
+// 「a seat post that goes quiet does not mean a seat went quiet」), recorded after
+// the previous shift did the same thing. The next shift reproduced it anyway. A
+// failure mode that recurs on the following shift, in the document the successor
+// is required to read, is not an attention problem — prose was applied at full
+// strength and did not hold. ⛔ So this row adds no rule and prescribes no new
+// protocol text; the rule already exists and the DETECTABILITY did not (H32's
+// posture, for the same reason).
+//
+// ## The signature costs nothing, because a silent shift still leaves a trace
+//
+// A shift that ran without writing home still CLAIMED cards. So the reading is
+// an ordering, not a threshold: newest lane claim vs the seat post's own last
+// event. No clock, no tuned constant — which is why this row can be certain
+// where H32 needs a measured horizon.
+//
+// ## ⛔ Out of scope, by the filing card's own boundary
+//
+// The card names a second gap — a representable 收班中 ("clocking off") state,
+// which the mutual-exclusion protocol cannot express today — and states that it
+// is a PROTOCOL change, ⛔ not to be bundled with this one. It is not
+// implemented here and this row must not be read as covering it.
+// ---------------------------------------------------------------------------
+
+/**
+ * `T_seat` — the seat post's last event, as the card defines it: the body edit
+ * or the newest comment, whichever is later.
+ *
+ * ⚠️ The body half is read off `updated_at`, which is the only body-edit signal
+ * the REST issue object carries — and it is bumped by LABEL writes too, not just
+ * by edits. That makes `T_seat` an upper bound on the post's real last write, so
+ * this row UNDER-reports: a seat whose post was silently bumped by a label write
+ * reads as fresher than it is and goes unreported. Named rather than fixed,
+ * because the alternative — a per-post timeline fetch on every seat, every sweep
+ * — is a per-card event read this file declines everywhere else (H15, H16 and
+ * H35 all refuse the same shape by name), and the residual error is one label
+ * write on a surface whose labels are essentially static.
+ *
+ * @param {{ updated_at?: string }} seat
+ * @param {{ created_at?: string, updated_at?: string }[]} commentRows
+ * @returns {number|null} epoch ms, or null when nothing was readable (#4690)
+ */
+export function seatPostLastEventMs(seat, commentRows) {
+  const stamps = [];
+  const body = Date.parse(seat?.updated_at ?? '');
+  if (Number.isFinite(body)) stamps.push(body);
+  for (const row of Array.isArray(commentRows) ? commentRows : []) {
+    // A comment's own edit counts: an edited comment IS the seat writing home.
+    for (const key of ['updated_at', 'created_at']) {
+      const at = Date.parse(row?.[key] ?? '');
+      if (Number.isFinite(at)) stamps.push(at);
+    }
+  }
+  return stamps.length === 0 ? null : Math.max(...stamps);
+}
+
+/**
+ * The newest `Claim:` on a lane, over the dispatched cards this sweep holds.
+ *
+ * ⚠️ The claim predicate is `latestClaimComment` — REUSED, deliberately not
+ * re-spelled. The filing card is explicit that the literal `Claim:` marker is
+ * the established machine criterion (maintainer ruling 2026-08-11) and ⛔ must
+ * not be widened; it is equally important not to NARROW it here. Defining a
+ * stricter first-line-only claim for this row alone would leave the file
+ * disagreeing with itself about what a claim IS — H2 calling a card claimed
+ * while H38 called the same comment invisible — and a file that contradicts
+ * itself about its own vocabulary is a worse defect than either gap (H33's
+ * header settles this for the whole file).
+ *
+ * ⚠️ `labels` filters on the listing endpoints are OR, not AND (measured and
+ * recorded on the seat post itself), which is why the lane is intersected
+ * LOCALLY here rather than requested as a two-label query — that query returns
+ * the union and would over-count in the "too many" direction.
+ *
+ * @param {string} lane — a `domain:*` label.
+ * @param {Iterable<any>} issues — open cards this sweep already listed.
+ * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
+ * @returns {{ number: number, at: number }|null} the newest claim, or null.
+ */
+export function newestLaneClaim(lane, issues, commentsByNumber) {
+  let best = null;
+  for (const issue of issues ?? []) {
+    const labels = labelNames(issue ?? {});
+    // Both conditions intersected locally — see the OR/AND note above.
+    if (!labels.includes('pm:dispatched') || !labels.includes(lane)) continue;
+    const rows = commentsByNumber?.get?.(issue.number);
+    if (!rows) continue;
+    const claim = latestClaimComment(rows);
+    if (!claim) continue;
+    const at = Date.parse(claim.createdAt ?? '');
+    if (!Number.isFinite(at)) continue;
+    if (best === null || at > best.at) best = { number: issue.number, at };
+  }
+  return best;
+}
+
+/**
+ * H38 — null when the seat post is current, else the finding sentence.
+ *
+ * @param {object} seat — the `pm:seat` post.
+ * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
+ * @param {{ number: number, at: number }|null} claim — the newest lane claim.
+ */
+export function h38SeatPostStale(seat, seatAt, claim) {
+  if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
+  const { lane, foreign } = seatLane(seat ?? {});
+  // A lane this board cannot count has no readable claim population here, so
+  // an absent claim would mean "unreadable", not "none" — H32's `foreign`
+  // reasoning, and the reason this row declines rather than reporting silence.
+  if (foreign || !lane) return null;
+  if (!claim) return null;
+  // ⛔ Both sides must be READABLE. This is an ORDER comparison, not an age, so
+  // an unreadable stamp does not make the reading conservative — it makes it
+  // undefined, and a staleness claim built on a stamp nobody could read is a
+  // fabricated ordering (H33 settles this direction for the file).
+  if (seatAt === null || !Number.isFinite(seatAt)) return null;
+  if (claim.at <= seatAt) return null;
+
+  const behindHours = (claim.at - seatAt) / 3_600_000;
+  return (
+    `\`pm:seat\` post is STALE — its lane \`${lane}\` carries a \`Claim:\` on #${claim.number} written ` +
+    `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
+    `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
+    'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
+    'moved on, while `updated_at` makes the post read as SETTLED rather than as stale. ⚠️ This is the ' +
+    'measured shape: one seat ran ~31h to wave 4 and dispatched five cards under a title still claiming ' +
+    'the previous round. ⛔ Not an accusation of carelessness — the same post already carried this exact ' +
+    'lesson in its own ledger, written one shift earlier, and the next shift reproduced it; that is the ' +
+    'evidence prose does not hold here, not evidence about any seat. Remedy: refresh the seat post (or ' +
+    'post a round marker) so the successor reading it sees the round that is actually running. ' +
+    'Report-only: ⛔ this row never writes a label, a title or a marker.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H39 — the CLOSED `pm:*` RESIDUE CENSUS (#13526). An inventory, not a
+// predicate: H17's register, and deliberately not H22's.
+//
+// ## Why a census when H22 already reports closed residue
+//
+// H22 judges the closed cards inside a bounded, UPDATE-ordered window (four
+// pages ≈ 1.7 days of update-recency) and reports them one row each. That is
+// the right shape for a patrol — recent residue, while the paired write is
+// still a live duty someone remembers — and it is the wrong shape for the
+// question #13526 asks, which is about the SIZE and AGE of the whole
+// population. The filing seat measured ≥100 closed carriers per lane per label
+// across at least three lanes, back to 2026-08-05, and could not say more,
+// because a first page is not a count.
+//
+// So this leg counts rather than lists: fully paginated, per lane, per label.
+//
+// ## ⛔ The one rule this block exists to enforce: A PAGE CAP IS NOT A COUNT
+//
+// The filing card was explicit, and stated its reason as a measurement about
+// this board rather than as a preference: the last three cards whose headline
+// number was an upper or capped bound all had that number quoted back as if it
+// were exact. So a truncated reading here is NEVER rendered as a number — it
+// renders as `≥N (PAGE CAP …)` with the word "cap" in it, and
+// `censusIsCountable` is the predicate a caller must consult before treating
+// any of these figures as a count.
+//
+// ## The control, and why a zero here is not automatically a reading
+//
+// The card also prescribed the control it did not have room to run: the same
+// query shape WITHOUT the `pm:*` label must return rows. If it does not, the
+// instrument is broken and every zero below is "nothing was read" rather than
+// "nothing is there" — #4690, on a leg whose whole output is counts. The
+// renderer refuses to present a clean census when the control came back empty.
+//
+// ## ⛔ What this leg must never grow into
+//
+// ⛔ NO relabelling. The remedy for hundreds of closed cards across three-plus
+// lanes is a maintainer decision and a per-label DELETE (a whole-set label PUT
+// silently strips concurrent labels — the standing hazard this board records),
+// and it belongs to its own card. This file writes no label anywhere, and this
+// leg — which is the one that finally makes the population visible — is exactly
+// where that discipline would be most tempting to break. The census comes
+// first; the cleanup is a separate decision with its own approval.
+//
+// ⚠️ The `issues` endpoint returns PULL REQUESTS too, and they are filtered out
+// by `pull_request` presence — a PR counted as a card would inflate every
+// figure here in the direction that makes the problem look worse than it is.
+// ---------------------------------------------------------------------------
+
+/**
+ * The quota backstop on each label's pagination. Generous on purpose: this leg
+ * is worthless if it binds routinely, since a bound page cap is precisely the
+ * non-answer the filing card refused to publish. 50 pages = 5,000 cards per
+ * label, against a population measured in the hundreds.
+ */
+export const CENSUS_PAGE_CEILING = 50;
+
+/** How many contradictory-pair card numbers are listed before the rest are counted. */
+export const CENSUS_PAIR_LIST_CAP = 25;
+
+/** Has this label's stream ended? A short page is the end; a full one never is. */
+export function censusPageExhausted(batch) {
+  return !Array.isArray(batch) || batch.length < 100;
+}
+
+/**
+ * The lanes a card belongs to — `domain:*` for domain lanes and `repo:*` for
+ * single-lane seats, the same two spellings the seat posts name.
+ *
+ * A card carrying neither is bucketed under `(no lane)` rather than dropped: an
+ * unrouted closed card with `pm:` residue is still residue, and silently
+ * excluding it would make the total disagree with the per-lane rows for reasons
+ * a reader could not see.
+ */
+export function censusLanesOf(issue) {
+  const lanes = labelNames(issue ?? {}).filter((l) => /^(?:domain|repo):/u.test(l));
+  return lanes.length > 0 ? lanes : ['(no lane)'];
+}
+
+/**
+ * Fold the per-label corpora into the census.
+ *
+ * @param {Map<string, { rows: any[], truncated: boolean }>} byLabel
+ * @param {{ controlRows?: number }} [context]
+ */
+export function summariseClosedResidue(byLabel, context = {}) {
+  const rows = [];
+  const seenByLabel = new Map();
+  let anyTruncated = false;
+  for (const [label, corpus] of byLabel ?? []) {
+    const cards = (corpus?.rows ?? []).filter((i) => !i?.pull_request);
+    seenByLabel.set(label, new Set(cards.map((i) => i.number)));
+    if (corpus?.truncated) anyTruncated = true;
+    const perLane = new Map();
+    let oldest = null;
+    for (const card of cards) {
+      for (const lane of censusLanesOf(card)) perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
+      const closed = Date.parse(card?.closed_at ?? '');
+      if (Number.isFinite(closed) && (oldest === null || closed < oldest.at)) {
+        oldest = { at: closed, number: card.number };
+      }
+    }
+    rows.push({
+      label,
+      total: cards.length,
+      truncated: Boolean(corpus?.truncated),
+      oldest,
+      lanes: [...perLane.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    });
+  }
+  // The contradictory pair, intersected LOCALLY — the listing endpoints'
+  // `labels` filter is a UNION (measured), so asking for both labels at once
+  // returns cards carrying EITHER and would overstate this by the sum.
+  const queue = seenByLabel.get('pm:queue') ?? new Set();
+  const dispatched = seenByLabel.get('pm:dispatched') ?? new Set();
+  const pairs = [...queue].filter((n) => dispatched.has(n)).sort((a, b) => a - b);
+  return {
+    rows: rows.sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    pairs,
+    truncated: anyTruncated,
+    controlRows: Number(context.controlRows ?? 0),
+  };
+}
+
+/**
+ * May these figures be quoted as counts? The predicate the filing card's whole
+ * warning reduces to — consult it before repeating any number from this leg.
+ */
+export function censusIsCountable(census) {
+  return Boolean(census) && !census.truncated && Number(census.controlRows ?? 0) > 0;
+}
+
+/**
+ * The census block, in either medium. Returns [] when no census ran, so a
+ * caller that did not gather one renders nothing rather than an empty table
+ * that reads as a clean board.
+ */
+export function renderClosedResidueCensus(census, { markdown = false } = {}) {
+  if (!census) return [];
+  const h = (s) => (markdown ? `**${s}**` : s);
+  // A census that could not RUN must not render as a census that found nothing
+  // — the same inversion this file refuses everywhere (#4690), and the exact
+  // failure the filing card was written about.
+  if (census.failed) {
+    return [
+      '',
+      h('Closed cards still carrying `pm:*` state (H39 census, #13526)'),
+      '',
+      `  ⚠️ CENSUS DID NOT RUN — ${census.failed}. ⛔ This is not a clean population: it is no reading.`,
+    ];
+  }
+  if (!Array.isArray(census.rows) || census.rows.length === 0) return [];
+  const out = [];
+  out.push('');
+  out.push(h('Closed cards still carrying `pm:*` state (H39 census, #13526)'));
+  out.push('');
+
+  if (Number(census.controlRows ?? 0) <= 0) {
+    out.push(
+      `⚠️ CONTROL FAILED — the control query (closed issues, no \`pm:*\` filter) returned 0 rows, so ` +
+        `this instrument read NOTHING. Every figure below is "not read", ⛔ not "not there" (#4690).`,
+    );
+    out.push('');
+  }
+
+  for (const row of census.rows) {
+    // ⛔ The one formatting rule this leg exists to enforce.
+    const figure = row.truncated
+      ? `≥${row.total} (PAGE CAP at ${CENSUS_PAGE_CEILING} pages — ⛔ NOT a count)`
+      : `${row.total}`;
+    const oldest = row.oldest
+      ? `, oldest closed ${new Date(row.oldest.at).toISOString().slice(0, 10)} (#${row.oldest.number})`
+      : '';
+    out.push(`  ${row.label}: ${figure}${oldest}`);
+    for (const [lane, n] of row.lanes) out.push(`      ${lane}: ${n}`);
+  }
+
+  out.push('');
+  if (census.pairs.length === 0) {
+    out.push('  contradictory `pm:queue` + `pm:dispatched` on a closed card: none');
+  } else {
+    const shown = census.pairs.slice(0, CENSUS_PAIR_LIST_CAP);
+    const rest = census.pairs.length - shown.length;
+    out.push(
+      `  contradictory \`pm:queue\` + \`pm:dispatched\` on a closed card: ${census.pairs.length}` +
+        ` — ${shown.map((n) => `#${n}`).join(', ')}${rest > 0 ? `, and ${rest} more` : ''}`,
+    );
+  }
+  out.push('');
+  out.push(
+    census.truncated
+      ? '  ⛔ At least one label hit the page cap. A cap is NOT a count — the true figures are larger' +
+          ' and unknown, and no reader may quote these as exact (the three cards whose capped bounds' +
+          ' were quoted back as exact are why this sentence is here).'
+      : '  Fully paginated: every figure above is a real count, not a page cap.',
+  );
+  out.push(
+    '  ⛔ Report-only, and ⛔ census only: no label is written by this script. A bulk strip of closed' +
+      " cards is a maintainer decision on its own card — a whole-set label PUT silently strips" +
+      ' concurrent labels, so the cleanup is per-label DELETE and is not this leg.',
+  );
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -6811,6 +7162,13 @@ export const SWEEP_COUNT_KEYS = [
   'commits',
   'commitBindings',
   'commitBindingMessages',
+  // H8's time-capped merged window (#13499). `mergedPages` is what the window
+  // COST and `mergedWindowTruncated` is whether it reached its horizon — the
+  // pair that keeps a ceiling-bound (i.e. short) window from reading as a
+  // complete one, the same discipline `eventWindowTruncated` carries.
+  'mergedPages',
+  'mergedWindowTruncated',
+  'mergedRateObserved',
 ];
 
 /**
@@ -6915,6 +7273,19 @@ export function summaryLine(counts, findingCount) {
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    // H8's window disclosure (#13499). The TRUNCATED half is the load-bearing
+    // one: a ceiling-bound window is a page cap again, and a page cap that
+    // reads as a completed time window is the exact inversion this repair
+    // removed. Gathering the flag and never printing it would be a measurement
+    // nobody can act on, so it is stated on every run, both ways.
+    `H8's merged window is a TIME cap of ${MERGED_WINDOW_DAYS} day(s), read in ${counts.mergedPages ?? 0} page(s)` +
+    `${
+      counts.mergedWindowTruncated
+        ? ` — ⛔ TRUNCATED at the ${MERGED_WINDOW_PAGE_CEILING}-page quota ceiling BEFORE reaching that horizon, so ` +
+          'this pass is a page cap and a delivery older than what those pages reached is invisible; ' +
+          'the merge rate has outgrown the ceiling and it needs raising'
+        : ' (horizon reached: a delivery inside the window was seen, not merely the first N rows)'
+    }. ` +
     `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
     `older closed carriers are outside it by design` +
     `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
@@ -7079,8 +7450,27 @@ export function renderPlain(findings, counts, options = {}) {
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
+  lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
+  lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
+}
+
+/**
+ * The rate-premise line (#13499 repair ②). Rendered in both media because it is
+ * an assertion about the INSTRUMENT rather than about the board: a reader who
+ * takes a window's stated coverage at face value needs to know whether the
+ * divisor behind it still describes the repo.
+ *
+ * The healthy state prints too, deliberately. A check that is only visible when
+ * it fires cannot be distinguished from a check that was removed — which is the
+ * whole shape of the defect this repair exists to close.
+ */
+export function renderRatePremise(premise, { markdown = false } = {}) {
+  if (!premise) return [];
+  const loud = premise.state !== 'ok';
+  const text = loud ? `⚠️ ${premise.message}` : premise.message;
+  return ['', markdown ? (loud ? `**${text}**` : `_${text}_`) : `  ${text}`];
 }
 
 /**
@@ -7179,7 +7569,16 @@ export function renderMarkdown(findings, counts, options = {}) {
   // finding rows, which announce their own omission and are recoverable from
   // the run log. An index silently missing from the anchor would restore
   // exactly the 0-for-19 silence this section exists to end.
-  const indexBlock = renderTriggerIndex(options.triggerIndex, { markdown: true });
+  // The census and the rate premise are RESERVED alongside the H17 index, for
+  // the same reason it is: both are instrument readings a noisy board must not
+  // be able to truncate away. The census in particular is the leg that exists
+  // because a population grew unobserved — losing it to a body trim would
+  // reproduce that defect inside its own fix.
+  const indexBlock = [
+    ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
+    ...renderClosedResidueCensus(options.census, { markdown: true }),
+    ...renderRatePremise(options.ratePremise, { markdown: true }),
+  ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
 
   if (rows.length === 0) {
@@ -7906,7 +8305,16 @@ function reportPrerequisiteNotMet(v, options = {}) {
       v.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  ${v.fix[0] ?? 'unknown'}\n` +
       v.fix.slice(1).map((l) => `        ${l}\n`).join('') +
-      `\n${nothing.join('\n')}\n` +
+      `\n${nothing.join('\n')}\n\n` +
+      `  A GATE NOBODY CAN RUN IS INDISTINGUISHABLE FROM A GATE THAT FINDS NOTHING (#13526).\n` +
+      `  That is not a slogan here, it is this refusal's measured cost. For as long as this exit\n` +
+      `  was the only thing an agent container could get out of this script, the population it\n` +
+      `  guards grew unobserved — and when the route was finally fixed and a census run, closed\n` +
+      `  cards still carrying \`pm:*\` came to 2,063 \`pm:dispatched\` and 846 \`pm:queue\`, with 555\n` +
+      `  carrying BOTH, back to 2026-08-02. The filing seat could only say "at least 100 per lane\n` +
+      `  per label", because a first page is not a count and this gate could not be run to get one.\n` +
+      `  ⇒ Treat this exit as an unread instrument, never as a quiet board: the H39 census below\n` +
+      `  does not appear at all in a run that ends here.\n` +
       `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from the unclassified failure's 2 — but piping this\n` +
       `  reports the PIPE's status, so \`… | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
   );
@@ -7995,6 +8403,13 @@ async function sweep(options = {}) {
     commits: 0,
     commitBindings: 0,
     commitBindingMessages: 0,
+    // H8's window pair (#13499), initialised here for the reason the commit
+    // counts are: a sweep that throws before the merged pass must still render
+    // numbers. `mergedRateObserved` starts null — "not measured", which is what
+    // the premise classifier reports as `unobserved` rather than as agreement.
+    mergedPages: 0,
+    mergedWindowTruncated: false,
+    mergedRateObserved: null,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -8037,10 +8452,27 @@ async function sweep(options = {}) {
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
   };
+  // H39's census (#13526) — gathered AFTER the findings, so a census that
+  // cannot run costs the report nothing that was already gathered. Its failure
+  // is rendered as a failure rather than swallowed: this leg's whole output is
+  // counts, and an absent count that reads as zero is the defect the card filed.
+  let census = null;
+  try {
+    census = await censusClosedPmResidue(stats);
+  } catch (err) {
+    census = { failed: err?.status ? `HTTP ${err.status}` : (err?.message ?? 'unreadable') };
+  }
+  // The rate premise, checked against what this very sweep observed (#13499).
+  const ratePremise = classifyRatePremise({ observed: stats.mergedRateObserved });
   console.log(
     options.format === 'markdown'
-      ? renderMarkdown(findings, counts, { provenance: options.provenance, triggerIndex })
-      : renderPlain(findings, counts, { triggerIndex }),
+      ? renderMarkdown(findings, counts, {
+          provenance: options.provenance,
+          triggerIndex,
+          census,
+          ratePremise,
+        })
+      : renderPlain(findings, counts, { triggerIndex, census, ratePremise }),
   );
 }
 
@@ -8112,52 +8544,263 @@ export const PATROL_CADENCE_HOURS = 6;
 export const MEASURED_MERGES_PER_DAY = 137.5;
 
 /**
- * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged ones
- * only, capped at four pages — a quota decision whose consequence is H8's
- * stated boundary (a delivery older than the window is invisible).
- * `sort=updated` so a long-lived PR that merges late is still in the window
- * when it matters.
- *
- * ## The boundary, re-derived (#11118)
- *
- * The cap was two pages, justified by a sentence claiming they "reach well past
- * the longest measured unexecuted-verdict latency" — true at ~18 merges/day,
- * which is where that sentence came from, and false at the measured 137.5.
- * Both readings, taken 2026-08-23T08:42:15Z over the live endpoint:
- *
- *   2 pages = 200 rows -> 197 merged, oldest merge 2026-08-21T14:00:28Z = 1.78d
- *   4 pages = 400 rows -> 397 merged, oldest merge 2026-08-20T09:41:02Z = 2.96d
- *
- * (Derivation and reading agree: `windowCoverageDays(400, 137.5)` = 2.91d. The
- * merged-only filter costs almost nothing — 397 of 400 closed PRs in the window
- * were merged — so rows and merges are interchangeable here in practice.)
- *
- * Four pages is chosen over an honest restatement because this row's damage
- * model is asymmetric in the direction that punishes a short window: H8 reports
- * a card whose delivering PR merged while the card still says `pm:dispatched`,
- * i.e. precisely the paired write NOBODY noticed — which correlates with age.
- * The population most likely to age out is the population the row exists for.
- * The measured H8 specimen (#11036) sat unreported ~22h, so a 1.78-day window
- * left the row about 2x its own worst measured latency; 2.96 days restores the
- * "comfortably past it" the docblock always claimed. Cost: two extra requests
- * per sweep, four sweeps a day, against a 15,000/h core quota.
- *
- * At the 6-hourly cadence that is `sweepOverlap(2.96)` ≈ 11.8 consecutive runs
- * that see a given merge — the window is a detection HORIZON, not a retry
- * budget: past it the finding is not delayed, it is gone (H22 catches the part
- * of that population whose card later closes; nothing catches the rest).
+ * WHEN `MEASURED_MERGES_PER_DAY` was measured. Carried as data rather than left
+ * in the prose above, because it is the input to the staleness alarm below —
+ * and because a rate premise with no date on it is precisely the artefact that
+ * produced this whole class of defect twice (`~18/day`, then 137.5).
  */
-export const MERGED_WINDOW_PAGES = 4;
+export const MEASURED_MERGES_PER_DAY_AT = '2026-08-23';
 
-async function listRecentlyMergedPullRequests() {
+/**
+ * The band inside which the pinned premise still DESCRIBES the board, as a
+ * ratio of observed to pinned — a factor of two in either direction.
+ *
+ * Derived from consequence, not chosen: this rate is the divisor that turns a
+ * page cap into a statement of coverage in days, so a drift of X% misstates
+ * every page-capped window's reach by X%. A factor of two is the point at which
+ * a docblock claiming "comfortably past the longest measured latency" is
+ * describing a window half that size — which is the #11118 failure in kind, if
+ * not yet in degree (that one ran to 7.6x before anything noticed, because
+ * nothing was watching the ratio at all).
+ */
+export const RATE_PREMISE_BAND = 2;
+
+/**
+ * How long a hand-measured rate premise may stand before it must be re-measured
+ * REGARDLESS of drift, in days.
+ *
+ * The drift test above can only fire when a sweep actually observes a rate; this
+ * one fires on the calendar, and it is the half that would have caught `~18/day`
+ * early. 30 days is one full release cadence — long enough that a healthy pin is
+ * not nagged at, short enough that a premise cannot quietly outlive the board it
+ * describes the way the last two did (`~18/day` stood for months).
+ */
+export const RATE_PREMISE_STALE_DAYS = 30;
+
+/**
+ * The merge rate this sweep OBSERVED, derived from rows it already holds.
+ *
+ * This is repair ② of #13499 and the reason that card exists: the premise was a
+ * number typed into a comment, so no reader and no run could ever disagree with
+ * it. Now every sweep re-derives the quantity from its own merged-PR window and
+ * compares. ⛔ The pinned constant is deliberately NOT overwritten from this —
+ * a self-updating premise is a premise nobody reviews — it is CHECKED against
+ * it, and a mismatch is reported.
+ *
+ * `null` when the rows cannot support a rate: fewer than two readable
+ * `merged_at` stamps, or a degenerate span. An unmeasurable rate must not read
+ * as agreement (#4690) — the classifier below reports it as unobserved.
+ *
+ * ⚠️ Measured over the window's OWN merge span rather than back from `now`,
+ * because the newest merge may be minutes old and dividing by a span that
+ * includes an empty tail would understate the rate.
+ *
+ * @param {{ merged_at?: string }[]} mergedPrs
+ * @returns {number|null} merges per day
+ */
+export function observedMergeRatePerDay(mergedPrs) {
+  const stamps = (mergedPrs ?? [])
+    .map((pr) => Date.parse(pr?.merged_at ?? ''))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  if (stamps.length < 2) return null;
+  const days = (stamps[stamps.length - 1] - stamps[0]) / 86_400_000;
+  if (!(days > 0)) return null;
+  return stamps.length / days;
+}
+
+/**
+ * Is the pinned rate premise still good? Pure, three outcomes, and the third is
+ * the one #4690 insists on.
+ *
+ * @param {{ observed: number|null, pinned?: number, pinnedAt?: string, nowMs?: number }} input
+ * @returns {{ state: 'ok'|'drifted'|'expired'|'unobserved', message: string,
+ *   observed: number|null, pinned: number, ageDays: number|null, ratio: number|null }}
+ */
+export function classifyRatePremise(input = {}) {
+  const pinned = Number.isFinite(input.pinned) ? input.pinned : MEASURED_MERGES_PER_DAY;
+  const pinnedAt = input.pinnedAt ?? MEASURED_MERGES_PER_DAY_AT;
+  const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
+  const observed = Number.isFinite(input.observed) ? input.observed : null;
+  const at = Date.parse(`${pinnedAt}T00:00:00Z`);
+  const ageDays = Number.isFinite(at) ? (nowMs - at) / 86_400_000 : null;
+  const ratio = observed !== null && pinned > 0 ? observed / pinned : null;
+  const shared =
+    `pinned \`MEASURED_MERGES_PER_DAY\` = ${pinned}/day, measured ${pinnedAt}` +
+    (ageDays === null ? '' : ` (${ageDays.toFixed(0)}d ago)`);
+
+  if (observed === null) {
+    return {
+      state: 'unobserved',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE UNOBSERVED — this sweep could not derive a merge rate from its own window ` +
+        `(fewer than two readable \`merged_at\` stamps), so ${shared} was not checked against ` +
+        `anything. ⚠️ This is not agreement: it is the one reading that says nothing.`,
+    };
+  }
+  if (ageDays !== null && ageDays > RATE_PREMISE_STALE_DAYS) {
+    return {
+      state: 'expired',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE EXPIRED — ${shared}, past the ${RATE_PREMISE_STALE_DAYS}-day re-measure ` +
+        `horizon; this sweep observed ~${observed.toFixed(1)}/day. Re-measure and update the ` +
+        `constant, its date, and the coverage numbers the page-capped windows quote. A rate ` +
+        `premise that outlives its measurement is how \`~18/day\` came to justify a window ` +
+        `covering a day and a half (#11118, #13499).`,
+    };
+  }
+  if (ratio !== null && (ratio > RATE_PREMISE_BAND || ratio < 1 / RATE_PREMISE_BAND)) {
+    return {
+      state: 'drifted',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE DRIFTED — this sweep observed ~${observed.toFixed(1)} merges/day against a ` +
+        `${shared}: a factor of ${ratio.toFixed(2)}, outside the ${RATE_PREMISE_BAND}x band. Every ` +
+        `page-capped window below states its reach by dividing by that constant, so each of those ` +
+        `docblocks is now misdescribing its own coverage by the same factor. Re-measure.`,
+    };
+  }
+  return {
+    state: 'ok',
+    observed,
+    pinned,
+    ageDays,
+    ratio,
+    message:
+      `rate premise OK — observed ~${observed.toFixed(1)}/day against ${shared}` +
+      (ratio === null ? '' : ` (factor ${ratio.toFixed(2)}, band ${RATE_PREMISE_BAND}x)`) + '.',
+  };
+}
+
+/**
+ * H8's window, as a TIME cap — #13499's repair ①, and the reason the page cap
+ * above is now only a quota backstop.
+ *
+ * ## Why a page cap could not hold, in two measurements of the same window
+ *
+ * A page cap states a ROW count; H8's boundary is a TIME. The conversion is a
+ * division by a merge rate nobody watches, so the window's real reach moves
+ * whenever the board's tempo moves — silently, in BOTH directions, with the
+ * docblock still quoting the old number:
+ *
+ *   2026-08-23   400 rows -> 397 merged, oldest 2026-08-20T09:41:02Z = 2.96d
+ *   2026-08-31   400 rows -> 397 merged, oldest 2026-08-26T05:54:27Z = 4.86d
+ *
+ * Same cap, same rows, coverage moved by 64% in eight days because the observed
+ * rate fell from 137.5/day to ~82/day. Nothing in the file changed and nothing
+ * could have reported it. ⚠️ Note the direction: this drift made the window
+ * WIDER. A page cap is not a conservative bound that occasionally underdelivers
+ * — it is an unmanaged quantity, and the run where it is too small looks
+ * exactly like the run where it is too big.
+ *
+ * ## N, derived from the longest measured unexecuted-verdict latency
+ *
+ * #13499's census (2026-08-30) found 24 of 52 in-flight cards whose delivering
+ * PR had merged without the paired write, **14 of them stranded 4.6–6.0 days**;
+ * the worst, objectui#5174, sat 6.0 days with its seat's ACCEPT already naming
+ * the terminal state. That 6.0d is the floor this window has to clear — a
+ * window shorter than the stranding it exists to detect reports the fast half
+ * of the population and disappears the slow half, which is the half the row is
+ * for (the damage model is asymmetric toward age: the paired write NOBODY
+ * noticed correlates with how long nobody noticed it).
+ *
+ * 8 days is 6.0d plus a weekend. The margin is that specific because the
+ * stranding is: a delivery that merges on a Friday has its paired write looked
+ * at on a Monday at the earliest, so the interval during which a write is most
+ * likely to go unwritten AND least likely to be noticed is exactly the one the
+ * headroom has to cover.
+ *
+ * ## The termination condition, and the monotonicity that makes it exact
+ *
+ * The listing is `sort=updated&direction=desc`, which is NOT `merged_at` order,
+ * so "stop when this row's merge is old" would be wrong — a long-lived PR that
+ * merged late is bumped to the front, which is the property `sort=updated` was
+ * chosen for in the first place. What IS sound is the bound on the OTHER end:
+ * merging a PR updates it, so `updated_at >= merged_at` for every merged row.
+ * Once a page's OLDEST `updated_at` predates the horizon, every remaining row
+ * in the stream has `merged_at <= updated_at < horizon` and no later page can
+ * contain an in-window merge. That is why `mergedPageExhaustsWindow` reads
+ * `updated_at` and the row filter reads `merged_at`: one bounds the paging, the
+ * other selects the rows, and they are deliberately different fields.
+ *
+ * ## The ceiling is a quota backstop, and it announces itself
+ *
+ * At the highest rate this repo has ever measured (137.5/day) 8 days is ~1,100
+ * merges ≈ 11 pages; the ceiling is 30, i.e. ~375 merges/day before it binds —
+ * 2.7x the fastest the board has ever been. If it ever DOES bind, the window is
+ * a page cap again and the run says so out loud rather than reporting a short
+ * window as a complete one (#4690, and the same `truncated` discipline
+ * `listRecentIssueEvents` already carries).
+ */
+export const MERGED_WINDOW_DAYS = 8;
+
+/** The quota backstop behind the time cap — see `MERGED_WINDOW_DAYS`. */
+export const MERGED_WINDOW_PAGE_CEILING = 30;
+
+/** The instant at which H8's window ends. */
+export function mergedWindowHorizonMs(nowMs = Date.now(), days = MERGED_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/**
+ * Is this PR a merge INSIDE the window? Reads `merged_at` — an unmerged closed
+ * PR is an abandoned attempt, not a delivery, and an unreadable stamp is not a
+ * merge this row can place in time.
+ */
+export function prMergedWithinWindow(pr, horizonMs) {
+  const at = Date.parse(pr?.merged_at ?? '');
+  return Number.isFinite(at) && at >= horizonMs;
+}
+
+/**
+ * May paging STOP after this page? True once the page's oldest `updated_at`
+ * predates the horizon — see the monotonicity argument in `MERGED_WINDOW_DAYS`.
+ *
+ * A short page also stops paging (the stream is exhausted), and that case is
+ * reported by the caller as reaching the horizon, because it did: there are no
+ * more rows to be missed.
+ *
+ * ⚠️ An UNREADABLE `updated_at` never stops paging. Treating it as old would
+ * end the window early on one bad row and silently shorten the pass.
+ */
+export function mergedPageExhaustsWindow(batch, horizonMs) {
+  const rows = Array.isArray(batch) ? batch : [];
+  if (rows.length < 100) return true;
+  const oldest = Date.parse(rows[rows.length - 1]?.updated_at ?? '');
+  return Number.isFinite(oldest) && oldest < horizonMs;
+}
+
+async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
+  const horizon = mergedWindowHorizonMs(nowMs);
   const out = [];
-  for (let page = 1; page <= MERGED_WINDOW_PAGES; page++) {
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= MERGED_WINDOW_PAGE_CEILING; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
-    out.push(...batch.filter((p) => p.merged_at));
-    if (batch.length < 100) break;
+    out.push(...batch.filter((p) => prMergedWithinWindow(p, horizon)));
+    if (mergedPageExhaustsWindow(batch, horizon)) {
+      reachedHorizon = true;
+      break;
+    }
   }
+  stats.mergedPages = Math.min(page, MERGED_WINDOW_PAGE_CEILING);
+  stats.mergedWindowTruncated = !reachedHorizon;
+  // Derived every run from the rows just fetched — the premise check that #13499
+  // asked for in place of a number typed into a comment.
+  stats.mergedRateObserved = observedMergeRatePerDay(out);
   return out;
 }
 
@@ -8337,6 +8980,48 @@ async function listRecentlyClosedIssues() {
  * surface GitHub's parser reads too — wider, never wrong.
  */
 export const COMMIT_WINDOW_PAGES = 3;
+
+/**
+ * H39's gathering (#13526) — one fully-paginated pass per residue label, plus
+ * the control.
+ *
+ * ⚠️ ONE label per request, intersected locally afterwards: the listing
+ * endpoint's `labels` filter is a UNION, so a two-label query answers a
+ * different question than the one being asked and answers it larger.
+ *
+ * Cost: ~6 labels x (population / 100) requests, four times a day, against a
+ * 15,000/h core quota — the same trade every window here makes, and the reason
+ * a census that finally produces real numbers is affordable at all.
+ */
+async function censusClosedPmResidue(stats = {}) {
+  const byLabel = new Map();
+  let requests = 0;
+  for (const label of PM_RESIDUE_LABELS) {
+    const rows = [];
+    let truncated = true;
+    for (let page = 1; page <= CENSUS_PAGE_CEILING; page++) {
+      const batch = await rest(
+        `/repos/${OWNER_REPO}/issues?state=closed&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
+      );
+      requests += 1;
+      rows.push(...batch);
+      if (censusPageExhausted(batch)) {
+        truncated = false;
+        break;
+      }
+    }
+    byLabel.set(label, { rows, truncated });
+  }
+  // The control the filing card prescribed and could not run: the same shape
+  // with no `pm:*` filter. Rows here mean the instrument works, so a zero above
+  // is a reading; no rows mean nothing above is one (#4690).
+  const control = await rest(`/repos/${OWNER_REPO}/issues?state=closed&per_page=100&page=1`);
+  requests += 1;
+  stats.censusRequests = requests;
+  return summariseClosedResidue(byLabel, {
+    controlRows: (Array.isArray(control) ? control : []).filter((i) => !i?.pull_request).length,
+  });
+}
 
 async function listRecentDefaultBranchCommits() {
   const out = [];
@@ -8564,9 +9249,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (h32NeedsSeatComments(issue)) {
         stats.seatCandidates = (stats.seatCandidates ?? 0) + 1;
         try {
-          const marker = latestSeatMarker(await commentRowsFor(issue));
+          // The ROWS are kept, not just the derived marker: H38 needs every
+          // comment stamp on the post to compute `T_seat`, and re-fetching for
+          // it would double a cost this gate exists to bound. H32 reads the
+          // same rows through `latestSeatMarker` exactly as before.
+          const rows = await commentRowsFor(issue);
+          const marker = latestSeatMarker(rows);
           stats.seatMarkersRead = (stats.seatMarkersRead ?? 0) + 1;
-          seatMarkers.set(issue.number, { issue, marker });
+          seatMarkers.set(issue.number, { issue, marker, rows });
         } catch {
           // Left out of `seatMarkers` entirely: the predicate's `undefined`
           // and `null` both decline, and the coverage pair is what states the
@@ -8747,7 +9437,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // from the H7/H12/H21 pass above, so the half-delivered question costs no
   // request — and without it this row prescribed a destructive label drop
   // against cards whose remaining half was still open.
-  for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
+  for (const pr of await listRecentlyMergedPullRequests(stats)) seenMerged.set(pr.number, pr);
   const mergedWindow = [...seenMerged.values()];
   const openWindow = [...seenPrs.values()];
   for (const issue of seen.values()) {
@@ -9043,6 +9733,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     findings.push([card, 'H37', drift]);
   }
 
+  // H38 (#13493) — seat-post staleness. Placed HERE, after the dispatch-liveness
+  // and fold passes, for the same reason H37's roster is: `commentCache` now
+  // holds a thread for every open `pm:dispatched` card, so the lane-claim index
+  // is built over threads already in hand and this row costs NO request at all.
+  //
+  // Its seat population is exactly `h32NeedsSeatComments`' — HELD seats on a
+  // lane this board can count — because that gate is what decided which seat
+  // threads were READ, and a row must not speak about a post nobody fetched.
+  // ⚠️ The residual, named rather than left implicit: a VACANT seat post whose
+  // lane is still taking claims is not reported here. That shape is real (it is
+  // dispatch on a lane whose seat says nobody is on the clock) but it is a
+  // different finding with a different remedy, and inventing it inside this row
+  // would put an accusation of staleness on a post that correctly says it is
+  // not running a shift.
+  for (const { issue, rows } of seatMarkers.values()) {
+    const { lane } = seatLane(issue);
+    if (!lane) continue;
+    const stale = h38SeatPostStale(
+      issue,
+      seatPostLastEventMs(issue, rows),
+      newestLaneClaim(lane, seen.values(), commentCache),
+    );
+    if (stale) findings.push([issue, 'H38', stale]);
+  }
+
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
   // already in hand, while "is the target still open" is a fact about an
@@ -9230,6 +9945,7 @@ function selfTest() {
   const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
   const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
   const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
+  const h38row = (...args) => String(h38SeatPostStale(...args) ?? '');
   const h33row = (...args) => String(h33ClaimPredatesRuling(...args) ?? '');
   // H34's wrapper (the pattern this generalizes) stays beside its own block,
   // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
@@ -11112,7 +11828,7 @@ function selfTest() {
   t('H27: …and states the measured ~26h age', dead27Row().includes('~26h after the claim was posted'), true);
   t('H27: …and names the lane-block consequence, not just the silence', dead27Row().includes('mutual-exclusion read'), true);
   t('H27: …and explains WHY H20 cannot see it', dead27Row().includes('pushing the empty branch the first action'), true);
-  t('H27: …and rules out the pre-window merged delivery first', dead27Row().includes(`${MERGED_WINDOW_PAGES} pages`), true);
+  t('H27: …and rules out the pre-window merged delivery first', dead27Row().includes(`${MERGED_WINDOW_DAYS} days`), true);
   t('H27: not a loud finding', isLoudFinding(dead27()), false);
 
   // ★ Report-only, and specifically NOT a reclaim — the protocol protects a
@@ -12365,14 +13081,18 @@ function selfTest() {
   // repo ran at ~132, which turned a claimed ~11-day reach into ~1.8 days with
   // nothing able to notice.
   t('windows: coverage is rows / rate', windowCoverageDays(400, 100), 4);
-  t('windows: H8 four pages against the measured rate', Number(windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.91);
-  t('windows: …which is what the live reading measured (2.96d), within a rounding', windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2.5, true);
   t('windows: the OLD two-page cap was under two days, not the ~11 its prose claimed', Number(windowCoverageDays(200, MEASURED_MERGES_PER_DAY).toFixed(2)), 1.45);
   t('windows: …and the stale ~18/day figure is what produced the ~11-day claim', Number(windowCoverageDays(200, 18).toFixed(1)), 11.1);
   t('windows: H23 keeps three pages', COMMIT_WINDOW_PAGES, 3);
   t('windows: …and its re-measured coverage still clears two days', windowCoverageDays(COMMIT_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2, true);
   t('windows: H22 widened to four pages', CLOSED_ISSUE_WINDOW_PAGES, 4);
-  t('windows: H8 widened to four pages', MERGED_WINDOW_PAGES, 4);
+  // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
+  // used to justify one is a HISTORY note here rather than a live derivation.
+  // What the four-page cap really bought, at the two rates that were measured
+  // eight days apart: the same cap, two different windows, nothing able to say so.
+  t('windows: H8\'s old 4-page cap bought 2.91d at the pinned rate', Number(windowCoverageDays(400, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.91);
+  t('windows: …and 4.87d at the rate measured 8 days later — same cap, 67% more window', Number(windowCoverageDays(400, 82.1).toFixed(2)), 4.87);
+  t('windows: …which is why the cap became a TIME cap', MERGED_WINDOW_DAYS, 8);
   // The cadence side: a window is a detection HORIZON, and the overlap says how
   // many runs see a row before it is gone for good.
   t('windows: the patrol cadence is the workflow\'s', PATROL_CADENCE_HOURS, 6);
@@ -12388,6 +13108,92 @@ function selfTest() {
   t('windows: a missing row count cannot divide', windowCoverageDays(undefined, 137.5), null);
   t('windows: a zero cadence has no overlap', sweepOverlap(2, 0), null);
   t('windows: an unusable coverage has no overlap', sweepOverlap(null), null);
+
+  // -- H8's TIME-capped merged window, BOTH directions (#13499 repair 3) -----
+  //
+  // The card's fence is that one direction alone proves nothing: a case showing
+  // an in-window delivery is reported would have passed against the OLD count
+  // cap too. The second case is the one with teeth — a delivery the old cap
+  // could not have seen, which the new window must both admit and report.
+  const NOW13499 = Date.parse('2026-08-31T02:00:00Z');
+  const HORIZON13499 = mergedWindowHorizonMs(NOW13499);
+  const agoDays = (d) => new Date(NOW13499 - d * 86_400_000).toISOString();
+  const mergedAgo = (number, body, days) => ({ number, body, merged_at: agoDays(days), updated_at: agoDays(days) });
+
+  // Direction 1 — an in-window hit is reported. The floor case.
+  t('H8 window: a 1-day-old merge is inside the window', prMergedWithinWindow(mergedAgo(1, 'Part of #4321', 1), HORIZON13499), true);
+  t('H8 window: …and H8 reports the card', typeof h8MergedPrStillDispatched(dispatched(4321), [mergedAgo(9001, 'Part of #4321', 1)]), 'string');
+
+  // Direction 2 — the delivery the OLD cap structurally could not see. At the
+  // pinned 137.5/day the 4-page cap bought 2.91 days, so a 5-day-old merge was
+  // off the end of the window: not late, GONE. This is the #13499 population —
+  // 14 deliveries stranded 4.6-6.0 days, every one of them outside it.
+  t('H8 window: the old 4-page cap could NOT reach 5 days', windowCoverageDays(400, MEASURED_MERGES_PER_DAY) < 5, true);
+  t('H8 window: …but the 8-day time cap admits that merge', prMergedWithinWindow(mergedAgo(9002, 'Part of #4321', 5), HORIZON13499), true);
+  t('H8 window: …and H8 then reports the card it used to miss', typeof h8MergedPrStillDispatched(dispatched(4321), [mergedAgo(9002, 'Part of #4321', 5)]), 'string');
+  // The worst measured stranding (objectui#5174, 6.0d) is the floor the window
+  // was derived from, so it must be strictly inside.
+  t('H8 window: the worst measured stranding (6.0d) is inside', prMergedWithinWindow(mergedAgo(9003, 'Part of #4321', 6), HORIZON13499), true);
+  // …and the window still HAS an edge. A boundary that admits everything is not
+  // a boundary, and H8's stated limit has to stay true.
+  t('H8 window: a 9-day-old merge is outside', prMergedWithinWindow(mergedAgo(9004, 'Part of #4321', 9), HORIZON13499), false);
+  t('H8 window: an unmerged closed PR is never in the window', prMergedWithinWindow({ number: 1, merged_at: null, updated_at: agoDays(1) }, HORIZON13499), false);
+  t('H8 window: an unreadable merge stamp is not placed in time', prMergedWithinWindow({ number: 1, merged_at: 'not-a-date' }, HORIZON13499), false);
+
+  // The paging bound reads `updated_at`, NOT `merged_at` — the monotonicity
+  // argument in `MERGED_WINDOW_DAYS`. A full page whose oldest UPDATE still
+  // postdates the horizon cannot end the window.
+  const page = (n, updatedDaysAgo) => Array.from({ length: n }, (_, i) => ({ number: i, updated_at: agoDays(updatedDaysAgo) }));
+  t('H8 paging: a full page still inside the horizon keeps paging', mergedPageExhaustsWindow(page(100, 2), HORIZON13499), false);
+  t('H8 paging: a full page whose oldest update predates the horizon stops', mergedPageExhaustsWindow(page(100, 9), HORIZON13499), true);
+  t('H8 paging: a SHORT page stops paging (the stream is exhausted)', mergedPageExhaustsWindow(page(40, 1), HORIZON13499), true);
+  t('H8 paging: an unreadable oldest update does NOT stop paging early', mergedPageExhaustsWindow([...page(99, 2), { number: 99, updated_at: 'nope' }], HORIZON13499), false);
+  t('H8 paging: a non-array is an exhausted stream, not an infinite one', mergedPageExhaustsWindow(null, HORIZON13499), true);
+  t('H8 paging: the ceiling is a quota backstop, not the boundary', MERGED_WINDOW_PAGE_CEILING > MERGED_WINDOW_DAYS, true);
+
+  // -- The rate premise, now self-checking (#13499 repair 2) -----------------
+  //
+  // The root cause the card names is a rate typed into a comment: no reader and
+  // no run could disagree with it. These cases pin the disagreement.
+  t('rate: observed is derived from the rows themselves', Math.round(observedMergeRatePerDay([{ merged_at: agoDays(4) }, { merged_at: agoDays(2) }, { merged_at: agoDays(0) }]) * 100) / 100, 0.75);
+  t('rate: one row cannot make a rate', observedMergeRatePerDay([{ merged_at: agoDays(1) }]), null);
+  t('rate: no rows cannot make a rate', observedMergeRatePerDay([]), null);
+  t('rate: unreadable stamps cannot make a rate', observedMergeRatePerDay([{ merged_at: 'x' }, { merged_at: 'y' }]), null);
+  t('rate: a zero span cannot make a rate', observedMergeRatePerDay([{ merged_at: agoDays(1) }, { merged_at: agoDays(1) }]), null);
+
+  const premise = (observed, pinnedAt = MEASURED_MERGES_PER_DAY_AT) =>
+    classifyRatePremise({ observed, pinned: MEASURED_MERGES_PER_DAY, pinnedAt, nowMs: NOW13499 });
+  t('rate premise: the rate measured TODAY is inside the band', premise(82.1).state, 'ok');
+  t('rate premise: …and the pin is not yet expired', premise(82.1).ageDays < RATE_PREMISE_STALE_DAYS, true);
+  // The drift the card is really about: `~18/day` against a board running at
+  // 137.5 is a factor of 7.6, and nothing reported it for months.
+  t('rate premise: the historical ~18/day premise is DRIFTED against 137.5', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY, pinned: 18, pinnedAt: MEASURED_MERGES_PER_DAY_AT, nowMs: NOW13499 }).state, 'drifted');
+  t('rate premise: …and the message names the factor so it can be acted on', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY, pinned: 18, pinnedAt: MEASURED_MERGES_PER_DAY_AT, nowMs: NOW13499 }).message.includes('7.64'), true);
+  t('rate premise: a doubling is outside the band', premise(MEASURED_MERGES_PER_DAY * 2.1).state, 'drifted');
+  t('rate premise: a halving is outside the band too', premise(MEASURED_MERGES_PER_DAY / 2.1).state, 'drifted');
+  t('rate premise: exactly at the band edge is still OK', premise(MEASURED_MERGES_PER_DAY * RATE_PREMISE_BAND).state, 'ok');
+  // The calendar half — the one that would have caught `~18/day` early, since a
+  // premise nobody re-measures drifts without any single sweep seeing it move.
+  t('rate premise: a pin past the re-measure horizon EXPIRES even in-band', premise(MEASURED_MERGES_PER_DAY, '2026-06-01').state, 'expired');
+  t('rate premise: …and says so loudly', premise(MEASURED_MERGES_PER_DAY, '2026-06-01').message.includes('EXPIRED'), true);
+  // #4690: an unmeasurable rate is not agreement.
+  t('rate premise: an unobserved rate is NOT reported as OK', premise(null).state, 'unobserved');
+  t('rate premise: …and says nothing was checked', premise(null).message.includes('not checked against'), true);
+  t('rate premise: the pin carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_MERGES_PER_DAY_AT), true);
+  t('rate premise: both window counters ride the enumerated contract', SWEEP_COUNT_KEYS.includes('mergedPages') && SWEEP_COUNT_KEYS.includes('mergedWindowTruncated'), true);
+
+  // The window's DISCLOSURE. A gathered flag that is never printed is a
+  // measurement nobody can act on, so both directions are pinned on the one
+  // line every run ends with.
+  const h8win = (extra) => summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, ...extra }, 0);
+  t('H8 summary: the window is stated as a TIME cap', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes(`TIME cap of ${MERGED_WINDOW_DAYS} day(s)`), true);
+  t('H8 summary: …with the pages it actually cost', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('read in 9 page(s)'), true);
+  t('H8 summary: a completed window says the horizon was reached', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('horizon reached'), true);
+  // ⛔ The inversion this repair removed: a ceiling-bound pass is a page cap
+  // again and must never read as a completed time window (#4690).
+  t('H8 summary: a ceiling-bound window says TRUNCATED', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('TRUNCATED'), true);
+  t('H8 summary: …and does NOT claim the horizon was reached', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('horizon reached'), false);
+  t('H8 summary: …and says a delivery past it is invisible', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('is invisible'), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
@@ -13025,6 +13831,163 @@ function selfTest() {
   t('H36: both count keys ride the enumerated contract', SWEEP_COUNT_KEYS.includes('sharedFileCandidates') && SWEEP_COUNT_KEYS.includes('sharedFileProbed'), true);
   // The markdown medium renders an H36 row like every other finding row.
   t('markdown: an H36 row links the PR it names', renderMarkdown([[{ number: 100, html_url: 'https://example.test/100' }, 'H36', 'shares a file']], { repo: 'r', issues: 0, unscoped: 0, prs: 2, merged: 0 }).includes('- **H36** [#100](https://example.test/100)'), true);
+
+  // -- H38 — seat-post staleness (#13493 half ①, report-only) ---------------
+  //
+  // Fixtures are the MEASURED handover: the `domain:services` post last wrote
+  // 2026-08-29T07:09Z, then a full shift ran ~31h to wave 4 and dispatched five
+  // cards without touching it. The claims are what a silent shift leaves behind.
+  const SEAT_AT_38 = Date.parse('2026-08-29T07:09:00Z');
+  const at38 = (iso) => Date.parse(iso);
+  const seat38 = (title = '[PM seat] domain:services — 🟢 os-elon · R4 派发中', extra = {}) => ({
+    number: 6021,
+    title,
+    labels: [{ name: 'pm:seat' }],
+    assignees: [{ login: 'os-elon' }],
+    body: '',
+    updated_at: '2026-08-29T07:09:00Z',
+    ...extra,
+  });
+  const claim38 = (number, iso) => ({ number, at: at38(iso) });
+
+  // The measured specimen: a claim written ~24h after the post's last event.
+  t('H38: a lane claim NEWER than the seat post -> finding', typeof h38SeatPostStale(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38: …and the finding names the lane', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('domain:services'), true);
+  t('H38: …and the card whose claim outran the post', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('#13398'), true);
+  t('H38: …and states how far behind the post is', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:09:00Z')).includes('24.0h'), true);
+  // ⛔ The row must not read as an accusation — the card is explicit that both
+  // shifts did substantial correct work and that this is evidence about PROSE.
+  t('H38: …and disclaims carelessness explicitly', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('Not an accusation'), true);
+  t('H38: …and stays report-only', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('never writes a label'), true);
+
+  // The other direction — a seat that DID write home is clean, which is the
+  // case that must stay quiet or the row is noise on every healthy lane.
+  t('H38: a post written AFTER the newest claim -> clean', h38SeatPostStale(seat38(), at38('2026-08-30T09:00:00Z'), claim38(13398, '2026-08-30T07:30:00Z')), null);
+  t('H38: a post written at the SAME instant is not behind', h38SeatPostStale(seat38(), SEAT_AT_38, claim38(13398, '2026-08-29T07:09:00Z')), null);
+  t('H38: a lane with no claims at all -> clean', h38SeatPostStale(seat38(), SEAT_AT_38, null), null);
+  t('H38: a non-seat card is out of scope', h38SeatPostStale({ ...issue(['pm:dispatched']), title: '[PM seat] domain:services — 🟢 x' }, SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  // A lane on a sibling board has an unreadable claim population here, so an
+  // absent claim would mean "unreadable", not "none" (H32's `foreign` rule).
+  t('H38: a FOREIGN lane is out of scope', h38SeatPostStale(siblingLaneSeat(), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  t('H38: a lane-less seat title is out of scope', h38SeatPostStale(seat38('[PM seat] triage (objectstack-wide) — 🟢 os-help'), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  // ⛔ An ORDER comparison built on an unreadable stamp is a fabricated
+  // ordering, not a conservative one — H33 settles this direction.
+  t('H38: an unreadable T_seat declines to judge', h38SeatPostStale(seat38(), null, claim38(1, '2026-08-30T07:30:00Z')), null);
+
+  // `T_seat` — the later of the body edit and the newest comment.
+  const row38 = (iso) => ({ created_at: iso, updated_at: iso });
+  t('H38 T_seat: a newer COMMENT wins over the body edit', seatPostLastEventMs(seat38(), [row38('2026-08-30T10:00:00Z')]), at38('2026-08-30T10:00:00Z'));
+  t('H38 T_seat: an older comment does not pull it back', seatPostLastEventMs(seat38(), [row38('2026-08-28T10:00:00Z')]), SEAT_AT_38);
+  t('H38 T_seat: the body edit alone is enough', seatPostLastEventMs(seat38(), []), SEAT_AT_38);
+  t('H38 T_seat: an EDITED comment counts as writing home', seatPostLastEventMs(seat38(), [{ created_at: '2026-08-28T10:00:00Z', updated_at: '2026-08-30T11:00:00Z' }]), at38('2026-08-30T11:00:00Z'));
+  t('H38 T_seat: nothing readable is null, not zero', seatPostLastEventMs({ updated_at: 'x' }, [{ created_at: 'y' }]), null);
+  t('H38 T_seat: a non-array comment list is tolerated', seatPostLastEventMs(seat38(), null), SEAT_AT_38);
+
+  // The lane claim index — and the OR/AND hazard the filing card measured: the
+  // listing endpoints' `labels` filter is a UNION, so the intersection has to
+  // happen locally or the count is wrong in the "too many" direction.
+  const laneCard = (number, labels) => ({ number, labels: labels.map((name) => ({ name })), assignees: [], body: '', title: '' });
+  const CLAIM_ROW = [{ body: 'Claim: PM loop round 4\nSession: `session_x`', created_at: '2026-08-30T07:30:00Z' }];
+  const laneIssues = [
+    laneCard(13398, ['pm:dispatched', 'domain:services']),
+    laneCard(13399, ['pm:dispatched', 'domain:devx']),
+    laneCard(13400, ['pm:queue', 'domain:services']),
+  ];
+  const laneComments = new Map([[13398, CLAIM_ROW], [13399, CLAIM_ROW], [13400, CLAIM_ROW]]);
+  t('H38 lane: the newest claim on the lane is found', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
+  t('H38 lane: a claim on ANOTHER lane is not counted (OR-not-AND)', newestLaneClaim('domain:devx', laneIssues, laneComments).number, 13399);
+  t('H38 lane: a `pm:queue` card is not a dispatch claim', newestLaneClaim('domain:services', [laneCard(13400, ['pm:queue', 'domain:services'])], laneComments), null);
+  t('H38 lane: a lane with no dispatched cards is null', newestLaneClaim('domain:engine', laneIssues, laneComments), null);
+  t('H38 lane: an unfetched thread contributes nothing', newestLaneClaim('domain:services', laneIssues, new Map()), null);
+  t('H38 lane: the NEWEST of several claims wins', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services']), laneCard(2, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: a', created_at: '2026-08-29T00:00:00Z' }]], [2, [{ body: 'Claim: b', created_at: '2026-08-30T00:00:00Z' }]]])).number, 2);
+  // ⛔ The claim predicate is REUSED, not re-spelled: a comment that is not a
+  // canonical `Claim:` is invisible here exactly as it is to H2 and H33.
+  t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
+
+  // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
+  //
+  // The card's central fence, restated as an assertion rather than as prose:
+  // ⛔ a page cap is NOT a count. Its reason was a measurement about this board
+  // — the last three cards whose headline number was a capped bound all had it
+  // quoted back as exact — so the rendering, not just the docblock, has to
+  // refuse it.
+  const censusCard = (number, labels, closed_at = '2026-08-20T00:00:00Z', extra = {}) => ({
+    number,
+    state: 'closed',
+    closed_at,
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const corpus = (rows, truncated = false) => ({ rows, truncated });
+  const censusOf = (byLabel, controlRows = 42) => summariseClosedResidue(new Map(byLabel), { controlRows });
+
+  const DEVX = ['pm:dispatched', 'domain:devx'];
+  const baseCensus = censusOf([
+    ['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX), censusCard(3, ['pm:dispatched', 'domain:spec'])])],
+    ['pm:queue', corpus([censusCard(1, ['pm:queue', 'domain:devx']), censusCard(9, ['pm:queue', 'domain:spec'])])],
+  ]);
+
+  t('H39: a label total is the count of its cards', baseCensus.rows.find((r) => r.label === 'pm:dispatched').total, 3);
+  t('H39: lanes are counted locally, per label', baseCensus.rows.find((r) => r.label === 'pm:dispatched').lanes.find((l) => l[0] === 'domain:devx')[1], 2);
+  t('H39: rows sort by size so the worst lane leads', baseCensus.rows[0].label, 'pm:dispatched');
+  t('H39: the oldest closure is carried, for the "how old is this" question', baseCensus.rows[0].oldest.number, 1);
+  // The contradictory pair, intersected LOCALLY — the endpoint's `labels`
+  // filter is a UNION, so asking for both at once answers a larger question.
+  t('H39: the contradictory pair is the INTERSECTION', baseCensus.pairs.length, 1);
+  t('H39: …and names the card carrying both', baseCensus.pairs[0], 1);
+  t('H39: a card in only one set is not a pair', baseCensus.pairs.includes(9), false);
+
+  // ⛔ The page-cap rule, in both directions.
+  const cappedCensus = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)], true)]]);
+  t('H39 cap: a truncated corpus marks the census truncated', cappedCensus.truncated, true);
+  t('H39 cap: …and its figures are NOT countable', censusIsCountable(cappedCensus), false);
+  t('H39 cap: …and the render says PAGE CAP, not a bare number', renderClosedResidueCensus(cappedCensus).join('\n').includes('PAGE CAP'), true);
+  t('H39 cap: …and says NOT a count in as many words', renderClosedResidueCensus(cappedCensus).join('\n').includes('NOT a count'), true);
+  t('H39 cap: …and prefixes the figure with ≥ rather than stating it', renderClosedResidueCensus(cappedCensus).join('\n').includes('≥1'), true);
+  t('H39 cap: a fully paginated census IS countable', censusIsCountable(baseCensus), true);
+  t('H39 cap: …and says so, so a reader can quote it', renderClosedResidueCensus(baseCensus).join('\n').includes('Fully paginated'), true);
+  t('H39 cap: …and does NOT cry page cap', renderClosedResidueCensus(baseCensus).join('\n').includes('PAGE CAP'), false);
+
+  // The control the filing card prescribed: without rows, a zero is "not read".
+  const noControl = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)])]], 0);
+  t('H39 control: an empty control makes the census uncountable', censusIsCountable(noControl), false);
+  t('H39 control: …and the render says the instrument read nothing', renderClosedResidueCensus(noControl).join('\n').includes('CONTROL FAILED'), true);
+  t('H39 control: …and refuses the "not there" reading explicitly', renderClosedResidueCensus(noControl).join('\n').includes('not "not there"'), true);
+
+  // ⚠️ The `issues` endpoint returns PRs too — one counted as a card inflates
+  // every figure in the direction that makes the problem look worse.
+  const withPr = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX, '2026-08-20T00:00:00Z', { pull_request: { url: 'x' } })])]]);
+  t('H39: a pull request is not a card', withPr.rows[0].total, 1);
+
+  // Pagination termination, and the ceiling behind it.
+  t('H39 paging: a short page ends the stream', censusPageExhausted(Array.from({ length: 40 })), true);
+  t('H39 paging: a FULL page never does', censusPageExhausted(Array.from({ length: 100 })), false);
+  t('H39 paging: a non-array is an ended stream', censusPageExhausted(null), true);
+  t('H39 paging: the ceiling is generous enough not to bind routinely', CENSUS_PAGE_CEILING >= 50, true);
+
+  // Lane bucketing — an unrouted card is still residue and must not vanish.
+  t('H39 lanes: a domain label is a lane', censusLanesOf(censusCard(1, ['pm:queue', 'domain:spec'])).includes('domain:spec'), true);
+  t('H39 lanes: a repo label is a lane too (single-lane seats)', censusLanesOf(censusCard(1, ['pm:queue', 'repo:cloud'])).includes('repo:cloud'), true);
+  t('H39 lanes: an unrouted card is bucketed, not dropped', censusLanesOf(censusCard(1, ['pm:queue']))[0], '(no lane)');
+
+  // ⛔ A census that could not RUN must not render as a clean population.
+  t('H39 failure: a failed census says it did not run', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('CENSUS DID NOT RUN'), true);
+  t('H39 failure: …and refuses the clean reading', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('no reading'), true);
+  t('H39 failure: no census at all renders nothing', renderClosedResidueCensus(null).length, 0);
+  // ⛔ And the discipline that must never be relaxed here.
+  t('H39: the block states that it writes no label', renderClosedResidueCensus(baseCensus).join('\n').includes('no label is written'), true);
+  t('H39: …and that cleanup is a separate decision', renderClosedResidueCensus(baseCensus).join('\n').includes('maintainer decision'), true);
+
+  // The rate-premise renderer — the healthy state prints too, because a check
+  // visible only when it fires is indistinguishable from a deleted one.
+  t('rate render: an OK premise is still shown', renderRatePremise(classifyRatePremise({ observed: 82.1, nowMs: NOW13499 })).join('\n').includes('rate premise OK'), true);
+  t('rate render: a drifted premise is marked loud', renderRatePremise(classifyRatePremise({ observed: 1, nowMs: NOW13499 })).join('\n').includes('⚠️'), true);
+  t('rate render: no premise renders nothing', renderRatePremise(null).length, 0);
 
   // -- H37 — family-dispatch member drift (report-only patrol input, #12629) --
   //
