@@ -715,7 +715,56 @@ export async function bootStack(
         { context: { isSystem: true } },
       );
     } catch {
-      /* best-effort — the gate answers either way */
+      // Best-effort -- the gate answers either way.
+      //
+      // [#12981] This catch is silent BY DESIGN and it is NOT a durability
+      // swallow. `scripts/measure-durability-swallow-family.mjs` reports this
+      // site as tier-1 DARK because membership is decided on three mechanical
+      // conjuncts -- silent catch, no rethrow, an awaited write in the `try`
+      // -- and the census deliberately leaves the fourth, "and the caller
+      // still reports success", to a person. Here the answer is NO, on two
+      // independent grounds:
+      //
+      //   1. NOTHING CLAIMS TO HAVE PERSISTED. This helper returns
+      //      `Promise<void>`: no return value, no counter, no report out of
+      //      which any caller could read a landed row. Its ONLY caller is
+      //      `signUp` immediately below, whose very next statement POSTs
+      //      `/auth/sign-up/email` -- the operation this row is a
+      //      precondition for.
+      //   2. THE LOSS IS ANSWERED ONE LINE LATER, LOUDLY. Under the default
+      //      `invite_only` posture a missing invitation makes that POST
+      //      refuse, and `signUp` throws
+      //      `verify signUp failed: <status> <body>` carrying the gate's real
+      //      verdict. Under `open` / `email_domain` the sign-up succeeds on
+      //      its own merits and the row was never needed. Those are the only
+      //      two branches -- which is what "the gate answers either way"
+      //      above means, stated here so it can be checked rather than
+      //      taken on faith. The row is write-only besides:
+      //      `org_verify_audience_gate` exists precisely so nothing ever
+      //      reads these rows back, and nothing does.
+      //
+      // The case this catch was written for is an app under verification that
+      // carries no `sys_invitation` object at all: there is no store to
+      // persist into, so there is no durability claim to break.
+      //
+      // AGENTS.md "Degradation log levels" names that its third legal answer.
+      // Do NOT "repair" this site by adding a log -- the fixture already
+      // receives the real refusal, with its status and body, from the throw a
+      // few lines down, and one durability `error` per harness sign-up is the
+      // mirror-image failure that made the founding incident's `warn`
+      // unreadable in the first place. A `FAILURE_PROPAGATION_SITES` entry is
+      // not right here either: that declaration asserts every path OUT OF THE
+      // CATCH delivers, and this one returns normally -- the delivery is the
+      // caller's next call, not this frame's. (It would also go red as STALE
+      // today, the way keys.ts's annotation records: the gate's
+      // `DURABILITY_CRITICAL_CALLEES` has no `insert`, so it matches no seam
+      // in this function.)
+      //
+      // Posture, load-bearing for all of the above: `@objectstack/verify`
+      // boots in-process against in-memory SQLite and "never touches a real
+      // database or production data" (this file's header). There is no
+      // deployed plane here that could go on looking healthy while something
+      // it claims is persisted did not land.
     }
   };
 
