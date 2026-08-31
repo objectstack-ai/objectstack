@@ -127,6 +127,12 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // — the exact churn profile the driver exists for. NO `readsDist`: it reads
   // `src/`, so a merge that moved sources is all it needs to be re-run against.
   { path: 'packages/spec/export-origins/**', gen: 'gen:export-origins', check: 'check:export-origins' },
+  // The #13712 TS-declaration-name → registry-name map. Composed from
+  // json-schema.manifest/ + export-origins/ (both rows above, so a regen pass
+  // that runs in list order refreshes its inputs first) plus a syntactic pass
+  // over src/ for module-private base declarations. NO `readsDist`: like its
+  // export-origins sibling it reads `src/` and committed artifacts only.
+  { path: 'packages/spec/declaration-map/**', gen: 'gen:declaration-map', check: 'check:declaration-map' },
   // `readsSchemaTree` is the `readsDist` above, one artifact over (#4723). Both
   // `gen:docs` and `check:docs` render from `packages/spec/json-schema/`, which is
   // GITIGNORED — a merge therefore never delivers it, and a leftover tree from

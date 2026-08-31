@@ -102,6 +102,7 @@ packages/spec/json-schema.manifest/**                        merge=os-regen
 packages/spec/api-surface/**                                 merge=os-regen
 packages/spec/src/meta-spelling/meta-url-data.generated.ts   merge=os-regen
 packages/spec/export-origins/**                              merge=os-regen
+packages/spec/declaration-map/**                             merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen

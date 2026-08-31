@@ -104,8 +104,6 @@ const PKG_DIR = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 export const DECLARATION_MAP_DIR_NAME = 'declaration-map';
 
 const MAP_DIR = path.resolve(PKG_DIR, DECLARATION_MAP_DIR_NAME);
-const MANIFEST_DIR = path.resolve(PKG_DIR, SCHEMA_MANIFEST_DIR_NAME);
-const ORIGINS_DIR = path.resolve(PKG_DIR, EXPORT_ORIGINS_DIR_NAME);
 
 const CHECK = process.argv.includes('--check');
 const SELF_TEST = process.argv.includes('--self-test');
