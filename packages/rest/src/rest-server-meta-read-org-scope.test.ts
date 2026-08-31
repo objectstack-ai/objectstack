@@ -117,25 +117,41 @@ interface Row {
     state: string; metadata: string; checksum?: string; version?: number;
 }
 
+interface HistoryRow {
+    id: string; type: string; name: string;
+    organization_id: string | null;
+    version: number; event_seq: number;
+    operation_type: string; metadata: string | null;
+}
+
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 
-function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
+function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
             const clauses = v as Array<Record<string, unknown>>;
             if (!clauses.some((c) => matchesWhere(r, c))) return false;
             continue;
         }
+        // ⛔ REFUSE any other combinator rather than reading it as a field
+        // name. `$or` is the only one the read paths under test emit, and a
+        // double that answered `$and` by looking for a column literally called
+        // `$and` would return a well-formed WRONG answer — the same silent
+        // class as a double that drops the predicate entirely. Refusing loudly
+        // is the convention the sibling harness already follows.
+        if (k.startsWith('$')) {
+            throw new Error(`stub engine: unsupported WHERE combinator \`${k}\``);
+        }
         if (v === undefined) continue;
-        if ((r as unknown as Record<string, unknown>)[k] !== v) return false;
+        if (r[k] !== v) return false;
     }
     return true;
 }
 
 function makeStubEngine() {
     const rows = new Map<string, Row>();
-    const historyRows: any[] = [];
+    const historyRows: HistoryRow[] = [];
     let nextId = 0;
 
     const findRow = (w: Record<string, unknown>): { key: string; row: Row } | null => {
@@ -148,25 +164,63 @@ function makeStubEngine() {
             const r = rows.get(k);
             if (r) return { key: k, row: r };
         }
-        for (const [k, r] of rows) if (matchesWhere(r, w)) return { key: k, row: r };
+        for (const [k, r] of rows) if (matchesWhere(r as unknown as Record<string, unknown>, w)) return { key: k, row: r };
         return null;
     };
 
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
-            if (table === 'sys_metadata_history') return null;
+            if (table === 'sys_metadata_history') {
+                // [#13764] Was `return null` UNCONDITIONALLY. Measured before
+                // changing it: the unconditional null is NOT load-bearing for
+                // the PUT path this fixture drives — production reaches this
+                // seam only from `getByHash`, `restoreVersion` and
+                // `resolveMetaItemOrgScope`, none of which a PUT calls; the
+                // write path reads history through `find`
+                // (`nextEventSeq` / `nextItemVersion`).
+                return historyRows.find(
+                    (h) => matchesWhere(h as unknown as Record<string, unknown>, opts.where),
+                ) ?? null;
+            }
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
-            if (table === 'sys_metadata_history') return historyRows;
-            return Array.from(rows.values()).filter((r) => matchesWhere(r, opts?.where ?? {}));
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            // [#13764] Two silences repaired on one seam, for one reason.
+            //
+            // WHERE: this branch used to `return historyRows` UNFILTERED.
+            // `SysMetadataRepository.history()` and `diffMetaItem` filter
+            // `organization_id` by STRICT EQUALITY and post-filter nothing, so
+            // an unfiltered answer made the org predicate a no-op: an
+            // org-scoping assertion for `/history` was green whether or not the
+            // door forwarded the organization. Measured, not argued — the
+            // `#13764` block at the bottom of this file is green over the old
+            // stub in BOTH states and reddens over this one when the org is
+            // dropped.
+            //
+            // LIMIT: applied AFTER the filter and BY PRESENCE
+            // (`typeof === 'number'`), so `limit: 0` returns nothing rather
+            // than everything, and bounding never decides WHICH rows survive
+            // the predicate — only how many of the survivors come back. Every
+            // call this fixture makes passes no bound and is untouched.
+            // `check:objectql-double-limit`. Applied on BOTH tables so the two
+            // branches cannot disagree.
+            if (table === 'sys_metadata_history') {
+                const matched = historyRows.filter(
+                    (h) => matchesWhere(h as unknown as Record<string, unknown>, opts?.where ?? {}),
+                );
+                return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
+            }
+            const matched = Array.from(rows.values()).filter(
+                (r) => matchesWhere(r as unknown as Record<string, unknown>, opts?.where ?? {}),
+            );
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
             if (table === 'sys_metadata_history') {
                 nextId += 1;
-                historyRows.push({ ...data, id: `h_${nextId}` });
+                historyRows.push({ ...(data as unknown as HistoryRow), id: `h_${nextId}` });
                 return { id: `h_${nextId}` };
             }
             if (table !== 'sys_metadata') return { id: 'side_effect_skip' };
