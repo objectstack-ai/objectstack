@@ -74,12 +74,14 @@
  * the platform ACCEPTS and is expressly outside this ruling.
  *
  * The predicate already follows `error.cause` four levels deep, with its own
- * pins (`schema-sync-errors.test.ts`, "follows an error wrapped as `cause`"),
- * because "drivers commonly re-throw with the original attached as `cause`" is
- * a case it was built for. So the wrap keeps the original there — and this
- * suite pins the driver's half of that contract: the cause is present, it is
- * the untouched dialect error, and it is NON-ENUMERABLE so it cannot ride back
- * onto a wire through `JSON.stringify` or a spread.
+ * pins (`packages/types/src/driver-error-classification.test.ts` — #13279
+ * moved it there from `metadata/src/utils/schema-sync-errors.test.ts` —
+ * "follows an error wrapped as `cause`"), because "drivers commonly re-throw
+ * with the original attached as `cause`" is a case it was built for. So the
+ * wrap keeps the original there — and this suite pins the driver's half of
+ * that contract: the cause is present, it is the untouched dialect error, and
+ * it is NON-ENUMERABLE so it cannot ride back onto a wire through
+ * `JSON.stringify` or a spread.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
