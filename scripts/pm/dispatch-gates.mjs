@@ -2532,10 +2532,13 @@ export function spellingFooterLines(split) {
  *   hint 'content/docs' vs 'content/docs.site.json'  raw=true  segment=false
  *       <- check:role-word, check:docs-audit-scope
  *
- * `content/docs.site.json` is a real file sitting beside the `content/docs`
- * directory, and neither gate reads it. So both were printed as MATCHED for any
+ * `content/docs.site.json` was a real file sitting beside the `content/docs`
+ * directory, and neither gate read it. So both were printed as MATCHED for any
  * card touching that file. The sibling class was always live; the earlier census
- * probed directories, and this specimen is a file.
+ * probed directories, and that specimen was a file. (The file itself was deleted
+ * as dead config in #12489 — the measurement above stands as the record of why
+ * this narrowing exists, and the self-test's live specimen moved to
+ * `packages/spec/authorable-surface` + `.base.json`.)
  *
  * The neighbouring predicate already draws this boundary and has a pinned case
  * for it (`isInI18nBundlePackage`: `path === dir || path.startsWith(dir + '/')`).
@@ -8549,10 +8552,10 @@ function selfTest() {
   t('nor reach a sibling that merely shares the stem', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry-v2.ts'));
   t('nor a doubled extension', !hintCovers('packages/spec/src/migrations/registry', 'packages/spec/src/migrations/registry.ts.ts'));
   t('and it stays inside the segment rule — a bare word is still refused, extension or not', !hintCovers('registry', 'registry.ts'));
-  // The `content/docs.site.json` trade (#8534) is what a LOOSE suffix rule
-  // would have taken back. Pinned here as well as above, because this card is
-  // the one that would have broken it: `.site.json` is not a module extension.
-  t('the sibling-file refusal survives the extension follow', !hintCovers('content/docs', 'content/docs.site.json'));
+  // The dotted-suffix sibling trade (#8534) is what a LOOSE suffix rule would
+  // have taken back. Pinned here as well as above, because this card is the one
+  // that would have broken it: `.base.json` is not a module extension.
+  t('the sibling-file refusal survives the extension follow', !hintCovers('packages/spec/authorable-surface', 'packages/spec/authorable-surface.base.json'));
 
   // COHERENCE: the matcher and the residue cannot disagree about a file the
   // tree HAS. `extensionlessModuleTarget` exists to say "the tree has this
@@ -8607,14 +8610,16 @@ function selfTest() {
   t('a hint equal to the input path covers it', hintCovers('docs/adr', 'docs/adr'));
   t('a sibling sharing a name prefix is NOT covered', !hintCovers('packages/client', 'packages/client-react/src/index.ts'));
   t('nor in the other direction', !hintCovers('packages/spec-extra/x.ts', 'packages/spec'));
-  // The live specimen this was measured on: a real FILE sitting beside a real
-  // directory of the same name stem, claimed by two gates that never read it.
-  // The filed census called the rule dormant after probing package DIRECTORIES;
-  // it was live all along, one directory level up and on a file. If
-  // content/docs.site.json is ever removed, re-point this case at whatever
-  // sibling pair the tree then has rather than deleting it.
-  t('the live sibling FILE is no longer claimed by the directory hint', !hintCovers('content/docs', 'content/docs.site.json'));
-  t('while the directory it names is still covered', hintCovers('content/docs', 'content/docs/adr/0112-x.mdx'));
+  // The live specimen this is measured on: a real FILE sitting beside a real
+  // directory of the same name stem. The filed census called the rule dormant
+  // after probing package DIRECTORIES; it was live all along, on a file. The
+  // original specimen was `content/docs` + `content/docs.site.json`; that file
+  // was deleted as dead config (#12489) and this case was re-pointed, per the
+  // standing instruction kept here: if `packages/spec/authorable-surface.base.json`
+  // is ever removed, re-point this case at whatever sibling pair the tree then
+  // has rather than deleting it.
+  t('the live sibling FILE is no longer claimed by the directory hint', !hintCovers('packages/spec/authorable-surface', 'packages/spec/authorable-surface.base.json'));
+  t('while the directory it names is still covered', hintCovers('packages/spec/authorable-surface', 'packages/spec/authorable-surface/ai.json'));
   // The collapsed-glob reach trade, pinned in BOTH directions so the decision
   // reads as an assertion. Refusing the sibling reach is the DECIDED loss (see
   // hintCovers' docblock): measured, no repo-path hint of this shape exists —
@@ -8959,7 +8964,13 @@ function selfTest() {
   // apart, and the collapsed subtree does.
   t('and claims nothing under the internal .claude skills tree it never walks', !roleWordHints.some((h) => hintCovers(h, '.claude/skills/pm-dispatch/SKILL.md')));
   t('nor a package source file', !roleWordHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
-  t('nor the sibling FILE beside the content root', !roleWordHints.some((h) => hintCovers(h, 'content/docs.site.json')));
+  // CONSTRUCTED path, deliberately: `content/docs.site.json` was a live file
+  // until it was deleted as dead config (#12489), and `content/` now holds only
+  // the two collection directories, so the tree offers no sibling beside the
+  // content root to name. The probe stays spelled against the `content/docs`
+  // hint anyway — that hint is the one with bite here, and re-pointing at a
+  // path some far-away gate names would keep this green while testing nothing.
+  t('nor a sibling FILE beside the content root', !roleWordHints.some((h) => hintCovers(h, 'content/docs.site.json')));
   // The pair that makes the declaration worth having: the bare word this gate
   // actually spells in its ROOTS array stays refused, so the coverage above is
   // bought by the declaration and by nothing else.

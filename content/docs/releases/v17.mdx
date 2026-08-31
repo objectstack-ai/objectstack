@@ -3504,7 +3504,12 @@ a credential that was never meant to be readable stops being served.
   and the inbox channel consumes it, so localized `sys_email_template` content now
   reaches `sys_inbox_message` (#9225). Flow `notify` nodes can reference a template
   for localized delivery — `template` + `templateData` on `NotifyNodeConfig`,
-  resolved by `(name, recipient locale)` at delivery time (#9205).
+  resolved by `(name, locale)` at delivery time (#9205). **The locale is one
+  value for the whole notification, not one per recipient**: `payload.locale` if
+  the producer set one, else the deployment default
+  (`II18nService.getDefaultLocale()`) — the platform has no per-user locale, so
+  recipients whose personal languages differ all receive the same row (a
+  per-user locale is deferred by the 2026-08-13 ruling).
 - **`map` joins the per-visualization blocks on `ListViewSchema`.**
   `ListMapConfigSchema` is the eighth block alongside kanban / calendar / gantt /
   gallery / timeline / chart / tree, declaring the map renderer's documented read

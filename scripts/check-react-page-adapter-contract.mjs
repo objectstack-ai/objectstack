@@ -54,7 +54,7 @@
 //
 // The detectors below are MOVED, not copied. The app-showcase sweep left that
 // test file in the same edit that added this gate, because two copies of
-// `recordsOnlyReads()` would double the places a future fix has to land --
+// `recordsReads()` would double the places a future fix has to land --
 // which is the shape of the defect above, not a fix for it. The test keeps the
 // half a text scan cannot do: it EXECUTES the renewals-pipeline rollup against
 // a contract-faithful adapter double.
@@ -137,8 +137,13 @@ const CENSUS_ANCHORS = {
 };
 
 // ---------------------------------------------------------------------------
-// The two detectors -- MOVED verbatim from
+// The two detectors -- MOVED from
 // examples/app-showcase/test/react-page-adapter-query-contract.test.ts (#10288).
+// `unprefixedQueryKeys` is still verbatim. `recordsReads` is NOT: it arrived
+// carrying a `.data`-beside carve-out that made `data ?? records` invisible,
+// and that carve-out was narrowed to comment/string stripping in the same
+// edit that deleted the two aliases it was load-bearing for. See the
+// function's own header for why a tolerant alias is a finding.
 // ---------------------------------------------------------------------------
 
 const DECLARED_QUERY_PARAM_PREFIX = '$';
@@ -223,28 +228,77 @@ export function unprefixedQueryKeys(source) {
   return found;
 }
 
+/** A `.records` / `?.records` PROPERTY read -- not the bare word, not a longer name. */
+const RECORDS_READ = /\??\.\s*records\b/;
+
 /**
- * A `.records` read with no `.data` beside it, off a find() result.
+ * One line's executable text: string and template bodies blanked (quotes kept),
+ * and a trailing `//` or block comment dropped.
+ *
+ * This is what lets the `.data`-beside carve-out go without the detector
+ * starting to fire on text that merely SPELLS the trap: a webhook payload
+ * naming `'data.records.updated'`, or a line whose trailing comment explains
+ * why `.records` is wrong. Both are kept out of the sweep by the SELECTOR
+ * today, and a detector that is quiet only because of the selector is one
+ * population change away from firing.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+export function codeOnly(line) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote !== null) {
+      if (c === '\\') { i++; continue; }
+      if (c === quote) { quote = null; out += c; }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; out += c; continue; }
+    if (c === '/' && (line[i + 1] === '/' || line[i + 1] === '*')) break;
+    out += c;
+  }
+  return out;
+}
+
+/**
+ * Every `.records` read off a find() result, judged on the line's CODE.
  *
  * `find()` resolves to a normalized `QueryResult` -- rows under `data`, never
  * the REST envelope's `records`. Reading `.records` yields `undefined` on every
  * call, so a KPI over it sticks at 0 forever while the `<ListView>` beside it
  * shows the same rows correctly.
  *
- * Comment lines are skipped: a page that explains the trap in prose (and
- * `crm-workbench` does, right above the call it once got wrong) is documenting
- * the contract, not violating it. The read itself is what this looks for.
+ * Whole-line comments are skipped and `codeOnly()` strips the rest: a page that
+ * explains the trap in prose (and `crm-workbench` does, right above the call it
+ * once got wrong) is documenting the contract, not violating it. The read
+ * itself is what this looks for.
+ *
+ * ⛔ A `.data` READ BESIDE IT IS NOT AN EXEMPTION. This detector used to skip
+ * any line carrying `.data`, which made `result.data ?? result.records` the one
+ * shape it could not see -- and that is the shape BOTH surviving repairs of
+ * this defect had landed as, including the sample in
+ * `content/docs/ui/react-pages.mdx` that a customer copies from. A tolerant
+ * alias renders correctly today (`.data` is read first and always wins), so
+ * nothing is on fire; what it does is teach authors and code assistants a
+ * spelling the producer cannot emit, leaving the next author who simplifies
+ * the chain to guess which limb was real. That guess is how ONE wrong read
+ * reached three files.
+ *
+ * Measured before the narrowing landed: the carve-out was load-bearing for
+ * exactly two lines across both populations -- the two aliases deleted in this
+ * same edit -- and nothing else. So it reds no bystander.
  *
  * @param {string} source
  * @returns {string[]}
  */
-export function recordsOnlyReads(source) {
+export function recordsReads(source) {
   const out = [];
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
-    if (!trimmed.includes('.records')) continue;
-    if (trimmed.includes('.data')) continue;
+    if (!RECORDS_READ.test(codeOnly(trimmed))) continue;
     out.push(trimmed);
   }
   return out;
@@ -431,7 +485,7 @@ export function sweep(population) {
           + `Spell it \`${key === 'limit' ? 'top' : key}\`. In: ${snippet}`,
         );
       }
-      for (const line of recordsOnlyReads(source)) {
+      for (const line of recordsReads(source)) {
         findings.push(
           `${at(lineOfText(source, line))}: reads \`.records\` off a find() result. \`QueryResult\` `
           + `declares rows under \`data\` — \`.records\` is \`undefined\` on every call, forever, `
@@ -511,8 +565,8 @@ export function selfTest() {
     'unprefixedQueryKeys fires on a known-bad source, naming both dropped keys',
   );
   assert(
-    JSON.stringify(recordsOnlyReads(bad)) === JSON.stringify(['const rows = (a && a.records) || [];']),
-    'recordsOnlyReads fires on a known-bad source, and a COMMENT mentioning .records is not a read',
+    JSON.stringify(recordsReads(bad)) === JSON.stringify(['const rows = (a && a.records) || [];']),
+    'recordsReads fires on a known-bad source, and a COMMENT mentioning .records is not a read',
   );
 
   // ...and stay silent on the corrected shape, so a green means something.
@@ -521,7 +575,43 @@ export function selfTest() {
       const rows = a.data ?? [];
     `;
   assert(unprefixedQueryKeys(good).length === 0, 'unprefixedQueryKeys is silent on the corrected shape');
-  assert(recordsOnlyReads(good).length === 0, 'recordsOnlyReads is silent on the corrected shape');
+  assert(recordsReads(good).length === 0, 'recordsReads is silent on the corrected shape');
+
+  // ── The narrowing: a `.data` read BESIDE it is not an exemption ───────────
+  // The first two are the two tolerant aliases the `.data`-beside carve-out
+  // used to bless -- the app-showcase one and, worse, the docs sample a
+  // customer copies from. Both rendered correctly while teaching a spelling
+  // `ObjectStackAdapter.find()` cannot emit, which is what the carve-out cost.
+  assert(
+    recordsReads(`const rows = Array.isArray(all) ? all : (all && (all.data || all.records)) || [];`).length === 1,
+    'a `data || records` alias IS a finding — the carve-out that blessed it is what let BOTH surviving repairs land as tolerance',
+  );
+  assert(
+    recordsReads(`const records = result?.data ?? result?.records ?? (Array.isArray(result) ? result : []);`).length === 1,
+    'the docs sample\'s `?? result?.records` alias IS a finding — optional chaining is a read',
+  );
+  assert(
+    recordsReads(`const records = result?.data ?? (Array.isArray(result) ? result : []);`).length === 0,
+    'the REPAIRED docs sample is silent — a local named `records` is not a `.records` read',
+  );
+
+  // ...and the narrowing must not start firing on text that merely SPELLS it.
+  assert(
+    recordsReads(`emit({ type: 'data.records.updated' });`).length === 0,
+    'a webhook payload naming data.records.updated in a STRING is not a read — the detector no longer leans on the selector for this',
+  );
+  assert(
+    recordsReads(`const rows = result.data ?? []; // never .records — QueryResult does not declare it`).length === 0,
+    'a TRAILING comment naming .records beside a canonical read is not a finding — prose documenting the trap is not the trap',
+  );
+  assert(
+    recordsReads(`const n = result.recordsCount;`).length === 0,
+    'a LONGER property is not a `.records` read — the detector matches a whole property name',
+  );
+  assert(
+    codeOnly(`a.records // '.data'`) === 'a.records ' && codeOnly(`x('.records')`) === `x('')`,
+    'codeOnly drops a trailing comment and blanks string BODIES while keeping the quotes',
+  );
 
   // ── The contracts this sweep must NOT fabricate findings on ─────────────
   // Both are real lines from `content/docs`, and both are CORRECT where they sit.
@@ -530,7 +620,7 @@ export function selfTest() {
     'an ObjectQL `engine.find` is a different contract — its unprefixed keys are not findings',
   );
   assert(
-    recordsOnlyReads(`  return data?.records.map(a => <div key={a.id}>{a.name}</div>);`).length === 1,
+    recordsReads(`  return data?.records.map(a => <div key={a.id}>{a.name}</div>);`).length === 1,
     'the detector itself DOES flag a bare .records read — so the client-sdk exclusion has to happen in the SELECTOR',
   );
   assert(

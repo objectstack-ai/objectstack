@@ -301,21 +301,56 @@ function listPositionFieldReferenceMessage(position: string): string {
 }
 
 /**
- * [#7596] `$in` / `$nin`, with the `{ $field }` member ruled out by name.
+ * [#13357] The author-facing refusal for a `null` in a LIST-comparand position
+ * — every `$in` / `$nin` member, and both `$between` endpoints (#13495's
+ * shape). Ruled 2026-08-31; the same one-builder-for-four-positions shape as
+ * {@link listPositionFieldReferenceMessage}, because it is likewise one ruling.
+ *
+ * The prescription sentence is the ruling's own: "equals X or has no value"
+ * has an explicit spelling, `$or: [{$in: […]}, {$null: true}]`, and the
+ * refusal names it rather than leaving the author to guess. The runtime twin
+ * is `nullListMemberError` / `nullRangeBoundError`
+ * (`./filter-comparand-shape.ts`), reconciled by pin — two moments, one
+ * author, no contradiction.
+ */
+function nullListComparandMemberMessage(position: string): string {
+  return (
+    `null is not a valid ${position}. No two backends agree on what a null in a `
+    + 'list-comparand position matches (the SQL family answers a NULL under NOT IN '
+    + 'unconditionally; the JS matchers split over the two readings of "no value"). State '
+    + 'absence explicitly with the null predicate instead: '
+    + '{"$or": [{"$in": […]}, {"$null": true}]} is "one of […] OR has no value", and '
+    + '{"$null": false} is the has-a-value half. '
+    + 'Ruled 2026-08-31: a null list member is refused at the validation entrance.'
+  );
+}
+
+/**
+ * [#7596] `$in` / `$nin`, with the `{ $field }` member ruled out by name —
+ * and, since the 2026-08-31 ruling (#13357), the `null` member likewise.
  *
  * The members stay `z.any()`: a set-membership list is genuinely heterogeneous
  * (a `lookup` id, an ISO day, a number), and this schema is field-AGNOSTIC — it
  * never sees which column the list applies to, so narrowing the member type
  * would refuse working filters, exactly the finding `RangeOperatorSchema`'s
  * "why a BARE string" section records for the sibling slot. What IS removable
- * is the one shape no backend implements, so it is removed as a check rather
- * than as a type change: everything else keeps parsing, `{ $field }` is refused
- * with the message it needs, and the generated JSON Schema still describes the
- * list as the open one it is.
+ * is a shape no backend implements — `{ $field }`, which nothing resolves in a
+ * list, and `null`, which no two backends read alike — so both are removed as
+ * checks rather than as a type change: everything else keeps parsing, each
+ * refused shape gets the message it needs, and the generated JSON Schema still
+ * describes the list as the open one it is.
  */
 const setMembershipSchema = (op: '$in' | '$nin') =>
   z.array(z.any()).superRefine((members, ctx) => {
     members.forEach((member, index) => {
+      if (member === null) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index],
+          message: nullListComparandMemberMessage(`${op} member at index ${index}`),
+        });
+        return;
+      }
       if (!isFieldReferenceShape(member)) return;
       ctx.addIssue({
         code: 'custom',
@@ -325,11 +360,13 @@ const setMembershipSchema = (op: '$in' | '$nin') =>
     });
   });
 
-/** The `describe()` both `$in` and `$nin` carry, stating the one ruled-out member shape. */
+/** The `describe()` both `$in` and `$nin` carry, stating the two ruled-out member shapes. */
 const SET_MEMBER_DESCRIPTION =
   'Membership list. Members are literal values of any type the column stores. A '
   + '{ $field } reference is NOT a member shape: no backend resolves one inside a list'
-  + ' — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead.';
+  + ' — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead. null is NOT '
+  + 'a member shape either: state absence explicitly with the null predicate — '
+  + '"one of […] OR has no value" is { "$or": [{ "$in": […] }, { "$null": true }] }.';
 
 /**
  * Set operators for membership checks.
@@ -482,9 +519,15 @@ const RANGE_ENDPOINT_DESCRIPTION =
 const rangeEndpointSchema = (index: 0 | 1) =>
   z.union([z.number(), z.date(), z.string()], {
     error: (issue) =>
-      isFieldReferenceShape(issue.input)
-        ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
-        : undefined,
+      // [#13357] `null` never passed this union (it is none of the three
+      // endpoint types) — what the 2026-08-31 ruling adds here is the POINTED
+      // message in place of zod's generic union text, the same replace-only
+      // mechanism the `{ $field }` shape uses one line down.
+      issue.input === null
+        ? nullListComparandMemberMessage(`$between endpoint at index ${index}`)
+        : isFieldReferenceShape(issue.input)
+          ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
+          : undefined,
   });
 
 export const RangeOperatorSchema = lazySchema(() => z.object({

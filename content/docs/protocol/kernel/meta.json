@@ -1,7 +1,6 @@
 {
   "title": "System Protocol",
   "pages": [
-    "index",
     "lifecycle",
     "http-protocol",
     "realtime-protocol",

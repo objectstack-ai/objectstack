@@ -1573,7 +1573,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1588,14 +1588,14 @@
           "the stock subflow pair showcase_task_done_notify_owner → showcase_notify_owner (drives the 409 refusal-rendering clause)"
         ],
         "knownGaps": [
-          "REPO OWNERSHIP (ADR-0054): the PAGE — markup, testids, dialogs, refusal rendering — is objectui's (packages/app-shell/src/views/setup/PackagedAutomationPage.tsx + PackagedActionsSection.tsx, registered as ref 'automation:packaged' in services/builtinComponents.tsx:64-69); the Setup NAV METADATA that should reach it is objectstack's (packages/platform-objects/src/apps/setup-nav.contributions.ts). A locator or copy fix goes to objectui; the missing nav entry goes HERE. Conflating the two repos is how the nav gap survived both repos' tests",
+          "REPO OWNERSHIP (ADR-0054): the PAGE — markup, testids, dialogs, refusal rendering — is objectui's (packages/app-shell/src/views/setup/PackagedAutomationPage.tsx + PackagedActionsSection.tsx, registered as ref 'automation:packaged' in services/builtinComponents.tsx:64-69); the Setup NAV METADATA that reaches it is objectstack's (packages/platform-objects/src/apps/setup-nav.contributions.ts:63 — nav_packaged_automation, landed by #12457). A locator or copy fix goes to objectui; a nav-entry regression goes HERE. Conflating the two repos is how the original nav gap survived both repos' tests — each side now pins its own half (framework: setup-packaged-automation-nav.test.ts; objectui: PackagedAutomationPage.navContribution.test.tsx), and only the live sidebar click observes the seam between them",
           "AUTOMATION IS PINNED IN THE objectui REPO — `automated.ref` names objectui component tests exclusively, so from this checkout the item is neither runnable nor pin-evidenced; and those tests are the MOCKED half only (stubbed fetch): they prove the page against faked responses and structurally cannot see the missing framework nav entry, a live server's refusal bodies, or persistence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact"
         ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0, OS_PORT exported); build/serve the pinned console; sign in as the dev admin",
         "nav probe: GET /api/v1/meta/app?id=setup and search the served navigation for a type:'component' item with componentRef 'automation:packaged'; then look for the entry in the rendered Setup sidebar and click it",
-        "regardless of the nav verdict, reach the page (typed URL /apps/setup/component/automation/packaged if the sidebar has no entry — recording that the typed URL was needed) and screenshot it settled",
+        "regardless of the nav verdict, reach the page and screenshot it settled (only if the sidebar entry is MISSING — a regression of #12457 — fall back to the typed URL /apps/setup/component/automation/packaged, recording that the typed URL was needed, so the rest of the item is still scored)",
         "inventory: compare the flows table rows against GET /api/v1/meta/flow (which items carry a real _packageId and _provenance != 'org') and the actions section against its own packaged-actions read; confirm every switch reads On",
         "toggle: flip showcase_urgent_task_alert OFF; reload the page fully; record the switch state and the sys_metadata_activation row; flip it back ON",
         "clone dialog: open Clone on a flow row — try submitting with name empty, label empty, then name 'Bad-Name!' + a label; record what renders; then a legal clone and the post-clone notice; DELETE the clone via the API afterwards",
@@ -1607,7 +1607,7 @@
         {
           "clause": "the page is REACHABLE FROM SETUP NAVIGATION: the served setup app metadata contains a type:'component' nav item with componentRef 'automation:packaged', and clicking the sidebar entry lands on the page",
           "oracle": "network",
-          "verify": "the GET /api/v1/meta/app?id=setup body carries the item AND the sidebar click navigates to it. ⚠️ EXPECTED FAIL at af56546, kept as the assertion on purpose: the objectui page and registry ref exist, but objectstack's packages/platform-objects/src/apps/setup-nav.contributions.ts contributes NO such nav item (the only component ref it ships is developer:packages, :51) — the page is reachable only by typed URL, and Epic layers L5 (#6301) / L6-UI (#6412) are closed, so this is a defect, not pending work; a red here is that product finding, already tracked by the #12438 sweep. ⛔ A typed-URL landing must NOT tick this clause — objectui's own PackagedAutomationPage.navContribution.test.tsx proves only ref→URL resolution (the mocked half), which is exactly the half that cannot see the missing nav entry",
+          "verify": "the GET /api/v1/meta/app?id=setup body carries the item — id 'nav_packaged_automation', type 'component', componentRef 'automation:packaged', label 'Packaged Automation', in group_apps beside Packages — AND the sidebar click navigates to the page. The entry is contributed at packages/platform-objects/src/apps/setup-nav.contributions.ts:63 (#12457, fixing the gap the #12438 sweep found: the page had merged in objectui with no framework nav entry naming its ref, reachable only by typed URL). Two deliberate ABSENCES on the entry are part of the contract — no requiresService ('automation') and no requiredPermissions (the sys_metadata_activation ledger works without the automation service, #12419; the write doors gate server-side) — do not 'fix' either. ⛔ A typed-URL landing must still NOT tick this clause: each repo pins only its own half (framework nav metadata: setup-packaged-automation-nav.test.ts; objectui ref→URL resolution: PackagedAutomationPage.navContribution.test.tsx), and the live served-app body + real sidebar click is the only observation that crosses the seam the original defect lived in",
           "evidence": "the meta/app body (item present or absent) + sidebar screenshot"
         },
         {
@@ -1654,7 +1654,7 @@
         }
       ],
       "negative": [
-        "ticking the nav clause off a typed-URL landing (or off the objectui navContribution unit test) is the exact false positive this item exists to block — the page working and the page being findable are different facts, and only the second is red today",
+        "ticking the nav clause off a typed-URL landing (or off either repo's unit pin alone) is the exact false positive this item exists to block — the page working and the page being findable are different facts, and the second was red for a full epic before #12457 precisely because each repo's tests proved only its own half",
         "scoring the member's refusal cell while the admin's token is still live in the browser context is an auth-state-leak — the alert would show a 409 (subflow) instead of the 403 (capability), silently proving the wrong clause",
         "a toggle whose switch flips back On after reload while the API row says active=false (or vice versa) is a FAIL wherever the mismatch lies — the page must derive from the server, and the server must have written the row"
       ],
@@ -1666,18 +1666,18 @@
       ],
       "automated": {
         "kind": "test",
-        "ref": "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx + PackagedActionsSection.test.tsx — the MOCKED component half only (stubbed fetch): rendering, filter, dialog validation, alert wiring; they cannot evidence the nav clause, live refusal bodies, or persistence"
+        "ref": "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx + PackagedActionsSection.test.tsx — the MOCKED component half only (stubbed fetch): rendering, filter, dialog validation, alert wiring; they cannot evidence live refusal bodies or persistence. The nav clause's framework half is pinned HERE by packages/platform-objects/src/apps/setup-packaged-automation-nav.test.ts (#12457: entry present, ref/label/group, the two deliberate absences, parses as a NavigationContribution) — runnable from this checkout, but it proves the contribution only; the served body + sidebar click still need the live run"
       },
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §7.4 (the Setup surface: on/off + clone, authoring stays in Studio; ⛔ no drift/ancestry surface)",
         "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (:327,529 clone-dialog validation; :427,516 role=alert refusal rendering) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts:59-106 (isPackagedFlowItem + runtime-spine join)",
         "objectui packages/app-shell/src/services/builtinComponents.tsx:64-69 (registerAppComponent ref 'automation:packaged') + views/ComponentNavView.tsx:26-60 (ref resolution, no gate) + views/setup/PackagedAutomationPage.navContribution.test.tsx (ref→URL resolution — the mocked half of the nav clause)",
         "objectui packages/core/src/actions/actionErrorDetail.ts:27-35 (error → error.message → message; details[] dropped)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (NO automation:packaged nav item at af56546 — the expected-fail's ground)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts:52-63 (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
         "packages/runtime/src/domains/automation.ts:333-335 (the exact enablement 403 sentence)",
         "packages/platform-objects/src/system/sys-metadata-activation.object.ts:152-158 (reads open)",
         "docs/adr/0054 (locator stability / UI-testability contract — the repo-ownership split recorded in fixtures)",
-        "#12438 (sweep; nav gap found from two angles) · Epic #12150 (L5 #6301 / L6-UI #6412 both closed → the nav gap is a defect, not pending work)",
+        "#12438 (sweep; nav gap found from two angles) → #12457 (the fix: framework nav entry + pin) · Epic #12150 (L5 #6301 / L6-UI #6412)",
         "cross-ref: automation.packaged-flow-disable-durable and automation.packaged-flow-subflow-disable-refusal (the API contracts whose surfaces this page renders); automation.packaged-flow-clone-contract (the clone door behind the dialog)"
       ],
       "history": [
@@ -1686,6 +1686,12 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §7.4 Setup surface shipped in objectui with mocked component tests only; nothing asserted the cross-repo seams where the real risks live: the Setup nav entry (missing at af56546 — authored as an expected-fail reachability clause a typed URL must not satisfy), verbatim server refusals surviving to role=alert against a LIVE server, toggle persistence corroborated by the ledger row, clone-on-flows-only, the no-lineage rule, and the plain-member read posture (recorded, with the maintainer question flagged rather than adjudicated)",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-30",
+          "change": "inverted the nav clause from expected-fail to a positive assertion: #12457 landed the missing framework nav entry (setup-nav.contributions.ts:63 — nav_packaged_automation → 'automation:packaged', verified at head) with its own pin (setup-packaged-automation-nav.test.ts), so the clause now asserts the entry in the served setup app body + a real sidebar landing, including the entry's two deliberate absences (no requiresService, no requiredPermissions — #12419 / server-side gating) so neither is 'fixed' into a regression. The 'missing nav entry goes HERE' knownGap is rewritten as the two-pins-one-seam ownership note; the typed-URL fallback in steps is re-scoped to regression handling. D16 is fixed — a red here is a NEW regression, not the old finding re-found",
+          "ref": "#12457"
         }
       ]
     }

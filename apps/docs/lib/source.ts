@@ -15,6 +15,31 @@ export const blog = loader({
   source: blogCollection.toFumadocsSource(),
 });
 
+/**
+ * The Open Graph card URL for a page: `/og/docs/<...page.slugs>/image.png`.
+ *
+ * The trailing `image.png` marker is load-bearing TWICE, and only the first is
+ * visible from this file:
+ *
+ * 1. `app/og/docs/[...slug]/route.tsx` resolves the page with
+ *    `source.getPage(slug.slice(0, -1))` -- the marker is the sacrificial
+ *    segment that slice discards. Its NAME does not matter to that.
+ * 2. Its DOT is what keeps this URL out of the locale rewriter. The matcher in
+ *    `apps/docs/proxy.ts` excludes any path containing a dot, so a dotted final
+ *    segment skips the proxy and reaches the route above. A marker WITHOUT a
+ *    dot is rewritten to `/en/og/docs/...`, which is not a route at all --
+ *    `app/og/` is top-level, not under `app/[lang]/`.
+ *
+ * Measured: `/og/docs/ai/agents` -> 404, `/og/docs/ai/agents/x.png` -> 200. So
+ * the marker's name is free; the presence of a dot is everything. Rename it to
+ * anything dotless -- or widen the proxy matcher on the other side -- and every
+ * `og:image` on the site 404s at once, which is worse than emitting none
+ * (crawlers fall back to scraping whatever else the page offers). Nothing
+ * fetches these URLs, so no test, type or link check would notice.
+ *
+ * `pnpm check:docs-locale-catch-all` gates the dot from here; the matcher half
+ * is commented on in `apps/docs/proxy.ts`.
+ */
 export function getPageImage(page: InferPageType<typeof source>) {
   const segments = [...page.slugs, 'image.png'];
 

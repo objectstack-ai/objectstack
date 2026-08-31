@@ -1,7 +1,6 @@
 {
   "title": "Views & Apps",
   "pages": [
-    "index",
     "apps",
     "pages",
     "react-pages",

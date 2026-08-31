@@ -1,7 +1,6 @@
 {
   "title": "Data Modeling",
   "pages": [
-    "index",
     "schema-design",
     "objects",
     "fields",
