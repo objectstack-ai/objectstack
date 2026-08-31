@@ -701,6 +701,40 @@ const CONTROL = {
     why: 'PR for #11341. Refuses by binding a negation to the verb, over a shrink-only baseline holding only the child-environment leaks that predate the gate; their repair is a card per neighbourhood, so no authority is missing.',
   },
 
+  // The sixth refusal instance, and the first to arrive because a gate's own
+  // SHRINK TESTIMONY MOVED rather than because its remedy did (#13489). Its
+  // remedy sentence is unchanged from before that card and was reachable the
+  // whole time; what changed is proximity. `anchorFor` reads the ±400 characters
+  // around every mention of a DECLARED target, and this gate's `⛔ SHRINK-ONLY`
+  // banner sits at the top of a docblock long enough to push the const's own
+  // name out of that window. A comment added elsewhere in the file named
+  // SELF_TEST_RUN_OTHERWISE and its shrink-only nature one line apart, stage 2
+  // reached the target for the first time, and a remedy that had been offering
+  // registry growth for as long as it existed became visible.
+  //
+  // ⛔ The lesson is about this detector, not about that comment: a gate whose
+  // testimony sits just outside the window is INDISTINGUISHABLE here from one
+  // with no ratchet at all, and the difference is a docblock's length. Recorded
+  // rather than engineered around — the window is a deliberate precision choice
+  // (widening it was measured and rejected), so the honest response is to know
+  // that `excluded` can mean "not reached yet".
+  //
+  // Refusal — not marking — because the ledger's own docblock already says it:
+  // "Nothing joins this list to silence a finding: a gate that really does ship
+  // an unrun self-test gets wired instead." The author-facing message had been
+  // contradicting that sentence; it now agrees with it. The legitimate row still
+  // exists and is named, as a maintainer's judgement of evidence rather than as
+  // an escape from wiring. Both refusal limbs fire on the rewritten sentence:
+  // the negation bound to the verb, and the act denied as its own subject.
+  //
+  // ⚠️ The two shapes are quoted HERE and not in the `why` below. Putting them
+  // in the string made this file read as an instance of its own convention and
+  // reddened self-test case (1) — measured, on the first attempt at this entry.
+  'check-self-test-wired.mjs': {
+    expect: 'refused',
+    why: 'PR for #13489. Refuses by both limbs at once over a shrink-only ledger — see the sentence quoted in the comment above — because wiring the self-test is the whole remedy and it is the landing author\'s. Reached for the first time when a comment elsewhere in that file put the ledger\'s name and its shrink-only nature one line apart, inside anchorFor\'s window; the remedy sentence itself is older than this card.',
+  },
+
   // The tenth, and the fourth to join as a NEW gate rather than by retrofit
   // (#13582). Marking rather than refusal, on the same reading as the seventh
   // through ninth: there IS a legitimate act here and it has an owner. The gate

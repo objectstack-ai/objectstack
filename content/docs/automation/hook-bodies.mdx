@@ -268,6 +268,8 @@ The dropped case is the dangerous one: nothing fails, the step reports success, 
 
 Only literal object names and literal payload keys are seen; a `sudo()` chain, a dynamic object name, an object this stack does not declare, and `insert`/`create` are all skipped, so the rule has no opinion on them. The flow surface has carried the same gate as `flow-update-readonly-field` since [#3425](https://github.com/objectstack-ai/objectstack/issues/3425).
 
+The table above is about a **hook** body. An **action** body is the one surface where the answer changes, so read this before you move a body from one to the other: an action body runs **elevated** — its `ctx.api` is built over the caller's envelope with `isSystem` set, which is the same trusted posture that lets an action bypass row and field permissions — and the static strip applies only to non-system callers. So `ctx.api.object('x').update({ someReadonlyField })` **lands** in an action, and there is no finding for it. Elevation does not waive the *conditional* lock, though, so that half does carry across: `action-api-update-readonly-when-field` — a **warning** — on an action body's literal `ctx.api` update to a `readonlyWhen` field ([#13770](https://github.com/objectstack-ai/objectstack/issues/13770)). Net effect when you move a body: a `readonly` write changes behaviour, a `readonlyWhen` write does not.
+
 ### Errors from `ctx.api`
 
 A rejected `ctx.api` call gives your body the host error's `name` and `message`, plus two structured properties when the host supplied them:

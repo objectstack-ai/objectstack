@@ -20,6 +20,11 @@
  * permission-set row, schema drift, or a stale row never blocks the
  * underlying `sys_member` mutation.
  *
+ * [#11670] The `organization_admin` row a grant points at is resolved PER
+ * ORGANIZATION under a walled posture — see {@link resolvePermissionSetId} for
+ * why an unscoped, name-only, process-cached resolution answered with a row
+ * nobody chose, and for the no-own-row decision that scoping forces.
+ *
  * **Why this isn't done by the better-auth org plugin directly:**
  * better-auth does not know about ObjectStack permission sets — it
  * only stores membership roles. Translating "owner/admin role on this
@@ -38,6 +43,18 @@
 
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+// [#11670] The per-organization catalog's own vocabulary — the governed
+// spelling of "which row is THIS organization's", the context a scoped
+// catalog read runs under, and the posture split that decides whether the
+// question applies at all. Same package, so this adds no dependency edge; a
+// second local spelling of that question is exactly the shape that produced the
+// defect this repair closes.
+import {
+  catalogIsPerOrganization,
+  resolveOwnOrganizationRow,
+  seedCtx,
+  SEED_ORGANIZATION_SCAN_LIMIT,
+} from './per-organization-catalog.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -115,9 +132,23 @@ function genId(prefix: string): string {
  * That was this module's only revoke channel for its whole life (#4640).
  */
 
-async function tryFind(ql: any, object: string, where: any, limit = 50, logger?: MaybeLogger): Promise<any[]> {
+async function tryFind(
+  ql: any,
+  object: string,
+  where: any,
+  limit = 50,
+  logger?: MaybeLogger,
+  /**
+   * [#11670] The execution context the read runs under. Defaults to
+   * {@link SYSTEM_CTX} — the installation-wide question every read in this
+   * module used to ask. A catalog read passes `seedCtx(organizationId)` instead,
+   * which routes it through `SqlDriver.applyTenantScope` (the governed
+   * chokepoint) rather than re-implementing a wall predicate here.
+   */
+  context: { isSystem: true; tenantId?: string } = SYSTEM_CTX,
+): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+    const rows = await ql.find(object, { where, limit }, { context });
     return Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : [];
   } catch (e) {
     // Reads legitimately fail before the tables exist (boot ordering), so this
@@ -220,32 +251,257 @@ export function autoOrgAdminGrantReason(
 }
 
 /**
- * Resolve the `sys_permission_set.id` for `organization_admin`. Cached
- * across calls per ObjectQL instance via a WeakMap so repeated
- * reconciliations do not re-query.
+ * Per-ObjectQL-instance memo for {@link resolvePermissionSetId}.
+ *
+ * [#11670] `ids` is keyed on `(organizationId, name)`, not on `name`. A cache
+ * keyed on the name alone made the first organization reconciled in a process
+ * decide the row every later organization got — the property no per-call
+ * scoping can repair, because the second organization never reaches the read.
+ *
+ * `refusalReported` keeps the no-own-row warning to once per key per instance:
+ * the backfill walks every membership pair, and a per-pair warning would bury
+ * the line it exists to surface.
  */
-const permissionSetIdCache = new WeakMap<object, Map<string, string>>();
+interface PermissionSetIdCacheEntry {
+  ids: Map<string, string>;
+  refusalReported: Set<string>;
+}
 
+const permissionSetIdCache = new WeakMap<object, PermissionSetIdCacheEntry>();
+
+/**
+ * `(organizationId, name)` as one string, spelled so no organization id can
+ * collide with a name boundary (`JSON.stringify` of the pair is injective over
+ * `[string | null, string]`; a delimiter is not).
+ */
+function permissionSetCacheKey(name: string, organizationId?: string): string {
+  return JSON.stringify([organizationId ?? null, name]);
+}
+
+/**
+ * Resolve the `sys_permission_set.id` an org-admin grant points at: THIS
+ * organization's own row under a walled posture, the installation's single row
+ * under `single`.
+ *
+ * ## [#11670] Why the read is threaded with the organization
+ *
+ * Post-#10103 the RBAC catalog is materialized PER ORGANIZATION, and
+ * `sys_permission_set.name` is unique per organization (ADR-0120 D3,
+ * `COALESCE(organization_id, '__global__')`). One name therefore carries a row
+ * per organization PLUS the organization-less platform-bucket row
+ * `bootstrapPlatformAdmin` mints on every boot — measured on a fresh walled rig
+ * as 8 rows written 1.3 s BEFORE the first `sys_organization` exists (#11532),
+ * which makes the organization-less row the OLDEST one bearing the name.
+ *
+ * This read used to be name-only, `limit: 1`, and cached on the name alone.
+ * Each looks defensible; together they answer with a row nobody chose. An
+ * unscoped `limit: 1` read has no reason to prefer any particular row, and the
+ * grant target is a FOREIGN KEY — so a walled deployment ends up with
+ * `sys_user_permission_set` rows pointing at a permission set that belongs to
+ * no organization, or to a different one. It stays invisible because
+ * `resolve-authz-context` resolves permission sets BY ID without tenant
+ * scoping, so the grant still evaluates.
+ *
+ * The repair is to ask the governed question instead: thread the organization
+ * (the read routes through `SqlDriver.applyTenantScope`, the chokepoint) and
+ * let {@link resolveOwnOrganizationRow} — "the one read that distinguishes
+ * 'this organization has its row' from 'somebody's organization-less row is
+ * visible here'" — pick the row. The cache key moves with it.
+ *
+ * Under `single` nothing is threaded, the read is the unscoped `limit: 1` it
+ * always was, and `resolveOwnOrganizationRow` returns the first row: the
+ * carve-out is byte-identical, which is what the posture-invariance pin
+ * measures.
+ *
+ * ## The no-own-row decision — a refusal, not a fallback
+ *
+ * Routing through the governed read forces an answer to: what does a walled rig
+ * do when the granting organization has no own row of that name? This returns
+ * `null` — the module's existing "not seeded yet" no-op — and never falls back
+ * to the organization-less row it can see. In order:
+ *
+ *  1. a fallback keeps MINTING grants that point at the platform bucket. The
+ *     reap of that bucket is gated on this repair precisely because a live
+ *     producer makes its census unclosable — falling back would leave the
+ *     producer producing;
+ *  2. a fallback row is never repaired afterwards. Once the organization's own
+ *     row appears, the reconciler looks for a grant carrying THAT id, finds
+ *     none, and inserts a second one — the dedup in the caller only collapses
+ *     duplicates sharing a `permission_set_id`. So a fallback manufactures
+ *     permanent duplicate grants across two set ids;
+ *  3. the state it declines to act in is one where the organization has no
+ *     catalog AT ALL — its own positions, permission sets and sharing rules are
+ *     equally missing — which the catalog seeding already warns about and
+ *     retries, on organization creation and on every boot sweep.
+ *
+ * ⚠️ The refusal is confined to the GRANT direction, and that is what keeps it
+ * from being a loosening. Revocation does not consult this resolver: it matches
+ * every copy of the name ({@link resolvePermissionSetIdsForName}), so a pair
+ * that must lose the capability still loses it in exactly this state. Both
+ * directions fail closed — nothing new is granted against a row that belongs to
+ * no organization, and nothing standing escapes a revoke.
+ *
+ * ⚠️ And it is LOUD. The organization-less row is visible to the scoped read,
+ * so an operator would otherwise see a plausible row and a missing grant at the
+ * same time with nothing connecting them. The caller returns
+ * `{ action: 'skipped', reason: 'permission_set_missing' }` — the value it
+ * already returned for the boot-ordering case, so no consumer has to learn a
+ * new one — and the next `sys_member` write and the `kernel:ready` backfill
+ * retry it.
+ *
+ * ⛔ Grants that ALREADY point at an organization-less row are not repaired
+ * here and nothing in this module claims they are: this makes new resolutions
+ * correct. Counting and repairing the existing ones is the reap card's census.
+ */
 async function resolvePermissionSetId(
   ql: any,
   name: string,
+  /**
+   * The granting organization, under a posture whose catalog is materialized
+   * per organization. `undefined` is the `single`-posture carve-out — the one
+   * deployment shape where an organization-less row IS the row — and never a
+   * fallback for "we could not work out the organization".
+   */
+  organizationId: string | undefined,
   logger?: MaybeLogger,
 ): Promise<string | null> {
   let perQl = permissionSetIdCache.get(ql);
   if (!perQl) {
-    perQl = new Map<string, string>();
+    perQl = { ids: new Map<string, string>(), refusalReported: new Set<string>() };
     permissionSetIdCache.set(ql, perQl);
   }
-  const cached = perQl.get(name);
+  const key = permissionSetCacheKey(name, organizationId);
+  const cached = perQl.ids.get(key);
   if (cached) return cached;
-  const rows = await tryFind(ql, 'sys_permission_set', { name }, 1, logger);
-  const id = rows[0]?.id;
+  // Limit 5, not 1, when scoped: a scoped read returns this organization's own
+  // rows AND organization-less ones through the driver's compatibility arm, so
+  // one row would be whichever the driver ordered first — the same spelling
+  // `seed-name-lookup.ts` and `bootstrap-declared-permissions.ts` use (#10103).
+  const rows = await tryFind(
+    ql,
+    'sys_permission_set',
+    { name },
+    organizationId ? 5 : 1,
+    logger,
+    seedCtx(organizationId),
+  );
+  const { own, organizationLessResidue } = resolveOwnOrganizationRow(rows, organizationId);
+  const id = own?.id;
   if (typeof id === 'string' && id.length > 0) {
-    perQl.set(name, id);
+    // Only an OWN row is memoized. A miss is re-asked on the next reconcile
+    // because it is a state the catalog seeding is actively repairing, and a
+    // process-lifetime cache over a transient answer is the third of the three
+    // properties this repair exists to remove.
+    perQl.ids.set(key, id);
     return id;
+  }
+  if (organizationId && organizationLessResidue && !perQl.refusalReported.has(key)) {
+    perQl.refusalReported.add(key);
+    logger?.warn?.(
+      `[security] no org-admin capability can be GRANTED for this organization: it has no own ` +
+        `${name} permission set. The organization-less row that IS visible here is deliberately not ` +
+        `used as a grant target — a grant pointing at it belongs to no organization, and under a ` +
+        `walled posture that is invalid state rather than a platform-wide default. Revocation is ` +
+        `unaffected and still matches every copy of the name, so nobody keeps a capability the ` +
+        `platform decided to take away; standing grants are otherwise left exactly as they are. ` +
+        `Remedy: seed this organization's RBAC catalog — it is created on organization creation and ` +
+        `on every boot sweep, so a missing copy means that pass failed or has not run yet, and its ` +
+        `own warning names why.`,
+      {
+        object: 'sys_permission_set',
+        name,
+        organization: organizationId,
+        organizationLessRowId: organizationLessResidue?.id ?? null,
+      },
+    );
   }
   return null;
 }
+
+/**
+ * [#11670] Rows a REVOKE is willing to hold for ONE org-admin set name under a
+ * walled posture: one per organization the catalog sweep covers, plus the
+ * organization-less platform-bucket row.
+ *
+ * A BUDGET rather than a bound — nothing caps rows-per-name, since the name is
+ * unique per organization (ADR-0120 D3). Exceeding it is therefore DETECTED and
+ * reported rather than silently truncated: a grant pointing at a row past the
+ * budget is a grant no revoke here can reach.
+ */
+const ORG_ADMIN_SET_COPY_SCAN_LIMIT = SEED_ORGANIZATION_SCAN_LIMIT + 1;
+
+/**
+ * EVERY `sys_permission_set.id` bearing `name`, across the installation.
+ *
+ * ## [#11670] Resolve NARROW to grant, WIDE to revoke
+ *
+ * The scoped resolution above answers "which row may a NEW grant point at",
+ * and it must be narrow: exactly this organization's own row. This one answers
+ * a different question — "which rows does a standing grant of that name point
+ * at" — and it must be WIDE, because the platform does not get to choose which
+ * copy an already-written foreign key names.
+ *
+ * Making the grant target narrower without widening the revoke reach is a
+ * PERMISSION LOOSENING, which is why the two ship together:
+ *
+ *  - a demoted admin whose grant was written before this repair points at the
+ *    organization-less row. A demotion matched only against this
+ *    organization's own id would not find it, and the capability the platform
+ *    just decided to take away would stay in force;
+ *  - the ADR-0105 D4 F2 close-out — a deployment that drops its wall must not
+ *    leave the unbounded `organization_admin` grant standing — converges by
+ *    revoking the SUPERSEDED variant for the pair. Across a posture flip the
+ *    standing grant and the newly-resolved id are copies from different
+ *    postures, so a narrow match converges on nothing;
+ *  - the backfill's orphan sweep asks the installation-wide question by
+ *    construction (it scans every membership and every org-admin grant), so a
+ *    single id would match no per-organization grant at all.
+ *
+ * ⛔ Wide to REVOKE only. Nothing here re-points, adopts or deletes a
+ * mis-targeted grant row belonging to someone who still qualifies — that census
+ * is the reap card's, not this one's.
+ *
+ * ## Why this one is NOT posture-keyed, when everything else here is
+ *
+ * The `single` carve-out governs the grant TARGET — under `single` the
+ * organization-less row is the row, and nothing is threaded. It cannot govern
+ * the revoke reach, because the rows a revoke has to reach were written by the
+ * OTHER posture: the F2 close-out is precisely the deployment that DROPS its
+ * wall, and every grant standing at that moment names a per-organization copy
+ * the wall-less resolution can no longer see. A revoke narrowed to `single`'s
+ * own row converges on nothing and leaves the unbounded `organization_admin`
+ * bits in force on a deployment with nothing left to bound them — F2 exactly.
+ *
+ * So the rule is uniform and easy to state: the grant target is posture-scoped,
+ * the revoke reach never is. The cost is measured and small: under `single` the
+ * revoke legs read `limit: {@link ORG_ADMIN_SET_COPY_SCAN_LIMIT}` with an `$in`
+ * where they used to read `limit: 1` with a scalar. The unscoped ANSWER — which
+ * row a `single` deployment grants — is untouched, and no read on any `single`
+ * path carries a `tenantId`.
+ */
+async function resolvePermissionSetIdsForName(
+  ql: any,
+  name: string,
+  logger?: MaybeLogger,
+): Promise<string[]> {
+  const limit = ORG_ADMIN_SET_COPY_SCAN_LIMIT;
+  const rows = await tryFind(ql, 'sys_permission_set', { name }, limit, logger);
+  if (rows.length >= limit) {
+    logger?.warn?.(
+      '[security] the org-admin permission-set scan hit its bound — a grant pointing at a row past ' +
+        'it is NOT reached by this revoke; the next boot sweep asks again',
+      { object: 'sys_permission_set', name, limit },
+    );
+  }
+  const ids: string[] = [];
+  for (const row of rows) {
+    const id = row?.id;
+    if (typeof id === 'string' && id.length > 0 && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+
 
 /**
  * Ensure (or revoke) the org-scoped `organization_admin` grant for
@@ -304,10 +560,31 @@ export async function reconcileOrgAdminGrant(
   const grantSetName = orgAdminSetNameForPosture(posture, suppressUnbounded);
   const supersededSetName = supersededOrgAdminSetName(posture, suppressUnbounded);
 
-  const permSetId = await resolvePermissionSetId(ql, grantSetName, logger);
-  if (!permSetId) {
+  // [#11670] WHICH organization's copy of the set this grant points at. The
+  // posture decides whether the question exists at all, in the catalog's own
+  // spelling: under `single` there is one organization-less row and threading
+  // an organization would ask a question that deployment shape cannot answer,
+  // so the carve-out is `undefined` — the same split `catalogIsPerOrganization`
+  // makes for the seeders, never a second local one.
+  const catalogOrganizationId = catalogIsPerOrganization(posture) ? orgId : undefined;
+
+  const permSetId = await resolvePermissionSetId(ql, grantSetName, catalogOrganizationId, logger);
+  if (!permSetId && !catalogOrganizationId) {
     // The permission set isn't seeded yet (boot ordering) — caller can retry
     // later (e.g. via kernel:ready backfill).
+    //
+    // [#11670] `single` keeps returning HERE: with one organization-less row per
+    // name, "no row" also means no standing grant can point at one, so there is
+    // nothing to revoke either and the early return is the whole answer —
+    // byte-identical to before this repair.
+    //
+    // A walled posture does NOT return here, because the two halves come apart:
+    // "this organization has no own row to point a NEW grant at" says nothing
+    // about the grants already standing for this pair. Returning here would
+    // make a demotion a no-op for exactly the rows this repair is about — a
+    // capability the platform decided to take away, left in force. So the
+    // revoke legs below run on their own ids, and the grant leg is the one that
+    // declines (see `resolvePermissionSetId`).
     return { action: 'skipped', reason: 'permission_set_missing' };
   }
 
@@ -330,12 +607,23 @@ export async function reconcileOrgAdminGrant(
   // 1b. [ADR-0105 D4] Revoke the OTHER variant for this pair, always. A posture
   //     change (or a downgrade after F2) must converge on exactly one org-admin
   //     grant; leaving the superseded row would keep the old bits in force.
-  const supersededSetId = await resolvePermissionSetId(ql, supersededSetName, logger);
-  if (supersededSetId) {
+  //
+  // [#11670] Matched against EVERY copy of the superseded name, not just this
+  // organization's own. The standing grant this leg exists to remove was
+  // written under the OTHER posture (or before this repair), so it points at
+  // whichever copy that posture resolved — a narrow match would converge on
+  // nothing and leave the superseded bits in force, which is the F2 outcome
+  // this leg is the close-out for.
+  const supersededSetIds = await resolvePermissionSetIdsForName(ql, supersededSetName, logger);
+  if (supersededSetIds.length > 0) {
     const stale = await tryFind(
       ql,
       'sys_user_permission_set',
-      { user_id: userId, organization_id: orgId, permission_set_id: supersededSetId },
+      {
+        user_id: userId,
+        organization_id: orgId,
+        permission_set_id: { $in: supersededSetIds },
+      },
       5,
       logger,
     );
@@ -352,15 +640,31 @@ export async function reconcileOrgAdminGrant(
   }
 
   // 2. Look at existing grants for this exact pair.
-  const existingGrants = await tryFind(
-    ql,
-    'sys_user_permission_set',
-    { user_id: userId, organization_id: orgId, permission_set_id: permSetId },
-    5,
-    logger,
-  );
-
+  //
+  // [#11670] The two branches ask DIFFERENT questions of the same table, and
+  // the read moved inside them because of it. Granting asks "does a grant
+  // already point at the row I would create" — narrow, this organization's own
+  // id. Revoking asks "does this pair hold ANY grant of that name" — wide,
+  // every copy. Under `single` both spell the same scalar predicate against the
+  // same single id, in the same position, so the carve-out issues exactly the
+  // reads it issued before.
   if (shouldGrant) {
+    if (!permSetId) {
+      // Walled only (the `single` early return above already fired). The
+      // organization has no own row to point a NEW grant at, and the
+      // organization-less row that IS visible is deliberately not a grant
+      // target — `resolvePermissionSetId` has already said so loudly. Nothing
+      // is granted; the superseded leg above still ran, so nothing that should
+      // lose the capability keeps it.
+      return { action: 'skipped', reason: 'permission_set_missing' };
+    }
+    const existingGrants = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { user_id: userId, organization_id: orgId, permission_set_id: permSetId },
+      5,
+      logger,
+    );
     if (existingGrants.length > 0) {
       // Deduplicate stale duplicates if any slipped through.
       for (const extra of existingGrants.slice(1)) {
@@ -400,6 +704,27 @@ export async function reconcileOrgAdminGrant(
   }
 
   // shouldGrant === false → revoke any pre-existing scoped grant.
+  //
+  // [#11670] Every copy of the granted name, not just this organization's own:
+  // a grant written before this repair points at the organization-less row, and
+  // a demotion that could not see it would leave the capability in force. ⛔ It
+  // revokes; it never re-points or adopts a row for someone who still
+  // qualifies.
+  const revocableSetIds = await resolvePermissionSetIdsForName(ql, grantSetName, logger);
+  const existingGrants =
+    revocableSetIds.length > 0
+      ? await tryFind(
+          ql,
+          'sys_user_permission_set',
+          {
+            user_id: userId,
+            organization_id: orgId,
+            permission_set_id: { $in: revocableSetIds },
+          },
+          5,
+          logger,
+        )
+      : [];
   if (existingGrants.length === 0) {
     return { action: 'noop' };
   }
@@ -454,19 +779,26 @@ export async function backfillOrgAdminGrants(
   const summary = { scanned: 0, granted: 0, revoked: 0, skipped: 0 };
   if (!ql || typeof ql.find !== 'function') return summary;
 
-  const permSetId = await resolvePermissionSetId(
+  // [#11670] The sweep is installation-wide by construction — it scans every
+  // `sys_member` row and every org-admin grant, across organizations — so its
+  // set ids are resolved installation-wide too, one per organization holding a
+  // copy. The PER-PAIR answer is not taken from here: `reconcileOrgAdminGrant`
+  // resolves its own organization's row below, which is the scoping this repair
+  // is about. The gate is unchanged: no row anywhere for the GRANTED name means
+  // the catalog has not been seeded at all yet.
+  const permSetIds = await resolvePermissionSetIdsForName(
     ql,
     orgAdminSetNameForPosture(posture, suppressUnbounded),
     logger,
   );
-  if (!permSetId) {
+  if (permSetIds.length === 0) {
     logger?.debug?.('[security] org-admin backfill skipped — permission set missing');
     return summary;
   }
   // [ADR-0105 D4] The orphan sweep below must see BOTH variants: a boot that
   // changed posture leaves grants of the superseded set behind, and those are
   // exactly the rows whose bits must stop applying.
-  const supersededId = await resolvePermissionSetId(
+  const supersededIds = await resolvePermissionSetIdsForName(
     ql,
     supersededOrgAdminSetName(posture, suppressUnbounded),
     logger,
@@ -497,7 +829,7 @@ export async function backfillOrgAdminGrants(
   // Also revoke any organization_admin grant pointing at a (user, org)
   // pair with NO membership row left (orphaned grants from deletes
   // that fired before this hook existed).
-  const grantSetIds = [permSetId, supersededId].filter(Boolean) as string[];
+  const grantSetIds = [...permSetIds, ...supersededIds];
   const allGrants = await tryFind(
     ql,
     'sys_user_permission_set',
