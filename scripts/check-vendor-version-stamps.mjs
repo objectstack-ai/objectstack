@@ -54,10 +54,13 @@
 //     named version. Editing the version without redoing the measurement
 //     produces a claim nobody ever made. A stale stamp tells the truth about
 //     when it was checked; a restamped-but-unmeasured one lies about it.
-//   - Measured on the #13940 corpus: 20 of the 95 stamps are anchored historical
-//     facts of the `[#11374] Bound from better-auth 1.7.1's own MySQL schema`
-//     shape. Forcing those to the pin would fabricate 20 measurements.
-//   - One of the 95 is not an attestation at all. It is SELF-TEST FIXTURE DATA
+//   - Measured on the #13940 corpus, 2026-08-31: of 249 stamp sites this gate
+//     sees, 130 name a version other than the resolved one and 116 of those are
+//     anchored historical facts of the `[#11374] Bound from better-auth 1.7.1's
+//     own MySQL schema` shape — true when written, true now, true after 1.9.0.
+//     Forcing them to the pin would fabricate that many measurements. (Those
+//     figures are a dated reading, not a live one: run `--census` for today's.)
+//   - Some sites are not attestations at all. It is SELF-TEST FIXTURE DATA
 //     inside `check-prerelease-pin-watch.mjs` — a synthetic npm registry payload
 //     whose `1.7.1` is an arbitrary input proving the watcher notices a stable
 //     release. A pin-equality sweep would corrupt a gate's own test input.
