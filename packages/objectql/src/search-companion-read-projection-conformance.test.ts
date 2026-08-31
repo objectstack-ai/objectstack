@@ -237,11 +237,26 @@ async function makeEngine(declared: boolean): Promise<Harness> {
   return { engine, store };
 }
 
-/** The `plugin-pinyin-search` write hook, in miniature. */
+/**
+ * The `plugin-pinyin-search` write hook, in miniature.
+ *
+ * [#13657] Carries `stampCompanion`'s DECLARATION GUARD
+ * (`companion-projection.ts`: `if (!schema?.fields?.[SEARCH_COMPANION_FIELD])
+ * return;`). It was missing here, which made this double LOOSER than the hook
+ * it stands in for — the #4550 failure shape one layer down: in the
+ * `declared: false` arm it stamped a column the real hook returns early on, so
+ * the arm exercised a write that cannot happen in shipped code. (In that arm
+ * the real plugin does not bind these hooks at all: the column is undeclared
+ * because pinyin is OFF.) The arm's subject is unchanged — the stored row
+ * still carries the blob, seeded directly by the fixture, and every door must
+ * still project it away.
+ */
 function bindCompanionStamp(engine: ObjectQL): void {
-  const stamp = (ctx: { input?: { data?: unknown } }): void => {
+  const stamp = (ctx: { object?: string; input?: { data?: unknown } }): void => {
     const data = ctx?.input?.data;
     if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    const schema: any = ctx?.object ? engine.registry.getObject(ctx.object) : undefined;
+    if (!schema?.fields?.[SEARCH_COMPANION_FIELD]) return;
     const row = data as Row;
     if (!('name' in row)) return;
     row[SEARCH_COMPANION_FIELD] = BLOB;
