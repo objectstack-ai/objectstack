@@ -660,20 +660,35 @@ describe('[#13608] publicSharing.eligibility is enforced again at REDEMPTION', (
   describe('the refusal is the answer revoked / expired / unknown already give', () => {
     it('at the service seam it is `null` — the identical value, not a lookalike', async () => {
       const { driver, service } = await boot();
+
+      // ⚠️ The record-gone arm gets its OWN record. Deleting the reclassified
+      // one would satisfy this case through the #5190 probe instead, and the
+      // reclassification assertion would then pass with the whole eligibility
+      // gate ablated — measured, on the first run of this ablation.
+      await driver.create('article', {
+        id: 'a_second',
+        title: 'Another published + public',
+        status: 'published',
+        audience: 'public',
+        owner_id: 'u1',
+      });
+
       const live = await mintOn(service);
       const revoked = await mintOn(service);
       const expired = await mintOn(service);
-      const gone = await mintOn(service, 'a_ok');
+      const gone = await mintOn(service, 'a_second');
 
       await service.revokeLink(revoked.token, { isSystem: true } as any);
       await driver.update('sys_share_link', expired.id, {
         expires_at: new Date(Date.now() - 60_000).toISOString(),
       });
 
-      // The reclassification, applied after every token above was minted.
+      // The reclassification, applied after every token above was minted. The
+      // record STAYS in the table — it is ineligible, not gone.
       await driver.update('article', 'a_ok', { audience: 'internal' });
-      // …and one record removed outright, for the #5190 arm of the same door.
-      await driver.delete('article', 'a_ok');
+      // …and the other record is removed outright, for the #5190 arm of the
+      // same door.
+      await driver.delete('article', 'a_second');
 
       const answers = {
         reclassified: await service.resolveToken(live.token, {}),
