@@ -17,18 +17,17 @@ subset the engine actually executes.
    manual keyset pagination (`where` on the sort key + `orderBy` + `limit`);
    fail if the answer uses the removed `cursor` property.
 4. **Aggregation correctness** — "Count deals by region and show total
-   revenue." Expect `groupBy` + `count`/`sum` with aliases; on SQL targets
-   the answer must stay within `count`/`sum`/`avg`/`min`/`max`.
-5. **The FILTER-WHERE trap** — "One call: total orders and count of orders
-   over $1000." The correct answer is **two** aggregate calls with the
-   condition in `where`; fail if the answer puts `filter` on an aggregation
-   (silently returns the unfiltered number).
+   revenue." Expect `groupBy` + `count`/`sum` with aliases; fail on a missing
+   `alias`, or on `array_agg`/`string_agg` (removed in protocol 17).
+5. **Filtered aggregation** — "One call: total orders and count of orders
+   over $1000." Expect one call with a per-aggregation `filter` on the
+   conditional measure; fail on `where`, which scopes every measure.
 6. **Post-aggregation filtering** — "Customers with more than 5 orders."
-   Expect aggregate + app-code filter of the group rows; fail on `having`
-   (schema-reserved, silently dropped).
+   Expect `having` on the aggregation alias; fail on `where`, which filters
+   input rows before the alias exists.
 7. **Date-bucketed time series** — "Monthly revenue for the last year."
    Expect structured `groupBy` with `dateGranularity: 'month'`, not
-   client-side bucketing and not window functions (schema-reserved).
+   client-side bucketing and not `windowFunctions` (removed in protocol 17).
 8. **Expand vs direct query** — "Show a task list with assignee names; page
    through one project's tasks." Expect `expand` for the lookup display and
    a direct query on the related object for pagination (nested

@@ -99,23 +99,20 @@ where: {
 
 ## Field References
 
-> ⚠️ **`$field` is schema-reserved — NOT executed by the engine yet.** It
-> exists only in the filter schema; no engine or driver code interprets it,
-> so the `{ $field: '...' }` object binds as a **literal value** and the
-> query silently returns zero rows.
+> ✅ **Enforced.** `{ $field: '...' }` compares two columns of the same row.
+> The in-memory evaluator resolves the reference against the record; the SQL
+> driver pushes it down as a column-to-column predicate. Same rows either way.
 
 ```typescript
-// ❌ Schema-valid but NOT executed — matches nothing
+// ✅ Projects that ran over budget
 where: {
   actual_cost: { $gt: { $field: 'budget' } }
 }
 ```
 
-**Working alternatives:**
-- Define a **formula field** that computes the cross-field comparison
-  (e.g. a boolean `over_budget`), then filter on it:
-  `where: { over_budget: true }` (see **objectstack-data**).
-- Fetch both fields and compare in **application code**.
+Legal in a **comparison** position only. As an `$in` / `$nin` member or a
+`$between` endpoint it is refused at parse — no evaluation path resolves a
+reference there.
 
 ## Nested Relation Filters
 
@@ -188,15 +185,16 @@ where: {
 }
 ```
 
-### ❌ Wrong: Null check with equality
+### ⚠️ Prefer `$null` to a bare `null` comparand
 
 ```typescript
-// ❌ Don't use equality to check for null
+// ⚠️ Works — a bare null lowers to IS NULL on both paths — but it reads
+//    as "equals null" and has no IS NOT NULL spelling
 where: {
   deleted_at: null
 }
 
-// ✅ Use $null operator
+// ✅ Explicit, and `$null: false` is IS NOT NULL
 where: {
   deleted_at: { $null: true }
 }
