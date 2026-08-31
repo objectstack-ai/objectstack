@@ -8,7 +8,7 @@ flows, approval chains, triggers, and scheduled sweeps.
 
 | Eval | Covers |
 |:-----|:-------|
-| [approvals/test-revise-loop.md](./approvals/test-revise-loop.md) | ADR-0044 send-back-for-revision: the `revise` branch, the signal `wait` node, and the resubmit edge declared `type: 'back'` |
+| [approvals/test-revise-loop.md](./approvals/test-revise-loop.md) | ADR-0044 send-back-for-revision: the `revise` branch, the `approval_revise` window, and the resubmit edge `type: 'back'` |
 
 ## Planned structure
 
