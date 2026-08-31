@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import { keysetWalk } from '@objectstack/types';
+import { createWallOrganizationResolver } from './backfill-sys-file-organizations.js';
 
 /**
  * Legacy file-value backfill (ADR-0104 D3 wave 2).
@@ -156,12 +157,21 @@ function urlOf(value: unknown): string | null {
   return null;
 }
 
-/** Upload a `data:` URI's bytes and register the `sys_file` row. */
+/**
+ * Upload a `data:` URI's bytes and register the `sys_file` row.
+ *
+ * `organizationId` is the organization of the RECORD whose field held these
+ * bytes, threaded as an execution context so the platform's insert-side
+ * chokepoint stamps `sys_file.organization_id` (#13547). See
+ * {@link backfillFileReferences} for why the subject record is the right — and
+ * the only honest — source for it.
+ */
 async function materializeDataUri(
   engine: BackfillEngine,
   storage: IStorageService,
   dataUri: string,
   legacy: unknown,
+  organizationId: string | null,
 ): Promise<string> {
   const m = DATA_URI_RE.exec(dataUri);
   if (!m) throw new Error('not a data: URI');
@@ -196,13 +206,47 @@ async function materializeDataUri(
       created_at: now,
       updated_at: now,
     },
-    { context: { ...SYSTEM_CTX } },
+    {
+      context:
+        organizationId != null
+          ? { ...SYSTEM_CTX, tenantId: organizationId }
+          : { ...SYSTEM_CTX },
+    },
   );
   return newId;
 }
 
 /**
  * Scan legacy file values and convert what can be converted.
+ *
+ * ## The organization a materialised `sys_file` is stamped with (#13547)
+ *
+ * This pass INSERTS `sys_file` rows — one per inline `data:` URI it
+ * materialises — and did so carrying `isSystem` and no organization, so every
+ * one of them landed `organization_id = NULL` on a tenancy-enabled object.
+ * That is the same defect as the `copyOwnedFile` door, arriving through an
+ * operator pass instead of a lifecycle hook.
+ *
+ * ⭐ It does NOT need an operator-supplied organization, and must not take
+ * one. `materializeDataUri` is reached only because a SPECIFIC record's field
+ * held those bytes, and the file it creates is claimed moments later — by the
+ * rewrite below and the claim hooks it wakes — for that same record's slot. So
+ * the record being converted already names the answer, and it is the answer
+ * the `sys_file` organization sweep would independently derive from the file's
+ * field-reference holder. The two agree by construction rather than by
+ * coincidence.
+ *
+ * ⛔ A single operator-supplied value would be WRONG for most rows: one run
+ * spans every object and every organization in the deployment, so any one
+ * organization it was handed would be stamped onto other tenants' files. ⚠️ A
+ * backfill that stamps the wrong organization is worse than one that stamps
+ * NULL — a NULL row stays reachable, while a mis-stamped row is walled into
+ * somebody else's tenant. Hence: derive per record, or stamp nothing.
+ *
+ * A record whose own organization column is NULL (a legacy row, or an unwalled
+ * object) yields nothing to thread and the new file stays unstamped, exactly
+ * as it did before. ⛔ Nothing here backfills the organization of any EXISTING
+ * `sys_file` row; forward-stamping only.
  *
  * @param getStorage resolves the storage service; when absent, `data:` values
  *   cannot be materialised and are reported `unresolvable` rather than failing
@@ -227,15 +271,35 @@ export async function backfillFileReferences(
     (name) => name !== 'sys_file' && fileFieldsOf(engine, name).length > 0,
   );
 
+  // [#13547] "Which column is THIS object walled by?", asked of the registered
+  // schema rather than hard-coded to `organization_id` — the same resolver the
+  // `sys_file` organization sweep uses, so a subject declaring
+  // `tenancy.tenantField` is read by the column it is actually walled by and
+  // this pass cannot drift from that one. `getSchema` is the resolver's
+  // spelling of the lookup this module already does as `getObject`.
+  const wall = createWallOrganizationResolver({
+    find: (object, options) => engine.find(object, (options ?? {}) as Record<string, unknown>),
+    update: (object, data, options) =>
+      engine.update(object, data as Record<string, unknown>, (options ?? {}) as Record<string, unknown>),
+    getSchema: (object: string) => engine.getObject(object),
+  });
+
   for (const object of scannedObjects) {
     const fileFields = fileFieldsOf(engine, object);
+    // Projected only when the subject really carries it: naming a column the
+    // object does not have would fail the scan for every row, and the whole
+    // pass with it.
+    const organizationField = wall.organizationFieldFor(object);
+    const scanFields = organizationField
+      ? ['id', ...fileFields, organizationField]
+      : ['id', ...fileFields];
     // Seek by `id` (#4363). This walk WRITES to the rows it is reading — the
     // rewrite below updates each record in place — and an offset counts into a
     // set the writes are changing underneath it, so rows slide past the cursor
     // and are never converted. The key does not move when a row is updated, so
     // the seek is not affected by the very thing this function does.
     const walk = keysetWalk<Record<string, unknown>>(
-      (q) => engine.find(object, { ...q, fields: ['id', ...fileFields], context: { ...SYSTEM_CTX } }),
+      (q) => engine.find(object, { ...q, fields: scanFields, context: { ...SYSTEM_CTX } }),
       { pageSize: SCAN_PAGE_SIZE, max: maxPerObject },
     );
 
@@ -245,6 +309,11 @@ export async function backfillFileReferences(
         const recordId = record?.id;
         if (recordId == null) continue;
         scannedRecords++;
+        // The organization of the record that HOLDS these bytes. Null on an
+        // unwalled object, and on a legacy row that itself carries none — in
+        // which case the new file stays unstamped rather than being invented
+        // into a tenant.
+        const recordOrganization = wall.organizationOf(object, record);
 
         for (const field of fileFields) {
           const raw = record[field];
@@ -319,7 +388,7 @@ export async function backfillFileReferences(
                 continue;
               }
               try {
-                const newId = await materializeDataUri(engine, storage, url, value);
+                const newId = await materializeDataUri(engine, storage, url, value, recordOrganization);
                 actions.push({
                   ...record_,
                   kind: 'uploaded_inline_data',

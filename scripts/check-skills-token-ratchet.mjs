@@ -263,9 +263,14 @@ export const CEILINGS = new Map([
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
   ['skills/objectstack-platform/SKILL.md', 12705], //   -11 (was 12716)
-  // Unchanged: this skill's only id-shaped tokens are a CLI usage line and a
-  // JSON shape example. The one edit there (`#457` -> `#<n>`) is byte-neutral.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 14239],
+  // 14239 -> 14391: the pull-directed split-resolution order joined the decision
+  // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
+  // accepting the four-rule set), and this file carries TWO enforced frame copies
+  // (check:skill-frame-sync COPIES), so the rule ships to third-party installers
+  // with the frame it amends — the #5130 drift is exactly a frame-semantics change
+  // that skipped this mirror. +152 tokens across both copies, compressed to the
+  // minimal anchor form; the raising PR's body carries the arithmetic.
+  ['skills/objectstack-pm-dispatch/SKILL.md', 14391],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   ['skills/objectstack-ui/SKILL.md', 25125], //         -29 (was 25154)
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
@@ -713,8 +718,11 @@ function selfTest() {
     // ⚠️ Scoped to the SKILL.md rows since #12392 widened the map: summing ALL
     // ceilings would compare this re-measure's subtotal against a total that
     // now includes 27 rows it never touched, which is a different claim.
+    // 117943 -> 118095: shifted by exactly the +152 ruling-authorized raise on
+    // the pm-dispatch row (2026-08-27 「tong y 4」, see that row), so the strip's
+    // lowering claim keeps its original slack instead of being silently eaten.
     ['the re-measure lowered the SKILL.md subtotal',
-      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 117943, true],
+      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 118095, true],
 
     // ── the #12392 extension basis ───────────────────────────────────────
     // Same reasoning as the pins above: the gate never reads this sha, so it

@@ -66,19 +66,105 @@ export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
 });
 
 /**
- * Does this filter consist solely of an empty membership (`{ field: { $in: [] } }`)?
- * Used to preserve the legacy "empty pre-resolved set drops the policy" semantics
- * so the single-policy path fails closed via the deny sentinel rather than an
- * always-false `$in: []`.
+ * Is this field constraint an emptied membership, and what CONSTANT does it
+ * evaluate to? `{ $in: [] }` is constant FALSE on every backend ("IN ()
+ * matches nothing"); `{ $nin: [] }` is constant TRUE ("NOT IN () excludes
+ * nothing"). Returns that constant, or `null` when the spec is not an emptied
+ * membership. The CEL pushdown compiler only ever emits `$in` (negation wraps
+ * in `$not` — cel-to-filter.ts), but this guard's contract is over the
+ * FilterCondition shape, so the intrinsically-negated `$nin` spelling is
+ * recognised too rather than left to fail open should a future lowering emit it.
  */
-function isEmptyMembershipFilter(filter: Record<string, unknown>): boolean {
-  const keys = Object.keys(filter);
-  if (keys.length !== 1) return false;
-  const inner = filter[keys[0]];
-  if (!inner || typeof inner !== 'object') return false;
-  const innerKeys = Object.keys(inner as Record<string, unknown>);
-  return innerKeys.length === 1 && Array.isArray((inner as Record<string, unknown>).$in)
-    && ((inner as Record<string, unknown>).$in as unknown[]).length === 0;
+function emptyMembershipConstantTruth(spec: unknown): boolean | null {
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return null;
+  const rec = spec as Record<string, unknown>;
+  if (Object.keys(rec).length !== 1) return null;
+  if (Array.isArray(rec.$in) && (rec.$in as unknown[]).length === 0) return false;
+  if (Array.isArray(rec.$nin) && (rec.$nin as unknown[]).length === 0) return true;
+  return null;
+}
+
+/**
+ * Does this compiled filter LEAN ON an emptied membership in a way that must
+ * drop the policy (→ the deny sentinel upstream)? Preserves the legacy "empty
+ * pre-resolved set drops the policy" semantics so the single-policy path fails
+ * closed via the deny sentinel rather than an always-false `$in: []`.
+ *
+ * [#13552] POLARITY-AWARE. "An emptied membership is safe because `$in: []`
+ * matches nothing" is a polarity-DEPENDENT claim, and the pushdown subset
+ * contains negation (`not in` is first-class: `!(x in y)` → `$not` wrapping
+ * `$in`). The pre-#13552 guard shape-matched the bare positive form only, so
+ * `{ $not: { f: { $in: [] } } }` — constant TRUE for every row — flowed
+ * through and compiled to ALLOW-ALL on the read scope. Two rules now hold:
+ *
+ * 1. An emptied membership whose EFFECTIVE polarity is inverted (odd number of
+ *    enclosing `$not`s for `$in: []`; zero/even for `$nin: []`) is a
+ *    constant-TRUE clause. Anywhere in the tree — wrapping directly, as an arm
+ *    of `$or`/`$and` (nested to any depth), inside a multi-key implicit AND,
+ *    or under multi-level `$not` — it means the membership restriction the
+ *    author wrote has evaporated: as an `$or` arm the whole filter is
+ *    allow-all; as an `$and` arm the restriction silently vanishes. Either way
+ *    the policy is degenerate → drop it (fail closed), exactly as the emptied
+ *    POSITIVE single-policy case already does.
+ * 2. The legacy positive case, generalised through double negation: a filter
+ *    that consists solely of an emptied `$in` membership under an even
+ *    (incl. zero) number of `$not` wrappers is constant FALSE as a whole —
+ *    prefer the deny sentinel over an always-false filter (same zero rows,
+ *    one recognisable shape).
+ *
+ * What deliberately does NOT fire, in both cases matching pre-#13552
+ * behaviour: a NON-empty membership under `$not` (the working `not in`
+ * feature), and an emptied POSITIVE membership nested in a composite — as an
+ * `$or` arm it is inert (`owner in <empty> || owner == me` must keep granting
+ * own rows), as an `$and` arm the filter is already constant FALSE (denies by
+ * itself). A deliberate allow-all stays authorable as literal `true` (compiles
+ * to `{}`), which never involves a membership set.
+ */
+export function isEmptyMembershipFilter(filter: Record<string, unknown>): boolean {
+  // (Exported for direct shape tests — rls-empty-membership-polarity.test.ts;
+  // not part of the package surface: index.ts deliberately does not re-export it.)
+  return containsTautologicalEmptyMembership(filter, false) || isSolelyEmptyMembership(filter);
+}
+
+/** Rule 1 above: an emptied membership that is constant TRUE in effective polarity. */
+function containsTautologicalEmptyMembership(node: unknown, negated: boolean): boolean {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+  const rec = node as Record<string, unknown>;
+  // A BARE operator object (an emptied membership with no field key) is not a
+  // shape the CEL lowering emits, but the evaluator answers it fail-closed
+  // (constant FALSE — unknown top-level operator), which a wrapping `$not`
+  // inverts to constant TRUE. The pre-#13552 guard already fired on
+  // `{ $not: { $in: [] } }`; never be weaker than the predecessor on any shape.
+  if (emptyMembershipConstantTruth(rec) !== null) return negated;
+  for (const [key, value] of Object.entries(rec)) {
+    if (key === '$not') {
+      if (containsTautologicalEmptyMembership(value, !negated)) return true;
+    } else if (key === '$and' || key === '$or') {
+      if (Array.isArray(value) && value.some((arm) => containsTautologicalEmptyMembership(arm, negated))) return true;
+    } else if (!key.startsWith('$')) {
+      const truth = emptyMembershipConstantTruth(value);
+      if (truth !== null && (negated ? !truth : truth)) return true;
+    }
+  }
+  return false;
+}
+
+/** Rule 2 above: solely an emptied `$in` membership under even (incl. zero) `$not`s. */
+function isSolelyEmptyMembership(filter: Record<string, unknown>): boolean {
+  let node: Record<string, unknown> = filter;
+  let negations = 0;
+  for (;;) {
+    const keys = Object.keys(node);
+    if (keys.length !== 1 || keys[0] !== '$not') break;
+    const inner = node.$not;
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return false;
+    node = inner as Record<string, unknown>;
+    negations++;
+  }
+  if (negations % 2 !== 0) return false; // odd polarity → rule 1's walk owns it
+  const keys = Object.keys(node);
+  if (keys.length !== 1 || keys[0].startsWith('$')) return false;
+  return emptyMembershipConstantTruth(node[keys[0]]) === false;
 }
 
 /**
@@ -228,7 +314,10 @@ export class RLSCompiler {
    *   - an unresolved/absent `current_user.*` variable → `null` → fail closed
    *     (the "no active organization" path);
    *   - an empty pre-resolved membership set → `null` so the single-policy case
-   *     yields the deny sentinel upstream rather than a permissive `$in: []`.
+   *     yields the deny sentinel upstream rather than a permissive `$in: []` —
+   *     in EITHER polarity ([#13552]): under a supported `not in` the emptied
+   *     set would otherwise compile to a constant-TRUE `$not`/`$in: []` clause,
+   *     i.e. allow-all, the exact fail-open this guard exists to prevent.
    */
   compileExpression(
     expression: string,
@@ -255,7 +344,10 @@ export class RLSCompiler {
     // Parity: an empty pre-resolved membership (`field in current_user.<empty>`)
     // compiles to `{ field: { $in: [] } }`. The legacy compiler dropped the
     // policy in this case; preserve that so the deny sentinel (not a literal
-    // empty-IN) is what the single-policy path returns.
+    // empty-IN) is what the single-policy path returns. [#13552] The guard is
+    // polarity-aware: the same emptied set under a supported `not in`
+    // (`$not` wrapping, at any composition depth) is dropped too — otherwise
+    // it inverts to a constant-TRUE clause and the policy compiles ALLOW-ALL.
     if (isEmptyMembershipFilter(result.filter as Record<string, unknown>)) return null;
     return result.filter as Record<string, unknown>;
   }
