@@ -8811,6 +8811,128 @@ function selfTest() {
     "const REAL = 'packages/ddd/src';",
   ].join('\n');
   t('a self-test declaration inside a comment anchors nothing', extractWatchHints(declInComment).includes('packages/ddd/src'));
+
+  // ── The helpers the self-test CALLS ──────────────────────────────────────
+  //
+  // `SELF_TEST_DECL` finds the ENTRY POINT by name, and a fixture builder is
+  // named for what it builds, so its body used to survive the mask whole.
+  // Measured specimen, live on this tree:
+  // `scripts/pm/release-rehearsal-clone.mjs` commits a fixture `.changeset`
+  // tree inside `makeSource`, and its two entries were read as paths that gate
+  // OPENS — the residue printed "the tree stops at .changeset; the layout moved
+  // under it" for them, a directory rename that never happened.
+  //
+  // The safety half is pinned beside it: a helper the module body can also
+  // reach is a path the gate really reads, and must survive.
+  const helperFixtures = [
+    "const REAL = 'packages/runtime/src';",
+    'function makeFixture(root) {',
+    "  write(root, 'packages/fixture-only/one.ts');",
+    '}',
+    'function shared() {',
+    "  return 'packages/shared/src';",
+    '}',
+    'function unreferenced() {',
+    "  return 'packages/dead/src';",
+    '}',
+    'export function alsoExported() {',
+    "  return 'packages/exported/src';",
+    '}',
+    'function selfTest() {',
+    '  makeFixture(tmp);',
+    '  shared();',
+    '  alsoExported();',
+    '}',
+    'function run() {',
+    '  return shared();',
+    '}',
+    'run();',
+  ].join('\n');
+  const helperHints = extractWatchHints(helperFixtures);
+  t(
+    'a fixture literal in a helper only the self-test calls is not a hint',
+    !helperHints.includes('packages/fixture-only/one.ts'),
+  );
+  t('…but a helper the module body also reaches keeps its literal', helperHints.includes('packages/shared/src'));
+  t('…and a declaration nothing references at all is left alone', helperHints.includes('packages/dead/src'));
+  t('…and an exported helper is reachable from outside this file, so it stays', helperHints.includes('packages/exported/src'));
+  t('the module body around them still hints', helperHints.includes('packages/runtime/src'));
+
+  // Transitive, and through a signature that carries braces. Counting the
+  // SIGNATURE's braces closes the body before it opens — the mask then covers
+  // 29 characters and reports success, which is how
+  // `function makeSource(root, name, { branch = 'main', … } = {})` reads.
+  const transitiveHelpers = [
+    'function writeOne(root, rel) {',
+    "  return rel === 'packages/leaf/fixture.ts';",
+    '}',
+    'function buildTree(root, { depth = 0 } = {}) {',
+    "  writeOne(root, 'packages/branch/fixture.ts');",
+    '}',
+    'function selfTest() {',
+    '  buildTree(root);',
+    '}',
+  ].join('\n');
+  const transitiveHints = extractWatchHints(transitiveHelpers);
+  t('a helper reached only THROUGH another helper is masked too', !transitiveHints.includes('packages/leaf/fixture.ts'));
+  t(
+    'a destructured default in the signature does not end the body early',
+    !transitiveHints.includes('packages/branch/fixture.ts'),
+  );
+
+  // A population DECLARED for this very scanner is referenced by no executing
+  // code — being unreferenced is what such a declaration IS. Extending the mask
+  // to value declarations was implemented and REFUSED on this evidence: over
+  // the 204 scripts this derivation scans it took 175 hints from 36 files
+  // instead of 104 from 9, and the 71 extra were the declared populations of
+  // eight gates (`ROOT_DIR_WATCH_HINTS` and its spellings).
+  const declaredPopulation = [
+    "const ROOT_DIR_WATCH_HINTS = ['packages/drivers/**'];",
+    'function selfTest() {',
+    '  return ROOT_DIR_WATCH_HINTS;',
+    '}',
+  ].join('\n');
+  t(
+    'a declaration constant only the self-test names is still a declaration',
+    extractWatchHints(declaredPopulation).includes('packages/drivers/**'),
+  );
+
+  // `${…}` is CODE, and reading it as string text is not academic: the live
+  // specimen names its own path only from inside template literals, so a scan
+  // blind to interpolations finds that constant unreferenced and masks the one
+  // hint the file really declares.
+  const interpolatedReference = [
+    'function banner() {',
+    "  return 'scripts/pm/thing.mjs';",
+    '}',
+    'function usage() {',
+    '  return `node ${banner()} --help`;',
+    '}',
+    'function selfTest() {',
+    '  banner();',
+    '}',
+    'usage();',
+  ].join('\n');
+  t(
+    'a reference from inside a template interpolation keeps a helper alive',
+    extractWatchHints(interpolatedReference).includes('scripts/pm/thing.mjs'),
+  );
+
+  // The specimen itself, on the live tree rather than in a fixture — both
+  // directions, so a future edit that deletes the file or empties its
+  // declaration cannot leave this green by vacuity.
+  const rehearsalPath = 'scripts/pm/release-rehearsal-clone.mjs';
+  const rehearsalAbs = join(ROOT, rehearsalPath);
+  t('the fixture-in-helper specimen is still on the tree', existsSync(rehearsalAbs));
+  if (existsSync(rehearsalAbs)) {
+    const rehearsalHints = extractWatchHints(readFileSync(rehearsalAbs, 'utf8'), rehearsalPath);
+    t(
+      'the fixture changesets it commits are not hints',
+      !rehearsalHints.some((h) => /^\.changeset\/(one|two)\.md$/.test(h)),
+    );
+    t('…while the population it really declares survives', rehearsalHints.includes('.changeset/*.md'));
+    t('…and so does its own path', rehearsalHints.includes(rehearsalPath));
+  }
   // Module-relative spellings: `new URL('../../x', import.meta.url)` is how
   // these scripts name a repo path, and the leading segments are the script's
   // own depth, not part of what it watches.
