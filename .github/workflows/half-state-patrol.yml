@@ -13,12 +13,36 @@ name: Half-State Patrol
 # counterfactual, and an alarm added to a script nobody runs is still silence.
 #
 # "Some seat should run it" also kept not happening for a MEASURED reason, not a
-# discipline one: the live sweep cannot run inside a PM session container at all
-# (#7412 class 1 — api.github.com refuses that egress in both directions, with and
-# without a token). The fix therefore had to move the caller somewhere the
-# transport prerequisite is actually met. A GitHub Actions runner with the
-# workflow's own `GITHUB_TOKEN` is that place — #7412 class 2, the triage Routine
-# container, is the same shape and measured reachable with 15,000 core quota.
+# discipline one: in every container class measured at the time, the live sweep
+# could not run at all (#7412 class 1 — api.github.com refuses that egress in
+# both directions, with and without a token). The fix therefore had to move the
+# caller somewhere the transport prerequisite is actually met. A GitHub Actions
+# runner with the workflow's own `GITHUB_TOKEN` is that place — #7412 class 2,
+# the triage Routine container, is the same shape and measured reachable with
+# 15,000 core quota.
+#
+# ⚠️ CORRECTED (#13544, measured 2026-08-31): "cannot run inside an agent
+# container at all" is no longer true of every such container, and the claim
+# above is kept only as the history that put this workflow here. A proxied agent
+# container reaches api.github.com fully — `/rate_limit`, `/user` AND
+# `GET /repos/{owner}/{repo}` all 200 with `server: github.com` — once node's
+# fetch is routed through the session proxy, which the script now does for
+# itself. What had actually failed was the ROUTE: node's `fetch` ignores
+# `HTTPS_PROXY`, so the sweeper sent the proxy's placeholder token straight to
+# GitHub, earned a 401, and reported that refusal as the container's verdict.
+#
+# ⛔ That does NOT retire this workflow, and the fix deliberately did not touch
+# it. The #9844 reason stands on its own and is not a transport reason: an alarm
+# whose only caller is "a seat should remember" is silence, whoever CAN run it.
+# The on-demand path is restored BESIDE the schedule — a lane that needs the
+# board read right now (the 4x/day body trims its own rows, and says so) can now
+# get it — never instead of the schedule.
+#
+# What this means for a runner is nothing at all, and that is load-bearing given
+# this file is copied VERBATIM into sibling repos (#11217): the script re-execs
+# only when `HTTPS_PROXY`/`https_proxy` is set, and a runner sets neither. No
+# child process, no extra line, no behaviour change — pinned in the script's
+# `--self-test` and measured byte-identical on the probe output.
 #
 # ## What lands where
 #
