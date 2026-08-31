@@ -1519,6 +1519,103 @@
           "ref": "#11421"
         }
       ]
+    },
+    {
+      "id": "cli.dev-automigrate-policy",
+      "title": "autoMigrate off|safe: a dev boot self-heals ONLY the safe-categorized drift and reports each applied op, `off` (the driver default) and NODE_ENV=production never touch the schema, and a duplicates-blocked tighten is never auto-applied",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH app copy (worktree copy of examples/app-showcase or a scaffolded blank app) whose config declares a `default` sqlite datasource with a file DB under /tmp/<run>/ — deliberate metadata edits stage the drift, so shared fixtures are never touched",
+          "a debug-readable boot log for every boot — the safe-apply evidence is the driver's own [schema-drift] lines",
+          "for the config-declared arms: the datasource's driver `config` is where `autoMigrate` is authored (sqlite.zod.ts:78; the same key on postgres/mysql); for the injected arm: a boot with NO config-declared datasource, whose fallback default datasource gets `autoMigrate: 'safe'` from the CLI only when isDev"
+        ],
+        "knownGaps": [
+          "the duplicates-BLOCKED leg (ADR-0120 D4 tightenNullSafeOnly recreate: duplicate rows found by the pre-flight probe → op blocked with a row report, old index left in place) needs planted duplicate rows under a legacy platform-wide unique index — stageable only by writing rows directly into the scratch sqlite file before boot. The leg is unit-pinned (sql-driver-unique-tenancy.test.ts 'auto-tightens at boot … when the probe is clean' + its duplicates sibling); a run may cite the pin per RUNNER rule 6 instead of hand-staging, and must record WHICH it did",
+          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts:635). Do not stage the wasm/turso arms expecting behavior"
+        ]
+      },
+      "variants": [
+        "off — the driver default when the key is omitted (sql-driver.ts:4728 `autoMigrate ?? 'off'`): drift is WARNED, never applied",
+        "safe — the loosen-only subset applied at boot (relax NOT NULL, widen varchar, safe index ops, clean-probe tighten), never destructive DDL",
+        "dev injection — `os dev`/`os serve --dev` pass 'safe' themselves for the FALLBACK default datasource (storage-driver.ts:324) and the telemetry datasource (serve.ts:2598); non-dev serve passes nothing, so the driver default 'off' stands",
+        "NODE_ENV=production — 'safe' force-ignored with the named warning, schema never auto-altered",
+        "schemaMode gate — safe is honoured only under schemaMode 'managed' (sql-driver.ts:10620 autoOn = safe && managed); an external-schema datasource is never auto-altered",
+        "duplicates-blocked — the ADR-0120 D4 tighten goes through the duplicate pre-flight probe: clean → recategorised safe (auto-appliable), duplicates → blocked with a row report (schema-drift.ts:250-259)"
+      ],
+      "enumSource": { "file": "packages/spec/src/data/driver/common.zod.ts", "export": "SqlAutoMigrateSchema", "expect": 2 },
+      "steps": [
+        "stage real drift in the scratch copy: declare a field `required: true`, `os build`, boot once against the file DB so the NOT NULL column lands; stop; flip the field to `required: false`, `os build` — the physical column is now STRICTER than metadata, which is exactly the loosening drift 'safe' exists for",
+        "the off side first: boot with the datasource's config carrying `autoMigrate: 'off'` (and once more with the key OMITTED — the driver default); capture the [schema-drift] WARNING for the divergence in both boots, then stop and run `os migrate plan` — the drift must still be pending, and a schema dump before/after the two boots must be identical",
+        "the safe side: boot the same DB with `autoMigrate: 'safe'`; capture the `[schema-drift] auto-reconciled <op> on <table>.<column>` info line(s); stop and run `os migrate plan` — the loosened column must no longer be pending; boot AGAIN and confirm no further reconcile lines (the heal converged)",
+        "production force-off: re-stage the drift, then boot with NODE_ENV=production and `autoMigrate: 'safe'` still declared; capture the exact warning `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.` and confirm via schema dump that nothing was altered",
+        "the injected arm: in a scratch project with NO config-declared datasource, re-stage the drift and boot plain `os dev` — the CLI's fallback default datasource carries autoMigrate:'safe' in dev (storage-driver.ts:324), so the same auto-reconciled line must appear with no authored key anywhere",
+        "the destructive boundary on the same boots: stage a REMOVED field too (a drop is category destructive) and confirm the safe boot leaves it as a warning + pending plan entry — `os migrate apply --allow-destructive --yes` remains the only door (cross-ref cli.migrate-plan-apply-json)",
+        "the duplicates-blocked leg: run the unit pin (packages/drivers/driver-sql/src/sql-driver-unique-tenancy.test.ts + sql-driver-schema-drift.test.ts) and cite its output — or hand-stage duplicate rows in the scratch sqlite file and boot with safe, capturing the blocked report; record which route the verdict rests on"
+      ],
+      "acceptance": [
+        {
+          "clause": "`safe` applies EXACTLY the safe-categorized diffs at boot and reports each one: every applied op logs `[schema-drift] auto-reconciled <op.type> on <table>.<column>` (info), drift is re-detected after the reconcile, and anything remaining is still warned once per divergence — never silently swallowed",
+          "oracle": "log",
+          "verify": "the safe boot's log carries one auto-reconciled line per staged loosening; a follow-up `os migrate plan` no longer lists it; a second safe boot reconciles nothing (converged). Mechanism: reconcileAndWarnDrift filters category === 'safe' into applyMigrationEntries({ allowDestructive: false }) (sql-driver.ts:10606-10659)",
+          "evidence": "the boot log lines + the before/after plan outputs"
+        },
+        {
+          "clause": "`off` — explicit OR omitted — boots WITHOUT touching the schema: the same drift is warned (`[schema-drift] <message>`) on every boot, two consecutive off boots report identical drift, and the physical schema is byte-identical before and after",
+          "oracle": "log",
+          "verify": "paired boot logs show the warning both times with no auto-reconciled line; the schema dumps (or a third `os migrate plan`) match exactly. The default is 'off' at the DRIVER (sql-driver.ts:4728) — only the CLI's dev boots inject 'safe'",
+          "evidence": "the two boot logs + the schema-dump pair"
+        },
+        {
+          "clause": "production force-off: with NODE_ENV=production, a declared `autoMigrate: 'safe'` is IGNORED with the exact named warning and the remedy ('Run os migrate deliberately') — the schema is never auto-altered in production, whatever the config says",
+          "oracle": "log",
+          "verify": "the production boot log carries the sql-driver.ts:10621-10624 warning verbatim and NO auto-reconciled line; the schema dump is unchanged",
+          "evidence": "the warning line + the unchanged schema dump"
+        },
+        {
+          "clause": "the gate composes: safe runs only under schemaMode 'managed' (autoOn = autoMigrate==='safe' && schemaMode==='managed'), and the DESTRUCTIVE category is never auto-applied under any setting — a staged drop stays a warning + pending plan entry on the safe boot, applied only through `os migrate apply --allow-destructive`",
+          "oracle": "log",
+          "verify": "the safe boot's log shows the drop warned, not applied; `os migrate plan` still lists it; the applyMigrationEntries call is pinned allowDestructive:false (sql-driver.ts:10629)",
+          "evidence": "the safe-boot log + the still-pending plan"
+        },
+        {
+          "clause": "the ADR-0120 D4 tighten is data-dependent and fails CLOSED: the bare-organization-column → NULL-safe unique recreate goes through the duplicate pre-flight probe — clean probe ⇒ recategorised safe and auto-applied at boot; duplicates found ⇒ BLOCKED with a row report and the old index left in place, never auto-applied under either autoMigrate value",
+          "oracle": "test",
+          "verify": "run the pinning suites (sql-driver-unique-tenancy.test.ts 'auto-tightens at boot under autoMigrate: safe when the probe is clean' and the duplicates-blocked cases; sql-driver-schema-drift.test.ts) and cite their output — or the hand-staged live capture, naming which the verdict rests on",
+          "evidence": "the test output (or the staged blocked report)"
+        },
+        {
+          "clause": "the CLI injects 'safe' ONLY in dev, and only where it says: the fallback default datasource (no config-declared driver) and the telemetry datasource carry autoMigrate:'safe' when isDev and nothing otherwise — so a plain `os dev` self-heals with no authored key, while a production `os serve` boot leaves the driver at its own 'off' default",
+          "oracle": "log",
+          "verify": "the keyless dev boot shows the auto-reconciled line (injection worked); a non-dev serve boot over the same staged drift shows warnings only (storage-driver.ts:324 `isDev ? { autoMigrate: 'safe' } : {}`; serve.ts:2598 telemetry `isDev ? 'safe' : undefined`)",
+          "evidence": "the paired keyless boot logs"
+        }
+      ],
+      "negative": [
+        "a `safe` boot applying anything the drift detector categorised destructive (a drop, a narrowing) is THE fail the loosen-only contract exists for — reproduce twice, file",
+        "an `off` (or omitted, or production) boot whose schema dump changes across the boot is a FAIL even if no [schema-drift] line printed — the dump pair is the authority, not the log's silence",
+        "a duplicates-carrying tighten being auto-applied (losing rows to a unique constraint, or failing the boot) instead of blocked-with-report is a FAIL against the ADR-0120 D4 probe contract",
+        "an authored `autoMigrate` on a sqlite-wasm datasource appearing to DO something is a FAIL of the declared boundary (the wasm driver is constructed without it — the guidance entry says writing it changes nothing); conversely, do not file the wasm no-op as a missing capability"
+      ],
+      "traps": ["stale-dist", "destructive-in-place"],
+      "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts" },
+      "source": [
+        "packages/spec/src/data/driver/common.zod.ts:22-32 (SqlAutoMigrateSchema z.enum(['off','safe']) — 'Dev-only, loosen-only schema self-heal (#2186) … force-disabled under NODE_ENV=production') + sqlite.zod.ts:78 (the authored key; :107-111 the wasm not-honoured guidance)",
+        "packages/drivers/driver-sql/src/sql-driver.ts:4021-4030 (SqlDriverConfig.autoMigrate docblock: non-destructive alters only), :4728 (default 'off'), :10601-10659 (reconcileAndWarnDrift — the managed+safe gate :10620, the production ignore warning :10621-10624 verbatim, safe-only applyMigrationEntries allowDestructive:false :10626-10629, per-op auto-reconciled info line :10641, post-reconcile re-detect, warn-once loop)",
+        "packages/drivers/driver-sql/src/schema-drift.ts:250-259 (tightenNullSafeOnly: clean probe → safe, duplicates → blocked with a row report, old index left in place; ADR-0120 D4)",
+        "packages/cli/src/utils/storage-driver.ts:324 (the ONE dev injection point for the fallback default datasource: isDev ? { autoMigrate: 'safe' } : {}) + packages/cli/src/commands/serve.ts:2596-2600 (telemetry datasource: isDev ? 'safe' : undefined)",
+        "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts + sql-driver-unique-tenancy.test.ts:641-668 + sql-driver-index-drift.test.ts:112-113,322-342 (the pins: off-warns / safe-applies / clean-probe tighten / duplicates block)",
+        "sibling items: cli.dev-boot-contract (the boot this rides), cli.migrate-plan-apply-json (the deliberate apply path — the ONLY door for destructive diffs; cross-referenced, not re-proven)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 2): the autoMigrate off|safe policy had no coverage although it is the one path that mutates a dev database at boot. Grounded verify-first, correcting the register's sketch on two points: (1) 'safe' is the LOOSEN-only subset (relax NOT NULL, widen varchar, index ops, clean-probe tighten) — not 'additive' diffs; (2) the register's sql-driver.ts:4030/4652-4654 cites the config/field declarations, but the enforcement lives in reconcileAndWarnDrift (:10601-10659) with the managed-mode gate, the production force-off warning, and allowDestructive:false — all now pinned as clauses. The dev-injection arm (storage-driver.ts:324 / serve.ts:2598, 'safe' only when isDev) was found while grounding and added as its own clause so a keyless dev boot's self-heal is not misread as a driver default. enumSource pins SqlAutoMigrateSchema expect 2", "ref": "#sweep-2026-08-30" }
+      ]
     }
   ]
 }

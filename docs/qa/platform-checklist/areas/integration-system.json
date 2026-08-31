@@ -506,10 +506,10 @@
     },
     {
       "id": "integration-system.webhook-lifecycle",
-      "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, reject retired trigger kinds, and never clobber admin edits",
+      "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, reject retired trigger kinds, and never clobber admin edits",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -539,7 +539,7 @@
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "author a scratch webhook with triggers:['undelete'] and one with ['api']; build both and capture the parse errors",
+        "restore the receiver, let the failing row reach a terminal status (failed/dead), then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
         "redeploy/reboot and confirm the admin-edited row survived re-seed (customized rows are never clobbered)"
       ],
       "acceptance": [
@@ -566,6 +566,12 @@
           "oracle": "api",
           "verify": "receiver-side headers + the outbox rows over the data API",
           "evidence": "headers + delivery rows"
+        },
+        {
+          "clause": "POST /api/v1/webhooks/redeliver replays a TERMINAL delivery (status success/failed/dead with attempts > 0): the row resets and re-dispatches carrying the STORED HMAC signature byte-for-byte (signed at enqueue, replayed verbatim — still verifiable against the secret), the row updates, and the response is { id, status }. The refusal matrix never 500s for a caller-fixable state: anonymous → 401 UNAUTHENTICATED; non-JSON → 400 INVALID_REQUEST; missing deliveryId → 400 MISSING_REQUIRED_FIELD; unknown OR cross-organization deliveryId → 404 RESOURCE_NOT_FOUND (the caller's activeOrganizationId is threaded into the lookup, #10740 — another org's row is simply not found, not forbidden-with-a-hint); non-terminal row → 409 DELIVERY_NOT_ELIGIBLE; a PARKED row (attempts === 0, recordUndeliverable's record of a delivery never prepared) → 409 DELIVERY_NEVER_SENT, because redelivering it would be an UNSIGNED first delivery (#7799/#8069 — the redeliver guard also refuses when the signing configuration is gone, fail-closed on a guard that throws). ⚠ PIN THE POSTURE: there is deliberately NO capability gate above the auth floor — 'every authenticated user counts' (the plugin's own words); a non-admin session redelivering successfully is the designed behavior, not a missing-gate finding, and a run must neither file it nor 'fix' it",
+          "oracle": "api",
+          "verify": "the redeliver 200 + the receiver's replayed signature equal to the original (pinned byte-for-byte in http-signature-at-rest.integration.test.ts:209-221); each refusal against webhook-outbox-plugin.ts:386-446 (401/400/400/404 arms) and http-outbox.ts:346-403 (assertHttpRedeliverable / assertRedeliverAllowed — the 409 pair and the guard); the no-capability posture and the #10740 tenant threading in the route's own docblock (:358-375)",
+          "evidence": "the redeliver response + replayed receiver hit + the refusal responses, keyed by arm"
         },
         {
           "clause": "a retired trigger kind fails at parse with the enum rejection — WebhookTriggerType is exactly [create, update, delete, bulk_update, bulk_delete]; undelete/api never register silently dead (the #3196 enforce-or-remove gate the #3358 sweep verified)",
@@ -597,7 +603,8 @@
         "packages/spec/src/automation/webhook.zod.ts (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
         "packages/spec/liveness/webhook.json (all 11 props live via the #3489 bridge; per-prop line refs)",
         "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts + auto-enqueuer.ts (remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; seed-not-clobber)",
-        "packages/services/service-messaging/src/http-outbox.ts (delivery statuses, attempts, redeliver contract) + plugin-webhooks/webhook-outbox-plugin.ts (sys_http_delivery nav)",
+        "packages/services/service-messaging/src/http-outbox.ts (delivery statuses, attempts; :305-403 HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts:209-221 (redelivery replays the stored signature byte-for-byte)",
+        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts:358-449 (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + :310-344 (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
         "packages/rest/src/rest-server.ts:10461-10492 (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
         "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
         "#3358 §9 (webhook undelete/api trigger removal gate)"
@@ -626,6 +633,12 @@
           "date": "2026-08-11",
           "change": "recorded the run #7690 note that predicate (multi:true) writes are unreachable over REST BY DESIGN — #3897 strips options.multi from the batch routes as a security boundary — so the bulk_update/bulk_delete clause must be driven from a flow update_record/delete_record node fired through the api trigger. Landed as a fixtures.knownGaps entry + a corrected step + a source citation so the next sweep does not re-derive it or file the 400 as a defect",
           "ref": "#7745"
+        },
+        {
+          "revision": 5,
+          "date": "2026-08-30",
+          "change": "coverage sweep: added the redeliver clause — POST /api/v1/webhooks/redeliver (a raw hono mount, webhook-outbox-plugin.ts:386-446) had no coverage. Asserts the terminal-row replay (stored HMAC signature re-sent byte-for-byte), the row update and { id, status } answer, and the full refusal matrix: 401 anonymous, 400 INVALID_REQUEST / MISSING_REQUIRED_FIELD, 404 for unknown AND cross-org ids (#10740 tenant threading), 409 DELIVERY_NOT_ELIGIBLE / DELIVERY_NEVER_SENT (the #8069 parked-row and gone-signing-config refusals — never a 500). Pins the deliberate NO-capability posture above the auth floor ('every authenticated user counts' — the plugin's own words) so a run neither files it as a missing gate nor widens it. Step + sources added",
+          "ref": "#sweep-2026-08-30"
         }
       ],
       "enumSource": {
@@ -1044,14 +1057,15 @@
     },
     {
       "id": "integration-system.datasource-admin-lifecycle",
-      "title": "The /api/v1/datasources admin lifecycle: static driver catalog, runtime create with provenance+health, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
+      "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
-        "admin"
+        "admin — authenticated AND holding manage_platform_settings (the whole family's capability since #9391/#9593)",
+        "a second authenticated persona holding NO capability, plus an anonymous probe (for the uniform-floor clause)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -1065,21 +1079,42 @@
         ]
       },
       "steps": [
-        "boot showcase via os dev (serve.ts mounts /api/v1/datasources by default on a non-memory engine); sign in as admin",
-        "GET /api/v1/datasources/drivers; confirm the static catalog (memory/sqlite/postgres/mysql/mongo, each with a configSchema) — this route has NO service dependency and answers even before any datasource-admin service is wired",
+        "boot showcase via os dev (serve.ts mounts /api/v1/datasources by default on a non-memory engine); sign in as the admin holding manage_platform_settings; also mint an authenticated session holding NO capability and keep an anonymous client",
+        "probe the uniform floor: GET /api/v1/datasources, GET /api/v1/datasources/drivers and one write (POST /api/v1/datasources) each anonymous (expect 401 UNAUTHENTICATED — do NOT misread the drivers 401 as 'catalog gone': the route is static but gated since #9391) and as the no-capability session (expect 403 PERMISSION_DENIED naming manage_platform_settings) — requireDatasourceAdmin runs on all 11 routes BEFORE any service resolution",
+        "GET /api/v1/datasources/drivers as the admin; confirm the static catalog (memory/sqlite/postgres/mysql/mongo, each with a configSchema) — the route has NO service dependency (it answers even when the datasource-admin service is unwired), but it is NOT anonymous-available",
+        "POST /api/v1/datasources/test with an UNSAVED sqlite draft { name: 'qa_ds_probe', driver: 'sqlite', config: { file: '<writable path>' }, secret: '...' } — the wizard's pre-Save probe; capture the result AND confirm nothing persisted (the subsequent list is unchanged); note the route is registered before the :name routes so the literal 'test' segment is never captured as a datasource name (admin-routes.ts:625-638)",
         "POST /api/v1/datasources with a sqlite-file draft { name: 'qa_ds_probe', driver: 'sqlite', config: { file: '<writable path>' }, secret?: '...' }; capture status + the returned datasource",
         "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and a health field",
         "GET /api/v1/datasources/qa_ds_probe; inspect the body for config + a hasSecret flag and confirm the cleartext secret value is ABSENT",
         "POST /api/v1/datasources with a bad draft (invalid config shape / missing required); capture status + code",
+        "POST /api/v1/datasources/qa_ds_probe/migrate-credential (#8155): the fresh, cleanly-created row has nothing to re-home, so capture the 200 whose result reports the plan outcome (action 'none', status 'already-bound'/'nothing-to-migrate' — datasource-credential-migration.ts:100) rather than a 400; for the live 'bind' arm a stored row still carrying an inline cleartext credential must be PLANTED directly (the current create path splits `secret` out, so no parse-produced row has one — same fixture caveat as datasource-credential-refusal-matrix's legacy-alias clause); if it cannot be planted, score that arm from the unit pin and record blocked(fixture)",
         "GET /api/v1/datasources/qa_ds_probe/remote-tables (an external-datasource-served route): on a stock os dev boot federation IS wired (serve.ts:2966-2979) so expect a WIRED answer (2xx, or a 400 EXTERNAL_DATASOURCE_ERROR from the introspector — not a 503) and score the 503 clause via its unit pin; only a boot that genuinely lacks the service (dynamic import failed / custom host without the plugin) shows the 503 — capture which service the answer names either way",
         "GET /api/v1/datasources/does-not-exist; capture the 404"
       ],
       "acceptance": [
         {
-          "clause": "the driver catalog is static and always-available: GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongo) each with a projected configSchema, with NO datasource-admin service dependency",
+          "clause": "the driver catalog is static but NOT anonymous: to the entitled admin GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongo) each with a projected configSchema, with NO datasource-admin service dependency — while an unauthenticated probe gets the floor's 401, deliberately (the family's floor is uniform on purpose: 'a family whose floor has one hole is a family whose floor has to be read route by route', admin-routes.ts:95-100). A 401 here is the floor working, never 'catalog broken'",
           "oracle": "api",
-          "verify": "the drivers body against DRIVER_CATALOG (driver-catalog.ts); route answers even when the admin service is unwired",
-          "evidence": "the drivers response"
+          "verify": "the admin's drivers body against DRIVER_CATALOG (driver-catalog.ts); the anonymous 401 on the same route; route needs no service (admin-routes.ts:510-516)",
+          "evidence": "the two drivers responses (admin 200, anonymous 401)"
+        },
+        {
+          "clause": "ONE uniform capability floor guards all 11 routes — reads, writes and the static catalog alike: anonymous → 401 UNAUTHENTICATED (shouldDenyAnonymous, fail-closed on an unresolvable identity), authenticated-without-manage_platform_settings → 403 PERMISSION_DENIED whose message names the capability — both decided BEFORE any service is resolved and before any handler body runs (#9391/#9593)",
+          "oracle": "api",
+          "verify": "the six floor probes of step 2 against requireDatasourceAdmin (admin-routes.ts:404-417; DATASOURCE_ADMIN_CAPABILITY = 'manage_platform_settings', :261) — every route in the registrar opens with `if (await requireDatasourceAdmin(req, res)) return;`",
+          "evidence": "the 401/403 responses for a read, the catalog, and a write"
+        },
+        {
+          "clause": "POST /api/v1/datasources/test probes an UNSAVED draft with NO persistence: the inline draft (+ optional cleartext secret, split out via splitSecret before the service sees the draft) is connection-tested and answered, and no datasource row exists afterwards; the literal 'test' segment is registered before the :name routes so it is never captured as a datasource name — distinct from POST /:name/test, which round-trips a SAVED datasource",
+          "oracle": "api",
+          "verify": "the test response + an unchanged GET /api/v1/datasources afterwards (admin-routes.ts:625-638; the saved-name twin at :575-585); the ledger rows for both spellings (datasource-route-ledger.ts:150-151, :164-165)",
+          "evidence": "the probe response + the unchanged list"
+        },
+        {
+          "clause": "POST /:name/migrate-credential re-homes a stored inline cleartext credential into the secret store and drops the inline key — afterwards the read shows hasSecret with the cleartext absent — while a row it cannot re-home safely answers 200 with the plan outcome (action 'refuse' carries operator-facing reason + remedy; action 'none' reports already-bound / nothing-to-migrate), NOT a 400: the datasource is intact and the operator asked a question (#8155). Per-datasource and operator-initiated by construction — no batch spelling exists",
+          "oracle": "api",
+          "verify": "live: the 'none' outcome on the clean qa_ds_probe + (if a legacy row was planted) the bind outcome and its post-migration redacted read; otherwise the unit pin packages/services/service-datasource/src/__tests__/datasource-credential-migration.test.ts (plan outcomes: bind / drop-inline / none / refuse — datasource-credential-migration.ts:89-102; route: admin-routes.ts:587-609)",
+          "evidence": "the migrate responses + the post-migration detail read (or the unit-test output for the bind arm)"
         },
         {
           "clause": "a runtime create lands with provenance + health: POST /api/v1/datasources creates a sqlite-file datasource (201) and the subsequent list shows it with origin:'runtime' and a health status",
@@ -1106,14 +1141,17 @@
           "evidence": "the unit-test output (or the 503 response on a deliberately unwired boot)"
         },
         {
-          "clause": "unknown name → 404 RESOURCE_NOT_FOUND; and (FINDING) the /api/v1/datasources admin CRUD is UNLEDGERED — absent from packages/rest/src/rest-route-ledger.ts (only the /datasources/:name/external/* federation routes are ledgered there), a tranche-3 route-ledger discipline gap the run must record (PENDING-GAPS §E)",
+          "clause": "unknown name → 404 RESOURCE_NOT_FOUND; and the family IS ledgered — the rev-1 'unledgered tranche-3 gap' finding is CLOSED and must NOT be re-filed: the admin CRUD carries its own audited ledger (datasource-route-ledger.ts, 11 rows, all deliberately server-only — no SDK method reaches this family, filed as #7954) with a conformance test deriving both directions from the registrar, precisely because the mount style (registerDatasourceAdminRoutes straight on IHttpServer from serve.ts) is invisible to the dispatcher and REST ledgers",
           "oracle": "api",
-          "verify": "GET /api/v1/datasources/does-not-exist → 404 RESOURCE_NOT_FOUND; run record notes the admin routes carry no route-ledger entry",
-          "evidence": "the 404 + the unledgered-mount finding"
+          "verify": "GET /api/v1/datasources/does-not-exist → 404 RESOURCE_NOT_FOUND; the ledger + gate at packages/services/service-datasource/src/datasource-route-ledger.ts (DATASOURCE_ROUTE_LEDGER, :134-166) and datasource-route-ledger.conformance.test.ts — a run may cite the conformance test's pass as the parity evidence",
+          "evidence": "the 404 + the conformance-test output"
         }
       ],
       "negative": [
         "the cleartext secret appearing in ANY list/detail response is a security FAIL — hasSecret is the only permitted signal",
+        "a 200 to the anonymous or no-capability caller on ANY of the 11 routes is a security FAIL (RUNNER rule 2's authz carve-out governs the report); conversely, re-filing the drivers-catalog 401 as 'static catalog broken' is a false finding — the floor is uniform by design",
+        "POST /datasources/test leaving a persisted row behind (or capturing 'test' as a datasource name) is a FAIL against the draft-probe contract",
+        "migrate-credential answering 400 for a row that is merely already-clean, or leaving the inline cleartext readable after reporting a bind, is a FAIL (#8155)",
         "a federation-route 503 that names datasource-admin (the service that IS running) instead of external-datasource is the #4225 mis-attribution regressed — FAIL",
         "a datasource-admin refusal carrying EXTERNAL_DATASOURCE_ERROR (or an external-datasource refusal carrying DATASOURCE_ADMIN_ERROR) is the #4249 code mis-attribution — FAIL"
       ],
@@ -1126,12 +1164,13 @@
         "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts (+ __tests__/envelope.conformance.test.ts) — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
       },
       "source": [
-        "packages/services/service-datasource/src/admin-routes.ts (the nine routes; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret)",
+        "packages/services/service-datasource/src/admin-routes.ts (the eleven routes; the uniform floor docblock :85-100 + requireDatasourceAdmin :404-417 + DATASOURCE_ADMIN_CAPABILITY :261 #9391/#9593; splitSecret keeps the secret out of the persisted draft :481-492; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe :625-638; POST /:name/migrate-credential :587-609)",
         "packages/services/service-datasource/src/driver-catalog.ts (static DRIVER_CATALOG, configSchema projected from spec #4410)",
+        "packages/services/service-datasource/src/datasource-route-ledger.ts (DATASOURCE_ROUTE_LEDGER — the family's own audited ledger, #7744; all rows server-only, SDK question filed as #7954) + datasource-route-ledger.conformance.test.ts (both directions derived from the registrar)",
+        "packages/services/service-datasource/src/datasource-credential-migration.ts:89-102 (CredentialMigrationPlan: bind / drop-inline / none / refuse with reason+remedy, #8155) + __tests__/datasource-credential-migration.test.ts (the plan pins)",
         "packages/spec/src/api/error-code-ledger.zod.ts (DATASOURCE_ADMIN_ERROR, EXTERNAL_DATASOURCE_ERROR under @objectstack/service-datasource)",
         "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap: 503 SERVICE_UNAVAILABLE, 404 RESOURCE_NOT_FOUND)",
-        "packages/cli/src/commands/serve.ts (mounts registerDatasourceAdminRoutes at /api/v1/datasources by default — NOT in the REST route ledger, tranche-3 gap)",
-        "PENDING-GAPS §B/§E (#4225/#4249; service-datasource has no route ledger)"
+        "packages/cli/src/commands/serve.ts (mounts registerDatasourceAdminRoutes at /api/v1/datasources by default — a raw IHttpServer mount, which is WHY the family carries its own ledger rather than a rest-route-ledger row)"
       ],
       "history": [
         {
@@ -1145,6 +1184,12 @@
           "date": "2026-08-20",
           "change": "scoped scan-functionality (扫描功能) sweep: the knownGap's claim that the federation service is 'intentionally NOT wired in the admin-lifecycle boot' went STALE — serve.ts:2966-2979 now wires ExternalDatasourceServicePlugin unconditionally on every os dev / os serve boot (and :2984-2993 wires createExternalValidationPlugin). Rewrote the knownGap to the wired truth, re-sited the 503 clause onto its unit pin (oracle api → test) with live scoring not-applicable on a stock boot so a working 2xx is never mis-scored as a regression, reworded step 7 to match, and pointed the wired-boot introspection happy path at the new integration-system.external-schema-introspection item",
           "ref": "claude/new-session-0pv25p"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-30",
+          "change": "coverage sweep, two stale texts + three uncovered arms. STALE: the rev-1 'UNLEDGERED admin CRUD / tranche-3 discipline gap' finding clause and the matching source lines were FALSE at head — #7744 landed the family's own datasource-route-ledger.ts (11 rows, all server-only, SDK question filed as #7954) with a registrar-derived conformance test, so a run following the old text files a false finding; the clause now asserts the ledger + gate positively. STALE: 'always-available static catalog' for GET /drivers — since #9391/#9593 requireDatasourceAdmin guards all 11 routes (401 anonymous, 403 without manage_platform_settings, decided before any service resolution), so the wording now pins the floor and warns a runner off misreading the drivers 401. ADDED: the uniform-floor clause (both sides, per ADR-0124 D5), the POST /datasources/test draft-probe clause (no persistence; 'test' never captured as a name), and the POST /:name/migrate-credential clause (#8155 — bind/drop-inline/none/refuse plan outcomes, 200-not-400 for a row with nothing to re-home, cleartext gone after a bind; live bind arm needs a planted legacy row, unit pin as fallback). Personas widened for the floor probes",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     },
@@ -1252,10 +1297,10 @@
     },
     {
       "id": "integration-system.external-schema-drift-gate",
-      "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; a partial metadata read withholds the all-clear instead of faking one",
+      "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; checkOnBoot:false skips a datasource with a loud info line (boot step only — the interval sweep is unaffected); a partial metadata read withholds the all-clear instead of faking one",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -1269,7 +1314,8 @@
         ],
         "knownGaps": [
           "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts:40) precisely so drift can never brick the stock showcase. To induce: work in a scratch app/worktree copy, alter the fixture DB between boots (prefer a column TYPE change — the idempotent provisioning initObjects re-runs at every boot and may heal an added/dropped column; verify the induced drift survives the re-run before scoring) or bind a scratch federated object to a missing/mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture) and the unit pins are the fallback evidence",
-          "the 'fail'-DEFAULT arm additionally needs a datasource that OMITS external.validation.onMismatch (the `?? 'fail'` default, external-validation-plugin.ts:331; the metadata-read-failure catch at :333 also defaults 'fail') — stock showcase never exercises it live",
+          "the 'fail'-DEFAULT arm additionally needs a datasource that OMITS external.validation.onMismatch (the `?? 'fail'` default, external-validation-plugin.ts:668; an unreadable definition also lands there — the def loader swallows the read failure to undefined, :584-602) — stock showcase never exercises it live",
+        "INDUCE MEASURED drift, not an outage: only MEASURED diffs reach the onMismatch policy — an 'unreachable' row (remote or definition could not be read) warns loudly and CONTINUES boot by maintainer ruling 2026-08-23 (#11166, external-validation-plugin.ts:323-354), so breaking connectivity (deleting the fixture DB file, bad credentials) tests the wrong arm and a non-aborting boot there is correct, not a gate failure",
           "clause 5's partial-read arm (a degraded metadata loader) is not reasonably inducible live — it is scored via its pin (list-diagnosed-consumer-sweep.test.ts), declared here rather than pretending a loader-outage fixture exists"
         ]
       },
@@ -1278,15 +1324,15 @@
         "in a scratch copy, induce a surviving drift (see knownGaps) under the stock 'warn' policy; boot; capture the '[external-validation] external schema drift' warn (datasource/object/diffs) and that boot COMPLETES",
         "same drift with the scratch datasource's external.validation.onMismatch OMITTED (and again with explicit 'fail'); boot; capture the abort — ExternalSchemaMismatchError, message 'Object '<o>' does not match its remote table on datasource '<d>':' plus per-diff lines naming the column",
         "same drift under onMismatch:'ignore'; boot; confirm completion with NO drift warn",
-        "set external.validation.checkOnBoot:false on the drifted scratch datasource and boot: the kernel:ready scan STILL runs (checkOnBoot has no runtime consumer) — record the declared≠enforced finding, do not score the scan-running as a bug",
-        "declare external.validation.checkIntervalMs on a datasource and confirm the armed-timer log '[external-validation] armed background drift check' (the event-emission arm is unit-pinned)",
-        "run the pins: packages/runtime/src/external-validation-plugin.test.ts and the '#6504 … boot gate' describe in packages/runtime/src/list-diagnosed-consumer-sweep.test.ts"
+        "set external.validation.checkOnBoot:false on the drifted scratch datasource (onMismatch 'fail' or omitted) and boot: since #13149 the gate HONOURS the skip — boot COMPLETES, that datasource's rows are dropped before any verdict, and the info line '[external-validation] boot schema validation SKIPPED for datasource(s) that set `external.validation.checkOnBoot: false` …' names it; a second in-sync datasource in the same boot is still judged (the gate is per-datasource)",
+        "declare external.validation.checkIntervalMs on a datasource and confirm the armed-timer log '[external-validation] armed background drift check' (the event-emission arm is unit-pinned); declare it TOGETHER with checkOnBoot:false and confirm the checker still arms — the skip is the boot step's only (maintainer ruling 2026-08-29)",
+        "run the pins: packages/runtime/src/external-validation-plugin.test.ts, packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — skip honoured, per-datasource scope, unreadable-def validates, alias spellings rejected, drift checker still arms), and the '#6504 … boot gate' describe in packages/runtime/src/list-diagnosed-consumer-sweep.test.ts"
       ],
       "acceptance": [
         {
           "clause": "the DEFAULT is 'fail' and it refuses boot: with drift present and onMismatch undeclared (or explicit 'fail'), boot aborts with ExternalSchemaMismatchError whose message names the object, the datasource, and the mismatched column per diff line (renderDiffMessage) — the highest-consequence branch here: a mis-typed federation must not come up serving garbage",
           "oracle": "log",
-          "verify": "the induced-drift boot's abort output against external-errors.ts:155-183; the default pinned at external-validation-plugin.ts:331 (and :333 — an unreadable datasource definition ALSO defaults 'fail'). Unit fallback: external-validation-plugin.test.ts 'throws … default (fail) policy' + 'defaults to fail when the datasource definition is unavailable'",
+          "verify": "the induced-drift boot's abort output against external-errors.ts:155-183; the default pinned at external-validation-plugin.ts:668 (resolveOnMismatch `?? 'fail'`; an unreadable datasource definition ALSO lands on it — the memoized def loader answers undefined on a failed read, :584-602). Only MEASURED diffs reach this throw (:355-366) — an 'unreachable' row warns and continues by ruling (#11166), see knownGaps. Unit fallback: external-validation-plugin.test.ts 'throws … default (fail) policy' + 'defaults to fail when the datasource definition is unavailable'",
           "evidence": "the boot abort log (or the unit-test output when the live arm is blocked(fixture))"
         },
         {
@@ -1302,10 +1348,16 @@
           "evidence": "the (absence in the) boot log + completed-boot proof"
         },
         {
-          "clause": "checkOnBoot is DECLARED-but-UNENFORCED — assert the actual behavior and record the gap: the spec declares validation.checkOnBoot defaulting true (datasource.zod.ts:313) and docs/liveness claim it gates the boot scan, but the plugin reads only onMismatch/checkIntervalMs (its DatasourceDef, external-validation-plugin.ts:124-133; no consumer of checkOnBoot exists under packages/ outside spec + test fixtures) — so with checkOnBoot:false the kernel:ready scan STILL runs. The run must verify still-runs and record the declared≠enforced finding (ADR-0049 enforce-or-remove shape) — neither re-filing 'checkOnBoot broken' without checking for an existing card, nor scoring the scan-running as a regression",
+          "clause": "checkOnBoot IS ENFORCED at the boot step — the rev-1 declared≠enforced finding is FIXED by #13149 (2026-08-29) and must not be re-filed: (a) a datasource with external.validation.checkOnBoot:false is dropped BEFORE any verdict — no onMismatch policy applies to it, a measured mismatch on it cannot abort boot, no unreachable-remote warning is raised for it, and its objects are not counted in the all-clear; (b) the skip is LOUD — one info line names the skipped datasource(s), says their federated objects were NOT gated, and says background drift checking is unaffected; (c) only an explicit false opts out: an absent key (schema default true), an unparseable/legacy row, or a definition the metadata service could not hand back all VALIDATE (the safe direction), and the misspellings checkonboot/validateonboot are parse-REJECTED with a did-you-mean, never folded",
           "oracle": "log",
-          "verify": "boot the drifted scratch fixture with checkOnBoot:false — the gate still warns/aborts per onMismatch; run record carries the finding",
-          "evidence": "the boot log + the recorded finding"
+          "verify": "boot the drifted scratch fixture with checkOnBoot:false — boot completes and the '[external-validation] boot schema validation SKIPPED …' info line names it (external-validation-plugin.ts:288-312; bootCheckEnabled `!== false` :655-661); a sibling datasource in the same boot is still judged. Unit pins: external-validation-checkonboot.test.ts (all five describes — skip, unchanged default, per-datasource scope, one parsed spelling, boot-step-only scope)",
+          "evidence": "the completed-boot log with the skip line (or the pin output where the live arm is blocked(fixture))"
+        },
+        {
+          "clause": "the checkOnBoot skip is BOOT-STEP-ONLY, by maintainer ruling (2026-08-29): a datasource declaring both checkOnBoot:false and checkIntervalMs still gets its background drift checker armed — the two keys answer different questions ('gate my startup on this' vs 'watch this while I run'), and arming a watcher is not an opt back in to the boot gate",
+          "oracle": "test",
+          "verify": "external-validation-checkonboot.test.ts 'scope: the gate covers the BOOT STEP ONLY' ('checkOnBoot:false still arms the background drift checker it asked for'); the ruling pinned in source at external-validation-plugin.ts:380-386 (⛔ do not add a checkOnBoot condition to scheduleDriftChecks) — live: the armed-timer log line on the combined-keys boot",
+          "evidence": "the pin output + the armed-timer log line from the checkOnBoot:false boot"
         },
         {
           "clause": "partial-read honesty (#6504): when the federated-object listing was degraded, the gate WITHHOLDS the clean all-clear and warns that it 'swept an INCOMPLETE object set … the onMismatch gate could not have fired for them' (external-validation-plugin.ts:113-121) — silence and nothing-to-find are never conflated; a throwing verdict probe reports 'could not be determined', never a fabricated failure; a complete read still gets the plain all-clear info line",
@@ -1322,6 +1374,7 @@
       ],
       "negative": [
         "a drifted boot under the 'fail' default that comes up serving anyway is the highest-consequence FAIL of this item — the gate's whole purpose",
+        "a checkOnBoot:false datasource whose MEASURED mismatch still aborts boot — or a skip performed SILENTLY (no info line) — is a FAIL against the #13149 contract; equally, a checkOnBoot:false datasource whose armed checkIntervalMs watcher goes missing is a FAIL against the boot-step-only ruling",
         "an all-clear info line emitted while the metadata read was degraded is the #6504 conflation — FAIL",
         "an abort message naming the wrong datasource/object, or omitting the per-column diff, is a FAIL against renderDiffMessage",
         "a background drift check that throws or kills the process is a FAIL (drift past boot is observational by design)",
@@ -1333,13 +1386,13 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/external-validation-plugin.test.ts (fail-default / warn / ignore / default-when-unreadable + drift-event emission) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts:334 (#6504 withheld all-clear) — the LIVE boot-abort arm is not pinned; an induced-drift boot is required for it"
+        "ref": "packages/runtime/src/external-validation-plugin.test.ts (fail-default / warn / ignore / default-when-unreadable + drift-event emission) + packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — the checkOnBoot gate, its scope, and the one-spelling rule) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts:334 (#6504 withheld all-clear) — the LIVE boot-abort arm is not pinned; an induced-drift boot is required for it"
       },
       "source": [
-        "packages/runtime/src/external-validation-plugin.ts:147-227 (Gate 2 kernel:ready validation; :188 runValidation; :224-226 the fail throw), :325-335 (resolveOnMismatch — `?? 'fail'` at :331, catch → 'fail' at :333), :78-122 (announceAllClear #6504; :113-121 the INCOMPLETE-sweep warn), :239-317 (background drift checks + external.schema.drift events)",
+        "packages/runtime/src/external-validation-plugin.ts:269-368 (Gate 2 kernel:ready runValidation; :288-312 the #13149 checkOnBoot gate + skip info line; :323-354 the #11166 unreachable carve-out — warn and continue, only measured diffs reach onMismatch; :366 the fail throw), :655-661 (bootCheckEnabled — explicit false only, safe direction), :663-669 (resolveOnMismatch — `?? 'fail'` at :668), :584-602 (memoized def loader; a failed read answers undefined → strict defaults), :105-168 (announceAllClear #6504; :141 the INCOMPLETE-sweep warn), :388-527 (background drift checks + external.schema.drift events; :380-386 the boot-step-only ruling ⛔)",
         "packages/spec/src/shared/external-errors.ts:155-183 (renderDiffMessage + ExternalSchemaMismatchError — datasource, object, per-column diffs)",
         "packages/cli/src/commands/serve.ts:2966-2993 (ADR-0015 federation block — ExternalDatasourceServicePlugin + createExternalValidationPlugin wired unconditionally, best-effort dynamic import)",
-        "packages/spec/src/data/datasource.zod.ts:301-318 (validation policy schema; checkOnBoot declared, default true — the declared≠enforced finding of clause 4; the liveness ledger note packages/spec/liveness/datasource.json claiming it 'gates the boot-time one' is contradicted by source)",
+        "packages/spec/src/data/datasource.zod.ts:301-318 (validation policy schema; checkOnBoot default true at :313, the checkonboot/validateonboot alias rows at :301-302 are REJECTION-path did-you-means, not folds — enforced since #13149, so declared = enforced here now)",
         "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts:40 (stock policy onMismatch:'warn' — deliberate, per its own comment)",
         "docs/adr/0015-external-datasource-federation.md §5.2"
       ],
@@ -1349,6 +1402,12 @@
           "date": "2026-08-20",
           "change": "new item from the scoped scan-functionality (扫描功能) coverage sweep: the boot-time drift gate — a 'fail' DEFAULT that can refuse boot, the sweep's highest-consequence uncovered branch — had no checklist coverage. Fixture honesty declared up front: no stock drift fixture exists (stock showcase is in-sync AND deliberately 'warn'), so drift is induced in a scratch copy or the arms fall back to the unit pins. Also records clause 4's finding: checkOnBoot is declared in spec (default true) but read by no runtime code — the scan runs regardless",
           "ref": "claude/new-session-0pv25p"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-30",
+          "change": "coverage sweep: the rev-1 checkOnBoot declared≠enforced finding is FIXED by #13149 (issue #13037, landed 2026-08-29) — a run following the old clause 4 would file a false finding and mis-score the skip as a bug. Flipped to positive assertions: (a) checkOnBoot:false rows are dropped before any verdict with the loud SKIPPED info line (external-validation-plugin.ts:288-312), per-datasource and explicit-false-only (bootCheckEnabled :655-661; unreadable/absent validates — safe direction; checkonboot/validateonboot are rejection-path did-you-means, one spelling one read); (b) a NEW clause pins the boot-step-only scope by maintainer ruling 2026-08-29 — checkIntervalMs watchers still arm for a checkOnBoot:false datasource (:380-386). Also folded in the #11166 unreachable carve-out (measured diffs only reach onMismatch; an outage warns and continues, ruling 2026-08-23) so an induced 'drift' via broken connectivity is not mis-scored against the fail default; re-anchored every rotted line ref (runValidation :269-368, resolveOnMismatch :663-669, announceAllClear :105-168, drift checks :388-527) and added the external-validation-checkonboot.test.ts pin",
+          "ref": "#13149"
         }
       ]
     },
@@ -1552,6 +1611,215 @@
           "date": "2026-08-17",
           "change": "new — the credential campaign is the single largest behavior cluster in the window (retired keys on four driver configs, eight+ semantic refusal doors, a centralized credential-key definition, and a second redaction door on the metadata read path) and no ratchet could see any of it: `datasource` was already a mapped kind, and none of the doors is an enum member. Existing coverage reached only the datasource-ADMIN door's 'secret never echoes'; the metadata read door (#8154), the legacy-alias class, the unknown-driver rule and the echoed-mask write guard were untested. P0 because every clause failure is a cleartext credential disclosure",
           "ref": "#9299"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.connector-auth-kind-application",
+      "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef is boot-fatal with the env-var prescription; oauth2 has NO authorable spelling (EE tier)",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the rest provider factory installed (ConnectorRestPlugin in examples/app-showcase/objectstack.config.ts) — the generic static-auth executor this item drives; the openapi provider shares the same transport (openapi-provider.ts:182-189) and is not re-proven per kind",
+          "an ECHO upstream on the run's own port range that reflects request headers AND query back in its response body (same local-receiver pattern as webhook-lifecycle's fixture) — the showcase's self-ping connectors prove reachability only",
+          "env vars set for each probe's credentialRef before boot (the open tier resolves credentialRef from environment variables — plugin.ts:1798-1806)"
+        ],
+        "knownGaps": [
+          "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts:66,103,142; its own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture) and fall back to the unit pins (rest-connector.test.ts drives applyAuth through a stubbed fetch)"
+        ]
+      },
+      "variants": [
+        "none → no auth artifact added to the request (control)",
+        "bearer → Authorization: Bearer <resolved secret> (rest-connector.ts:83-85)",
+        "basic → Authorization: Basic base64(username:password) — username authored in metadata (not a secret), password resolved from credentialRef (rest-connector.ts:86-90; connector-auth.zod.ts:143-150)",
+        "api-key, header form → header [headerName ?? 'X-API-Key']: <key> (rest-connector.ts:91-93; default applied at resolution, plugin.ts:1811-1817)",
+        "api-key, query form → paramName rides the query string and the header is NOT set (rest-connector.ts:92)",
+        "rejection: auth type 'oauth2' — not an arm of ConnectorInstanceAuthSchema (none/bearer/api-key/basic only, connector-auth.zod.ts:157-162); OAuth2 token acquisition is the enterprise tier (ResolvedConnectorAuth doc, connector-auth.zod.ts:90-101)",
+        "rejection: inline `authentication` with any non-'none' type on an authored entry — the #7990 publish refusal (connector.zod.ts:935-941)",
+        "NOT enumSource-pinnable: the four static kinds are arms of a discriminated union of object schemas, not a named z.enum export — hand-enumerated here (4), guarded by the rejection variants instead"
+      ],
+      "steps": [
+        "start the echo upstream; export the probe env vars (e.g. QA_BEARER_TOK, QA_API_KEY, QA_BASIC_PW); author five scratch rest-provider instances against it in a writable package: auth none / {type:'bearer',credentialRef:'QA_BEARER_TOK'} / {type:'basic',username:'qa',credentialRef:'QA_BASIC_PW'} / {type:'api-key',credentialRef:'QA_API_KEY'} / {type:'api-key',credentialRef:'QA_API_KEY',paramName:'api_key'}; boot",
+        "dispatch each instance's `request` action (flow connector_action or direct engine dispatch) at an echo path; capture what the upstream received per instance",
+        "read the authored rows back over GET /api/v1/meta and GET /api/v1/automation/connectors; grep both full bodies for every resolved secret value",
+        "unset QA_BEARER_TOK and boot again; capture the boot failure verbatim",
+        "author one instance with auth {type:'oauth2', ...} and one catalog/instance entry with inline authentication {type:'api-key', key:'x'}; build both; capture the two rejections",
+        "run the pins: packages/connectors/connector-rest/src/rest-connector.test.ts (wire shapes) and packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution, env fallback, boot-fatal missing ref)"
+      ],
+      "acceptance": [
+        {
+          "clause": "each static kind lands on the wire in exactly its shape, one verdict per variant, none inferred: bearer → Authorization: Bearer <secret>; basic → Authorization: Basic base64(username:password); api-key header form → X-API-Key (or the authored headerName); api-key query form → the key in the named query param AND no key header; none → no auth artifact",
+          "oracle": "network",
+          "verify": "the echo upstream's captured headers/query per instance against applyAuth (packages/connectors/connector-rest/src/rest-connector.ts:75-96); unit fallback per shape in rest-connector.test.ts:103-138",
+          "evidence": "the five echoed requests, keyed by kind"
+        },
+        {
+          "clause": "the secret reaches the wire through RESOLUTION, never through metadata: the authored row carries only the credentialRef name, and the dispatched request carries the env var's VALUE — proving materialization dereferenced the ref (resolveInstanceAuth builds the ResolvedConnectorAuth the factory receives, plugin.ts:1789-1821; ADR-0097 §3)",
+          "oracle": "api",
+          "verify": "the sys_metadata/meta read shows the ref string, the echo capture shows the resolved value; the two must differ and correspond",
+          "evidence": "the meta read + the matching echo capture"
+        },
+        {
+          "clause": "an unresolvable credentialRef is a HARD BOOT ERROR carrying the prescription — the message names the connector, the provider, the ref, and both remedies ('set the <ref> env var, or wire AutomationServicePluginOptions.credentialResolver to a secrets service (ADR-0097 §3)') — an app must not come up with a connector whose credentials never loaded",
+          "oracle": "log",
+          "verify": "the unset-env boot aborts with the plugin.ts:1800-1805 message; pinned by connector-materialization.test.ts:330 ('fails boot loudly when credentialRef does not resolve')",
+          "evidence": "the fatal boot output"
+        },
+        {
+          "clause": "oauth2 is refused at AUTHORING, not degraded at runtime: auth {type:'oauth2'} fails parse (invalid discriminator — ConnectorInstanceAuthSchema has exactly the four static arms; the EE-tier boundary is documented on ResolvedConnectorAuth), and an inline `authentication` with a non-'none' type is refused with the located #7990 message steering to auth:{type,credentialRef} — there is no door through which an OAuth2 flow or an inline secret enters open-edition metadata",
+          "oracle": "build",
+          "verify": "the two build rejections against connector-auth.zod.ts:157-162 (union arms) and connector.zod.ts:931-941 (the superRefine message, quoted fragments verbatim)",
+          "evidence": "the two error texts"
+        },
+        {
+          "clause": "no resolved secret ever appears in a served body: GET /api/v1/automation/connectors descriptors and every /meta read of the scratch entries are free of all three secret values (grep the FULL bodies) — basic's username may appear (schema-declared non-secret), its password must not",
+          "oracle": "api",
+          "verify": "grep of the full listing + meta bodies for each env-var value",
+          "evidence": "the grepped bodies (secret-absent)"
+        }
+      ],
+      "negative": [
+        "a resolved secret appearing in any listing/meta/descriptor body is a cleartext-credential FAIL of P0 severity regardless of this item's priority",
+        "an oauth2-authored entry building clean — or an inline non-'none' `authentication` publishing — is a FAIL against the #7990/ADR-0097 refusal doors",
+        "a missing credentialRef materializing a connector that fails only at dispatch time (instead of failing boot) is a FAIL against the hard-boot-error contract"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback and the boot-fatal missing ref) — the LIVE echo-upstream leg is not pinned"
+      },
+      "source": [
+        "packages/spec/src/shared/connector-auth.zod.ts:78-101 (ConnectorAuthConfigSchema — the runtime shape; ResolvedConnectorAuth = the static open tier, OAuth2 named as the enterprise tier), :117-164 (ConnectorInstanceAuthSchema — the authored shape: credentialRef instead of inline secrets, four arms, no oauth2)",
+        "packages/spec/src/integration/connector.zod.ts:931-941 (the #7990 inline-`authentication` publish refusal, both message variants)",
+        "packages/services/service-automation/src/plugin.ts:1789-1821 (resolveInstanceAuth — credentialRef → ResolvedConnectorAuth; empty resolution throws with the env-var prescription :1800-1805; api-key headerName default applied :1815)",
+        "packages/connectors/connector-rest/src/rest-connector.ts:75-96 (applyAuth — the wire shapes per kind) + rest-provider.ts:52-54 (the factory receives the RESOLVED static subset)",
+        "packages/connectors/connector-openapi/src/openapi-provider.ts:182-189 (the openapi provider shares the same static-auth transport)",
+        "examples/app-showcase/src/system/connectors/index.ts:42-43,66,103,142 (all shipped instances auth none; the fixture's own pointer at bearer+credentialRef for real upstreams)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new item from the 2026-08-30 coverage sweep (spec-enums angle): the static connector-auth tier had NO checklist coverage — connector-declarative-boot proves the auth-less happy path and the inline-secret refusal, but no item proved a resolved credential actually lands on the wire per kind, the credentialRef boot-fatal contract, or the oauth2 no-authorable-spelling boundary. Register hypothesis CORRECTED against source: the register said oauth2 'declared in open edition degrades loudly' — it does not reach runtime at all; ConnectorInstanceAuthSchema simply has no oauth2 arm, so it is a parse rejection at authoring (and the inline `authentication` spelling is the #7990 publish refusal) — the clause asserts refusal-at-build, not a runtime degrade. Not enumSource-pinnable (discriminated union, no named z.enum) — hand-enumerated 4 static kinds and said so in variants",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.external-schema-browser-ui",
+      "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin — authenticated, holding manage_platform_settings (federation reads: tables/validate) AND manage_metadata (federation writes: import/refresh-catalog, and the /meta write the UI import performs)",
+        "a second authenticated persona holding NO capability, plus an anonymous probe (for the floor clause)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped read-only SQLite external datasource showcase_external + its boot-provisioned fixture DB (examples/app-showcase/src/system/datasources/ — customers/orders, 5 columns each; same fixture as external-schema-introspection)",
+          "the built console mounted (the panel lives in the app-shell metadata-admin engine)"
+        ],
+        "knownGaps": [
+          "the federation-unavailable 503 arm is NOT reachable on a stock boot (serve.ts:2966-2979 wires ExternalDatasourceServicePlugin unconditionally — same bound as datasource-admin-lifecycle's 503 clause); it needs a deliberately unwired boot",
+          "AND when that 503 IS reached, the UI's designed friendly state is EXPECTED-FAIL at head: objectui api.ts jsonOrThrow matches the RETIRED pre-#3843 body shape (`body.error === 'external_service_unavailable'`, api.ts:101-115, pinned by its own api.test.ts:65-70) while the server has answered the envelope `{ success:false, error:{ code:'SERVICE_UNAVAILABLE', message } }` since the sendError consolidation (external-datasource-routes.ts:383; response-envelope.ts:210) — so ExternalServiceUnavailableError cannot fire against a real head server and the 'Federation is not enabled on this server.' / SchemaBrowser 'unavailable' states are dead code live. Record the ACTUAL render (generic error text), never tick the friendly-hint clause green, and check for an existing objectui card before filing",
+          "the 'unreachable' diff kind (spec 2026-08-23, emitted by external-datasource-service.ts:789) is NEWER than the DIFF_LABEL map objectui compiles against: ValidationPanel.tsx:44-54 labels 9 kinds and lacks 'unreachable', so a validate run reporting an unreachable remote renders an unlabelled kind cell at head — the exact objectstack#4115 class the map's totality gate exists to catch; it will fail objectui's compile at the next spec pin bump (the panel's own comment documents the mechanism working that way for default_mismatch). Expected-fail if observed live; do not file as new without checking",
+          "diff-kind labels beyond the in-sync fixture need INDUCED drift — reuse external-schema-drift-gate's induced-drift recipe notes (scratch copy, measured column-type change); the stock in-sync fixture proves only the all-green render"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated via os dev with the console; sign in as the entitled admin; pre-capture the API ground truth: GET /api/v1/datasources/showcase_external/external/tables and POST .../external/validate",
+        "navigate Setup → Datasources (the metadata-admin engine route …/metadata/datasource — the left-nav names it directly, objectui#3660/register.ts) and open showcase_external: the ExternalDatasourcePanel renders (DatasourcePreview.tsx:148-154 keys it off schemaMode !== 'managed') with the schemaMode badge and the read-only/writes-allowed pill; screenshot FIRST, then read the DOM",
+        "Tables tab: SchemaBrowser loads the remote tables (mount + explicit Refresh only — never a timer); compare the rendered list name-by-name and columnCount-by-columnCount against the pre-captured listing",
+        "header 'Refresh catalog': click it and capture the POST /api/v1/datasources/showcase_external/external/refresh-catalog on the network; the snapshot timestamp renders from the returned catalog.snapshotAt",
+        "Import: pick customers → ImportObjectDialog fires POST .../external/tables/customers/draft, renders the suggested name, any review flags, and the generated *.object.ts source; click 'Import as Object' and capture the PUT /api/v1/meta/object/<name> it performs (the UI's import door IS the metadata channel — api.ts:189-199 importObjectDraft); confirm the object now exists over GET /api/v1/meta and answers a read-only /data query against the external rows",
+        "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects",
+        "Validation tab: run validation; capture POST .../external/validate → { ok, results } (URL-scoped work, #10537) and compare the rendered per-object verdict rows against it; on the in-sync stock fixture expect all-green; if an induced-drift scratch copy is available, confirm each reported diff kind renders with its DIFF_LABEL text",
+        "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 naming manage_metadata — FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses ('Rewriting stored metadata requires the `manage_metadata` capability')",
+        "ONLY on a deliberately unwired boot (see knownGaps): drive the Tables tab into the 503 and record what the UI ACTUALLY renders — expected-fail against the designed 'Federation is not enabled on this server.' state"
+      ],
+      "acceptance": [
+        {
+          "clause": "the panel renders for a FEDERATED datasource only: showcase_external (schemaMode external/validate-only) shows the External Datasource panel with Tables + Validation tabs and the read-only pill; a managed datasource shows no such panel — and an unsaved draft shows the save-first guidance instead of firing name-less REST calls",
+          "oracle": "screenshot",
+          "verify": "the panel on showcase_external vs its absence on a managed datasource (DatasourcePreview.tsx:145-154; the unsaved-draft guard ExternalDatasourcePanel.tsx:76-85)",
+          "evidence": "the two screenshots (+ the unsaved-draft state if a wizard draft is on hand)"
+        },
+        {
+          "clause": "SchemaBrowser mirrors the API exactly: the rendered table list equals GET .../external/tables name-for-name with per-table columnCount (customers/orders, 5 each on the stock fixture) — the network response is the authority, not the panel; data loads on mount + explicit Refresh only, never a timer",
+          "oracle": "dom",
+          "verify": "screenshot first, then DOM list diffed against the pre-captured listing (SchemaBrowser.tsx — listRemoteTables on mount/refresh; the fixture DDL in external-fixture.ts)",
+          "evidence": "screenshot + API read, diffed"
+        },
+        {
+          "clause": "the import chain lands a REAL object through the metadata channel: the dialog's draft (POST .../tables/:remote/draft) renders name + review flags + generated source, and 'Import as Object' persists via PUT /api/v1/meta/object/<name> (api.ts:189-199) — after which the object exists in /meta, is bound to showcase_external, and answers a federated read-only /data query; the server-side twin POST .../tables/:remote/import (201 { object }, refusals 400 EXTERNAL_IMPORT_ERROR) lands the same way — two doors, one metadata channel, both behind the manage_metadata floor",
+          "oracle": "api",
+          "verify": "the captured PUT + the post-import GET /meta and /data reads; the twin route at external-datasource-routes.ts:449-477; the dialog flow in ImportObjectDialog.tsx (draft → review → PUT)",
+          "evidence": "the network captures + the post-import meta/data reads"
+        },
+        {
+          "clause": "Refresh catalog round-trips: the header button fires POST .../external/refresh-catalog (a federation WRITE — manage_metadata floor), and the returned catalog.snapshotAt renders as the snapshot timestamp",
+          "oracle": "network",
+          "verify": "the captured POST + the rendered timestamp (ExternalDatasourcePanel.tsx:56-74,108-123; route at external-datasource-routes.ts:479-495)",
+          "evidence": "the network capture + the header screenshot"
+        },
+        {
+          "clause": "ValidationPanel reports what the server measured: the run fires POST .../external/validate (URL-scoped to this datasource, #10537 — a read, manage_platform_settings floor) and renders one verdict row per federated object matching { ok, results }; every diff kind rendered carries its DIFF_LABEL text — with the head-version caveat that 'unreachable' is not yet in objectui's label map (knownGaps: expected-fail, the #4115 class; the map's totality over the imported spec union is the standing guard)",
+          "oracle": "dom",
+          "verify": "the rendered rows against the captured response (ValidationPanel.tsx:44-54 DIFF_LABEL; route at external-datasource-routes.ts:508-526; kinds at external-errors.ts:102-141 — 10 at head, 9 labelled in objectui)",
+          "evidence": "the response + the rendered rows (and the unlabelled-kind capture if drift/outage was induced)"
+        },
+        {
+          "clause": "the floor holds on BOTH sides for all three newly-covered routes: anonymous → 401 UNAUTHENTICATED before any service lookup (#9686 shouldDenyAnonymous); the no-capability session → 403 PERMISSION_DENIED naming manage_platform_settings on validate (read) and manage_metadata on import/refresh-catalog (write, FEDERATION_WRITE_CAPABILITY); and the UI's own import door (PUT /meta/object) refuses the same session server-side — the dialog's success path must be unreachable for an unentitled operator by anything but pixels",
+          "oracle": "api",
+          "verify": "the probes of step 8 against refuseFederationRequest (external-datasource-routes.ts:287-324 — 'read' for validate at :513, 'write' for import/refresh at :458/:485) and the /meta manage_metadata gate (rest-server.ts:4270-4275)",
+          "evidence": "the 401/403 responses, keyed by route and persona"
+        },
+        {
+          "clause": "federation-unavailable honesty (EXPECTED-FAIL at head, record — do not tick): the server's 503 names the external-datasource service in the envelope; the UI was DESIGNED to map it to a friendly 'Federation is not enabled on this server.' / 'unavailable' state, but its detector matches the retired pre-#3843 string body, so at head the real envelope falls through to the generic error path — the run records the actual render and the mismatch, and must not score the generic error as the friendly state working",
+          "oracle": "dom",
+          "verify": "on a deliberately unwired boot: the 503 envelope (external-datasource-routes.ts:383) vs the UI detector (api.ts:101-115, ExternalServiceUnavailableError) and the stale pin (api.test.ts:65-70); on a stock boot this clause is not-applicable-live",
+          "evidence": "the 503 response + the actual rendered state, side by side"
+        }
+      ],
+      "negative": [
+        "a UI table/verdict row for anything the API did not report (or one missing) is a FAIL — the network response is the authority",
+        "the dialog reporting import success while no object row landed in /meta is a FAIL against the import chain",
+        "a 200 to the anonymous or no-capability caller on import / refresh-catalog / validate is a security FAIL (RUNNER rule 2's authz carve-out governs the report)",
+        "an imported object accepting DATA writes against the read-only external datasource is a FAIL (import must not grant writes — the datasource's allowWrites still governs)",
+        "a blank panel region or raw exception text where a designed state (loading / error / unavailable / save-first) should render is a FAIL"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "source": [
+        "objectui packages/app-shell/src/views/metadata-admin/external/api.ts:1-30 (the five-route client; :101-115 the retired-shape 503 detector; :131-199 listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
+        "objectui packages/app-shell/src/views/metadata-admin/external/{SchemaBrowser,ImportObjectDialog,ValidationPanel,ExternalDatasourcePanel}.tsx (the P5 surfaces; ValidationPanel.tsx:44-54 DIFF_LABEL total over the imported spec union — the #4115 recurrence guard) + previews/DatasourcePreview.tsx:145-154 (panel keyed off schemaMode !== 'managed')",
+        "objectui packages/app-shell/src/views/metadata-admin/datasource/register.ts:1-32 (Setup → Datasources = the engine route; left-nav names it directly, objectui#3660)",
+        "packages/rest/src/external-datasource-routes.ts:30-34 (the five-route family), :449-477 (import → 201 { object }, EXTERNAL_IMPORT_ERROR), :479-495 (refresh-catalog), :508-526 (validate, #10537 URL-scoped), :287-324 (refuseFederationRequest — read=manage_platform_settings, write=manage_metadata, #9686 anonymous floor), :383 (the 503 envelope)",
+        "packages/spec/src/shared/external-errors.ts:102-141 (SchemaDiffEntryKind — 10 kinds at head incl. index_mismatch/unmapped_index/default_mismatch/unreachable)",
+        "packages/services/service-datasource/src/external-datasource-service.ts:789 (the 'unreachable' producer)",
+        "sibling coverage this item deliberately does NOT duplicate: external-schema-introspection (tables/draft API contract + twin equivalence + auth-floor pins), external-datasource-federated-read (the query path), external-schema-drift-gate (boot gate; its induced-drift recipe notes are reused here for diff-label evidence)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new item from the 2026-08-30 coverage sweep (built-in-apps angle): the federation Studio UI and three of the five federation routes (import / refresh-catalog / validate) had no checklist coverage — external-schema-introspection covers only the two read twins. Grounded against source with two register corrections: (1) the UI's import door is PUT /api/v1/meta/object/:name (api.ts importObjectDraft), not the server's /external/tables/:remote/import route — both are covered as two doors into one metadata channel; (2) the register's 'federation-less boot surfaces the 503 as the named hint' is EXPECTED-FAIL at head: the UI's 503 detector matches the retired pre-#3843 string body while the server answers the sendError envelope, so the friendly state is dead code live (recorded as a knownGap + expected-fail clause, not asserted). Also recorded the 'unreachable' diff kind (2026-08-23) outrunning objectui's DIFF_LABEL pin — the #4115 class the map's compile-time totality will catch at the next spec bump",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     }
