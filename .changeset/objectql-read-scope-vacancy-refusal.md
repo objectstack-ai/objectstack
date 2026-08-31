@@ -1,0 +1,5 @@
+---
+'@objectstack/service-analytics': patch
+---
+
+`ObjectQLStrategy` now refuses a read scope that does not bind, before handing it to the engine (`READ_SCOPE_COMPILE_FAILED` / 500). That strategy merges `StrategyContext.getReadScope` output straight into the `FilterCondition` it gives `engine.aggregate` and never reaches `compileScopedFilterToSql`, so the empty-`$nin` refusal that compiler gained guarded the NativeSQL path and the `/analytics/sql` echo only. Measured against a real engine, a non-RLS scope provider handing `{ f: { $nin: [] } }`, `{ $not: { f: { $in: [] } } }`, `{ $not: { f: [] } }` or `{ $not: { f: { $in: [], $ne: 'x' } } }` received the WHOLE TABLE on any query this strategy served; all four are now refused, at both engine-bound merges (the aggregate filter and the FK→attribute resolution). Deliberately unchanged: `$in: []` keeps its ruled constant-FALSE fold, so the RLS compiler's live composite — an emptied membership `$or`-ed beside an own-rows grant — still admits exactly the own rows; and the NativeSQL path and the SQL echo keep the disposition they already had.
