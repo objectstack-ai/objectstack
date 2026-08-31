@@ -66,8 +66,15 @@ function makeDriver(flavour: Flavour) {
   const writes: Array<{ fn: string; data: Record<string, unknown> }> = [];
   const stored = new Map<string, Record<string, unknown>>();
 
-  /** What each flavour does when an undeclared key reaches it. */
-  const refuse = (object: string, data: Record<string, unknown>, undeclared: string): never => {
+  /**
+   * What each flavour does when an undeclared key reaches it.
+   *
+   * Takes only the object and the offending key: the SQL arm quotes a fixed
+   * value in its statement string on purpose, because the point of that arm is
+   * the shape driver-sql used to leak (`insert into … values (10)`), not this
+   * double's own payload.
+   */
+  const refuse = (object: string, undeclared: string): never => {
     if (flavour === 'sql') {
       // driver-sql / knex: the bound statement AND its values, then the
       // database's own diagnostic. `code` is the backend's, `status` absent.
@@ -96,7 +103,7 @@ function makeDriver(flavour: Flavour) {
       const bad = Object.keys(data).find((k) => !declaredByThisDouble.has(k));
       // `memory` is the ACCEPTING flavour: it spreads the payload, so the stray
       // key is persisted and read back — the shadow column.
-      if (bad && flavour !== 'memory') refuse(object, data, bad);
+      if (bad && flavour !== 'memory') refuse(object, bad);
       const id = (data.id as string) ?? `rec_${writes.length}`;
       const row = { id, ...data };
       stored.set(id, row);
@@ -105,7 +112,7 @@ function makeDriver(flavour: Flavour) {
     async update(object: string, id: string, data: Record<string, unknown>) {
       writes.push({ fn: 'update', data: { ...data } });
       const bad = Object.keys(data).find((k) => !declaredByThisDouble.has(k));
-      if (bad && flavour !== 'memory') refuse(object, data, bad);
+      if (bad && flavour !== 'memory') refuse(object, bad);
       const row = { ...(stored.get(id) ?? { id }), ...data, id };
       stored.set(id, row);
       return row;
@@ -113,7 +120,7 @@ function makeDriver(flavour: Flavour) {
     async updateMany(object: string, _ast: any, data: Record<string, unknown>) {
       writes.push({ fn: 'updateMany', data: { ...data } });
       const bad = Object.keys(data).find((k) => !declaredByThisDouble.has(k));
-      if (bad && flavour !== 'memory') refuse(object, data, bad);
+      if (bad && flavour !== 'memory') refuse(object, bad);
       for (const [id, row] of stored) stored.set(id, { ...row, ...data, id });
       return stored.size;
     },
