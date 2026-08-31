@@ -35,12 +35,19 @@ Two structural reasons to prefer the flow when either could work:
   `update_record` node's `fields` is structural config that `os validate`
   checks — readonly targets, template dialects, declared expression slots. A
   hook body's write set is checked too, but only for the literal patterns a
-  parser can recognise and only as an advisory warning (see
+  parser can recognise (see
   [Hook & Action Bodies](/docs/automation/hook-bodies#write-set-checking)).
   Field existence is checked on both surfaces, at different strengths: a hook
   body gets a warning, an `update_record` node a **gating error**
   (`flow-node-write-unknown-field`) — its `fields` is a literal map next to a
-  literal `objectName`, so nothing could have mis-read it.
+  literal `objectName`, so nothing could have mis-read it. **Writability** is
+  now gated on both: writing a `readonly` field through `ctx.api` is
+  `hook-api-update-readonly-field`, the hook-side sibling of the flow node's
+  `flow-update-readonly-field` (see
+  [Writing a `readonly` field](/docs/automation/hook-bodies#writing-a-readonly-field)) —
+  the two questions differ because a `readonly` declaration and a literal
+  `ctx.api` update are both visible in the stack, while a field's existence may
+  depend on a package the build cannot see.
 - **A flow reviews as data.** The node graph diffs field-by-field and renders
   in the Console designer with per-node run history; a hook body reviews as
   code only.
