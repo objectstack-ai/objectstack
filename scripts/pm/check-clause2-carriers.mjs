@@ -600,11 +600,27 @@ function rearmThroughProxy(args) {
   return null;
 }
 
-/** Every open PR on the board, paged to exhaustion. */
+/**
+ * Every open PR on the board, paged to exhaustion.
+ *
+ * Each page gets the same ONE retry the per-pair reads get, and for a sharper
+ * reason: a failure here is TOTAL. Measured 2026-08-31 — a transient `HTTP 502`
+ * on page 1 refused a whole `--pair` run that would otherwise have answered in
+ * a second. The refusal itself was correct (exit 3, "0 pair(s) had been read",
+ * ⛔ never a clean board), which is exactly why it should not be spent on a
+ * blip. ⛔ Still one retry, not a loop: a second failure is the answer.
+ */
 async function listOpenPulls(repo) {
   const out = [];
   for (let page = 1; page <= 10; page++) {
-    const batch = await rest(`/repos/${repo}/pulls?state=open&per_page=100&page=${page}`);
+    const path = `/repos/${repo}/pulls?state=open&per_page=100&page=${page}`;
+    let batch;
+    try {
+      batch = await rest(path);
+    } catch {
+      await new Promise((r) => setTimeout(r, 1500));
+      batch = await rest(path); // a second failure throws, and the caller refuses.
+    }
     out.push(...batch);
     if (batch.length < 100) break;
   }
