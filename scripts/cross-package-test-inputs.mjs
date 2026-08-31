@@ -411,6 +411,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts',
       'packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts',
       'scripts/check-route-envelope.mjs',
+      // [#13079] `envelope-caller-census.test.ts` IMPORTS the tree's one
+      // code/prose separator to enumerate call sites without counting the
+      // docblocks that name them. A real read, not a prose mention: the census
+      // count changes if the mask does.
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
     ],
   },
   '@objectstack/lint': {

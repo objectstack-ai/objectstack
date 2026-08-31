@@ -110,6 +110,78 @@ describe('http (canonical node)', () => {
             expect(result.success).toBe(true);
             expect(fetchMock).toHaveBeenCalledOnce();
         });
+
+        // [#13546] The producer pin: `sys_http_delivery` rows must carry the
+        // organization of the run that caused them, or they land in the
+        // driver's `organization_id IS NULL` global-row arm — visible to and
+        // replayable by every organization through redeliver() (#10740). The
+        // organization is THREADED from the run's own acting context
+        // (`AutomationContext.tenantId`) — the same source, and the same
+        // no-fallback rule, as the notify node's #11303 repair.
+        it("threads the run's acting organization onto the enqueue input (#13546)", async () => {
+            const enqueued: any[] = [];
+            const messaging: HttpSurface = {
+                isHttpDeliveryReady: () => true,
+                async enqueueHttp(input) {
+                    enqueued.push(input);
+                    return 'dlv_1';
+                },
+            };
+            const engine = new AutomationEngine(createTestLogger());
+            registerHttpNodes(engine, createCtx(messaging));
+            engine.registerFlow(
+                'http_flow',
+                httpFlow('http', { url: 'https://example.test/hook', durable: true }),
+            );
+
+            const result = await engine.execute('http_flow', { tenantId: 'org_pin_alpha' } as any);
+
+            expect(result.success).toBe(true);
+            expect(enqueued).toHaveLength(1);
+            // Verbatim — the acting tenant, not a derived or defaulted value.
+            expect(enqueued[0].organizationId).toBe('org_pin_alpha');
+        });
+
+        it('with NO organization in scope: still enqueues, passes NO organizationId key, and says so out loud (#13546)', async () => {
+            // The over-denial control (the notify suite's PIN C shape): a
+            // `single`-posture install and a stack before its first
+            // organization legitimately have no tenant to thread, and a
+            // durable callout there must still enqueue — org-less, loudly,
+            // never refused and never guessed.
+            const warnings: string[] = [];
+            const logger: any = {
+                info: () => {}, error: () => {}, debug: () => {},
+                warn: (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); },
+            };
+            logger.child = () => logger;
+            const enqueued: any[] = [];
+            const messaging: HttpSurface = {
+                isHttpDeliveryReady: () => true,
+                async enqueueHttp(input) {
+                    enqueued.push(input);
+                    return 'dlv_1';
+                },
+            };
+            const engine = new AutomationEngine(logger);
+            registerHttpNodes(engine, {
+                logger,
+                getService: (name: string) => (name === 'messaging' ? messaging : undefined),
+            } as any);
+            engine.registerFlow(
+                'http_flow',
+                httpFlow('http', { url: 'https://example.test/hook', durable: true }),
+            );
+
+            const result = await engine.execute('http_flow');
+
+            expect(result.success).toBe(true);
+            expect(enqueued).toHaveLength(1);
+            // Absent, not null and not '' — the outbox normalizes a missing
+            // value to NULL exactly once, at its insert.
+            expect('organizationId' in enqueued[0]).toBe(false);
+            // Fail-LOUD: the org-less durable callout is a visible event.
+            expect(warnings.some((w) => w.includes('organization_id = NULL'))).toBe(true);
+        });
     });
 
     describe('request/response mode (default)', () => {

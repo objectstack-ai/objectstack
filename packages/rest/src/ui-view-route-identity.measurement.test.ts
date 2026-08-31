@@ -4,13 +4,19 @@
  * [#13214] What `GET /api/v1/ui/view/:object/:type` decides about the caller —
  * at the REST seam AND downstream in `getUiView`.
  *
- * ## What this file is
+ * ## ⭐ What this file is NOW: the single-tenant half of the regression pin
  *
- * ⛔ A MEASUREMENT file. It repairs nothing, gates nothing and proposes
- * nothing. Access-control behaviour is a human floor in this repo: if a
- * reading below is a problem, the repair is a card of its own with a human
- * decision on it. What is committed here is the instrument and its readings,
- * so the next person does not have to re-derive them from grep.
+ * It was written as a MEASUREMENT file and every reading in §1-§2 pinned the
+ * UNGUARDED seam: 200 to an absent context, byte-identical to an entitled one,
+ * `resolveExecCtx` called zero times. The maintainer ruled the repair on
+ * 2026-08-30 (option C), and those readings have been INVERTED onto the
+ * repaired behaviour — ⛔ not deleted, ⛔ not softened. §3-§6 are unchanged:
+ * they are readings about the PRODUCER, about `isAuthGateAllowlisted` and about
+ * the ratchet's reach, and the repair moved none of them.
+ *
+ * ⚠️ The pre-repair readings were TRUE WHEN TAKEN and are kept in the comments
+ * beside their inverses, because an assertion with no history cannot tell a
+ * later reader whether the defect ever existed.
  *
  * ## The three questions, and why the second is the big one
  *
@@ -155,11 +161,28 @@ async function call(handler: Handler, method: string, pattern: string, params: a
     return { status: status || (sent ? 200 : 0), code: body?.code ?? body?.error?.code ?? body?.error, body, threw };
 }
 
+/**
+ * The entitled caller this file drives with.
+ *
+ * ⚠️ `__authEnvironmentId` is not decoration and it is not a magic string: it is
+ * the internal key `computeExecCtx` stamps on every context it produces, naming
+ * the environment whose auth service actually validated the caller.
+ * `enforceEnvironmentOwnership` compares it against the environment the request
+ * resolved to, and `instrument()` below replaces `resolveExecCtx` wholesale, so
+ * a synthetic context has to MODEL that key or it is a caller anchored nowhere
+ * — which the repaired seam refuses, fail-closed and deliberately.
+ *
+ * `'env_13214'` is this harness's `defaultEnvironmentIdProvider` (see
+ * `makeServer`), i.e. exactly the environment every drive in this file resolves
+ * to. A caller entitled somewhere ELSE is the tenancy suite's subject, not
+ * this file's.
+ */
 const ENTITLED = {
     userId: 'u_13214',
     isSystem: false,
     tenantId: 'org_13214',
     systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    __authEnvironmentId: 'env_13214',
 };
 
 /** Mount the REAL route table and drive one route under one wiring. */
@@ -246,21 +269,27 @@ function gatingProtocol() {
 // ---------------------------------------------------------------------------
 
 describe('[#13214] §1 the REST seam — absent context vs entitled context', () => {
-    it('answers 200 under BOTH, with byte-identical bodies, having asked for identity ZERO times', async () => {
+    it('refuses an ABSENT context with 401 and serves an ENTITLED one — having actually ASKED for identity', async () => {
+        // ⚠️ Pre-repair, this same drive answered 200 under BOTH, with
+        // byte-identical bodies and `execCtxCalls` at 0 on both legs. Those
+        // three observations were the finding; these are their inverses.
         const absent = await driveRoute(UI_ROUTE, undefined, realProtocol(), UI_PARAMS);
         const entitled = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), UI_PARAMS);
 
-        expect(absent.status).toBe(200);
+        expect(absent.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(absent.code).toBe(ANONYMOUS_DENY_CODE);
         expect(entitled.status).toBe(200);
-        // Not merely "both 200": the same bytes. A route that resolved identity
-        // and narrowed on it would answer 200 twice with DIFFERENT bodies.
-        expect(JSON.stringify(absent.body)).toBe(JSON.stringify(entitled.body));
+        // Not merely "different statuses": the anonymous caller receives no
+        // view at all, so this is a refusal rather than a narrowed answer.
+        expect(JSON.stringify(absent.body)).not.toBe(JSON.stringify(entitled.body));
+        expect((absent.body as any)?.list).toBeUndefined();
+        expect((entitled.body as any)?.list?.columns?.length).toBeGreaterThan(0);
 
-        // ⭐ The third, independent observation. `resolveExecCtx` is patched on
-        // the prototype for the WHOLE server, so this counts every site the
-        // driven request reached — not just this handler's.
-        expect(absent.execCtxCalls).toBe(0);
-        expect(entitled.execCtxCalls).toBe(0);
+        // ⭐ The third, independent observation, inverted. `resolveExecCtx` is
+        // patched on the prototype for the WHOLE server, so this counts every
+        // site the driven request reached — not just this handler's.
+        expect(absent.execCtxCalls).toBeGreaterThan(0);
+        expect(entitled.execCtxCalls).toBeGreaterThan(0);
     }, 120_000);
 
     it('⭐ POSITIVE CONTROL — the same instrument, same boot, DOES refuse an absent context on a sibling route', async () => {
@@ -280,12 +309,13 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         expect(entitled.execCtxCalls).toBeGreaterThan(0);
     }, 120_000);
 
-    it('the handler calls `resolveProtocol` and NOT `enforceAuth` — read off the mounted registrar, not off a grep of the file', () => {
-        // The source assertion is scoped to the registrar body so it cannot be
-        // satisfied by a neighbour's guard, which is the trap the card warns
-        // about: `enforceAuth` IS present in this file (52 times over) and
-        // `registerUiEndpoints` sits directly above `registerCrudEndpoints`,
-        // whose handlers all carry it.
+    it('the handler now calls `enforceAuth` — read off the mounted registrar, not off a grep of the file', () => {
+        // ⚠️ The two `false` assertions this case used to carry WERE the card's
+        // source-level finding. The scoping matters as much now as it did then,
+        // and for the same reason the card warns about: `enforceAuth` IS present
+        // in this file 52 times over, and `registerUiEndpoints` sits directly
+        // above `registerCrudEndpoints`, whose handlers all carry it — so a
+        // file-wide grep would have read as a pass before the repair too.
         const start = SOURCE.indexOf('private registerUiEndpoints(');
         const end = SOURCE.indexOf('private registerCrudEndpoints(');
         expect(start).toBeGreaterThan(0);
@@ -294,11 +324,11 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
 
         expect(body).toContain('this.resolveProtocol(');
         expect(body).toContain('p.getUiView(');
-        // ⛔ Reverse-checked zeros: the same two terms are counted over the
-        // WHOLE file below, so a zero here is "absent from this registrar",
-        // never "misspelled".
-        expect(body.includes('this.enforceAuth(')).toBe(false);
-        expect(body.includes('this.resolveExecCtx(')).toBe(false);
+        expect(body.includes('this.enforceAuth(')).toBe(true);
+        expect(body.includes('this.resolveExecCtx(')).toBe(true);
+        // ⛔ Reverse-checked: a `true` from a substring test is only worth
+        // something if the term is spelled the way the rest of the file spells
+        // it — 52 sibling sites say it is.
         expect(SOURCE.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(SOURCE.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });
@@ -344,51 +374,89 @@ describe('[#13214] §2 the argument object — the producer cannot gate on what 
 // ---------------------------------------------------------------------------
 
 describe('[#13214] §3 downstream — the REAL `getUiView`, driven', () => {
-    it('returns the SAME view to an absent and an entitled caller, field for field', async () => {
-        const absent = await driveRoute(UI_ROUTE, undefined, realProtocol(), UI_PARAMS);
-        const entitled = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), UI_PARAMS);
-        expect(absent.status).toBe(200);
-        expect(entitled.status).toBe(200);
+    // ⚠️ METHOD CHANGE, and it is the repair that forced it. Every case here
+    // used to compare an ABSENT caller against an ENTITLED one THROUGH the
+    // seam, because the seam served both. It no longer serves the absent one,
+    // so that comparison is not available and ⛔ has not been faked by relaxing
+    // an assertion. The producer question is unchanged and still answered — by
+    // calling the producer DIRECTLY, which is where "does it gate?" actually
+    // lives, plus a new reading the old method could not take: the producer is
+    // never REACHED at all when the seam refuses.
 
-        const columns = (b: any) => (b.list.columns as any[]).map((c) => c.field).sort();
-        expect(columns(absent.body)).toEqual(columns(entitled.body));
+    it('⭐ the producer is never REACHED when the seam refuses — the guard sits before it, not inside it', async () => {
+        // The strongest form of "no metadata escapes": not that the response
+        // was empty, but that the thing which produces metadata was not called.
+        const rec = recordingProtocol();
+        const absent = await driveRoute(UI_ROUTE, undefined, rec.protocol, UI_PARAMS);
+        expect(absent.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect(rec.seen.length).toBe(0);
+
+        // ⭐ CONTROL — the SAME recorder is reached by an entitled caller, so
+        // the zero above is a refusal and not a recorder that never records.
+        const rec2 = recordingProtocol();
+        const entitled = await driveRoute(UI_ROUTE, ENTITLED, rec2.protocol, UI_PARAMS);
+        expect(entitled.status).toBe(200);
+        expect(rec2.seen.length).toBe(1);
+    }, 120_000);
+
+    it('the producer applies NO authorization of its own — called directly, an identity in the argument changes nothing', async () => {
+        // ⚠️ This is #13214's originally-UNMEASURED half and the answer has not
+        // changed: the repair is at the seam, and the producer still gates
+        // nothing. Measured where it can still be measured — §2 and §4 supply
+        // the other half (the seam tells it nothing, and the instance is not
+        // per-request, so it could not gate even if it wanted to).
+        const producer = realProtocol();
+        const bare = await producer.getUiView({ object: 'account', type: 'list' });
+        const withIdentity = await producer.getUiView({
+            object: 'account', type: 'list', context: ENTITLED, userId: ENTITLED.userId,
+        } as any);
+        expect(JSON.stringify(bare)).toBe(JSON.stringify(withIdentity));
 
         // Freshness of the built artifact this reads (see the header note):
         // #5948 relocated `object` onto the CONTAINER. A `dist/` from before
         // that would put it on `list` instead and this would fail loudly rather
         // than reporting a stale producer's behaviour as current.
-        expect((absent.body as any).object).toBe('account');
-        expect((absent.body as any).list.object).toBeUndefined();
+        expect((bare as any).object).toBe('account');
+        expect((bare as any).list.object).toBeUndefined();
     }, 120_000);
 
-    it('⚠️ the one field it DOES drop is dropped by DECLARATION, not by caller — `hidden` goes for everyone, `salary` stays for everyone', async () => {
+    it('⚠️ the one field it DOES drop is dropped by DECLARATION, not by caller — `hidden` goes, `salary` stays', async () => {
         // This is the distinction the whole question turns on. An FLS-style
-        // narrowing would differ BETWEEN the two callers. This narrowing is
-        // identical for both, and keyed on a property of the schema.
-        const absent = await driveRoute(UI_ROUTE, undefined, realProtocol(), UI_PARAMS);
-        const entitled = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), UI_PARAMS);
+        // narrowing would differ BETWEEN callers; this one is keyed on a
+        // property of the schema and is identical however the producer is asked.
+        const served = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), UI_PARAMS);
         const cols = (b: any) => (b.list.columns as any[]).map((c) => c.field);
+        expect(cols(served.body)).not.toContain('secret');
+        expect(cols(served.body)).toContain('salary');
 
-        expect(cols(absent.body)).not.toContain('secret');
-        expect(cols(entitled.body)).not.toContain('secret');
-        expect(cols(absent.body)).toContain('salary');
-        expect(cols(entitled.body)).toContain('salary');
+        const direct: any = await realProtocol().getUiView({
+            object: 'account', type: 'list', context: ENTITLED,
+        } as any);
+        expect((direct.list.columns as any[]).map((c) => c.field)).toEqual(cols(served.body));
     }, 120_000);
 
     it('the form branch behaves the same way — this is not a list-only reading', async () => {
+        const served = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), { object: 'account', type: 'form' });
+        expect(served.status).toBe(200);
+        // ...and it is refused for an anonymous caller on the same branch, so
+        // the repair is not list-only either.
         const absent = await driveRoute(UI_ROUTE, undefined, realProtocol(), { object: 'account', type: 'form' });
-        const entitled = await driveRoute(UI_ROUTE, ENTITLED, realProtocol(), { object: 'account', type: 'form' });
-        expect(absent.status).toBe(200);
-        expect(JSON.stringify(absent.body)).toBe(JSON.stringify(entitled.body));
+        expect(absent.status).toBe(ANONYMOUS_DENY_STATUS);
+        expect((absent.body as any)?.form).toBeUndefined();
     }, 120_000);
 
     it('⭐ POSITIVE CONTROL A — the instrument REPORTS a downstream refusal when the producer makes one', async () => {
         // The rival wiring. Same route, same boot, same driver: a producer that
-        // gates is visible as a refusal. So §3's "served identically" is a
-        // reading about the SHIPPED producer, not a property of this harness.
-        const absent = await driveRoute(UI_ROUTE, undefined, gatingProtocol(), UI_PARAMS);
-        expect(absent.status).toBe(403);
-        expect(absent.code).toBe('PERMISSION_DENIED');
+        // gates is visible as a refusal, so §3's readings are about the SHIPPED
+        // producer and not a property of this harness.
+        //
+        // ⚠️ Driven with an ENTITLED caller now, and that is the point of the
+        // case rather than a workaround: the seam passes the gate, the producer
+        // still finds no identity in its argument (§2), and refuses. A 401 here
+        // would mean the seam refused and this control measured nothing.
+        const gated = await driveRoute(UI_ROUTE, ENTITLED, gatingProtocol(), UI_PARAMS);
+        expect(gated.status).toBe(403);
+        expect(gated.code).toBe('PERMISSION_DENIED');
     }, 120_000);
 
     it('⭐ POSITIVE CONTROL B — the REAL producer is reachable and CAN answer something other than 200', async () => {

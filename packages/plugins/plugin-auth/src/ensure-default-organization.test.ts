@@ -4,8 +4,34 @@
 // Covers the idempotency short-circuits, the create/reuse paths, and the
 // injectable seed-ownership step (enterprise injects it; open path omits it).
 
-import { describe, it, expect, vi } from 'vitest';
-import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { resetPlatformAdminEmailMemo } from '@objectstack/core';
+import {
+  ensureDefaultOrganization,
+  isDefaultOrganizationBootstrapTrigger,
+} from './ensure-default-organization.js';
+
+// [#11973] The config anchor reads `OS_PLATFORM_OWNER_EMAIL` live (memoized on
+// the raw value), so every case in this file pins the variable's state instead
+// of inheriting the ambient environment's.
+const ENV = 'OS_PLATFORM_OWNER_EMAIL';
+let ambientOwnerEmail: string | undefined;
+beforeEach(() => {
+  ambientOwnerEmail = process.env[ENV];
+  delete process.env[ENV];
+  resetPlatformAdminEmailMemo();
+});
+afterEach(() => {
+  if (ambientOwnerEmail === undefined) delete process.env[ENV];
+  else process.env[ENV] = ambientOwnerEmail;
+  resetPlatformAdminEmailMemo();
+});
+
+/** Declare the deployment's administrators and drop the raw-value memo. */
+function declare(value: string): void {
+  process.env[ENV] = value;
+  resetPlatformAdminEmailMemo();
+}
 
 type Row = Record<string, any>;
 
@@ -17,6 +43,7 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
     ],
     sys_member: [],
     sys_organization: [],
+    sys_user: [],
     ...seed,
   };
   const matches = (row: Row, where: Row) =>
@@ -178,5 +205,131 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
       await ensureDefaultOrganization(refusingQl('sys_organization'), { logger: sink });
       expect(sink.seen).toHaveLength(1);
     });
+  });
+
+  // [#11973 / #11663 L3] The config-anchored population — design §2 step 5.
+  describe('config-anchored population (#11973)', () => {
+    const OWNER = 'owner@corp.example';
+
+    it('finds a declared, VERIFIED administrator with NO grant row anywhere (post-L4 walled population)', async () => {
+      declare(OWNER);
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: true }],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.memberCreated).toBe(true);
+      expect(ql.tables.sys_member[0]).toMatchObject({ user_id: 'u_cfg', role: 'owner' });
+    });
+
+    it('prefers the config anchor over the legacy grant anchor (the derivation prefers config)', async () => {
+      declare(OWNER);
+      const ql = makeQl({
+        sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: true }],
+      });
+      // The default fixture also carries the legacy grant admin `u1`.
+      await ensureDefaultOrganization(ql);
+      expect(ql.tables.sys_member[0].user_id).toBe('u_cfg');
+    });
+
+    it('an UNVERIFIED declared account confers nothing — falls back to the legacy grant anchor', async () => {
+      declare(OWNER);
+      const ql = makeQl({
+        sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: false }],
+      });
+      await ensureDefaultOrganization(ql);
+      expect(ql.tables.sys_member[0].user_id).toBe('u1');
+    });
+
+    it('declared but nobody registered, and no grants: no_admin — the trigger set re-runs it later', async () => {
+      declare(OWNER);
+      const ql = makeQl({ sys_user_permission_set: [] });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
+    });
+
+    it('operator order decides between several declared administrators with standing', async () => {
+      declare('first@corp.example,second@corp.example');
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [
+          { id: 'u_second', email: 'second@corp.example', email_verified: true },
+          { id: 'u_first', email: 'first@corp.example', email_verified: true },
+        ],
+      });
+      await ensureDefaultOrganization(ql);
+      expect(ql.tables.sys_member[0].user_id).toBe('u_first');
+    });
+
+    it('an entry with no verified account is passed over for the next declared entry', async () => {
+      declare('first@corp.example,second@corp.example');
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [{ id: 'u_second', email: 'second@corp.example', email_verified: true }],
+      });
+      await ensureDefaultOrganization(ql);
+      expect(ql.tables.sys_member[0].user_id).toBe('u_second');
+    });
+
+    it('a REFUSED variable (unparseable entry) fails the whole list closed — legacy anchor answers', async () => {
+      declare(`${OWNER},not an email`);
+      const ql = makeQl({
+        sys_user: [{ id: 'u_cfg', email: OWNER, email_verified: true }],
+      });
+      await ensureDefaultOrganization(ql);
+      // Choice 2B: the whole variable is refused, never the one entry — so the
+      // verified declared account confers nothing and the grant admin is bound.
+      expect(ql.tables.sys_member[0].user_id).toBe('u1');
+    });
+
+    it('queries the VERBATIM spelling too — an imported row that is not stored lowercased is found', async () => {
+      declare('Ada@Example.com');
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        // The fake driver is an exact-match store, so the normalized
+        // (lowercased) lookup misses this row; only the as-typed spelling hits.
+        sys_user: [{ id: 'u_ada', email: 'Ada@Example.com', email_verified: true }],
+      });
+      await ensureDefaultOrganization(ql);
+      expect(ql.tables.sys_member[0].user_id).toBe('u_ada');
+    });
+
+    // The Choice 4A pin the PM asked for by name: with the variable UNSET, a
+    // verified `sys_user` row is NOT a population candidate. If the re-point
+    // leaked into the `single` branch (any verified user read as an admin
+    // candidate), `u_other` would win the bind below and this goes red.
+    it('config UNSET: a verified sys_user row is NOT an admin candidate — the grant anchor decides (Choice 4A)', async () => {
+      const ql = makeQl({
+        sys_user: [{ id: 'u_other', email: 'other@corp.example', email_verified: true }],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.memberCreated).toBe(true);
+      expect(ql.tables.sys_member[0].user_id).toBe('u1');
+      // …and the config half cost no sys_user read at all.
+      expect(ql.find).not.toHaveBeenCalledWith('sys_user', expect.anything(), expect.anything());
+    });
+  });
+});
+
+// [#11973 / #11663 L3, design H4] The trigger predicate — one definition for
+// every wiring (plugin-auth's middleware here; the enterprise organizations
+// package's walled wiring is asked to consume the same export).
+describe('isDefaultOrganizationBootstrapTrigger', () => {
+  it.each([
+    [{ object: 'sys_user', operation: 'insert' }, true],
+    [{ object: 'sys_user', operation: 'create' }, true],
+    [{ object: 'sys_user', operation: 'update', data: { email_verified: true } }, true],
+    [{ object: 'sys_user', operation: 'update', data: { email: 'x@y.example' } }, true],
+    [{ object: 'sys_user', operation: 'update', data: { name: 'renamed' } }, false],
+    [{ object: 'sys_user', operation: 'update' }, false],
+    [{ object: 'sys_user', operation: 'delete' }, false],
+    [{ object: 'sys_user_permission_set', operation: 'insert' }, true],
+    [{ object: 'sys_user_permission_set', operation: 'create' }, true],
+    [{ object: 'sys_user_permission_set', operation: 'update', data: { organization_id: null } }, false],
+    [{ object: 'sys_member', operation: 'insert' }, false],
+    [{ object: 'task', operation: 'insert' }, false],
+    [{}, false],
+  ])('%j → %s', (opCtx, expected) => {
+    expect(isDefaultOrganizationBootstrapTrigger(opCtx as any)).toBe(expected);
   });
 });

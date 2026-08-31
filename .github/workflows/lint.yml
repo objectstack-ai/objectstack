@@ -1460,12 +1460,23 @@ jobs:
       # every type still checks, every link still resolves. The only symptom is
       # a 200 where a 404 belongs, on URLs no test requests.
       #
+      # The same matcher rule holds up a SECOND surface, gated by the same
+      # script: `lib/source.ts`'s `getPageImage()` appends an `image.png` marker
+      # to every Open Graph card URL, and that marker's DOT is the only reason
+      # `/og/docs/<page>/image.png` is not rewritten to `/en/og/docs/...` (not a
+      # route -- `app/og/` is top-level, not under `app/[lang]/`). Measured:
+      # `/og/docs/ai/agents` -> 404, `/og/docs/ai/agents/x.png` -> 200, so the
+      # marker's NAME is free and its dot is not. Rename it to anything dotless
+      # and every `og:image` on the site 404s at once; nothing fetches those
+      # URLs, so it is the same silent shape as the catch-all above.
+      #
       # Runs its own --self-test first (via the pnpm script). Not ceremony: the
       # live tree is green by construction after the fix, so a passing run over
       # real data cannot distinguish a working gate from one that approves
-      # everything. The self-test is where every limb is observed failing, and
-      # where the proxy condition is observed flipping the requirement off.
-      - name: Docs locale catch-all rejects non-locale segments
+      # everything. The self-test is where every limb is observed failing --
+      # including the OG marker stripped of its dot -- and where the proxy
+      # condition is observed flipping the catch-all requirement off.
+      - name: Docs locale catch-all and OG card URL dot invariant
         run: pnpm check:docs-locale-catch-all
 
       # #11050 route spellings taught in prose: every /api/v1 wire-path

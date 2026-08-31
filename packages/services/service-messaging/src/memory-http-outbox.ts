@@ -75,6 +75,10 @@ export class MemoryHttpOutbox implements IHttpOutbox {
             signature: terminal.signature,
             timeoutMs: input.timeoutMs,
             payload: input.payload,
+            // [#13546] Same stamp as `SqlHttpOutbox.insert`, so a test that
+            // inspects a row here sees what production persists — and so
+            // `redeliver()` below has a tenant to scope by.
+            organizationId: input.organizationId,
             status: terminal.status,
             attempts: 0,
             error: terminal.error,
@@ -157,20 +161,32 @@ export class MemoryHttpOutbox implements IHttpOutbox {
     }
 
     /**
-     * [#10740] `options.tenantId` is accepted and deliberately not applied:
-     * this outbox is a `Map` of in-process rows with no tenant column and no
-     * driver behind it, so there is nothing to scope and nothing that could
-     * emit a tenant-audit finding. It is a test/dev double, never the
-     * request-reachable production store — `SqlHttpOutbox.redeliver` is the
-     * site that owes the isolation, and it applies the field.
+     * [#10740] `options.tenantId` IS applied here since #13546. The [#10740]
+     * text this replaces disclaimed the predicate because the rows carried no
+     * tenant at all ("a future memory implementation that DOES store a tenant
+     * owes the predicate here") — and `insert()` now stamps
+     * {@link HttpDelivery.organizationId}, so the debt is due.
      *
-     * ⚠️ Stated rather than left implicit, because "the parameter is ignored"
-     * and "the isolation is missing" look identical from a call site. A future
-     * memory implementation that DOES store a tenant owes the predicate here.
+     * The predicate mirrors the SQL driver's tenant term
+     * `(organization_id = :tenantId OR organization_id IS NULL)`, all three
+     * arms deliberately:
+     *  - a row in ANOTHER organization is INVISIBLE (`RESOURCE_NOT_FOUND`),
+     *    never forbidden — the same non-oracle refusal the contract rules;
+     *  - a row with NO organization is a global row every tenant may reach
+     *    (the driver's deliberate fail-open arm — hiding platform rows from
+     *    every tenant is a different defect);
+     *  - a caller with NO tenant (`tenantId: undefined`) stays unscoped,
+     *    which is the honest degraded shape {@link RedeliverOptions} rules
+     *    for genuinely tenant-less deployments.
      */
     async redeliver(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
         const row = this.rows.get(id);
-        if (!row) {
+        if (
+            !row ||
+            (options.tenantId !== undefined &&
+                row.organizationId !== undefined &&
+                row.organizationId !== options.tenantId)
+        ) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         // [#8069] Refuse BEFORE any mutation — a refused redelivery must leave
