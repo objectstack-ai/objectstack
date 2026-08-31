@@ -75,6 +75,23 @@
 # hand-written measurement of how each type got where it is — and is NOT.
 # Regenerating a Note would fabricate a verdict, which that README calls worse
 # than a missing row.
+#
+# The elevation census page joined at #13646 — a generated `file:line` anchor
+# table whose correct merged values are on NEITHER side of a conflict (measured on
+# #13625: five conflicted anchors resolved to 4408/5771/6019/6382/6575 against
+# branch 4407/5770/… and main 4284/5647/…), so no text merge and no hand merge can
+# reach them. ⚠️ It is routed as the FILE and NOT as `content/docs/permissions/**`:
+# unlike `content/docs/references/**` above, which is generated whole, that
+# directory is 22 hand-written prose pages around one generated one, and the glob
+# would defer the prose to OURS. See NOT_DRIVER_MANAGED for that entry.
+#
+# This is also the row where the header's own warning is answered rather than
+# accepted: deferring is safe here because `scripts/check-system-context-census.mjs`
+# still reddens on every PR from the required `Lint & Repo Gates` job — it
+# RE-DERIVES the census from the tree, so it catches the stale anchors a merge
+# leaves behind even when nothing conflicted, which is the majority case (#13625:
+# 18 anchors stale, 5 marked). The driver removes hand-merge rounds; it is never
+# the only signal.
 
 packages/spec/spec-changes.json                              merge=os-regen
 packages/spec/liveness/state-counts.md                       merge=os-regen
@@ -89,3 +106,4 @@ packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
 content/docs/references/**                                   merge=os-regen
+content/docs/permissions/system-context.mdx                  merge=os-regen

@@ -32,7 +32,10 @@ import {
   readMcpServerEnabledEnv,
   type AuthManagerOptions,
 } from './auth-manager.js';
-import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import {
+  ensureDefaultOrganization,
+  isDefaultOrganizationBootstrapTrigger,
+} from './ensure-default-organization.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
@@ -181,10 +184,13 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * organization, so sessions carry no `activeOrganizationId` and better-auth
    * `organization/invite-member` has no org to resolve — i.e. no way to add a
    * user at all. When enabled (default), the plugin idempotently creates the
-   * `Default Organization` (slug `default`) and binds the first platform
-   * admin as `owner`, on `kernel:ready` and after every
-   * `sys_user_permission_set` insert. Inert in multi-org mode — the
-   * enterprise organizations package owns the bootstrap there.
+   * `Default Organization` (slug `default`) and binds the platform admin as
+   * `owner`, on `kernel:ready` and after every write matched by
+   * `isDefaultOrganizationBootstrapTrigger` (a `sys_user` insert or
+   * email/email_verified update — the config-anchor trigger set — plus the
+   * legacy `sys_user_permission_set` insert that `single`-posture first-user
+   * promotion still writes). Inert in multi-org mode — the enterprise
+   * organizations package owns the bootstrap there.
    * @default true
    */
   autoDefaultOrganization?: boolean;
@@ -1047,18 +1053,20 @@ export class AuthPlugin implements Plugin {
         }
       };
       ctx.hook('kernel:ready', runEnsure);
-      // Re-run after every admin grant — covers the "first sign-up promoted
-      // to platform admin" case where kernel:ready fired before any user
-      // existed (same wiring the multi-org bootstrap uses).
+      // [#11973 / #11663 L3] Re-run after every write that can move the
+      // population answer, judged by the ONE exported trigger predicate: a
+      // `sys_user` insert or email/email_verified update (the #11343 trigger
+      // set — how a CONFIG-anchored admin comes into standing), and the
+      // legacy `sys_user_permission_set` insert (how `single`-posture
+      // first-user promotion lands standing, Choice 4A — retired with the
+      // legacy-grant removal leg). The enterprise organizations package's
+      // walled wiring should consume the same predicate.
       try {
         const ql = ctx.getService<IObjectQLEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {
           ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
             await next();
-            if (
-              opCtx?.object === 'sys_user_permission_set' &&
-              (opCtx?.operation === 'insert' || opCtx?.operation === 'create')
-            ) {
+            if (isDefaultOrganizationBootstrapTrigger(opCtx)) {
               await runEnsure();
             }
           });

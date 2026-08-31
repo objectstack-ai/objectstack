@@ -26,8 +26,11 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { z } from 'zod';
+
 import {
   BUILTIN_DRIVER_IDS,
+  CREDENTIAL_KEY_SPELLINGS,
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
   getDriverConfigSchema,
   urlCredentialQueryParams,
@@ -42,6 +45,8 @@ import {
   redactUrlPassword,
   redactableConfigKeys,
   refusedCredentialKeys,
+  refusedCredentialPaths,
+  refusedCredentialPathsOfSchema,
   refusedPassthroughSecretPaths,
 } from './datasource-credential-redaction';
 
@@ -336,6 +341,80 @@ describe('passthrough secret redaction (#9040) — the nested spellings the key-
     ]);
   });
 
+  it('drops CSFLE `kmsProviders` key material in every family, keeps the identity halves', () => {
+    // Measured against mongodb@7.5.0 BOTH ways the optional
+    // `mongodb-client-encryption` dependency can go: with it installed (7.2.1,
+    // inside the pin's ^7.2.0 optional-peer range) an instrumented constructor
+    // reads every one of these leaves (BSON-serialized into the native
+    // MongoCrypt); without it the same construction throws
+    // MongoMissingDependencyError before reading any of them. Either way a
+    // stored copy is decryption-capable material served in cleartext — the
+    // AWS_SESSION_TOKEN posture.
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: {
+        replicaSet: 'rs0',
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          kmsProviders: {
+            aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE', secretAccessKey: 'AWS-SECRET', sessionToken: 'AWS-SESSION' },
+            azure: { tenantId: 'tenant-id', clientId: 'client-id', clientSecret: 'AZURE-SECRET' },
+            gcp: { email: 'svc@example.iam.gserviceaccount.com', privateKey: 'R0NQLUtFWQ==' },
+            local: { key: 'TE9DQUwtS0VZ' },
+          },
+        },
+      },
+    });
+    expect(config).toEqual({
+      url: 'mongodb://app@mongo.internal:27017/events',
+      options: {
+        replicaSet: 'rs0',
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          kmsProviders: {
+            // The identity halves the client also reads are NOT credential
+            // material (#8876's asymmetry) and stay served.
+            aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE' },
+            azure: { tenantId: 'tenant-id', clientId: 'client-id' },
+            gcp: { email: 'svc@example.iam.gserviceaccount.com' },
+            local: {},
+          },
+        },
+      },
+    });
+    expect(redactedKeys).toEqual([
+      'options.autoEncryption.kmsProviders.aws.secretAccessKey',
+      'options.autoEncryption.kmsProviders.aws.sessionToken',
+      'options.autoEncryption.kmsProviders.azure.clientSecret',
+      'options.autoEncryption.kmsProviders.gcp.privateKey',
+      'options.autoEncryption.kmsProviders.local.key',
+    ]);
+  });
+
+  it('unmeasured `autoEncryption` neighbours stay served — the table is measurement-only', () => {
+    // Negative control for the CSFLE rows: positions the measurement did NOT
+    // establish as secret material (`kmip.endpoint`, `keyVaultNamespace`,
+    // `schemaMap`, `bypassAutoEncryption`) are not on the table, mirror no
+    // credential spelling, and come back byte-identical — the discipline that
+    // entries land only with a measurement quoted, never by name-shape.
+    const table = passthroughSecretPaths('mongodb').map((p) => p.join('.'));
+    expect(table).not.toContain('options.autoEncryption.kmsProviders.kmip.endpoint');
+    expect(table).not.toContain('options.autoEncryption.keyVaultNamespace');
+    const stored = {
+      options: {
+        autoEncryption: {
+          keyVaultNamespace: 'encryption.__keyVault',
+          bypassAutoEncryption: false,
+          schemaMap: { 'appdb.people': { bsonType: 'object' } },
+          kmsProviders: { kmip: { endpoint: 'kmip.internal:5696' } },
+        },
+      },
+    };
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', stored);
+    expect(config).toEqual(stored);
+    expect(redactedKeys).toEqual([]);
+  });
+
   it('a config without the passthrough — or with a malformed one — is untouched', () => {
     expect(redactDatasourceConfig('mongodb', { database: 'events' }).redactedKeys).toEqual([]);
     // Off-shape walks fall off silently rather than throwing on a stored row.
@@ -365,6 +444,137 @@ describe('passthrough secret redaction (#9040) — the nested spellings the key-
     const redacted = new Set(passthroughSecretPaths('mongodb').map((p) => p.join('.')));
     for (const path of refusedPassthroughSecretPaths('mongodb')) {
       expect(redacted.has(path.join('.'))).toBe(true);
+    }
+  });
+});
+
+/**
+ * The nested-position class — the finding this suite exists to hold closed.
+ *
+ * Before the fix, the credential-name judgment ran at the TOP level only and
+ * the nested side was ONLY the hand-enumerated `passthroughSecretPaths` table:
+ * a credential under the very spelling the top level hides, one object level
+ * down, was served back cleartext with `redactedKeys: []` (measured on the
+ * pre-fix build: `options.auth.token`, `options.pool.password`,
+ * `tunnel.password` on a contract-less driver, and a nested URL userinfo
+ * password all leaked). Every case below is a position deliberately ABSENT
+ * from that table — the mandated non-empty control: regression cases against
+ * table paths were already green and prove nothing about this class.
+ */
+describe('nested credential positions OFF the passthrough table — the class control', () => {
+  it('mongodb: drops a nested credential SPELLING the table does not list (`options.auth.token`)', () => {
+    expect(passthroughSecretPaths('mongodb').map((p) => p.join('.')))
+      .not.toContain('options.auth.token');
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
+      database: 'app',
+      options: { auth: { username: 'svc', token: 'eyJhbGci.x.y' }, replicaSet: 'rs0' },
+    });
+    expect(config).toEqual({
+      database: 'app',
+      options: { auth: { username: 'svc' }, replicaSet: 'rs0' },
+    });
+    expect(redactedKeys).toEqual(['options.auth.token']);
+  });
+
+  it('mongodb: drops a credential spelling nested one level deeper than the table knows', () => {
+    expect(passthroughSecretPaths('mongodb').map((p) => p.join('.')))
+      .not.toContain('options.pool.password');
+    const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
+      database: 'app',
+      options: { pool: { password: 'hunter2', min: 1 } },
+    });
+    expect(config).toEqual({ database: 'app', options: { pool: { min: 1 } } });
+    expect(redactedKeys).toEqual(['options.pool.password']);
+  });
+
+  it('a contract-less driver has nested credential spellings hidden too — no table row exists at all', () => {
+    expect(passthroughSecretPaths('com.vendor.custom')).toEqual([]);
+    const { config, redactedKeys } = redactDatasourceConfig('com.vendor.custom', {
+      endpoint: 'x',
+      tunnel: { password: 'hunter2', host: 'bastion' },
+    });
+    expect(config).toEqual({ endpoint: 'x', tunnel: { host: 'bastion' } });
+    expect(redactedKeys).toEqual(['tunnel.password']);
+  });
+
+  it('a NESTED string value gets the same URL composite the top level gets', () => {
+    const { config, redactedKeys } = redactDatasourceConfig('com.vendor.custom', {
+      replication: { url: 'postgresql://svc:hunter2@replica/db', lag: 5 },
+    });
+    expect(config).toEqual({
+      replication: { url: 'postgresql://svc@replica/db', lag: 5 },
+    });
+    expect(redactedKeys).toEqual(['replication.url']);
+  });
+
+  it('`redactedPaths` carries the same removals as exact segments, index-aligned', () => {
+    const { redactedKeys, redactedPaths } = redactDatasourceConfig('mongodb', {
+      password: 'top',
+      options: { auth: { token: 'nested' } },
+    });
+    expect(redactedKeys).toEqual(['options.auth.token', 'password']);
+    expect(redactedPaths).toEqual([['options', 'auth', 'token'], ['password']]);
+  });
+
+  it('is pure at depth — the nested containers of the stored input are never mutated', () => {
+    const stored = {
+      options: { auth: { username: 'svc', token: 'eyJ' }, pool: { password: 'x' } },
+    };
+    const snapshot = JSON.parse(JSON.stringify(stored));
+    redactDatasourceConfig('mongodb', stored);
+    expect(stored).toEqual(snapshot);
+  });
+
+  it('arrays are OFF the walk — row-shaped data keeps its own `password` FIELD (the seed carve-out, structurally)', () => {
+    // memory's `initialData` holds rows the driver SERVES; a scrub that
+    // reached into them would corrupt data, which is not this module's
+    // question. The boundary is structural (arrays end the walk — the same
+    // line the write door's `valueAtPath` draws), so it needs no per-driver
+    // exclusion list.
+    const stored = {
+      initialData: { users: [{ name: 'u1', password: 'seed-row-value' }] },
+    };
+    const { config, redactedKeys } = redactDatasourceConfig('memory', stored);
+    expect(config).toEqual(stored);
+    expect(redactedKeys).toEqual([]);
+  });
+});
+
+/**
+ * The DERIVED nested refusals — "reading the schema is reading the refusal
+ * list", extended below the top level. No builtin driver declares a nested
+ * `z.never()` today (pinned per driver below, measured not assumed), so the
+ * nested branch is proved against a constructed schema.
+ */
+describe('refusedCredentialPaths — the schema derivation, walked at depth', () => {
+  it('finds a nested z.never() leaf in an object shape, at its exact path', () => {
+    const schema = z.object({
+      host: z.string(),
+      proxy: z.object({
+        host: z.string(),
+        secretToken: z.never().optional(),
+      }).optional(),
+    });
+    expect(refusedCredentialPathsOfSchema(schema)).toEqual([['proxy', 'secretToken']]);
+  });
+
+  it('depth-1 projection equals refusedCredentialKeys for every builtin driver — and no driver declares deeper refusals today', () => {
+    for (const id of BUILTIN_DRIVER_IDS as readonly string[]) {
+      const paths = refusedCredentialPaths(id);
+      expect(paths.map((p) => p.join('.')), id).toEqual(refusedCredentialKeys(id));
+      expect(paths.every((p) => p.length === 1), id).toBe(true);
+    }
+    expect(refusedCredentialPaths('not-a-real-driver')).toEqual([]);
+  });
+
+  it('the ONE spelling list both doors consume covers canonical + aliases, and the read fallback carries all of it', () => {
+    // `CREDENTIAL_KEY_SPELLINGS` (driver/common.zod.ts) is what the write
+    // door's passthrough walk refuses; the read path's name set must hide at
+    // least those spellings at every depth, or the doors disagree about a
+    // nested position — the drift #8300 exists to prevent.
+    const fallback = new Set(redactableConfigKeys('a-driver-with-no-contract'));
+    for (const name of CREDENTIAL_KEY_SPELLINGS) {
+      expect(fallback.has(name), name).toBe(true);
     }
   });
 });

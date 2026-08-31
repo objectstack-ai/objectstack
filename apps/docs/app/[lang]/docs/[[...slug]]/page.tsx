@@ -39,23 +39,21 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
  * `index` node. ⛔ Nothing here splits `page.url` on `/`, and nothing constructs a
  * URL the loader has not already produced.
  *
- * ⚠️ **An ancestor arrives without a URL more often than not, and this drops it.**
- * Measured against a local production build, not inferred: fumadocs attaches a
- * folder's `index.mdx` as that folder's `index` node only when the folder's
- * `meta.json` does **not** list `"index"` in `pages`. 17 of the 35 `meta.json`
- * files under `content/docs` do list it, so their folder nodes carry a
- * `name` and no `url`, and 172 of 403 doc pages therefore ship a trail that skips
- * its section. Confirmed causally by deleting that one line from
- * `content/docs/data-modeling/meta.json` and rebuilding: the section crumb
- * appeared, linked, while an untouched control section stayed short.
+ * ⚠️ **An ancestor can arrive without a URL, and this drops it.** Fumadocs
+ * attaches a folder's `index.mdx` as that folder's `index` node only when the
+ * folder's `meta.json` does **not** list `"index"` in `pages`; a folder that
+ * lists it reaches this walk with a `name` and no `url`. That was once 17 of the
+ * 35 `meta.json` files under `content/docs`, shortening 172 of 404 trails. 16 of
+ * the 17 were fixed producer-side (#12352) and 8 short trails remain, all under
+ * `content/docs/releases/` — a directory AGENTS.md fences off, so its `meta.json`
+ * still lists `"index"`. The condition is therefore live, just rare.
  *
- * ⛔ The missing URL is deliberately **not** reconstructed here. The folder's index
- * page exists, is in the sitemap and answers 200 — the defect is in the content
- * config that hides it from the tree, not in this consumer, and a lookup that
- * re-derived it would make a producer bug invisible and permanent. Google requires
- * `item` on every crumb but the last, so a name-only crumb is not an option
- * either. Filed separately; when it lands, these trails complete with no change to
- * this file.
+ * ⛔ The missing URL is deliberately **not** reconstructed here — that fence is
+ * the reason #12352 was fixable at all. The folder's index page exists, is in the
+ * sitemap and answers 200 — the defect is in the content config that hides it
+ * from the tree, not in this consumer, and a lookup that re-derived it would make
+ * a producer bug invisible and permanent. Google requires `item` on every crumb
+ * but the last, so a name-only crumb is not an option either.
  *
  * Two things the tree cannot supply are added around it, both from data this
  * page already holds:

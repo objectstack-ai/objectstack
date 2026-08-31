@@ -147,7 +147,7 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
 // defect #13109 records. This block is the differential the shared
 // `PAGE_COMPONENT_COPY_KEYS` list cannot give: the KEY LIST has one definition
 // and both sides import it, but the WALK — which COMPONENTS carry those keys —
-// is written twice, once in `translatePage` (`packages/spec`) and once in
+// was written twice, once in `translatePage` (`packages/spec`) and once in
 // `collectExpectedEntries`. `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names the
 // failure pair a second hand-maintained copy produces: offering a key the
 // resolver ignores, or omitting one it reads. These tests fail on BOTH halves.
@@ -159,11 +159,16 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
 // whichever side it was copied from and pass through the drift it exists to
 // catch.
 //
-// ⚠️ `MAX_NESTED_COMPONENT_DEPTH` is deliberately NOT exported by
-// `packages/spec`, so the extractor mirrors the number rather than importing
-// it. The deep-chain case below is what keeps the mirror honest: it walks
-// deeper than the cap and asserts the two sides agree about where the descent
-// stops, so raising the cap on one side alone reds here.
+// Since #13218 (ruled 2026-08-30) the walk itself is ONE exported symbol —
+// `walkAddressedPageComponents` in `@objectstack/spec/system` — and both sides
+// consume it, so the five invariants this block measures (roots, descent key,
+// depth cap, cycle guard, collision arbitration) have a single source. This
+// block is the convergence's REGRESSION GUARD, preserved by that ruling: it
+// still measures end to end, so it catches what sharing a symbol cannot — a
+// consumer detaching from the walk again, or wiring it up so the two sides
+// diverge in what they DO at each component. The deep-chain case runs a chain
+// deeper than the (module-private) cap and asserts both sides stop at the same
+// depth, cap drift included.
 
 /**
  * Every component record reachable anywhere in a page document, by id — a

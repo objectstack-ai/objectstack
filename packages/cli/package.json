@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./console": {
+      "types": "./dist/utils/console.d.ts",
+      "default": "./dist/utils/console.js"
     }
   },
   "bin": {

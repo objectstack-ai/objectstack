@@ -1,0 +1,8 @@
+{
+  "content/docs/protocol/kernel/http-protocol.mdx": {
+    "exists-key-presence": 1
+  },
+  "content/docs/protocol/objectql/query-syntax.mdx": {
+    "exists-key-presence": 3
+  }
+}

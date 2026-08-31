@@ -59,6 +59,12 @@ interface DeliveryRow {
     signature?: string | null;
     timeout_ms?: number | null;
     payload_json: string;
+    /**
+     * [#13546] Kernel-provisioned tenant column — the predicate of the
+     * cross-organization wall on `redeliver()` (#10740). NULL = global row,
+     * visible to every organization (the driver's deliberate fail-open arm).
+     */
+    organization_id?: string | null;
     partition_key: number;
     status: HttpDeliveryStatus;
     attempts: number;
@@ -167,6 +173,15 @@ export class SqlHttpOutbox implements IHttpOutbox {
             signature: terminal.signature,
             timeout_ms: input.timeoutMs,
             payload_json: JSON.stringify(input.payload ?? null),
+            // [#13546] Stamp the producer's organization on the row — the same
+            // line `SqlOutbox.enqueue` writes. There is no execution context on
+            // this path (both producers run off the write path), so the row
+            // value is the ONE seam that can scope this row; without it every
+            // row lands in the driver's `organization_id IS NULL` global-row
+            // arm and the redeliver() wall (#10740) excludes nothing. The
+            // explicit `?? null` normalizes "producer has no organization"
+            // to NULL exactly once, here.
+            organization_id: input.organizationId ?? null,
             partition_key: hashPartition(input.refId, this.partitionCount),
             status: terminal.status,
             attempts: 0,
@@ -439,6 +454,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             signature: r.signature ?? undefined,
             timeoutMs: r.timeout_ms ?? undefined,
             payload: JSON.parse(r.payload_json),
+            organizationId: r.organization_id ?? undefined,
             status: r.status,
             attempts: r.attempts,
             claimedBy: r.claimed_by ?? undefined,

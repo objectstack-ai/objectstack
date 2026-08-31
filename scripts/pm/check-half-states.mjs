@@ -19,8 +19,14 @@
  * backlog sat on the board; not one predicate here had fired, because nothing
  * standing ever called them. An alarm added to a script nobody runs is still
  * silence, and the transport note below explains why "some seat should run it"
- * kept not happening: the live sweep cannot run inside a PM session container
- * at all.
+ * kept not happening: in every container class measured at the time, the live
+ * sweep could not run at all.
+ *
+ * ⚠️ That last clause is no longer true of every agent container, and saying so
+ * is #13544's whole point — see "Routing node through the session proxy" below.
+ * The scheduled caller stays regardless: it is right for the #9844 reason (a
+ * lane that has to REMEMBER to run a patrol does not run it), never for a
+ * transport reason. The on-demand path is restored BESIDE it, ⛔ not instead.
  *
  * So the caller is now `.github/workflows/half-state-patrol.yml` — a scheduled
  * workflow, on a runner where the transport prerequisite is met, landing the
@@ -703,6 +709,19 @@
  *       the proxy itself. Live mode cannot run, and the reading that used to say
  *       it could is the reason this probe now has a second stage.
  *
+ *   Proxied cloud dev session, node ROUTED through the proxy (#13544, measured
+ *       2026-08-31) — the same container class as the two above, and this time
+ *       every stage answers as GitHub: `/rate_limit` 200 (15000 core), `/user`
+ *       200 (the real login), and `GET /repos/objectstack-ai/objectstack` 200
+ *       with `server: github.com` and a real `x-github-request-id`. Live mode
+ *       runs fully. The SAME container with node NOT routed reads 401
+ *       authenticated and 403 anonymous on all three — so the fourth class's
+ *       refusal and this class's success are both true readings, of different
+ *       ROUTES, and the proxy's repo-scope policy is per-container rather than
+ *       a property of "being proxied". ⇒ stage 2 stays exactly as it is: it is
+ *       the only thing that tells this class from the fourth, and the fourth is
+ *       still out there.
+ *
  * That fourth class is the one that broke the probe, and its mechanism is worth
  * stating exactly, because the obvious hypothesis is WRONG and was measured to
  * be wrong. `/rate_limit` there is not the proxy fabricating a quota: it carries
@@ -745,6 +764,69 @@
  * cannot make one request. The first draft of the probe below did exactly that.
  * `probeIsUsable` is that lesson, and the self-test pins it.
  *
+ * ## Routing node through the session proxy (#13544)
+ *
+ * Requirement 1 above has a REMEDY this script can apply to itself, and not
+ * applying it was a measured defect. In a proxied agent container this probe
+ * printed PREREQUISITE NOT MET — "the token in the environment is not a valid
+ * GitHub credential", prescribing `export GITHUB_TOKEN=` — while `curl` on the
+ * same host, with the same token, in the same second, answered 200. A
+ * diagnostic that reports the opposite of the truth on the exact question "can
+ * a reading be taken here?" is the #4690 class INVERTED: readable looks like
+ * unreadable. The inverted direction is the more durable one, because it costs
+ * the tool nothing and only ever costs the caller — a probe that says "you
+ * can't" is not argued with. It cost the on-demand path for weeks, while the
+ * population that path exists to watch grew unobserved (#13526).
+ *
+ * So a live mode now RE-EXECS itself once with `--use-env-proxy` when a proxy
+ * is configured and this process is not already routed through it
+ * (`proxyRearmPlan`). `scripts/pm/check-governed-merges.mjs` carries the same
+ * mechanism for the same reason; this file keeps its OWN copy rather than
+ * importing it, because the patrol pair is copied VERBATIM into sibling repos
+ * (#11217) and must not acquire a dependency on a file that is not part of that
+ * pair.
+ *
+ * Three properties of that shape, each measured rather than argued:
+ *
+ *   - It has to be a re-exec. The flag is read at process START: assigning
+ *     `process.env.NODE_USE_ENV_PROXY = '1'` from inside the script is too late
+ *     (measured 2026-08-31 — still 403 from `server: Varnish`, i.e. still the
+ *     bypassed route). The alternative shape, constructing an undici
+ *     `EnvHttpProxyAgent` and calling `setGlobalDispatcher`, was measured and
+ *     rejected: `undici` does not resolve from this repo
+ *     (`require.resolve('undici')` -> MODULE_NOT_FOUND), so it would put a
+ *     dependency into a file whose entire adoption story is "copy it verbatim".
+ *   - It is a NO-OP where no proxy is configured — which is precisely the
+ *     GitHub Actions runner the scheduled caller runs on. `proxyRearmPlan`
+ *     returns `rearm: false` for an environment carrying no `HTTPS_PROXY` /
+ *     `https_proxy`, so the runner spawns no child, prints no extra line and
+ *     takes the code path it took before, byte for byte. Pinned in the
+ *     self-test, both directions.
+ *   - It never touches STDOUT. The notice goes to stderr, because the
+ *     `--format=markdown` consumer redirects stdout into an issue body: a
+ *     status line landing there would be PUBLISHED as part of the report.
+ *
+ * ⛔ What the re-exec deliberately does NOT do is weaken the refusal. A failed
+ * probe still prints PREREQUISITE NOT MET and still exits 3. Restoring the
+ * on-demand path means fixing the ROUTE the probe takes, never lowering the bar
+ * it applies to what comes back — a sweep that runs on an unreachable API and
+ * reports a clean board is strictly worse than a refusal, which is #4690 in the
+ * direction this file was written for. The control is run both ways and the
+ * unreachable leg is a first-class case, not an afterthought: with the proxy
+ * pointed at a dead port the re-exec still happens, the child still cannot
+ * reach the host, and the run still exits 3.
+ *
+ * And when a bypassed reading DOES reach the report — an older node that will
+ * not accept the flag, a re-exec that could not spawn — the verdict carries
+ * `describeTransportRoute`'s bypassed note: the `Fix:` line becomes the ROUTE,
+ * and the credential remedy is demoted to "if the route is not the problem". The
+ * old text sent the next reader looking for a credential they do not need. The
+ * SAME reading, taken on the routed side, retires a sentence that the re-exec
+ * falsified: the host-unreachable branch used to reassure every reader that
+ * "node's fetch does not use HTTPS_PROXY", which stops being true the moment
+ * this file routes it — and a stale reassurance inside a refusal is the same
+ * defect one layer down.
+ *
  * So the script PROBES before it sweeps, in two stages, and the staging is the
  * whole cost story:
  *
@@ -781,8 +863,11 @@
  * transport or a required-real-token doctrine. That depends on where
  * `scripts/pm/**` live modes are meant to execute, which is a maintainer call
  * (#7412 triage, explicitly out of scope). This change only stops the file from
- * lying about the transport it has. It does not drop, substitute or re-route the
- * token, so a container where the sweep worked before works identically after.
+ * lying about the transport it has. It still does not drop or substitute the
+ * TOKEN — which identity to send stays the caller's decision — and the #13544
+ * re-exec re-routes the TRANSPORT only, on the one environment shape that
+ * carries a proxy, so a container where the sweep worked before works
+ * identically after.
  *
  * REST only, never GraphQL (Operational notes 3: the loop's hot path stays on
  * the core quota).
@@ -802,7 +887,8 @@
  */
 
 import process from 'node:process';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 /**
@@ -878,6 +964,8 @@ export function resolveSweepRepo(env = {}) {
 const SWEEP_REPO = resolveSweepRepo(process.env);
 const OWNER_REPO = SWEEP_REPO.repo;
 const API = 'https://api.github.com';
+/** This file, resolved for the #13544 proxy re-exec (see `rearmThroughProxy`). */
+const SELF_PATH = fileURLToPath(import.meta.url);
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 
 // ---------------------------------------------------------------------------
@@ -4767,7 +4855,7 @@ export function h27NeedsClaimLivenessRead(issue, claim, nowMs = Date.now()) {
  *
  * Counted per channel because the two windows have different reach: the open
  * listing is effectively complete (paged to exhaustion), while the merged one
- * is a bounded recency window (`MERGED_WINDOW_PAGES`). That asymmetry is what
+ * is a bounded recency window (`MERGED_WINDOW_DAYS`). That asymmetry is what
  * the finding sentence has to disclose, so it is preserved here rather than
  * collapsed into a boolean.
  */
@@ -4890,7 +4978,7 @@ export function h27DeadClaimNoProgress(issue, claim, refStates, delivery, nowMs 
     "sit there — the next PM's round-open mutual-exclusion read treats a dead `Claim:` as a live " +
     'claim by another session and stays off the card, so one dead agent blocks the lane. ⛔ Rule ' +
     'out one reading first: a delivery that merged BEFORE this sweep\'s merged window ' +
-    `(${MERGED_WINDOW_PAGES} pages) is invisible here, so a card whose PR landed days ago and ` +
+    `(${MERGED_WINDOW_DAYS} days) is invisible here, so a card whose PR landed days ago and ` +
     'whose branch was never deleted can reach this row — check the card for a merged delivery ' +
     'before treating it as a death.' +
     recovery
@@ -6598,6 +6686,367 @@ export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
 }
 
 // ---------------------------------------------------------------------------
+// H38 — a SEAT POST that a whole shift ran behind (#13493, half ① only).
+//
+// ## The observation, and why it is a gate rather than a lesson
+//
+// The `domain:services` seat post last wrote 2026-08-29T07:09Z. Over the next
+// ~31 hours a full shift ran to wave 4 and dispatched at least five cards, three
+// with live remote branches, while the post's title still read 「R4 派发中 · 在飞
+// 3 · 队列 11 可派」. Every number in it was wrong, and `updated_at` matched the
+// body's last edit exactly — so the post read as SETTLED rather than as stale.
+//
+// ⭐ What makes this mechanisable rather than a reminder: that same seat post
+// already carried this exact lesson, written one shift EARLIER (ledger item 16,
+// 「a seat post that goes quiet does not mean a seat went quiet」), recorded after
+// the previous shift did the same thing. The next shift reproduced it anyway. A
+// failure mode that recurs on the following shift, in the document the successor
+// is required to read, is not an attention problem — prose was applied at full
+// strength and did not hold. ⛔ So this row adds no rule and prescribes no new
+// protocol text; the rule already exists and the DETECTABILITY did not (H32's
+// posture, for the same reason).
+//
+// ## The signature costs nothing, because a silent shift still leaves a trace
+//
+// A shift that ran without writing home still CLAIMED cards. So the reading is
+// an ordering, not a threshold: newest lane claim vs the seat post's own last
+// event. No clock, no tuned constant — which is why this row can be certain
+// where H32 needs a measured horizon.
+//
+// ## ⛔ Out of scope, by the filing card's own boundary
+//
+// The card names a second gap — a representable 收班中 ("clocking off") state,
+// which the mutual-exclusion protocol cannot express today — and states that it
+// is a PROTOCOL change, ⛔ not to be bundled with this one. It is not
+// implemented here and this row must not be read as covering it.
+// ---------------------------------------------------------------------------
+
+/**
+ * `T_seat` — the seat post's last event, as the card defines it: the body edit
+ * or the newest comment, whichever is later.
+ *
+ * ⚠️ The body half is read off `updated_at`, which is the only body-edit signal
+ * the REST issue object carries — and it is bumped by LABEL writes too, not just
+ * by edits. That makes `T_seat` an upper bound on the post's real last write, so
+ * this row UNDER-reports: a seat whose post was silently bumped by a label write
+ * reads as fresher than it is and goes unreported. Named rather than fixed,
+ * because the alternative — a per-post timeline fetch on every seat, every sweep
+ * — is a per-card event read this file declines everywhere else (H15, H16 and
+ * H35 all refuse the same shape by name), and the residual error is one label
+ * write on a surface whose labels are essentially static.
+ *
+ * @param {{ updated_at?: string }} seat
+ * @param {{ created_at?: string, updated_at?: string }[]} commentRows
+ * @returns {number|null} epoch ms, or null when nothing was readable (#4690)
+ */
+export function seatPostLastEventMs(seat, commentRows) {
+  const stamps = [];
+  const body = Date.parse(seat?.updated_at ?? '');
+  if (Number.isFinite(body)) stamps.push(body);
+  for (const row of Array.isArray(commentRows) ? commentRows : []) {
+    // A comment's own edit counts: an edited comment IS the seat writing home.
+    for (const key of ['updated_at', 'created_at']) {
+      const at = Date.parse(row?.[key] ?? '');
+      if (Number.isFinite(at)) stamps.push(at);
+    }
+  }
+  return stamps.length === 0 ? null : Math.max(...stamps);
+}
+
+/**
+ * The newest `Claim:` on a lane, over the dispatched cards this sweep holds.
+ *
+ * ⚠️ The claim predicate is `latestClaimComment` — REUSED, deliberately not
+ * re-spelled. The filing card is explicit that the literal `Claim:` marker is
+ * the established machine criterion (maintainer ruling 2026-08-11) and ⛔ must
+ * not be widened; it is equally important not to NARROW it here. Defining a
+ * stricter first-line-only claim for this row alone would leave the file
+ * disagreeing with itself about what a claim IS — H2 calling a card claimed
+ * while H38 called the same comment invisible — and a file that contradicts
+ * itself about its own vocabulary is a worse defect than either gap (H33's
+ * header settles this for the whole file).
+ *
+ * ⚠️ `labels` filters on the listing endpoints are OR, not AND (measured and
+ * recorded on the seat post itself), which is why the lane is intersected
+ * LOCALLY here rather than requested as a two-label query — that query returns
+ * the union and would over-count in the "too many" direction.
+ *
+ * @param {string} lane — a `domain:*` label.
+ * @param {Iterable<any>} issues — open cards this sweep already listed.
+ * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
+ * @returns {{ number: number, at: number }|null} the newest claim, or null.
+ */
+export function newestLaneClaim(lane, issues, commentsByNumber) {
+  let best = null;
+  for (const issue of issues ?? []) {
+    const labels = labelNames(issue ?? {});
+    // Both conditions intersected locally — see the OR/AND note above.
+    if (!labels.includes('pm:dispatched') || !labels.includes(lane)) continue;
+    const rows = commentsByNumber?.get?.(issue.number);
+    if (!rows) continue;
+    const claim = latestClaimComment(rows);
+    if (!claim) continue;
+    const at = Date.parse(claim.createdAt ?? '');
+    if (!Number.isFinite(at)) continue;
+    if (best === null || at > best.at) best = { number: issue.number, at };
+  }
+  return best;
+}
+
+/**
+ * H38 — null when the seat post is current, else the finding sentence.
+ *
+ * @param {object} seat — the `pm:seat` post.
+ * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
+ * @param {{ number: number, at: number }|null} claim — the newest lane claim.
+ */
+export function h38SeatPostStale(seat, seatAt, claim) {
+  if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
+  const { lane, foreign } = seatLane(seat ?? {});
+  // A lane this board cannot count has no readable claim population here, so
+  // an absent claim would mean "unreadable", not "none" — H32's `foreign`
+  // reasoning, and the reason this row declines rather than reporting silence.
+  if (foreign || !lane) return null;
+  if (!claim) return null;
+  // ⛔ Both sides must be READABLE. This is an ORDER comparison, not an age, so
+  // an unreadable stamp does not make the reading conservative — it makes it
+  // undefined, and a staleness claim built on a stamp nobody could read is a
+  // fabricated ordering (H33 settles this direction for the file).
+  if (seatAt === null || !Number.isFinite(seatAt)) return null;
+  if (claim.at <= seatAt) return null;
+
+  const behindHours = (claim.at - seatAt) / 3_600_000;
+  return (
+    `\`pm:seat\` post is STALE — its lane \`${lane}\` carries a \`Claim:\` on #${claim.number} written ` +
+    `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
+    `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
+    'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
+    'moved on, while `updated_at` makes the post read as SETTLED rather than as stale. ⚠️ This is the ' +
+    'measured shape: one seat ran ~31h to wave 4 and dispatched five cards under a title still claiming ' +
+    'the previous round. ⛔ Not an accusation of carelessness — the same post already carried this exact ' +
+    'lesson in its own ledger, written one shift earlier, and the next shift reproduced it; that is the ' +
+    'evidence prose does not hold here, not evidence about any seat. Remedy: refresh the seat post (or ' +
+    'post a round marker) so the successor reading it sees the round that is actually running. ' +
+    'Report-only: ⛔ this row never writes a label, a title or a marker.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H39 — the CLOSED `pm:*` RESIDUE CENSUS (#13526). An inventory, not a
+// predicate: H17's register, and deliberately not H22's.
+//
+// ## Why a census when H22 already reports closed residue
+//
+// H22 judges the closed cards inside a bounded, UPDATE-ordered window (four
+// pages ≈ 1.7 days of update-recency) and reports them one row each. That is
+// the right shape for a patrol — recent residue, while the paired write is
+// still a live duty someone remembers — and it is the wrong shape for the
+// question #13526 asks, which is about the SIZE and AGE of the whole
+// population. The filing seat measured ≥100 closed carriers per lane per label
+// across at least three lanes, back to 2026-08-05, and could not say more,
+// because a first page is not a count.
+//
+// So this leg counts rather than lists: fully paginated, per lane, per label.
+//
+// ## ⛔ The one rule this block exists to enforce: A PAGE CAP IS NOT A COUNT
+//
+// The filing card was explicit, and stated its reason as a measurement about
+// this board rather than as a preference: the last three cards whose headline
+// number was an upper or capped bound all had that number quoted back as if it
+// were exact. So a truncated reading here is NEVER rendered as a number — it
+// renders as `≥N (PAGE CAP …)` with the word "cap" in it, and
+// `censusIsCountable` is the predicate a caller must consult before treating
+// any of these figures as a count.
+//
+// ## The control, and why a zero here is not automatically a reading
+//
+// The card also prescribed the control it did not have room to run: the same
+// query shape WITHOUT the `pm:*` label must return rows. If it does not, the
+// instrument is broken and every zero below is "nothing was read" rather than
+// "nothing is there" — #4690, on a leg whose whole output is counts. The
+// renderer refuses to present a clean census when the control came back empty.
+//
+// ## ⚖️ RULED 2026-08-31 — the cleanup this leg was counting FOR is rejected
+//
+// The separate decision this leg deferred to has been made, and it went the
+// other way. Maintainer ruling, 第 6 场总监席决裁批 #13, verbatim and
+// untranslated: 「13605 已关卡 为什么要清理。普查时不应该只看open的卡片吗，其他
+// 同意」.
+//
+// So there is no cleanup, now or later: ⛔ no bulk strip, ⛔ no backfill of old
+// cards, ⛔ no sweep, ⛔ no reaper. A closed card is ARCHIVE, not state, and
+// ~3,000 label writes to tidy an archive is machinery serving the instrument.
+// The residue is made harmless READER-side instead — every query that selects
+// by a `pm:*` label scopes itself to open cards (`pmLabelListingPath` carries
+// that scoping and the self-test pins it).
+//
+// ⇒ What that costs THIS leg is its verdict, not its existence. The numbers
+// below are no longer a to-do, a backlog, or a problem: they are one
+// informational reading about a population nobody is expected to act on. So
+// the renderer emits exactly ONE line, and ⛔ never renders red, an alarm, or a
+// finding row — a patrol that keeps shouting a number after the number has
+// been ruled harmless trains its readers to stop reading the whole report.
+// Close-time hygiene (strip `pm:*` in the same stroke as the close) stays the
+// convention, and H22 — bounded to a 3-day closure window, where the paired
+// write is still a live duty — stays the leg that observes it.
+//
+// ⛔ NO relabelling remains true and is now doubly settled: this file writes no
+// label anywhere, and the write it might have been tempted into has been
+// refused by name.
+//
+// ⚠️ The `issues` endpoint returns PULL REQUESTS too, and they are filtered out
+// by `pull_request` presence — a PR counted as a card would inflate every
+// figure here in the direction that makes the problem look worse than it is.
+// ---------------------------------------------------------------------------
+
+/**
+ * The quota backstop on each label's pagination. Generous on purpose: this leg
+ * is worthless if it binds routinely, since a bound page cap is precisely the
+ * non-answer the filing card refused to publish. 50 pages = 5,000 cards per
+ * label, against a population measured in the hundreds.
+ */
+export const CENSUS_PAGE_CEILING = 50;
+
+/** How many contradictory-pair card numbers are listed before the rest are counted. */
+export const CENSUS_PAIR_LIST_CAP = 25;
+
+/** Has this label's stream ended? A short page is the end; a full one never is. */
+export function censusPageExhausted(batch) {
+  return !Array.isArray(batch) || batch.length < 100;
+}
+
+/**
+ * The lanes a card belongs to — `domain:*` for domain lanes and `repo:*` for
+ * single-lane seats, the same two spellings the seat posts name.
+ *
+ * A card carrying neither is bucketed under `(no lane)` rather than dropped: an
+ * unrouted closed card with `pm:` residue is still residue, and silently
+ * excluding it would make the total disagree with the per-lane rows for reasons
+ * a reader could not see.
+ */
+export function censusLanesOf(issue) {
+  const lanes = labelNames(issue ?? {}).filter((l) => /^(?:domain|repo):/u.test(l));
+  return lanes.length > 0 ? lanes : ['(no lane)'];
+}
+
+/**
+ * Fold the per-label corpora into the census.
+ *
+ * @param {Map<string, { rows: any[], truncated: boolean }>} byLabel
+ * @param {{ controlRows?: number }} [context]
+ */
+export function summariseClosedResidue(byLabel, context = {}) {
+  const rows = [];
+  const seenByLabel = new Map();
+  let anyTruncated = false;
+  for (const [label, corpus] of byLabel ?? []) {
+    const cards = (corpus?.rows ?? []).filter((i) => !i?.pull_request);
+    seenByLabel.set(label, new Set(cards.map((i) => i.number)));
+    if (corpus?.truncated) anyTruncated = true;
+    const perLane = new Map();
+    let oldest = null;
+    for (const card of cards) {
+      for (const lane of censusLanesOf(card)) perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
+      const closed = Date.parse(card?.closed_at ?? '');
+      if (Number.isFinite(closed) && (oldest === null || closed < oldest.at)) {
+        oldest = { at: closed, number: card.number };
+      }
+    }
+    rows.push({
+      label,
+      total: cards.length,
+      truncated: Boolean(corpus?.truncated),
+      oldest,
+      lanes: [...perLane.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    });
+  }
+  // The contradictory pair, intersected LOCALLY — the listing endpoints'
+  // `labels` filter is a UNION (measured), so asking for both labels at once
+  // returns cards carrying EITHER and would overstate this by the sum.
+  const queue = seenByLabel.get('pm:queue') ?? new Set();
+  const dispatched = seenByLabel.get('pm:dispatched') ?? new Set();
+  const pairs = [...queue].filter((n) => dispatched.has(n)).sort((a, b) => a - b);
+  return {
+    rows: rows.sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    pairs,
+    truncated: anyTruncated,
+    controlRows: Number(context.controlRows ?? 0),
+  };
+}
+
+/**
+ * May these figures be quoted as counts? The predicate the filing card's whole
+ * warning reduces to — consult it before repeating any number from this leg.
+ */
+export function censusIsCountable(census) {
+  return Boolean(census) && !census.truncated && Number(census.controlRows ?? 0) > 0;
+}
+
+/**
+ * The census line, in either medium — ONE informational line, by ruling.
+ *
+ * ## Why one line, and why it is styled like the healthy rate premise
+ *
+ * Ruled 2026-08-31 (批 #13; the section header above carries the verbatim
+ * quote): closed-card `pm:*` residue is not a problem, not a to-do, and not a
+ * backlog — it is archive, made harmless by open-scoped readers rather than by
+ * three thousand label writes. A leg that renders it as a table of per-lane
+ * counts, page-cap warnings and a contradictory-pair roster is asserting the
+ * opposite with its typography whatever its words say, four times a day, in
+ * the same body as the findings that DO need action.
+ *
+ * So this returns at most `['', <one line>]` and, in markdown, the italic
+ * `_…_` the healthy `renderRatePremise` uses — deliberately NOT the bold
+ * heading that every finding block wears. ⛔ No `⚠️`, no `⛔`, no heading, no
+ * row per label, no finding code. A reader skimming for what to do must be
+ * able to skip this line, and a reader who wants the number must find it.
+ *
+ * ## The instrument caveats survive, demoted to a parenthesis
+ *
+ * A page cap is still not a count and an empty control still means "not read",
+ * because #4690 is about the INSTRUMENT and the ruling was about the BOARD —
+ * it did not license quoting an unread zero. Both are now one qualifier on the
+ * same line instead of two blocks, and `censusIsCountable` stays the predicate
+ * a caller consults before repeating any figure.
+ */
+export function renderClosedResidueCensus(census, { markdown = false } = {}) {
+  if (!census) return [];
+  const line = (text) => ['', markdown ? `_${text}_` : `  ${text}`];
+  const LEAD = 'Closed-card `pm:*` residue (H39 census, informational)';
+  // Ruled harmless, so a census that could not run is a missing reading rather
+  // than an alarm — but it must still never read as a clean population (#4690).
+  if (census.failed) {
+    return line(`${LEAD}: not read this run — ${census.failed}. No figure, and none is owed.`);
+  }
+  if (!Array.isArray(census.rows) || census.rows.length === 0) return [];
+
+  const figures = census.rows
+    .map((row) => `${row.label} ${row.truncated ? `≥${row.total}` : row.total}`)
+    .join(', ');
+  // The GLOBAL oldest closure, not the biggest label's. `rows` is sorted by
+  // size, so `find` would silently answer "oldest among pm:dispatched" and
+  // present it as the population's floor — the age claim is about the whole
+  // residue or it is about nothing.
+  const oldest = census.rows.reduce(
+    (min, row) => (row.oldest && (min === null || row.oldest.at < min.at) ? row.oldest : min),
+    null,
+  );
+  const since = oldest ? `, oldest closed ${new Date(oldest.at).toISOString().slice(0, 10)}` : '';
+  const pairs = `${census.pairs.length} carrying both \`pm:queue\` and \`pm:dispatched\``;
+  // The two instrument caveats, folded into one parenthesis.
+  const caveat = censusIsCountable(census)
+    ? ''
+    : census.truncated
+      ? ` (lower bounds — a label hit the ${CENSUS_PAGE_CEILING}-page cap; not counts)`
+      : ' (not read — the control query returned no rows; not counts)';
+
+  return line(
+    `${LEAD}: ${figures}${since}; ${pairs}${caveat}. Archive, not state — no cleanup is owed ` +
+      `and none is planned (ruled 2026-08-31, 批 #13); readers scope \`pm:*\` queries to open cards.`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -6723,6 +7172,25 @@ export const SWEEP_COUNT_KEYS = [
   'commits',
   'commitBindings',
   'commitBindingMessages',
+  // H8's time-capped merged window (#13499). `mergedPages` is what the window
+  // COST and `mergedWindowTruncated` is whether it reached its horizon — the
+  // pair that keeps a ceiling-bound (i.e. short) window from reading as a
+  // complete one, the same discipline `eventWindowTruncated` carries.
+  'mergedPages',
+  'mergedWindowTruncated',
+  'mergedRateObserved',
+  // The remaining windows, converted the same way (#13606). Each carries the
+  // same pair for the same reason: what the pass COST, and whether it reached
+  // its boundary or ran out of quota. `openListingsTruncated` is a LIST rather
+  // than a flag because `listIssues` runs once per label and a reader needs to
+  // know WHICH inventory is short — a silently capped label page is one whole
+  // state's population missing from the sweep.
+  'closedPages',
+  'closedWindowTruncated',
+  'commitPages',
+  'commitWindowTruncated',
+  'openListingPages',
+  'openListingsTruncated',
 ];
 
 /**
@@ -6827,13 +7295,65 @@ export function summaryLine(counts, findingCount) {
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
-    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
-    `older closed carriers are outside it by design` +
+    // H8's window disclosure (#13499). The TRUNCATED half is the load-bearing
+    // one: a ceiling-bound window is a page cap again, and a page cap that
+    // reads as a completed time window is the exact inversion this repair
+    // removed. Gathering the flag and never printing it would be a measurement
+    // nobody can act on, so it is stated on every run, both ways.
+    `H8's merged window is a TIME cap of ${MERGED_WINDOW_DAYS} day(s), read in ${counts.mergedPages ?? 0} page(s)` +
+    `${
+      counts.mergedWindowTruncated
+        ? ` — ⛔ TRUNCATED at the ${MERGED_WINDOW_PAGE_CEILING}-page quota ceiling BEFORE reaching that horizon, so ` +
+          'this pass is a page cap and a delivery older than what those pages reached is invisible; ' +
+          'the merge rate has outgrown the ceiling and it needs raising'
+        : ' (horizon reached: a delivery inside the window was seen, not merely the first N rows)'
+    }. ` +
+    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (older closed ` +
+    `carriers are outside the window by design` +
     `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
       'earlier closures predate the strip-on-close convention and are NOT a reading about them' : ''}). ` +
-    `H23 read ${commits} squash commit message(s) from the default branch's recent window, carrying ` +
-    `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s) ` +
-    `(bounded window; a message that landed before it is invisible by design). ` +
+    // H22's window disclosure (#13606). The divisor is named here as well as in
+    // the docblock, because the summary is the only half a report reader sees
+    // and "bounded window" said nothing about which quantity bounds it.
+    `${describeWindowBound({
+      name: "H22's closed-card window",
+      horizon: CLOSED_ISSUE_WINDOW_DAYS,
+      pages: counts.closedPages ?? 0,
+      ceiling: CLOSED_ISSUE_WINDOW_PAGE_CEILING,
+      truncated: counts.closedWindowTruncated,
+      drops: 'a card that closed earlier than what those pages reached',
+    })} It is a CLOSURE horizon: rows are selected on \`closed_at\`, while paging is bounded by ` +
+    `\`updated_at\` — the stream is consumed by closed-issue ACTIVITY (~${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY}/day, ` +
+    `measured ${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT}), not by closures (~11/day), which is why the ` +
+    'page cap it replaced covered a ragged 2.1 days of update-recency rather than the closure window it read as. ' +
+    `H23 read ${commits} squash commit message(s) from the default branch, carrying ` +
+    `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s). ` +
+    `${describeWindowBound({
+      name: "H23's commit window",
+      horizon: COMMIT_WINDOW_DAYS,
+      pages: counts.commitPages ?? 0,
+      ceiling: COMMIT_WINDOW_PAGE_CEILING,
+      truncated: counts.commitWindowTruncated,
+      drops: 'a message that landed earlier than what those pages reached',
+    })} ` +
+    // The three OPEN listings (#13606). Not a time horizon — see the block above
+    // `listIssues` for the measurement that rules that shape out — so what is
+    // disclosed is completeness, and the failure it must announce is a
+    // ceiling-bound inventory reading as the whole board.
+    `${describeWindowBound({
+      name: 'The open listings (H1–H18 inventory, H13 unscoped pass, open PRs)',
+      kind: 'exhaustive',
+      pages: counts.openListingPages ?? 0,
+      ceiling: OPEN_LISTING_PAGE_CEILING,
+      truncated: (counts.openListingsTruncated ?? []).length > 0,
+      drops: 'the OLDEST open row of each capped listing — the population these rows most exist for',
+    })}` +
+    `${
+      (counts.openListingsTruncated ?? []).length > 0
+        ? ` ⛔ Ceiling-bound listing(s): ${(counts.openListingsTruncated ?? []).join(', ')} — those ` +
+          'inventories are PREFIXES, not populations, so a quiet finding count over them is a short read.'
+        : ''
+    } ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
@@ -6849,14 +7369,27 @@ export function summaryLine(counts, findingCount) {
           'false — 199 rows were trimmed and not one rendered row carried an unresolved target)'
         : ''
     }` +
+    // #13650: this terminator is UNCONDITIONAL, and belongs to the CLAUSE
+    // rather than to either optional branch below. It used to exist only inside
+    // the cross-repo branch, so the single rendering that ended this sentence
+    // was the one where an unrelated optional probe happened to fire. On an
+    // ordinary healthy pass — no shortfall AND no probe, the common case — the
+    // clause stopped at `card(s)` and a lone space joined it straight onto
+    // H20's lead-in, which the live 2026-08-31 patrol rendered as
+    // `…card(s) Dispatch liveness (H20 + H27): …`: two disclosures read as one,
+    // with the boundary findable only by a reader who already knows the row
+    // inventory. Each optional branch now contributes ONLY its own text, which
+    // is what keeps the terminator independent of whether they fire — a branch
+    // carrying the sentence's end is how the two clauses ran together.
+    '. ' +
     `${
       crossRepoProbed > 0
-        ? ` Cross-repo reachability was measured directly on ${crossRepoProbed} sibling repo(s), of which ` +
+        ? `Cross-repo reachability was measured directly on ${crossRepoProbed} sibling repo(s), of which ` +
           `${crossRepoUnreadable} do(es) not answer this credential — those targets are unjudgeable by ` +
           'ruling (each install reads its own repo with its own repo-scoped token) and ⛔ no re-run ' +
-          'resolves them.'
+          'resolves them. '
         : ''
-    } ` +
+    }` +
     `Dispatch liveness (H20 + H27): remote branch read on ${refRead} of ${refTargets} distinct claimed ` +
     `branch(es) named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute ` +
     `threshold — one read serving both rows, so H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset ` +
@@ -6896,6 +7429,119 @@ export function summaryLine(counts, findingCount) {
     } ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
+}
+
+/**
+ * Every window that speaks on the summary line, in RENDER order, with the
+ * lead-in phrase that opens its clause.
+ *
+ * The list is the segmentation: a window's clause runs from its own anchor to
+ * whichever other anchor comes next in the rendered string. Two properties are
+ * required of every entry and both are pinned as cases (`summaryClause:` in the
+ * self-test), because the extractor is silently wrong rather than loud if
+ * either lapses:
+ *
+ *   UNIQUE   — the anchor occurs EXACTLY ONCE in the rendered line, under every
+ *              shape of `counts`. An anchor that can appear twice would hand a
+ *              case the wrong half of the sentence.
+ *   PRESENT  — the anchor is rendered UNCONDITIONALLY, never behind a flag. An
+ *              anchor that disappears when its window has nothing to say makes
+ *              its clause collapse into the previous window's, which is the
+ *              defect this whole mechanism removes.
+ *
+ * ⚠️ Adding a window to `summaryLine`? Add it here too, in render position.
+ * Skipping this does not break loudly — the new clause is simply absorbed into
+ * the window above it, and that window's cases start passing on text it never
+ * wrote. The `summaryClause: the declared order IS the rendered order` case is
+ * what catches a misplacement; the coverage case is what catches an omission.
+ */
+export const SUMMARY_CLAUSE_ANCHORS = [
+  ['head', 'check-half-states: swept '],
+  ['h8Window', "H8's merged window is a TIME cap of "],
+  ['h22Read', 'H22 read '],
+  ['h22Window', "H22's closed-card window is a"],
+  ['h23Read', 'H23 read '],
+  ['h23Window', "H23's commit window is a"],
+  ['openListings', 'The open listings (H1–H18 inventory, H13 unscoped pass, open PRs) is an '],
+  ['h17Holds', 'Hold comments read on '],
+  ['h14Fallback', '`Blocked-by:` comment fallback read on '],
+  ['h9Restart', '`Restart-when:` hold comments read on '],
+  ['h19Blockers', 'Blocker liveness (H19): '],
+  ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
+  ['h32Seats', 'Seat liveness (H32): '],
+  ['h35GatePatrol', 'Gate-removal patrol (H35): '],
+  ['h36SharedFiles', 'Shared-file holds (H36): '],
+  ['h37Folds', 'Family folds (H37): '],
+  ['reportOnly', 'Report-only: '],
+];
+
+/**
+ * ONE window's clause, cut out of a rendered summary line (#13629).
+ *
+ * `summaryLine` returns a single sentence carrying every pass's disclosure, so
+ * `summary.includes(phrase)` is answered by the WHOLE line: any window's clause
+ * can satisfy any window's case. That was exact while H8 was the only speaker
+ * (#13499) and became a check that cannot fail the moment #13606 put four more
+ * clauses beside it — the positive case "a completed window says the horizon
+ * was reached" kept passing with H8's own disclosure deleted outright, because
+ * a NEIGHBOUR said it. #13628 measured the other direction the hard way: the
+ * matching negative case went red on a truncated H8 window because H22's
+ * healthy clause standing beside it carried the phrase.
+ *
+ * #13628 held the line with a naming convention — one phrase per speaker, see
+ * `describeWindowBound`'s "boundary reached" — which keeps today's cases
+ * falsifiable but is a convention, and the next author reaching for the obvious
+ * word retires a check silently. This is the structural half: assert on the
+ * extraction and a case can only be satisfied by the window it names, whatever
+ * words the neighbours choose.
+ *
+ * ⚠️ Two failure modes, deliberately NOT symmetric:
+ *
+ *   unknown KEY     -> throws. An author error, and there is no run in which it
+ *                      is correct to continue: silently returning '' would show
+ *                      up as an ordinary red case whose message names a phrase
+ *                      rather than the typo, so the loud abort is cheaper. It
+ *                      can only fire while writing a case, never mid-ablation
+ *                      (an ablation edits `summaryLine`, never these keys).
+ *   missing ANCHOR  -> returns ''. This is the ABLATION path and it must never
+ *                      throw: deleting one window's clause has to leave every
+ *                      OTHER window's cases running and green, and a throw
+ *                      inside a `t()` argument aborts the whole suite (see the
+ *                      row-wrapper note in `selfTest`). '' satisfies no positive
+ *                      `.includes`, so the ablated window's own cases go red —
+ *                      which is exactly the acceptance this card was cut for.
+ *
+ * ⚠️ '' also satisfies every NEGATIVE case vacuously, so a negative alone
+ * cannot prove a clause is present. That is what the per-window presence
+ * controls (`summaryClause: <key> renders its own clause`) are for — they are
+ * the leg that goes red when a window stops speaking at all.
+ *
+ * @param {string} summary a rendered `summaryLine`
+ * @param {string} key a key from `SUMMARY_CLAUSE_ANCHORS`
+ * @returns {string} that window's clause, or '' when it did not speak
+ */
+export function summaryClause(summary, key) {
+  const line = String(summary ?? '');
+  const entry = SUMMARY_CLAUSE_ANCHORS.find(([k]) => k === key);
+  if (!entry) {
+    throw new Error(
+      `summaryClause: unknown window key ${JSON.stringify(key)} — ` +
+        `declare it in SUMMARY_CLAUSE_ANCHORS (known: ${SUMMARY_CLAUSE_ANCHORS.map(([k]) => k).join(', ')})`
+    );
+  }
+  const start = line.indexOf(entry[1]);
+  if (start < 0) return '';
+  // The clause ends where the NEXT speaker begins. Computed by scanning every
+  // other anchor rather than by taking the next one in declaration order, so a
+  // neighbour that is itself absent (the ablation case) widens this clause to
+  // the following speaker instead of truncating it to nothing.
+  let end = line.length;
+  for (const [otherKey, otherAnchor] of SUMMARY_CLAUSE_ANCHORS) {
+    if (otherKey === key) continue;
+    const at = line.indexOf(otherAnchor);
+    if (at > start && at < end) end = at;
+  }
+  return line.slice(start, end);
 }
 
 /**
@@ -6991,8 +7637,27 @@ export function renderPlain(findings, counts, options = {}) {
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
+  lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
+  lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
+}
+
+/**
+ * The rate-premise line (#13499 repair ②). Rendered in both media because it is
+ * an assertion about the INSTRUMENT rather than about the board: a reader who
+ * takes a window's stated coverage at face value needs to know whether the
+ * divisor behind it still describes the repo.
+ *
+ * The healthy state prints too, deliberately. A check that is only visible when
+ * it fires cannot be distinguished from a check that was removed — which is the
+ * whole shape of the defect this repair exists to close.
+ */
+export function renderRatePremise(premise, { markdown = false } = {}) {
+  if (!premise) return [];
+  const loud = premise.state !== 'ok';
+  const text = loud ? `⚠️ ${premise.message}` : premise.message;
+  return ['', markdown ? (loud ? `**${text}**` : `_${text}_`) : `  ${text}`];
 }
 
 /**
@@ -7091,7 +7756,16 @@ export function renderMarkdown(findings, counts, options = {}) {
   // finding rows, which announce their own omission and are recoverable from
   // the run log. An index silently missing from the anchor would restore
   // exactly the 0-for-19 silence this section exists to end.
-  const indexBlock = renderTriggerIndex(options.triggerIndex, { markdown: true });
+  // The census and the rate premise are RESERVED alongside the H17 index, for
+  // the same reason it is: both are instrument readings a noisy board must not
+  // be able to truncate away. The census in particular is the leg that exists
+  // because a population grew unobserved — losing it to a body trim would
+  // reproduce that defect inside its own fix.
+  const indexBlock = [
+    ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
+    ...renderClosedResidueCensus(options.census, { markdown: true }),
+    ...renderRatePremise(options.ratePremise, { markdown: true }),
+  ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
 
   if (rows.length === 0) {
@@ -7164,6 +7838,135 @@ export function parseOutputOptions(argv) {
 
 /** The exit code for a classified transport prerequisite failure (see header). */
 export const EXIT_PREREQUISITE_NOT_MET = 3;
+
+/**
+ * The node flag that points `fetch` at the session proxy, and the env guard that
+ * stops a re-exec from re-execing (#13544).
+ *
+ * `NODE_USE_ENV_PROXY=1` is the env spelling of the same switch and is honoured
+ * identically — both are read at process START, which is the whole reason this
+ * is a re-exec rather than an assignment (header, "Routing node through the
+ * session proxy").
+ */
+export const PROXY_FLAG = '--use-env-proxy';
+export const PROXY_REARM_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+
+/**
+ * Is a proxy configured, and is THIS process already routed through it? Pure,
+ * and split out because two different decisions read it: whether to re-exec,
+ * and whether a failing verdict was taken on a bypassed route.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[] }} [ctx]
+ */
+export function proxyRoute({ env = {}, execArgv = [] } = {}) {
+  const proxy = env.HTTPS_PROXY || env.https_proxy || null;
+  const routed =
+    (execArgv ?? []).includes(PROXY_FLAG) ||
+    String(env.NODE_OPTIONS ?? '').includes(PROXY_FLAG) ||
+    String(env.NODE_USE_ENV_PROXY ?? '') === '1';
+  return { proxy, routed };
+}
+
+/**
+ * Does this run need re-executing with `PROXY_FLAG` before it can reach GitHub
+ * at all? Pure, so every branch is offline-testable — and the branches are the
+ * point: a proxied run without the flag answers 401 authenticated and 403
+ * anonymous on every endpoint and reads exactly like a credential problem, which
+ * is the defect #13544 was filed for.
+ *
+ * ⭐ The `no HTTPS_PROXY` branch is the one that keeps this file safe to copy
+ * VERBATIM into a sibling repo (#11217): a GitHub Actions runner carries no
+ * proxy env, so it never re-execs and behaves exactly as it did before.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, reason: string }}
+ */
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true } = {}) {
+  const { proxy, routed } = proxyRoute({ env, execArgv });
+  if (!proxy) {
+    return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — node fetch reaches api.github.com directly' };
+  }
+  if (routed) return { rearm: false, hint: false, reason: `already routed through the proxy (${PROXY_FLAG} / NODE_USE_ENV_PROXY=1)` };
+  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (!flagSupported) {
+    return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; every request will bypass ${proxy}` };
+  }
+  return { rearm: true, hint: false, flag: PROXY_FLAG, reason: `HTTPS_PROXY is set (${proxy}) and node's fetch does not read it` };
+}
+
+/**
+ * WHICH route the observations were taken on, described for the report (#13544).
+ * Pure. `null` where no proxy is configured — a runner, where every sentence the
+ * classifier already prints is correct.
+ *
+ * Two directions, because the refusal text was wrong in BOTH:
+ *
+ *   `bypassed: true`  — a proxy is configured and this process is not using it.
+ *       The verdict gains the note below and its remedy becomes the ROUTE. This
+ *       is the #13544 defect: the un-noted wording prescribed
+ *       `export GITHUB_TOKEN=<a real GitHub token>` in a container where the
+ *       proxy SUPPLIES the credential and no token is needed, sending the reader
+ *       after a secret instead of a route.
+ *   `bypassed: false` — this process IS routed through the proxy. Nothing is
+ *       folded in, but the host-unreachable branch owes a different sentence:
+ *       its standing "node's fetch does not use HTTPS_PROXY, so this says
+ *       nothing about `curl`/`gh`" became FALSE the moment the re-exec landed,
+ *       and a stale reassurance in a refusal is the same defect one layer down.
+ *
+ * ⛔ Neither direction changes the VERDICT. A refusal stays a refusal and exit 3
+ * still means NOT MEASURED; only the wording moves.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[] }} [ctx]
+ */
+export function describeTransportRoute({ env = {}, execArgv = [] } = {}) {
+  const { proxy, routed } = proxyRoute({ env, execArgv });
+  if (!proxy) return null;
+  if (routed) return { proxy, bypassed: false, detail: [], fix: [] };
+  return {
+    proxy,
+    bypassed: true,
+    detail: [
+      `⚠️  This reading was taken on a route that BYPASSES the configured proxy:`,
+      `\`HTTPS_PROXY=${proxy}\` is set and node's fetch does not read it, while \`curl\`,`,
+      `\`gh\` and the \`mcp__github__*\` tools do. So the status above is evidence about`,
+      `the ROUTE this process took, not about what this container can reach.`,
+      ``,
+      `In an agent container the proxy is also what swaps the 14-character \`prox…\``,
+      `placeholder for a real credential — so a bypassed route sends the placeholder`,
+      `to GitHub and earns the 401 it would then report as the container's verdict.`,
+    ],
+    fix: [
+      `node ${PROXY_FLAG} scripts/pm/check-half-states.mjs …   (or NODE_USE_ENV_PROXY=1)`,
+      `  ↑ this script normally re-execs itself with that flag; reaching this text`,
+      `    means the re-exec did not happen — an older node that will not take it,`,
+      `    or a child process that failed to spawn.`,
+    ],
+  };
+}
+
+/**
+ * Fold a transport note into a verdict. Pure, and deliberately additive: the
+ * `kind` is untouched, the original evidence stays, and the original remedy is
+ * kept as a named alternative rather than replaced — the route is the likelier
+ * cause in a proxied container, but it is not the only one.
+ *
+ * ⛔ A `reachable` verdict is returned unchanged: a run that got a real reading
+ * needs no advice about how it got there.
+ */
+export function withTransportNote(verdict, note) {
+  if (!verdict || !note || !note.bypassed || verdict.kind === 'reachable') return verdict;
+  const previous = verdict.fix ?? [];
+  return {
+    ...verdict,
+    detail: [...(verdict.detail ?? []), ``, ...note.detail],
+    fix: [
+      ...note.fix,
+      ``,
+      `If the route is not the problem: ${previous[0] ?? 'unknown'}`,
+      ...previous.slice(1),
+    ],
+  };
+}
 
 /**
  * What the token in the environment LOOKS like — never whether it is valid; only
@@ -7367,9 +8170,21 @@ function classifyRepoRead(tok, primary, repo) {
  *   gathered only when the account-scoped evidence already reads `reachable`.
  *   Absent, this classifies the account-scoped evidence alone — the behaviour
  *   every caller had before #9946.
+ *
+ *   `transport` is the OPTIONAL `describeTransportRoute` reading for the route
+ *   the observations were taken on (#13544). Absent, no note is folded in, no
+ *   sentence changes, and every verdict is byte-identical to what it was — which
+ *   is what keeps the other importer (`scripts/pm/ci-failure.mjs`, which passes
+ *   no such field) unchanged.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
+  return withTransportNote(classifyProbeObservations(obs), obs?.transport ?? null);
+}
+
+/** The classification itself, over the observations alone. Pure. */
+function classifyProbeObservations(obs) {
+  const route = obs?.transport ?? null;
   const token = obs?.token ?? '';
   const tok = describeToken(token);
   const authed = obs?.authed ?? null;
@@ -7395,9 +8210,18 @@ export function classifyTransportProbe(obs) {
       detail: [
         `\`GET /rate_limit\` did not complete: ${primary.networkError}`,
         ``,
-        `Node's fetch does not use HTTPS_PROXY, so this says nothing about \`curl\`, \`gh\``,
-        `or the \`mcp__github__*\` tools — those may all work here and still not be this`,
-        `script's transport.`,
+        ...(route && !route.bypassed
+          ? [
+              `This request DID go through the configured proxy (\`${route.proxy}\`) — the`,
+              `#13544 re-exec routed it — so the route is not the missing piece here and`,
+              `re-running with \`${PROXY_FLAG}\` will not change this answer. Either the proxy`,
+              `itself is unreachable, or it cannot reach \`api.github.com\`.`,
+            ]
+          : [
+              `Node's fetch does not use HTTPS_PROXY, so this says nothing about \`curl\`, \`gh\``,
+              `or the \`mcp__github__*\` tools — those may all work here and still not be this`,
+              `script's transport.`,
+            ]),
       ],
       fix: [
         'run this from a container with direct egress to api.github.com (CI, or the',
@@ -7575,12 +8399,16 @@ export function needsRepoProbe(accountVerdict) {
 }
 
 async function probeTransport() {
+  // The route these observations are taken on rides into every verdict (#13544)
+  // so a refusal gathered on a bypassed route says so instead of blaming a
+  // credential. `null` on a runner and on an already-routed re-exec alike.
+  const transport = describeTransportRoute({ env: process.env, execArgv: process.execArgv });
   const first = await probeRateLimit(TOKEN);
   const account = !TOKEN
-    ? classifyTransportProbe({ token: '', anon: first })
+    ? classifyTransportProbe({ token: '', anon: first, transport })
     : first.status === 200
-      ? classifyTransportProbe({ token: TOKEN, authed: first })
-      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+      ? classifyTransportProbe({ token: TOKEN, authed: first, transport })
+      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit(''), transport });
 
   if (!needsRepoProbe(account)) return account;
 
@@ -7588,8 +8416,45 @@ async function probeTransport() {
   // stage-1 verdict: one classifier, one place where a verdict is named.
   const repo = await probeRepoRead(TOKEN);
   return TOKEN
-    ? classifyTransportProbe({ token: TOKEN, authed: first, repo })
-    : classifyTransportProbe({ token: '', anon: first, repo });
+    ? classifyTransportProbe({ token: TOKEN, authed: first, repo, transport })
+    : classifyTransportProbe({ token: '', anon: first, repo, transport });
+}
+
+/**
+ * The re-exec (#13544). Returns the child's exit code when this run was handed
+ * off, or `null` when the caller should carry on in-process.
+ *
+ * ⚠️ Everything it prints goes to STDERR: the `--format=markdown` caller
+ * redirects stdout into a GitHub issue body, so a status line on stdout would be
+ * published as part of the report.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: process.env,
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container — the verdict says which.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The proxy agent is experimental and says so once per run. An operator cannot
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); ` +
+      'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
 }
 
 /**
@@ -7627,7 +8492,16 @@ function reportPrerequisiteNotMet(v, options = {}) {
       v.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  ${v.fix[0] ?? 'unknown'}\n` +
       v.fix.slice(1).map((l) => `        ${l}\n`).join('') +
-      `\n${nothing.join('\n')}\n` +
+      `\n${nothing.join('\n')}\n\n` +
+      `  A GATE NOBODY CAN RUN IS INDISTINGUISHABLE FROM A GATE THAT FINDS NOTHING (#13526).\n` +
+      `  That is not a slogan here, it is this refusal's measured cost. For as long as this exit\n` +
+      `  was the only thing an agent container could get out of this script, the population it\n` +
+      `  guards grew unobserved — and when the route was finally fixed and a census run, closed\n` +
+      `  cards still carrying \`pm:*\` came to 2,063 \`pm:dispatched\` and 846 \`pm:queue\`, with 555\n` +
+      `  carrying BOTH, back to 2026-08-02. The filing seat could only say "at least 100 per lane\n` +
+      `  per label", because a first page is not a count and this gate could not be run to get one.\n` +
+      `  ⇒ Treat this exit as an unread instrument, never as a quiet board: the H39 census below\n` +
+      `  does not appear at all in a run that ends here.\n` +
       `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from the unclassified failure's 2 — but piping this\n` +
       `  reports the PIPE's status, so \`… | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
   );
@@ -7656,15 +8530,118 @@ async function rest(path) {
   return res.json();
 }
 
-async function listIssues(label) {
-  const out = [];
-  for (let page = 1; page <= 10; page++) {
-    const batch = await rest(
-      `/repos/${OWNER_REPO}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
-    );
-    out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+// ---------------------------------------------------------------------------
+// The three OPEN listings (#13606) — and the one window this card asked to
+// convert to a time horizon that MUST NOT BE ONE.
+//
+// ## What was actually wrong with the bare `page <= 10`
+//
+// The filing card surveyed three defects here: reach moves with tempo, no
+// coverage stated, no truncation announced. Measured 2026-08-31T03:34Z, only
+// the third is real — and it is real enough to fix:
+//
+//   listIssues(<label>)      largest population 91 open cards (`pm:on-hold`), 1 page
+//   listAllOpenIssues        354 open cards + 21 PRs, 4 pages
+//   listOpenPullRequests     21 open PRs, 1 page
+//
+// None of them binds the cap, and none of them is a recency WINDOW: each pages
+// to EXHAUSTION (`batch.length < 100`) and the 10 is a pure quota backstop that
+// has never been reached. There is no coverage in days to state, because the
+// boundary is the end of the population, not an instant.
+//
+// ## ⛔ Why a TIME horizon here would be a defect, not a repair
+//
+// These streams come back `sort=created&direction=desc` (the endpoints' default),
+// so a created-time horizon truncates the OLDEST open rows — and on this board
+// that is precisely the population every predicate in this file exists for. The
+// damage model is asymmetric toward age in exactly the direction that forbids
+// it: H8's own docblock states it ("the paired write NOBODY noticed correlates
+// with how long nobody noticed it"). Measured, at the same instant:
+//
+//   an 8-day  created horizon drops 104 of 354 open cards (29%)
+//   a 14-day  created horizon drops  72 of 354 open cards (20%)
+//   a 30-day  created horizon drops  12 of 354 open cards ( 3%)
+//
+// The oldest OPEN card on the board is 76.9 days old; `pm:on-hold`'s oldest is
+// 76.9 days and `priority:p0`'s is 52.9. An 8-day horizon — the one H8's window
+// uses, and the obvious number to copy — would make a 52-day-old open P0 card
+// invisible to the entire patrol. A horizon is the right shape for a window over
+// a CLOSED, finished stream (H8, H22, H23, H35, all of which are recency reads
+// over events that already happened); it is the wrong shape for an INVENTORY of
+// what is still open, where completeness is the whole point.
+//
+// ⇒ So these three convert to the OTHER half of the target shape, which is the
+// half they were actually missing: the ceiling becomes a NAMED quota backstop
+// that ANNOUNCES itself, and the summary line states which bound ended the pass.
+// A ceiling-bound listing must never read as a complete inventory — the same
+// #4690 inversion H8's repair removed, in the one form it can take here.
+// ---------------------------------------------------------------------------
+
+/**
+ * The quota backstop on every OPEN listing — a ceiling, never a boundary.
+ *
+ * 10 pages = 1,000 open rows, against a measured 354 open cards and 21 open PRs
+ * (2026-08-31): ~2.8x headroom on the largest of them. Kept at 10 rather than
+ * raised, because the number was never the problem — the silence when it binds
+ * was. `openListingTruncated` is what closes that, and it is what a reader
+ * consults before treating any of these listings as complete.
+ */
+export const OPEN_LISTING_PAGE_CEILING = 10;
+
+/**
+ * Record one open listing's cost and whether the ceiling bound it.
+ *
+ * Aggregated across every open listing in the sweep, because `listIssues` runs
+ * once per label and a reader needs to know that ANY of them truncated — a
+ * single silently-capped label page is a whole state's inventory missing.
+ */
+export function noteOpenListing(stats, name, pages, truncated) {
+  if (!stats) return;
+  stats.openListingPages = (stats.openListingPages ?? 0) + pages;
+  if (truncated) {
+    stats.openListingsTruncated = [...(stats.openListingsTruncated ?? []), name];
   }
+}
+
+/**
+ * The path of ONE page of a `pm:*`-label listing — and the single place the
+ * `state=open` scoping on it is asserted.
+ *
+ * ## Why this is a named, pinned function rather than an inline template
+ *
+ * Maintainer ruling 2026-08-31 (第 6 场总监席决裁批 #13), verbatim and
+ * untranslated: 「13605 已关卡 为什么要清理。普查时不应该只看open的卡片吗，其他
+ * 同意」. The ~3,000 closed cards still carrying `pm:*` are NOT cleaned up — no
+ * bulk strip, no backfill, no reaper — because a closed card is ARCHIVE, not
+ * state. What makes that residue harmless is entirely reader-side: every
+ * census, patrol, candidate and mutex query that selects by a `pm:*` label
+ * must scope itself to OPEN cards. `state=open` here is therefore no longer an
+ * incidental detail of one listing helper; it is the whole mechanism by which
+ * the ruling holds, and the self-test pins it (search `批 #13`).
+ *
+ * ⛔ Never widen this to `state=all` or drop the parameter. A `pm:*` label page
+ * without it returns two thousand archived cards as though they were in-flight
+ * claims, and every predicate downstream reads them as live state — which is
+ * precisely the corruption the ruling chose to fix HERE instead of by writing
+ * three thousand labels.
+ */
+export function pmLabelListingPath(repo, label, page) {
+  return `/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`;
+}
+
+async function listIssues(label, stats = {}) {
+  const out = [];
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
+    const batch = await rest(pmLabelListingPath(OWNER_REPO, label, page));
+    out.push(...batch.filter((i) => !i.pull_request));
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
+  }
+  noteOpenListing(stats, `listIssues(${label})`, Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -7716,6 +8693,25 @@ async function sweep(options = {}) {
     commits: 0,
     commitBindings: 0,
     commitBindingMessages: 0,
+    // H8's window pair (#13499), initialised here for the reason the commit
+    // counts are: a sweep that throws before the merged pass must still render
+    // numbers. `mergedRateObserved` starts null — "not measured", which is what
+    // the premise classifier reports as `unobserved` rather than as agreement.
+    mergedPages: 0,
+    mergedWindowTruncated: false,
+    mergedRateObserved: null,
+    // The other four converted windows (#13606), initialised for H8's reason: a
+    // sweep that throws before one of these passes must still render numbers.
+    // ⚠️ The truncation flags start FALSE, which is the same claim the H8 pair
+    // makes — "this pass was not ceiling-bound" — and it is only honest because
+    // the pages counter starts at 0 beside it: 0 pages read is visibly not a
+    // completed window, so the pair cannot be misread as a clean pass.
+    closedPages: 0,
+    closedWindowTruncated: false,
+    commitPages: 0,
+    commitWindowTruncated: false,
+    openListingPages: 0,
+    openListingsTruncated: [],
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -7758,20 +8754,43 @@ async function sweep(options = {}) {
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
   };
+  // H39's census (#13526) — gathered AFTER the findings, so a census that
+  // cannot run costs the report nothing that was already gathered. Its failure
+  // is rendered as a failure rather than swallowed: this leg's whole output is
+  // counts, and an absent count that reads as zero is the defect the card filed.
+  let census = null;
+  try {
+    census = await censusClosedPmResidue(stats);
+  } catch (err) {
+    census = { failed: err?.status ? `HTTP ${err.status}` : (err?.message ?? 'unreadable') };
+  }
+  // The rate premise, checked against what this very sweep observed (#13499).
+  const ratePremise = classifyRatePremise({ observed: stats.mergedRateObserved });
   console.log(
     options.format === 'markdown'
-      ? renderMarkdown(findings, counts, { provenance: options.provenance, triggerIndex })
-      : renderPlain(findings, counts, { triggerIndex }),
+      ? renderMarkdown(findings, counts, {
+          provenance: options.provenance,
+          triggerIndex,
+          census,
+          ratePremise,
+        })
+      : renderPlain(findings, counts, { triggerIndex, census, ratePremise }),
   );
 }
 
-async function listOpenPullRequests() {
+async function listOpenPullRequests(stats = {}) {
   const out = [];
-  for (let page = 1; page <= 10; page++) {
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
     const batch = await rest(`/repos/${OWNER_REPO}/pulls?state=open&per_page=100&page=${page}`);
     out.push(...batch);
-    if (batch.length < 100) break;
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
   }
+  noteOpenListing(stats, 'listOpenPullRequests', Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -7810,6 +8829,132 @@ export function sweepOverlap(coverageDays, cadenceHours = PATROL_CADENCE_HOURS) 
 /** The scheduled patrol's period — `cron: '37 1,7,13,19 * * *'` in the workflow. */
 export const PATROL_CADENCE_HOURS = 6;
 
+// ---------------------------------------------------------------------------
+// The shared window vocabulary (#13606) — what DID fall out of converting the
+// remaining count-shaped windows, and what deliberately did not.
+//
+// ## The abstraction question, re-derived after the conversion
+//
+// PR #13601's report measured, BEFORE converting anything, that a shared window
+// helper "does not fall out naturally" because H22's divisor is a different
+// quantity from H8's. That measurement holds and is confirmed below: the
+// divisors are genuinely different (H8 divides by merges/day, H22 by
+// closed-issue UPDATE events/day, H23 by commits/day) and so are the paging
+// shapes. Forcing one window helper over them would be the failure mode that
+// report rejected.
+//
+// But the conversion makes a DIFFERENT commonality visible, and it is the one
+// this card is actually about. Every bounded pass here ends for exactly one of
+// two reasons — it reached its boundary, or it ran out of quota — and a reader
+// cannot act on any window's output without knowing which. That sentence is the
+// same sentence in every case. Three hand-copies of it is the other failure
+// mode named in the dispatch, and it is the likelier one: hand-copied
+// disclosures drift, and a report where one window says "TRUNCATED" and another
+// silently says nothing is worse than either wording alone.
+//
+// ⇒ So what is factored here is the DISCLOSURE, not the paging. The paging
+// predicates stay per-window because their termination arguments differ; the
+// announcement is one function because a reader's question is one question.
+// ---------------------------------------------------------------------------
+
+/**
+ * May paging STOP after this page? The generic form of the argument H8's window
+ * spelled out (`MERGED_WINDOW_DAYS`): once a page's OLDEST ordering timestamp
+ * predates the horizon, no later page can contain an in-window row.
+ *
+ * `field` is the field the STREAM IS ORDERED BY, which is not always the field
+ * the window SELECTS on — that asymmetry is the whole subtlety. H8 and H22 both
+ * order by `updated_at` while selecting on `merged_at` / `closed_at`, and both
+ * are sound for the same monotonicity reason: merging or closing an issue
+ * updates it, so `updated_at >= merged_at` and `updated_at >= closed_at` for
+ * every row. H23 and H35 order by the very field they select on, so for them
+ * the two coincide.
+ *
+ * ⚠️ A short page also stops paging — the stream is exhausted, so there are no
+ * more rows to be missed — and the caller reports that as reaching the horizon.
+ *
+ * ⚠️ An UNREADABLE ordering stamp never stops paging. Treating it as old would
+ * end the window early on one bad row and silently shorten the pass.
+ *
+ * @param {any[]} batch — one page of rows.
+ * @param {number} horizonMs — the instant the window ends.
+ * @param {string|((row: any) => string|undefined)} field — the ordering stamp.
+ */
+export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
+  const rows = Array.isArray(batch) ? batch : [];
+  if (rows.length < 100) return true;
+  const last = rows[rows.length - 1];
+  const raw = typeof field === 'function' ? field(last) : last?.[field];
+  const oldest = Date.parse(raw ?? '');
+  return Number.isFinite(oldest) && oldest < horizonMs;
+}
+
+/**
+ * The ONE disclosure sentence every bounded pass in this file owes: which of
+ * the two bounds ended it.
+ *
+ * ⛔ The rule this exists to make unbreakable: a ceiling-bound pass must NEVER
+ * read as a completed window. That is the exact inversion #13499's repair
+ * removed from H8, and the reason it is a function rather than a convention is
+ * that a convention is what the other windows were following when they stated
+ * no coverage at all.
+ *
+ * Two kinds, because the file has two honest boundary shapes:
+ *
+ *   `time`        — the boundary IS a horizon (H8, H22, H23, H35). The ceiling
+ *                   is a quota backstop; binding it means the pass silently
+ *                   became a page cap again.
+ *   `exhaustive`  — the boundary is the END OF THE STREAM (the three open
+ *                   listings). There is no horizon to state and inventing one
+ *                   would DROP the oldest rows, which on this board is the
+ *                   population every row here exists for (#13606's measurement:
+ *                   a created-time horizon of 8 days would have discarded 104
+ *                   of 354 open cards, the oldest of them 76.9 days old).
+ *
+ * @param {{ name: string, kind?: 'time'|'exhaustive', horizon?: number,
+ *   unit?: string, pages?: number, ceiling?: number|null, truncated?: boolean,
+ *   drops?: string }} bound
+ * @returns {string} the clause, or '' when there is nothing to disclose.
+ */
+export function describeWindowBound(bound) {
+  if (!bound || !bound.name) return '';
+  const {
+    name,
+    kind = 'time',
+    horizon = null,
+    unit = 'day(s)',
+    pages = 0,
+    ceiling = null,
+    truncated = false,
+    drops = 'a row older than what those pages reached',
+  } = bound;
+  const exhaustive = kind === 'exhaustive';
+  const head = exhaustive
+    ? `${name} is an EXHAUSTIVE listing, read in ${pages} page(s)`
+    : `${name} is a TIME cap of ${horizon} ${unit}, read in ${pages} page(s)`;
+  if (truncated) {
+    return (
+      `${head} — ⛔ TRUNCATED at the ${ceiling}-page quota ceiling` +
+      `${exhaustive ? '' : ' BEFORE reaching that horizon'}, so this pass is a page cap and ` +
+      `${drops} is invisible; the ceiling needs raising.`
+    );
+  }
+  // ⚠️ "boundary reached", NOT H8's "horizon reached", and the difference is
+  // load-bearing rather than stylistic. H8's own disclosure (#13499) is pinned
+  // by a case asserting that a TRUNCATED H8 pass does not contain the phrase
+  // "horizon reached" ANYWHERE in the summary line — a whole-line substring
+  // check, written when H8's was the only window that spoke. Reusing its exact
+  // phrase for the four windows that now share that line would satisfy that
+  // check from a neighbouring clause and quietly retire it, which is the same
+  // "a check that cannot fail" defect this whole family is about. One phrase
+  // per speaker keeps every one of them falsifiable.
+  return `${head} (${
+    exhaustive
+      ? 'complete: paging reached the end of the stream, so this IS the whole population'
+      : 'boundary reached: paging ran past the horizon, not merely the first N rows'
+  }).`;
+}
+
 /**
  * The default-branch merge rate, MEASURED — the divisor every window below
  * uses, and the number the stale `~18/day` was replaced with.
@@ -7833,52 +8978,269 @@ export const PATROL_CADENCE_HOURS = 6;
 export const MEASURED_MERGES_PER_DAY = 137.5;
 
 /**
- * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged ones
- * only, capped at four pages — a quota decision whose consequence is H8's
- * stated boundary (a delivery older than the window is invisible).
- * `sort=updated` so a long-lived PR that merges late is still in the window
- * when it matters.
- *
- * ## The boundary, re-derived (#11118)
- *
- * The cap was two pages, justified by a sentence claiming they "reach well past
- * the longest measured unexecuted-verdict latency" — true at ~18 merges/day,
- * which is where that sentence came from, and false at the measured 137.5.
- * Both readings, taken 2026-08-23T08:42:15Z over the live endpoint:
- *
- *   2 pages = 200 rows -> 197 merged, oldest merge 2026-08-21T14:00:28Z = 1.78d
- *   4 pages = 400 rows -> 397 merged, oldest merge 2026-08-20T09:41:02Z = 2.96d
- *
- * (Derivation and reading agree: `windowCoverageDays(400, 137.5)` = 2.91d. The
- * merged-only filter costs almost nothing — 397 of 400 closed PRs in the window
- * were merged — so rows and merges are interchangeable here in practice.)
- *
- * Four pages is chosen over an honest restatement because this row's damage
- * model is asymmetric in the direction that punishes a short window: H8 reports
- * a card whose delivering PR merged while the card still says `pm:dispatched`,
- * i.e. precisely the paired write NOBODY noticed — which correlates with age.
- * The population most likely to age out is the population the row exists for.
- * The measured H8 specimen (#11036) sat unreported ~22h, so a 1.78-day window
- * left the row about 2x its own worst measured latency; 2.96 days restores the
- * "comfortably past it" the docblock always claimed. Cost: two extra requests
- * per sweep, four sweeps a day, against a 15,000/h core quota.
- *
- * At the 6-hourly cadence that is `sweepOverlap(2.96)` ≈ 11.8 consecutive runs
- * that see a given merge — the window is a detection HORIZON, not a retry
- * budget: past it the finding is not delayed, it is gone (H22 catches the part
- * of that population whose card later closes; nothing catches the rest).
+ * WHEN `MEASURED_MERGES_PER_DAY` was measured. Carried as data rather than left
+ * in the prose above, because it is the input to the staleness alarm below —
+ * and because a rate premise with no date on it is precisely the artefact that
+ * produced this whole class of defect twice (`~18/day`, then 137.5).
  */
-export const MERGED_WINDOW_PAGES = 4;
+export const MEASURED_MERGES_PER_DAY_AT = '2026-08-23';
 
-async function listRecentlyMergedPullRequests() {
+/**
+ * The band inside which the pinned premise still DESCRIBES the board, as a
+ * ratio of observed to pinned — a factor of two in either direction.
+ *
+ * Derived from consequence, not chosen: this rate is the divisor that turns a
+ * page cap into a statement of coverage in days, so a drift of X% misstates
+ * every page-capped window's reach by X%. A factor of two is the point at which
+ * a docblock claiming "comfortably past the longest measured latency" is
+ * describing a window half that size — which is the #11118 failure in kind, if
+ * not yet in degree (that one ran to 7.6x before anything noticed, because
+ * nothing was watching the ratio at all).
+ */
+export const RATE_PREMISE_BAND = 2;
+
+/**
+ * How long a hand-measured rate premise may stand before it must be re-measured
+ * REGARDLESS of drift, in days.
+ *
+ * The drift test above can only fire when a sweep actually observes a rate; this
+ * one fires on the calendar, and it is the half that would have caught `~18/day`
+ * early. 30 days is one full release cadence — long enough that a healthy pin is
+ * not nagged at, short enough that a premise cannot quietly outlive the board it
+ * describes the way the last two did (`~18/day` stood for months).
+ */
+export const RATE_PREMISE_STALE_DAYS = 30;
+
+/**
+ * The merge rate this sweep OBSERVED, derived from rows it already holds.
+ *
+ * This is repair ② of #13499 and the reason that card exists: the premise was a
+ * number typed into a comment, so no reader and no run could ever disagree with
+ * it. Now every sweep re-derives the quantity from its own merged-PR window and
+ * compares. ⛔ The pinned constant is deliberately NOT overwritten from this —
+ * a self-updating premise is a premise nobody reviews — it is CHECKED against
+ * it, and a mismatch is reported.
+ *
+ * `null` when the rows cannot support a rate: fewer than two readable
+ * `merged_at` stamps, or a degenerate span. An unmeasurable rate must not read
+ * as agreement (#4690) — the classifier below reports it as unobserved.
+ *
+ * ⚠️ Measured over the window's OWN merge span rather than back from `now`,
+ * because the newest merge may be minutes old and dividing by a span that
+ * includes an empty tail would understate the rate.
+ *
+ * @param {{ merged_at?: string }[]} mergedPrs
+ * @returns {number|null} merges per day
+ */
+export function observedMergeRatePerDay(mergedPrs) {
+  const stamps = (mergedPrs ?? [])
+    .map((pr) => Date.parse(pr?.merged_at ?? ''))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  if (stamps.length < 2) return null;
+  const days = (stamps[stamps.length - 1] - stamps[0]) / 86_400_000;
+  if (!(days > 0)) return null;
+  return stamps.length / days;
+}
+
+/**
+ * Is the pinned rate premise still good? Pure, three outcomes, and the third is
+ * the one #4690 insists on.
+ *
+ * @param {{ observed: number|null, pinned?: number, pinnedAt?: string, nowMs?: number }} input
+ * @returns {{ state: 'ok'|'drifted'|'expired'|'unobserved', message: string,
+ *   observed: number|null, pinned: number, ageDays: number|null, ratio: number|null }}
+ */
+export function classifyRatePremise(input = {}) {
+  const pinned = Number.isFinite(input.pinned) ? input.pinned : MEASURED_MERGES_PER_DAY;
+  const pinnedAt = input.pinnedAt ?? MEASURED_MERGES_PER_DAY_AT;
+  const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
+  const observed = Number.isFinite(input.observed) ? input.observed : null;
+  const at = Date.parse(`${pinnedAt}T00:00:00Z`);
+  const ageDays = Number.isFinite(at) ? (nowMs - at) / 86_400_000 : null;
+  const ratio = observed !== null && pinned > 0 ? observed / pinned : null;
+  const shared =
+    `pinned \`MEASURED_MERGES_PER_DAY\` = ${pinned}/day, measured ${pinnedAt}` +
+    (ageDays === null ? '' : ` (${ageDays.toFixed(0)}d ago)`);
+
+  if (observed === null) {
+    return {
+      state: 'unobserved',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE UNOBSERVED — this sweep could not derive a merge rate from its own window ` +
+        `(fewer than two readable \`merged_at\` stamps), so ${shared} was not checked against ` +
+        `anything. ⚠️ This is not agreement: it is the one reading that says nothing.`,
+    };
+  }
+  if (ageDays !== null && ageDays > RATE_PREMISE_STALE_DAYS) {
+    return {
+      state: 'expired',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE EXPIRED — ${shared}, past the ${RATE_PREMISE_STALE_DAYS}-day re-measure ` +
+        `horizon; this sweep observed ~${observed.toFixed(1)}/day. Re-measure and update the ` +
+        `constant, its date, and the coverage numbers the page-capped windows quote. A rate ` +
+        `premise that outlives its measurement is how \`~18/day\` came to justify a window ` +
+        `covering a day and a half (#11118, #13499).`,
+    };
+  }
+  if (ratio !== null && (ratio > RATE_PREMISE_BAND || ratio < 1 / RATE_PREMISE_BAND)) {
+    return {
+      state: 'drifted',
+      observed,
+      pinned,
+      ageDays,
+      ratio,
+      message:
+        `RATE PREMISE DRIFTED — this sweep observed ~${observed.toFixed(1)} merges/day against a ` +
+        `${shared}: a factor of ${ratio.toFixed(2)}, outside the ${RATE_PREMISE_BAND}x band. Every ` +
+        `page-capped window below states its reach by dividing by that constant, so each of those ` +
+        `docblocks is now misdescribing its own coverage by the same factor. Re-measure.`,
+    };
+  }
+  return {
+    state: 'ok',
+    observed,
+    pinned,
+    ageDays,
+    ratio,
+    message:
+      `rate premise OK — observed ~${observed.toFixed(1)}/day against ${shared}` +
+      (ratio === null ? '' : ` (factor ${ratio.toFixed(2)}, band ${RATE_PREMISE_BAND}x)`) + '.',
+  };
+}
+
+/**
+ * H8's window, as a TIME cap — #13499's repair ①, and the reason the page cap
+ * above is now only a quota backstop.
+ *
+ * ## Why a page cap could not hold, in two measurements of the same window
+ *
+ * A page cap states a ROW count; H8's boundary is a TIME. The conversion is a
+ * division by a merge rate nobody watches, so the window's real reach moves
+ * whenever the board's tempo moves — silently, in BOTH directions, with the
+ * docblock still quoting the old number:
+ *
+ *   2026-08-23   400 rows -> 397 merged, oldest 2026-08-20T09:41:02Z = 2.96d
+ *   2026-08-31   400 rows -> 397 merged, oldest 2026-08-26T05:54:27Z = 4.86d
+ *
+ * Same cap, same rows, coverage moved by 64% in eight days because the observed
+ * rate fell from 137.5/day to ~82/day. Nothing in the file changed and nothing
+ * could have reported it. ⚠️ Note the direction: this drift made the window
+ * WIDER. A page cap is not a conservative bound that occasionally underdelivers
+ * — it is an unmanaged quantity, and the run where it is too small looks
+ * exactly like the run where it is too big.
+ *
+ * ## N, derived from the longest measured unexecuted-verdict latency
+ *
+ * #13499's census (2026-08-30) found 24 of 52 in-flight cards whose delivering
+ * PR had merged without the paired write, **14 of them stranded 4.6–6.0 days**;
+ * the worst, objectui#5174, sat 6.0 days with its seat's ACCEPT already naming
+ * the terminal state. That 6.0d is the floor this window has to clear — a
+ * window shorter than the stranding it exists to detect reports the fast half
+ * of the population and disappears the slow half, which is the half the row is
+ * for (the damage model is asymmetric toward age: the paired write NOBODY
+ * noticed correlates with how long nobody noticed it).
+ *
+ * 8 days is 6.0d plus a weekend. The margin is that specific because the
+ * stranding is: a delivery that merges on a Friday has its paired write looked
+ * at on a Monday at the earliest, so the interval during which a write is most
+ * likely to go unwritten AND least likely to be noticed is exactly the one the
+ * headroom has to cover.
+ *
+ * ## The termination condition, and the monotonicity that makes it exact
+ *
+ * The listing is `sort=updated&direction=desc`, which is NOT `merged_at` order,
+ * so "stop when this row's merge is old" would be wrong — a long-lived PR that
+ * merged late is bumped to the front, which is the property `sort=updated` was
+ * chosen for in the first place. What IS sound is the bound on the OTHER end:
+ * merging a PR updates it, so `updated_at >= merged_at` for every merged row.
+ * Once a page's OLDEST `updated_at` predates the horizon, every remaining row
+ * in the stream has `merged_at <= updated_at < horizon` and no later page can
+ * contain an in-window merge. That is why `mergedPageExhaustsWindow` reads
+ * `updated_at` and the row filter reads `merged_at`: one bounds the paging, the
+ * other selects the rows, and they are deliberately different fields.
+ *
+ * ## The ceiling is a quota backstop, and it announces itself
+ *
+ * At the highest rate this repo has ever measured (137.5/day) 8 days is ~1,100
+ * merges ≈ 11 pages; the ceiling is 30, i.e. ~375 merges/day before it binds —
+ * 2.7x the fastest the board has ever been. If it ever DOES bind, the window is
+ * a page cap again and the run says so out loud rather than reporting a short
+ * window as a complete one (#4690, and the same `truncated` discipline
+ * `listRecentIssueEvents` already carries).
+ */
+export const MERGED_WINDOW_DAYS = 8;
+
+/** The quota backstop behind the time cap — see `MERGED_WINDOW_DAYS`. */
+export const MERGED_WINDOW_PAGE_CEILING = 30;
+
+/** The instant at which H8's window ends. */
+export function mergedWindowHorizonMs(nowMs = Date.now(), days = MERGED_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/**
+ * Is this PR a merge INSIDE the window? Reads `merged_at` — an unmerged closed
+ * PR is an abandoned attempt, not a delivery, and an unreadable stamp is not a
+ * merge this row can place in time.
+ */
+export function prMergedWithinWindow(pr, horizonMs) {
+  const at = Date.parse(pr?.merged_at ?? '');
+  return Number.isFinite(at) && at >= horizonMs;
+}
+
+/**
+ * May paging STOP after this page? True once the page's oldest `updated_at`
+ * predates the horizon — see the monotonicity argument in `MERGED_WINDOW_DAYS`.
+ *
+ * A short page also stops paging (the stream is exhausted), and that case is
+ * reported by the caller as reaching the horizon, because it did: there are no
+ * more rows to be missed.
+ *
+ * ⚠️ An UNREADABLE `updated_at` never stops paging. Treating it as old would
+ * end the window early on one bad row and silently shorten the pass.
+ *
+ * ⚠️ #13606: the body is now `pageExhaustsWindow(batch, horizonMs,
+ * 'updated_at')`. This is the ONE line of #13601's landed repair this card
+ * touches, and it is a delegation rather than a rewrite: same name, same
+ * export, same signature, byte-identical behaviour, and #13601's own direction
+ * cases still pin it unchanged. It is here because H22's converted window turned
+ * out to need this predicate EXACTLY — same ordering field, same selecting
+ * field, same monotonicity argument — so leaving H8 on a private copy would
+ * have made the second caller a hand-copy of the first.
+ */
+export function mergedPageExhaustsWindow(batch, horizonMs) {
+  return pageExhaustsWindow(batch, horizonMs, 'updated_at');
+}
+
+async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
+  const horizon = mergedWindowHorizonMs(nowMs);
   const out = [];
-  for (let page = 1; page <= MERGED_WINDOW_PAGES; page++) {
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= MERGED_WINDOW_PAGE_CEILING; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
-    out.push(...batch.filter((p) => p.merged_at));
-    if (batch.length < 100) break;
+    out.push(...batch.filter((p) => prMergedWithinWindow(p, horizon)));
+    if (mergedPageExhaustsWindow(batch, horizon)) {
+      reachedHorizon = true;
+      break;
+    }
   }
+  stats.mergedPages = Math.min(page, MERGED_WINDOW_PAGE_CEILING);
+  stats.mergedWindowTruncated = !reachedHorizon;
+  // Derived every run from the rows just fetched — the premise check that #13499
+  // asked for in place of a number typed into a comment.
+  stats.mergedRateObserved = observedMergeRatePerDay(out);
   return out;
 }
 
@@ -7924,8 +9286,121 @@ async function listRecentlyMergedPullRequests() {
  * it turned out to be buying. It does NOT reopen the deep tail: the population
  * that argument refuses is the 500+ historical carriers spanning months, and
  * 1.7 days is not in it. Cost: two extra requests per sweep.
+ *
+ * ## …and why four pages could not hold either (#13606)
+ *
+ * Everything above is still true and still the reason this window is bounded.
+ * What it could not fix is that the boundary was still a ROW count, so the
+ * derivation above had to be redone every time the board's tempo moved — and
+ * the quantity it divides by is not the one a reader assumes.
+ *
+ * ⛔ THE DIVISOR, NAMED HONESTLY: this window's rows are consumed by
+ * closed-issue UPDATE ACTIVITY, not by closures. A closed card is bumped to the
+ * front of `sort=updated` by every later comment, label write and
+ * cross-reference. So the page cap bought a window in a unit nobody wanted a
+ * window in, and the two rates differ by more than an order of magnitude.
+ * Measured 2026-08-31T03:36Z over the live endpoint:
+ *
+ *   update activity   400 rows / 2.13d  = ~188 closed-issue updates/day
+ *   actual closures   226 cards / 21.06d = ~11 closures/day
+ *
+ * The consequence is not a slightly-wrong number, it is a RAGGED frontier: 28
+ * of 225 adjacent card pairs in the window were out of closure order. A card
+ * closed three days ago and untouched since falls out of the window while a card
+ * closed three WEEKS ago that got one comment today sits at the front of it.
+ *
+ * What that cost, measured the same instant — findings this row should have
+ * reported and structurally could not:
+ *
+ *   closed within 2d   70 of 70 residue carriers seen   (the cap was enough)
+ *   closed within 3d   77 of 96                          — 19 missed
+ *   closed within 4d   77 of 117                         — 40 missed
+ *   closed within 7d   77 of 342                         — 265 missed
+ *
+ * ## N = 3 days, and the anti-drowning argument is what FIXES it
+ *
+ * The horizon is bounded on both sides, and both bounds are measured rather
+ * than chosen:
+ *
+ *   FLOOR   — the window must not lose what four pages already delivered. The
+ *             cap covered closures within ~2 days completely (199 of 199), so
+ *             anything under 2 days is a regression.
+ *   CEILING — the anti-drowning argument above, in numbers. Residue density on
+ *             this board measured 28-35% at every horizon, so the finding count
+ *             is roughly linear in the horizon: 3d = 96 rows, 5d = 175, 7d =
+ *             342, 8d = 370. The sibling install's experience is the calibration
+ *             — at ~347 rows H22 exhausted the anchor body budget and trimmed
+ *             every other predicate's findings out of the report, which is why
+ *             that install shipped with this reader switched OFF entirely. A
+ *             horizon that turns this row into the report is not a wider window,
+ *             it is a disabled patrol.
+ *
+ * 3 days is the largest horizon that stays in the same order of magnitude as
+ * what the row already produces (96 rows against today's 77, +25%) while
+ * delivering COMPLETELY what the page cap only sampled: 310 of 310 cards closed
+ * within three days, against 219 of 310 today. At the 6-hourly cadence that is
+ * `sweepOverlap(3)` = 12 consecutive runs.
+ *
+ * ⚠️ THE RESIDUAL, stated rather than papered over: H8's window is 8 days and
+ * this one is 3, so a card that closed between 3 and 8 days ago carrying `pm:*`
+ * residue is visible to NEITHER row (H8's predicate needs the card still open).
+ * That band is real and it is the price of the anti-drowning ceiling — it is not
+ * a gap that widening this horizon could close for free, because widening it is
+ * exactly what disables the report. Naming it is the honest half; closing it
+ * needs a different shape (a residue census like H39's, which counts rather than
+ * lists) and is not this window's job.
+ *
+ * ⚠️ Cost note: 46% of the rows this stream returns are PULL REQUESTS, filtered
+ * out after paging. The horizon is therefore reached in roughly twice the pages
+ * a card-only stream would need — ~6 pages for 3 days at the measured rate.
+ * Constants here are deliberately NOT self-updating (H8's rule): they are
+ * CHECKED against what a sweep observes, never overwritten by it.
  */
-export const CLOSED_ISSUE_WINDOW_PAGES = 4;
+export const CLOSED_ISSUE_WINDOW_DAYS = 3;
+
+/**
+ * The quota backstop behind H22's time cap — see `CLOSED_ISSUE_WINDOW_DAYS`.
+ *
+ * At the measured ~188 closed-issue updates/day the 3-day horizon needs ~6
+ * pages; the ceiling is 12, i.e. it absorbs a board twice as busy before it
+ * binds. If it ever DOES bind, this window is a page cap again and the summary
+ * line says so out loud rather than reporting a short window as a complete one.
+ */
+export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 12;
+
+/**
+ * The rate H22's window is stated in, MEASURED — and the reason it is carried
+ * as data is H8's: a rate typed into a comment is one no reader and no run can
+ * disagree with.
+ *
+ * ⛔ This is closed-issue UPDATE EVENTS per day, NOT closures per day. The two
+ * differ by ~17x on this board and confusing them is precisely the defect this
+ * window carried (see the docblock above).
+ *
+ *   read    2026-08-31T03:36Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
+ *   window  400 rows spanning 2.125 days
+ *   rate    400 / 2.125 = ~188 closed-issue update events/day
+ *   (re-read at depth: 800 rows / 4.209d = ~190/day, 1200 rows / 5.496d = ~218/day)
+ */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 188.3;
+
+/** WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured. */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-08-31';
+
+/** The instant at which H22's window ends. */
+export function closedWindowHorizonMs(nowMs = Date.now(), days = CLOSED_ISSUE_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/**
+ * Did this issue CLOSE inside the window? Reads `closed_at` — the field the
+ * window is about — while the paging above is bounded by `updated_at`. An
+ * unreadable stamp is not a closure this row can place in time (#4690).
+ */
+export function issueClosedWithinWindow(issue, horizonMs) {
+  const at = Date.parse(issue?.closed_at ?? '');
+  return Number.isFinite(at) && at >= horizonMs;
+}
 
 /**
  * H22's DATED CLOSURE FLOOR — the cutover date at and after which a closed
@@ -8000,15 +9475,25 @@ export function resolveClosureFloor(env = {}) {
 
 const CLOSED_FLOOR = resolveClosureFloor(process.env);
 
-async function listRecentlyClosedIssues() {
+async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
+  const horizon = closedWindowHorizonMs(nowMs);
   const out = [];
-  for (let page = 1; page <= CLOSED_ISSUE_WINDOW_PAGES; page++) {
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
-    out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+    // Selection reads `closed_at`; paging (below) reads `updated_at`. They are
+    // deliberately different fields — see `pageExhaustsWindow`.
+    out.push(...batch.filter((i) => !i.pull_request && issueClosedWithinWindow(i, horizon)));
+    if (pageExhaustsWindow(batch, horizon, 'updated_at')) {
+      reachedHorizon = true;
+      break;
+    }
   }
+  stats.closedPages = Math.min(page, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
+  stats.closedWindowTruncated = !reachedHorizon;
   return out;
 }
 
@@ -8056,16 +9541,147 @@ async function listRecentlyClosedIssues() {
  * and the squash-message list are the same list. A repo that DOES carry merge
  * commits would simply feed this row a few branch-side messages, which are a
  * surface GitHub's parser reads too — wider, never wrong.
+ *
+ * ## Why the page cap went anyway (#13606)
+ *
+ * This docblock was the one that DERIVED its cap from a measured rate instead
+ * of quoting a remembered one, and it is the only one that survived a
+ * re-measure — so it is the strongest case that a page cap can be kept honest
+ * by hand, and it is still the wrong shape. Re-measured 2026-08-31T03:34Z:
+ *
+ *   2026-08-23   300 commits = 2.18d at ~137.5/day
+ *   2026-08-31   300 commits = 2.73d at ~110/day
+ *
+ * Same three pages, 25% more window, eight days apart, because the commit rate
+ * fell. Nothing was wrong with the derivation; the derivation simply has to be
+ * redone on every tempo change, by a human who remembers to — and the two other
+ * windows in this file are what happens when nobody does. A TIME cap needs no
+ * redoing: the rate below becomes only a COST estimate (how many pages the
+ * horizon takes), never the boundary itself.
+ *
+ * ## N = 3 days, derived from this row's own overlap argument
+ *
+ * The argument above is the measured need, and it is stated in patrol cycles
+ * rather than in days: a message must survive enough consecutive sweeps that one
+ * failed or skipped run cannot lose it, and this row targeted ~9x. At the
+ * 6-hourly cadence 3 days is `sweepOverlap(3)` = 12 consecutive runs,
+ * comfortably past that target — and it is very close to what three pages
+ * delivers at today's rate (2.73d), so the conversion barely moves the window
+ * right now. That is the point: it stays 3 days when the rate moves, where the
+ * cap would silently become ~1.5 days again at 200 commits/day.
+ *
+ * ⚠️ Unlike H8's and H22's windows, this stream is ordered by the very field the
+ * window selects on (commit date), so the paging bound and the row filter
+ * coincide. The ordering/selection asymmetry those two need does not apply here,
+ * and pretending it did would be the forced abstraction #13601's report refused.
  */
-export const COMMIT_WINDOW_PAGES = 3;
+export const COMMIT_WINDOW_DAYS = 3;
 
-async function listRecentDefaultBranchCommits() {
-  const out = [];
-  for (let page = 1; page <= COMMIT_WINDOW_PAGES; page++) {
-    const batch = await rest(`/repos/${OWNER_REPO}/commits?per_page=100&page=${page}`);
-    out.push(...batch);
-    if (batch.length < 100) break;
+/**
+ * The quota backstop behind H23's time cap — see `COMMIT_WINDOW_DAYS`.
+ *
+ * At the measured ~110 commits/day the 3-day horizon needs ~4 pages; the
+ * ceiling is 12, i.e. ~400 commits/day before it binds, 3.6x the fastest this
+ * window has been measured. A run that hits it has a short window and the
+ * summary line says so.
+ */
+export const COMMIT_WINDOW_PAGE_CEILING = 12;
+
+/**
+ * The default-branch commit rate, MEASURED — a COST input (how many pages the
+ * horizon takes), no longer the boundary. Carried as data for H8's reason: a
+ * rate typed into prose is one no reader and no run can disagree with.
+ *
+ *   read    2026-08-31T03:34Z, `GET /repos/{repo}/commits`
+ *   window  300 commits spanning 2.729 days
+ *   rate    300 / 2.729 = ~110 commits/day
+ */
+export const MEASURED_COMMITS_PER_DAY = 109.9;
+
+/** WHEN `MEASURED_COMMITS_PER_DAY` was measured. */
+export const MEASURED_COMMITS_PER_DAY_AT = '2026-08-31';
+
+/**
+ * A commit row's timestamp. `committer.date` is what orders this stream (an old
+ * authored patch committed today is at the front, and it is the COMMIT that just
+ * landed on the branch), with `author.date` as the fallback for a row carrying
+ * only one. `null` when neither is readable — an undateable row must not be
+ * placed in time (#4690).
+ */
+export function commitTimeMs(commit) {
+  const at = Date.parse(commit?.commit?.committer?.date ?? commit?.commit?.author?.date ?? '');
+  return Number.isFinite(at) ? at : null;
+}
+
+/** The instant at which H23's window ends. */
+export function commitWindowHorizonMs(nowMs = Date.now(), days = COMMIT_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/** Did this commit land inside the window? An undateable row is never inside it. */
+export function commitWithinWindow(commit, horizonMs) {
+  const at = commitTimeMs(commit);
+  return at !== null && at >= horizonMs;
+}
+
+/**
+ * H39's gathering (#13526) — one fully-paginated pass per residue label, plus
+ * the control.
+ *
+ * ⚠️ ONE label per request, intersected locally afterwards: the listing
+ * endpoint's `labels` filter is a UNION, so a two-label query answers a
+ * different question than the one being asked and answers it larger.
+ *
+ * Cost: ~6 labels x (population / 100) requests, four times a day, against a
+ * 15,000/h core quota — the same trade every window here makes, and the reason
+ * a census that finally produces real numbers is affordable at all.
+ */
+async function censusClosedPmResidue(stats = {}) {
+  const byLabel = new Map();
+  let requests = 0;
+  for (const label of PM_RESIDUE_LABELS) {
+    const rows = [];
+    let truncated = true;
+    for (let page = 1; page <= CENSUS_PAGE_CEILING; page++) {
+      const batch = await rest(
+        `/repos/${OWNER_REPO}/issues?state=closed&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
+      );
+      requests += 1;
+      rows.push(...batch);
+      if (censusPageExhausted(batch)) {
+        truncated = false;
+        break;
+      }
+    }
+    byLabel.set(label, { rows, truncated });
   }
+  // The control the filing card prescribed and could not run: the same shape
+  // with no `pm:*` filter. Rows here mean the instrument works, so a zero above
+  // is a reading; no rows mean nothing above is one (#4690).
+  const control = await rest(`/repos/${OWNER_REPO}/issues?state=closed&per_page=100&page=1`);
+  requests += 1;
+  stats.censusRequests = requests;
+  return summariseClosedResidue(byLabel, {
+    controlRows: (Array.isArray(control) ? control : []).filter((i) => !i?.pull_request).length,
+  });
+}
+
+async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
+  const horizon = commitWindowHorizonMs(nowMs);
+  const out = [];
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= COMMIT_WINDOW_PAGE_CEILING; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/commits?per_page=100&page=${page}`);
+    out.push(...batch.filter((c) => commitWithinWindow(c, horizon)));
+    // Ordered by the same field it selects on, so one accessor serves both.
+    if (pageExhaustsWindow(batch, horizon, (c) => c?.commit?.committer?.date ?? c?.commit?.author?.date)) {
+      reachedHorizon = true;
+      break;
+    }
+  }
+  stats.commitPages = Math.min(page, COMMIT_WINDOW_PAGE_CEILING);
+  stats.commitWindowTruncated = !reachedHorizon;
   return out;
 }
 
@@ -8112,18 +9728,30 @@ async function listRecentIssueEvents(stats = {}, nowMs = Date.now()) {
  * The unscoped listing H13 needs: the domain-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
- * queries hides it from a label-scoped sweep too. Ten pages, the same cap as
- * `listIssues`; an open backlog beyond the cap is invisible to H13 (stated
- * boundary, same convention as H8's merged window — the finding clears when
- * the paired write lands, not when the card ages out).
+ * queries hides it from a label-scoped sweep too. The same
+ * `OPEN_LISTING_PAGE_CEILING` quota backstop as `listIssues`, and — since
+ * #13606 — the same announcement when it binds: an open backlog beyond the
+ * ceiling is invisible to H13, and that is now stated on the run rather than
+ * only in this docblock.
+ *
+ * ⚠️ This is the largest of the three open listings (354 open cards over 4 pages,
+ * measured 2026-08-31) and therefore the one nearest the ceiling. It is also the
+ * one a created-time horizon would damage most — see the block above
+ * `listIssues` for the measurement that ruled that shape out.
  */
-async function listAllOpenIssues() {
+async function listAllOpenIssues(stats = {}) {
   const out = [];
-  for (let page = 1; page <= 10; page++) {
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
     const batch = await rest(`/repos/${OWNER_REPO}/issues?state=open&per_page=100&page=${page}`);
     out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
   }
+  noteOpenListing(stats, 'listAllOpenIssues', Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -8136,7 +9764,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // the defect this whole family is about. One label page per sweep, four
   // sweeps a day, against a 15,000/h core quota.
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', AWAITING_MAINTAINER_LABEL, 'priority:p0']) {
-    for (const issue of await listIssues(label)) seen.set(issue.number, issue);
+    for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
 
   // At most ONE comment fetch per card, shared by the two items that need the
@@ -8285,9 +9913,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (h32NeedsSeatComments(issue)) {
         stats.seatCandidates = (stats.seatCandidates ?? 0) + 1;
         try {
-          const marker = latestSeatMarker(await commentRowsFor(issue));
+          // The ROWS are kept, not just the derived marker: H38 needs every
+          // comment stamp on the post to compute `T_seat`, and re-fetching for
+          // it would double a cost this gate exists to bound. H32 reads the
+          // same rows through `latestSeatMarker` exactly as before.
+          const rows = await commentRowsFor(issue);
+          const marker = latestSeatMarker(rows);
           stats.seatMarkersRead = (stats.seatMarkersRead ?? 0) + 1;
-          seatMarkers.set(issue.number, { issue, marker });
+          seatMarkers.set(issue.number, { issue, marker, rows });
         } catch {
           // Left out of `seatMarkers` entirely: the predicate's `undefined`
           // and `null` both decline, and the coverage pair is what states the
@@ -8385,7 +10018,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // fix, and both rows are only fixable while the PR is open, because the
   // damage is done by the merge — and excluded by H12's own predicate (drafts
   // are parked deliberately).
-  for (const pr of await listOpenPullRequests()) {
+  for (const pr of await listOpenPullRequests(stats)) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
@@ -8468,7 +10101,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // from the H7/H12/H21 pass above, so the half-delivered question costs no
   // request — and without it this row prescribed a destructive label drop
   // against cards whose remaining half was still open.
-  for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
+  for (const pr of await listRecentlyMergedPullRequests(stats)) seenMerged.set(pr.number, pr);
   const mergedWindow = [...seenMerged.values()];
   const openWindow = [...seenPrs.values()];
   for (const issue of seen.values()) {
@@ -8480,7 +10113,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // collection for the same reason H13's unscoped listing is: the open-only
   // default of every other collector stays exactly as it was, and the summary
   // line can say what this pass covered on its own terms.
-  for (const issue of await listRecentlyClosedIssues()) {
+  for (const issue of await listRecentlyClosedIssues(stats)) {
     seenClosed.set(issue.number, issue);
     const residue = h22ClosedCardPmResidue(issue, CLOSED_FLOOR.floor);
     if (residue) findings.push([issue, 'H22', residue]);
@@ -8499,7 +10132,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // the evidence. When a subject carries no marker (1 of 1,546 measured) the
   // first contradicted card number stands in, so a row is never dropped for
   // want of a number to sort by.
-  for (const commit of await listRecentDefaultBranchCommits()) {
+  for (const commit of await listRecentDefaultBranchCommits(stats)) {
     const message = commit?.commit?.message ?? '';
     stats.commits = (stats.commits ?? 0) + 1;
     const bindings = closingKeywordTargets(message, { markdown: false });
@@ -8523,7 +10156,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // inputs and the summary line stays honest about what each pass covered;
   // the overlap with the label listings costs nothing (the predicate is
   // label-gated and pure).
-  const unscoped = await listAllOpenIssues();
+  const unscoped = await listAllOpenIssues(stats);
   for (const issue of unscoped) {
     seenUnscoped.set(issue.number, issue);
     const halfState = h13DomainWithoutPmState(issue);
@@ -8764,6 +10397,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     findings.push([card, 'H37', drift]);
   }
 
+  // H38 (#13493) — seat-post staleness. Placed HERE, after the dispatch-liveness
+  // and fold passes, for the same reason H37's roster is: `commentCache` now
+  // holds a thread for every open `pm:dispatched` card, so the lane-claim index
+  // is built over threads already in hand and this row costs NO request at all.
+  //
+  // Its seat population is exactly `h32NeedsSeatComments`' — HELD seats on a
+  // lane this board can count — because that gate is what decided which seat
+  // threads were READ, and a row must not speak about a post nobody fetched.
+  // ⚠️ The residual, named rather than left implicit: a VACANT seat post whose
+  // lane is still taking claims is not reported here. That shape is real (it is
+  // dispatch on a lane whose seat says nobody is on the clock) but it is a
+  // different finding with a different remedy, and inventing it inside this row
+  // would put an accusation of staleness on a post that correctly says it is
+  // not running a shift.
+  for (const { issue, rows } of seatMarkers.values()) {
+    const { lane } = seatLane(issue);
+    if (!lane) continue;
+    const stale = h38SeatPostStale(
+      issue,
+      seatPostLastEventMs(issue, rows),
+      newestLaneClaim(lane, seen.values(), commentCache),
+    );
+    if (stale) findings.push([issue, 'H38', stale]);
+  }
+
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
   // already in hand, while "is the target still open" is a fact about an
@@ -8906,6 +10564,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  // -- Summary-disclosure cases go through THIS, never through the raw line ---
+  //
+  // `summaryLine` is one sentence carrying every window's disclosure, so a bare
+  // `summaryLine(...).includes(phrase)` asks "did ANY window say this" when the
+  // case name promises "did H8 say this". #13628 measured both directions of
+  // the resulting defect: a neighbour's clause silently SATISFIED a positive
+  // case (which would keep passing with the named window's disclosure deleted
+  // outright) and silently BROKE a negative one (red, blaming the wrong
+  // window). `saidBy` cuts the named window's own clause out first, so a case
+  // can only be answered by the speaker it names — see `summaryClause`.
+  //
+  // ⚠️ The two whole-line cases below that do NOT go through this are
+  // deliberate and marked where they sit: the sentence-terminal `endsWith`
+  // contract, and the one case asserting no clause ANYWHERE prints `undefined`.
+  // Both are claims about the assembled sentence rather than about a window.
+  const saidBy = (key, line) => summaryClause(line, key);
   const issue = (labels, assignees = [], body = '', title = '') => ({
     labels: labels.map((name) => ({ name })),
     assignees: assignees.map((login) => ({ login })),
@@ -8951,6 +10625,7 @@ function selfTest() {
   const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
   const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
   const h32row = (...args) => String(h32SeatIdleOverQueue(...args) ?? '');
+  const h38row = (...args) => String(h38SeatPostStale(...args) ?? '');
   const h33row = (...args) => String(h33ClaimPredatesRuling(...args) ?? '');
   // H34's wrapper (the pattern this generalizes) stays beside its own block,
   // as do H8's `halvesRow` and H27's `dead27Row` — all three wrap a helper
@@ -9750,14 +11425,14 @@ function selfTest() {
 
   // The summary line's H22 clause — a pass that read nothing must not read the
   // same as a board with no residue (#4690), so the count is always stated.
-  t('summary: the H22 clause states what the closed pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('H22 read 200 recently-closed issue(s)'), true);
-  t('summary: an absent closed count degrades to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H22 read 0 recently-closed'), true);
+  t('summary: the H22 clause states what the closed pass read', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0)).includes('H22 read 200 recently-closed issue(s)'), true);
+  t('summary: an absent closed count degrades to 0, never to undefined', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('H22 read 0 recently-closed'), true);
   // …and when a floor is in force the line SAYS so: "read 200" with a floor
   // silently applied would overstate what was judged, which is the same
   // unread-reads-as-clean defect the count itself exists to prevent.
-  t('summary: a floored pass names the floor date', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('only cards closed on/after 2026-08-28 are judged'), true);
-  t('summary: …and says the earlier closures are not a reading about them', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('NOT a reading about them'), true);
-  t('summary: an unfloored pass adds no floor clause', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('are judged'), false);
+  t('summary: a floored pass names the floor date', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('only cards closed on/after 2026-08-28 are judged'), true);
+  t('summary: …and says the earlier closures are not a reading about them', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('NOT a reading about them'), true);
+  t('summary: an unfloored pass adds no floor clause', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0)).includes('are judged'), false);
 
   // -- H23: the COMMIT-MESSAGE surface (#10942) -------------------------------
   //
@@ -9859,10 +11534,14 @@ function selfTest() {
   // The summary line's H23 clause — with a yield of ~6 in 1,546 a quiet row is
   // the NORMAL reading, so the coverage numbers are the only thing separating a
   // read surface from an unread one (#4690).
-  t('summary: the H23 clause states what the commit pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('H23 read 300 squash commit message(s)'), true);
-  t('summary: …and the binding totals a promotion decision would need', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
-  t('summary: …and states the window boundary', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300 }, 0).includes('invisible by design'), true);
-  t('summary: absent H23 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H23 read 0 squash commit message(s)'), true);
+  t('summary: the H23 clause states what the commit pass read', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0)).includes('H23 read 300 squash commit message(s)'), true);
+  t('summary: …and the binding totals a promotion decision would need', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0)).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
+  // #13606 — H23's boundary is a TIME cap now, so the phrase this case used to
+  // pin ('invisible by design', which stated a boundary without ever saying what
+  // bounded it) no longer exists. The case keeps its subject — the summary must
+  // state the window boundary — against the disclosure that replaced it.
+  t('summary: …and states the window boundary', saidBy('h23Window', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitPages: 4 }, 0)).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s), read in 4 page(s)`), true);
+  t('summary: absent H23 counts degrade to 0, never to undefined', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('H23 read 0 squash commit message(s)'), true);
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
   const hold = (body) => issue(['pm:on-hold'], [], body);
@@ -10314,10 +11993,10 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     fallbackProbed, fallbackCandidates,
   });
-  t('summary: the fallback pair is reported', summaryLine(fbCounts(24, 26), 3).includes('comment fallback read on 24 of 26 candidate(s)'), true);
-  t('summary: a shortfall announces the suspended stale direction', summaryLine(fbCounts(24, 26), 3).includes('stale direction is SUSPENDED'), true);
-  t('summary: a complete pass says nothing about suspension', summaryLine(fbCounts(26, 26), 3).includes('SUSPENDED'), false);
-  t('summary: absent fallback counts still render a sentence', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('comment fallback read on 0 of 0'), true);
+  t('summary: the fallback pair is reported', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('comment fallback read on 24 of 26 candidate(s)'), true);
+  t('summary: a shortfall announces the suspended stale direction', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('stale direction is SUSPENDED'), true);
+  t('summary: a complete pass says nothing about suspension', saidBy('h14Fallback', summaryLine(fbCounts(26, 26), 3)).includes('SUSPENDED'), false);
+  t('summary: absent fallback counts still render a sentence', saidBy('h14Fallback', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('comment fallback read on 0 of 0'), true);
 
   // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
   const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
@@ -10576,18 +12255,18 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     blockerResolved, blockerTargets,
   });
-  t('summary: the H19 coverage pair is reported', summaryLine(btCounts(11, 12), 1).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
-  t('summary: …and says the unit is DISTINCT targets, not per-card edges', summaryLine(btCounts(11, 12), 1).includes('distinct'), true);
-  t('summary: …scoped to the population H19 judges', summaryLine(btCounts(11, 12), 1).includes('named by open `pm:blocked` card(s)'), true);
+  t('summary: the H19 coverage pair is reported', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
+  t('summary: …and says the unit is DISTINCT targets, not per-card edges', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('distinct'), true);
+  t('summary: …scoped to the population H19 judges', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('named by open `pm:blocked` card(s)'), true);
   // The shortfall clause still points at the rows that carry the gap — but it
   // no longer PROMISES they survive, it says what makes them survive (the
   // unjudged sort band). The bare "never dropped" wording was measurably false
   // on 2026-08-25T02:08Z; see `UNJUDGED_MARKER`.
-  t('summary: an H19 shortfall points at the rows that carry it', summaryLine(btCounts(11, 12), 1).includes("unresolved target(s) are named on their own cards' rows"), true);
-  t('summary: …and names the mechanism instead of promising the outcome', summaryLine(btCounts(11, 12), 1).includes('sort ABOVE the size trim'), true);
-  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts(12, 12), 1).includes('unresolved target(s) are named'), false);
-  t('summary: absent H19 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('resolved on 0 of 0 distinct'), true);
-  t('summary: …and the H19 clause never prints the string undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('undefined'), false);
+  t('summary: an H19 shortfall points at the rows that carry it', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes("unresolved target(s) are named on their own cards' rows"), true);
+  t('summary: …and names the mechanism instead of promising the outcome', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('sort ABOVE the size trim'), true);
+  t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('unresolved target(s) are named'), false);
+  t('summary: absent H19 counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('resolved on 0 of 0 distinct'), true);
+  t('summary: …and the H19 clause never prints the string undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('undefined'), false);
   t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
 
   // -- H20: a `pm:dispatched` card nobody is working (#10312) ----------------
@@ -10771,17 +12450,17 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     dispatchRefRead, dispatchRefTargets,
   });
-  t('summary: the H20 coverage pair is reported', summaryLine(refCounts(4, 5), 1).includes('remote branch read on 4 of 5 distinct claimed branch(es)'), true);
-  t('summary: …scoped to the population H20 judges', summaryLine(refCounts(4, 5), 1).includes('named by open `pm:dispatched` card(s)'), true);
-  t('summary: …and names the threshold that bounded it', summaryLine(refCounts(4, 5), 1).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
-  t('summary: an H20 shortfall points at the rows that carry it', summaryLine(refCounts(4, 5), 1).includes('each unread branch is named on its own card\'s row, never dropped'), true);
-  t('summary: a complete H20 pass adds no shortfall clause', summaryLine(refCounts(5, 5), 1).includes('each unread branch'), false);
-  t('summary: absent H20 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('remote branch read on 0 of 0 distinct'), true);
+  t('summary: the H20 coverage pair is reported', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('remote branch read on 4 of 5 distinct claimed branch(es)'), true);
+  t('summary: …scoped to the population H20 judges', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('named by open `pm:dispatched` card(s)'), true);
+  t('summary: …and names the threshold that bounded it', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
+  t('summary: an H20 shortfall points at the rows that carry it', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('each unread branch is named on its own card\'s row, never dropped'), true);
+  t('summary: a complete H20 pass adds no shortfall clause', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('each unread branch'), false);
+  t('summary: absent H20 counts degrade to 0, never to undefined', saidBy('h20Dispatch', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('remote branch read on 0 of 0 distinct'), true);
   // The pair is H27's coverage number too, and a reader seeing a quiet H27
   // needs to know that — one read serves both rows.
-  t('summary: the pair is declared as serving BOTH rows', summaryLine(refCounts(5, 5), 1).includes('Dispatch liveness (H20 + H27)'), true);
-  t('summary: …naming H27\'s threshold', summaryLine(refCounts(5, 5), 1).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
-  t('summary: …and that it costs no request of its own', summaryLine(refCounts(5, 5), 1).includes('costs no request of its own'), true);
+  t('summary: the pair is declared as serving BOTH rows', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('Dispatch liveness (H20 + H27)'), true);
+  t('summary: …naming H27\'s threshold', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
+  t('summary: …and that it costs no request of its own', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('costs no request of its own'), true);
 
   t('summary: the report-only contract still ends the sentence after H20', summaryLine(refCounts(5, 5), 1).endsWith('not a gate verdict.'), true);
 
@@ -10833,7 +12512,7 @@ function selfTest() {
   t('H27: …and states the measured ~26h age', dead27Row().includes('~26h after the claim was posted'), true);
   t('H27: …and names the lane-block consequence, not just the silence', dead27Row().includes('mutual-exclusion read'), true);
   t('H27: …and explains WHY H20 cannot see it', dead27Row().includes('pushing the empty branch the first action'), true);
-  t('H27: …and rules out the pre-window merged delivery first', dead27Row().includes(`${MERGED_WINDOW_PAGES} pages`), true);
+  t('H27: …and rules out the pre-window merged delivery first', dead27Row().includes(`${MERGED_WINDOW_DAYS} days`), true);
   t('H27: not a loud finding', isLoudFinding(dead27()), false);
 
   // ★ Report-only, and specifically NOT a reclaim — the protocol protects a
@@ -11311,40 +12990,161 @@ function selfTest() {
   t('markdown: an H19 row links the card it names', renderMarkdown([h19Row], counts).includes('- **H19** [#10112](https://example.test/10112)'), true);
   t('markdown: …and is NOT sorted above the loud band', renderMarkdown([h19Row, loudRow], counts).indexOf('#900') < renderMarkdown([h19Row, loudRow], counts).indexOf('#10112'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
-  t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
-  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', summaryLine(counts, 0).includes('unscoped pass (H13–H15, H18)'), true);
+  t('summaryLine: names what was READ, not only what was found', saidBy('head', summaryLine(counts, 0)).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', saidBy('head', summaryLine(counts, 0)).includes('unscoped pass (H13–H15, H18)'), true);
   // H16's pair is the row-granular half of the same #4690 property: a detail
   // pass that read NOTHING must not be indistinguishable from a board with no
   // conflicts, so the sentence carries `read X of Y` rather than only findings.
-  t('summaryLine: reports the H16 detail reads, not only the H16 findings', summaryLine(counts, 0).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
-  t('summaryLine: …and a partial read says so', summaryLine({ ...counts, conflictProbed: 1 }, 0).includes('read on 1 of 2'), true);
+  t('summaryLine: reports the H16 detail reads, not only the H16 findings', saidBy('head', summaryLine(counts, 0)).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
+  t('summaryLine: …and a partial read says so', saidBy('head', summaryLine({ ...counts, conflictProbed: 1 }, 0)).includes('read on 1 of 2'), true);
   // Counts assembled without the pair still render a sentence, never `undefined`.
-  t('summaryLine: absent H16 counts degrade to 0, never to undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('read on 0 of 0'), true);
-  t('summaryLine: …and never prints the string undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('undefined'), false);
+  t('summaryLine: absent H16 counts degrade to 0, never to undefined', saidBy('head', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0)).includes('read on 0 of 0'), true);
+  t('summaryLine: …and never prints the string undefined', saidBy('head', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0)).includes('undefined'), false);
+
+  // -- The clause extractor every summary case above rides on (#13629) --------
+  //
+  // `saidBy` is only as good as the anchor table, and a wrong table is SILENT:
+  // a mis-ordered entry hands a case its neighbour's text, an omitted window
+  // dissolves into the clause above it. Neither shows up as a red anywhere
+  // else, so the table's two required properties are pinned here directly.
+  //
+  // The PARTITION case is the load-bearing one and covers both at once: if the
+  // per-window clause lengths sum to the whole line, then every character
+  // belongs to exactly one declared window — no window is missing from the
+  // table (that would leave a gap) and no clause reaches into another (that
+  // would overlap). Run over two renderings deliberately: `bareLine` is the
+  // shape where every optional sub-clause is absent, `richLine` the shape where
+  // all of them fire, and a window that speaks only in one of the two is the
+  // exact failure the PRESENT property forbids.
+  const bareLine = summaryLine({}, 0);
+  const richLine = summaryLine({
+    repo: 'o/r', issues: 3, unscoped: 4, prs: 2, merged: 5,
+    closed: 200, closedFloor: '2026-08-28', closedPages: 12, closedWindowTruncated: true,
+    mergedPages: 12, mergedWindowTruncated: true,
+    commits: 300, commitBindings: 51, commitBindingMessages: 44, commitPages: 12, commitWindowTruncated: true,
+    openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'],
+    holdProbed: 3, holdCandidates: 9, fallbackProbed: 24, fallbackCandidates: 26,
+    restartProbed: 2, restartCandidates: 7, blockerResolved: 25, blockerTargets: 28,
+    crossRepoProbed: 2, crossRepoUnreadable: 1, dispatchRefRead: 4, dispatchRefTargets: 5,
+    seatMarkersRead: 2, seatCandidates: 6, gateRemovals: 7, eventPages: 24,
+    gate_unjudgeable: 5, gate_undated: 1, eventWindowTruncated: true,
+    sharedFileProbed: 17, sharedFileCandidates: 19,
+    liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0,
+  }, 1);
+  const clauseTotal = (line) => SUMMARY_CLAUSE_ANCHORS.reduce((n, [k]) => n + saidBy(k, line).length, 0);
+  t('summaryClause: the clauses PARTITION a bare line — no gap, no overlap', clauseTotal(bareLine), bareLine.length);
+  t('summaryClause: …and partition a line where every optional clause fires', clauseTotal(richLine), richLine.length);
+  const occurrences = (hay, needle) => hay.split(needle).length - 1;
+  t('summaryClause: every anchor occurs EXACTLY ONCE in a bare line', SUMMARY_CLAUSE_ANCHORS.every(([, a]) => occurrences(bareLine, a) === 1), true);
+  t('summaryClause: …and exactly once in a fully-loaded line', SUMMARY_CLAUSE_ANCHORS.every(([, a]) => occurrences(richLine, a) === 1), true);
+  t('summaryClause: the declared order IS the rendered order', SUMMARY_CLAUSE_ANCHORS.map(([, a]) => richLine.indexOf(a)).every((at, i, all) => i === 0 || at > all[i - 1]), true);
+  // PRESENT: every window speaks on every run. A clause that appears only when
+  // its counts are interesting would be absorbed by its neighbour on the runs
+  // where it is silent, and its cases would then read that neighbour's text.
+  for (const [key, anchor] of SUMMARY_CLAUSE_ANCHORS) {
+    t(`summaryClause: ${key} opens its own clause on every run`, saidBy(key, bareLine).startsWith(anchor) && saidBy(key, richLine).startsWith(anchor), true);
+  }
+  // The ablation contract: a window whose clause is gone yields '' rather than
+  // throwing, so ITS cases go red while every other window's keep running. A
+  // throw inside a `t()` argument aborts the suite (see the wrapper note above)
+  // and would make the per-window ablation this card was cut for unreadable.
+  const withoutClause = (line, key) => line.replace(saidBy(key, line), '');
+  t('summaryClause: an absent clause extracts as the empty string, never a throw', saidBy('h8Window', withoutClause(richLine, 'h8Window')), '');
+  t('summaryClause: …so the ablated window\'s own positive case goes red', saidBy('h8Window', withoutClause(richLine, 'h8Window')).includes('TIME cap'), false);
+  t('summaryClause: …while its neighbours keep answering for themselves', saidBy('h22Read', withoutClause(richLine, 'h8Window')).includes('H22 read 200 recently-closed'), true);
+  t('summaryClause: an unknown key is an author error and throws', (() => { try { saidBy('h99Nope', richLine); return false; } catch { return true; } })(), true);
+  // ⛔ THE DEFECT ITSELF, pinned in both directions (#13629). These two cases
+  // are the whole reason the extractor exists, so they assert against a line
+  // that has been DOCTORED to make a neighbour speak H8's words — which is
+  // precisely what a future author reaching for the obvious phrase would do.
+  const h8Truncated = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true, closed: 200 }, 0);
+  const neighbourSpeaks = h8Truncated.replace('H22 read ', 'H22 read (horizon reached) ');
+  t('#13629 loud direction: a neighbour saying "horizon reached" DOES reach the whole line', neighbourSpeaks.includes('horizon reached'), true);
+  t('#13629: …but H8\'s truncated clause still does not claim it', saidBy('h8Window', neighbourSpeaks).includes('horizon reached'), false);
+  // The silent direction, and the worse of the two: H8's own disclosure deleted
+  // outright while a neighbour carries the phrase. Whole-line, the positive
+  // case passes and pins nothing; scoped, it goes red as it must.
+  const h8Complete = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, mergedPages: 9, mergedWindowTruncated: false, closed: 200 }, 0);
+  const h8Deleted = withoutClause(h8Complete, 'h8Window').replace('H22 read ', 'H22 read (horizon reached) ');
+  t('#13629 silent direction: the whole line still says it, from the neighbour', h8Deleted.includes('horizon reached'), true);
+  t('#13629: …and the scoped case refuses to be satisfied by that', saidBy('h8Window', h8Deleted).includes('horizon reached'), false);
+  // Two windows legitimately share a phrase today ("never invent one", H36 and
+  // H37), which is the convention-only defence #13628 was left holding. Scoped,
+  // each answers for itself no matter how many neighbours reuse the words.
+  t('#13629: a phrase two windows share is present twice on the line', occurrences(richLine, 'never invent one'), 2);
+  t('#13629: …yet H36 answers only for H36', saidBy('h36SharedFiles', richLine).includes('never invent one'), true);
+  t('#13629: …and H37 only for H37', saidBy('h37Folds', richLine).includes('never invent one'), true);
+  // Kept whole-line ON PURPOSE: this is a claim about the assembled sentence,
+  // not about any one window, and scoping it would only weaken it. It replaces
+  // the whole-line reach the per-window `…never to undefined` cases gave up
+  // when they were scoped — each of those now speaks only for its own clause,
+  // so without this nothing would be watching the gaps between them.
+  //
+  // ⚠️ Built on `optionalsAbsent`, NOT on `bareLine`: the `?? 0` degradation
+  // contract covers the OPTIONAL counts, while `repo`/`issues`/`unscoped`/
+  // `prs`/`merged` are required by the docblock and ungated by design.
+  // `summaryLine({})` therefore does print `undefined`, from those five and
+  // only those five — a caller violating the signature, not a lapsed guard.
+  const optionalsAbsent = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0);
+  t('summaryLine: no clause ANYWHERE prints the string undefined', optionalsAbsent.includes('undefined') || richLine.includes('undefined'), false);
 
   // -- The H19 coverage clause, and the promise it used to make falsely -------
   const btCounts2 = (blockerResolved, blockerTargets, extra = {}) => ({ ...counts, blockerResolved, blockerTargets, ...extra });
-  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts2(12, 12), 1).includes('unresolved target(s) are named'), false);
-  t('summary: an H19 shortfall counts the unresolved targets', summaryLine(btCounts2(25, 28), 1).includes('the 3 unresolved target(s) are named on their own cards\' rows'), true);
-  t('summary: …and promises the TRIM cannot drop them, which is the fixable half', summaryLine(btCounts2(25, 28), 1).includes('sort ABOVE the size trim'), true);
-  t('summary: …and cites the sweep on which the old promise was false', summaryLine(btCounts2(25, 28), 1).includes('2026-08-25T02:08Z'), true);
-  t('summary: …and no longer makes the bare "never dropped" claim for H19', summaryLine(btCounts2(25, 28), 1).includes('each unresolved target is named on its own card\'s row, never dropped'), false);
+  t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts2(12, 12), 1)).includes('unresolved target(s) are named'), false);
+  t('summary: an H19 shortfall counts the unresolved targets', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('the 3 unresolved target(s) are named on their own cards\' rows'), true);
+  t('summary: …and promises the TRIM cannot drop them, which is the fixable half', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('sort ABOVE the size trim'), true);
+  t('summary: …and cites the sweep on which the old promise was false', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('2026-08-25T02:08Z'), true);
+  t('summary: …and no longer makes the bare "never dropped" claim for H19', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('each unresolved target is named on its own card\'s row, never dropped'), false);
 
   // -- The cross-repo reachability pair (#11218) ------------------------------
   const xCounts = (crossRepoProbed, crossRepoUnreadable) => btCounts2(25, 28, { crossRepoProbed, crossRepoUnreadable });
-  t('summary: cross-repo probes are reported', summaryLine(xCounts(2, 1), 1).includes('measured directly on 2 sibling repo(s)'), true);
-  t('summary: …naming how many refused', summaryLine(xCounts(2, 1), 1).includes('1 do(es) not answer this credential'), true);
-  t('summary: …and that a re-run will not help', summaryLine(xCounts(2, 1), 1).includes('no re-run'), true);
-  t('summary: no probes taken -> no cross-repo clause at all', summaryLine(xCounts(0, 0), 1).includes('sibling repo(s)'), false);
-  t('summary: absent cross-repo counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('undefined'), false);
+  t('summary: cross-repo probes are reported', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('measured directly on 2 sibling repo(s)'), true);
+  t('summary: …naming how many refused', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('1 do(es) not answer this credential'), true);
+  t('summary: …and that a re-run will not help', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('no re-run'), true);
+  t('summary: no probes taken -> no cross-repo clause at all', saidBy('h19Blockers', summaryLine(xCounts(0, 0), 1)).includes('sibling repo(s)'), false);
+  t('summary: absent cross-repo counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine(counts, 0)).includes('undefined'), false);
+
+  // -- H19 terminates its OWN sentence, on every shape (#13650) ---------------
+  //
+  // The `. ` every other clause on this line ends with used to exist only
+  // inside the cross-repo branch above, so the ONE rendering that terminated
+  // H19 was the one where an unrelated optional probe happened to fire. On an
+  // ordinary healthy pass — no shortfall AND no probe — the clause stopped at
+  // `card(s)` and a lone space joined it onto H20's lead-in, which the live
+  // 2026-08-31 patrol rendered as `…card(s) Dispatch liveness (H20 + H27): …`.
+  //
+  // ⚠️ Why the neighbouring `endsWith('not a gate verdict.')` cases could not
+  // catch it: those pin where the SENTENCE ends, which is H37's business. This
+  // is a claim about where H19's clause ends, and only the scoped extractor can
+  // make it. All four shapes are pinned rather than one, because the defect WAS
+  // that the shapes disagreed — a pin on the probe shape alone would have been
+  // green throughout the entire life of the bug.
+  const h19Terminated = (c) => saidBy('h19Blockers', summaryLine(c, 1)).endsWith('. ');
+  t('#13650: H19 ends its sentence on a healthy pass (no shortfall, no probe)', h19Terminated(btCounts2(28, 28)), true);
+  t('#13650: …and on a shortfall pass', h19Terminated(btCounts2(25, 28)), true);
+  t('#13650: …and on a cross-repo probe pass', h19Terminated(btCounts2(28, 28, { crossRepoProbed: 2, crossRepoUnreadable: 1 })), true);
+  t('#13650: …and when BOTH optional branches fire', h19Terminated(xCounts(2, 1)), true);
+  // The other half of the fix, and the way it would most plausibly be got
+  // wrong: the probe branch already ended in a period of its own, so a
+  // terminator appended AFTER it renders `resolves them.. ` — which satisfies
+  // every `endsWith('. ')` case above while reading as a typo in the report.
+  t('#13650: the probe shape does not double the period', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('.. '), false);
+  t('#13650: …and the probe branch closes the clause exactly once', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).endsWith('no re-run resolves them. '), true);
+  // Kept WHOLE-LINE on purpose, both of them: this is a claim about the
+  // boundary BETWEEN two clauses, so there is no single window to scope it to —
+  // the adjacency is the thing being asserted. It is safe from #13629's defect
+  // because no neighbour can manufacture this pairing: `card(s) ` is H19's last
+  // text and the H20 anchor is H20's first.
+  t('#13650: H20\'s clause is no longer joined onto H19\'s population', summaryLine(btCounts2(28, 28), 1).includes('card(s) Dispatch liveness'), false);
+  t('#13650: …and the rendered boundary reads as two sentences', summaryLine(btCounts2(28, 28), 1).includes('card(s). Dispatch liveness (H20 + H27)'), true);
 
   // -- H32's seat coverage pair (#11706) -------------------------------------
   const seatCounts = (seatMarkersRead, seatCandidates) => ({ ...counts, seatMarkersRead, seatCandidates });
-  t('summary: the H32 seat pair is reported', summaryLine(seatCounts(6, 6), 1).includes('marker thread read on 6 of 6 HELD seat post(s)'), true);
-  t('summary: …scoped to lanes countable on this board', summaryLine(seatCounts(6, 6), 1).includes('countable on THIS board'), true);
-  t('summary: …and says a sibling-lane seat is out of scope', summaryLine(seatCounts(6, 6), 1).includes("a seat held for a sibling repo's lane is out of scope"), true);
-  t('summary: …and that an unread thread declines rather than accuses', summaryLine(seatCounts(2, 6), 1).includes('decline to judge that seat rather than accuse it'), true);
-  t('summary: absent H32 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('marker thread read on 0 of 0'), true);
+  t('summary: the H32 seat pair is reported', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes('marker thread read on 6 of 6 HELD seat post(s)'), true);
+  t('summary: …scoped to lanes countable on this board', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes('countable on THIS board'), true);
+  t('summary: …and says a sibling-lane seat is out of scope', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes("a seat held for a sibling repo's lane is out of scope"), true);
+  t('summary: …and that an unread thread declines rather than accuses', saidBy('h32Seats', summaryLine(seatCounts(2, 6), 1)).includes('decline to judge that seat rather than accuse it'), true);
+  t('summary: absent H32 counts degrade to 0, never to undefined', saidBy('h32Seats', summaryLine(counts, 0)).includes('marker thread read on 0 of 0'), true);
 
   // -- The dispatch-liveness pair was COMPUTED and never forwarded -----------
   //
@@ -11355,7 +13155,7 @@ function selfTest() {
   // cache is the only way to produce. Pinned as the CONTRACT the assembly owes,
   // so a future edit that drops the keys again fails here rather than in the
   // anchor body six hours later.
-  t('summary: the H20/H27 pair is a real reading, not a constant 0 of 0', summaryLine(refCounts(4, 5), 1).includes('read on 0 of 0 distinct claimed'), false);
+  t('summary: the H20/H27 pair is a real reading, not a constant 0 of 0', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('read on 0 of 0 distinct claimed'), false);
   t('summary: SWEEP_COUNT_KEYS names every count the summary consumes', SWEEP_COUNT_KEYS.includes('dispatchRefTargets') && SWEEP_COUNT_KEYS.includes('dispatchRefRead'), true);
   t('summary: …including the pairs added since', SWEEP_COUNT_KEYS.includes('crossRepoProbed') && SWEEP_COUNT_KEYS.includes('seatCandidates'), true);
 
@@ -11527,13 +13327,13 @@ function selfTest() {
   t('H17 budget: an over-cap index announces the omission', overflow.includes('3 further card(s) omitted'), true);
   t('H17 budget: …and renders exactly the cap', overflow.split('\n').filter((l) => /^- \[?#?\d/.test(l)).length, H17_INDEX_ROW_CAP);
   // The summary line's H17 half, mirroring the H16 `read X of Y` discipline.
-  t('summaryLine: reports the H17 hold-comment reads', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
-  t('summaryLine: …and a partial hold read says so', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0).includes('read on 12 of 79'), true);
-  t('summaryLine: absent H17 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('Hold comments read on 0 of 0'), true);
+  t('summaryLine: reports the H17 hold-comment reads', saidBy('h17Holds', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0)).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
+  t('summaryLine: …and a partial hold read says so', saidBy('h17Holds', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0)).includes('read on 12 of 79'), true);
+  t('summaryLine: absent H17 counts degrade to 0, never to undefined', saidBy('h17Holds', summaryLine(counts, 0)).includes('Hold comments read on 0 of 0'), true);
   // The summary line's H9 half (#10403), same `read X of Y` discipline.
-  t('summaryLine: reports the H9 restart-comment reads', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
-  t('summaryLine: …and a partial restart read says so', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
-  t('summaryLine: absent H9 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('`Restart-when:` hold comments read on 0 of 0'), true);
+  t('summaryLine: reports the H9 restart-comment reads', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0)).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
+  t('summaryLine: …and a partial restart read says so', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0)).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
+  t('summaryLine: absent H9 counts degrade to 0, never to undefined', saidBy('h9Restart', summaryLine(counts, 0)).includes('`Restart-when:` hold comments read on 0 of 0'), true);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.
@@ -12086,14 +13886,28 @@ function selfTest() {
   // repo ran at ~132, which turned a claimed ~11-day reach into ~1.8 days with
   // nothing able to notice.
   t('windows: coverage is rows / rate', windowCoverageDays(400, 100), 4);
-  t('windows: H8 four pages against the measured rate', Number(windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.91);
-  t('windows: …which is what the live reading measured (2.96d), within a rounding', windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2.5, true);
   t('windows: the OLD two-page cap was under two days, not the ~11 its prose claimed', Number(windowCoverageDays(200, MEASURED_MERGES_PER_DAY).toFixed(2)), 1.45);
   t('windows: …and the stale ~18/day figure is what produced the ~11-day claim', Number(windowCoverageDays(200, 18).toFixed(1)), 11.1);
-  t('windows: H23 keeps three pages', COMMIT_WINDOW_PAGES, 3);
-  t('windows: …and its re-measured coverage still clears two days', windowCoverageDays(COMMIT_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2, true);
-  t('windows: H22 widened to four pages', CLOSED_ISSUE_WINDOW_PAGES, 4);
-  t('windows: H8 widened to four pages', MERGED_WINDOW_PAGES, 4);
+  // #13606 — H22's and H23's caps are gone the same way H8's went, so the
+  // arithmetic that used to justify them is HISTORY here too. What each cap
+  // really bought, in the unit its reader assumed it was buying:
+  t('windows: H23\'s old 3-page cap bought 2.18d at the 2026-08-23 rate', Number(windowCoverageDays(300, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.18);
+  t('windows: …and 2.73d at the rate measured 8 days later — same cap, 25% more window', Number(windowCoverageDays(300, MEASURED_COMMITS_PER_DAY).toFixed(2)), 2.73);
+  t('windows: …which is why H23\'s cap became a TIME cap', COMMIT_WINDOW_DAYS, 3);
+  // ⛔ H22's is the one whose DIVISOR was the surprise: its rows are consumed by
+  // closed-issue UPDATE activity, not by closures, and the two differ ~17x. The
+  // old 4-page cap read as a closure window and was nothing of the kind.
+  t('windows: H22\'s old 4-page cap bought only 2.12d of UPDATE recency', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 2.12);
+  t('windows: …and the honest divisor is ~17x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 17.6);
+  t('windows: …which is why H22\'s cap became a CLOSURE-time cap', CLOSED_ISSUE_WINDOW_DAYS, 3);
+  t('windows: …and its horizon is seen by 12 consecutive runs', sweepOverlap(CLOSED_ISSUE_WINDOW_DAYS), 12);
+  // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
+  // used to justify one is a HISTORY note here rather than a live derivation.
+  // What the four-page cap really bought, at the two rates that were measured
+  // eight days apart: the same cap, two different windows, nothing able to say so.
+  t('windows: H8\'s old 4-page cap bought 2.91d at the pinned rate', Number(windowCoverageDays(400, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.91);
+  t('windows: …and 4.87d at the rate measured 8 days later — same cap, 67% more window', Number(windowCoverageDays(400, 82.1).toFixed(2)), 4.87);
+  t('windows: …which is why the cap became a TIME cap', MERGED_WINDOW_DAYS, 8);
   // The cadence side: a window is a detection HORIZON, and the overlap says how
   // many runs see a row before it is gone for good.
   t('windows: the patrol cadence is the workflow\'s', PATROL_CADENCE_HOURS, 6);
@@ -12109,6 +13923,217 @@ function selfTest() {
   t('windows: a missing row count cannot divide', windowCoverageDays(undefined, 137.5), null);
   t('windows: a zero cadence has no overlap', sweepOverlap(2, 0), null);
   t('windows: an unusable coverage has no overlap', sweepOverlap(null), null);
+
+  // -- H8's TIME-capped merged window, BOTH directions (#13499 repair 3) -----
+  //
+  // The card's fence is that one direction alone proves nothing: a case showing
+  // an in-window delivery is reported would have passed against the OLD count
+  // cap too. The second case is the one with teeth — a delivery the old cap
+  // could not have seen, which the new window must both admit and report.
+  const NOW13499 = Date.parse('2026-08-31T02:00:00Z');
+  const HORIZON13499 = mergedWindowHorizonMs(NOW13499);
+  const agoDays = (d) => new Date(NOW13499 - d * 86_400_000).toISOString();
+  const mergedAgo = (number, body, days) => ({ number, body, merged_at: agoDays(days), updated_at: agoDays(days) });
+
+  // Direction 1 — an in-window hit is reported. The floor case.
+  t('H8 window: a 1-day-old merge is inside the window', prMergedWithinWindow(mergedAgo(1, 'Part of #4321', 1), HORIZON13499), true);
+  t('H8 window: …and H8 reports the card', typeof h8MergedPrStillDispatched(dispatched(4321), [mergedAgo(9001, 'Part of #4321', 1)]), 'string');
+
+  // Direction 2 — the delivery the OLD cap structurally could not see. At the
+  // pinned 137.5/day the 4-page cap bought 2.91 days, so a 5-day-old merge was
+  // off the end of the window: not late, GONE. This is the #13499 population —
+  // 14 deliveries stranded 4.6-6.0 days, every one of them outside it.
+  t('H8 window: the old 4-page cap could NOT reach 5 days', windowCoverageDays(400, MEASURED_MERGES_PER_DAY) < 5, true);
+  t('H8 window: …but the 8-day time cap admits that merge', prMergedWithinWindow(mergedAgo(9002, 'Part of #4321', 5), HORIZON13499), true);
+  t('H8 window: …and H8 then reports the card it used to miss', typeof h8MergedPrStillDispatched(dispatched(4321), [mergedAgo(9002, 'Part of #4321', 5)]), 'string');
+  // The worst measured stranding (objectui#5174, 6.0d) is the floor the window
+  // was derived from, so it must be strictly inside.
+  t('H8 window: the worst measured stranding (6.0d) is inside', prMergedWithinWindow(mergedAgo(9003, 'Part of #4321', 6), HORIZON13499), true);
+  // …and the window still HAS an edge. A boundary that admits everything is not
+  // a boundary, and H8's stated limit has to stay true.
+  t('H8 window: a 9-day-old merge is outside', prMergedWithinWindow(mergedAgo(9004, 'Part of #4321', 9), HORIZON13499), false);
+  t('H8 window: an unmerged closed PR is never in the window', prMergedWithinWindow({ number: 1, merged_at: null, updated_at: agoDays(1) }, HORIZON13499), false);
+  t('H8 window: an unreadable merge stamp is not placed in time', prMergedWithinWindow({ number: 1, merged_at: 'not-a-date' }, HORIZON13499), false);
+
+  // The paging bound reads `updated_at`, NOT `merged_at` — the monotonicity
+  // argument in `MERGED_WINDOW_DAYS`. A full page whose oldest UPDATE still
+  // postdates the horizon cannot end the window.
+  const page = (n, updatedDaysAgo) => Array.from({ length: n }, (_, i) => ({ number: i, updated_at: agoDays(updatedDaysAgo) }));
+  t('H8 paging: a full page still inside the horizon keeps paging', mergedPageExhaustsWindow(page(100, 2), HORIZON13499), false);
+  t('H8 paging: a full page whose oldest update predates the horizon stops', mergedPageExhaustsWindow(page(100, 9), HORIZON13499), true);
+  t('H8 paging: a SHORT page stops paging (the stream is exhausted)', mergedPageExhaustsWindow(page(40, 1), HORIZON13499), true);
+  t('H8 paging: an unreadable oldest update does NOT stop paging early', mergedPageExhaustsWindow([...page(99, 2), { number: 99, updated_at: 'nope' }], HORIZON13499), false);
+  t('H8 paging: a non-array is an exhausted stream, not an infinite one', mergedPageExhaustsWindow(null, HORIZON13499), true);
+  t('H8 paging: the ceiling is a quota backstop, not the boundary', MERGED_WINDOW_PAGE_CEILING > MERGED_WINDOW_DAYS, true);
+
+  // -- The rate premise, now self-checking (#13499 repair 2) -----------------
+  //
+  // The root cause the card names is a rate typed into a comment: no reader and
+  // no run could disagree with it. These cases pin the disagreement.
+  t('rate: observed is derived from the rows themselves', Math.round(observedMergeRatePerDay([{ merged_at: agoDays(4) }, { merged_at: agoDays(2) }, { merged_at: agoDays(0) }]) * 100) / 100, 0.75);
+  t('rate: one row cannot make a rate', observedMergeRatePerDay([{ merged_at: agoDays(1) }]), null);
+  t('rate: no rows cannot make a rate', observedMergeRatePerDay([]), null);
+  t('rate: unreadable stamps cannot make a rate', observedMergeRatePerDay([{ merged_at: 'x' }, { merged_at: 'y' }]), null);
+  t('rate: a zero span cannot make a rate', observedMergeRatePerDay([{ merged_at: agoDays(1) }, { merged_at: agoDays(1) }]), null);
+
+  const premise = (observed, pinnedAt = MEASURED_MERGES_PER_DAY_AT) =>
+    classifyRatePremise({ observed, pinned: MEASURED_MERGES_PER_DAY, pinnedAt, nowMs: NOW13499 });
+  t('rate premise: the rate measured TODAY is inside the band', premise(82.1).state, 'ok');
+  t('rate premise: …and the pin is not yet expired', premise(82.1).ageDays < RATE_PREMISE_STALE_DAYS, true);
+  // The drift the card is really about: `~18/day` against a board running at
+  // 137.5 is a factor of 7.6, and nothing reported it for months.
+  t('rate premise: the historical ~18/day premise is DRIFTED against 137.5', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY, pinned: 18, pinnedAt: MEASURED_MERGES_PER_DAY_AT, nowMs: NOW13499 }).state, 'drifted');
+  t('rate premise: …and the message names the factor so it can be acted on', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY, pinned: 18, pinnedAt: MEASURED_MERGES_PER_DAY_AT, nowMs: NOW13499 }).message.includes('7.64'), true);
+  t('rate premise: a doubling is outside the band', premise(MEASURED_MERGES_PER_DAY * 2.1).state, 'drifted');
+  t('rate premise: a halving is outside the band too', premise(MEASURED_MERGES_PER_DAY / 2.1).state, 'drifted');
+  t('rate premise: exactly at the band edge is still OK', premise(MEASURED_MERGES_PER_DAY * RATE_PREMISE_BAND).state, 'ok');
+  // The calendar half — the one that would have caught `~18/day` early, since a
+  // premise nobody re-measures drifts without any single sweep seeing it move.
+  t('rate premise: a pin past the re-measure horizon EXPIRES even in-band', premise(MEASURED_MERGES_PER_DAY, '2026-06-01').state, 'expired');
+  t('rate premise: …and says so loudly', premise(MEASURED_MERGES_PER_DAY, '2026-06-01').message.includes('EXPIRED'), true);
+  // #4690: an unmeasurable rate is not agreement.
+  t('rate premise: an unobserved rate is NOT reported as OK', premise(null).state, 'unobserved');
+  t('rate premise: …and says nothing was checked', premise(null).message.includes('not checked against'), true);
+  t('rate premise: the pin carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_MERGES_PER_DAY_AT), true);
+  t('rate premise: both window counters ride the enumerated contract', SWEEP_COUNT_KEYS.includes('mergedPages') && SWEEP_COUNT_KEYS.includes('mergedWindowTruncated'), true);
+
+  // The window's DISCLOSURE. A gathered flag that is never printed is a
+  // measurement nobody can act on, so both directions are pinned on the one
+  // line every run ends with.
+  const h8win = (extra) => summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, ...extra }, 0);
+  t('H8 summary: the window is stated as a TIME cap', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes(`TIME cap of ${MERGED_WINDOW_DAYS} day(s)`), true);
+  t('H8 summary: …with the pages it actually cost', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes('read in 9 page(s)'), true);
+  t('H8 summary: a completed window says the horizon was reached', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes('horizon reached'), true);
+  // ⛔ The inversion this repair removed: a ceiling-bound pass is a page cap
+  // again and must never read as a completed time window (#4690).
+  t('H8 summary: a ceiling-bound window says TRUNCATED', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('TRUNCATED'), true);
+  t('H8 summary: …and does NOT claim the horizon was reached', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('horizon reached'), false);
+  t('H8 summary: …and says a delivery past it is invisible', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('is invisible'), true);
+
+  // -- The remaining count-shaped windows, converted (#13606) ----------------
+  //
+  // Three legs, and each is pinned in BOTH directions, because one direction
+  // alone proves nothing here: a case showing an in-window row is admitted
+  // would have passed against the old page cap too. The case with teeth is the
+  // row the old cap structurally could not reach, plus the ceiling case that
+  // must announce itself rather than read as a completed pass.
+  const NOW13606 = Date.parse('2026-08-31T03:36:00Z');
+  const ago13606 = (d) => new Date(NOW13606 - d * 86_400_000).toISOString();
+
+  // ---- The shared disclosure. This is the piece that DID fall out, so it is
+  // pinned once here and the per-window cases below assert through it.
+  const timeBound = (extra) =>
+    describeWindowBound({ name: 'W', horizon: 3, pages: 6, ceiling: 12, ...extra });
+  t('bound: a completed time window states its horizon', timeBound({}).includes('TIME cap of 3 day(s)'), true);
+  t('bound: …and the pages it cost', timeBound({}).includes('read in 6 page(s)'), true);
+  t('bound: …and says the boundary was reached', timeBound({}).includes('boundary reached'), true);
+  t('bound: …and does NOT cry truncation', timeBound({}).includes('TRUNCATED'), false);
+  // ⛔ The inversion this whole card exists to remove.
+  t('bound: a ceiling-bound pass says TRUNCATED', timeBound({ truncated: true }).includes('⛔ TRUNCATED'), true);
+  t('bound: …and names the ceiling that bound it', timeBound({ truncated: true }).includes('12-page quota ceiling'), true);
+  t('bound: …and does NOT claim the boundary was reached', timeBound({ truncated: true }).includes('boundary reached'), false);
+  t('bound: …and says it became a page cap again', timeBound({ truncated: true }).includes('this pass is a page cap'), true);
+  // The exhaustive kind — no horizon to state, and inventing one is the defect.
+  const exBound = (extra) =>
+    describeWindowBound({ name: 'L', kind: 'exhaustive', pages: 4, ceiling: 10, ...extra });
+  t('bound: an exhaustive listing states no horizon', exBound({}).includes('TIME cap'), false);
+  t('bound: …it states completeness instead', exBound({}).includes('EXHAUSTIVE listing'), true);
+  t('bound: …and says it IS the whole population', exBound({}).includes('the whole population'), true);
+  t('bound: a ceiling-bound listing announces it too', exBound({ truncated: true }).includes('⛔ TRUNCATED'), true);
+  t('bound: …and never claims completeness', exBound({ truncated: true }).includes('the whole population'), false);
+  t('bound: a nameless bound renders nothing', describeWindowBound(null), '');
+  t('bound: …and so does one with no name', describeWindowBound({ kind: 'time' }), '');
+
+  // ---- The generic paging predicate, and the ordering/selection asymmetry.
+  const pg13606 = (n, daysAgo, field = 'updated_at') =>
+    Array.from({ length: n }, (_, i) => ({ number: i, [field]: ago13606(daysAgo) }));
+  const H13606 = NOW13606 - 3 * 86_400_000;
+  t('paging: a full page still inside the horizon keeps paging', pageExhaustsWindow(pg13606(100, 1), H13606), false);
+  t('paging: a full page whose oldest stamp predates the horizon stops', pageExhaustsWindow(pg13606(100, 5), H13606), true);
+  t('paging: a SHORT page stops paging (stream exhausted)', pageExhaustsWindow(pg13606(40, 1), H13606), true);
+  t('paging: an unreadable oldest stamp does NOT stop paging early', pageExhaustsWindow([...pg13606(99, 1), { updated_at: 'nope' }], H13606), false);
+  t('paging: a non-array is an exhausted stream, not an infinite one', pageExhaustsWindow(null, H13606), true);
+  t('paging: the field is selectable (H23 orders by a nested commit date)', pageExhaustsWindow(Array.from({ length: 100 }, () => ({ commit: { committer: { date: ago13606(5) } } })), H13606, (c) => c?.commit?.committer?.date), true);
+  // ⛔ H8's predicate is now this one. Same behaviour, which is the whole point
+  // of the delegation — #13601's own cases still pin it, and so does this.
+  t('paging: H8\'s predicate delegates to the generic, unchanged', mergedPageExhaustsWindow(pg13606(100, 9), H13606), pageExhaustsWindow(pg13606(100, 9), H13606, 'updated_at'));
+
+  // ---- H22: a CLOSURE horizon over a stream ordered by UPDATE.
+  const closed13606 = (number, closedDaysAgo, updatedDaysAgo = closedDaysAgo) => ({
+    number,
+    closed_at: ago13606(closedDaysAgo),
+    updated_at: ago13606(updatedDaysAgo),
+  });
+  const CH = closedWindowHorizonMs(NOW13606);
+  // Direction 1 — the floor case: a recent closure is admitted.
+  t('H22 window: a 1-day-old closure is inside', issueClosedWithinWindow(closed13606(1, 1), CH), true);
+  // Direction 2 — the row the OLD 4-page cap structurally could not reach. The
+  // cap covered ~2.12d of UPDATE recency, so a card closed 2.5 days ago and
+  // untouched since fell out of it: not late, GONE. Measured cost at the time
+  // of the repair: 19 residue carriers closed within 3 days were missed.
+  t('H22 window: the old 4-page cap reached only ~2.1 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
+  t('H22 window: …but the 3-day closure horizon admits that card', issueClosedWithinWindow(closed13606(2, 2.5), CH), true);
+  // …and the window still HAS an edge; a boundary that admits everything is none.
+  t('H22 window: a 4-day-old closure is outside', issueClosedWithinWindow(closed13606(3, 4), CH), false);
+  t('H22 window: an unreadable closure stamp is not placed in time', issueClosedWithinWindow({ closed_at: 'not-a-date' }, CH), false);
+  t('H22 window: a card with no closure stamp is never inside', issueClosedWithinWindow({ closed_at: null }, CH), false);
+  // ⛔ THE DIVISOR, pinned: selection and paging read DIFFERENT fields. A card
+  // closed 20 days ago but bumped today is what `sort=updated` puts at the
+  // front — it must NOT be admitted, and it must NOT stop the paging either.
+  t('H22 divisor: a stale closure bumped by today\'s activity is NOT admitted', issueClosedWithinWindow(closed13606(4, 20, 0), CH), false);
+  t('H22 divisor: …and that same row does not end the window early', pageExhaustsWindow(Array.from({ length: 100 }, () => closed13606(4, 20, 0)), CH, 'updated_at'), false);
+  t('H22 divisor: a page whose oldest UPDATE predates the horizon does end it', pageExhaustsWindow(Array.from({ length: 100 }, () => closed13606(5, 9, 9)), CH, 'updated_at'), true);
+  t('H22: the ceiling is a quota backstop, not the boundary', CLOSED_ISSUE_WINDOW_PAGE_CEILING > CLOSED_ISSUE_WINDOW_DAYS, true);
+  t('H22: the pinned divisor carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT), true);
+
+  // ---- H23: horizon and paging on the SAME field.
+  const commit13606 = (daysAgo) => ({ commit: { committer: { date: ago13606(daysAgo) } } });
+  const CMH = commitWindowHorizonMs(NOW13606);
+  t('H23 window: a 1-day-old commit is inside', commitWithinWindow(commit13606(1), CMH), true);
+  t('H23 window: a 4-day-old commit is outside', commitWithinWindow(commit13606(4), CMH), false);
+  t('H23 window: an undateable commit is never inside', commitWithinWindow({ commit: {} }, CMH), false);
+  t('H23 window: author.date is the fallback when there is no committer date', commitTimeMs({ commit: { author: { date: ago13606(1) } } }) !== null, true);
+  t('H23 window: a commit with neither stamp is null, not 0', commitTimeMs({ commit: {} }), null);
+  t('H23: the ceiling is a quota backstop, not the boundary', COMMIT_WINDOW_PAGE_CEILING > COMMIT_WINDOW_DAYS, true);
+  t('H23: the pinned rate carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_COMMITS_PER_DAY_AT), true);
+
+  // ---- The three OPEN listings: exhaustion, announced.
+  const st13606 = {};
+  noteOpenListing(st13606, 'listIssues(pm:queue)', 1, false);
+  noteOpenListing(st13606, 'listAllOpenIssues', 4, false);
+  t('open listings: pages accumulate across listings', st13606.openListingPages, 5);
+  t('open listings: a complete pass records no truncation', st13606.openListingsTruncated, undefined);
+  const stCap = {};
+  noteOpenListing(stCap, 'listIssues(pm:queue)', 1, false);
+  noteOpenListing(stCap, 'listAllOpenIssues', OPEN_LISTING_PAGE_CEILING, true);
+  t('open listings: a ceiling-bound listing is named, not just counted', (stCap.openListingsTruncated ?? []).join(','), 'listAllOpenIssues');
+  t('open listings: …and the pages still accumulate', stCap.openListingPages, 11);
+  t('open listings: noteOpenListing tolerates a missing stats object', noteOpenListing(null, 'x', 1, true), undefined);
+  // ⛔ The measured reason these are NOT time horizons: a created-time cut
+  // discards the OLDEST open rows, which is the population every row here is
+  // for. 104 of 354 open cards were older than 8 days when this was measured.
+  t('open listings: the ceiling is a quota backstop over a measured 4-page population', OPEN_LISTING_PAGE_CEILING > 4, true);
+
+  // ---- The summary line carries all three, both ways. A gathered flag that is
+  // never printed is a measurement nobody can act on.
+  const win13606 = (extra) =>
+    summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1, closed: 5, ...extra }, 0);
+  t('H22 summary: the window is stated as a TIME cap', saidBy('h22Window', win13606({ closedPages: 6 })).includes(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s)`), true);
+  t('H22 summary: …and names the divisor honestly as ACTIVITY', saidBy('h22Window', win13606({ closedPages: 6 })).includes('consumed by closed-issue ACTIVITY'), true);
+  t('H22 summary: …and contrasts it with the closure rate it read as', saidBy('h22Window', win13606({ closedPages: 6 })).includes('not by closures'), true);
+  t('H22 summary: a completed window says the boundary was reached', saidBy('h22Window', win13606({ closedPages: 6 })).includes('boundary reached'), true);
+  t('H22 summary: a ceiling-bound window says TRUNCATED', saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true })).includes('⛔ TRUNCATED'), true);
+  t('H23 summary: the commit window is stated as a TIME cap', saidBy('h23Window', win13606({ commitPages: 4 })).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s)`), true);
+  t('H23 summary: a ceiling-bound commit window says TRUNCATED', saidBy('h23Window', win13606({ commitPages: 12, commitWindowTruncated: true })).includes(`${COMMIT_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
+  t('open summary: a complete inventory says so', saidBy('openListings', win13606({ openListingPages: 11 })).includes('EXHAUSTIVE listing'), true);
+  t('open summary: …and claims the whole population', saidBy('openListings', win13606({ openListingPages: 11 })).includes('the whole population'), true);
+  t('open summary: a ceiling-bound listing is NAMED on the line', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('Ceiling-bound listing(s): listAllOpenIssues'), true);
+  t('open summary: …and says the inventory is a PREFIX', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('PREFIXES, not populations'), true);
+  t('open summary: …and a complete pass says none of that', saidBy('openListings', win13606({ openListingPages: 11 })).includes('Ceiling-bound listing(s)'), false);
+  // ⛔ No bare-number rendering of a capped pass: every truncated window must
+  // carry the word, in every medium the summary feeds.
+  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true }))), false);
+  t('summary: all three converted windows ride the enumerated contract', ['closedPages', 'closedWindowTruncated', 'commitPages', 'commitWindowTruncated', 'openListingPages', 'openListingsTruncated'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
@@ -12665,16 +14690,16 @@ function selfTest() {
   // The summary line carries the residue, so a quiet section cannot read as
   // "the gate is watched" when most removals are structurally unwatchable.
   const gateCounts = { gateRemovals: 7, eventPages: 24, gate_unjudgeable: 5, gate_undated: 1 };
-  t('H35 summary: the removal count is reported', summaryLine(gateCounts, 1).includes('7 removal(s) of a gate-semantic label'), true);
-  t('H35 summary: …with the pages read', summaryLine(gateCounts, 1).includes('24 page(s) of the repo-wide issue-event stream'), true);
-  t('H35 summary: …and states it made no per-card fetch', summaryLine(gateCounts, 1).includes('no per-card timeline fetch'), true);
-  t('H35 summary: …and carries the unjudgeable residue', summaryLine(gateCounts, 1).includes('5 of them are UNJUDGEABLE'), true);
-  t('H35 summary: …and the undated count', summaryLine(gateCounts, 1).includes('1 more had no hang inside the window'), true);
-  t('H35 summary: a truncated window is announced, never silent', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('TRUNCATED'), true);
-  t('H35 summary: …and says a quiet section is a SHORT READ', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('short read, not a clean board'), true);
-  t('H35 summary: an untruncated window makes no such claim', summaryLine(gateCounts, 1).includes('TRUNCATED'), false);
+  t('H35 summary: the removal count is reported', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('7 removal(s) of a gate-semantic label'), true);
+  t('H35 summary: …with the pages read', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('24 page(s) of the repo-wide issue-event stream'), true);
+  t('H35 summary: …and states it made no per-card fetch', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('no per-card timeline fetch'), true);
+  t('H35 summary: …and carries the unjudgeable residue', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('5 of them are UNJUDGEABLE'), true);
+  t('H35 summary: …and the undated count', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('1 more had no hang inside the window'), true);
+  t('H35 summary: a truncated window is announced, never silent', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('TRUNCATED'), true);
+  t('H35 summary: …and says a quiet section is a SHORT READ', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('short read, not a clean board'), true);
+  t('H35 summary: an untruncated window makes no such claim', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('TRUNCATED'), false);
   // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
-  t('H35 summary: absent counts degrade to 0', summaryLine({}, 0).includes('0 removal(s) of a gate-semantic label'), true);
+  t('H35 summary: absent counts degrade to 0', saidBy('h35GatePatrol', summaryLine({}, 0)).includes('0 removal(s) of a gate-semantic label'), true);
 
   // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
   const h36pr = (number, opts = {}) => ({
@@ -12741,11 +14766,235 @@ function selfTest() {
   t('H36: zero candidates is a clean reading', h36DetailPassUnreadable(0, 0), false);
   t('H36: a partial read is a bounded gap, not a failure', h36DetailPassUnreadable(3, 1), false);
   // The coverage pair reaches the summary line, and degrades to 0.
-  t('H36 summary: the pair is reported', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0).includes('changed-file page read on 17 of 19 open PR(s)'), true);
-  t('H36 summary: …and states the miss-only direction', summaryLine({}, 0).includes('MISS a hold, never invent one'), true);
+  t('H36 summary: the pair is reported', saidBy('h36SharedFiles', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0)).includes('changed-file page read on 17 of 19 open PR(s)'), true);
+  t('H36 summary: …and states the miss-only direction', saidBy('h36SharedFiles', summaryLine({}, 0)).includes('MISS a hold, never invent one'), true);
   t('H36: both count keys ride the enumerated contract', SWEEP_COUNT_KEYS.includes('sharedFileCandidates') && SWEEP_COUNT_KEYS.includes('sharedFileProbed'), true);
   // The markdown medium renders an H36 row like every other finding row.
   t('markdown: an H36 row links the PR it names', renderMarkdown([[{ number: 100, html_url: 'https://example.test/100' }, 'H36', 'shares a file']], { repo: 'r', issues: 0, unscoped: 0, prs: 2, merged: 0 }).includes('- **H36** [#100](https://example.test/100)'), true);
+
+  // -- H38 — seat-post staleness (#13493 half ①, report-only) ---------------
+  //
+  // Fixtures are the MEASURED handover: the `domain:services` post last wrote
+  // 2026-08-29T07:09Z, then a full shift ran ~31h to wave 4 and dispatched five
+  // cards without touching it. The claims are what a silent shift leaves behind.
+  const SEAT_AT_38 = Date.parse('2026-08-29T07:09:00Z');
+  const at38 = (iso) => Date.parse(iso);
+  const seat38 = (title = '[PM seat] domain:services — 🟢 os-elon · R4 派发中', extra = {}) => ({
+    number: 6021,
+    title,
+    labels: [{ name: 'pm:seat' }],
+    assignees: [{ login: 'os-elon' }],
+    body: '',
+    updated_at: '2026-08-29T07:09:00Z',
+    ...extra,
+  });
+  const claim38 = (number, iso) => ({ number, at: at38(iso) });
+
+  // The measured specimen: a claim written ~24h after the post's last event.
+  t('H38: a lane claim NEWER than the seat post -> finding', typeof h38SeatPostStale(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38: …and the finding names the lane', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('domain:services'), true);
+  t('H38: …and the card whose claim outran the post', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('#13398'), true);
+  t('H38: …and states how far behind the post is', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:09:00Z')).includes('24.0h'), true);
+  // ⛔ The row must not read as an accusation — the card is explicit that both
+  // shifts did substantial correct work and that this is evidence about PROSE.
+  t('H38: …and disclaims carelessness explicitly', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('Not an accusation'), true);
+  t('H38: …and stays report-only', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('never writes a label'), true);
+
+  // The other direction — a seat that DID write home is clean, which is the
+  // case that must stay quiet or the row is noise on every healthy lane.
+  t('H38: a post written AFTER the newest claim -> clean', h38SeatPostStale(seat38(), at38('2026-08-30T09:00:00Z'), claim38(13398, '2026-08-30T07:30:00Z')), null);
+  t('H38: a post written at the SAME instant is not behind', h38SeatPostStale(seat38(), SEAT_AT_38, claim38(13398, '2026-08-29T07:09:00Z')), null);
+  t('H38: a lane with no claims at all -> clean', h38SeatPostStale(seat38(), SEAT_AT_38, null), null);
+  t('H38: a non-seat card is out of scope', h38SeatPostStale({ ...issue(['pm:dispatched']), title: '[PM seat] domain:services — 🟢 x' }, SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  // A lane on a sibling board has an unreadable claim population here, so an
+  // absent claim would mean "unreadable", not "none" (H32's `foreign` rule).
+  t('H38: a FOREIGN lane is out of scope', h38SeatPostStale(siblingLaneSeat(), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  t('H38: a lane-less seat title is out of scope', h38SeatPostStale(seat38('[PM seat] triage (objectstack-wide) — 🟢 os-help'), SEAT_AT_38, claim38(1, '2026-08-30T07:30:00Z')), null);
+  // ⛔ An ORDER comparison built on an unreadable stamp is a fabricated
+  // ordering, not a conservative one — H33 settles this direction.
+  t('H38: an unreadable T_seat declines to judge', h38SeatPostStale(seat38(), null, claim38(1, '2026-08-30T07:30:00Z')), null);
+
+  // `T_seat` — the later of the body edit and the newest comment.
+  const row38 = (iso) => ({ created_at: iso, updated_at: iso });
+  t('H38 T_seat: a newer COMMENT wins over the body edit', seatPostLastEventMs(seat38(), [row38('2026-08-30T10:00:00Z')]), at38('2026-08-30T10:00:00Z'));
+  t('H38 T_seat: an older comment does not pull it back', seatPostLastEventMs(seat38(), [row38('2026-08-28T10:00:00Z')]), SEAT_AT_38);
+  t('H38 T_seat: the body edit alone is enough', seatPostLastEventMs(seat38(), []), SEAT_AT_38);
+  t('H38 T_seat: an EDITED comment counts as writing home', seatPostLastEventMs(seat38(), [{ created_at: '2026-08-28T10:00:00Z', updated_at: '2026-08-30T11:00:00Z' }]), at38('2026-08-30T11:00:00Z'));
+  t('H38 T_seat: nothing readable is null, not zero', seatPostLastEventMs({ updated_at: 'x' }, [{ created_at: 'y' }]), null);
+  t('H38 T_seat: a non-array comment list is tolerated', seatPostLastEventMs(seat38(), null), SEAT_AT_38);
+
+  // The lane claim index — and the OR/AND hazard the filing card measured: the
+  // listing endpoints' `labels` filter is a UNION, so the intersection has to
+  // happen locally or the count is wrong in the "too many" direction.
+  const laneCard = (number, labels) => ({ number, labels: labels.map((name) => ({ name })), assignees: [], body: '', title: '' });
+  const CLAIM_ROW = [{ body: 'Claim: PM loop round 4\nSession: `session_x`', created_at: '2026-08-30T07:30:00Z' }];
+  const laneIssues = [
+    laneCard(13398, ['pm:dispatched', 'domain:services']),
+    laneCard(13399, ['pm:dispatched', 'domain:devx']),
+    laneCard(13400, ['pm:queue', 'domain:services']),
+  ];
+  const laneComments = new Map([[13398, CLAIM_ROW], [13399, CLAIM_ROW], [13400, CLAIM_ROW]]);
+  t('H38 lane: the newest claim on the lane is found', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
+  t('H38 lane: a claim on ANOTHER lane is not counted (OR-not-AND)', newestLaneClaim('domain:devx', laneIssues, laneComments).number, 13399);
+  t('H38 lane: a `pm:queue` card is not a dispatch claim', newestLaneClaim('domain:services', [laneCard(13400, ['pm:queue', 'domain:services'])], laneComments), null);
+  t('H38 lane: a lane with no dispatched cards is null', newestLaneClaim('domain:engine', laneIssues, laneComments), null);
+  t('H38 lane: an unfetched thread contributes nothing', newestLaneClaim('domain:services', laneIssues, new Map()), null);
+  t('H38 lane: the NEWEST of several claims wins', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services']), laneCard(2, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: a', created_at: '2026-08-29T00:00:00Z' }]], [2, [{ body: 'Claim: b', created_at: '2026-08-30T00:00:00Z' }]]])).number, 2);
+  // ⛔ The claim predicate is REUSED, not re-spelled: a comment that is not a
+  // canonical `Claim:` is invisible here exactly as it is to H2 and H33.
+  t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
+  t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
+
+  // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
+  //
+  // The card's central fence, restated as an assertion rather than as prose:
+  // ⛔ a page cap is NOT a count. Its reason was a measurement about this board
+  // — the last three cards whose headline number was a capped bound all had it
+  // quoted back as exact — so the rendering, not just the docblock, has to
+  // refuse it.
+  const censusCard = (number, labels, closed_at = '2026-08-20T00:00:00Z', extra = {}) => ({
+    number,
+    state: 'closed',
+    closed_at,
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const corpus = (rows, truncated = false) => ({ rows, truncated });
+  const censusOf = (byLabel, controlRows = 42) => summariseClosedResidue(new Map(byLabel), { controlRows });
+
+  const DEVX = ['pm:dispatched', 'domain:devx'];
+  const baseCensus = censusOf([
+    ['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX), censusCard(3, ['pm:dispatched', 'domain:spec'])])],
+    ['pm:queue', corpus([censusCard(1, ['pm:queue', 'domain:devx']), censusCard(9, ['pm:queue', 'domain:spec'])])],
+  ]);
+
+  t('H39: a label total is the count of its cards', baseCensus.rows.find((r) => r.label === 'pm:dispatched').total, 3);
+  t('H39: lanes are counted locally, per label', baseCensus.rows.find((r) => r.label === 'pm:dispatched').lanes.find((l) => l[0] === 'domain:devx')[1], 2);
+  t('H39: rows sort by size so the worst lane leads', baseCensus.rows[0].label, 'pm:dispatched');
+  t('H39: the oldest closure is carried, for the "how old is this" question', baseCensus.rows[0].oldest.number, 1);
+  // The contradictory pair, intersected LOCALLY — the endpoint's `labels`
+  // filter is a UNION, so asking for both at once answers a larger question.
+  t('H39: the contradictory pair is the INTERSECTION', baseCensus.pairs.length, 1);
+  t('H39: …and names the card carrying both', baseCensus.pairs[0], 1);
+  t('H39: a card in only one set is not a pair', baseCensus.pairs.includes(9), false);
+
+  // ⛔ The page-cap rule, in both directions. The RENDER's spelling of it moved
+  // into the one-line qualifier at the 批 #13 re-judgment (below); the
+  // countability predicate behind it is unchanged and is what callers consult.
+  const cappedCensus = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)], true)]]);
+  t('H39 cap: a truncated corpus marks the census truncated', cappedCensus.truncated, true);
+  t('H39 cap: …and its figures are NOT countable', censusIsCountable(cappedCensus), false);
+  t('H39 cap: …and the render says lower bounds, not a bare number', renderClosedResidueCensus(cappedCensus).join('\n').includes('lower bounds'), true);
+  t('H39 cap: …and says not counts in as many words', renderClosedResidueCensus(cappedCensus).join('\n').includes('not counts'), true);
+  t('H39 cap: …and prefixes the figure with ≥ rather than stating it', renderClosedResidueCensus(cappedCensus).join('\n').includes('≥1'), true);
+  t('H39 cap: …and names the cap that produced the bound', renderClosedResidueCensus(cappedCensus).join('\n').includes(`${CENSUS_PAGE_CEILING}-page cap`), true);
+  t('H39 cap: a fully paginated census IS countable', censusIsCountable(baseCensus), true);
+  t('H39 cap: …and carries no bound qualifier at all', renderClosedResidueCensus(baseCensus).join('\n').includes('lower bounds'), false);
+
+  // The control the filing card prescribed: without rows, a zero is "not read".
+  // #4690 is about the INSTRUMENT, so the ruling did not retire it — it only
+  // demoted its typography from a block to a parenthesis.
+  const noControl = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)])]], 0);
+  t('H39 control: an empty control makes the census uncountable', censusIsCountable(noControl), false);
+  t('H39 control: …and the render says the instrument read nothing', renderClosedResidueCensus(noControl).join('\n').includes('not read'), true);
+  t('H39 control: …and names the control as the reason', renderClosedResidueCensus(noControl).join('\n').includes('control query returned no rows'), true);
+  t('H39 control: …and still refuses to be quoted as a count', renderClosedResidueCensus(noControl).join('\n').includes('not counts'), true);
+  // ⛔ The two caveats are mutually exclusive: a capped census must not also
+  // claim the control failed, which is what a naive `||` of the two would print.
+  t('H39 control: a capped census does not blame the control', renderClosedResidueCensus(cappedCensus).join('\n').includes('control query'), false);
+
+  // ⚠️ The `issues` endpoint returns PRs too — one counted as a card inflates
+  // every figure in the direction that makes the problem look worse.
+  const withPr = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX), censusCard(2, DEVX, '2026-08-20T00:00:00Z', { pull_request: { url: 'x' } })])]]);
+  t('H39: a pull request is not a card', withPr.rows[0].total, 1);
+
+  // Pagination termination, and the ceiling behind it.
+  t('H39 paging: a short page ends the stream', censusPageExhausted(Array.from({ length: 40 })), true);
+  t('H39 paging: a FULL page never does', censusPageExhausted(Array.from({ length: 100 })), false);
+  t('H39 paging: a non-array is an ended stream', censusPageExhausted(null), true);
+  t('H39 paging: the ceiling is generous enough not to bind routinely', CENSUS_PAGE_CEILING >= 50, true);
+
+  // Lane bucketing — an unrouted card is still residue and must not vanish.
+  t('H39 lanes: a domain label is a lane', censusLanesOf(censusCard(1, ['pm:queue', 'domain:spec'])).includes('domain:spec'), true);
+  t('H39 lanes: a repo label is a lane too (single-lane seats)', censusLanesOf(censusCard(1, ['pm:queue', 'repo:cloud'])).includes('repo:cloud'), true);
+  t('H39 lanes: an unrouted card is bucketed, not dropped', censusLanesOf(censusCard(1, ['pm:queue']))[0], '(no lane)');
+
+  // ⛔ A census that could not RUN must not render as a clean population.
+  t('H39 failure: a failed census says it was not read', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('not read this run'), true);
+  t('H39 failure: …and carries the status so a reader can act on it', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('HTTP 403'), true);
+  t('H39 failure: …and states no figure rather than implying zero', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('No figure'), true);
+  t('H39 failure: no census at all renders nothing', renderClosedResidueCensus(null).length, 0);
+
+  // -- 批 #13 (2026-08-31) — the census is INFORMATIONAL, never an alarm ------
+  //
+  // Maintainer ruling: closed-card residue is archive, not state; it is made
+  // harmless reader-side and no cleanup is owed. These pins are the ruling's
+  // mechanical half — the render may state the number and must not campaign
+  // about it. Each one below was a real property of the pre-ruling block.
+  const censusLines = (c) => renderClosedResidueCensus(c);
+  const censusText = (c) => censusLines(c).join('\n');
+  t('批 #13: the census renders ONE line (plus its leading blank)', censusLines(baseCensus).length, 2);
+  t('批 #13: …a capped census is one line too', censusLines(cappedCensus).length, 2);
+  t('批 #13: …a failed census is one line too', censusLines({ failed: 'HTTP 403' }).length, 2);
+  t('批 #13: no alarm glyph anywhere in the line', /[⚠⛔]/u.test(censusText(baseCensus)), false);
+  t('批 #13: …not on the capped reading either', /[⚠⛔]/u.test(censusText(cappedCensus)), false);
+  t('批 #13: …nor on the unread one', /[⚠⛔]/u.test(censusText({ failed: 'HTTP 403' })), false);
+  t('批 #13: the line says the residue is archive, not state', censusText(baseCensus).includes('Archive, not state'), true);
+  t('批 #13: …and that no cleanup is owed', censusText(baseCensus).includes('no cleanup is owed'), true);
+  t('批 #13: …and that none is planned, so nobody re-opens it', censusText(baseCensus).includes('none is planned'), true);
+  t('批 #13: …and cites the ruling that says so', censusText(baseCensus).includes('批 #13'), true);
+  t('批 #13: …and names the reader-side mechanism that replaces the cleanup', censusText(baseCensus).includes('open cards'), true);
+  t('批 #13: the line is marked informational rather than a heading', censusText(baseCensus).includes('informational'), true);
+  t('批 #13: markdown renders it italic, like the healthy rate premise', renderClosedResidueCensus(baseCensus, { markdown: true })[1].startsWith('_'), true);
+  t('批 #13: …and never bold', renderClosedResidueCensus(baseCensus, { markdown: true })[1].startsWith('**'), false);
+  // ⛔ The census must never become a finding row. The load-bearing half of
+  // that is arithmetic, not wording: a clean board with a large census must
+  // still report ZERO findings, because the count is what a patrol reader acts
+  // on and what "the board is clean" means. (The lead legitimately names H39 —
+  // that is the leg's identity, not a per-card finding code.)
+  const cleanBoardWithCensus = renderPlain([], {}, { census: baseCensus });
+  t('批 #13: a clean board with a census still summarises ZERO findings', cleanBoardWithCensus.includes(summaryLine({}, 0)), true);
+  t('批 #13: …and the census line is still present in that report', cleanBoardWithCensus.includes('Closed-card `pm:*` residue'), true);
+  t('批 #13: …and no finding row was manufactured for it', /^ {2}H\d\d #/mu.test(cleanBoardWithCensus), false);
+  t('批 #13: …and it gives no strip/cleanup imperative', /\bStrip\b/u.test(censusText(baseCensus)), false);
+  // The figures still reach a reader who wants them — demoted, not deleted.
+  t('批 #13: the per-label figure survives on the line', censusText(baseCensus).includes('pm:dispatched 3'), true);
+  t('批 #13: …and so does the contradictory-pair count', censusText(baseCensus).includes('1 carrying both'), true);
+  // ⛔ The age claim is about the WHOLE residue. `rows` is sorted by size, so a
+  // `find` here answers "oldest among the biggest label" and reads as the
+  // population's floor — the smaller label below carries the real one.
+  const oldestElsewhere = censusOf([
+    ['pm:dispatched', corpus([censusCard(1, DEVX, '2026-08-20T00:00:00Z'), censusCard(2, DEVX, '2026-08-20T00:00:00Z')])],
+    ['pm:queue', corpus([censusCard(9, ['pm:queue'], '2026-08-02T00:00:00Z')])],
+  ]);
+  t('批 #13: the oldest closure is the GLOBAL one, not the biggest label\'s', censusText(oldestElsewhere).includes('oldest closed 2026-08-02'), true);
+  t('批 #13: …so the larger label\'s later date is not presented as the floor', censusText(oldestElsewhere).includes('oldest closed 2026-08-20'), false);
+
+  // -- 批 #13 item ① — the open-state scoping that MAKES the residue harmless -
+  //
+  // The reader audit's whole finding was that this one query is the mechanism.
+  // It was already correct; these pins are what stop it being silently widened.
+  t('批 #13: the pm:* label listing is scoped to OPEN cards', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=open'), true);
+  t('批 #13: …and never to all states', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=all'), false);
+  t('批 #13: …nor to closed', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=closed'), false);
+  t('批 #13: the label is URL-encoded, so `pm:*` survives the colon', pmLabelListingPath('o/r', 'pm:on-hold', 1).includes('labels=pm%3Aon-hold'), true);
+  t('批 #13: the path is repo-relative, keeping the sweeper repo-agnostic', pmLabelListingPath('o/r', 'pm:queue', 2).startsWith('/repos/o/r/issues?'), true);
+  t('批 #13: …and carries the page it was asked for', pmLabelListingPath('o/r', 'pm:queue', 7).includes('page=7'), true);
+  // Every residue label is reachable through the open-scoped path — the audit's
+  // population, asserted rather than described.
+  for (const label of PM_RESIDUE_LABELS) {
+    t(`批 #13: ${label} is listed open-scoped`, pmLabelListingPath('o/r', label, 1).includes('state=open'), true);
+  }
+
+  // The rate-premise renderer — the healthy state prints too, because a check
+  // visible only when it fires is indistinguishable from a deleted one.
+  t('rate render: an OK premise is still shown', renderRatePremise(classifyRatePremise({ observed: 82.1, nowMs: NOW13499 })).join('\n').includes('rate premise OK'), true);
+  t('rate render: a drifted premise is marked loud', renderRatePremise(classifyRatePremise({ observed: 1, nowMs: NOW13499 })).join('\n').includes('⚠️'), true);
+  t('rate render: no premise renders nothing', renderRatePremise(null).length, 0);
 
   // -- H37 — family-dispatch member drift (report-only patrol input, #12629) --
   //
@@ -12867,11 +15116,11 @@ function selfTest() {
   t('H37: a wide fold names the cap and counts the rest', h37row1(wide37, h37map(h37card(11678, ['pm:dispatched']), h37card(11671, ['pm:queue'])), new Map()).includes(`+${7 - H37_MEMBER_LIST_CAP} more`), true);
 
   // The coverage pair reaches the summary line, and degrades to 0.
-  t('H37 summary: the pair is reported', summaryLine({ liveFolds: 2, memberReadProbed: 38, memberReadCandidates: 40 }, 0).includes('member comment page read on 38 of 40'), true);
-  t('H37 summary: …and the fold count with it', summaryLine({ liveFolds: 2 }, 0).includes('2 live shared branch(es)'), true);
-  t('H37 summary: …stating the miss-only direction', summaryLine({}, 0).includes('never invent one'), true);
-  t('H37 summary: an all-failed pass is named as the transport', summaryLine({ liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0 }, 0).includes('NO member page was readable'), true);
-  t('H37 summary: …and 0 of 0 makes no such claim', summaryLine({}, 0).includes('NO member page was readable'), false);
+  t('H37 summary: the pair is reported', saidBy('h37Folds', summaryLine({ liveFolds: 2, memberReadProbed: 38, memberReadCandidates: 40 }, 0)).includes('member comment page read on 38 of 40'), true);
+  t('H37 summary: …and the fold count with it', saidBy('h37Folds', summaryLine({ liveFolds: 2 }, 0)).includes('2 live shared branch(es)'), true);
+  t('H37 summary: …stating the miss-only direction', saidBy('h37Folds', summaryLine({}, 0)).includes('never invent one'), true);
+  t('H37 summary: an all-failed pass is named as the transport', saidBy('h37Folds', summaryLine({ liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0 }, 0)).includes('NO member page was readable'), true);
+  t('H37 summary: …and 0 of 0 makes no such claim', saidBy('h37Folds', summaryLine({}, 0)).includes('NO member page was readable'), false);
   t('H37: all three count keys ride the enumerated contract', ['liveFolds', 'memberReadCandidates', 'memberReadProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   // The markdown medium renders an H37 row like every other finding row.
   t('markdown: an H37 row links the card it names', renderMarkdown([[{ number: 11680, html_url: 'https://example.test/11680' }, 'H37', 'member pointer without the label']], { repo: 'r', issues: 1, unscoped: 0, prs: 0, merged: 0 }).includes('- **H37** [#11680](https://example.test/11680)'), true);
@@ -12920,7 +15169,68 @@ function selfTest() {
   t('sweep repo: no env at all is the same as an empty one', resolveSweepRepo().repo, DEFAULT_SWEEP_REPO);
   // The sweep target rides into the rendered report, so a reader of a sibling
   // repo's anchor can see WHICH board was read (and a wrong one is legible).
-  t('sweep repo: the rendered summary names the swept repo', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0).includes('objectstack-ai/objectui'), true);
+  t('sweep repo: the rendered summary names the swept repo', saidBy('head', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0)).includes('objectstack-ai/objectui'), true);
+
+  // -- The proxy route (#13544): a probe that answers on the BYPASSED route
+  // -- answers about the wrong route, and its refusal reads as the container's
+  // -- verdict. These pin the re-exec decision and the corrected remedy.
+  // The leg that keeps this file safe to copy verbatim: an Actions runner has
+  // no proxy env, so it must never spawn a child or change a single word.
+  t('proxy: no HTTPS_PROXY means no re-exec (the Actions runner leg)', proxyRearmPlan({ env: {} }).rearm, false);
+  t('proxy: …and the reason says why, for a reader of the run log', proxyRearmPlan({ env: {} }).reason.includes('reaches api.github.com directly'), true);
+  t('proxy: a configured proxy re-execs', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309' } }).rearm, true);
+  t('proxy: …with the flag node actually reads at start', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' } }).flag, PROXY_FLAG);
+  t('proxy: the lowercase spelling counts too', proxyRearmPlan({ env: { https_proxy: 'http://x' } }).rearm, true);
+  t('proxy: the flag already in execArgv stops the re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] }).rearm, false);
+  t('proxy: …in NODE_OPTIONS, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_OPTIONS: `--enable-source-maps ${PROXY_FLAG}` } }).rearm, false);
+  t('proxy: …and the env spelling NODE_USE_ENV_PROXY=1, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_USE_ENV_PROXY: '1' } }).rearm, false);
+  t('proxy: the guard env stops an infinite re-exec loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  // An older node gets a printed hint, never a bad-option crash.
+  t('proxy: an unsupported flag hints instead of re-execing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).hint, true);
+  t('proxy: …and does not re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).rearm, false);
+
+  // The note. Absent where there is nothing to say — which is every runner.
+  t('route: no proxy configured, nothing to describe', describeTransportRoute({ env: {} }), null);
+  t('route: proxied and bypassed is the reportable direction', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }).bypassed, true);
+  t('route: …and it names the proxy the reader has to check', describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309' } }).detail.join(' ').includes('http://127.0.0.1:40309'), true);
+  t('route: …with the remedy being the route, not a secret', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }).fix[0].includes(PROXY_FLAG), true);
+  t('route: already routed is described, not nulled — the wording differs', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] }).bypassed, false);
+  // ⛔ The routed direction must fold in NOTHING: there is no route advice to
+  // give a run that already took the route.
+  t('route: a routed reading folds no note into the verdict', withTransportNote({ kind: 'bad-credential', headline: 'h', detail: ['d'], fix: ['f'] }, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] })).fix.length, 1);
+  // The sentence the re-exec falsified: on a routed run the refusal must not
+  // reassure the reader that node ignores HTTPS_PROXY — it just used it.
+  const deadRouted = classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' }, execArgv: [PROXY_FLAG] }) });
+  t('route: a routed refusal says the proxy WAS used', deadRouted.detail.join(' ').includes('DID go through the configured proxy'), true);
+  t('route: …and drops the sentence the re-exec made false', deadRouted.detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), false);
+  t('route: a BYPASSED refusal keeps that sentence, where it is still true', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), true);
+  t('route: …and a run with no transport reading at all is unchanged', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' } }).detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), true);
+
+  // Folding it in changes the REMEDY and never the verdict (H2/H3: the refusal
+  // stays a refusal, exit 3 stays NOT MEASURED).
+  const badCred = { kind: 'bad-credential', headline: 'h', detail: ['d'], fix: ['export GITHUB_TOKEN=<a real GitHub token> and re-run.'] };
+  const noted = withTransportNote(badCred, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }));
+  t('transport note: the verdict KIND is untouched — a refusal stays a refusal', noted.kind, 'bad-credential');
+  t('transport note: the route becomes the first remedy', noted.fix[0].includes(PROXY_FLAG), true);
+  t('transport note: the credential remedy survives, demoted and named', noted.fix.some((l) => l.startsWith('If the route is not the problem: export GITHUB_TOKEN=')), true);
+  t('transport note: the original evidence survives', noted.detail[0], 'd');
+  t('transport note: a reachable verdict is returned unchanged', withTransportNote({ kind: 'reachable', headline: 'h', detail: [], fix: [] }, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } })).fix.length, 0);
+  t('transport note: no note is the identity', withTransportNote(badCred, null), badCred);
+
+  // The two REAL readings from the same container, one second apart (#13544,
+  // measured 2026-08-31) — the pair that proves the refusal was about the route.
+  const bypassedObs = { token: 'proxy-injected', authed: { status: 401, rateLimitRemaining: null }, anon: { status: 200, rateLimitRemaining: 0 } };
+  t('#13544 bypassed route: still classified as a bad credential', classifyTransportProbe(bypassedObs).kind, 'bad-credential');
+  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical (ci-failure.mjs)', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
+  t('#13544 bypassed route: with the transport handed in, the remedy is the route', classifyTransportProbe({ ...bypassedObs, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).fix[0].includes(PROXY_FLAG), true);
+  // The same container, same token, routed through the proxy: all three stages
+  // answer as GitHub, including the repo-scoped one. This is the reading the
+  // refusal was hiding.
+  t('#13544 routed: the same container reads REACHABLE', classifyTransportProbe({ token: 'proxy-injected', authed: { status: 200, rateLimitRemaining: 14472 }, repo: { status: 200, rateLimitRemaining: 14893 } }).kind, 'reachable');
+  // ⛔ The refusal must survive the fix, or a false negative became a false
+  // positive: an unreachable host still classifies, still with exit 3.
+  t('#13544 control: a genuinely unreachable host still refuses', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' } }) }).kind, 'host-unreachable');
+  t('#13544 control: …and the refusal exit code is still 3', EXIT_PREREQUISITE_NOT_MET, 3);
 
   let failed = 0;
   for (const [name, actual, expected] of cases) {
@@ -12966,6 +15276,11 @@ if (isMain) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else if (process.argv.includes('--probe')) {
+    // Transport before questions about it (#13544): the probe's own requests go
+    // through the same fetch the sweep uses, so a probe that answers on the
+    // BYPASSED route answers about the wrong route. Re-exec first, then ask.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
+    if (rearmed !== null) process.exit(rearmed);
     // "Can live mode run HERE?" answered on its own, so a seat can find out
     // without a sweep and without reading a raw HTTP status off a label page.
     probeTransport().then((v) => {
@@ -12986,6 +15301,11 @@ if (isMain) {
       console.error(`check-half-states: ${options.error}`);
       process.exit(2);
     }
+    // After argument validation, so a bad-usage run never pays for a child
+    // process — the ordering `check-governed-merges.mjs` settled on for the
+    // same re-exec.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
+    if (rearmed !== null) process.exit(rearmed);
     sweep(options).catch((err) => {
       // The in-loop net. The pre-sweep probe answers the common case, but the
       // transport can also fail mid-run (a quota exhausted by this very sweep,

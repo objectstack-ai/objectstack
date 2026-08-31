@@ -1,7 +1,6 @@
 {
   "title": "Kernel & Services",
   "pages": [
-    "index",
     "architecture",
     "events",
     "services",

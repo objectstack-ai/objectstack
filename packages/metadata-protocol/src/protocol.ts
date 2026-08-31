@@ -1371,18 +1371,143 @@ export class ConcurrentUpdateError extends Error {
 }
 
 /**
- * Normalises a version token for comparison. Strips RFC-7232-style quotes
- * (`"…"`) that an HTTP `If-Match` header may carry, trims whitespace, and
- * returns null for empty / nullish input.
+ * An ISO-8601 date-time that denotes an ABSOLUTE instant — it carries an
+ * explicit `Z` or a numeric `±HH:mm` offset, so reading it never consults the
+ * process timezone.
+ *
+ * Deliberately narrower than a bare `Date.parse`, which falls back to
+ * implementation-specific heuristics outside this shape and reads a zone-LESS
+ * date-time as *local* time — the one thing an OCC verdict must never depend on.
+ * A string this pattern rejects is not reinterpreted: it stays an opaque token
+ * and is compared verbatim, exactly as before.
  */
-function normaliseVersionToken(v: unknown): string | null {
-    if (v === null || v === undefined) return null;
-    const s = String(v).trim();
-    if (!s) return null;
-    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-        return s.slice(1, -1);
+const ABSOLUTE_ISO_INSTANT =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** Largest magnitude a JS time value may hold; `toISOString()` throws beyond it. */
+const MAX_TIME_VALUE = 8.64e15;
+
+/**
+ * A version token read into the two forms the OCC comparison may need.
+ *
+ * `token` is the tidied verbatim string — the whole normalisation this seam used
+ * to do. `instant` is the canonical absolute-instant spelling, present only when
+ * the token really denotes one.
+ */
+interface NormalisedVersion {
+    /** The token as compared verbatim: trimmed, RFC-7232 quotes stripped. */
+    readonly token: string;
+    /** Canonical ISO-8601 UTC (`…Z`), or null when the token is opaque. */
+    readonly instant: string | null;
+}
+
+/**
+ * The canonical absolute-instant spelling of a version token, or null when the
+ * token does not denote an instant.
+ *
+ * The input domain is the set of things a DRIVER puts in `updated_at`, measured
+ * rather than listed from memory (#13382):
+ *
+ *  - **JS `Date`** — `driver-sql` on Postgres and MySQL (`timestamptz` /
+ *    `DATETIME(3)` are instants, and the driver materialises them as `Date` on
+ *    purpose; `SqlDriver.withPostgresCalendarDayAsText` says so in as many
+ *    words) and `driver-mongodb` (it stamps `new Date()`, and BSON round-trips
+ *    it). Canonical form: `toISOString()`.
+ *  - **`string`, already canonical ISO-8601 UTC with milliseconds** —
+ *    `driver-sql` on SQLite, its `driver-turso` / `driver-sqlite-wasm` siblings,
+ *    and `driver-memory`. Canonical form: itself, re-derived through `Date`.
+ *  - **`number`, epoch milliseconds** — a pre-canonical or hand-migrated SQLite
+ *    column. Reachable: the driver's legacy datetime repair is keyed on declared
+ *    `Field.datetime` columns, and the engine-injected audit columns are not in
+ *    that set, so such a value passes through unrepaired. Canonical form:
+ *    `new Date(ms).toISOString()`.
+ *  - **`null` / `undefined`** — timestamps disabled, or no such column. No
+ *    check runs at all; handled by the caller, not here.
+ *  - **anything else** a host stamps into the column — opaque, and compared
+ *    verbatim rather than guessed at.
+ *
+ * Milliseconds are the resolution, because that is what a JS `Date` — and so
+ * every driver's materialised instant — can carry. A token with more fractional
+ * digits (a Postgres microsecond rendering, say) truncates to the same
+ * millisecond as the record it is compared against, which is the point: two
+ * spellings of one instant must not conflict.
+ */
+function canonicalVersionInstant(value: unknown, token: string): string | null {
+    let ms: number;
+    if (value instanceof Date) {
+        ms = value.getTime();
+    } else if (typeof value === 'number') {
+        ms = value;
+    } else if (ABSOLUTE_ISO_INSTANT.test(token)) {
+        ms = Date.parse(token);
+    } else {
+        return null;
     }
-    return s;
+    if (!Number.isFinite(ms) || Math.abs(ms) > MAX_TIME_VALUE) return null;
+    return new Date(ms).toISOString();
+}
+
+/**
+ * Reads a version token into the forms `assertVersionOf` compares. Strips
+ * RFC-7232-style quotes (`"…"`) that an HTTP `If-Match` header may carry, trims
+ * whitespace, and returns null for empty / nullish input — a null is the
+ * caller's "no token supplied", which opts out of the check.
+ *
+ * ## Why this returns two forms rather than one string (#13382)
+ *
+ * It used to return `String(v).trim()` alone, and the two sides of the OCC
+ * comparison do not agree on how to spell one instant. On Postgres the record's
+ * `updated_at` arrives as a JS `Date`, whose `String()` is
+ * `"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)"` — **milliseconds
+ * dropped and the process timezone baked in** — while the client echoes back
+ * the `"2026-08-30T10:19:25.947Z"` the GET served it. One instant, two
+ * spellings, strict string compare: every guarded save on the production
+ * default driver answered `409 CONCURRENT_UPDATE`, on records nobody had ever
+ * touched. SQLite stores and returns ISO text, so both sides matched by
+ * accident and the defect never surfaced in development.
+ *
+ * So the comparison normalises to ONE representation before comparing — a
+ * canonical absolute instant — and falls back to the verbatim token when either
+ * side is not an instant. That fallback is what makes the change **strictly
+ * widening**: any pair that matched before still matches (their verbatim
+ * strings were equal, so they either canonicalise equally or are compared as
+ * strings again), so no token a client sends today starts being refused —
+ * including a client still echoing a pre-fix 409's `Date.toString()` value.
+ * Only pairs denoting the same instant in different spellings change verdict,
+ * from conflict to match, which is the defect.
+ */
+function normaliseVersionToken(v: unknown): NormalisedVersion | null {
+    if (v === null || v === undefined) return null;
+    let token = String(v).trim();
+    if (!token) return null;
+    if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
+        token = token.slice(1, -1);
+        // ⚠️ The emptiness test runs on BOTH sides of the strip, and the second
+        // one is load-bearing: `If-Match: ""` is empty only once the RFC-7232
+        // quotes come off. Before this seam returned an object it returned the
+        // bare string, so that case handed every caller the falsy `''` and they
+        // short-circuited into "no token supplied" — the opt-out was riding
+        // implicitly on the empty string's falsiness. An object is always
+        // truthy, so without this line an empty entity-tag would stop skipping
+        // the check and start earning a 409: an accept-to-refuse flip on a
+        // shipped API, which is precisely what this change promises not to do.
+        if (!token) return null;
+    }
+    return { token, instant: canonicalVersionInstant(v, token) };
+}
+
+/**
+ * Do two version tokens name the same record version?
+ *
+ * Instants are compared as instants — that is the repair. When either side is
+ * opaque the tokens are compared verbatim, which is what this seam has always
+ * done and what keeps an opaque host-stamped version working.
+ */
+function versionTokensAgree(current: NormalisedVersion, expected: NormalisedVersion): boolean {
+    if (current.instant !== null && expected.instant !== null) {
+        return current.instant === expected.instant;
+    }
+    return current.token === expected.token;
 }
 
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
@@ -3974,18 +4099,20 @@ export class ObjectStackProtocolImplementation implements
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
     /**
-     * Project scope applied to sys_metadata reads/writes. When undefined
-     * (single-kernel deployments), rows land in / come from the
-     * platform-global bucket (`environment_id IS NULL`). When set, every
-     * saveMetaItem insert/update and loadMetaFromDb query is filtered by
-     * `environment_id = environmentId`, so per-project kernels see only their own
-     * metadata even if several projects share the same physical database.
+     * Environment scope this protocol instance is bound to. It is a topology
+     * declaration, not a row filter. ADR-0005 (revised 2026-05) gave every
+     * environment its own physical database, so no saveMetaItem insert/update
+     * writes an `environment_id` column and no loadMetaFromDb query constrains
+     * on one — the isolation key that survived is `organization_id`, which is
+     * what `ensureOverlayIndex` below indexes and what `loadMetaFromDb`'s own
+     * where-clause names. Legacy rows may still carry the column; nothing here
+     * reads it.
      *
-     * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
-     * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
-     * the local metadata-storage provisioning decision — but it no longer
-     * decides whether the #4463 runtime authoring rules run.
-     * See {@link authoringChannel}.
+     * [#6710] Topology ONLY. This key keeps every one of its other jobs — the
+     * ADR-0005 overlay-whitelist gate, the ADR-0010 metadata-lock evaluation,
+     * the SchemaRegistry hydration/listing posture, the local metadata-storage
+     * provisioning decision — but it no longer decides whether the #4463
+     * runtime authoring rules run. See {@link authoringChannel}.
      *
      * [#7674] …and no longer whether the #3050 pre-persistence authoring gate
      * runs either. The sentence above used to list "the #3050 authoring-gate
@@ -4364,12 +4491,14 @@ export class ObjectStackProtocolImplementation implements
         // mechanism, because the failure mode being designed out is precisely
         // "a new assembly variant nobody thought about".
         //
-        // `environmentId` keeps its row-scoping jobs — the `environment_id`
-        // stamp/filter and the ADR-0005 overlay-whitelist gate. [#7674] It no
-        // longer keys the #3050 authoring gate below either: #6710 re-keyed
-        // this activation and left that one on the retired proxy, which cost
-        // the ADR-0090 D11 object posture gate every host-config deployment
-        // until #7674 finished the move.
+        // `environmentId` keeps its topology jobs — the ADR-0005
+        // overlay-whitelist gate and the registry / provisioning postures. It
+        // never stamps or filters an `environment_id` column: ADR-0005 (revised
+        // 2026-05) retired that job when each environment got its own database.
+        // [#7674] It no longer keys the #3050 authoring gate below either:
+        // #6710 re-keyed this activation and left that one on the retired
+        // proxy, which cost the ADR-0090 D11 object posture gate every
+        // host-config deployment until #7674 finished the move.
         if (this.authoringChannel === 'package-author') return [];
         if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -4959,10 +5088,12 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Exposes the project scope the protocol is bound to. Consumers like
+     * Exposes the environment scope the protocol is bound to. Consumers like
      * the HTTP dispatcher use this to decide whether to trust the process-
-     * wide SchemaRegistry or whether they must route a read through the
-     * protocol's environment_id-filtered lookup.
+     * wide SchemaRegistry (an unscoped kernel owns it) or whether they must
+     * route the read through this protocol's own sys_metadata lookup — which
+     * is scoped by `organization_id`, never by an `environment_id` column
+     * (ADR-0005 revised 2026-05).
      */
     getProjectId(): string | undefined {
         return this.environmentId;
@@ -10002,6 +10133,13 @@ export class ObjectStackProtocolImplementation implements
      *    Logging would be noisy here; OCC is opt-in and the absence of a
      *    version column is an explicit "this object doesn't support OCC"
      *    signal.
+     *  - Both tokens are normalised to ONE representation before they are
+     *    compared (#13382): a canonical absolute instant when they denote one,
+     *    the verbatim token otherwise. Which spelling of an instant a driver
+     *    hands back — a JS `Date` on Postgres/MySQL/Mongo, ISO text on the
+     *    SQLite family — must not decide whether a save is a conflict. See
+     *    `normaliseVersionToken` for the measured input domain and for why the
+     *    change cannot refuse a token that is accepted today.
      */
     private assertVersionOf(
         object: string,
@@ -10012,13 +10150,23 @@ export class ObjectStackProtocolImplementation implements
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
         if (!current) return;
-        const currentVersion = normaliseVersionToken((current as any).updated_at);
-        if (!currentVersion) return;
-        if (currentVersion !== expected) {
+        const currentToken = normaliseVersionToken((current as any).updated_at);
+        if (!currentToken) return;
+        if (!versionTokensAgree(currentToken, expected)) {
+            // Publish the CANONICAL spelling, not `String(updated_at)` (#13382).
+            // Two reasons, and the second is not optional: it is what
+            // `content/docs/api/wire-format.mdx` documents this field to be, and
+            // it is the token the client echoes back as its next `If-Match` when
+            // the user chooses "Overwrite anyway" — so a 409 whose
+            // `currentVersion` is a `Date.toString()` (milliseconds already
+            // dropped) hands the client a token that can never match the record
+            // it names, turning a resolvable conflict into an unresolvable one.
+            const currentVersion = currentToken.instant ?? currentToken.token;
+            const expectedVersionText = expected.instant ?? expected.token;
             throw new ConcurrentUpdateError({
                 currentVersion,
                 currentRecord: current,
-                message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expected})`,
+                message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expectedVersionText})`,
             });
         }
     }
@@ -17667,6 +17815,28 @@ export class ObjectStackProtocolImplementation implements
         );
 
         const reassigned: Array<{ type: string; name: string }> = [];
+        // [#12981] The refusal channel this loop used to lack entirely.
+        //
+        // The catch below is the card's defining shape, and this method is the
+        // sharpest instance of it in the file: a refused `update` was dropped
+        // whole -- not logged, not rethrown, not carried on the response -- and
+        // the return then reported `success: reassigned.length > 0`. So an
+        // adoption where 99 of 100 orphans were refused answered
+        // `{success: true, reassignedCount: 1}`, byte-identical in shape to a
+        // healthy run with one orphan to move, and the 99 stayed orphans with
+        // nothing anywhere recording that they had been tried. Nothing retries
+        // them and no later boot reconstructs the attempt.
+        //
+        // A COUNTER plus one report AFTER the loop, deliberately, and not a
+        // `console.error` inside the catch: AGENTS.md -> "Degradation log
+        // levels" says an operator-facing degradation is stated ONCE, at the
+        // first occurrence, not once per failed write -- and a refused
+        // `sys_metadata` write is refused for every row, so the per-row
+        // spelling would print one line per orphan in the environment. This is
+        // the same shape #12923's shared refusal accumulator takes at the other
+        // repaired seams of this family.
+        let refusedCount = 0;
+        let firstRefusal = '';
         for (const row of orphans) {
             try {
                 await this.engine.update(
@@ -17675,9 +17845,36 @@ export class ObjectStackProtocolImplementation implements
                     { where: { id: row.id } },
                 );
                 reassigned.push({ type: row.type, name: row.name });
-            } catch {
-                /* skip a row that fails to update; report only what moved */
+            } catch (e: any) {
+                // Control flow is UNCHANGED: a row that cannot be rebound must
+                // not abort the adoption of the rows that can. Only the
+                // silence changes.
+                refusedCount += 1;
+                if (firstRefusal === '') firstRefusal = e?.message ?? String(e);
             }
+        }
+        if (refusedCount > 0) {
+            // `error` and not `warn`, by the one question AGENTS.md turns this
+            // on -- after the degradation the system still looks normal from
+            // the outside while something it claims to have persisted did not
+            // land. It is the same verdict, on the same sink, that
+            // `recordPackageCommit` in this file already reaches for the
+            // `sys_metadata_commit` write, and the inverse of the one
+            // `clientFacingRowFailureText` records for its `console.warn`
+            // (there the row reports `success: false` and the counters
+            // reconcile, so nothing was silently dropped; here neither holds).
+            console.error(
+                `[Protocol] reassignOrphanedMetadata: ${refusedCount} of ${orphans.length} orphaned `
+                + `metadata row(s) were NOT rebound to package '${request.targetPackageId}' -- the `
+                + `update was REFUSED. The call still answers reassignedCount=${reassigned.length}`
+                + `${reassigned.length > 0 ? ' with success: true' : ''}, so nothing looks broken, but `
+                + 'those rows are STILL orphans: they keep `package_id` null or the `sys_metadata` '
+                + 'sentinel, this environment has NOT converged on the package-first model (ADR-0070 '
+                + 'D5 completes when an environment has no orphans), and nothing retries them. '
+                + `First refusal: ${firstRefusal}. Fix: restore write access to \`sys_metadata\` for `
+                + 'the system context and run the adoption again -- it is idempotent, rows already '
+                + 'bound to a real package are left untouched.',
+            );
         }
         return {
             success: reassigned.length > 0,
@@ -19493,9 +19690,13 @@ export class ObjectStackProtocolImplementation implements
      * Loads all active metadata records and registers them in the in-memory registry.
      * Safe to call repeatedly — idempotent (latest DB record wins).
      *
-     * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
-     * customization overlay rows must survive restart. Scope filter
-     * (`environment_id = this.environmentId ?? null`) keeps tenants isolated.
+     * Per ADR-0005, environment-kernel mode ALSO hydrates from sys_metadata —
+     * customization overlay rows must survive restart. The where-clause below
+     * is `{ state: 'active', organization_id: null }`: env-wide rows only, with
+     * per-org overlays left to `getMetaItem`'s on-demand read so one org's
+     * customization never lands in the process-wide SchemaRegistry. There is no
+     * `environment_id` constraint — ADR-0005 (revised 2026-05) gave each
+     * environment its own database and `organization_id` is the isolation key.
      *
      * #3903 — two contract duties run per row, and their split is deliberate:
      *

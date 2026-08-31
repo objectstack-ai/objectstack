@@ -1674,8 +1674,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1759,8 +1759,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2523,6 +2523,13 @@ Installed package with runtime lifecycle state
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). Slash-compound names are refused at the publish door. |
 | **item** | `any` | ✅ | Metadata item definition |
+| **organizationId** | `string` | optional | Organization (tenant) scope for the write. Load-bearing, not advisory: it selects the overlay partition (ADR-0005) the row lands in — an org-scoped save writes that tenant's own overlay, while an org-less save writes the environment-wide row every tenant reads — and it is the scope stamped on the write's audit row. An org-scoped write of a type whose registry entry declares `allowOrgOverride: false` is refused (403). Absent = environment-wide. |
+| **parentVersion** | `string \| null` | optional | ADR-0008 optimistic-concurrency pin: the version token the caller believes is current (on the REST door, the `If-Match` request header). Present as a string, a concurrent edit is reported as a 409 conflict instead of silently overwritten. ⚠️ `null` is NOT the same as absent: a present `null` asserts "no current row of this lifecycle" — the first-write pin, refused 409 when a row already exists — while an ABSENT key is unpinned: the implementation adopts the current row's hash as the parent (last-write-wins). Nullable because that is the implementation's parameter type, and unlike the reset twin (which folds a present `null` back to the current hash) this verb passes `null` through to the repository's conflict check unchanged. |
+| **actor** | `string` | optional | Identity recorded on the write's history event (`recorded_by`, a lookup into `sys_user`) and audit row. On the REST door this is the request's authenticated identity (one producer) — never a caller-supplied header. Absent, the event is recorded actor-less (null), deliberately not attributed to "system". |
+| **force** | `boolean` | optional | Destructive-change acknowledgement (`?force=true` on the REST door): skips the safety diff that refuses an `object` save whose body drops fields or narrows types the stored item still carries (409 with the findings otherwise). Only `object` saves reach that diff, so the flag is inert for every other type. Absent = the guard runs. |
+| **mode** | `Enum<'draft' \| 'publish'>` | optional | Per-item lifecycle (ADR-0005 drafts): `draft` stages the body as a pending draft overlay (`?mode=draft` on the REST door; the publish door promotes it later); `publish` or ABSENT writes straight to the live `active` row — the legacy default, kept so callers that predate the draft/publish split keep working. Any value other than `draft` is read as `publish`. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package to bind the saved row to (`sys_metadata.package_id`; `?package=<id>` on the REST door, sent only when it names a real package). Set when authoring inside a Studio package workspace; a named read-only base package is refused. On create the row is stamped with this id; on update an existing binding is preserved, never silently re-bound. Absent = env-local overlay (no package stamp); it also scopes which row the unpinned parent-version resolution reads. |
+| **writeFace** | `Enum<'package-duplicate' \| 'meta-envelope' \| 'meta-dispatch'>` | optional | Which write door a refusal is being rendered FOR — stated by the SERVER, never by a remote caller: every door builds this request field by field and never spreads a request body into it, so there is no path for a client to smuggle a face in, and a face arriving in a wire body is simply never read. Two refusals branch on it, for different questions: the 409 destructive-change remedy names the acknowledgement mechanism that actually exists on the refusing door (`?force=true` on the REST doors; the dispatcher and the duplicate-package door have none), and the 422 invalid-metadata message adapts to whether a structured `issues[]` channel reaches the consumer beside it. Absent = the conservative default wording. |
 
 
 ---

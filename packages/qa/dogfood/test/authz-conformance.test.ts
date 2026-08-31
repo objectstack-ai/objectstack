@@ -31,6 +31,10 @@ import { dirname, join } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
 import { checkLedger } from '@objectstack/verify';
 import { AUTHZ_CONFORMANCE, type AuthzPrimitive } from './authz-conformance.matrix.js';
+import {
+  LEDGER_POPULATION_BASELINE,
+  LEDGER_POPULATION_BASELINE_MAX,
+} from './authz-ledger-population.baseline.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // packages/qa/dogfood/test → repo root.
@@ -109,10 +113,75 @@ interface Probe {
   kind: ProbeKind;
   file: string;
   re: RegExp;
+  /**
+   * Narrow the scan to ONE exported array literal, named here (`export const
+   * <within>` up to the closing `\n];`). Only the two ledger probes use it,
+   * and they need it: their patterns (`family: '...'` / `domain: '...'`) are
+   * the ledger's OWN row vocabulary, so a doc-comment or a future type
+   * declaration spelling the same tokens outside the table would mint a
+   * phantom key. Scoping the read to the table is what makes the key set a
+   * reading OF the table rather than of the file that carries it.
+   */
+  within?: string;
   key: (m: RegExpExecArray) => string;
 }
 
 const PROBES: readonly Probe[] = [
+  // ── THE POPULATION SOURCE: the two route ledgers, at FAMILY / DOMAIN
+  //    granularity (2026-08-31 ruling) ─────────────────────────────────────
+  //
+  // Everything below these two entries is a hand-curated pattern aimed at a
+  // hand-chosen file, and that is the mechanism this pair replaces as the
+  // COMPLETENESS instrument. A probe table naming 11 files cannot notice a
+  // 12th; it reaches 1 of the 17 registrars in `rest-server.ts` and 4 of the
+  // 17 files in `runtime/src/domains/`. A file nobody named emitted no key,
+  // no UNCLASSIFIED and no STALE — its absence was structurally unobservable.
+  //
+  // The ledgers do not have that property, and that is the whole reason they
+  // are the source. Both are enumerated from a RUNNING server and guarded in
+  // both directions by their own conformance tests: every mounted REST route
+  // must have a ledger row (`RestServer.getRoutes()`), and every registered
+  // dispatcher domain must have a ledger row while every ledger domain must be
+  // a live registry prefix (`domainRegistry.list()`). A new family or a new
+  // domain therefore cannot be silently absent from them, so it cannot be
+  // silently absent from HERE.
+  //
+  // ⭐ WHAT THIS PAIR PROMISES, stated at exactly the granularity delivered:
+  // ANY NEW ROUTE FAMILY or DISPATCHER DOMAIN mints a key. That key is
+  // UNCLASSIFIED — and red — until a matrix row covers it or it is written
+  // into the dated, shrink-only `authz-ledger-population.baseline.ts`.
+  //
+  // ⛔ WHAT IT DOES NOT PROMISE, measured and accepted rather than papered
+  // over: a route added INSIDE an existing family or domain mints NOTHING. An
+  // ungated route injected into `registerUiEndpoints` leaves this gate GREEN,
+  // exactly as it did before this change — `ui` is already a family, so no key
+  // appears. That bound is stated in the matrix header too, with no caveat
+  // attached to a wider claim, because the claim itself is the narrow one.
+  //
+  // ⛔ AND IT IS NOT A GATE READING. A ledger row grades SDK expressibility,
+  // never authorization: `sdk` / `server-only` / `public` / `gap` / `mismatch`
+  // say nothing about whether a caller is authenticated. Deriving "gated" from
+  // source syntax instead was measured and rejected — scanning all 80
+  // `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
+  // reads 50/30 and 22 of the 30 ungated are FALSE (a wrapping
+  // `guardedRouteManager` for 19 of them, a shared handler const for 3), a 73%
+  // false-ungated rate on the largest registrar. What these two probes supply
+  // is the POPULATION; the classification stays a reviewed row.
+  {
+    kind: 'ROUTE_ENUMERATION',
+    file: 'packages/rest/src/rest-route-ledger.ts',
+    within: 'REST_ROUTE_LEDGER',
+    re: /family: '([^']+)'/g,
+    key: (m) => `rest-family:rest-route-ledger.ts:${m[1]}`,
+  },
+  {
+    kind: 'ROUTE_ENUMERATION',
+    file: 'packages/runtime/src/route-ledger.ts',
+    within: 'ROUTE_LEDGER',
+    re: /domain: '([^']+)'/g,
+    key: (m) => `dispatcher-domain:route-ledger.ts:${m[1]}`,
+  },
+
   // REST /meta umbrella registrar — one guarded registrar covers all ~17 routes.
   {
     kind: 'ROUTE_ENUMERATION',
@@ -368,6 +437,25 @@ const PROBES: readonly Probe[] = [
 ];
 
 /**
+ * The text ONE probe reads: the whole file, or — when the probe declares
+ * `within` — only the body of that exported array literal.
+ *
+ * ⛔ A `within` that matches nothing returns the EMPTY string, not the whole
+ * file. Falling back to the file would turn a renamed export into a silently
+ * WIDER scan that still mints keys, which is the failure shape this project
+ * keeps paying for; an empty scope mints zero keys and the DEAD PROBE check
+ * says so out loud.
+ */
+function probeSource(probe: Probe): string {
+  const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
+  if (!probe.within) return src;
+  const from = src.indexOf(`export const ${probe.within}`);
+  if (from < 0) return '';
+  const to = src.indexOf('\n];', from);
+  return to < 0 ? '' : src.slice(from, to);
+}
+
+/**
  * Keys ONE probe mints against today's source.
  *
  * Split out from the walk below so per-probe reach is measurable on its own.
@@ -377,7 +465,7 @@ const PROBES: readonly Probe[] = [
  * and is indistinguishable, there, from a probe that never existed.
  */
 function keysMintedBy(probe: Probe): Set<string> {
-  const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
+  const src = probeSource(probe);
   // Fresh lastIndex per read (the RegExp is shared, `g`-flagged).
   probe.re.lastIndex = 0;
   const found = new Set<string>();
@@ -386,11 +474,102 @@ function keysMintedBy(probe: Probe): Set<string> {
   return found;
 }
 
-/** Statically enumerate the anonymous-deny HTTP entry points from source. */
-function discoverAnonymousDenySurfaces(): Set<string> {
+/**
+ * Every key the table mints today — the RAW population, baseline included.
+ *
+ * Kept separate from what the ratchet classifies (below) because the baseline
+ * rules are checked against THIS set: an entry that has stopped being minted
+ * is stale and must go, and that question cannot be asked of a set the entry
+ * was already filtered out of.
+ */
+function mintAllSurfaceKeys(): Set<string> {
   const found = new Set<string>();
   for (const probe of PROBES) for (const k of keysMintedBy(probe)) found.add(k);
   return found;
+}
+
+/**
+ * The population this ratchet CLASSIFIES: every minted key except the ones
+ * enumerated in `authz-ledger-population.baseline.ts`.
+ *
+ * ⚠️ The subtraction is not a tolerance and it is not a pattern. Each excluded
+ * key is written out by hand in a dated file, the list is pinned shrink-only,
+ * and `checkLedgerPopulationBaseline` reds if it grows, if an entry stops
+ * being minted, if an entry becomes classified, or if one is duplicated. The
+ * keys it excludes were UNMINTABLE before 2026-08-31 — no key, no
+ * UNCLASSIFIED, no STALE — so the net effect on what this gate can see is
+ * strictly positive: a family or domain that is NOT on that list is red the
+ * day it lands.
+ */
+function discoverAnonymousDenySurfaces(): Set<string> {
+  const baseline = new Set(LEDGER_POPULATION_BASELINE);
+  return new Set([...mintAllSurfaceKeys()].filter((k) => !baseline.has(k)));
+}
+
+// ── the baseline is shrink-only, and every rule of it is checked ──────────
+//
+// The four rules the baseline file states, made mechanical. Written as its own
+// checker rather than folded into `checkAuthzLedger` for the same reason
+// `checkProbeInstrumentIntegrity` is: it reads the REAL ledgers, and every
+// controlled-input case in this file hands `checkAuthzLedger` a synthetic
+// `discover`.
+function checkLedgerPopulationBaseline(
+  rows: readonly AuthzPrimitive[],
+  minted: ReadonlySet<string>,
+): string[] {
+  return checkLedgerPopulationBaselineWith(LEDGER_POPULATION_BASELINE, rows, minted);
+}
+
+/**
+ * The same four rules over an ARBITRARY list, so each can be driven to red
+ * without editing the real baseline file. `checkLedgerPopulationBaseline` is
+ * this function bound to the real list — which is what CI runs — so no case
+ * can pass against a weaker rule than the shipped one.
+ */
+function checkLedgerPopulationBaselineWith(
+  baseline: readonly string[],
+  rows: readonly AuthzPrimitive[],
+  minted: ReadonlySet<string>,
+): string[] {
+  const problems: string[] = [];
+  const covered = new Set(rows.flatMap((r) => r.covers ?? []));
+
+  // Rule 1 — growth is red. The literal is the reviewed decision.
+  if (baseline.length > LEDGER_POPULATION_BASELINE_MAX) {
+    problems.push(
+      `BASELINE GREW — ${baseline.length} entries against a pinned ceiling of ` +
+        `${LEDGER_POPULATION_BASELINE_MAX}. This list is shrink-only. A new route family or dispatcher ` +
+        'domain is UNCLASSIFIED until a matrix row covers it; adding it here instead needs the ceiling ' +
+        'moved deliberately, which is a reviewed edit and not a side effect of adding a route.',
+    );
+  }
+  // Rule 4 — a duplicate makes the count lie.
+  const seen = new Set<string>();
+  for (const k of baseline) {
+    if (seen.has(k)) problems.push(`DUPLICATE BASELINE ENTRY — ${k}. The pinned count has to mean what it says.`);
+    seen.add(k);
+  }
+  for (const k of baseline) {
+    // Rule 2 — a stale entry is red. A retired or renamed family takes its
+    // line with it, so the list cannot describe a table that moved on.
+    if (!minted.has(k)) {
+      problems.push(
+        `STALE BASELINE ENTRY — ${k} is no longer minted by any probe. Delete the line: a baseline that ` +
+          'outlives its surface is a record of nothing, and it hides the fact that the list is shorter ' +
+          'than it claims.',
+      );
+    }
+    // Rule 3 — once classified, the entry is a duplicate of the row and must
+    // go in the same change. This is the burn-down that makes it shrink.
+    if (covered.has(k)) {
+      problems.push(
+        `BASELINE SHADOWS A CLASSIFICATION — ${k} is now covered by a matrix row. Delete it from the ` +
+          'baseline in the same change and lower LEDGER_POPULATION_BASELINE_MAX. Leaving it here would ' +
+          'let the list keep taking credit for a gap that is closed.',
+      );
+    }
+  }
+  return problems;
 }
 
 // ── a probe whose POPULATION was deleted must not fail SILENTLY ───────────
@@ -437,6 +616,64 @@ function checkProbeInstrumentIntegrity(probes: readonly Probe[]): string[] {
         'evidence and a positive control from that same file; or delete the probe TOGETHER WITH ' +
         'the surface it watched. Silence is what this check exists to remove.',
     );
+  }
+  return problems;
+}
+
+// ── the producer-side `authz` declaration resolves, or it is not written ──
+//
+// The 2026-08-31 ruling's DIRECTION half: a route ledger row may declare the
+// authorization posture it has been REVIEWED to have, by naming the
+// `authz-conformance.matrix.ts` row that classifies it. The field is phased
+// exactly like `responseSchema` in those same two files — optional, filled
+// only where conformance coverage already exists, and burnt down incrementally
+// rather than mass-produced.
+//
+// This is the guard that makes the declaration a CHECKED fact rather than a
+// second place to write an unverified claim. It is the direct transposition of
+// `responseSchema`'s rule ("a name written ahead of the test it points at
+// would BE the declared-but-unverified surface the programme exists to
+// remove") and of its resolution strategy: the ledgers stay import-free data,
+// and the resolution lives in the guard that can import the vocabulary.
+//
+// Two refusals, and they are the whole rule:
+//   • a name that is not a row id — a typo, or a row that was renamed or
+//     retired out from under the declaration;
+//   • a row that is not `enforced` — an `experimental` or `removed` row
+//     records an ABSENCE, and pointing a route at one would declare "reviewed"
+//     while the reviewed answer is "there is nothing here". That is the same
+//     silent exit `checkTransportWiredAdmission` closes for tripwire keys.
+//
+// ⛔ It deliberately does NOT check that the named row's enforcement site
+// covers this exact route. That is not mechanically decidable and pretending
+// otherwise would be the syntactic gate-reading this design already measured
+// and rejected. What is mechanical is that the declaration points at a real,
+// enforced, reviewed row — and that a route landing WITHOUT one is visible at
+// the ledger review point, which is where the question belongs.
+function checkAuthzDeclaration(id: string, rows: readonly AuthzPrimitive[], where = ''): string[] {
+  const row = rows.find((r) => r.id === id);
+  if (!row) {
+    return [
+      `${where}authz: '${id}' names no row in authz-conformance.matrix.ts. Fill this field only with ` +
+        'the id of a row that classifies this route, and move it when the row is renamed.',
+    ];
+  }
+  if (row.state !== 'enforced') {
+    return [
+      `${where}authz: '${id}' names a '${row.state}' row. Only an \`enforced\` row — which owes an ` +
+        'enforcement site — can back a declared authorization posture; a non-enforced row records an ' +
+        'absence, so pointing a route at it declares "reviewed" over "there is nothing here".',
+    ];
+  }
+  return [];
+}
+
+function checkLedgerAuthzDeclarations(rows: readonly AuthzPrimitive[]): string[] {
+  const problems: string[] = [];
+  for (const probe of PROBES.filter((pr) => pr.within)) {
+    for (const m of probeSource(probe).matchAll(/authz: '([^']*)'/g)) {
+      problems.push(...checkAuthzDeclaration(m[1], rows, `${probe.file}: `));
+    }
   }
   return problems;
 }
@@ -552,6 +789,190 @@ describe('ADR-0056 D10 — authorization conformance matrix', () => {
     // repo's real files for a property none of them is about.
     const problems = checkProbeInstrumentIntegrity(PROBES);
     expect(problems, problems.join('\n')).toEqual([]);
+  });
+
+  it('the ledger-sourced population baseline is shrink-only, current and non-shadowing', () => {
+    // All four baseline rules on the REAL ledgers and the REAL matrix. Same
+    // reason as the case above for living outside `checkAuthzLedger`: it reads
+    // source, and every controlled-input case in this file supplies a
+    // synthetic `discover`.
+    const problems = checkLedgerPopulationBaseline(AUTHZ_CONFORMANCE, mintAllSurfaceKeys());
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+
+  it('every producer-side `authz` declaration resolves to an `enforced` matrix row', () => {
+    const problems = checkLedgerAuthzDeclarations(AUTHZ_CONFORMANCE);
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+});
+
+// ── the ledger population, and the two new rules over it, BITE ────────────
+//
+// Same discipline as every other block here: a check never shown to fail is
+// not evidence, and a zero with no positive control beside it is not a
+// reading. The cases below drive the real ledgers (so a moved or emptied file
+// is caught) and synthetic baselines / rows (so they are deterministic and
+// need no source edits).
+describe('the ledger-sourced population and its baseline bite', () => {
+  const clone = (): AuthzPrimitive[] => JSON.parse(JSON.stringify(AUTHZ_CONFORMANCE));
+  const REST_LEDGER = PROBES.find((p) => p.file === 'packages/rest/src/rest-route-ledger.ts')!;
+  const RUN_LEDGER = PROBES.find((p) => p.file === 'packages/runtime/src/route-ledger.ts')!;
+
+  it('CONTROL — both ledgers are readable and mint a real key set (the zeros below are readings)', () => {
+    // Without this, every assertion in this block would be satisfied just as
+    // well by two probes pointed at files that no longer exist.
+    const restKeys = keysMintedBy(REST_LEDGER);
+    const runKeys = keysMintedBy(RUN_LEDGER);
+    expect(restKeys.size).toBeGreaterThan(10);
+    expect(runKeys.size).toBeGreaterThan(10);
+    // Named anchors, not just counts: a key set of the right SIZE from the
+    // wrong table would pass a count check.
+    expect(restKeys).toContain('rest-family:rest-route-ledger.ts:metadata');
+    expect(runKeys).toContain('dispatcher-domain:route-ledger.ts:/meta');
+    // …and the two key spaces do not collide, so a family can never be
+    // silently classified by a domain's row or the reverse.
+    expect([...restKeys].filter((k) => runKeys.has(k))).toEqual([]);
+  });
+
+  it('the `within` scope is load-bearing: it reads the TABLE, not the file', () => {
+    // The probe patterns are the ledger's own row vocabulary. Scoped to the
+    // exported array they read the table; unscoped they would also read any
+    // doc-comment or type declaration that spells the same tokens. This case
+    // is what keeps the scope from being dropped as redundant.
+    const scoped = keysMintedBy(REST_LEDGER);
+    const unscoped = keysMintedBy({ ...REST_LEDGER, within: undefined });
+    expect(scoped.size).toBeGreaterThan(0);
+    for (const k of scoped) expect(unscoped).toContain(k);
+    // A `within` naming an export that is not there mints NOTHING — it does
+    // not silently fall back to the whole file.
+    expect(keysMintedBy({ ...REST_LEDGER, within: 'NO_SUCH_EXPORT' }).size).toBe(0);
+  });
+
+  it('a NEW route family in the ledger is UNCLASSIFIED — the rot the probe table had is closed', () => {
+    // The point of the whole change, executable: nobody has to remember to add
+    // a probe when a family lands.
+    const fresh = 'rest-family:rest-route-ledger.ts:webhooks';
+    expect(mintAllSurfaceKeys().has(fresh)).toBe(false);
+    const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, {
+      proofRoot: HERE,
+      highRisk: HIGH_RISK,
+      discover: () => new Set([...discoverAnonymousDenySurfaces(), fresh]),
+      attribution: ATTRIBUTION,
+    });
+    expect(problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(fresh))).toBe(true);
+  });
+
+  it('a NEW dispatcher domain is UNCLASSIFIED too — the file-selection layer', () => {
+    // A domain file no probe names used to emit NOTHING: no key, no STALE, no
+    // UNCLASSIFIED. Its absence was structurally unobservable. It is not now.
+    const fresh = 'dispatcher-domain:route-ledger.ts:/webhooks';
+    expect(mintAllSurfaceKeys().has(fresh)).toBe(false);
+    const problems = checkAuthzLedger(AUTHZ_CONFORMANCE, {
+      proofRoot: HERE,
+      highRisk: HIGH_RISK,
+      discover: () => new Set([...discoverAnonymousDenySurfaces(), fresh]),
+      attribution: ATTRIBUTION,
+    });
+    expect(problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(fresh))).toBe(true);
+  });
+
+  it('rule 1 — a baseline over its pinned ceiling is RED', () => {
+    const minted = mintAllSurfaceKeys();
+    const over = [...LEDGER_POPULATION_BASELINE, ...[...minted].filter((k) => !LEDGER_POPULATION_BASELINE.includes(k))];
+    expect(over.length).toBeGreaterThan(LEDGER_POPULATION_BASELINE_MAX);
+    // Driven through the same rule the real check uses, with the length as the
+    // only thing changed.
+    const problems = checkLedgerPopulationBaselineWith(over, AUTHZ_CONFORMANCE, minted);
+    expect(problems.some((p) => /BASELINE GREW/.test(p))).toBe(true);
+  });
+
+  it('rule 2 — a baseline entry no probe mints any more is RED', () => {
+    const problems = checkLedgerPopulationBaselineWith(
+      [...LEDGER_POPULATION_BASELINE, 'rest-family:rest-route-ledger.ts:retired-family'],
+      AUTHZ_CONFORMANCE,
+      mintAllSurfaceKeys(),
+    );
+    expect(problems.some((p) => /STALE BASELINE ENTRY/.test(p) && p.includes('retired-family'))).toBe(true);
+  });
+
+  it('rule 3 — classifying a baselined key without deleting the line is RED', () => {
+    // The burn-down rule. Without it the list would keep taking credit for a
+    // gap somebody closed, and would never shrink.
+    const key = LEDGER_POPULATION_BASELINE[0];
+    const m = clone();
+    m.find((r) => r.id === 'anonymous-deny-meta')!.covers!.push(key);
+    const problems = checkLedgerPopulationBaseline(m, mintAllSurfaceKeys());
+    expect(problems.some((p) => /BASELINE SHADOWS A CLASSIFICATION/.test(p) && p.includes(key))).toBe(true);
+  });
+
+  it('rule 4 — a duplicated baseline entry is RED', () => {
+    const problems = checkLedgerPopulationBaselineWith(
+      [...LEDGER_POPULATION_BASELINE, LEDGER_POPULATION_BASELINE[0]],
+      AUTHZ_CONFORMANCE,
+      mintAllSurfaceKeys(),
+    );
+    expect(problems.some((p) => /DUPLICATE BASELINE ENTRY/.test(p))).toBe(true);
+  });
+
+  it('every baselined key IS minted, and none of them is classified (non-vacuity)', () => {
+    // The two rules above are only meaningful if the real list is currently in
+    // the state they describe. This is what says so out loud.
+    const minted = mintAllSurfaceKeys();
+    const covered = new Set(AUTHZ_CONFORMANCE.flatMap((r) => r.covers ?? []));
+    for (const k of LEDGER_POPULATION_BASELINE) {
+      expect(minted.has(k), `${k} is baselined but not minted`).toBe(true);
+      expect(covered.has(k), `${k} is baselined AND classified`).toBe(false);
+    }
+    expect(LEDGER_POPULATION_BASELINE.length).toBe(LEDGER_POPULATION_BASELINE_MAX);
+  });
+
+  it('the classified ledger keys really are classified — the baseline is not the whole population', () => {
+    // A baseline that swallowed everything would make this gate say nothing
+    // about the ledgers at all, and would still pass every rule above.
+    const covered = new Set(AUTHZ_CONFORMANCE.flatMap((r) => r.covers ?? []));
+    const ledgerKeys = [...keysMintedBy(REST_LEDGER), ...keysMintedBy(RUN_LEDGER)];
+    const classified = ledgerKeys.filter((k) => covered.has(k));
+    expect(classified.length).toBeGreaterThan(0);
+    expect(classified.sort()).toEqual([
+      'dispatcher-domain:route-ledger.ts:/actions',
+      'dispatcher-domain:route-ledger.ts:/automation',
+      'dispatcher-domain:route-ledger.ts:/mcp',
+      'dispatcher-domain:route-ledger.ts:/meta',
+      'dispatcher-domain:route-ledger.ts:/packages',
+      'rest-family:rest-route-ledger.ts:metadata',
+    ]);
+    // …and the two halves partition the population exactly: nothing minted by
+    // a ledger probe is both, and nothing is neither.
+    expect(classified.length + LEDGER_POPULATION_BASELINE.length).toBe(new Set(ledgerKeys).size);
+  });
+
+  it('a producer `authz` naming no row is RED, and a non-enforced row is RED too', () => {
+    const m = clone();
+    // Drive the checker's two refusals through synthetic rows rather than by
+    // editing the ledgers: the real declarations are asserted clean above, and
+    // a check that has only ever seen the clean case is not evidence.
+    expect(checkAuthzDeclaration('no-such-row', m).some((p) => /names no row/.test(p))).toBe(true);
+    const experimental = m.find((r) => r.state === 'experimental')!;
+    expect(
+      checkAuthzDeclaration(experimental.id, m).some((p) => /names a 'experimental' row/.test(p)),
+    ).toBe(true);
+    // …and the positive control: a real enforced row is accepted.
+    const enforced = m.find((r) => r.state === 'enforced')!;
+    expect(checkAuthzDeclaration(enforced.id, m)).toEqual([]);
+  });
+
+  it('the `authz` field is actually IN USE — the guard is not passing for lack of subjects', () => {
+    // A resolver over zero declarations is green forever. This is the case
+    // that fails when the seed rows are deleted or the field is never filled.
+    const declared = [...PROBES.filter((p) => p.within)].flatMap((p) =>
+      [...probeSource(p).matchAll(/authz: '([^']+)'/g)].map((mm) => mm[1]),
+    );
+    expect(declared.length).toBeGreaterThan(0);
+    for (const id of declared) {
+      const row = AUTHZ_CONFORMANCE.find((r) => r.id === id);
+      expect(row, `authz: '${id}' must name a real row`).toBeDefined();
+      expect(row!.state).toBe('enforced');
+    }
   });
 });
 

@@ -576,6 +576,98 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: pins the open/cloud AI boundary as testable behavior (courtesy list + 501 remedy + discovery parity) instead of leaving /ai/** unswept; model-registry & conversation runtime behavior recorded as knownGaps rather than invented", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
+    },
+    {
+      "id": "ai.console-ai-surface-gating",
+      "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — with the UNgated SystemHub 'AI Approvals' card pinned as an expected-fail probe",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin (form sign-in — the pending-actions poll sends the COOKIE half only, credentials:'include' with no bearer header, so an injected-token session reads as anonymous there)"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a stock OPEN-framework boot — no @objectstack/service-ai registered, so GET /api/v1/ai/agents answers the 200 empty-catalog courtesy (data.agents: []) for every authenticated principal (the same boot ai.open-edition-honest-degradation drives)",
+          "the objectui console (app-shell + apps/console) — the gating signal is client-side: useAiSurfaceEnabled polls the catalog and every entry point reads that ONE hook",
+          "a REAL form sign-in (not an injected localStorage token): the AI Approvals page's poll authenticates by cookie only (usePendingActions call() sends credentials:'include' and no Authorization header), so without the cookie half the poll answers 401 AUTH_REQUIRED instead of the 501 this item pins (RUNNER.md console-session fact)"
+        ],
+        "knownGaps": [
+          "the ENTITLED side of the gate (catalog >= 1 agent ⇒ FAB/dock/link/route all appear) has NO open-framework fixture: service-ai is Cloud/EE and no stock agent-serving harness exists. The only lever is the VITE_AI_BASE_URL opt-in pointing the catalog fetch at an external AI server (useAiSurface.ts resolveAiApiBase), which needs a console REBUILD plus such a server — score those clauses blocked(fixture), never inferred from the hook's source",
+          "the PER-SEAT half of the signal (ai_seat holder sees agents, seat-less user gets an empty catalog on the SAME deployment — ADR-0068, the objectui#1992 revert) is equally cloud-only: on an open boot the catalog is empty for every principal, so per-seat differentiation is unobservable here",
+          "the /_console bundle is vendored and may be stale — verify affordance absence against current objectui app-shell or a fresh build before scoring (stale-console-bundle)"
+        ]
+      },
+      "steps": [
+        "boot the stock open framework with the console; sign in as admin THROUGH THE FORM (both auth halves needed — see fixtures); screenshot the settled shell",
+        "pin the signal first: in-page fetch GET /api/v1/ai/agents and capture the 200 envelope with data.agents [] — this is the one input every gated affordance reads (useAiSurfaceEnabled), so every absence below is scored against it",
+        "sweep the gated affordances on the settled shell: floating chatbot FAB, the right-docked chat rail, the AppHeader AI/assistant entry, the Home layout's AI CTAs — screenshot each region, THEN read the DOM to confirm absence",
+        "press ⌘⇧I (the chat-dock toggle) and confirm nothing mounts — ConsoleLayout only arms the listener when dockEnabled",
+        "navigate directly to /ai (the stale-bookmark path): capture that a loading fallback holds while the catalog resolves, then the redirect to home lands with the splash preserved — record whether any frame of chat UI flashed",
+        "as admin open the System hub (SystemHubPage): screenshot the admin card cluster and record whether the 'AI Approvals' card renders on this agent-less boot (expected at head: it DOES — the card is built unconditionally, SystemHubPage.tsx)",
+        "click the card through to system/ai-approvals; capture the network for ~15s: GET /api/v1/ai/pending-actions?status=pending firing every ~5s and answering 501 each time (poll never stops on error — usePendingActions clears nothing and re-arms)",
+        "capture what the page renders: the destructive alert's text (must carry the Cloud/EE remedy sentence from the 501 body), AND whether the 'No actions waiting / When the AI proposes a sensitive action it will appear here for review' empty state renders beneath it as if a live queue exists",
+        "capture the browser console for the whole session"
+      ],
+      "acceptance": [
+        {
+          "clause": "the gating signal is the access-filtered agent catalog and nothing else: the console issues GET /api/v1/ai/agents (per navigation) and the open boot answers the 200 courtesy with data.agents [] — the empty catalog IS the 'no AI here' signal (never discovery's deployment-wide services.ai flag, which cannot express the per-user seat)",
+          "oracle": "network",
+          "verify": "the catalog request/response trace shows 200 with data.agents as an empty ARRAY (the relocated envelope, ai.ts #4053/#4058); the run scores the affordance sweep against THIS capture, not against source-reading",
+          "evidence": "the catalog request/response trace"
+        },
+        {
+          "clause": "every gated affordance is ABSENT on the empty catalog: no FAB, no chat dock (⌘⇧I inert — the listener is not armed), no top-bar AI entry, no Home AI CTAs — hidden-during-load is the designed flash-free behavior, so a settled screenshot precedes every DOM read. The ENTITLED side (>= 1 agent ⇒ all of them appear) is blocked(fixture) on the open framework — record it blocked, never ticked from the hook's source",
+          "oracle": "screenshot",
+          "verify": "settled screenshots of shell chrome + Home show none of the affordances; post-screenshot DOM reads confirm; ⌘⇧I produces no mount (ConsoleLayout.tsx gates the listener on dockEnabled = the same signal)",
+          "evidence": "the region screenshots + the ⌘⇧I non-event"
+        },
+        {
+          "clause": "a stale /ai bookmark redirects WITHOUT flash: RequireAiSurface waits for the catalog to resolve (loading fallback, isLoading latch in useAiSurfaceEnabled) and then redirects home splash-preserved — never a broken/empty chat frame, never a redirect that flashes before the fetch starts",
+          "oracle": "screenshot",
+          "verify": "the /ai navigation shows loading → home with no intermediate chat frame (ConsoleShell.tsx RequireAiSurface + RedirectWithSplash, objectui#6507)",
+          "evidence": "the navigation capture / frame notes"
+        },
+        {
+          "clause": "EXPECTED FAIL at head (defect K2, sweep 2026-08-30): the SystemHub 'AI Approvals' card follows the same gate as every other AI affordance — i.e. it is absent on an agent-less boot. At head it is NOT: SystemHubPage.tsx builds the card unconditionally (no useAiSurfaceEnabled read, unlike FAB/dock/header/Home), so it renders and advertises a dead surface. A run that sees the card must score this clause FAIL with the screenshot — do not tick it green, and do not re-file the defect (the sweep's FOLLOW-UPS row owns it)",
+          "oracle": "dom",
+          "verify": "screenshot the hub first, then read the card grid: the designed contract is no 'AI Approvals' card on an empty catalog; observed-at-head is the ungated card",
+          "evidence": "the hub screenshot + card-grid DOM"
+        },
+        {
+          "clause": "the landing page degrades with the REMEDY, not a fault: the poll's 501 body message (the single-sourced Cloud/EE sentence — see ai.open-edition-honest-degradation clause 2) surfaces verbatim in the page's destructive alert (usePendingActions call() throws body.error.message; AiPendingActionsInbox renders error.message)",
+          "oracle": "screenshot",
+          "verify": "the alert text string-equals the 501 body's message ('Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework'); diff alert text vs a captured 501 body",
+          "evidence": "the alert screenshot + one captured 501 response"
+        },
+        {
+          "clause": "EXPECTED FAIL at head (defect K2, same row): honest degradation means no fake empty queue and no unbounded dead poll. At head, beneath the error alert the inbox ALSO renders the 'No actions waiting' empty state (rows.length === 0 branch is not error-aware, AiPendingActionsInbox.tsx) — reading as a live, empty approval queue on a deployment that has none — and the 5s poll re-arms forever against the dead endpoint (usePendingActions keeps polling on error). Score against the honest contract; record the observed fake-empty-queue + endless poll as the FAIL evidence, do not tick green",
+          "oracle": "network",
+          "verify": "the ~15s network capture shows the repeated 501s with no backoff/stop; the page screenshot shows the empty-queue panel rendered alongside the error alert",
+          "evidence": "the poll trace + the page screenshot"
+        }
+      ],
+      "negative": [
+        "ticking any AI capability as PRESENT from the 200 empty-agents courtesy is a recording error — the empty catalog is the hide signal (same negative as ai.open-edition-honest-degradation)",
+        "scoring an affordance ABSENT from a DOM read taken before a settled screenshot is the hydration-race trap — the gated controls are hidden during load BY DESIGN, so a too-early read proves nothing",
+        "the two expected-fail clauses must not flip to PASS silently: if a run observes the card gated / the empty-queue suppressed, the defect was fixed — revise this item (drop the expected-fail wording, bump revision) rather than quietly ticking",
+        "an anonymous probe of /ai/pending-actions answering 501 instead of 401 would be a REGRESSION of the #7653 anonymous-deny ordering (auth gate precedes every capability answer) — file it, it is not this item's expected 501"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle"],
+      "source": [
+        "objectui packages/app-shell/src/hooks/useAiSurface.ts,71-88 (the ONE signal: access-filtered GET /ai/agents, per-seat rationale, isLoading latch for the route guard; do-NOT-simplify-to-discovery warning)",
+        "objectui packages/app-shell/src/layout/ConsoleLayout.tsx (FAB + chat dock + ⌘⇧I all gated on showChatbot/dockEnabled)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx (top-bar AI entry gated on the same hook) + console/home/HomeLayout.tsx (Home CTAs)",
+        "objectui packages/app-shell/src/console/ConsoleShell.tsx (RequireAiSurface — waits for resolve, splash-preserving redirect, objectui#6507)",
+        "objectui apps/console/src/pages/system/SystemHubPage.tsx (the 'AI Approvals' card built UNconditionally — the K2 gap) + AppContent.tsx (the system/ai-approvals route) + pages/system/AiPendingActionsPage.tsx (thin wrapper, 'Polled every 5 seconds')",
+        "objectui packages/plugin-chatbot/src/usePendingActions.ts,217-300 (cookie-only call(), error → error.message, pollInterval 5000 re-arming regardless of errors) + AiPendingActionsInbox.tsx (destructive alert + the error-blind 'No actions waiting' empty state)",
+        "packages/runtime/src/domains/ai.ts (#7653 anonymous-deny first; the /ai/agents empty-catalog courtesy #4058/#4053; every other /ai/* → capabilityUnavailable 501) + domains/unavailable.ts (single-sourced remedy sentence)",
+        "ai.open-edition-honest-degradation (the API half this item mirrors in the browser — 501 body/discovery parity is proven THERE, not re-proven here)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, cross-angle hit 1+4): the console-side AI gating had no coverage — the catalog-signal design (useAiSurfaceEnabled) hides FAB/dock/⌘⇧I/header/Home affordances and no-flash-redirects /ai on an agent-less boot, while SystemHubPage's 'AI Approvals' card is built ungated and its page polls the dead /ai/pending-actions endpoint every 5s (501) rendering a fake empty queue beside the error alert. Authored as a NEW browser sibling of ai.open-edition-honest-degradation (which keeps the API half) rather than extending it, so neither surface double-covers the other; the two K2 defect clauses are expected-fail probes, the defect row itself is the sweep's FOLLOW-UPS entry", "ref": "#sweep-2026-08-30" }
+      ]
     }
   ]
 }

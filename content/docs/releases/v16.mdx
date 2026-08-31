@@ -114,15 +114,15 @@ dashboard widget typos, dead hook events, phantom webhook triggers, unknown
 
 ---
 
-# 16.0.0 in detail
+## 16.0.0 in detail
 
-## Breaking changes & migration
+### Breaking changes & migration
 
 Strict-semver edges and behavior changes, with migrations — read before
 recompiling metadata authored against spec 15.x or upgrading a deployment
 with custom hooks, actions, MCP stdio, or multi-org tenancy.
 
-### Hook & action `ctx`: the `tenantId` alias is removed — read `organizationId` (#3280, #3290)
+#### Hook & action `ctx`: the `tenantId` alias is removed — read `organizationId` (#3280, #3290)
 
 The caller's active organization is now surfaced to JS authors under one
 blessed name, matching the `organization_id` column and
@@ -149,7 +149,7 @@ untouched — that configurable isolation column legitimately carries an
 Community edition never populates an org, so `organizationId` is `undefined`
 there.
 
-### Strict dashboard widgets — undeclared keys are loud (ADR-0021, #3251)
+#### Strict dashboard widgets — undeclared keys are loud (ADR-0021, #3251)
 
 `DashboardWidgetSchema` is now `.strict()`: an undeclared top-level key — a
 typo, a hallucinated key, or a removed pre-ADR-0021 inline-analytics key
@@ -163,7 +163,7 @@ counterpart of 15.0.0's strict form/page flip. **Migration:** recompile;
 rewrite any flagged widget onto the dataset shape (both Studio authoring
 surfaces already emit only that shape — objectui#2703).
 
-### MCP stdio: its own switch, and a mandatory API-key principal (ADR-0101, #3167, #3246)
+#### MCP stdio: its own switch, and a mandatory API-key principal (ADR-0101, #3167, #3246)
 
 Two changes close the platform's last identity-less execution surface:
 
@@ -184,7 +184,7 @@ Two changes close the platform's last identity-less execution surface:
   authority is a key minted on a platform-admin or service identity. The
   default-on HTTP surface is unaffected.
 
-### Feed contracts retired from the type surface and discovery (#1959, #3180)
+#### Feed contracts retired from the type surface and discovery (#1959, #3180)
 
 The feed runtime was deleted long ago (`sys_comment` / `sys_activity` are the
 canonical collaboration backend); 16.0.0 removes the dead surfaces that still
@@ -200,7 +200,7 @@ and was permanently `false`; it now tracks the presence of `sys_comment`, so
 `client.data.create('sys_comment', { object, record_id, body })`, read
 `sys_activity` — and `discovery.capabilities.comments`.
 
-### The enforce-or-remove sweep — dead metadata is now loud (#2377, ADR-0049)
+#### The enforce-or-remove sweep — dead metadata is now loud (#2377, ADR-0049)
 
 A platform-wide audit removed declared-but-unenforced surfaces. Authoring
 these was a false affordance — especially dangerous for AI-authored metadata:
@@ -240,7 +240,7 @@ these was a false affordance — especially dangerous for AI-authored metadata:
   unimplemented notification channels now say "not yet enforced" in their
   doc comments and `.describe()` texts.
 
-### Engine-owned system rows are read-only through the generic data API (ADR-0103, #3220)
+#### Engine-owned system rows are read-only through the generic data API (ADR-0103, #3220)
 
 The overloaded `managedBy: 'system'` bucket conflated rows a platform service
 owns end-to-end with platform-defined schema whose rows are legitimately
@@ -260,7 +260,7 @@ old fail-open behavior gets its write verbs stripped (with a warning) —
 declare `userActions` for the verbs it legitimately takes from users. The
 Console badges engine-owned objects distinctly (objectui#2705).
 
-### Multi-org: the carried posture rung is authoritative for the tenant wall (ADR-0099 P1, #3211)
+#### Multi-org: the carried posture rung is authoritative for the tenant wall (ADR-0099 P1, #3211)
 
 The Layer 0 cross-tenant exemption now reads the principal's carried
 `ctx.posture` rung as authoritative; the platform-admin capability probe is
@@ -279,7 +279,7 @@ manage_platform_settings, studio.access, manage_users}`; grant the
 is intended. A runtime `[authz/ADR-0099]` warning names any principal hitting
 the divergence.
 
-### Approver type `role` → `org_membership_level` (#3133)
+#### Approver type `role` → `org_membership_level` (#3133)
 
 `ApproverType.role` was the last authoring surface projecting the reserved
 word that ADR-0090 D3 retired — and it manufactured a real silent failure: since
@@ -293,7 +293,7 @@ with a warning) and is removed next major. New paired lints:
 `approval-approver-type-deprecated`. If the value names an org position, the
 fix is `type: 'position'`.
 
-## Behavior changes (16.0.0)
+### Behavior changes (16.0.0)
 
 - **Bulk user import defaults to `auto` (#3236).**
   `POST /api/v1/auth/admin/import-users` gains a fourth `passwordPolicy` and
@@ -359,9 +359,9 @@ fix is `type: 'position'`.
   opt-out across partial re-registrations, and `isTenancyDisabled(schema)`
   is the single shared source of truth.
 
-## New capabilities in 16.0.0
+### New capabilities in 16.0.0
 
-### Approvals: quorum, per-group sign-off (会签), attachments, and declared actions (#3266 series)
+#### Approvals: quorum, per-group sign-off (会签), attachments, and declared actions (#3266 series)
 
 - **Decision behaviors (#3268):** approval steps gain `quorum` (M-of-N via
   `minApprovals`) and `per_group` (one approver from each labeled group —
@@ -384,7 +384,7 @@ fix is `type: 'position'`.
   renders a real user picker. A contract test pins the action set. The
   Console side retires the inbox's hand-written buttons (see Console below).
 
-### Time-relative automation — a daily sweep, not date-equality roulette (#1874)
+#### Time-relative automation — a daily sweep, not date-equality roulette (#1874)
 
 A flow start node can declare `config.timeRelative` — swept object,
 `dateField`, and either `offsetDays: [60, 30, 7]` (T-minus thresholds) or
@@ -398,7 +398,7 @@ flows. The discovery query runs as system, capped (`maxRecords`, default
 1000), with per-record failure isolation. `os validate` gains readiness
 checks; the flow designer gets a first-class panel (objectui#2668).
 
-### Flow trigger observability — no more four-layer silence (2026-07-17 eval)
+#### Flow trigger observability — no more four-layer silence (2026-07-17 eval)
 
 A misauthored auto-launched flow used to produce zero output anywhere. Now:
 the `os serve`/`os dev`/`os start` startup banner prints a **`Flows:`
@@ -411,7 +411,7 @@ stderr; `RecordChangeTrigger` probes object existence at bind time; a
 status). Registration-time flow-condition validation also runs schema-aware
 checks for dynamically registered flows (#1928).
 
-### Filtered roll-ups and honest state machines
+#### Filtered roll-ups and honest state machines
 
 - **`summaryOperations.filter` (#1868):** a roll-up `summary` field can
   aggregate only matching child rows (operator and compound forms included),
@@ -430,7 +430,7 @@ checks for dynamically registered flows (#1928).
   sanctioned authoring path rejected; a retired `'own'`/`'extend'` value
   fails with guidance (that's the package-contribution kind).
 
-### Analytics: exact drill-through scopes (#1752, #3214)
+#### Analytics: exact drill-through scopes (#1752, #3214)
 
 Drilling a "2026-Q2" cell needs a range, not an equality. `queryDataset` now
 emits a `drillRanges` sidecar of half-open `[start, end)` bounds for
@@ -442,7 +442,7 @@ the raw-value snapshot to totals/subtotal rows, so subtotal drills
 exact-match on stored values instead of display labels. Consumed by the
 Console's report drill-through (objectui#2672).
 
-### Performance diagnostics: Server-Timing spans (#2408)
+#### Performance diagnostics: Server-Timing spans (#2408)
 
 - Opt-in `Server-Timing` now decomposes requests into **`auth`** (identity
   resolution), **`db`** (total SQL time + query count, correctly attributed
@@ -456,7 +456,7 @@ Console's report drill-through (objectui#2672).
   the slowest parametrized statements (placeholders only, never bindings).
   Zero overhead when off.
 
-### AI / MCP
+#### AI / MCP
 
 - **`validate_expression` tool (#1928):** agents can run the same expression
   checks as `objectstack build` against an object's *real* schema before
@@ -474,7 +474,7 @@ Console's report drill-through (objectui#2672).
   rescues), threaded through formulas, validation rules, predicates, and
   flow conditions (fatal only under `--strict`).
 
-### Spec, kernel & platform
+#### Spec, kernel & platform
 
 - **One platform capability vocabulary (#3265):** `requires` tokens are
   canonical kebab-case owned by the spec (`PLATFORM_CAPABILITY_TOKENS`) with
@@ -518,7 +518,7 @@ Console's report drill-through (objectui#2672).
   also stop corrupting lookup natural keys and are now idempotent
   (no `updated_at` churn per boot).
 
-### CLI & developer experience
+#### CLI & developer experience
 
 - **Scaffold ships the connector executors (ADR-0097):** `npm create
   objectstack` wires `ConnectorRestPlugin` / `ConnectorOpenApiPlugin` /
@@ -556,7 +556,7 @@ Console's report drill-through (objectui#2672).
   record History tab stops showing phantom changes (#3293); the seed-replayer
   reports `skipped` so hosts can stamp seed-once on all-skip replays.
 
-## New in Console (Studio) — bundled objectui 16.0
+### New in Console (Studio) — bundled objectui 16.0
 
 16.0.0 bundles the **objectui 16.0 Console major** (15.0.0 → 16.0.0, the
 range `077e45b..94d4876`, objectui #2589–#2705). The major is a version-line
@@ -573,7 +573,7 @@ directly) and the removal of the Gantt mobile QR-share context action
 > that later Console work is under
 > [Landed since 16.0.0-rc.0](#landed-since-1600-rc0).
 
-### Approvals inbox goes metadata-driven (#2678 line)
+#### Approvals inbox goes metadata-driven (#2678 line)
 
 - **`DeclaredActionsBar` (#2692):** a reusable bar that renders and executes
   an object's *declared* actions for any (object, record, location) through
@@ -591,7 +591,7 @@ directly) and the removal of the Gantt mobile QR-share context action
   flow-designer approval panel synced with the engine schema
   (quorum / per_group / minApprovals / group).
 
-### Action dialogs render real field widgets (ADR-0059, #2704)
+#### Action dialogs render real field widgets (ADR-0059, #2704)
 
 `ActionParamDialog` retires its bespoke per-type branch chain: every declared
 param renders through the same `fieldWidgetMap` as the object form, so a
@@ -600,7 +600,7 @@ code, date, …) gets its real widget — uploads ride the ambient
 UploadProvider with `multiple`/`accept`/`maxSize` honored. Result dialogs
 skip declared fields whose path doesn't resolve (#2674).
 
-### Dashboards author the dataset shape only (#2703)
+#### Dashboards author the dataset shape only (#2703)
 
 Both Studio surfaces (widget config panel and inspector) now emit only the
 ADR-0021 semantic-layer shape (`dataset` + `dimensions` + `values`) — the
@@ -609,7 +609,7 @@ authoring-side counterpart that let the framework flip
 picker (chart *and* pivot) with a catalog; filter-binding field pickers
 source from the bound dataset's dimensions.
 
-### Flow designer: nested regions, visible and editable (#2670)
+#### Flow designer: nested regions, visible and editable (#2670)
 
 `loop` / `parallel` / `try_catch` containers stop being opaque cards: their
 regions render as read-only mini-canvases (#2675), then as inline push-down
@@ -623,7 +623,7 @@ canonical `config.schedule` the runtime actually reads (#2671), and the
 `xExpression` marker renders the loop `collection` as a template editor
 instead of false-flagging `{tasks}` as malformed CEL (framework#3304).
 
-### Gantt (plugin-gantt)
+#### Gantt (plugin-gantt)
 
 - **Ownership-aware rescheduling (#2683):** an own-dates, unlocked summary
   shifts like a task and carries its unlocked subtree by the same delta;
@@ -637,7 +637,7 @@ instead of false-flagging `{tasks}` as malformed CEL (framework#3304).
 - **Removed:** the mobile QR-share context action (#2687, the objectui 16.0
   breaking edge).
 
-### Studio Access pillar (#2600 B-series)
+#### Studio Access pillar (#2600 B-series)
 
 The permission matrix hits the first screen: identity and zero-grant
 capability sections start collapsed (B1); the Explain panel's object field
@@ -646,7 +646,7 @@ stops clipping at narrow widths (B3); wide objects get a field filter plus
 Read-all / Write-all / Clear bulk shortcuts scoped to the visible rows (B4);
 and curated capability labels + picker group headers localize (B5).
 
-### Lists, grids, data & detail
+#### Lists, grids, data & detail
 
 - **Master-detail saves are atomic on capable backends (#2684):**
   MasterDetailForm / LineItemsPanel persist through
@@ -667,7 +667,7 @@ and curated capability labels + picker group headers localize (B5).
   the new `drillRanges` bounds (#2672); the roll-up summary editor gains a
   visual child-row filter (#2669).
 
-### Auth & login
+#### Auth & login
 
 - **Never strand SSO-only users on a password wall (#2629):** the
   `/auth/config` fetch gets single-flight caching + retrying backoff, the
@@ -677,7 +677,7 @@ and curated capability labels + picker group headers localize (B5).
   signup page).
 - Dev-seeded admin credentials hint on the login page (#2635, dev-gated).
 
-### Platform & fixes
+#### Platform & fixes
 
 - **`@object-ui/types` adopts `@objectstack/spec` 15.1.1 (#2589,
   breaking):** value-erased `…Schema` re-exports from `spec/ui` are dropped;
@@ -694,7 +694,7 @@ and curated capability labels + picker group headers localize (B5).
   editors are fixed (#2666); AgentPreview drops the removed agent
   `visibility` (#2665).
 
-### Console changes after the `rc.0` pin
+#### Console changes after the `rc.0` pin
 
 The four frontend changes that were pending when this page was first written
 (import wizard `auto` policy — objectui#2701; schema-driven `keyValue` /
@@ -705,7 +705,7 @@ objectui#2706) **are now bundled**: the console pin advanced `94d4876 →
 further wave of Console work are described under
 [Landed since 16.0.0-rc.0](#landed-since-1600-rc0) below.
 
-## Landed since 16.0.0-rc.0
+### Landed since 16.0.0-rc.0
 
 These changes are on `main` after the `rc.0` cut and **rolled into
 `16.0.0-rc.1`**, cut on 2026-07-20 — the train's last RC, so every entry below
@@ -713,7 +713,7 @@ shipped in **16.0.0**. Backend from those changesets, Console from the objectui
 pin advancing `94d4876 → 69fa5d163a97` (objectui #2701–#2743), bundled as
 `@objectstack/console` 16.0.0-rc.1. Sourced from each repo's own changesets.
 
-### Breaking / behavior
+#### Breaking / behavior
 
 - **Deprecated `aiStudio` / `aiSeat` capability aliases removed (#3308,
   breaking-as-minor).** The one-cycle deprecation window from #3265 is over:
@@ -741,7 +741,7 @@ pin advancing `94d4876 → 69fa5d163a97` (objectui #2701–#2743), bundled as
   round-trip) can no longer slip its gate. Fail-open on unbound `current_user`
   is preserved.
 
-### New capabilities (backend)
+#### New capabilities (backend)
 
 - **Formulas that compute dates/durations stop silently nulling (#3306).**
   Two long-standing CEL gaps are closed alongside the build error above: the
@@ -799,7 +799,7 @@ pin advancing `94d4876 → 69fa5d163a97` (objectui #2701–#2743), bundled as
   so mark-as-read works on `os dev` / standalone instead of leaving unread
   state that could never clear.
 
-### New in Console (objectui, now bundled `94d4876 → 69fa5d163a97`)
+#### New in Console (objectui, now bundled `94d4876 → 69fa5d163a97`)
 
 - **Option-widget `visibleWhen` parity.** Per-option cascading + `dependsOn`
   gating lands across the widget family so client and server agree on which
@@ -831,7 +831,7 @@ pin advancing `94d4876 → 69fa5d163a97` (objectui #2701–#2743), bundled as
   flow `keyValue`/`numberList`, ActionParamDialog upload guard, system-field
   classifier) are included in this pin.
 
-## Landed at the 16.0.0 GA cut
+### Landed at the 16.0.0 GA cut
 
 Two changesets are in the `## 16.0.0` changelog sections but in **neither**
 `16.0.0-rc.0` nor `16.0.0-rc.1`: they landed between the last RC and the GA
@@ -857,7 +857,7 @@ cut on 2026-07-21, so they ship in 16.0.0 without appearing in any RC.
 
 ---
 
-# What's new in 16.1.0
+## What's new in 16.1.0
 
 16.1 is a small fast-follow minor — **8 changesets (5 minor, 3 patch), no
 major** — released on 2026-07-22, and the v16 line's final release. Three of
@@ -866,7 +866,7 @@ theme is moving configuration failures earlier: from a boot crash or a broken
 render to a build error. The bundled Console advances one pin,
 `9a5f016f7d5c → cf2d56e32a11`.
 
-## New capabilities in 16.1.0
+### New capabilities in 16.1.0
 
 - **`requires` capabilities are preflighted against installable providers
   (#3366).** A listed capability was only checked at `serve`/`start` time, and
@@ -914,7 +914,7 @@ render to a build error. The bundled Console advances one pin,
   fields (`created_at`, the `dateRange` default) and objects outside the
   validated stack never false-positive.
 
-## Behavior changes & fixes in 16.1.0
+### Behavior changes & fixes in 16.1.0
 
 - **`runAs: 'user'` flows execute data ops with the triggering user's real
   permission sets and positions (#3356, follow-up to #1888).** Since #1888 the
@@ -962,7 +962,7 @@ render to a build error. The bundled Console advances one pin,
   `@objectstack/plugin-hono-server` CRUD surface open the gate for an
   admin/service principal via the carried `posture` rung.
 
-## New in Console (Studio) — objectui pin `9a5f016f7d5c → cf2d56e32a11`
+### New in Console (Studio) — objectui pin `9a5f016f7d5c → cf2d56e32a11`
 
 - Record hits surface on the full search page, with i18n group labels
   (objectui#2776), and in the command palette from `/api/v1/search`
@@ -974,9 +974,9 @@ render to a build error. The bundled Console advances one pin,
 - `SchemaForm` renders sort repeater rows for union schemas (objectui#2771,
   pairing framework#3379).
 
-## Upgrade checklist
+### Upgrade checklist
 
-### 16.0.0
+#### 16.0.0
 
 - **Hooks/actions:** rename `ctx.session.tenantId` / `ctx.user.tenantId` →
   `organizationId` in every `*.hook.ts` / `*.action.ts` body.
@@ -1015,7 +1015,7 @@ render to a build error. The bundled Console advances one pin,
 - **Console hosts:** import spec schema values from `@objectstack/spec`
   instead of the removed `@object-ui/types` `spec/ui` re-exports.
 
-### 16.1.0
+#### 16.1.0
 
 - **Re-run `os build` / `os validate` after upgrading** — three new preflights
   can fail a stack that built clean on 16.0.0: a `requires` capability whose
@@ -1033,7 +1033,7 @@ render to a build error. The bundled Console advances one pin,
   silently stripped on a `public_read_write` object are now written when the
   user is authorized. `runAs:'system'` is unchanged.
 
-## References
+### References
 
 ADR-0099 (posture-authoritative tenant wall) · ADR-0101 (MCP stdio
 principal) · ADR-0102 (sandbox CPU budget + sync engine) · ADR-0103

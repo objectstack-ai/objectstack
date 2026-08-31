@@ -120,6 +120,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Longitud mínima",
         helpText: "Mínimo de caracteres"
       },
+      "fields.rows": {
+        label: "Rows",
+        helpText: "Inline editor height (text rows)"
+      },
       "fields.min": {
         label: "Mínimo",
         helpText: "Valor mínimo"
@@ -383,6 +387,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxLength: {
         label: "Longitud máxima",
         helpText: "Longitud máxima de caracteres"
+      },
+      rows: {
+        label: "Rows",
+        helpText: "Inline editor height in text rows"
       },
       min: {
         label: "Mínimo",

@@ -369,7 +369,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
-| `ctx.log` | `{ info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
+| `ctx.log` | `{ debug, info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record instead of printing its id.** `await ctx.title()` resolves this object's `nameField` — including when it is a **formula**, evaluated server-side, with no extra read. `await ctx.title('account_id')` resolves the related record's title through a lookup column (one `findOne`, gated by `api.read`; the no-argument form needs no capability). `null` when there is no title — it never falls back to the id. |
 
@@ -395,6 +395,7 @@ org / user / transaction. Methods:
 | `update(data, opts?)` | `api.write` | **`update({ id, ...fields })`** — put the id **inside** `data` |
 | `upsert(data, opts?)` | `api.write` | `upsert({ … })` |
 | `delete(opts)` | `api.write` | `delete({ where: { id } })` |
+| `aggregate` · `updateMany` · `deleteMany` | read · write · write | also installed; same `where` shape |
 
 **Query shape — the key is `where`.** It takes an object with `$`-operators, the
 same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
@@ -443,11 +444,11 @@ set of legal tokens (`HookBodyCapability`) is exactly five:
 
 | Token | Unlocks |
 |:--|:--|
-| `api.read` | `ctx.api.object(n).find` / `findOne` / `count`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
-| `api.write` | `ctx.api.object(n).insert` / `update` / `delete` / `upsert` |
+| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
+| `api.write` | `ctx.api.object(n).insert` / `update` / `delete` / `upsert` / `updateMany` / `deleteMany` |
 | `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
-| `log` | `ctx.log.info` / `warn` / `error(msg, data?)` |
+| `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 
 There is **no `http.fetch` capability** by design — outbound calls go through
 Connector recipes so they stay auditable and replayable.
@@ -553,8 +554,7 @@ Register it like any hook — add it to `defineStack({ hooks: [fillPositionOnHir
   capability it emits only when the runtime wired a logger into the hook context —
   otherwise it is a **silent no-op**. Treat `ctx.log` as best-effort diagnostics,
   not a reliable side-channel or proof a hook ran; to observe an effect, assert on
-  the data it writes. (And call `ctx.log.info(msg)` — `ctx.log` is an object, not
-  a function, so `ctx.log(msg)` is not callable.)
+  the data it writes.
 
 ---
 
@@ -589,10 +589,8 @@ interface HookContext {
     organizationId?: string; // Active org — the single blessed name. Matches the
                              // `organization_id` column + `current_user.organizationId` (RLS).
                              // The former `tenantId` alias was removed in v16.
-                             // There is no `roles` here: `session.roles` was declared but
-                             // never produced, and was retired in 17.0.0. Privilege
-                             // is judged by the security service (permissions / positions /
-                             // posture), never by a role-name string in a hook.
+                             // No `roles` here (retired in 17.0.0) — privilege is judged
+                             // by the security service, never by a role name in a hook.
     accessToken?: string;
     isSystem?: boolean;      // Elevated system context (engine self-writes).
   };

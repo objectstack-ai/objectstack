@@ -40,6 +40,14 @@ describe('lintDataModel — relationships', () => {
     ]);
     const db = issues.find((i) => i.rule === 'relationship/delete-behavior');
     expect(db?.severity).toBe('suggestion');
+    // #9689 (PR #11406) made an authored `deleteBehavior: 'set_null'` on a
+    // master_detail a named parse-time rejection — the DECLARABLE enumeration
+    // this suggestion names must not walk an author into that rejection. The
+    // message may still MENTION `set_null` to explain why it is excluded (the
+    // same outcome-naming courtesy as the field.zod.ts rejection message), so
+    // assert the declarable set directly rather than a bare substring-absence.
+    expect(db?.message).not.toContain('cascade/restrict/set_null');
+    expect(db?.message).toContain('(cascade/restrict');
   });
 
   it('suggests inlineEdit on master_detail line-item children', () => {

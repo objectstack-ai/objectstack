@@ -85,34 +85,21 @@
  */
 
 import {
+  CANONICAL_CREDENTIAL_KEYS,
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
   credentialQueryParamOf,
+  FORMER_CREDENTIAL_ALIASES,
   MONGO_OPTIONS_CREDENTIAL_PATHS,
 } from './driver/common.zod';
 import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry.zod';
 
-/**
- * Canonical inline-credential spellings, used for a driver whose contract this
- * platform does not ship. Kept in sync with the schemas by
- * `datasource-credential-redaction.test.ts`, which asserts every `z.never()`
- * key across every builtin driver appears here — so a new refused key cannot
- * land without this fallback learning it.
- */
-const CANONICAL_CREDENTIAL_KEYS = ['password', 'authToken'] as const;
-
-/**
- * Pre-#8078 alias spellings of the keys above. A row written through the wizard
- * (which does not parse) can hold these verbatim; a row written through an
- * authoring door had them renamed onto the canonical key before storage.
- */
-const FORMER_CREDENTIAL_ALIASES = [
-  'passwd',
-  'pwd',
-  'token',
-  'jwt',
-  'auth_token',
-  'authtoken',
-] as const;
+// The canonical spellings and former aliases MOVED to `driver/common.zod.ts`
+// with the nested-position fix: the write door's passthrough walk
+// (`credentialFreeMongoOptions`) must judge the same names this read path
+// judges, and this module sits above `driver/` in the import graph — a second
+// copy down there would be exactly the duplicated security list #8300 rejects.
+// The sync pin (every builtin `z.never()` key appears in the canonical list)
+// lives unchanged in `datasource-credential-redaction.test.ts`.
 
 /**
  * Credential-shaped config keys that remain WRITABLE by deliberate spec choice,
@@ -129,8 +116,18 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
 
 /**
  * Secret-bearing paths inside a driver's passthrough `config` slot — the
- * FOURTH spelling of the stored credential (#9040), nested where the top-level
- * key-name scrub cannot see it.
+ * FOURTH spelling of the stored credential (#9040).
+ *
+ * Since the nested-position finding this table is a RESIDUE, not the nested
+ * judgment: the credential-name scrub runs at every object depth (see
+ * {@link redactDatasourceConfig}), so what belongs here is only the
+ * CLIENT-MEASURED secret spellings that mirror no top-level key
+ * (`proxyPassword`, `key`, `passphrase`, …) — names no schema ships and no
+ * shared spelling list can derive, established by measuring the client the
+ * driver spreads the slot into, never inferred from documentation. A nested
+ * position missing from this table is no longer served cleartext by default;
+ * it is cleartext only if it ALSO mirrors no credential spelling, which is
+ * exactly the class a measurement must decide.
  *
  * Only mongo declares a passthrough today (`options`, spread verbatim into
  * `MongoClientOptions`); postgres/mysql/turso/sqlite/memory have closed
@@ -158,6 +155,26 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
  *    Either way a stored copy is a secret served in cleartext, and serving it
  *    back is a leak under any boundary (the same asymmetry with the write
  *    door this module already documents for the inline keys).
+ *  - `options.autoEncryption.kmsProviders.{aws.secretAccessKey,
+ *    aws.sessionToken, azure.clientSecret, gcp.privateKey, local.key}` —
+ *    CSFLE KMS key material, measured both ways the client's OPTIONAL
+ *    `mongodb-client-encryption` dependency can go (the answer differs, so
+ *    both were run). With it installed (7.2.1, inside the pin's `^7.2.0`
+ *    optional-peer range): an instrumented `new MongoClient(url,
+ *    { …, ...options })` READS every one of these leaves at construction —
+ *    the kmsProviders record is BSON-serialized into the native MongoCrypt —
+ *    and `connect()` proceeds into live CSFLE machinery. Without it: the same
+ *    construction throws `MongoMissingDependencyError` before reading any of
+ *    them. Either way a stored copy is decryption-capable material served in
+ *    cleartext (the AWS_SESSION_TOKEN posture: a loud client failure does not
+ *    make serving the secret back acceptable). Still WRITABLE — the binder's
+ *    one slot is the login password, the proxyPassword posture — but never
+ *    SERVED. The same families' identity halves (`aws.accessKeyId`,
+ *    `azure.tenantId` / `clientId`, `gcp.email`) are read by the client too
+ *    but are not credential material (#8876's asymmetry), and the unmeasured
+ *    neighbours (`kmip.endpoint`, `keyVaultNamespace`, `schemaMap`) mirror no
+ *    credential spelling — deliberately not here: entries land on this table
+ *    with a measurement quoted, never by name-shape.
  *
  * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
  * so a stored legacy `driver: 'mongo'` row is scrubbed identically to
@@ -171,6 +188,11 @@ const PASSTHROUGH_SECRET_PATHS: Readonly<Record<string, readonly (readonly strin
     ['options', 'key'],
     ['options', 'passphrase'],
     ['options', 'authMechanismProperties', 'AWS_SESSION_TOKEN'],
+    ['options', 'autoEncryption', 'kmsProviders', 'aws', 'secretAccessKey'],
+    ['options', 'autoEncryption', 'kmsProviders', 'aws', 'sessionToken'],
+    ['options', 'autoEncryption', 'kmsProviders', 'azure', 'clientSecret'],
+    ['options', 'autoEncryption', 'kmsProviders', 'gcp', 'privateKey'],
+    ['options', 'autoEncryption', 'kmsProviders', 'local', 'key'],
   ],
 };
 
@@ -202,8 +224,8 @@ export function refusedPassthroughSecretPaths(driver: unknown): readonly (readon
     : [];
 }
 
-/** Unwrap `.optional()` / `.default()` / `.nullable()` down to the base type. */
-function baseTypeOf(schema: unknown): string | undefined {
+/** Unwrap `.optional()` / `.default()` / `.nullable()` down to the base node. */
+function baseNodeOf(schema: unknown): any {
   let node: any = schema;
   for (let depth = 0; node && depth < 10; depth += 1) {
     const def = node.def ?? node._def;
@@ -213,9 +235,75 @@ function baseTypeOf(schema: unknown): string | undefined {
       node = def.innerType;
       continue;
     }
-    return type;
+    return node;
   }
   return undefined;
+}
+
+/** Unwrap `.optional()` / `.default()` / `.nullable()` down to the base type. */
+function baseTypeOf(schema: unknown): string | undefined {
+  const node = baseNodeOf(schema);
+  const def = node?.def ?? node?._def;
+  return def?.type;
+}
+
+/** The `shape` record of an object-typed schema node, or `undefined`. */
+function shapeOf(schema: unknown): Record<string, unknown> | undefined {
+  const raw = (schema as any)?.shape;
+  const shape = typeof raw === 'function' ? raw() : raw;
+  return shape && typeof shape === 'object' ? (shape as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Every path (any depth) in `schema`'s object shape whose leaf is `z.never()`
+ * — the nested extension of the {@link refusedCredentialKeys} derivation, so a
+ * driver contract that refuses a credential key inside a nested object shape
+ * is covered by the read scrub the day it lands, exactly like a top-level one.
+ *
+ * The walk descends OBJECT members only: a record slot
+ * (`z.record(z.string(), z.unknown())`) is the schema saying "untyped from
+ * here down", and the untyped region is judged by NAME instead (see the
+ * recursion in {@link redactDatasourceConfig}). Depth-capped defensively —
+ * driver config shapes are shallow and non-recursive.
+ *
+ * Exported for the derivation pin: no builtin driver declares a nested
+ * `z.never()` today, so the nested branch is provable only against a
+ * constructed schema.
+ */
+export function refusedCredentialPathsOfSchema(schema: unknown): (readonly string[])[] {
+  const out: string[][] = [];
+  const walk = (shape: Record<string, unknown>, prefix: readonly string[], depth: number): void => {
+    if (depth > 8) return;
+    for (const [key, member] of Object.entries(shape)) {
+      const node = baseNodeOf(member);
+      const def = node?.def ?? node?._def;
+      const type: string | undefined = def?.type;
+      if (type === 'never') {
+        out.push([...prefix, key]);
+        continue;
+      }
+      if (type === 'object') {
+        const inner = shapeOf(node) ?? shapeOf(def);
+        if (inner) walk(inner, [...prefix, key], depth + 1);
+      }
+    }
+  };
+  const shape = shapeOf(schema);
+  if (shape) walk(shape, [], 0);
+  return out;
+}
+
+/**
+ * The refused credential POSITIONS a driver's own contract declares, at any
+ * depth — {@link refusedCredentialKeys} is the depth-1 projection of this.
+ * Empty for a driver with no shipped contract, like the key derivation.
+ */
+export function refusedCredentialPaths(driver: unknown): (readonly string[])[] {
+  try {
+    return refusedCredentialPathsOfSchema(getDriverConfigSchema(driver));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -328,16 +416,58 @@ export function redactUrlCredentials(value: string): string {
 export interface RedactedDatasourceConfig {
   config: Record<string, unknown>;
   /**
-   * Config keys whose value was removed or rewritten, sorted. Serving this
-   * alongside the redacted config is the difference between a caller that knows
-   * a credential is being withheld and one that infers it from an absence.
+   * Config keys whose value was removed or rewritten, as dotted paths
+   * (`password`, `options.auth.password`), sorted. Serving this alongside the
+   * redacted config is the difference between a caller that knows a credential
+   * is being withheld and one that infers it from an absence.
    */
   redactedKeys: string[];
+  /**
+   * The same removals as exact SEGMENT arrays, index-aligned with
+   * {@link redactedKeys}. The dotted spelling is ambiguous the moment a stored
+   * key carries a literal dot; the write-path inverses restore by walking
+   * containers, so they consume this form and cannot mis-split.
+   */
+  redactedPaths: (readonly string[])[];
 }
 
 /**
  * Remove every stored credential from a driver `config` for serving on a read
- * path.
+ * path — at EVERY object depth, not only the top level.
+ *
+ * Four removal sources, applied in order:
+ *
+ *  1. The credential-name judgment ({@link redactableConfigKeys}) at every
+ *     object depth. It was top-level-only until the nested-position finding:
+ *     a credential under the very spelling the top level hides — one object
+ *     level down (`options.auth.token`, `tunnel.password`) — was served back
+ *     cleartext with `redactedKeys: []`, because the nested side was only the
+ *     hand-enumerated path table of source 4. The name set is ONE list for
+ *     every depth, and the same list the write door's passthrough walk
+ *     refuses, so a nested position is treated identically to the top-level
+ *     key it mirrors.
+ *  2. The URL composite ({@link redactUrlCredentials}) on every STRING value,
+ *     again at every depth — a `postgresql://u:pass@host/db` nested inside a
+ *     record slot carries the same secret it carries at the top level.
+ *  3. The DERIVED nested refusals ({@link refusedCredentialPaths}) — object
+ *     shapes inside a driver contract whose leaf is `z.never()`. None exist
+ *     today; the walk is what keeps "reading the schema is reading the
+ *     refusal list" true at depth the day one lands.
+ *  4. The passthrough spellings (#9040, {@link passthroughSecretPaths}): the
+ *     CLIENT-MEASURED secret names (`proxyPassword`, `key`, `passphrase`, …)
+ *     that mirror no top-level key, so neither the schema nor the name set can
+ *     derive them. The table is the residue for exactly that class — an entry
+ *     whose leaf IS credential-spelled (`options.auth.password`) is already
+ *     covered by source 1 and stays listed only because the table doubles as
+ *     the write-path inverse's contract.
+ *
+ * Boundary shared by every walker on this surface (the write door's
+ * `valueAtPath`, `withoutPath` here): **arrays are off the walk.** An array in
+ * driver config is row-shaped data (memory's `initialData` seeds), and
+ * redacting a seeded row's own `password` FIELD would corrupt data the driver
+ * serves — which is not this module's question. The boundary is structural,
+ * so the seed-data carve-out needs no per-driver list, and both doors draw it
+ * in the same place.
  *
  * Pure: the input object is never mutated, so a caller holding the stored
  * record (the connect path does) is unaffected.
@@ -346,48 +476,66 @@ export function redactDatasourceConfig(
   driver: unknown,
   config: Record<string, unknown> | undefined,
 ): RedactedDatasourceConfig {
-  if (!config || typeof config !== 'object') return { config: {}, redactedKeys: [] };
+  if (!config || typeof config !== 'object') return { config: {}, redactedKeys: [], redactedPaths: [] };
 
   const hidden = new Set(redactableConfigKeys(driver));
-  const out: Record<string, unknown> = {};
-  const redactedKeys: string[] = [];
+  const removed: (readonly string[])[] = [];
 
-  for (const [key, value] of Object.entries(config)) {
-    if (hidden.has(key)) {
-      // Dropped, not masked. A mask would round-trip back through the wizard as
-      // a literal new password, and post-#8078 the canonical spellings would
-      // then be REFUSED at the write door — turning an untouched "Save" into an
-      // error the author cannot act on. An absent key is the shape the form
-      // already understands from `hasSecret`.
-      if (value !== undefined) redactedKeys.push(key);
-      continue;
-    }
-    if (typeof value === 'string') {
-      const redacted = redactUrlCredentials(value);
-      if (redacted !== value) {
-        out[key] = redacted;
-        redactedKeys.push(key);
+  const scrub = (node: Record<string, unknown>, prefix: readonly string[]): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+      const path = [...prefix, key];
+      if (hidden.has(key)) {
+        // Dropped, not masked. A mask would round-trip back through the wizard
+        // as a literal new password, and post-#8078 the canonical spellings
+        // would then be REFUSED at the write door — turning an untouched
+        // "Save" into an error the author cannot act on. An absent key is the
+        // shape the form already understands from `hasSecret`.
+        if (value !== undefined) removed.push(path);
         continue;
       }
+      if (typeof value === 'string') {
+        const redacted = redactUrlCredentials(value);
+        if (redacted !== value) {
+          out[key] = redacted;
+          removed.push(path);
+          continue;
+        }
+        out[key] = value;
+        continue;
+      }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        out[key] = scrub(value as Record<string, unknown>, path);
+        continue;
+      }
+      out[key] = value;
     }
-    out[key] = value;
-  }
+    return out;
+  };
 
-  // The passthrough spellings (#9040): nested secret material the top-level
-  // key-name scrub cannot see. Dropped, not masked, for the same round-trip
-  // reason as the inline keys; each removal is reported as its DOTTED path
-  // (`options.auth.password`), which is the shape the metadata write door's
-  // generic carry-forward (`carryForwardRedactedValues`) already walks.
-  let scrubbed: Record<string, unknown> = out;
-  for (const path of passthroughSecretPaths(driver)) {
+  let scrubbed = scrub(config, []);
+
+  // Sources 3 and 4: positional removals. Reported as their exact paths; a
+  // path source 1 already emptied is a no-op here (`dropped: false`), so
+  // nothing is reported twice.
+  const positional = [
+    ...refusedCredentialPaths(driver).filter((path) => path.length > 1),
+    ...passthroughSecretPaths(driver),
+  ];
+  for (const path of positional) {
     const [next, dropped] = withoutPath(scrubbed, path);
     if (dropped) {
       scrubbed = next;
-      redactedKeys.push(path.join('.'));
+      removed.push(path);
     }
   }
 
-  return { config: scrubbed, redactedKeys: redactedKeys.sort() };
+  removed.sort((a, b) => (a.join('.') < b.join('.') ? -1 : a.join('.') > b.join('.') ? 1 : 0));
+  return {
+    config: scrubbed,
+    redactedKeys: removed.map((path) => path.join('.')),
+    redactedPaths: removed,
+  };
 }
 
 /**

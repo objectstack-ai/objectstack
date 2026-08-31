@@ -158,19 +158,19 @@ The REST plugin (`com.objectstack.rest.api`, `@objectstack/rest`) registers
 
 ## Core Fallback Injection
 
-ObjectKernel auto-injects in-memory fallbacks for `core`-criticality services not registered by any plugin during Phase 1.
+ObjectKernel auto-injects an in-memory fallback for each `core` service that has one and no plugin registered in Phase 1.
 
 ```
 Phase 1: init() completes for all plugins
     ↓
 Kernel checks ServiceRequirementDef (@objectstack/spec/system):
-  'data'      → required → ERROR if missing (no fallback; ObjectQLPlugin registers it)
+  'data'      → required → ERROR if missing (ObjectQLPlugin registers it)
   'metadata'  → core    → auto-inject createMemoryMetadata() if missing
   'cache'     → core    → auto-inject createMemoryCache() if missing
   'queue'     → core    → auto-inject createMemoryQueue() if missing
-  'job'       → core    → auto-inject createMemoryJob() if missing
+  'job'       → core    → NO fallback — warns; getService throws if missing
   'i18n'      → core    → auto-inject createMemoryI18n() if missing
-  'auth'      → core    → no fallback factory — degraded-capability warning if missing
+  'auth'      → core    → NO fallback — warns; getService throws if missing
   'realtime'  → optional → skip, plugins should check availability
     ↓
 Phase 2: start() begins — all core services available
@@ -178,14 +178,14 @@ Phase 2: start() begins — all core services available
 
 The fallbacks are **factories** exported from `@objectstack/core`
 (`createMemoryCache`, `createMemoryMetadata`, `createMemoryQueue`,
-`createMemoryJob`, `createMemoryI18n`) — not classes.
+`createMemoryI18n`) — not classes; `job`/`auth` have none.
 
 ### Service Criticality Levels
 
 | Level | Behavior |
 |:------|:---------|
 | `required` | Kernel throws if missing — system cannot start |
-| `core` | Auto-injected in-memory fallback if no plugin provides it |
+| `core` | In-memory fallback auto-injected where one exists, else warn |
 | `optional` | Silently skipped — plugins must check before use |
 
 ## Incorrect vs Correct

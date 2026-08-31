@@ -15,16 +15,21 @@
  *   - walled + owner UNDECLARED still REFUSES STARTUP (`auth-plugin.ts`
  *     `init()`, #11184) — this check never runs in that shape, because boot
  *     already aborted;
- *   - walled + owner declared but the account unverified still REFUSES
- *     ELEVATION (`bootstrapPlatformAdmin`, `walled_owner_not_verified`,
- *     #11343) — this check is the *forecast* of that refusal, not a
- *     replacement for it.
+ *   - walled + owner declared but the account unverified still CONFERS
+ *     NOTHING. ([#11973] Since the #11663 L4 re-anchor there is no elevation
+ *     WRITE left to refuse — platform-admin standing is derived per request
+ *     at the one derivation site, `resolve-authz-context.ts` §6b-config, and
+ *     an unverified account holding a declared address resolves non-admin
+ *     there, fail-closed. The semantic this check forecasts is unchanged;
+ *     only where it is enforced moved.)
  *
  * ## Why the deployment is a dead end
  *
- * #11343 made walled platform-admin elevation require a VERIFIED owner-email
+ * #11343 made walled platform-admin standing require a VERIFIED owner-email
  * match (the string alone proves nothing — anyone who knows the address could
- * register it first). Verification can arrive two ways:
+ * register it first), and the #11663 re-anchor kept the requirement while
+ * retiring the elevation write: the verified match is now read at request
+ * time. Verification can arrive two ways:
  *
  *   1. an **email transport**, which delivers the verification link, or
  *   2. a **trusted federated sign-in** (enterprise SSO or a social/OIDC
@@ -33,10 +38,10 @@
  *      profile when it creates the user (`better-auth/dist/oauth2/
  *      link-account.mjs`, the new-user branch).
  *
- * With NEITHER wired, the declared owner registers, is refused, and has no
- * in-product way to ever satisfy the condition. Nothing else in the boot path
- * notices: the refusal is correct and the deployment looks healthy until the
- * one account that matters tries to sign in.
+ * With NEITHER wired, the declared owner registers, holds no standing, and
+ * has no in-product way to ever satisfy the condition. Nothing else in the
+ * boot path notices: the non-derivation is correct and the deployment looks
+ * healthy until the one account that matters tries to sign in.
  *
  * ## Why the message names the remedy
  *
@@ -102,8 +107,8 @@ import { isHumanUserRow } from './audience-posture.js';
 /**
  * The stable NAME of this warning — the "named" half of the ruled "loud, named
  * warning". It leads the message so an operator (or a support thread) can grep
- * one token, the same way the elevation refusals are keyed by
- * `walled_owner_email_undeclared` / `walled_owner_not_verified`.
+ * one token, the same way the walled bootstrap's outcomes are keyed by reasons
+ * like `walled_owner_email_undeclared` / `walled_config_derived`.
  */
 export const WALLED_OWNER_NO_VERIFICATION_PATH = 'walled_owner_no_verification_path';
 
@@ -193,24 +198,28 @@ export interface VerificationPathWiring {
 /**
  * [#12751] Resolve {@link WalledOwnerAccountState} from the live user store.
  *
- * Mirrors the two reads the elevation gate performs rather than inventing new
- * ones: the bounded human-population page (`isBootstrapCreation`'s shape —
- * humans, not rows; a FULL page of non-humans cannot prove absence and reads
- * as populated) and the by-email owner lookup (both the lowercased and the
- * verbatim spelling, matches re-checked trimmed + lowercased, exactly as
- * `bootstrapPlatformAdmin` queries). The verified answer is the shared
- * [#11343] allow-list (`isEmailVerifiedUserRow`) — the SAME predicate the
- * elevation gate refuses on, so this probe can never forecast a refusal the
- * gate would not make, nor stay quiet about one it would.
+ * Mirrors the reads the walled standing surfaces perform rather than
+ * inventing new ones: the bounded human-population page
+ * (`isBootstrapCreation`'s shape — humans, not rows; a FULL page of
+ * non-humans cannot prove absence and reads as populated) and the by-email
+ * owner lookup (both the lowercased and the verbatim spelling, matches
+ * re-checked through the shared predicates — the same two-spelling read
+ * `plugin-security`'s `resolvePlatformAdminStanding` serves the audit surface
+ * with). The verified answer is the shared [#11343] allow-list
+ * (`isEmailVerifiedUserRow`) — the SAME predicate the derivation site reads
+ * ([#11973]: `resolve-authz-context.ts` §6b-config, where an unverified
+ * declared address resolves non-admin), so this probe can never forecast a
+ * dead end the derivation would not produce, nor stay quiet about one it
+ * would.
  *
  * [#13147] `OS_PLATFORM_OWNER_EMAIL` takes one address OR a comma-separated
  * list (#11663 Choice 2B), so the probe asks the ONE shared parser and answers
  * about the DECLARED SET: `owner-verified` when at least one declared address
- * has a verified account (one verified administrator is all the elevation gate
- * needs to promote), `owner-unverified` when accounts exist for declared
- * addresses but none is verified, `owner-absent` when none exists at all.
- * Those are exactly the elevation gate's own three outcomes, which is what
- * keeps this probe from forecasting a refusal the gate would not make.
+ * has a verified account (one verified administrator is all the derivation
+ * needs), `owner-unverified` when accounts exist for declared addresses but
+ * none is verified, `owner-absent` when none exists at all. Those are exactly
+ * the per-entry outcomes the walled bootstrap's standing log reports, which is
+ * what keeps this probe from forecasting a dead end that surface would not.
  *
  * Never throws: any unanswerable read is `'unknown'`.
  */
@@ -227,8 +236,8 @@ export async function probeWalledOwnerAccountState(
     return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
   };
   try {
-    // Both spellings for EVERY declared address, exactly as the elevation gate
-    // queries them — the as-typed forms come from the parser's own
+    // Both spellings for EVERY declared address, exactly as the standing
+    // resolver queries them — the as-typed forms come from the parser's own
     // `declaredSpellings`, never from splitting the raw value a second time.
     const spellings = [...new Set([...config.emails, ...config.declaredSpellings])];
     const byId = new Map<unknown, Record<string, unknown>>();
@@ -345,21 +354,21 @@ export function resolveWalledOwnerVerificationPathWarning(
     state === 'owner-unverified'
       ? 'An account holding a declared address ALREADY EXISTS and is NOT verified — it was created ' +
         'outside the operator provisioning path (the #12751 stamp applies at operator-provisioned ' +
-        'CREATION only), so elevation keeps being refused (walled_owner_not_verified) and the ' +
-        'account has no in-product way to satisfy the condition. '
+        'CREATION only), so it holds NO platform-admin standing (an unverified declared address ' +
+        'resolves non-admin at request time) and has no in-product way to satisfy the condition. '
       : state === 'owner-absent'
         ? 'Human users already exist but none holds a declared address, so the first-account bootstrap ' +
           'window (whose owner-email creation would have been stamped verified) is spent; an ' +
-          'invitation-admitted registration arrives UNVERIFIED, would be refused ' +
-          '(walled_owner_not_verified), and would have no in-product way to satisfy the condition. '
+          'invitation-admitted registration arrives UNVERIFIED, would hold NO platform-admin ' +
+          'standing, and would have no in-product way to satisfy the condition. '
         : state === 'no-human-users'
           ? `The dev-admin seed is armed and will provision '${devSeedAdminEmail()}' as the FIRST ` +
             'account at kernel:ready, spending the bootstrap carve-out on an address that is not ' +
-            'the declared owner — the owner then registers later, is refused ' +
-            '(walled_owner_not_verified), and has no in-product way to satisfy the condition. '
+            'the declared owner — the owner then registers later, holds NO platform-admin ' +
+            'standing, and has no in-product way to satisfy the condition. '
           : 'The user store could not be consulted at boot, so the declared administrators\' account state ' +
-            'is unknown; an owner account not created through an operator provisioning path is ' +
-            'refused (walled_owner_not_verified) with no in-product way to satisfy the condition. ';
+            'is unknown; an owner account not created through an operator provisioning path holds ' +
+            'NO platform-admin standing, with no in-product way to satisfy the condition. ';
 
   return (
     `[auth] ${WALLED_OWNER_NO_VERIFICATION_PATH}: tenancy posture '${posture}' declares its ` +
@@ -373,7 +382,8 @@ export function resolveWalledOwnerVerificationPathWarning(
     'but this deployment has NO way ' +
     'to verify those addresses — no email transport is wired AND no trusted federated sign-in ' +
     '(enterprise SSO or a social/OIDC provider) is configured. Boot continues, but ' +
-    'platform-admin elevation requires a declared administrator\'s address to be VERIFIED. ' +
+    'platform-admin standing is derived at request time and requires a declared ' +
+    'administrator\'s address to be VERIFIED. ' +
     situation +
     'Wire EITHER path: (1) an EMAIL ' +
     'TRANSPORT — register an email service (EmailServicePlugin + OS_EMAIL_*), which delivers ' +

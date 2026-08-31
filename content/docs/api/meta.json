@@ -1,7 +1,6 @@
 {
   "title": "API & SDK",
   "pages": [
-    "index",
     "data-api",
     "metadata-api",
     "plugin-endpoints",

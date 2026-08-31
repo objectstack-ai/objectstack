@@ -165,7 +165,8 @@ object: customer
 mode: edit
 layout:
   sections:
-    - label: Basic Information
+    - name: basic_information
+      label: Basic Information
       columns: 2
       fields:
         - name
@@ -369,7 +370,8 @@ All layouts use a 12-column grid that adapts automatically:
 
 ```yaml
 sections:
-  - label: Contact Info
+  - name: contact_info
+    label: Contact Info
     columns: 2  # Desktop: 2 columns, Tablet: 1 column, Mobile: 1 column
     fields:
       - email
@@ -429,7 +431,8 @@ name: customer_edit
 object: customer  # ← References ObjectQL schema
 layout:
   sections:
-    - fields: [name, email, status]  # ← Fields auto-validated
+    - name: basic_information
+      fields: [name, email, status]  # ← Fields auto-validated
 ```
 
 **What ObjectUI Inherits from ObjectQL:**

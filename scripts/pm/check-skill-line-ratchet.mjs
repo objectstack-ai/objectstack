@@ -225,7 +225,19 @@ export const CEILINGS = new Map([
   // only in-place payment available was deleting a ruled clause. Landed count,
   // headroom 0 again, same convention.
   ['.claude/skills/pm-dispatch/references/state-machine.md', 44],
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 48],
+  // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
+  // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
+  // `skills/**` changes making a falsifiable operator/contract semantic claim fall
+  // under the CONTENT limb, with the criterion narrowed to 「可证伪的语义主张」 and
+  // NOT 「提到契约」). The ruling sizes it at 补一句 and it landed as three lines,
+  // which could not be paid in place: the file's 41 content lines carry 577 bytes
+  // of total slack under the 120-byte cap (mean width 105.9), so absorbing the
+  // addition's 332 bytes without a new line means re-wrapping the whole file —
+  // re-wrap funding is refused per the 2026-08-17 rule, exactly as on the
+  // dispatch-runbook entry above — and the only other in-place payment available
+  // was deleting a ruled clause, refused on the state-machine precedent. Landed
+  // count, headroom 0 again, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 51],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -312,7 +324,12 @@ export const CEILINGS = new Map([
   // the maintainer-action ledger. A lane charter is read per seat session like
   // every entry above. Set at the landed line count read from this ratchet's own
   // run (headroom 0, same convention as the entries above).
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 75],
+  // 75 → 77: maintainer-directed placement (2026-08-27, verbatim: 「创业阶段不渐进
+  // 应该写入项目总监skills」) — the no-gradualism standing rule lands here by that
+  // directive; the file sat at headroom 0 with no losslessly compressible slack in
+  // the touched sections (arithmetic in the raising PR), so the directive is the
+  // ruling that pays for exactly the two lines it dictates.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 77],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.

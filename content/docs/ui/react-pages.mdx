@@ -31,6 +31,13 @@ tags in the public block manifest are accepted, props are checked against each b
 declared inputs, and an unknown tag is a hard error at save time. That is the tier for
 author- or AI-generated pages you have not reviewed.
 
+Those tags are the **registered type names, written verbatim** — lowercase and
+kebab-case, keeping the namespace prefix where a block has one: `<list-view>`,
+`<object-form>`, `<object-chart>`, `<record:related_list>`, `<flex>`. The **PascalCase**
+spellings further down this page (`<ListView>`, `<ObjectForm>`, `<ObjectChart>`) are the
+**react tier's** convention and are not registered names, so an html page that borrows
+one is rejected at save time with `<ListView> is not an allowed component`.
+
 <Callout type="warn">
 Reach for `'html'` by default. Reach for `'react'` when the page genuinely needs
 behaviour the schema tree cannot express — local state, computed lists, one block's
@@ -74,8 +81,10 @@ builds for it:
 | `useAdapter` | The live data source: `find` / `findOne` / `create` / `update`. |
 | `data`, `variables`, `page` | The page's data, its `variables` map, and its own schema. |
 
-Blocks are referenced by the **PascalCase form of their registered type**: `object-form`
-→ `<ObjectForm>`, `list-view` → `<ListView>`, `object-chart` → `<ObjectChart>`.
+**On this tier** blocks are referenced by the **PascalCase form of their registered
+type**: `object-form` → `<ObjectForm>`, `list-view` → `<ListView>`, `object-chart` →
+`<ObjectChart>`. A `kind:'html'` page writes the registered name itself instead —
+`<object-form>`, `<list-view>`, `<object-chart>`.
 
 The per-block prop lists are **generated** from the spec's block index, so they cannot
 drift out of step with the runtime. Treat the generated file as the authority and read it
@@ -142,7 +151,7 @@ function Page() {
         $filter: ['status', '!=', 'paid'],
         $top: 200,
       });
-      const records = result?.data ?? result?.records ?? (Array.isArray(result) ? result : []);
+      const records = result?.data ?? (Array.isArray(result) ? result : []);
       if (alive) setRows(records);
     })();
     return () => { alive = false; };

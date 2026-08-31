@@ -130,13 +130,18 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
    * into `MongoCredentials`, so a passthrough password authenticated for real
    * while sitting cleartext in `sys_metadata`. A non-empty `auth.password` is
    * refused with the binder prescription; `auth.username` stays writable
-   * (#8876's asymmetry — a username is not credential material).
+   * (#8876's asymmetry — a username is not credential material). The
+   * nested-position finding widened the walk: a non-empty string under a
+   * credential-SPELLED key (`password`, `authToken`, and the former aliases)
+   * is refused at ANY object depth of the passthrough, so a nested position
+   * is treated identically to the top-level key it mirrors instead of
+   * accepting the same secret one level down.
    */
   options: credentialFreeMongoOptions(
     placeholderFreeDeep(z.record(z.string(), z.unknown()), 'options'),
     'options',
   ).optional()
-    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …). Only `auth.password` is refused inline — bind it via the connection form / external.credentialsRef. `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, and `passphrase` are accepted and stored at rest in cleartext; they\'re redacted only when the datasource is read back, not refused at write.'),
+    .describe('Extra MongoClient options (replicaSet, tls, timeouts, …). Credential-spelled keys (`password`, `authToken`, and their former aliases) are refused inline at any depth — bind the secret via the connection form / external.credentialsRef. `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, and `passphrase` are accepted and stored at rest in cleartext; they\'re redacted only when the datasource is read back, not refused at write.'),
 })
   .describe('MongoDB Connection Configuration')
   .superRefine((cfg, ctx) => {

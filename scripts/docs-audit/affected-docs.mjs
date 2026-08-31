@@ -13,6 +13,33 @@
 // Scope: hand-written docs only = content/docs/**/*.mdx MINUS content/docs/references/**
 // (references are generated from packages/spec and handled by a separate regenerate pass).
 //
+// THE ABOVE SCOPE IS THE RECALL DENOMINATOR (#13306, maintainer ruling 2026-08-31). Any
+// recall figure for this tool — "of the docs pages that should have been listed, how many
+// were" — MUST use the scope above (hand-written docs, generated pages excluded) as its
+// denominator. Excluding `content/docs/references/**` is not a gap this tool happens to
+// have: those pages are AUTO-GENERATED and nobody hand-edits them, so telling an author
+// "you may have affected this page" would be WRONG ADVICE, not missing advice — the
+// exclusion is constructive, by design, same as the Scope line states.
+//
+// ⇒ a recall ratio computed against a WIDER denominator — every edit under content/docs,
+// generated pages included — is not measuring this tool at all. It is measuring how often
+// the docs generator happened to run inside whatever window was sampled, because every one
+// of those runs counts as a "miss" this tool could structurally never have avoided. This is
+// exactly how the one such figure ever computed got it wrong: measured 2026-08-30 over a
+// 91-commit window ending at `c4ecf0c49` (method, replay and the corrected re-derivation in
+// #13306), 31 of its 46 ground-truth entries were `content/docs/references/**` pages this
+// tool cannot list on any run, at any recall — the ratio moved by a factor of 2.7 just from
+// widening the sampling window, which is the signature of a denominator not measuring the
+// thing.
+//
+// ⛔ Maintainer ruling: this ceiling is honest, not a defect, and does not license widening
+// the corpus to improve the number — that trades a real regression (prompting authors about
+// pages they must never touch) for a paper gain. The tool's advisory-only posture (see
+// .github/workflows/docs-drift-check.yml's own header) is unchanged. That file documents
+// the OTHER half of "why a listed number can still miss something" — a page already IN this
+// scope that goes unlisted because it restates a rule without naming what this tool anchors
+// on. Read both; they compose into one picture, not two competing ones.
+//
 // DERIVATION (#9192): a doc is "affected" when it NAMES SOMETHING THE CHANGE TOUCHED —
 // an ANCHOR — not when it merely mentions the changed package.
 //
@@ -289,6 +316,69 @@ const DECL_PATTERNS = [
   // Members and object/schema keys: `name(`, `name<`, `name:`, `name?:`, `name =`.
   { kind: 'member', container: false, re: /^\s*(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*\*?\s*([A-Za-z_$][\w$]*)\s*(?:\?\s*)?(?:[(<:]|=[^=>])/ },
 ];
+
+/**
+ * How each declaration kind READS in an anchor's provenance clause (#12824).
+ *
+ * ⭐ RENDERING ONLY. Everything in this block and the two functions below it exists to
+ * SAY where an anchor came from; not one of them is consulted by `admitAnchor`, by either
+ * guard, or by the bridge. The anchor set a run emits is byte-identical with the whole
+ * block deleted — which is the property #12824's ruling asks for ("零 recall 变化、不动
+ * 阈值") and which `--self-test` pins directly (see `provenanceCases`).
+ *
+ * A `binding` splits, because the split is the reader's whole question: `export const
+ * ObjectSchema = z.object({` owns authorable keys and reads as a **const object**, while a
+ * plain `const` is a value. That is `declarationOn`'s own `isContainer` verdict, reused
+ * rather than re-derived.
+ */
+const DECL_NOUN = {
+  class: 'class', interface: 'interface', enum: 'enum', namespace: 'namespace',
+  type: 'type', function: 'function', binding: 'const', member: 'member',
+};
+
+/** The noun for one declaration — `binding` reads as `const object` when it owns keys. */
+const declNoun = (d) => (d.kind === 'binding' ? (d.container ? 'const object' : 'const') : (DECL_NOUN[d.kind] || d.kind));
+
+/** `a`/`an`, so a provenance clause reads as English rather than as a template. */
+const article = (word) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
+
+/**
+ * Is a matched MEMBER a data property or a callable? `name(` / `name<` are callable;
+ * `name:`, `name?:` and `name =` declare data. THIS IS THE CONSTRUCT #12824 IS ABOUT —
+ * the same syntactic form mints the best anchor the tool has (`userActions`, a key of an
+ * authorable spec object) and the worst (`organizationId`, a field of an internal cache
+ * struct) — so the clause names which one it saw and lets the reader judge the row.
+ *
+ * ⛔ It decides NOTHING. A member whose form this cannot read degrades to the neutral
+ * `member`, never to a dropped or reweighted anchor: option B — discriminating ON this
+ * distinction — is ruled down on two rounds of measurement, and this function is the
+ * deliberate opposite of it (publish the distinction, act on none of it).
+ */
+function memberFormOn(line, name) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = String(line).match(new RegExp(`(?<![\\w$])${esc}\\s*\\??\\s*([(<:=])`));
+  if (!m) return 'member';
+  return m[1] === '(' || m[1] === '<' ? 'method' : 'field';
+}
+
+/**
+ * Where a symbol anchor came from, as ONE clause a reader can judge the row by (#12824):
+ * the member, and the declaration enclosing it.
+ *
+ *   organizationId  →  a field of interface MetaOverlayCacheKey     (internal cache struct)
+ *   userActions     →  a field of const object ObjectSchemaBase     (authorable surface)
+ *   auditMetaItem   →  a method of class ObjectStackProtocolImplementation
+ *   readMetaOverlayCache → a top-level function
+ *
+ * The ruling this implements asks for exactly this and nothing more: make the defect
+ * legible, move no row. The container name is what separates the two cases above, and it
+ * is the field no row printed before.
+ */
+function declarationProvenance(winner, container, line) {
+  const noun = winner.kind === 'member' ? memberFormOn(line, winner.name) : declNoun(winner);
+  if (!container) return `a top-level ${noun}`;
+  return `${article(noun)} ${noun} of ${declNoun(container)} ${container.name}`;
+}
 
 /**
  * Where route REGISTRARS live. Deliberately a filename convention rather than a hand-kept
@@ -1026,7 +1116,9 @@ function declarationChainAt(lines, idx) {
   const chain = [];
   let indent = indentOf(lines[idx]);
   const own = declarationOn(lines[idx]);
-  if (own) chain.push({ ...own, indent });
+  // `line` rides along for the provenance clause only (#12824) — `memberFormOn` needs the
+  // text that declared the member. Nothing that decides an anchor reads it.
+  if (own) chain.push({ ...own, indent, line: lines[idx] });
   for (let i = idx - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line.trim()) continue;
@@ -1034,7 +1126,7 @@ function declarationChainAt(lines, idx) {
     const li = indentOf(line);
     if (li >= indent) continue;
     const d = declarationOn(line);
-    if (d) chain.push({ ...d, indent: li });
+    if (d) chain.push({ ...d, indent: li, line });
     indent = li;
     if (li === 0) break;
   }
@@ -1057,6 +1149,13 @@ function declarationChainAt(lines, idx) {
  * `bridgeSymbols` block in §3b). It is read off the winning declaration rather than
  * from the branch, so a container reached as `inner` (an interface nested in a
  * namespace) is reported the same as one reached as the fallback.
+ *
+ * `from` is the third field and it is PURE REPORTING (#12824): the clause naming the
+ * declaration that minted this anchor, so an emitted row reads "via `organizationId`, a
+ * field of interface `MetaOverlayCacheKey`" instead of leaving the reader to guess whether
+ * that is an authorable key or an internal cache struct. ⛔ It is not consulted here, in
+ * `symbolAnchorsFromSource`, in `admitAnchor` or in the bridge — the two returns below
+ * select exactly the names they selected before it existed.
  */
 function documentableDeclarationsAt(lines, idx) {
   const chain = declarationChainAt(lines, idx);
@@ -1064,8 +1163,8 @@ function documentableDeclarationsAt(lines, idx) {
   const outer = chain[chain.length - 1];
   const inner = chain.length > 1 ? chain[chain.length - 2] : null;
   const usable = (d) => d && !GENERIC_ANCHOR_NAMES.has(d.name) && !GENERIC_ANCHOR_NAMES.has(d.name.toLowerCase()) && d.name.length >= 3;
-  if (inner && outer.container && usable(inner)) return [{ name: inner.name, container: !!inner.container }];
-  if (usable(outer) && outer.kind !== 'member') return [{ name: outer.name, container: !!outer.container }];
+  if (inner && outer.container && usable(inner)) return [{ name: inner.name, container: !!inner.container, from: declarationProvenance(inner, outer, inner.line) }];
+  if (usable(outer) && outer.kind !== 'member') return [{ name: outer.name, container: !!outer.container, from: declarationProvenance(outer, null, outer.line) }];
   return [];
 }
 
@@ -1127,27 +1226,111 @@ function routePatternFor(tail) {
   return new RegExp(`/${body}(?![\\w-])`);
 }
 
+/**
+ * Accumulate provenance clauses for one token, in a `Map<token, Set<clause>>` (#12824).
+ * A token reached through more than one declaration keeps every clause — the row then
+ * says so, rather than silently picking one and reading like the only answer.
+ */
+function noteFrom(map, token, clause) {
+  if (!clause) return;
+  let set = map.get(token);
+  if (!set) map.set(token, (set = new Set()));
+  set.add(clause);
+}
+
+/**
+ * Is this quoted span identifier-shaped enough to mint a `literal` anchor?
+ *
+ * FOUR SHAPES. Three of them say "an identifier starts lowercase" — snake_case,
+ * camelCase, a dotted client path. A quoted English word (`'ignore'`, `'utf8'`) is not a
+ * surface anyone documents by that spelling, and those three keep it out.
+ *
+ * THE FOURTH IS SCREAMING_SNAKE, AND IT IS HERE TO END A DISAGREEMENT (#13471). While the
+ * three lowercase-initial shapes were the whole rule, this predicate and `isCodeShaped`
+ * contradicted each other on every constant name: `isCodeShaped('OS_MODE')` is `true` —
+ * pinned as `SCREAMING_SNAKE` in the shape cases below since the guard was written — while
+ * this test declined to mint an anchor from it at all. One predicate in the pair called the
+ * token an identifier, the other silently called it prose, and nothing reported the split.
+ * A page that names env vars and essentially nothing else (`deployment/environment-variables.mdx`)
+ * has no other `literal` route onto an advisory.
+ *
+ * The fourth shape is earned by the same argument that earns `PHRASE_ANCHOR_KINDS` its
+ * exemption — DISTINCTIVE BY CONSTRUCTION, not by inspection. `OS_TENANCY_POSTURE` cannot
+ * be the English word this guard exists to drop: prose does not shout in underscores. Note
+ * the shape is MULTI-SEGMENT by construction (the `_` is required), so a bare all-caps word
+ * is not admitted by it — see the deliberate-disagreement pins in `--self-test`.
+ *
+ * MEASURED BOTH WAYS before widening, over the 60 most recent `packages/**` commits, using
+ * the per-row provenance #12824 published so each added row could be attributed to the
+ * declaration that minted it rather than counted in a lump:
+ *   - rows 374 -> 383 (+9, +2.4%), and ZERO rows lost;
+ *   - `overbroadAnchors` 8 -> 8: the corpus-share guard caught no new hub term, so the
+ *     widening minted no term broad enough to need catching;
+ *   - only 2 of the 60 runs moved at all. Every new anchor named its declaration:
+ *     `FlowRefusalCode`, `AUTHZ_STORE_UNAVAILABLE_CODE`, `codes`.
+ *   - GROUND TRUTH on `b6d3d76b5`, whose own commit edited three docs pages: the advisory
+ *     went from 0 of those 3 (it listed two `releases/**` pages and nothing else) to 2 of 3
+ *     — `api/client-sdk.mdx` and `automation/flows.mdx`, both minted from `FlowRefusalCode`.
+ *   - the four vendor codes in that window (`ER_DUP_KEYNAME` and friends, from a MySQL
+ *     driver table) minted anchors and matched NO page, so they cost nothing: an anchor
+ *     no doc names is not a row.
+ *
+ * BLAST RADIUS, KEPT HONEST. `4d98d9eab` is the commit this was found on, and the widening
+ * adds ZERO rows there: `environment-variables.mdx` was already listed through the `route`
+ * anchor `/api/v1/runtime/config`, so all the fourth shape adds is a second `via` clause
+ * saying `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED` also pointed at it. The recall win is
+ * real and it is `b6d3d76b5`-shaped, not `4d98d9eab`-shaped.
+ *
+ * DO NOT COLLAPSE THIS INTO `isCodeShaped`. It looks like the same question and it is not,
+ * because the two run over DIFFERENT POPULATIONS: `isCodeShaped` judges a token already
+ * known to be a declaration NAME, while this one judges an arbitrary quoted span, which may
+ * be prose someone quoted. Measured on the same 60 commits, delegating this test to
+ * `isCodeShaped` gives rows 374 -> 408 (+9.1%, versus +2.4%) and admits `'unchanged.'`,
+ * `'means.'` and `'version.'` — sentence fragments that reach `isCodeShaped`'s `.` arm.
+ * Those three are pinned as non-anchors in `--self-test` so the collapse goes red.
+ */
+function isLiteralAnchorShape(lit) {
+  return /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(lit)          // snake_case
+    || /^[a-z]+(?:[A-Z][A-Za-z0-9]*)+$/.test(lit)             // camelCase
+    || /^[a-z][a-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/.test(lit)   // a dotted client path
+    || /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(lit);           // SCREAMING_SNAKE (#13471)
+}
+
 /** Route tails and identifier-shaped string literals appearing on the changed lines. */
 function literalAnchorsFromLines(lines, changed) {
   const routes = new Set();
   const literals = new Set();
+  // WHERE each one sat, for the emitted row (#12824). Derived lazily — the enclosing
+  // declaration is only walked for a line that actually yielded a literal, so a run that
+  // mints none pays nothing. Reporting only: no route and no literal is admitted,
+  // dropped or reordered by anything below.
+  const from = new Map();
   for (const n of changed) {
     const line = lines[n - 1];
     if (line === undefined) continue;
+    let enclosing;
+    const enclosingName = () => {
+      if (enclosing === undefined) enclosing = documentableDeclarationsAt(lines, n - 1)[0] || null;
+      return enclosing ? enclosing.name : null;
+    };
     for (const m of line.replace(/\$\{[^}]*\}/g, '').matchAll(/(?:\/[A-Za-z0-9_:.$*{}-]+){2,}/g)) {
       const tail = routeTailOf(m[0]);
-      if (tail) routes.add(tail);
+      if (tail) {
+        routes.add(tail);
+        const where = enclosingName();
+        noteFrom(from, tail, where ? `a path literal in ${where}` : 'a path literal on a changed line');
+      }
     }
     for (const m of line.matchAll(/['"]([A-Za-z][\w.$-]{3,63})['"]/g)) {
       const lit = m[1];
       if (GENERIC_ANCHOR_NAMES.has(lit.toLowerCase())) continue;
-      // Identifier-shaped only: snake_case, camelCase or dotted. A quoted English word
-      // ('ignore', 'utf8') is not a surface anyone documents by that spelling.
-      if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(lit) && !/^[a-z]+(?:[A-Z][A-Za-z0-9]*)+$/.test(lit) && !/^[a-z][a-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/.test(lit)) continue;
+      if (!isLiteralAnchorShape(lit)) continue;
       literals.add(lit);
+      const where = enclosingName();
+      noteFrom(from, lit, where ? `a string literal in ${where}` : 'a string literal on a changed line');
     }
   }
-  return { routes, literals };
+  return { routes, literals, from };
 }
 
 /**
@@ -1163,14 +1346,19 @@ function symbolAnchorsFromSource(text, changed) {
   const lines = text.split('\n');
   const names = new Set();
   const bridgeable = new Set();
+  // The #12824 third answer: `Map<name, Set<clause>>`, the declaration each name was
+  // minted from. Accumulated like `names` and never consulted by it — deleting the
+  // `noteFrom` line below leaves both sets byte-identical.
+  const from = new Map();
   for (const n of changed) {
     if (n - 1 < 0 || n - 1 >= lines.length) continue;
     for (const d of documentableDeclarationsAt(lines, n - 1)) {
       names.add(d.name);
+      noteFrom(from, d.name, d.from);
       if (!d.container) bridgeable.add(d.name);
     }
   }
-  return { names, bridgeable };
+  return { names, bridgeable, from };
 }
 
 /**
@@ -2582,6 +2770,84 @@ function selfTest() {
   ];
   for (const [line, want, label] of containerCases) {
     check('symbolAnchorsFromSource', label, `line ${line}`, JSON.stringify(want), JSON.stringify([...anchorsAt(schemaSource, line)]));
+  }
+
+  // ---- anchor PROVENANCE (#12824) -------------------------------------------
+  // The ruling of 2026-08-31 took option C — say where each anchor came from — and ruled
+  // OUT option B, discriminating on it. These pins hold both halves: the clause is
+  // derived and correct, AND it moves no anchor.
+  //
+  // The two fixtures below are THE case the card is about, and they are deliberately the
+  // same syntactic form: `name:` inside an object/interface. One is the noisiest anchor
+  // the tool mints, the other is the most valuable one — disproven discriminator #1 on
+  // the card is exactly that no syntactic test separates them. The container does, and
+  // that is the field these rows now print.
+  const cacheStructSource = [
+    '/** The identity of one cached overlay read. */',
+    'export interface MetaOverlayCacheKey {',
+    '    type: string;',
+    '    packageId?: string;',
+    '    organizationId?: string;',
+    '}',
+  ].join('\n');
+  const authorableSource = [
+    'const ObjectSchemaBase = strictObject({',
+    '    userActions: strictObject({',
+    '        create: z.boolean().optional(),',
+    '    }),',
+    '});',
+  ].join('\n');
+  const fromAt = (src, lineNo) => {
+    const d = documentableDeclarationsAt(src.split('\n'), lineNo - 1)[0];
+    return d ? `${d.name} — ${d.from}` : null;
+  };
+  const provenanceCases = [
+    [cacheStructSource, 5, 'organizationId — a field of interface MetaOverlayCacheKey',
+      'the NOISY face: a data property of an internal cache struct, and the row now says so'],
+    [authorableSource, 2, 'userActions — a field of const object ObjectSchemaBase',
+      'the VALUABLE face: the same `name:` form on an authorable spec object — option B dropped this row, C prints it'],
+    [protocolSource, 9, 'auditMetaItem — a method of class ObjectStackProtocolImplementation',
+      'a changed method body names its method AND the class it lives in'],
+    [protocolSource, 1, 'ObjectStackProtocolImplementation — a top-level class',
+      'a top-level declaration says so rather than naming a container it has not got'],
+    [schemaSource, 2, 'controlled_by_parent — a field of const object ObjectSchema',
+      'a schema KEY reads as a field of the const object that owns it'],
+    [schemaSource, 6, 'buildObject — a top-level function',
+      'a local inside a function anchors on the function, and the clause says top-level'],
+  ];
+  for (const [src, line, want, label] of provenanceCases) {
+    check('documentableDeclarationsAt.from', label, `line ${line}`, want, fromAt(src, line));
+  }
+
+  // The member FORM is what the two faces above differ by, so it is pinned on its own —
+  // including its degraded answer, which is the shape that guarantees a form this cannot
+  // read costs a WORD and never an anchor.
+  const memberFormCases = [
+    ['    organizationId?: string;', 'organizationId', 'field', 'an optional data property'],
+    ['  userActions: strictObject({', 'userActions', 'field', 'a schema key'],
+    ['    async auditMetaItem(request: {', 'auditMetaItem', 'method', 'a class method'],
+    ['    getHistory?(type: string): Promise<void>;', 'getHistory', 'method', 'an optional interface method'],
+    ['    handler = () => {};', 'handler', 'field', 'a class field initialised with an arrow'],
+    ['    somethingUnreadable', 'somethingUnreadable', 'member', 'a form this cannot read degrades to the neutral word — never to a dropped anchor'],
+  ];
+  for (const [line, name, want, label] of memberFormCases) {
+    check('memberFormOn', label, line.trim(), want, memberFormOn(line, name));
+  }
+
+  // ⭐ THE INVARIANT THAT MAKES "零 recall 变化" A PROPERTY OF THE CODE. Provenance is a
+  // parallel map, so the only way it could move the list is by introducing or withholding
+  // a NAME. Both directions are pinned: its key set is exactly the anchor set, never a
+  // superset (a name nothing minted) and never a subset (an anchor with no clause, which
+  // is how a row would silently go back to being unjudgeable).
+  for (const [src, line, label] of [
+    [protocolSource, 9, 'a method body'],
+    [cacheStructSource, 5, 'a data property of an internal struct'],
+    [authorableSource, 2, 'a data property of an authorable schema'],
+    [schemaSource, 6, 'a function-local line'],
+  ]) {
+    const got = symbolAnchorsFromSource(src, [line]);
+    check('symbolAnchorsFromSource.from', `the provenance key set IS the anchor set — ${label}`, `line ${line}`,
+      JSON.stringify([...got.names].sort()), JSON.stringify([...got.from.keys()].sort()));
   }
 
   // Statement heads must never be read as declarations — `if (x) {` has the same shape as
@@ -4138,14 +4404,49 @@ function selfTest() {
   check('PHRASE_ANCHOR_KINDS', 'a rule expression is distinctive by construction', 'rule', true, PHRASE_ANCHOR_KINDS.has('rule'));
 
   // String literals on a changed line: an identifier-shaped one is surface, English is not.
-  const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');"];
-  const lits = literalAnchorsFromLines(litLines, [1, 2, 3]).literals;
+  const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');",
+    "  const ENV = 'OS_TENANCY_POSTURE';", "  if (c === 'FLOW_NO_START_NODE') return refuse(c);",
+    "  // the shape is 'unchanged.' in that arm", "  throw new Error('EEXIT');"];
+  const lits = literalAnchorsFromLines(litLines, [1, 2, 3, 4, 5, 6, 7]).literals;
   const literalCases = [
     ['controlled_by_parent', true, 'a snake_case literal IS an authoring surface'],
     ['utf8', false, 'an encoding name is not surface'],
     ['ignore', false, 'an English word is not surface'],
+    // #13471. The env-var name is the case the whole card was filed on: a page that names
+    // env vars and essentially nothing else has no other `literal` route onto an advisory.
+    ['OS_TENANCY_POSTURE', true, 'a SCREAMING_SNAKE env-var name IS an authoring surface'],
+    ['FLOW_NO_START_NODE', true, 'and so is a refusal code — the measured recall win'],
+    // ⛔ The guard rail on the widening, both halves measured on the same 60 commits.
+    ['unchanged.', false, 'a quoted sentence fragment is still not surface'],
+    ['EEXIT', false, 'a bare all-caps word is not SCREAMING_SNAKE — the shape needs a segment break'],
   ];
   for (const [lit, want, label] of literalCases) check('literalAnchorsFromLines', label, lit, want, lits.has(lit));
+
+  // ── THE PAIR MUST AGREE ON SCREAMING_SNAKE (#13471) ──
+  // The defect this closed was not "recall too low", it was TWO PREDICATES CONTRADICTING
+  // each other with nothing reporting the split: `isCodeShaped` called `OS_MODE` an
+  // identifier (pinned in `shapeCases` above) while `literalAnchorsFromLines` declined to
+  // mint any anchor from it. Pin the agreement itself, so neither side can drift back out
+  // of step silently — a check on one predicate alone could not have caught this.
+  for (const t of ['OS_CLOUD_URL', 'OS_MODE', 'OS_TENANCY_POSTURE', 'ERROR_CODE_LEDGER', 'FLOW_INPUT_SCHEMA_INVALID']) {
+    check('isCodeShaped/isLiteralAnchorShape', 'the pair agrees on a SCREAMING_SNAKE token', t,
+      true, isCodeShaped(t) === isLiteralAnchorShape(t) && isLiteralAnchorShape(t));
+  }
+
+  // ⛔ AND THE DISAGREEMENTS THAT REMAIN ARE DELIBERATE, so the next reader does not
+  // "finish the job" by collapsing this test into `isCodeShaped`. The two run over
+  // DIFFERENT POPULATIONS — a declaration NAME versus an arbitrary quoted span that may be
+  // prose — and delegating measured rows 374 -> 408 (+9.1%, versus +2.4% for the shape
+  // above) on the same 60 commits. These three fragments are what it admits.
+  const deliberateSplits = [
+    ['unchanged.', 'a sentence fragment reaches isCodeShaped through its `.` arm'],
+    ['means.', 'ditto — measured, not hypothetical'],
+    ['version.', 'ditto'],
+    ['IHttpRequest', 'a PascalCase name is already reachable through the `symbol` kind'],
+  ];
+  for (const [t, label] of deliberateSplits) {
+    check('isCodeShaped/isLiteralAnchorShape', label, t, true, isCodeShaped(t) && !isLiteralAnchorShape(t));
+  }
 
   // ── `computedOn` (#9519): the record that names WHICH TREE the answer is about ──
   // Pinned on the pure shaper, so these stay hermetic; the probing wrapper reads real
@@ -4552,6 +4853,14 @@ const ruleAnchors = new Set();
 const unmappedCommandFiles = [];
 const unanchoredRuleBlocks = [];
 const anchorlessChanges = [];
+// WHERE EVERY ANCHOR CAME FROM (#12824), keyed `kind::token` — the kinds carry no colon,
+// so the key is unambiguous whatever a `rule` span contains. Every emitted row reads its
+// clause from here, and NOTHING else does: no guard, no bridge and no admission consults
+// this map, which is what makes "零 recall 变化" a property of the code rather than a
+// claim about it. A token with several origins keeps them all.
+const anchorFrom = new Map();
+const noteAnchorFrom = (kind, token, clause) => noteFrom(anchorFrom, `${kind}::${token}`, clause);
+const anchorFromOf = (kind, token) => [...(anchorFrom.get(`${kind}::${token}`) || [])].sort();
 
 const readAt = (ref, file) => {
   try { return sh(`git show ${ref}:${file}`); } catch { return null; }
@@ -4563,7 +4872,12 @@ for (const f of implementationChanges) {
   // not in the contents.
   const cmd = commandAnchorFor(f);
   if (cmd?.unmapped) unmappedCommandFiles.push(f);
-  if (cmd?.token) commandAnchors.set(cmd.token, { id: cmd.id, bins: cmd.bins });
+  if (cmd?.token) {
+    commandAnchors.set(cmd.token, { id: cmd.id, bins: cmd.bins });
+    // The token IS the command phrase, so restating its id here says nothing; the FILE
+    // the id was read off is the fact the row does not already carry.
+    noteAnchorFrom('command', cmd.token, `read off ${f}`);
+  }
   if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(f)) { anchorlessChanges.push(f); continue; }
   let diffText = '';
   try { diffText = sh(`git diff -U0 ${baseRef} HEAD -- ${JSON.stringify(f)}`); } catch { /* keep empty */ }
@@ -4580,12 +4894,15 @@ for (const f of implementationChanges) {
     const sym = symbolAnchorsFromSource(text, changed);
     for (const name of sym.names) { symbolAnchors.add(name); found++; }
     for (const name of sym.bridgeable) bridgeableSymbols.add(name);
-    const { routes, literals } = literalAnchorsFromLines(text.split('\n'), changed);
+    for (const [name, clauses] of sym.from) for (const c of clauses) noteAnchorFrom('symbol', name, c);
+    const { routes, literals, from: literalFrom } = literalAnchorsFromLines(text.split('\n'), changed);
     for (const r of routes) { routeAnchors.add(r); found++; }
     for (const l of literals) { literalAnchors.add(l); found++; }
+    for (const r of routes) for (const c of literalFrom.get(r) || []) noteAnchorFrom('route', r, c);
+    for (const l of literals) for (const c of literalFrom.get(l) || []) noteAnchorFrom('literal', l, c);
     const rule = ruleAnchorsFromSource(text, changed);
     if (rule.touched) ruleBlockTouched = true;
-    for (const s of rule.spans) { ruleAnchors.add(s); ruleSpansHere++; found++; }
+    for (const s of rule.spans) { ruleAnchors.add(s); ruleSpansHere++; found++; noteAnchorFrom('rule', s, `a ${DOCS_RULE_TAG} block in ${f}`); }
   }
   // A tagged block that changed and produced nothing is a DECLARED blind spot, published
   // like `unmappedCommandFiles` rather than left to be inferred from a gap. The file may
@@ -4635,7 +4952,9 @@ function admitAnchor(kind, token, re) {
   const docs = [];
   for (let i = 0; i < handwritten.length; i++) if (re.test(docTexts[i])) docs.push(i);
   if (docs.length > overbroadLimit) { overbroadAnchors.push(`${token} (${kind}, ${docs.length} pages)`); return false; }
-  anchors.push({ kind, token });
+  // The clause rides ALONG with the admitted anchor; it is read after both guards have
+  // already spoken, so it cannot participate in either verdict (#12824).
+  anchors.push({ kind, token, from: anchorFromOf(kind, token) });
   hitsByAnchor.push(docs);
   return true;
 }
@@ -4747,23 +5066,44 @@ if (bridgeSymbols.length) {
   }
   for (const [s, tails] of routesBySymbol) {
     if (tails.size > MAX_ROUTES_PER_SYMBOL) { crossCuttingSymbols.push(`${s} (${tails.size} routes)`); continue; }
-    for (const t of tails) routeAnchors.add(t);
+    for (const t of tails) {
+      routeAnchors.add(t);
+      noteAnchorFrom('route', t, `bridged from symbol ${s} — its registrar handler names it`);
+    }
   }
   // route → client method (the ledger's declared binding), and the reverse direction for
   // free: a changed SDK method name pulls in the route it is bound to.
   for (const { route, client } of ledgerRows) {
     if (!client) continue;
     const tail = client.split('.').pop();
-    if ([...routeAnchors].some((t) => route.endsWith(t))) {
+    // `.find` where this used to say `.some`, over the SAME insertion-ordered snapshot:
+    // the boolean is identical (first match / any match), and capturing the selecting tail
+    // is what lets the emitted row name the hop it rode (#12824). The amplification this
+    // card records — an `sdk` row on a diff that never came near that route — is only
+    // judgeable when the row says which route anchor selected it.
+    const selectedBy = [...routeAnchors].find((t) => route.endsWith(t));
+    if (selectedBy !== undefined) {
       sdkAnchors.add(client);
+      // The selecting tail is named only when it is not simply the route itself — on the
+      // common case the two spellings are the same path and printing both is noise.
+      const bare = route.replace(/^[A-Z]+\s+/, '');
+      noteAnchorFrom('sdk', client, bare === selectedBy
+        ? `the route ledger binds it to ${route}`
+        : `the route ledger binds it to ${route}, selected by route anchor ${selectedBy}`);
       // The BARE tail is an anchor only when its own spelling is distinctive.
       // `getBookTree` identifies one method; `import` / `query` / `revoke` are English,
       // and matching them corpus-wide put 116 and 84 pages on the list respectively
       // (measured, 0668f02a6). The dotted form (`data.query`) stays, and it is precise.
-      if (tail && isCodeShaped(tail) && !GENERIC_ANCHOR_NAMES.has(tail.toLowerCase())) sdkAnchors.add(tail);
+      if (tail && isCodeShaped(tail) && !GENERIC_ANCHOR_NAMES.has(tail.toLowerCase())) {
+        sdkAnchors.add(tail);
+        noteAnchorFrom('sdk', tail, `the bare tail of client method ${client}, bound to ${route}`);
+      }
     } else if (tail && bridgeSymbols.includes(tail)) {
       const routeTail = routeTailOf(route.replace(/^[A-Z]+\s+/, ''));
-      if (routeTail) routeAnchors.add(routeTail);
+      if (routeTail) {
+        routeAnchors.add(routeTail);
+        noteAnchorFrom('route', routeTail, `the route ledger binds it to client method ${client}`);
+      }
     }
   }
 }
@@ -4774,12 +5114,29 @@ for (const name of [...sdkAnchors].sort()) admitAnchor('sdk', name, dottedRe(nam
 for (const tail of [...routeAnchors].sort()) admitAnchor('route', tail, routePatternFor(tail));
 
 // --- 3c. the pages that name a surviving anchor ----------------------------
+/**
+ * ONE `via` clause of an emitted row — the anchor, its kind, and WHERE it came from
+ * (#12824). Before this, a row read `organizationId (symbol)` and a reader had no way to
+ * tell the single most on-target anchor the tool mints from pure noise: the same `name:`
+ * form declares `userActions` on an authorable spec object and `organizationId` on an
+ * internal cache struct, and the container is the only thing that separates them. Now it
+ * reads `organizationId (symbol, a field of interface MetaOverlayCacheKey)`.
+ *
+ * ⛔ Rendering only, and deliberately so. The ruling this implements (2026-08-31) took
+ * option C — publish the provenance — and ruled OUT option B, discriminating on it: the
+ * `-17.9%` a data-property filter buys was measured against an oracle that could see 10 of
+ * 46 pages (re-derived to 48.8% on #13306), and the rows it drops include `userActions` →
+ * `data-modeling/objects.mdx` and `schemaMode` → `data-modeling/drivers.mdx`. A false
+ * negative here ships a falsified page; a false positive costs a reader a minute.
+ */
+const anchorRow = (a) => `${a.token} (${a.kind}${a.from && a.from.length ? `, ${a.from.join('; ')}` : ''})`;
+
 const affectedByDoc = new Map();
 for (let k = 0; k < anchors.length; k++) {
   for (const i of hitsByAnchor[k]) {
     let via = affectedByDoc.get(i);
     if (!via) affectedByDoc.set(i, (via = []));
-    via.push(`${anchors[k].token} (${anchors[k].kind})`);
+    via.push(anchorRow(anchors[k]));
   }
 }
 const affected = [];
@@ -4841,7 +5198,9 @@ emit(
   affected,
   { testFilesSkipped, scriptFilesSkipped, devOnlyManifestsSkipped },
   {
-    anchors: anchors.map((a) => ({ kind: a.kind, token: a.token })),
+    // `from` is the same clause the rows above render, from the same field — never a
+    // second derivation, which is how the list and the rows start disagreeing (#12824).
+    anchors: anchors.map((a) => ({ kind: a.kind, token: a.token, from: a.from })),
     anchorlessChanges,
     unmappedCommandFiles,
     unanchoredRuleBlocks,

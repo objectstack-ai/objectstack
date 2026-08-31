@@ -1085,6 +1085,27 @@ describe('AuthPlugin', () => {
       expect(ql.insert).not.toHaveBeenCalled();
     });
 
+    // [#11973 / #11663 L3] The trigger set widened to the #11343 `sys_user`
+    // arms: a config-anchored administrator comes into standing through a
+    // `sys_user` insert (operator-provisioned, arrives verified) or a
+    // verifying/email update — with no grant insert ever firing post-L4.
+    it('single-org: re-runs after a sys_user insert and after an email_verified update (#11973)', async () => {
+      await boot();
+      const runAll = async (opCtx: any) => {
+        for (const mw of middlewares) await mw(opCtx, async () => {});
+      };
+      await runAll({ object: 'sys_user', operation: 'insert' });
+      expect(ql.tables.sys_member).toHaveLength(1);
+      // The verifying update fires the bootstrap too (idempotent second pass).
+      await runAll({ object: 'sys_user', operation: 'update', data: { email_verified: true } });
+      expect(ql.tables.sys_member).toHaveLength(1);
+      // A sys_user update touching NEITHER standing column costs no run at
+      // all — asserted on `find`, which any fired pass must call first.
+      ql.find.mockClear();
+      await runAll({ object: 'sys_user', operation: 'update', data: { name: 'renamed' } });
+      expect(ql.find).not.toHaveBeenCalled();
+    });
+
     it('single-org: idempotent — second kernel:ready pass is a no-op', async () => {
       await boot();
       await hookCapture.trigger('kernel:ready');

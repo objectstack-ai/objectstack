@@ -772,6 +772,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.occ-version-token-instant.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.occ-version-token-instant.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.occ-version-token-instant.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit-live-registry.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2114,7 +2129,7 @@
     {
       "file": "packages/plugins/plugin-auth/src/durability-swallow-repair.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-auth/src/first-session-membership-ordering.test.ts",
@@ -2842,6 +2857,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3097,6 +3127,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-messaging/src/http-outbox-organization.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-messaging/src/inbox-channel.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3230,6 +3265,16 @@
       "file": "packages/services/service-storage/src/stranded-orphan-inventory.test.ts",
       "verb": "delete",
       "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-copy-backfill-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-copy-backfill-organization-stamping.test.ts",
+      "verb": "update",
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",

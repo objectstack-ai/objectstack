@@ -1,7 +1,6 @@
 {
   "title": "Deployment & Operations",
   "pages": [
-    "index",
     "self-hosting",
     "production-readiness",
     "backup-restore",

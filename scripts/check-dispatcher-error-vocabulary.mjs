@@ -565,8 +565,9 @@ export const KEBAB_DIAGNOSTIC_VOCABULARY = Object.freeze({
  * (`const c = x ? 'A' : 'B'; return { code: c }`) — the object-literal twin of
  * the `assignconst` local #9568 closed for the assign position. `objlithelper`
  * declines it (the identifier is not a parameter), `objlitconst` needs
- * SCREAMING_SNAKE, and `objlit` needs a quote. UNCLOSED and UNCENSUSED, on the
- * record here rather than in the gap between three shapes.
+ * SCREAMING_SNAKE, and `objlit` needs a quote. Still UNCLOSED — but no longer
+ * UNCENSUSED: [#13478] measured it at CENSUSED-AND-EMPTY, zero live instances,
+ * so the widening is PREVENTIVE and not a live defect. See `localTwinCensus`.
  * ⛔ It does not admit the ANONYMOUS ARROW, for the reason below: a nameless
  * helper offers nothing for a call scan to anchor on.
  */
@@ -629,6 +630,83 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
      * cannot quietly become the story.
      */
     nonErrorCodeHelpersReached: 2,
+  }),
+  /**
+   * [#13478] THE CENSUS the sibling card was closed on, and this one was opened
+   * for. Question: what would admitting a `code:` fed by a lower-case LOCAL in
+   * an object literal — the twin of `assignconst`, above — newly reach?
+   *
+   * Measured on this tree through the gate's OWN primitives (`SHAPES`,
+   * `enclosingOpeners`, `helperCodesFor`, `resolveConstant`), with the
+   * `objlithelper` branch replicated and ONE line changed: where it declines a
+   * non-parameter identifier, the replica falls back to `resolveConstant`
+   * exactly as the assignment position's `codehelper` branch does. Two
+   * instrument checks, because a zero from a broken instrument and a zero from
+   * a clean corpus are the same number:
+   *   · CONFORMANCE — with the fallback OFF the replica reproduced the real
+   *     `deriveSites` objlithelper output EXACTLY (29 sites, 5 unresolved).
+   *   · POSITIVE CONTROL — a synthetic corpus carrying this very shape yielded
+   *     5 emissions (2 SCREAMING, 2 lowercase, 1 shorthand) with the fallback
+   *     ON and 0 with it OFF; a same-name-shadowing negative control yielded 0.
+   *
+   * ⚠️ The headline zero is NOT "the position is empty". The position is
+   * populated — 24 value-position candidates feed a `code:` through a local or
+   * a destructured binding. Every one of them holds a RUNTIME value, which is
+   * the #9460 bound this gate declares rather than a hole. What is empty is the
+   * REDUCIBLE subclass: not one local in this tree holds the ternary-or-chain
+   * of literals that the widening would newly admit.
+   *
+   * ⇒ Nothing reduces ⇒ nothing is emitted ⇒ no verdict row is owed, and the
+   * bidirectional reconciliation that locks widening-vs-row ordering has
+   * nothing to order. The widening would be PREVENTIVE. Re-run the census
+   * before spending a round on it; do not read this zero as permission to
+   * assume the next tree is also empty.
+   */
+  localTwinCensus: Object.freeze({
+    /** Every position where `objlithelper` declines a non-parameter identifier. */
+    candidatePositions: 125,
+    /**
+     * Of those, the ones another object-literal shape ALREADY matches at the
+     * same `code` token — SCREAMING_SNAKE module constants, which `objlitconst`
+     * resolves or reports today. Not newly reached, and counting them as such
+     * is the easiest way to inflate this census.
+     */
+    alreadyCoveredByObjlitconst: 36,
+    /** Genuinely newly reached: no other shape matches that token. */
+    newlyReached: 89,
+    newlyReachedDistinctFileIdent: 69,
+    newlyReachedDistinctFiles: 45,
+    /** ⭐ Of the newly reached, how many reduce to a literal set. */
+    reduce: 0,
+    /** ⇒ nothing to emit ⇒ no rows owed in the declaration file. */
+    newVerdictRows: 0,
+    /**
+     * ⭐⭐ THE ROW THAT DECIDES IT. Unregistered wire codes the widening would
+     * surface: none. That is what makes this a preventive card rather than a
+     * live defect — the opposite reading was the escalation the card reserved.
+     */
+    unregisteredWireCodesHiding: 0,
+    /**
+     * Entries reducing to NOTHING, counted as their OWN class rather than
+     * folded into the zero: each would be a red with no verdict available
+     * unless it can be classified, so each IS classified. The four classes sum
+     * to `newlyReached`, and the first two are not value stamps at all — the
+     * candidate regex reads `code: Ident`, and in a TYPE literal that Ident is
+     * a type name. That imprecision is the reason a widening here would cost
+     * more than the assignment position's did.
+     */
+    reduceToEmptyByClass: Object.freeze({
+      typeKeywordPosition: 49, // `code: string` / `number` / `undefined`
+      namedTypePosition: 16, // `code: FieldErrorCode` / `ErrorCode` / `FlowRefusalCode` / …
+      runtimeValueLocal: 15, // `const code = e?.body?.code ?? …` — the #9460 bound
+      bindingWithoutDeclarator: 9, // destructured `const { code } = resolveThrownHttpError(…)`
+    }),
+    /**
+     * The card's EXACT shape — a lower-case local reducible to a literal SET,
+     * stamped through an object-literal `code:`. The number the whole card
+     * turned on.
+     */
+    cardsExactClassLiveInstances: 0,
   }),
   /**
    * [#13226] What closing blindness ② moved on the tree: NOTHING.
@@ -3337,6 +3415,94 @@ function selfTest() {
       'the anonymous-arrow form is no longer declared out — #13226 deliberately left it out of scope, so ' +
         'either it was closed without rewriting this declaration, or the declaration lost its last entry',
     );
+
+    // ⑤ [#13478] THE CENSUS, kept re-checkable rather than left as five numbers.
+    //
+    //    `localTwinCensus` says the lower-case-LOCAL twin is CENSUSED-AND-EMPTY.
+    //    That claim has two halves and a bare count asserts neither, so both are
+    //    pinned here — and they fail in OPPOSITE directions, which is the point:
+    //      · the HOLE is still open (no site AND no unresolved for the card's
+    //        exact shape). If someone closes it, this fires and says the figures
+    //        below now describe a gate that no longer exists — re-census, do not
+    //        edit the numbers to match.
+    //      · the MACHINERY is live (`resolveConstant` reduces that same local to
+    //        both of its branches). This is the POSITIVE CONTROL for the zero: a
+    //        broken resolver would also report "nothing reduces", and the two
+    //        readings are the same number. Without this half, "censused and
+    //        empty" is indistinguishable from "measured with a dead instrument"
+    //        — the failure this card was opened to avoid inheriting from #13430.
+    {
+      const localTwin =
+        `export function refuse(intent: string, message: string) {\n` +
+        `  const c = intent === 'x' ? '${B.probe}' : '${B.probeLowercase}';\n` +
+        `  return { code: c, message };\n` +
+        `}\n`;
+      const derived = derive(localTwin);
+      const probes = [B.probe, B.probeLowercase];
+
+      // The candidate generator DOES fire here — what declines is the structural
+      // guard. "No shape matches the text" and "a shape matches and declines"
+      // are different states, and only the second is what was censused.
+      const objlithelperShape = SHAPES.find((sh) => sh.name === 'objlithelper');
+      ok(
+        [...localTwin.matchAll(new RegExp(objlithelperShape.re.source, objlithelperShape.re.flags))].some(
+          (m) => m[1] === 'c',
+        ),
+        'the `objlithelper` candidate regex no longer even matches `{ code: c }` — the censused state was ' +
+          '"a shape matches this text and its parameter guard declines it", so the census now describes ' +
+          'something else entirely. Re-derive it.',
+      );
+      ok(
+        !derived.sites.some((site) => probes.includes(site.code)),
+        'a `code:` fed by a lower-case LOCAL in an object literal now derives a SITE — the blindness ' +
+          `${'localTwinCensus'} was measured against is CLOSED. That is not a regression, but every figure in ` +
+          'it describes the OPEN gate and is now stale: re-run the census and rewrite the block, including ' +
+          'the verdict rows the widening owes in ' + DECLARATION + '. ⛔ Do not delete this pin to pass.',
+      );
+      ok(
+        !derived.unresolved.some((u) => u.value === 'c'),
+        'the lower-case-LOCAL object-literal twin now reports an UNRESOLVED entry. The censused state was ' +
+          '"no site AND no unresolved" — the one shape whose absence this gate cannot notice by itself — ' +
+          'so the census predates the current behaviour. Re-derive it.',
+      );
+      ok(
+        JSON.stringify(resolveConstant('c', localTwin, REL, () => '') ?? []) === JSON.stringify(probes),
+        '⭐ POSITIVE CONTROL FOR THE ZERO: `resolveConstant` no longer reduces `const c = cond ? A : B` to ' +
+          'both branches, so the machinery the census assumed is live is NOT live — and a corpus zero and ' +
+          'a dead-resolver zero are the same number. `localTwinCensus.reduce === 0` currently reads as a ' +
+          'measurement; with this broken it reads as nothing at all.',
+      );
+
+      // Internal coherence: the classes are the whole of the newly-reached set,
+      // and the two decision rows follow from `reduce`.
+      const byClass = B.localTwinCensus.reduceToEmptyByClass;
+      const classSum = Object.values(byClass).reduce((a, n) => a + n, 0);
+      ok(
+        classSum === B.localTwinCensus.newlyReached,
+        `localTwinCensus: the reduce-to-empty classes sum to ${classSum} but ${B.localTwinCensus.newlyReached} ` +
+          'positions were newly reached. Every newly-reached entry either reduces or is classified — an ' +
+          'entry in neither column is exactly the "no verdict available" red this census exists to count.',
+      );
+      ok(
+        B.localTwinCensus.candidatePositions ===
+          B.localTwinCensus.alreadyCoveredByObjlitconst + B.localTwinCensus.newlyReached,
+        'localTwinCensus: candidatePositions is not alreadyCoveredByObjlitconst + newlyReached. Counting ' +
+          "positions another shape already owns as NEWLY reached is the cheapest way to inflate this census.",
+      );
+      ok(
+        B.localTwinCensus.reduce !== 0 ||
+          (B.localTwinCensus.newVerdictRows === 0 && B.localTwinCensus.unregisteredWireCodesHiding === 0),
+        'localTwinCensus: nothing reduces, yet rows or hidden wire codes are claimed. With no reduction ' +
+          'there is no value to emit, so neither figure can be non-zero without a second derivation.',
+      );
+      ok(
+        B.localTwinCensus.cardsExactClassLiveInstances === 0 &&
+          B.localTwinCensus.unregisteredWireCodesHiding === 0,
+        'localTwinCensus no longer records the EMPTY reading. If a live instance has since been measured, ' +
+          'this is a LIVE DEFECT and the widening is owed — see the card: unregistered wire codes > 0 is ' +
+          'the escalation row, not a number to update in place.',
+      );
+    }
   }
 
   if (fail.length) {
@@ -3414,7 +3580,17 @@ function main() {
     `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.measured.helpers} helpers reached carry no error code at ` +
     `all, and no sibling-key test separates them (measured). Still unseen: a \`code:\` fed by a ` +
     `lower-case LOCAL in an object literal, and the ANONYMOUS ARROW declaration form — see ` +
-    `OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.`;
+    `OBJECT_LITERAL_CODE_HELPER_BLINDNESS in this file, pinned by --self-test.` +
+    `\n  [#13478] that lower-case-LOCAL remainder is now CENSUSED rather than merely declared, and it ` +
+    `is EMPTY: of ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.candidatePositions} candidate ` +
+    `positions, ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.alreadyCoveredByObjlitconst} are ` +
+    `already objlitconst's and ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.newlyReached} would ` +
+    `be newly reached, of which ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.reduce} reduce ` +
+    `⇒ ${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.newVerdictRows} verdict rows owed and ` +
+    `${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.unregisteredWireCodesHiding} unregistered ` +
+    `wire code(s) hiding. So the widening is PREVENTIVE, not a live defect. ⚠️ The position is populated ` +
+    `(${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.reduceToEmptyByClass.runtimeValueLocal + OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.reduceToEmptyByClass.bindingWithoutDeclarator} ` +
+    `value-position candidates); what is empty is the REDUCIBLE subclass. See localTwinCensus.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');

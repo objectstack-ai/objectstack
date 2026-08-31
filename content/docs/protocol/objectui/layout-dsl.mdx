@@ -342,7 +342,8 @@ Sections are collapsible containers for related fields.
 {/* os:check-yaml FormSectionSchema[] key=sections */}
 ```yaml
 sections:
-  - label: Contact Information
+  - name: contact_information
+    label: Contact Information
     collapsible: true
     collapsed: false  # Expanded by default
     fields:
@@ -370,10 +371,12 @@ Show sections based on field values. The key is **`visibleWhen`** and its value 
 {/* os:check-yaml FormSectionSchema[] key=sections */}
 ```yaml
 sections:
-  - label: Basic Info
+  - name: basic_info
+    label: Basic Info
     fields: [name, email]
 
-  - label: Billing Information
+  - name: billing_information
+    label: Billing Information
     visibleWhen: "record.account_type == 'premium'"  # Only show for premium accounts
     fields: [payment_method, billing_address]
 ```
@@ -434,7 +437,8 @@ a field widens itself with `span: full`:
 {/* os:check-yaml FormSectionSchema[] key=sections */}
 ```yaml
 sections:
-  - label: Name
+  - name: full_name
+    label: Name
     columns: 2          # first_name and last_name share a row
     fields:
       - field: first_name
@@ -442,7 +446,8 @@ sections:
       - field: last_name
         placeholder: Last
 
-  - label: Address
+  - name: address
+    label: Address
     columns: 3
     fields:
       - field: street

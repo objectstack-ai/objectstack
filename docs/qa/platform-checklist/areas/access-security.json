@@ -314,18 +314,24 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
         "admin"
       ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
+        ]
+      },
       "steps": [
         "boot showcase with the console; open Studio → object designer and the permission matrix on an object belonging to a read-only (installed/locked) package",
         "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
         "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
         "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
-        "repeat the same PUT against a WRITABLE (draft/app-local) object to prove the guard discriminates by package writability, not by blanket denial"
+        "POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base into a writable target, then repeat the same PUT against an object in that writable package to prove the guard discriminates by package writability, not by blanket denial"
       ],
       "acceptance": [
         {
@@ -341,9 +347,9 @@
           "evidence": "PUT trace"
         },
         {
-          "clause": "the same PUT against a writable object SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
+          "clause": "the same PUT against a writable object — obtained through the platform's own duplicate-base route, not a stock fixture — SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
           "oracle": "api",
-          "verify": "writable-target PUT answers 2xx and a follow-up GET shows the change",
+          "verify": "POST /packages/com.example.showcase/duplicate (ADR-0070 D4) to clone the showcase base into a writable target package, then PUT on an object in that target answers 2xx and a follow-up GET shows the change",
           "evidence": "both traces"
         },
         {
@@ -363,7 +369,9 @@
       "source": [
         "#3358 §5",
         "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
-        "ADR-0010 §3.3 (_lock)"
+        "ADR-0010 §3.3 (_lock)",
+        "packages/runtime/src/domains/packages.ts (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
         {
@@ -377,6 +385,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-31",
+          "change": "retargeted the writable-package contrast side (step 5, acceptance clause 3) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」; reaffirmed 2026-08-25, 「其他接受」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get the writable contrast object. Added a fixtures.requires line naming the runtime route explicitly, since the item previously left the writable side as an unqualified 'a WRITABLE (draft/app-local) object'. Mirrors the sibling half landed for automation.rollup-summary-filter (PR #11913, bb62d4d08).",
+          "ref": "#9788"
         }
       ]
     },
@@ -1428,7 +1442,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1518,7 +1532,8 @@
         "packages/plugins/plugin-sharing/src/share-link-service.ts (getPolicy publicSharing gate → 422 SHARING_NOT_ENABLED, resolveToken audience/password/expiry, #5190 recordStillExists fail-closed, list createdBy scoping)",
         "packages/runtime/src/route-ledger.ts (share-links rows incl. public resolve/messages)",
         "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
-        "ADR-0047, ADR-0111 D8, #5190"
+        "ADR-0047, ADR-0111 D8, #5190",
+        "cross-ref access-security.share-link-landing-page — the /s/:token console rendering of this surface (UI half): resolve/password/audience/revoke SEMANTICS are scored HERE, what the page renders of them is scored THERE (one defect, one count)"
       ],
       "history": [
         {
@@ -1532,6 +1547,12 @@
           "date": "2026-08-18",
           "change": "UNBLOCKED. showcase_client_brief is the stock publicSharing fixture and the seed carries both an eligible and an ineligible record, so mint / resolve / redaction are runnable on stock and the declared eligibility predicate is falsifiable too. `blocked` removed; the fixture is named in requires; the knownGap is rewritten as closed-by-fixture rather than deleted, with the warning that clause 1's negative control must stay pointed at an object that did NOT opt in. packages/qa/dogfood/test/showcase-client-liaison-fixtures.dogfood.test.ts pins the mint, the eligibility refusal and the redaction",
           "ref": "#9308"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-30",
+          "change": "cross-referenced the new UI half (access-security.share-link-landing-page — the /s/:token console page): API semantics stay scored on this item, rendering on that one, so a leak found through the page's network trace is recorded here once and cross-referenced there, never double-counted",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     },
@@ -2091,21 +2112,21 @@
         "app": "showcase",
         "requires": [
           "stock showcase boots the `single` tenancy posture (no tenancy service / ADR-0093 D4-D5 fallback) — CONFIRM the posture before scoring, because it decides which gate can answer at all",
-          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts:1679) for POST /api/v1/automation/showcase_urgent_task_alert/toggle",
+          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts) for POST /api/v1/automation/showcase_urgent_task_alert/toggle",
           "a packaged action for POST /api/v1/actions/_activation/showcase_task/showcase_mark_done (examples/app-showcase/src/ui/actions/index.ts)",
           "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata"
         ],
         "knownGaps": [
-          "The group/isolated legs (clauses 5) have NO stock fixture: enabling a walled posture requires the enterprise @objectstack/organizations runtime (packages/spec/src/security/tenancy-posture.ts:23-34 'Open code, entitled activation', ADR-0105 D12), no example app sets a posture, and booting OS_TENANCY_POSTURE=isolated without it is correctly REFUSED (ADR-0093 D5) — the same dead end three rounds re-derived on access-security.no-active-org-session-semantics (#9334). Those clauses are blocked(fixture); the unit pins in automated.ref are their standing oracle. Never fake a posture to tick them.",
-          "⚠️ On the STOCK `single` posture the §5 operator gate is INERT by design (activation-gate.ts:141-147 — postureEnforcesWall('single') is false, so the gate returns before the position is ever read). The refusal an unentitled caller gets on stock showcase is the manage_metadata AUTHORING TIER, not the operator gate — score clause 1/2 against the tier and never against §5, or the run records the wrong gate as proven."
+          "The group/isolated legs (clauses 5) have NO stock fixture: enabling a walled posture requires the enterprise @objectstack/organizations runtime (packages/spec/src/security/tenancy-posture.ts 'Open code, entitled activation', ADR-0105 D12), no example app sets a posture, and booting OS_TENANCY_POSTURE=isolated without it is correctly REFUSED (ADR-0093 D5) — the same dead end three rounds re-derived on access-security.no-active-org-session-semantics (#9334). Those clauses are blocked(fixture); the unit pins in automated.ref are their standing oracle. Never fake a posture to tick them.",
+          "⚠️ On the STOCK `single` posture the §5 operator gate is INERT by design (activation-gate.ts — postureEnforcesWall('single') is false, so the gate returns before the position is ever read). The refusal an unentitled caller gets on stock showcase is the manage_metadata AUTHORING TIER, not the operator gate — score clause 1/2 against the tier and never against §5, or the run records the wrong gate as proven."
         ]
       },
       "steps": [
         "boot showcase isolated; admin session; PROVE the posture is `single` (no tenancy service resolves / the deployment declares none) and record the evidence — the posture selects which gate can answer",
         "as the plain member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — capture status, code and the EXACT message string",
         "as the plain member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — capture status, code and the exact message",
-        "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts:1017-1045; activation-gate.ts:128-131)",
-        "GET /api/v1/data/sys_metadata_activation (reads are open — sys-metadata-activation.object.ts:153-158) and confirm no row for either artifact was written by the refusals",
+        "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts; activation-gate.ts)",
+        "GET /api/v1/data/sys_metadata_activation (reads are open — sys-metadata-activation.object.ts) and confirm no row for either artifact was written by the refusals",
         "author the scratch manage_metadata permission set, grant it to a fresh member, and prove server-side that the member's positions do NOT include platform_admin (session row / GET /auth/get-session — never the grant gesture)",
         "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, organization_id NULL); then re-enable ({\"enabled\": true}) to restore the fixture",
         "as the same member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — expect 200 + the metadata_type 'action' row; re-enable to restore",
@@ -2115,37 +2136,37 @@
         {
           "clause": "flow door, stock `single` posture: the refusal an unentitled caller gets is the manage_metadata AUTHORING TIER — 403 PERMISSION_DENIED with the exact enablement sentence — and NOT the §5 operator gate, which is inert on `single`; the run must record which gate it scored",
           "oracle": "api",
-          "verify": "POST /api/v1/automation/showcase_urgent_task_alert/toggle as the plain member answers 403, code PERMISSION_DENIED, message exactly 'Enabling or disabling an automation flow requires the `manage_metadata` capability.' (FLOW_ENABLEMENT_DENY_MESSAGE, packages/runtime/src/domains/automation.ts:333-334 — the toggle-specific sentence, not the generic 'Authoring automation flows requires…' one). A message naming the tenancy posture here would mean the §5 gate answered — on `single` that is a FAIL of this clause, not a pass",
+          "verify": "POST /api/v1/automation/showcase_urgent_task_alert/toggle as the plain member answers 403, code PERMISSION_DENIED, message exactly 'Enabling or disabling an automation flow requires the `manage_metadata` capability.' (FLOW_ENABLEMENT_DENY_MESSAGE, packages/runtime/src/domains/automation.ts — the toggle-specific sentence, not the generic 'Authoring automation flows requires…' one). A message naming the tenancy posture here would mean the §5 gate answered — on `single` that is a FAIL of this clause, not a pass",
           "evidence": "the refusal trace with the full message string quoted"
         },
         {
           "clause": "action door, stock `single` posture: same tier, the actions domain's own call into the shared gate — 403 PERMISSION_DENIED naming manage_metadata and the #10243 'functionally equivalent to deleting it' rationale, with subject 'a packaged action'",
           "oracle": "api",
-          "verify": "POST /api/v1/actions/_activation/showcase_task/showcase_mark_done as the plain member answers 403 PERMISSION_DENIED with the refuseUngrantedActivationAuthoring sentence (packages/runtime/src/domains/activation-gate.ts:184-203, called at domains/actions.ts:154; the posture arm at actions.ts:156 stays silent on `single`)",
+          "verify": "POST /api/v1/actions/_activation/showcase_task/showcase_mark_done as the plain member answers 403 PERMISSION_DENIED with the refuseUngrantedActivationAuthoring sentence (packages/runtime/src/domains/activation-gate.ts, called at domains/actions.ts; the posture arm at actions.ts stays silent on `single`)",
           "evidence": "the refusal trace with the message quoted"
         },
         {
           "clause": "a refused caller writes nothing and learns nothing: no sys_metadata_activation row exists for either artifact after the refusals, and an unentitled caller with an INVALID body still gets the 403 — never a 400 that maps out the toggle contract (both gates run before body validation)",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_metadata_activation filtered on the two names returns no row attributable to the refused attempts; the invalid-body probe as the plain member answers 403 PERMISSION_DENIED, not 400 (gate placement: automation.ts:1017-1045 ahead of the service probe and body checks; activation-gate.ts:128-131)",
+          "verify": "GET /api/v1/data/sys_metadata_activation filtered on the two names returns no row attributable to the refused attempts; the invalid-body probe as the plain member answers 403 PERMISSION_DENIED, not 400 (gate placement: automation.ts ahead of the service probe and body checks; activation-gate.ts)",
           "evidence": "the ledger reads + the invalid-body trace"
         },
         {
-          "clause": "the §5 gate is INERT on `single`, not satisfied: a caller holding manage_metadata but NOT the platform_admin POSITION succeeds at BOTH doors, and each write lands one install-level ledger row (organization_id NULL) — install-level and org-level are the same scope on one logical tenant (activation-gate.ts:22-27,141-147)",
+          "clause": "the §5 gate is INERT on `single`, not satisfied: a caller holding manage_metadata but NOT the platform_admin POSITION succeeds at BOTH doors, and each write lands one install-level ledger row (organization_id NULL) — install-level and org-level are the same scope on one logical tenant (activation-gate.ts,141-147)",
           "oracle": "api",
-          "verify": "the scratch-set member's positions are proven server-side to exclude platform_admin (BUILTIN_IDENTITY_PLATFORM_ADMIN = 'platform_admin', packages/spec/src/identity/eval-user.zod.ts:32), then both toggles answer 200 and GET /api/v1/data/sys_metadata_activation shows the metadata_type 'flow' and 'action' rows with active false, organization_id NULL; re-enable restores active true",
+          "verify": "the scratch-set member's positions are proven server-side to exclude platform_admin (BUILTIN_IDENTITY_PLATFORM_ADMIN = 'platform_admin', packages/spec/src/identity/eval-user.zod.ts), then both toggles answer 200 and GET /api/v1/data/sys_metadata_activation shows the metadata_type 'flow' and 'action' rows with active false, organization_id NULL; re-enable restores active true",
           "evidence": "the position proof + both 200 traces + the ledger rows"
         },
         {
           "clause": "walled postures (`group`/`isolated`) — BLOCKED on stock fixtures (knownGaps, #9334 precedent): an org admin holding manage_metadata is refused 403 PERMISSION_DENIED with a message naming the POSTURE and the per-artifact remedy — flows recommend the clone path, actions deliberately do NOT (operator + sibling authoring instead) — no row is written on refusal, and a caller carrying the platform_admin POSITION (not a capability) is admitted",
           "oracle": "test",
-          "verify": "stands on the unit pins until an enterprise-posture fixture exists: packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) and action-activation-posture-gate.test.ts (#12160) drive the posture x identity matrix against both doors and assert toggleFlow/the write was never entered on refusal; the refusal sentence and remedies are activation-gate.ts:100-118,155-163. Do not tick this clause from an HTTP probe on a faked posture",
+          "verify": "stands on the unit pins until an enterprise-posture fixture exists: packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) and action-activation-posture-gate.test.ts (#12160) drive the posture x identity matrix against both doors and assert toggleFlow/the write was never entered on refusal; the refusal sentence and remedies are activation-gate.ts,155-163. Do not tick this clause from an HTTP probe on a faked posture",
           "evidence": "the two test runs' output, cited by test name"
         },
         {
           "clause": "engine self-invocation bypasses both tiers (isSystem, never settable from the wire) — the boot pull and ledger hydration must not be refused by the gate that guards the wire",
           "oracle": "test",
-          "verify": "the isSystem arms of the same unit pins (activation-gate.ts:139,190 — both return undefined before any check); corroborate live by the fact that a restart re-hydrates flow activations without error while the gate is armed",
+          "verify": "the isSystem arms of the same unit pins (activation-gate.ts,190 — both return undefined before any check); corroborate live by the fact that a restart re-hydrates flow activations without error while the gate is armed",
           "evidence": "test output + the boot log line"
         }
       ],
@@ -2153,7 +2174,7 @@
         "the §5 posture-gate sentence ('…this deployment runs the \\'single\\' tenancy posture…') appearing on a stock boot is a FAIL — the gate must not fire where postureEnforcesWall is false",
         "run the refused calls as ADMIN too and confirm 200 (wrong-persona both sides): the denial must come from the missing capability, not a broken route",
         "the two doors' tier sentences must not swap: the flow door owns its own FLOW_ENABLEMENT_DENY_MESSAGE while the action door speaks the shared activation-gate sentence — a run quoting the wrong door's string has probed the wrong door",
-        "absent tenancy service fails OPEN by design (activation-gate.ts:50-56,141-147): do not file a missing-refusal finding against a deployment with no tenancy service — that is ADR-0093 D4/D5, not a hole"
+        "absent tenancy service fails OPEN by design (activation-gate.ts,141-147): do not file a missing-refusal finding against a deployment with no tenancy service — that is ADR-0093 D4/D5, not a hole"
       ],
       "variants": [
         "single (stock — gate inert, tier decides)",
@@ -2171,8 +2192,8 @@
       },
       "source": [
         "packages/runtime/src/domains/activation-gate.ts (the shared §5 gate: posture read 141-147, platform_admin POSITION test 149-150, manage_metadata tier 184-203, per-artifact remedies 100-118, fail-open rationale 50-56)",
-        "packages/runtime/src/domains/automation.ts:333-334 (FLOW_ENABLEMENT_DENY_MESSAGE), :471-474 (isFlowActivationWrite), :1017-1045 (gate ordering ahead of service probe and body checks)",
-        "packages/runtime/src/domains/actions.ts:154-157 (both tiers at the action door)",
+        "packages/runtime/src/domains/automation.ts (FLOW_ENABLEMENT_DENY_MESSAGE), (isFlowActivationWrite), (gate ordering ahead of service probe and body checks)",
+        "packages/runtime/src/domains/actions.ts (both tiers at the action door)",
         "packages/spec/src/security/tenancy-posture.ts (TenancyPostureSchema — the variants source; postureEnforcesWall; the ADR-0105 D12 entitlement note)",
         "docs/adr/0126-packaged-metadata-customization-model.md §5 (D3: install-level rows, operator-gated in multi-org postures)",
         "#12438 (the sweep), #12159 (ADR-0126 flow legs), #10243 (the measured incident the gate makes durable), #12157 / #12160 (the two door cards)"
@@ -2200,11 +2221,11 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts:1679)",
+          "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts)",
           "capture the flow's full current definition BEFORE any probe (GET /api/v1/automation/showcase_urgent_task_alert) — it is the restore payload"
         ],
         "knownGaps": [
-          "the acceptance is the ADR-0126 §2 PARITY PROMISE ('the packaged base is locked — in-place edit refused loudly at the write door'), not today's behavior: as of #12438 the /automation door has NO lock — PUT/DELETE /automation/:name reach registerFlow/unregisterFlow with only the manage_metadata authoring gate in front (packages/runtime/src/domains/automation.ts:1826-1865), and the engine has zero lock/provenance check on that path (packages/services/service-automation/src/engine.ts:2625-2730). Clauses 2-3 are EXPECTED FAILS: a 200 there, where /meta refuses the same artifact, is the product finding, tracked centrally in FOLLOW-UPS (#12438). Keep the parity promise as the acceptance so the item flips green when the door is locked, without a rewrite"
+          "the acceptance is the ADR-0126 §2 PARITY PROMISE ('the packaged base is locked — in-place edit refused loudly at the write door'), not today's behavior: as of #12438 the /automation door has NO lock — PUT/DELETE /automation/:name reach registerFlow/unregisterFlow with only the manage_metadata authoring gate in front (packages/runtime/src/domains/automation.ts), and the engine has zero lock/provenance check on that path (packages/services/service-automation/src/engine.ts). Clauses 2-3 are EXPECTED FAILS: a 200 there, where /meta refuses the same artifact, is the product finding, tracked centrally in FOLLOW-UPS (#12438). Keep the parity promise as the acceptance so the item flips green when the door is locked, without a rewrite"
         ]
       },
       "steps": [
@@ -2223,13 +2244,13 @@
           "evidence": "both PUT traces (with and without ?package=) + the before/after /meta reads"
         },
         {
-          "clause": "parity, update door: PUT /api/v1/automation/showcase_urgent_task_alert against the SAME packaged artifact is refused — ⚠️ EXPECTED FAIL today: the door runs only the manage_metadata authoring gate (automation.ts:1826-1857) and registerFlow re-registers with no lock or provenance check (engine.ts:2625-2715), so a 200 here while /meta refused the identical artifact IS the finding. Record the fail with both traces side by side; the defect is tracked centrally in FOLLOW-UPS (#12438) — do not re-file it per run",
+          "clause": "parity, update door: PUT /api/v1/automation/showcase_urgent_task_alert against the SAME packaged artifact is refused — ⚠️ EXPECTED FAIL today: the door runs only the manage_metadata authoring gate (automation.ts) and registerFlow re-registers with no lock or provenance check (engine.ts), so a 200 here while /meta refused the identical artifact IS the finding. Record the fail with both traces side by side; the defect is tracked centrally in FOLLOW-UPS (#12438) — do not re-file it per run",
           "oracle": "api",
           "verify": "same admin session, same artifact, same-shape body at both doors; the verdicts must MATCH. A 2xx on /automation with a mutated GET read-back, paired with the /meta refusal from clause 1, is a fail of this clause and the expected present-day outcome",
           "evidence": "the /automation PUT trace + the mutated (or unchanged) GET read-back, paired with clause 1's refusal"
         },
         {
-          "clause": "parity, delete door: DELETE /api/v1/automation/showcase_urgent_task_alert is refused for the same reason — ⚠️ EXPECTED FAIL today (unregisterFlow, engine.ts:2717-2730, removes the shipped flow from the live engine with no check; 'delete first, refuse second' is the exact shape the #10145 measurement recorded at this door before the capability gate existed, and the lock half is still missing)",
+          "clause": "parity, delete door: DELETE /api/v1/automation/showcase_urgent_task_alert is refused for the same reason — ⚠️ EXPECTED FAIL today (unregisterFlow, engine.ts, removes the shipped flow from the live engine with no check; 'delete first, refuse second' is the exact shape the #10145 measurement recorded at this door before the capability gate existed, and the lock half is still missing)",
           "oracle": "api",
           "verify": "DELETE answers >=400 and the flow still serves; a 200 followed by a 404 on GET /api/v1/automation/showcase_urgent_task_alert is the fail (and the deletion this item's restore step exists to undo)",
           "evidence": "the DELETE trace + the follow-up GET"
@@ -2251,8 +2272,8 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/domains/automation.ts:1826-1865 (PUT/DELETE /automation/:name → registerFlow/unregisterFlow, manage_metadata gate only)",
-        "packages/services/service-automation/src/engine.ts:2625-2730 (registerFlow/unregisterFlow — zero lock/provenance check on this path)",
+        "packages/runtime/src/domains/automation.ts (PUT/DELETE /automation/:name → registerFlow/unregisterFlow, manage_metadata gate only)",
+        "packages/services/service-automation/src/engine.ts (registerFlow/unregisterFlow — zero lock/provenance check on this path)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2 (Regime C: 'the packaged base is locked — in-place edit refused loudly at the write door') + §6 wall 2 (sole definition ledger)",
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (the same lock implemented at the permission-set data door — the regime's first instance, proving the refusal shape the /automation door lacks)",
         "cross-ref access-security.readonly-package-locks-studio (the /meta door's locked-base class on objects) + access-security.owd-save-gate rev 3 (why the /meta control leg records the answering layer instead of assuming it)",
@@ -2283,7 +2304,7 @@
         "app": "showcase",
         "requires": [
           "a package-declared permission set: showcase_contributor (declared by com.example.showcase in examples/app-showcase/src/security/permission-sets.ts, projected to a sys_permission_set row at boot) — the SchemaRegistry, not the row's managed_by column, is what the lock reads (packaged-permission-set-lock.ts)",
-          "the Setup permission-sets surface rendering the object's own actions (Activate / Deactivate / Clone on locations list_item + record_header — packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts:41-155)",
+          "the Setup permission-sets surface rendering the object's own actions (Activate / Deactivate / Clone on locations list_item + record_header — packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts)",
           "member M granted showcase_contributor, with a showcase_contributor-only verb to probe (e.g. a project PATCH the everyone baseline does not grant — compute the baseline union per access-security.crud-permission-matrix's knownGaps before picking it)"
         ],
         "knownGaps": [
@@ -2294,7 +2315,7 @@
         "boot showcase with the console; admin session; provision member M (grant showcase_contributor); baseline: as M exercise the contributor-granted probe verb — 2xx; count sys_metadata_activation rows (GET /api/v1/data/sys_metadata_activation — reads are open)",
         "lock, API: as admin PATCH /api/v1/data/sys_permission_set/<showcase_contributor id> with a DEFINITION change (e.g. an object_permissions tweak) — capture the 403 and its message verbatim",
         "lock, UI: attempt the same edit through the Setup/Studio permission-set surface and capture what renders (the server refusal text, not a local fallback)",
-        "row-state carve-out: run the Deactivate action from the Setup list (or PATCH /api/v1/data/sys_permission_set/<id> {\"active\": false} — exactly what the action sends, bodyExtra sys-permission-set.object.ts:66) — expect 2xx, NOT the lock",
+        "row-state carve-out: run the Deactivate action from the Setup list (or PATCH /api/v1/data/sys_permission_set/<id> {\"active\": false} — exactly what the action sends, bodyExtra sys-permission-set.object.ts) — expect 2xx, NOT the lock",
         "as M: repeat the probe verb — now refused; re-read the row (active false) and confirm M's sys_user_permission_set assignment row still exists (deactivation keeps assignments, per the action's own confirmText)",
         "clone: run the Clone action on showcase_contributor (POST /api/v1/data/sys_permission_set — new label + snake_case name both required); read the clone back and field-compare every definition facet against the base; attempt the clone again with the SAME name — 409",
         "clone is org-owned: PATCH the clone's definition (same shape step 2 sent at the base) — 2xx; grant the clone to a fresh member and prove one of its verbs live",
@@ -2305,11 +2326,11 @@
         {
           "clause": "locked base: an in-place DEFINITION write against a package-declared set is refused 403 NOT_OVERRIDABLE with the #11513 message naming the sanctioned path (clone it), and the stored definition is unchanged — fail-closed: undeterminable provenance refuses too, with its own distinct message",
           "oracle": "api",
-          "verify": "the PATCH answers 403, code NOT_OVERRIDABLE, message from PackagedPermissionSetLockedError (packages/plugins/plugin-security/src/packaged-permission-set-lock.ts:265-283 — names the package and the Clone action; the provenance-unknown refusal at :286-299 is a different sentence, distinguish by message); a re-read shows the definition facets unchanged",
+          "verify": "the PATCH answers 403, code NOT_OVERRIDABLE, message from PackagedPermissionSetLockedError (packages/plugins/plugin-security/src/packaged-permission-set-lock.ts — names the package and the Clone action; the provenance-unknown refusal is a different sentence, distinguish by message); a re-read shows the definition facets unchanged",
           "evidence": "the PATCH trace with message quoted + the before/after reads"
         },
         {
-          "clause": "the active flip is ROW STATE, not a definition write: a bare {active} PATCH passes the lock (the #4669 carve-out runs BEFORE the lock — permission-set-projection.ts:1128-1134) and lands on the driver, and enforcement follows it — M's granted verb is refused while active=false and restored on re-activation, with M's assignment row intact throughout",
+          "clause": "the active flip is ROW STATE, not a definition write: a bare {active} PATCH passes the lock (the #4669 carve-out runs BEFORE the lock — permission-set-projection.ts) and lands on the driver, and enforcement follows it — M's granted verb is refused while active=false and restored on re-activation, with M's assignment row intact throughout",
           "oracle": "api",
           "verify": "deactivate 2xx (a 403 here is the lock swallowing the carve-out — a FAIL that breaks the shipped Deactivate action); M's probe verb >=400 while inactive, 2xx after reactivation; sys_user_permission_set row for M present at every step",
           "evidence": "the lifecycle traces + M's before/during/after probes + the assignment-row reads"
@@ -2317,7 +2338,7 @@
         {
           "clause": "clone contract (#11703 regression guard): new label AND machine name mandatory; ALL definition facets carried — description, object_permissions, field_permissions, AND the three #11703 dropped ones (system_permissions, row_level_security, tab_permissions); admin_scope deliberately ABSENT (ruled 2026-08-24, stated in the action's own description); the clone starts active; a taken name answers 409; no linkage column (no cloned_from anywhere — amendment ruling 2)",
           "oracle": "api",
-          "verify": "field-compare the clone row against the base per the clone_permission_set params list (sys-permission-set.object.ts:137-154 — the params list IS the payload); admin_scope empty/default on the clone; duplicate-name POST → 409 (projection duplicate check); no cloned_from/replaced_by key on the row",
+          "verify": "field-compare the clone row against the base per the clone_permission_set params list (sys-permission-set.object.ts — the params list IS the payload); admin_scope empty/default on the clone; duplicate-name POST → 409 (projection duplicate check); no cloned_from/replaced_by key on the row",
           "evidence": "the clone POST + the field-by-field diff + the 409 trace"
         },
         {
@@ -2340,7 +2361,7 @@
         }
       ],
       "negative": [
-        "a 403 on the BARE {active} PATCH is a FAIL even though it looks like the lock working — the row-state carve-out is load-bearing for the shipped Deactivate/Activate actions (permission-set-projection.ts:1140-1144 says so in as many words)",
+        "a 403 on the BARE {active} PATCH is a FAIL even though it looks like the lock working — the row-state carve-out is load-bearing for the shipped Deactivate/Activate actions (permission-set-projection.ts says so in as many words)",
         "a clone missing system_permissions, row_level_security or tab_permissions is the exact #11703 silent-grant-loss regression this item guards — diff every facet, not just the two that were never dropped",
         "the two 403 sentences (packaged-locked vs provenance-unknown) must not be conflated: both are NOT_OVERRIDABLE, and only the message says whether the lock decided or failed closed",
         "cross-refs, to keep one defect one count: the /meta-door package lock on objects is access-security.readonly-package-locks-studio; the WRITABLE-set edit loop through /meta/permission is access-security.permission-matrix-edit-loop (its fixture note explicitly excludes locked package sets — this item is that excluded case, at the DATA door); grant enforcement itself is access-security.crud-permission-matrix"
@@ -2356,8 +2377,8 @@
       },
       "source": [
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",
-        "packages/plugins/plugin-security/src/permission-set-projection.ts:1076-1169 (insert-path lock + duplicate 409; the #4669 row-state carve-out at :1128-1134 ordered BEFORE the update-path lock at :1135-1167)",
-        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts:41-155 (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
+        "packages/plugins/plugin-security/src/permission-set-projection.ts (insert-path lock + duplicate 409; the #4669 row-state carve-out ordered BEFORE the update-path lock)",
+        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
         "docs/adr/0126-packaged-metadata-customization-model.md §1.1 (the #11513 machinery, named as the regime's first instance), §8 item 3 (permission sets converge later; the landed shape stays valid meanwhile)",
         "#11513 (lock the base, clone to customize — the 2026-08-24 ruling), #11703 (the three dropped clone facets), #12159 (ruling 2026-08-26: no ledger rows for permission sets pending the convergence card), #12438 (the sweep)"
       ],
@@ -2367,6 +2388,432 @@
           "date": "2026-08-26",
           "change": "new — the landed #11513 surface (data-door lock, clone action, active row-state lifecycle) had no checklist item: readonly-package-locks-studio covers the /meta door on objects and permission-matrix-edit-loop explicitly scopes itself to WRITABLE sets, so the packaged-set data-door lifecycle was uncovered end to end. Authored as the ADR-0126 regression guard with the no-ledger-row wall as its ⭐ clause, per the 2026-08-26 ruling in #12159 (card 已知边界 4): flipping active or cloning must keep writing sys_permission_set state only, never a sys_metadata_activation row",
           "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "access-security.platform-owner-email-anchor",
+      "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (seeded dev admin — grant-anchored via the unscoped admin_full_access row, the ADR-0068 D2 contrast; its address is seed-stamped verified per #11343)",
+        "fresh member M (the config-anchor subject; a fresh sign-up's sys_user row is UNVERIFIED, which is exactly the unverified-match fixture)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "boots with a controlled OS_PLATFORM_OWNER_EMAIL per variant — changing the variable means restarting the process: the value is read live per derivation but memoized per-process on the RAW string (platform-admin.ts), and there is deliberately no runtime mutation path",
+          "a manage_platform_settings-floor probe route: GET /api/v1/datasources answers 401/403 BEFORE any service resolution (packages/services/service-datasource/src/admin-routes.ts; DATASOURCE_ADMIN_CAPABILITY), and admin_full_access carries that capability (packages/spec/src/identity/eval-user.zod.ts) — so the probe discriminates platform-admin standing cleanly"
+        ],
+        "knownGaps": [
+          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant, so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated with the variable UNSET; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
+        "restart with OS_PLATFORM_OWNER_EMAIL=<M's email> (M's row is unverified); as M repeat both probes",
+        "restart with OS_PLATFORM_OWNER_EMAIL=<an address matching no sys_user row>; repeat M's probes",
+        "restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing",
+        "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead",
+        "with the variable unset again, drive one admin-standing derivation as the seeded admin (any authenticated request) and grep the process log for the once-per-process legacy-grant re-anchor pointer"
+      ],
+      "acceptance": [
+        {
+          "clause": "unset = ZERO config-derived administrators, and the ADR-0068 D2 unscoped-grant anchor stays the only door: M's datasource probe is refused server-side (401/403 per identity, never 200) and M's systemPermissions lacks manage_platform_settings, while the seeded admin's identical probe answers 200 (both sides of the gate)",
+          "oracle": "api",
+          "verify": "M's GET /api/v1/datasources >=400 with the declared code; M's /auth/me/permissions systemPermissions array excludes manage_platform_settings; admin's same GET is 200",
+          "evidence": "both personas' traces"
+        },
+        {
+          "clause": "an UNVERIFIED match confers nothing: with the variable naming M's address and M's stored row unverified, M's probes are refused exactly as at baseline — matchesConfiguredPlatformAdmin consults isEmailVerifiedUserRow and an absent/false column reads unverified (platform-admin.ts)",
+          "oracle": "api",
+          "verify": "M's datasource probe and systemPermissions read are byte-for-byte the clause-1 refusals despite the configured match",
+          "evidence": "the traces + the boot env captured in the run record"
+        },
+        {
+          "clause": "a non-match confers nothing and changes nothing for anyone: with the variable naming an address no row holds, M's probes refuse as at baseline and the seeded admin still resolves through the grant anchor",
+          "oracle": "api",
+          "verify": "same probes as clause 1, identical outcomes",
+          "evidence": "the traces"
+        },
+        {
+          "clause": "any malformed entry fails the WHOLE variable closed, loudly once: the process log carries the [authz] refusal naming the offending entry verbatim and stating the deployment now has ZERO config-derived platform administrators (parsePlatformAdminEmails, platform-admin.ts; sink) — and the well-formed sibling entry on the same list confers nothing (never skip-and-continue)",
+          "oracle": "log",
+          "verify": "log line matches the refusal text and names the entry; M (the well-formed entry) still refused on the datasource probe",
+          "evidence": "the log excerpt + M's trace"
+        },
+        {
+          "clause": "a VERIFIED stored-row match confers exactly the declared envelope: PLATFORM_ADMIN standing with the spec-declared ADMIN_FULL_ACCESS_CAPABILITIES content (systemPermissions including manage_platform_settings), hasPlatformAdminStanding agreeing, with NO grant row in sight — matching is case-insensitive over the caller's OWN stored sys_user.email, per entry of a comma-separated list",
+          "oracle": "test",
+          "verify": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts — the acceptance-criterion describe ('yields PLATFORM_ADMIN with the DECLARED capability set', 'answers the id-shaped predicate too, with no grant row in sight', 'matches case-insensitively, and honours every declared entry of a list'); the LIVE leg (M verified + configured → datasource probe 200 and admin envelope in /auth/me/permissions) runs only with the knownGaps fixture, else scores blocked(fixture)",
+          "evidence": "test output (and, when the fixture exists, M's entitled traces)"
+        },
+        {
+          "clause": "additive, never subtractive — the legacy anchor is honoured and loudly re-pointed: with the variable unset, standing resting on the unscoped admin_full_access grant alone still resolves PLATFORM_ADMIN, and the once-per-process [authz] pointer names the OS_PLATFORM_OWNER_EMAIL config line that re-anchors it (reportLegacyPlatformAdminGrant, platform-admin.ts)",
+          "oracle": "log",
+          "verify": "seeded admin's request succeeds AND the process log carries the legacy-grant pointer naming the variable; it appears once — grep the whole log, not the tail",
+          "evidence": "the log excerpt + the admin trace"
+        }
+      ],
+      "negative": [
+        "no runtime write reaches the anchor: OS_PLATFORM_OWNER_EMAIL is declared a NON-TABLE derivation input (admin-standing-surface.ts) — revocation is a configuration change plus a process roll, by design. Any in-product surface found mutating who is a platform administrator is an authorization finding: record it under RUNNER rule 2's carve-out (item, clause, detail withheld pending maintainer), never with a reproduction",
+        "the derivation reads the caller's OWN STORED sys_user row, never the session-seeded grants.email — the ⭐ P1 pin of the leg. That property is asserted by the unit pin (the '⭐ … reads the STORED row, never the seeded email' describe); do not attempt to re-prove it against a live server",
+        "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)",
+        "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
+      ],
+      "variants": [
+        "unset (zero config-derived admins)",
+        "verified match (confers the declared envelope)",
+        "unverified match (nothing)",
+        "non-match (nothing)",
+        "comma-separated list — duplicates collapsed, trim+lowercase normalization (platform-admin.ts)",
+        "malformed entry (whole-variable refusal, loud once)"
+      ],
+      "traps": [
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the legacy-grant pointer loudness) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4 and 6) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server"
+      },
+      "source": [
+        "packages/core/src/security/resolve-authz-context.ts (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
+        "packages/core/src/security/platform-admin.ts (parsePlatformAdminEmails whole-variable refusal, loud-once resolve, matchesConfiguredPlatformAdmin verified-only, reportLegacyPlatformAdminGrant)",
+        "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
+        "packages/types/src/env.ts,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
+        "packages/services/service-datasource/src/admin-routes.ts,261 (the manage_platform_settings-floor probe)",
+        "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the #11663 L2 deployment-config platform-admin anchor landed (#13146, 2026-08-29) with no checklist coverage. Env-conferred standing is a security gate and needs both sides asserted live: confer on a VERIFIED stored-row match only; nothing on unset / unverified / non-match / malformed (whole-variable fail-closed, loud once); plus the legacy-grant re-anchor pointer. Written as guard assertion per the shipped-guard posture; the entitled live leg is fixture-gapped (verified second account) and rests on the unit pin meanwhile",
+          "ref": "#13146"
+        }
+      ]
+    },
+    {
+      "id": "access-security.me-permissions-aggregation-parity",
+      "title": "The /auth/me/permissions aggregation (and its /auth/me/localization + /me/apps siblings) mirrors server-side enforcement in both directions — and the trio's anonymous 200 is the deliberate exception to the 401 floor",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "contributor member C (showcase_contributor — carries the FLS grant on showcase_project budget figures, the field-parity fixture)",
+        "plain member P (member_default only — the withheld-verb contrast)",
+        "admin (the entitled /me/apps contrast)",
+        "anonymous (the designed-200 exception)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_contributor: allowEdit on showcase_project plus FLS budget/spent/budget_remaining readable:true/editable:false (permission-sets.ts) — the same fixture access-security.fls-mask-and-strip drives; this item asserts the AGGREGATION agrees with that enforcement, not the enforcement itself",
+          "member_default WITHOUT allowEdit on showcase_project — compute the ADR-0090 D5 baseline union per access-security.crud-permission-matrix's knownGaps before picking the withheld verb, or a baseline-granted verb will read as an aggregation violation",
+          "an app whose requiredPermissions a plain member lacks (the setup built-in requires setup capabilities admin_full_access carries) — the /me/apps contrast pair"
+        ],
+        "knownGaps": [
+          "the SecurityPlugin-absent fail-open branch (current-user-endpoints.ts empty-but-authenticated body; /me/apps failOpen returning every app) has no showcase fixture — a stack without SecurityPlugin is a different boot. Declared boundary; do not score it here"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; provision C (grant showcase_contributor via sys_user_permission_set), P (baseline only), admin; use a FRESH http client per persona (cache-staleness)",
+        "as C: GET /api/v1/auth/me/permissions — record objects.showcase_project, fields['showcase_project.budget'], permissionSets, systemPermissions",
+        "verb parity, both directions: as C PATCH a showcase_project name (the map says allowEdit) — 2xx; as P read P's own map (allowEdit absent/false on showcase_project) then issue the identical PATCH — 403 PERMISSION_DENIED",
+        "field parity: C's map says budget editable:false — C's budget PATCH is refused/stripped with the stored value unchanged (the fls-mask-and-strip oracle; cross-check only, do not re-score that item here)",
+        "as P then admin: GET /api/v1/me/apps — P's list excludes the capability-gated app and includes showcase_app; admin's includes it; for every returned app verify requiredPermissions ⊆ the caller's merged systemPermissions",
+        "as any member: GET /api/v1/auth/me/localization — the resolved currency/locale/timezone",
+        "anonymous (no Authorization header, fresh client): GET all three endpoints and capture status + body",
+        "self-scoping probe: as P, GET /api/v1/auth/me/permissions?userId=<C's id> — the response must describe P, not C (no such parameter exists; prove it is ignored)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the objects map matches enforcement in BOTH directions: a verb the map grants succeeds live (C's project PATCH 2xx + persisted) and a verb the map withholds is refused live (P's identical PATCH 403 PERMISSION_DENIED) — the aggregation must neither under- nor over-claim",
+          "oracle": "api",
+          "verify": "compare each persona's /auth/me/permissions objects.showcase_project against their live PATCH outcome; any disagreement is a FAIL against the endpoint",
+          "evidence": "both maps + both PATCH traces"
+        },
+        {
+          "clause": "the fields map matches FLS enforcement: C's fields['showcase_project.budget'] reads {readable:true, editable:false} and the live budget write is refused/stripped with the value unchanged, while the value IS served on C's reads (readable held)",
+          "oracle": "api",
+          "verify": "field-map entry vs the live write refusal + a read carrying the value; the most-permissive merge across C's sets is the expectation (current-user-endpoints.ts)",
+          "evidence": "the map + write trace + read"
+        },
+        {
+          "clause": "/me/apps equals its declared filter: every returned app satisfies requiredPermissions ⊆ the caller's merged systemPermissions and tabPermissions !== 'hidden'; the capability-gated app appears for admin and not for P (both sides)",
+          "oracle": "api",
+          "verify": "per-app check of requiredPermissions against the same caller's /auth/me/permissions systemPermissions; P-vs-admin diff shows exactly the gated app(s) (current-user-endpoints.ts)",
+          "evidence": "both /me/apps bodies + the systemPermissions arrays"
+        },
+        {
+          "clause": "the anonymous trio is pinned BY DESIGN, each with its own shape: /auth/me/permissions and /auth/me/localization answer 200 {authenticated:false}; /me/apps answers 200 {apps:[]} — the deliberate exception to access-security.anonymous-deny-surfaces' 401 floor (the frontend distinguishes anon from error; core auth-gate.ts allow-lists /me/apps + /me/localization for gated users). A future run finding 401 here is a REGRESSION of the design, not a fix — never file 'missing auth' against these three",
+          "oracle": "api",
+          "verify": "the three anonymous traces match those exact statuses and bodies (current-user-endpoints.ts)",
+          "evidence": "the three traces"
+        },
+        {
+          "clause": "the trio is self-scoped: the response describes the CALLER only — userId in the body equals the session's user, and a ?userId= query is ignored, so no caller can read another user's aggregation",
+          "oracle": "api",
+          "verify": "P's ?userId=<C's id> probe returns P's own userId and P's own maps",
+          "evidence": "the probe trace"
+        },
+        {
+          "clause": "localization rides the ExecutionContext without a setup gate: an ordinary member's /auth/me/localization answers 200 with currency/locale/timezone keys (nulls legal) — the SETTINGS surface is setup-gated, the resolved defaults deliberately are not",
+          "oracle": "api",
+          "verify": "member trace carries authenticated:true plus the three keys",
+          "evidence": "the trace"
+        }
+      ],
+      "negative": [
+        "an over-claiming map is the dangerous direction and a FAIL against the endpoint: the frontend consumes this to render affordances, so a map granting what the server refuses turns every such surface into a dead-click generator — but the server refusal is still the authority (ADR-0124 D1); record the disagreement against THIS item, not as an enforcement hole",
+        "the trio is raw-mounted on the hono app and appears in NO route ledger (grepped absent from rest-route-ledger.ts, runtime route-ledger.ts and auth-route-ledger.ts) — this item is their only live-HTTP observation, so a 404 on any of the three is a mount regression no ledger conformance gate will catch; record it loudly",
+        "do not score the FLS enforcement itself here — access-security.fls-mask-and-strip owns it; this item owes only the parity cross-check (one defect, one count)"
+      ],
+      "variants": [
+        "GET /api/v1/auth/me/permissions",
+        "GET /api/v1/auth/me/localization",
+        "GET /api/v1/me/apps"
+      ],
+      "traps": [
+        "wrong-persona",
+        "auth-state-leak",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts. STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2) and the self-scoping probe"
+      },
+      "source": [
+        "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
+        "packages/core/src/security/auth-gate.ts (ALLOW_SUFFIXES — /me/apps + /me/localization reachable to gated users)",
+        "#7616 (delegated permission-set resolution — the enforcement path's own answer), #2752 (/me/apps registry sourcing), #3391 (effective apiOperations annotation), #4093 (guarded degraded branch), ADR-0090 D5 (additive baseline)",
+        "cross-ref access-security.anonymous-deny-surfaces — the 401 floor this trio is the declared exception to",
+        "cross-ref access-security.fls-mask-and-strip — owns the FLS enforcement this item's clause 2 cross-checks"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the raw-mounted current-user trio (/auth/me/permissions, /auth/me/localization, /me/apps) is the console's whole permission layer and appeared in no ledger and no checklist item: aggregation-vs-enforcement parity was untested in either direction, and the deliberate anonymous-200 design (distinct bodies per endpoint: authenticated:false for two, apps:[] for the third — corrected from the sweep register, which implied one shape for all three) was unpinned and at risk of being 'fixed' into a 401",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "access-security.record-view-read-audit",
+      "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "member M (the viewer whose detail reads land rows — a USER-context principal; system-context reads are the declared no-row boundary)",
+        "admin (reads the ledger)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock showcase boot for the honest-default half (grepped: nothing under examples/app-showcase constructs an AuditPlugin or names readAudit — the CLI's auto-registered instance passes NO options and audits no views)",
+          "read the rows through GET /api/v1/data/sys_audit_log — NEVER by opening a SQLite file directly: sys_audit_log's ADR-0057 lifecycle class routes it to the dedicated telemetry datasource whenever one is registered (os dev provisions one by default as a sibling file), and the data API resolves the right one; the write-failure text at read-audit.ts documents exactly this trap"
+        ],
+        "knownGaps": [
+          "the CONFIGURED half has no stock fixture and the provisioning is a BOOT-CONFIG change, not an API sequence — so no area recipe fits. Compose the docs' own snippet (content/docs/permissions/record-view-auditing.mdx, 'Under os serve'): a scratch app whose objectstack.config.ts plugins array carries new AuditPlugin({ readAudit: { objects: ['<object>', 'sys_job'] } }) — sys_job included deliberately as the excluded-name probe. The 'Plugin superseded: com.objectstack.audit' boot line is the opt-in WORKING (last-one-wins over the CLI's option-less instance), not a misconfiguration. Without such a boot, clauses 2-5 score blocked(fixture); clause 1 (the stock negative) runs regardless",
+          "there is deliberately NO enable.auditReads object-metadata key, no stack-config key and no env flag (the docs state why: a declaration that can outlive the plugin reads as coverage while recording nothing) — a runner hunting for a config knob on the object will conclude the capability is missing (absence-inference); the opt-in lives ONLY where the plugin is constructed"
+        ]
+      },
+      "steps": [
+        "stock leg: boot showcase stock; as M open a record detail (GET /api/v1/data/showcase_contact/<id>); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
+        "configured leg (see knownGaps): boot the scratch app with readAudit.objects naming object X plus the excluded sys_job; read the boot log for the install line and the exclusion warning",
+        "as M (user context): GET /api/v1/data/X/<id>; wait past the flush window (or drive maxBatchSize reads); as admin read the ledger rows for action 'read'",
+        "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in — then re-read the ledger",
+        "inspect the landed row's fields: action, user_id, object_name, record_id, old_value, new_value, created_at (compare created_at against the wall clock of the read, not of the flush)"
+      ],
+      "acceptance": [
+        {
+          "clause": "stock boot audits nothing — the honest default: os serve/dev auto-registers AuditPlugin with NO options, so a stock boot writes zero action:'read' rows however many records are opened, and logs no install line (a deployment that opts nothing in pays nothing)",
+          "oracle": "api",
+          "verify": "post-read ledger query for action 'read' returns 0 rows on the stock boot; boot log lacks 'record-view auditing installed'",
+          "evidence": "the filtered query + the log grep"
+        },
+        {
+          "clause": "the opt-in is a CLOSED per-object list: the configured boot's install line names exactly the surviving set ('AuditPlugin: record-view auditing installed on N object(s) — …', audit-plugin.ts), a detail read of an opted-in object lands one row (after flush), and reads of any object OFF the list land none",
+          "oracle": "api",
+          "verify": "install line lists X and not sys_job; M's GET /data/X/<id> produces exactly one action:'read' row; the un-opted object's detail read produces zero",
+          "evidence": "log line + the ledger rows before/after each read"
+        },
+        {
+          "clause": "the row records WHO/WHICH/WHEN and nothing else: action 'read', user_id = M, object_name/record_id correct, old_value AND new_value both null (the afterFind hook sees PRE-MASK plaintext, so copying values would mint a plaintext copy of exactly what FLS withholds — read-audit.ts,516-521), and created_at is the VIEW instant, not the flush instant",
+          "oracle": "api",
+          "verify": "field-by-field read of the landed row; created_at within the read's wall-clock window, not the flush's",
+          "evidence": "the row + the recorded clocks"
+        },
+        {
+          "clause": "the detail-read discriminator holds: a LIST read of the audited object lands no row, and only a findOne whose predicate pins the primary key in its AND-closure qualifies ($or/$not anywhere on the path refuse the proof — extractDetailReadId, read-audit.ts)",
+          "oracle": "api",
+          "verify": "after the list read the ledger count for action 'read' is unchanged; the by-id GET (which reaches the engine as findOne({where:{id}})) is what landed the row",
+          "evidence": "ledger counts around each read"
+        },
+        {
+          "clause": "an exclusion-list name in the opt-in is refused LOUDLY at registration, never silently accepted: sys_job in readAudit.objects draws the warning naming the object ('is on the audit exclusion list … will NOT have its record views recorded', read-audit.ts) and the install line's set excludes it — configuration must not claim coverage the writer does not provide",
+          "oracle": "log",
+          "verify": "boot log carries the named warning AND the install line omits sys_job",
+          "evidence": "both log excerpts"
+        },
+        {
+          "clause": "system-context reads produce NO row — the declared boundary: a read carrying session.isSystem (formula recompute, roll-up, any api.sudo() path — sudo keeps the caller's userId, so the flag is the ONLY discriminator) is the platform reading for its own bookkeeping, not a person opening a record (read-audit.ts)",
+          "oracle": "test",
+          "verify": "packages/plugins/plugin-audit/src/read-audit.test.ts pins the isSystem skip and the no-principal skip; do not tick this from an absence a live run did not deliberately drive",
+          "evidence": "test output"
+        }
+      ],
+      "negative": [
+        "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per process with the durability text (read-audit.ts) and rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it",
+        "a read with no principal (no userId and no actor) lands no row — noise in the WHO ledger is refused by design (read-audit.ts)",
+        "cross-ref access-security.audit-log-browser — WRITE auditing, the browser UI, and the append-only guard belong there; this item owes only the read-writer's contract (one ledger, two items, no double-scoring). The append-only negative there covers action:'read' rows too: user-context POSTs to sys_audit_log are refused regardless of action"
+      ],
+      "variants": [
+        "stock boot (nothing audited)",
+        "configured: opted-in detail read (row)",
+        "configured: list read (no row)",
+        "configured: un-opted object (no row)",
+        "excluded name in the opt-in (loud refusal at registration)",
+        "system-context read (no row — unit-pinned boundary)"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "wrong-persona",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps)"
+      },
+      "source": [
+        "packages/plugins/plugin-audit/src/read-audit.ts (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts (wiring readAudit options into the writer; the install log line)",
+        "content/docs/permissions/record-view-auditing.mdx ('Under os serve' — the option-less auto-instance audits no views; last-one-wins supersession is the opt-in path; no metadata key / stack key / env flag by design)",
+        "#8992 (the card and the 2026-08-16 maintainer ruling: Option A scoped MVP — detail views only, per-object closed opt-in, async batched writes)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the #8992 record-view audit writer had no checklist coverage: the honest default (stock boot audits nothing), the closed per-object opt-in, the detail-read discriminator, the no-values row shape and the loud exclusion refusal were all unasserted. The configured half is fixture-gapped (a boot-config change per the docs' own snippet — recorded as knownGaps, not an area recipe, since it is not an API sequence); the stock negative runs on stock",
+          "ref": "#8992"
+        }
+      ]
+    },
+    {
+      "id": "access-security.share-link-landing-page",
+      "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "minter (member holding showcase_client_liaison — mints the tokens via the API item's steps)",
+        "anonymous visitor (a FRESH browser context — see traps)",
+        "signed-in member (the audience:'signed_in' entitled side — signed in through the console FORM so both auth halves exist)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_client_brief — the stock publicSharing fixture (#9308 fixture 2), same as access-security.share-link-capability-tokens: the PUBLISHED brief is mint-eligible and redactFields declares ['internal_notes','deal_value']",
+          "tokens minted over the API as the liaison member per the API item's step shapes (plain, password, audience signed_in, short-expiry) — this item drives only the RENDERING; the mint/resolve/revoke API clauses stay on the API item"
+        ],
+        "knownGaps": [
+          "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
+          "the ai_conversations transcript branch (SharedRecordPage.tsx,190-234 — messages fetch + ChatbotEnhanced readOnly) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
+          "the page folds EVERY 401 into the password prompt (SharedRecordPage.tsx branches on status alone, never on the body's NEEDS_PASSWORD vs SIGN_IN_REQUIRED code): a signed_in-audience link opened anonymously renders 'Password required' today, not a sign-in prompt. Clause 4's bar is therefore non-leak + a designed state; record the rendered state as measured, and revise this item if the console later distinguishes the two codes"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; as the liaison member mint the four tokens over the API (plain, password, audience:'signed_in', short-expiry); revoke a fifth after minting it",
+        "in a FRESH anonymous browser context open /s/<plain token>: screenshot; then read the DOM — the page renders OUTSIDE the authenticated shell (App.tsx): 'Shared showcase_client_brief' header, the record body, and the hidden-fields notice naming the redaction set",
+        "capture the resolve network response for the same load and diff its record keys against the object's publicSharing.redactFields",
+        "open /s/<password token>: submit a wrong password, then the correct one; capture each round-trip",
+        "open /s/<revoked token> and /s/<garbage-token>; after the short-expiry link lapses, open it too; screenshot each terminal state",
+        "open /s/<signed_in token> anonymously (fresh context), then again as a member signed in through the console form (cookie + bearer both present)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the anonymous render works end to end MINUS the redaction set: record fields render, every field of publicSharing.redactFields ∪ the per-link redact_fields is absent from the DOM AND from the resolve network body (the strip is server-side; the page merely renders it), and the 'Some fields are hidden by the owner' notice names them — the notice depends on the redactFields→redactedFields envelope fold (normalizeResolvedShare), whose omission was exactly the objectstack#3983 regression",
+          "oracle": "network",
+          "verify": "resolve body's record omits the redaction set; after a screenshot confirms render, the DOM shows the record and the notice listing the redacted names (SharedRecordPage.tsx)",
+          "evidence": "the resolve body + screenshot + DOM read of the notice"
+        },
+        {
+          "clause": "the password gate renders as designed and never leaks early: 401 → the 'Password required' prompt; wrong password → re-prompt with 'Wrong password.'; correct password → the record renders — and NO 401 response body carries the record",
+          "oracle": "network",
+          "verify": "the three round-trips (SharedRecordPage.tsx,143-176): two 401s with record-free bodies, then the 200 render; drive the input with native setter + events, not coordinate typing",
+          "evidence": "the three network traces + screenshots of prompt and render"
+        },
+        {
+          "clause": "dead links refuse with designed, non-leaking states: revoked and expired render 'This link has expired or was revoked.' (410), a garbage token renders 'This link is invalid or no longer available.' (404) — never a blank page, a spinner that never settles, or a raw stack/JSON error, and no record data in any refusal body",
+          "oracle": "screenshot",
+          "verify": "each terminal state's screenshot shows the designed message (SharedRecordPage.tsx,178-186); the paired network bodies are record-free",
+          "evidence": "screenshots + the 404/410 bodies"
+        },
+        {
+          "clause": "audience 'signed_in', both sides: the anonymous open never renders the record (the 401 body is record-free; the page shows a designed state — per knownGaps, today that state is the password prompt, record which renders), and the form-signed-in member's open renders it",
+          "oracle": "network",
+          "verify": "anonymous resolve 401 record-free + the rendered state noted; signed-in resolve 200 and the record renders (the resolve fetch rides the same-origin session cookie)",
+          "evidence": "both traces + both screenshots"
+        },
+        {
+          "clause": "the page stands outside the authenticated shell: it renders for a visitor with NO session at all, with no console chrome/sidebar and no redirect to login",
+          "oracle": "screenshot",
+          "verify": "fresh-context load of the plain token shows the standalone layout (App.tsx mounts /s/:token outside the shell routes)",
+          "evidence": "screenshot"
+        }
+      ],
+      "negative": [
+        "any record data reaching a 401/404/410 network body is a SERVER failure first — record it against access-security.share-link-capability-tokens clause 5 and cross-reference from here (one defect, one count); the UI-only symptoms (blank page, raw error text, a rendered redacted field the body did not carry) are failures of THIS item",
+        "a DOM assertion made before a screenshot confirms render is not evidence — the loading state (SharedRecordPage.tsx) reads as an empty page to a premature dump"
+      ],
+      "variants": [
+        "plain link (renders minus redactions)",
+        "password (prompt → wrong → correct)",
+        "revoked (410 message)",
+        "expired (410 message)",
+        "unknown token (404 message)",
+        "audience signed_in — anonymous (refused, designed state)",
+        "audience signed_in — signed-in (renders)",
+        "redacted-fields notice"
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle",
+        "automation-input",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "objectui apps/console/src/pages/shared-record-shape.test.ts (the envelope fold + the redactFields→redactedFields rename — the #3983 pin); objectui-repo-only, see knownGaps. Everything rendered stays manual"
+      },
+      "source": [
+        "objectui apps/console/src/App.tsx (the /s/:token route, mounted outside the authenticated shell)",
+        "objectui apps/console/src/pages/SharedRecordPage.tsx (status folds, password form, error states, generic record render + hidden-fields notice, ai_conversations branch,190-234)",
+        "objectui apps/console/src/pages/shared-record-shape.ts (normalizeResolvedShare — both envelopes, the #3983 rename)",
+        "cross-ref access-security.share-link-capability-tokens — the API half: mint/resolve/redaction/password/audience/revoke semantics and the #9308 showcase_client_brief fixture are asserted THERE; this item asserts only what the console renders of them",
+        "#9308 (the stock fixture), objectstack#3983 (the enveloped-branch rename regression the notice clause guards)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the UI half of the share-link surface: access-security.share-link-capability-tokens (surface:api) asserts the resolve contract but nothing asserted what /s/:token actually renders — the redaction notice (whose #3983 regression was precisely a render-only loss), the password prompt loop, the designed dead-link states, and the outside-the-shell mount. Cross-referenced both ways; the 401-fold boundary (password prompt rendered for a signed_in-audience 401) is recorded as a measured knownGap, not an expectation",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     }

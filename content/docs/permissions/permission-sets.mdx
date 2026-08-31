@@ -153,6 +153,41 @@ Auto-seeded on boot by `plugin-security`
 | `member_default` | Per-org | Standard end-user CRUD; **writes owner-scoped** via `positions: ['org_member']`-domained RLS | The additive baseline — applies to every authenticated request *in addition to* explicit grants (ADR-0090 D5) |
 | `viewer_readonly` | Per-org | Read access only | Auditors / read-only stakeholders |
 
+**Who holds `admin_full_access` is not (only) a grant row.** `PLATFORM_ADMIN`
+standing is derived at a single site from **two anchors**, and either one is
+sufficient:
+
+- **Configuration — `OS_PLATFORM_OWNER_EMAIL`.** The deployment declares its
+  administrators as one email address, or a comma-separated list of them. A
+  caller holds standing when their **own stored `sys_user` row** carries a
+  declared address *and* that row reads **email-verified**; an unverified
+  account holding a declared address confers nothing, so registering the
+  operator's address first gains an attacker no standing. Both sides are
+  compared trimmed and lower-cased, so `Ada@Example.com` and `ada@example.com`
+  are one administrator, not two half-matches. Nothing is stored and nothing is
+  granted — the answer is recomputed from configuration on every resolution.
+- **An unscoped `admin_full_access` grant row** — a `sys_user_permission_set`
+  row with `organization_id = NULL`, the original anchor. It still confers
+  standing, and it is **deprecated**: a deployment resolving through it logs a
+  pointer, once per process, at the configuration line that re-anchors it.
+
+Which anchor a fresh deployment gets depends on its
+[tenancy posture](/docs/deployment/tenancy-modes). Under `single` the first
+human account to register is still promoted and its grant row written. Under
+the walled postures (`group` / `isolated`) **no grant row is ever written** —
+first-registrant promotion is removed there, because on a deployment with
+self-registration reachable, whoever signs up first would otherwise receive
+cross-tenant access. Administrators come from configuration alone. The operator
+procedure, including what an unusable value does, is on
+[Self-hosting → First boot](/docs/deployment/self-hosting#first-boot-create-the-admin).
+
+The resolved list is **readable, never writable**: a `platformAdmin` service
+answers the configured addresses and, per address, whether an account exists,
+whether it is verified, and which account holds standing — for Setup, discovery
+and health surfaces. There is deliberately **no runtime endpoint that changes
+who a platform administrator is**; revocation is a configuration change plus a
+process reload.
+
 ## Assigning permission sets
 
 Grants are plain data rows:

@@ -120,6 +120,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最小长度",
         helpText: "最小字符数"
       },
+      "fields.rows": {
+        label: "Rows",
+        helpText: "Inline editor height (text rows)"
+      },
       "fields.min": {
         label: "最小值",
         helpText: "最小值"
@@ -383,6 +387,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxLength: {
         label: "最大长度",
         helpText: "最多字符数"
+      },
+      rows: {
+        label: "Rows",
+        helpText: "Inline editor height in text rows"
       },
       min: {
         label: "最小值",

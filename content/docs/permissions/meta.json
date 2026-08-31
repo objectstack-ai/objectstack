@@ -1,7 +1,6 @@
 {
   "title": "Permissions & Identity",
   "pages": [
-    "index",
     "administrator-guide",
     "authentication",
     "sso",

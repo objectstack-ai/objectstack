@@ -144,6 +144,39 @@ function hasOwnerField(schema: any): boolean {
 }
 
 /**
+ * The `record_id` column of a `sys_record_share` read, as the members of a
+ * security `$in`. A row whose `record_id` is nullish or empty contributes
+ * NOTHING — the nullish test runs on the RAW column value, BEFORE `String()`.
+ *
+ * The order is the whole point. The previous spelling coerced first and
+ * filtered after — `grants.map((g) => String(g.record_id)).filter(Boolean)` —
+ * which cannot drop a nullish `record_id` at all: `String(null)` is `'null'`
+ * and `String(undefined)` is `'undefined'`, and both are truthy. The only
+ * value it could drop was the empty string, so the guard was dead for exactly
+ * the case its spelling advertised, and a corrupt row put the literal string
+ * `'null'` into `{ id: { $in: [...] } }`. Both call sites are positive
+ * polarity (an OR-ed branch, never negated) and no real record id matches that
+ * member, so the effect was a silently DROPPED grant rather than a widened
+ * scope — but an audit asking which security paths already handle nullish ids
+ * would have counted these two as covered when they provably were not.
+ *
+ * `String()` is kept for the surviving values: a driver may hand back a
+ * numeric primary key, and the members must compare against the string ids the
+ * rest of the filter is built from. Every non-nullish value therefore
+ * stringifies exactly as it did before, and the trailing `!== ''` drops
+ * precisely what `filter(Boolean)` used to drop — so the non-null path is
+ * unchanged and only the nullish rows are newly excluded.
+ */
+function grantedRecordIds(grants: unknown): string[] {
+  if (!Array.isArray(grants)) return [];
+  return grants
+    .map((g: any) => g?.record_id)
+    .filter((recordId: unknown) => recordId != null)
+    .map((recordId: unknown) => String(recordId))
+    .filter((recordId: string) => recordId !== '');
+}
+
+/**
  * [#8418] The one WARN line a write gate emits when it refuses because the
  * ownership fast-path was defeated by a FEDERATED object's phantom `owner_id`
  * anchor.
@@ -416,9 +449,7 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
 
-    const grantedIds: string[] = Array.isArray(grants)
-      ? grants.map((g: any) => String(g.record_id)).filter(Boolean)
-      : [];
+    const grantedIds: string[] = grantedRecordIds(grants);
 
     if (grantedIds.length === 0) {
       return ownerMatch;
@@ -494,9 +525,7 @@ export class SharingService implements ISharingService {
       limit: 5000,
       context: SYSTEM_CTX,
     });
-    const grantedIds: string[] = Array.isArray(grants)
-      ? grants.map((g: any) => String(g.record_id)).filter(Boolean)
-      : [];
+    const grantedIds: string[] = grantedRecordIds(grants);
 
     if (grantedIds.length === 0) return ownerMatch;
     return { $or: [ownerMatch, { id: { $in: grantedIds } }] };

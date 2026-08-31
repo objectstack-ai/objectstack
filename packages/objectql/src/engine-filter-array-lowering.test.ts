@@ -483,6 +483,69 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     expect(err.message).toMatch(/where\.amount\.\$between/);
   });
 
+  // ── [#13357] the null carve-out, ruled 2026-08-31: refused at this seam, ──
+  // ── so the drivers' three-way null-member divergence is UNREACHABLE ──────
+  //
+  // Ruling point 3's negative pin, engine half: the witness is the recording
+  // driver's call log, not the thrown envelope alone — an envelope asserted
+  // without the log would also pass if a DRIVER had thrown it, i.e. if the
+  // refusal had not preceded the dispatch, which is the one thing these
+  // assertions exist to prove. The compile-face half (`parseFilterAST`, both
+  // input forms) is pinned in `@objectstack/spec`'s
+  // `filter-comparand-shape.test.ts`; the matcher-side statement lives in
+  // driver-memory's `memory-null-list-member-unreachable.test.ts`. ⛔ Nothing
+  // here asserts what any backend WOULD have answered — the divergence is
+  // sealed, not reconciled (#5299 stays declined).
+
+  it.each([
+    ['$in: [null]', { stage: { $in: [null] } }],
+    ['$nin: [null]', { stage: { $nin: [null] } }],
+    ['$between: [null, null]', { amount: { $between: [null, null] } }],
+    ['$between: [null, max]', { amount: { $between: [null, 20] } }],
+  ])('a null list member is refused on EVERY verb before any driver call — %s', async (_l, where) => {
+    await expect(engine.find('deal', { where }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.findOne('deal', { where }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.aggregate('deal', {
+      where: where as unknown as EngineAggregateOptions['where'],
+      groupBy: ['stage'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    })).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.delete('deal', { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    // The negative half: refused BEFORE the store — no read, no write, no row
+    // moved. (The count() control below adds its own read, so it runs after.)
+    expect(reads).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    expect(await engine.count('deal')).toBe(3);
+  });
+
+  it('the null-member refusal is not vacuous — the same list WITHOUT null reaches the driver', async () => {
+    // Positive control for the zero-call reading above: one member removed,
+    // same operator, same field, and the dispatch happens.
+    const rows = await engine.find('deal', { where: { stage: { $in: ['won'] } } });
+    expect(reads).toHaveLength(1);
+    expect(lastWhere()).toEqual({ stage: { $in: ['won'] } });
+    expect(rows.map((r: any) => r.id).sort()).toEqual(['d1', 'd3']);
+  });
+
+  it('a nested null member is refused at its own path, engine prefix and all', async () => {
+    const err = await engine.find(
+      'deal',
+      { where: { $or: [{ stage: { $nin: [null] } }] } },
+    ).then(() => null, (e: any) => e);
+    expect(err?.status).toBe(400);
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err.message).toMatch(/^find\('deal'\): /);
+    expect(err.message).toContain('where.$or[0].stage.$nin[0]');
+    expect(reads).toHaveLength(0);
+  });
+
   // ── what must KEEP working: the declared list shapes ───────────────────
 
   it('a proper list comparand still reaches the driver untouched', async () => {

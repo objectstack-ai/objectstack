@@ -100,11 +100,18 @@
  *
  * ## `--fix` repairs rot and REFUSES to repair population
  *
- * Per file, when the page's read-anchor count equals the census's site count, the
- * two are mapped in line order and the numbers rewritten: that is a pure shift, the
- * shape an unrelated edit produces. When the counts differ, the population changed
- * -- a site arrived or vanished -- and no mechanical mapping is honest. `--fix`
- * leaves those alone and the gate stays red until a human writes the row.
+ * Per file, when the page's DISTINCT anchor count equals the number of lines the
+ * file offers to be anchored -- its census read sites AND its `NON_READ_ANCHORS`
+ * citations, as one union -- the two are mapped in line order and the numbers
+ * rewritten: that is a pure shift, the shape an unrelated edit produces. When the
+ * counts differ, the population changed -- a site arrived or vanished -- and no
+ * mechanical mapping is honest. `--fix` leaves those alone and the gate stays red
+ * until a human writes the row.
+ *
+ * ⭐ The union is load-bearing, not tidiness: subtracting the ledger by LINE
+ * compares a pre-shift page with a post-shift ledger and reports a POPULATION
+ * change over a population that never moved (#13490). `fixAnchors` carries the two
+ * measured occurrences and why the union is the safer shape.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -112,6 +119,36 @@
  * of zero files, a declared-count pattern that matches nothing, an UNENFORCED row
  * that vanished or lost its date, and a ledger row that locates nothing are all
  * exit 1 naming what could not be read.
+ *
+ * ## ⭐ Wiring, and why the self-test asserts it (#13646)
+ *
+ * This gate IS the "regenerate and diff" instrument for the page: it re-derives the
+ * census from the tree and reddens when the committed anchors disagree. That makes
+ * it the only thing standing between the page and the failure mode that has no
+ * other signal -- an anchor going stale because the file it CITES moved, in a merge
+ * that produced no conflict at all.
+ *
+ * Measured on `cc837dbfec` by shifting `plugin-sharing/src/sharing-service.ts` down
+ * 29 lines (main's real delta in the #13625 window) with the page untouched, which
+ * is the branch-never-touched-that-file case git merges clean and silent:
+ *
+ *   gate on the shifted tree   exit 1, 16 findings, naming every one of the five
+ *                              sharing-service anchors and the ledger row
+ *   `--fix` then the gate      109 sites re-anchored, exit 0
+ *
+ * So the anchors are recoverable and the loss is loud -- PROVIDED the gate is
+ * scheduled. Nothing asserted that it was. `check-self-test-wired` is conditional
+ * in the wrong direction here: it requires that a script CI runs also has its
+ * `--self-test` run, so deleting BOTH invocations from `lint.yml` retires this gate
+ * with every check still green. The self-test therefore reads the workflow text and
+ * asserts both legs, the way `check-doc-frontmatter`, `check-aggregator-roster` and
+ * `check-ci-filter-parity` each assert their own -- a gate that exists and is not
+ * scheduled is the dormant shape seen from the other side.
+ *
+ * ⚠️ The pin deliberately needs NO workflow edit: `lint.yml` already invokes both
+ * legs, in the required `Lint & Repo Gates` job, on a trigger set that includes
+ * `merge_group` and with no `paths:` filter. It is the repo's busiest file and the
+ * assertion reads it rather than adding to it.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -177,7 +214,7 @@ export const NON_READ_ANCHORS = [
   },
   {
     file: 'packages/objectql/src/engine.ts',
-    needle: 'if (isSystem && opts.bypassTenantAudit === undefined) {',
+    needle: 'if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {',
     why: 'row 24 -- where `bypassTenantAudit` is threaded to the driver',
   },
   {
@@ -748,17 +785,103 @@ export function evaluate({
   };
 }
 
+/** A line list for a refusal message, capped so one bad file cannot flood the log. */
+function fmtLines(lines, cap = 14) {
+  if (lines.length === 0) return '(none)';
+  const shown = lines.slice(0, cap).join(', ');
+  return lines.length > cap ? `${shown}, … (+${lines.length - cap} more)` : shown;
+}
+
+/**
+ * The refusal, with everything it compared -- BOTH counts, BOTH target classes,
+ * and the set difference.
+ *
+ * ⭐ Why the sets and not just the counts. Twice now this refusal has been read as
+ * "your diff added or removed an elevation read site" when nothing of the sort had
+ * happened, and the output gave the author no way to tell which case they were in
+ * short of running `isystem-census.mjs --json` in two trees by hand. The last line
+ * settles it mechanically: if NOTHING is already anchored the page is uniformly
+ * displaced and some citation is unaccounted for; if everything but one target is
+ * already anchored, that one target is the site that arrived.
+ */
+function describeRefusal({ path, pageLines, censusLines, ledgerLines, targets, located }) {
+  const anchoredSet = new Set(pageLines);
+  const targetSet = new Set(targets);
+  const alreadyAnchored = targets.filter((line) => anchoredSet.has(line));
+  const unanchored = targets.filter((line) => !anchoredSet.has(line));
+  const stray = pageLines.filter((line) => !targetSet.has(line));
+  const why = ledgerLines
+    .map((line) => `${line} (${located.get(`${path}:${line}`)?.why ?? 'declared non-read'})`)
+    .join('; ');
+  return (
+    `${path}: the page anchors ${pageLines.length} distinct line(s) into this file, but the tree ` +
+    `holds ${targets.length} anchorable line(s) -- ${censusLines.length} census read site(s) plus ` +
+    `${ledgerLines.length} NON_READ_ANCHORS citation(s). The POPULATION changed, this is not a ` +
+    'shift. A row has to be written or deleted by hand.\n' +
+    `       page anchors ......... ${fmtLines(pageLines)}\n` +
+    `       census read sites .... ${fmtLines(censusLines)}\n` +
+    `       ledger-excused ....... ${why || '(none)'}\n` +
+    `       already anchored ..... ${alreadyAnchored.length} of ${targets.length} target(s)\n` +
+    `       target, NO anchor .... ${fmtLines(unanchored)}\n` +
+    `       anchor, NO target .... ${fmtLines(stray)}`
+  );
+}
+
 /**
  * Rewrite rotted read-site anchors and ledger anchors in place.
  *
- * Only pure shifts: per file, the page's read-anchor count must equal the census's
- * site count. A population change is left for a human.
+ * Only pure shifts. Per file the page's DISTINCT anchor lines are compared with the
+ * union of the two classes of line this page is allowed to anchor -- the census's
+ * read sites and the `NON_READ_ANCHORS` citations -- and rewritten by order when
+ * the two counts agree. A population change is left for a human.
+ *
+ * ## ⛔ Why the ledger cannot be subtracted by LINE (#13490)
+ *
+ * The obvious partition -- "a page anchor is a read anchor unless it sits on a
+ * ledger line" -- compares two DIFFERENT coordinate systems. The page's anchors are
+ * pre-shift, by construction: rot is the only reason `--fix` is running. The ledger
+ * lines are post-shift, because a row locates itself by NEEDLE in the current tree.
+ * So a file whose ledger-excused citation also moved has that citation counted as a
+ * read anchor, and the gate reports a POPULATION change over a population that
+ * never moved. Measured twice, in two lanes, on two different files:
+ *
+ *   security-plugin.ts  7 read sites + 1 ledger citation, all displaced +20/+19 by
+ *                       an unrelated bootstrap edit; zero `isSystem` lines added or
+ *                       removed. Refusal: "page anchors 8 distinct read line(s),
+ *                       census finds 7". (PR #13514, cost a patch round.)
+ *   rest-server.ts      6 read sites + 2 ledger citations, displaced +3/+11 by a
+ *                       merge. Refusal: "page anchors 7 ... census finds 6", with
+ *                       the contradicting `[ledger-row-unused]` line in the SAME
+ *                       run's output.
+ *
+ * ⚠️ And it is wrong in the other direction too, which is the dangerous one: a
+ * stale READ anchor that happens to land on a line the ledger now occupies was
+ * SUBTRACTED, so the counts could agree by cancellation and the rewrite would map
+ * the surviving anchors onto each other's rows -- a page that is wrong and GREEN,
+ * because both classes stay covered. That crossing is real: on the second
+ * occurrence `rest-server.ts:1267` was simultaneously the second inbound seam's new
+ * home and a read row's stale anchor.
+ *
+ * ⭐ Comparing the UNION removes both directions at once, and buys a postcondition
+ * the per-class comparison cannot state: the rewrite is a BIJECTION from the page's
+ * distinct anchor lines onto the file's anchorable lines, so every census site is
+ * anchored, every ledger row is used and no anchor is unexplained -- for every file
+ * `--fix` touches, `evaluate` is clean by construction. That is why the union is
+ * the safer of the two shapes, and it is the one taken: it also refuses when a
+ * ledger citation was added or dropped without the page following, which comparing
+ * reads alone would have rewritten straight past.
+ *
+ * ⛔ What it still cannot see, stated rather than papered over: alignment is by
+ * ORDER, so a pure displacement is reconstructed exactly, but a REORDERING that
+ * moves a cited construct past another one inside the same file is indistinguishable
+ * from a shift on line numbers alone. No line-only tool can tell those apart -- and
+ * `evaluate` cannot either, since both classes stay covered. Rows are matched to
+ * lines by a human there, as they always were.
  *
  * @returns {{ text: string, rewrites: string[], refused: string[] }}
  */
 export function fixAnchors({ pageText, census, tracked, readFile, ledger = NON_READ_ANCHORS }) {
   const anchors = extractLineAnchors(pageText);
-  const sites = siteKeys(census);
   const { located } = locateNonReadAnchors(ledger, readFile);
   /** ledger target lines, per file */
   const ledgerByFile = new Map();
@@ -787,40 +910,24 @@ export function fixAnchors({ pageText, census, tracked, readFile, ledger = NON_R
     byFile.get(path).push(anchor);
   }
   for (const [path, fileAnchors] of byFile) {
-    const ledgerLines = new Set(ledgerByFile.get(path) ?? []);
-    const censusLines = [...new Set(census.sites.filter((s) => s.file === path).map((s) => s.line))];
+    const ledgerLines = [...new Set(ledgerByFile.get(path) ?? [])].sort((a, b) => a - b);
+    const censusLines = [...new Set(census.sites.filter((s) => s.file === path).map((s) => s.line))].sort(
+      (a, b) => a - b
+    );
+    // ⭐ The comparison is against the UNION of both target classes, in one pass.
     // A row cites the same line more than once (`:274` appears in the table AND in
     // the rough edges), so the comparable unit is a DISTINCT line, not an anchor.
-    const readAnchors = fileAnchors.filter((a) => !ledgerLines.has(a.line));
-    const readLines = [...new Set(readAnchors.map((a) => a.line))].sort((a, b) => a - b);
-    if (readLines.length !== censusLines.length) {
-      refused.push(
-        `${path}: page anchors ${readLines.length} distinct read line(s), census finds ` +
-          `${censusLines.length} -- the POPULATION changed, this is not a shift. A row has to be ` +
-          'written or deleted by hand.'
-      );
+    const targets = [...new Set([...censusLines, ...ledgerLines])].sort((a, b) => a - b);
+    const pageLines = [...new Set(fileAnchors.map((a) => a.line))].sort((a, b) => a - b);
+    if (pageLines.length !== targets.length) {
+      refused.push(describeRefusal({ path, pageLines, censusLines, ledgerLines, targets, located }));
       continue;
     }
-    const target = [...censusLines].sort((a, b) => a - b);
-    const shift = new Map(readLines.map((line, i) => [line, target[i]]));
-    for (const anchor of readAnchors) {
+    const shift = new Map(pageLines.map((line, i) => [line, targets[i]]));
+    for (const anchor of fileAnchors) {
       const to = shift.get(anchor.line);
       if (to !== undefined && to !== anchor.line) newLine.set(anchor, to);
     }
-  }
-
-  // Ledger anchors: an anchor whose file has exactly one ledger line it is nearest
-  // to, and which is neither a census site nor already on a ledger line.
-  for (const [path, fileAnchors] of byFile) {
-    const ledgerLines = ledgerByFile.get(path) ?? [];
-    if (ledgerLines.length === 0) continue;
-    const taken = new Set(fileAnchors.filter((a) => ledgerLines.includes(a.line)).map((a) => a.line));
-    const free = ledgerLines.filter((l) => !taken.has(l));
-    const orphans = fileAnchors.filter(
-      (a) => !ledgerLines.includes(a.line) && !sites.has(`${path}:${a.line}`) && !newLine.has(a)
-    );
-    const orphanLines = new Set(orphans.map((a) => a.line));
-    if (free.length === 1 && orphanLines.size === 1) for (const a of orphans) newLine.set(a, free[0]);
   }
 
   // Apply, latest anchor first, so earlier offsets stay valid.
@@ -925,12 +1032,67 @@ const FIXTURE_LEDGER = [
   { file: 'pkg/a.ts', needle: 'export function isSystemObjectName', why: 'name-prefix helper, not a read' },
 ];
 
+/**
+ * ⭐ The CROSSING fixture (#13490). `pkg/a.ts` puts its read ABOVE its ledger
+ * citation, which is the easy order: a stale read anchor can never land on the
+ * ledger's line. Here the citation sits BELOW the read site, so a displacement
+ * walks the citation onto ground a read anchor used to hold -- and the ledger was
+ * subtracted by LINE, so that read anchor was subtracted with it. The counts then
+ * agreed by cancellation and the rewrite mapped the two surviving anchors onto
+ * each other's rows: a page that is WRONG and GREEN, because both classes stay
+ * covered and nothing downstream compares a row to its meaning. That crossing is
+ * not hypothetical -- `rest-server.ts:1267` was simultaneously the second inbound
+ * seam's new home and a read row's stale anchor on the second occurrence.
+ */
+const CROSSING_SOURCE = [
+  'export function guard(ctx: ExecutionContext) {', // 1
+  '  const kind = classify(ctx);', // 2
+  '  if (isSystemObjectName(ctx.objectName)) return SKIP;', // 3  <- ledger needle
+  '  audit(kind);', // 4
+  '  if (ctx.isSystem) return ALLOW;', // 5  <- the elevation read
+  '  return DENY;', // 6
+  '}', // 7
+].join('\n');
+
+const CROSSING_CENSUS = {
+  ...FIXTURE_CENSUS,
+  sites: [{ file: 'pkg/b.ts', line: 5, receiver: 'ctx', package: 'pkg', text: 'if (ctx.isSystem) return ALLOW;' }],
+  files: ['pkg/b.ts'],
+};
+
+const CROSSING_LEDGER = [
+  {
+    file: 'pkg/b.ts',
+    needle: 'isSystemObjectName(ctx.objectName)',
+    why: 'the sys_ name-prefix helper call, not a read',
+  },
+];
+
 function fixtureRead(relPath) {
   if (relPath === 'pkg/a.ts') return FIXTURE_SOURCE;
+  if (relPath === 'pkg/b.ts') return CROSSING_SOURCE;
   throw new Error(`no fixture for ${relPath}`);
 }
 
-const FIXTURE_TRACKED = ['pkg/a.ts', 'other/a.ts'];
+const FIXTURE_TRACKED = ['pkg/a.ts', 'other/a.ts', 'pkg/b.ts'];
+
+/**
+ * One anchor per line, so the two slots can be told apart AFTER a rewrite: the
+ * question these cases ask is not "are both lines covered" -- the buggy fixer
+ * covered both -- but "did each ROW keep its own line".
+ */
+function crossingPage({ read = 'pkg/b.ts:5', helper = 'pkg/b.ts:3' } = {}) {
+  return [
+    '---',
+    'title: crossing fixture',
+    '---',
+    '',
+    'the elevation read at `' + read + '`.',
+    '',
+    'the name helper at `' + helper + '`.',
+    '',
+  ].join('\n');
+}
 
 /** A one-row stand-in for `DECLARED_COUNTS`, so the fixtures need one sentence. */
 const FIXTURE_COUNTS = [
@@ -1248,6 +1410,156 @@ function selfTest() {
     refusedFix.rewrites.length === 0 && refusedFix.refused.length === 1,
     JSON.stringify(refusedFix.refused)
   );
+
+  // ── ⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift ────
+  //
+  // The pre-existing case above shifts the read only, which is why it never caught
+  // this: a page anchor is pre-shift by construction, a ledger line is located by
+  // needle in the CURRENT tree, and subtracting one from the other counts the
+  // displaced citation as a read anchor. Measured on two files in two lanes --
+  // `security-plugin.ts` (7 reads + 1 citation, all +20/+19, zero `isSystem` lines
+  // added or removed) refused with "page anchors 8 distinct read line(s), census
+  // finds 7", and `rest-server.ts` (6 + 2) with "7 ... finds 6".
+  const bothShifted = fixAnchors({
+    pageText: fixturePage({ anchor: 'pkg/a.ts:1', helper: 'pkg/a.ts:6' }),
+    census: FIXTURE_CENSUS,
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: FIXTURE_LEDGER,
+  });
+  t(
+    'FIX #13490: a shift that moves the LEDGER citation too is a shift, not a population change',
+    bothShifted.refused.length === 0 &&
+      bothShifted.text.includes('`pkg/a.ts:2`') &&
+      bothShifted.text.includes('`pkg/a.ts:7`'),
+    `refused=${JSON.stringify(bothShifted.refused)} rewrites=${JSON.stringify(bothShifted.rewrites)}`
+  );
+
+  // ⭐ The postcondition the union buys: the rewrite is a BIJECTION from the page's
+  // distinct anchor lines onto the file's anchorable lines, so a file `--fix`
+  // touched cannot come back with a missing site, an unexplained anchor or an
+  // unused ledger row. Pinned behaviourally rather than argued in a comment.
+  const afterFix = evaluate({
+    pageText: bothShifted.text,
+    census: FIXTURE_CENSUS,
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: FIXTURE_LEDGER,
+    declaredCounts: [],
+    unenforcedCounts: [],
+  });
+  t(
+    'FIX #13490: what --fix rewrote evaluates clean -- every site anchored, every ledger row used',
+    afterFix.problems.length === 0,
+    afterFix.problems.join(' | ')
+  );
+
+  // ── ⛔ the dangerous direction: the citation crosses onto a read anchor's line ─
+  //
+  // Subtracting the ledger by LINE removed the stale READ anchor here (it sits on
+  // `:3`, the citation's new home), the counts agreed by cancellation, and the one
+  // surviving anchor was mapped onto the read site -- leaving the page GREEN with
+  // the two rows pointing at each other's lines. Both spellings survive either
+  // way, so this case asserts which ROW holds which line.
+  const crossed = fixAnchors({
+    pageText: crossingPage({ read: 'pkg/b.ts:3', helper: 'pkg/b.ts:2' }),
+    census: CROSSING_CENSUS,
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: CROSSING_LEDGER,
+  });
+  t(
+    'FIX #13490: a citation crossing a read anchor keeps each ROW on its own line, not merely covered',
+    crossed.refused.length === 0 &&
+      crossed.text.includes('the elevation read at `pkg/b.ts:5`') &&
+      crossed.text.includes('the name helper at `pkg/b.ts:3`'),
+    `refused=${JSON.stringify(crossed.refused)} rewrites=${JSON.stringify(crossed.rewrites)}`
+  );
+
+  // ── ⭐ and the safety property, on the shape that now ACCEPTS ────────────────
+  //
+  // ⛔ The fix must not buy acceptance with the refusal. A read site ARRIVES while
+  // the ledger citation shifts: the old counting arm and the new one both refuse
+  // here, and that must stay true, or #13490 was closed by deleting the guard.
+  const grewWhileShifting = fixAnchors({
+    pageText: fixturePage({ anchor: 'pkg/a.ts:2', helper: 'pkg/a.ts:6' }),
+    census: arrived,
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: FIXTURE_LEDGER,
+  });
+  t(
+    'FIX #13490: a site that ARRIVES while the citation shifts is still REFUSED',
+    grewWhileShifting.rewrites.length === 0 && grewWhileShifting.refused.length === 1,
+    JSON.stringify(grewWhileShifting.refused)
+  );
+
+  const vanished = fixAnchors({
+    pageText: crossingPage(),
+    census: { ...CROSSING_CENSUS, sites: [...CROSSING_CENSUS.sites, { file: 'pkg/b.ts', line: 6, receiver: 'ctx', package: 'pkg', text: 'return DENY;' }] },
+    tracked: FIXTURE_TRACKED,
+    readFile: fixtureRead,
+    ledger: CROSSING_LEDGER,
+  });
+  t(
+    'FIX #13490: an unanchored site in the crossing file is REFUSED too',
+    vanished.rewrites.length === 0 && vanished.refused.length === 1,
+    JSON.stringify(vanished.refused)
+  );
+
+  // ── the refusal has to SHOW its work (both counts, both classes, the diff) ────
+  //
+  // Twice this refusal was read as "your diff added or removed an elevation read
+  // site" when nothing had, and the output gave no way to tell which case you were
+  // in short of running the census in two trees by hand. `already anchored 8 of 9`
+  // + one named target settles it; `0 of 9` says uniform displacement.
+  const refusalText = grewWhileShifting.refused[0] ?? '';
+  t(
+    'FIX #13490: the refusal states BOTH counts it compared and the ledger it set aside',
+    refusalText.includes('the page anchors 2 distinct line(s)') &&
+      refusalText.includes('holds 3 anchorable line(s)') &&
+      refusalText.includes('2 census read site(s)') &&
+      refusalText.includes('1 NON_READ_ANCHORS citation(s)') &&
+      refusalText.includes('name-prefix helper, not a read'),
+    refusalText
+  );
+  t(
+    'FIX #13490: the refusal names the set difference, not just a count',
+    refusalText.includes('already anchored') &&
+      refusalText.includes('target, NO anchor') &&
+      refusalText.includes('anchor, NO target'),
+    refusalText
+  );
+
+  // ── WIRING: this gate, and its self-test, really run in CI ──────────────────
+  //
+  // ⭐ The half a clean tree cannot show, and the reason this block exists. Every
+  // other case above judges the RULES; this one judges whether anything runs them.
+  // `check-self-test-wired` is conditional in the wrong direction for that -- it
+  // requires "if CI runs the script, CI runs its --self-test too", so deleting BOTH
+  // lines from `lint.yml` leaves it green and silently retires the only instrument
+  // that catches a stale anchor. Measured: the census is what reddens when a cited
+  // file moves underneath a page nobody edited, so its scheduling is load-bearing,
+  // not incidental.
+  //
+  // Asserted against the workflow TEXT, following the precedent `check-doc-frontmatter`,
+  // `check-aggregator-roster` and `check-ci-filter-parity` set -- and, like the second
+  // docs root that gate added, this needed NO workflow edit: `lint.yml` already invokes
+  // both legs, and it is the repo's busiest file.
+  const SELF = 'scripts/check-system-context-census.mjs';
+  let lintYml = null;
+  try {
+    lintYml = readFileSync(join(ROOT, '.github/workflows/lint.yml'), 'utf8');
+  } catch (err) {
+    t(`WIRING: .github/workflows/lint.yml is readable`, false, err.code ?? err.message);
+  }
+  if (lintYml !== null) {
+    t(
+      'WIRING: lint.yml invokes this gate directly (the GATE INVOCATION IDIOM, not a package.json fence)',
+      lintYml.includes(`node ${SELF}\n`)
+    );
+    t('WIRING: lint.yml runs the --self-test leg too', lintYml.includes(`node ${SELF} --self-test`));
+  }
 
   process.stdout.write(
     failures === 0
