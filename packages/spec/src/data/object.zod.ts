@@ -15,6 +15,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1157,10 +1158,16 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
       'Write `visibleWhen: <CEL>` — FALSE hides the whole group, header included.',
   },
 }, {
-  /** Group key — referenced by `Field.group` to assign a field to this group. Must be snake_case. */
-  key: z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+  /**
+   * Group key — referenced by `Field.group` to assign a field to this group,
+   * and (since #13855) by a layout section's `group` to inherit the whole
+   * group. Must be snake_case; the grammar is single-sourced as
+   * `FIELD_GROUP_KEY_PATTERN` beside the derivation it belongs to, so the
+   * declaring surface and the referencing surfaces cannot drift apart.
+   */
+  key: z.string().regex(FIELD_GROUP_KEY_PATTERN, {
     message: 'Field group key must be lowercase snake_case (e.g., "contact_info", "billing", "system")',
-  }).describe('Group machine key (snake_case). Referenced by Field.group.'),
+  }).describe('Group machine key (snake_case). Referenced by Field.group, and by a layout section\'s `group`.'),
 
   /** Human-readable label displayed as the group header. */
   label: z.string().describe('Group display label'),

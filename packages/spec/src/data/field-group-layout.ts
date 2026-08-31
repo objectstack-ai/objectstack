@@ -34,6 +34,21 @@
  * flat/auto layout.
  */
 
+/**
+ * The field-group KEY grammar — lowercase snake_case, one declaration.
+ *
+ * Declared here rather than inline on `ObjectFieldGroupSchema.key` because the
+ * key is now written on TWO surfaces: the group that DECLARES it
+ * (`ObjectFieldGroupSchema.key`) and the layout sections that REFERENCE it
+ * (`FormSectionSchema.group`, `RecordDetailsProps.sections[].group` — #13855).
+ * Two spellings of one grammar is the failure `identifiers.zod.ts` records from
+ * the other side: the reference surface would accept a key the declaring
+ * surface refuses, so the reference could never resolve and the section would
+ * render nothing with nothing reported. This module is the ADR-0085 §5 single
+ * source for the grouping semantics, so it is where the key's shape belongs.
+ */
+export const FIELD_GROUP_KEY_PATTERN = /^[a-z_][a-z0-9_]*$/;
+
 /** Collapse behaviour of a derived section (mirrors ObjectFieldGroupSchema.collapse). */
 export type FieldGroupCollapse = 'none' | 'expanded' | 'collapsed';
 

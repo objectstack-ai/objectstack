@@ -66,6 +66,14 @@ export const PAGE_FIELD_UNKNOWN = 'page-field-unknown';
  * #8116's severity reasoning, unchanged.
  */
 export const PAGE_FIELD_UNPROVISIONED = 'page-field-unprovisioned';
+/**
+ * [#13855] A section's `group` names a field group the bound object does not
+ * declare. The reference form inherits the section's whole membership from that
+ * group, so a dangling key leaves the section with no members and it does not
+ * render at all. Always `warning` — see `object-field-groups.ts` for why this
+ * sits with the family's advisory findings rather than gating.
+ */
+export const PAGE_SECTION_GROUP_UNKNOWN = 'page-section-group-unknown';
 
 export type PageFieldSeverity = 'error' | 'warning';
 
@@ -99,6 +107,14 @@ import {
   unprovisionedAnchorCause,
   unprovisionedAnchorHint,
 } from './system-fields.js';
+// [#13855] The field-group reference question, shared with `validate-form-layout`
+// so both layout escape hatches resolve a `section.group` against one index.
+import {
+  checkSectionGroupRefs,
+  indexObjectFieldGroups,
+  sectionGroupRefs,
+  type SectionGroupRef,
+} from './object-field-groups.js';
 
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];
@@ -259,6 +275,30 @@ export function componentFieldRefs(
       if (!isRec(section)) continue;
       refs.push(...fieldRefsFrom(section.fields, `${basePath}${sep}${key}[${si}].fields`));
     }
+  }
+  return refs;
+}
+
+/**
+ * [#13855] The `group` references a component's section props hold — the same
+ * `nestedSections` list {@link componentFieldRefs} walks, asked the other
+ * question. Read from that one descriptor table on purpose: a component that
+ * grows sections is covered by both checks in one edit, instead of gaining the
+ * field check and silently missing the group one.
+ *
+ * `null` for a type with no descriptor, matching {@link componentFieldRefs}.
+ */
+export function componentSectionGroupRefs(
+  type: string,
+  props: AnyRec,
+  basePath: string,
+  sep = '.',
+): SectionGroupRef[] | null {
+  const spec = COMPONENT_FIELD_SPECS[type];
+  if (!spec) return null;
+  const refs: SectionGroupRef[] = [];
+  for (const key of spec.nestedSections ?? []) {
+    refs.push(...sectionGroupRefs(props[key], `${basePath}${sep}${key}`, sep));
   }
   return refs;
 }
@@ -443,6 +483,8 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   // [#8340] The provenance index alongside the existence one — same keying,
   // asked on the path where the existence check stays silent.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
+  // [#13855] object name → its declared field-group keys, for `section.group`.
+  const objectFieldGroups = indexObjectFieldGroups(stack);
 
   const pages = asArray(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
@@ -476,6 +518,18 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
       const refs = componentFieldRefs(type, props, base);
       if (!refs) continue; // unregistered / non-field component — skip silently
       checkRefs(refs, objectName, where);
+
+      // [#13855] The other question a section can raise: not "is this field
+      // real?" but "is this GROUP real?". Same walk, same object binding.
+      findings.push(
+        ...checkSectionGroupRefs(
+          componentSectionGroupRefs(type, props, base) ?? [],
+          objectName,
+          objectFieldGroups,
+          where,
+          PAGE_SECTION_GROUP_UNKNOWN,
+        ),
+      );
     }
 
     // ── interfaceConfig (list pages) ──
