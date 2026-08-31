@@ -604,7 +604,7 @@ export function lintDataModel(objects: any[]): LintIssue[] {
           issues.push({
             severity: 'suggestion',
             rule: 'relationship/delete-behavior',
-            message: `master_detail "${obj.name}.${fieldName}" → ${parent} should declare deleteBehavior (cascade/restrict/set_null)`,
+            message: `master_detail "${obj.name}.${fieldName}" → ${parent} should declare deleteBehavior (cascade/restrict — set_null is not honored on master_detail; use a lookup field if children must survive the parent)`,
             path: `${fieldPath}.deleteBehavior`,
             fix: "deleteBehavior: 'cascade'",
           });

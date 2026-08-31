@@ -19,13 +19,14 @@
 // module between two suites that pin OPPOSITE halves of one arm would couple
 // them for no gain.
 //
-// ⛔ NOT pinned here: whether a canonically-spelled `reference` lookup should
-// GET `idx_FIELD_lookup`. That is part (2) of #13222 — a separate, still-open
-// ruling (it is a boot-time behaviour change for existing deployments: index
-// builds on large collections). The last case below is this PR's own NO-CHANGE
-// control for it, and is expected to flip in the PR that takes part (2),
-// alongside `mongodb-schema-declared-indexes.test.ts`'s #12252 pin, which owns
-// the fact.
+// Part (2) of #13222 has since been ruled and taken: the join-index arm now
+// gates on the canonical `reference`, so a lookup an author can really publish
+// GETS `idx_FIELD_lookup`. The last case below was this file's NO-CHANGE
+// control for that question and has flipped accordingly, in the same stroke as
+// `mongodb-schema-declared-indexes.test.ts`'s #12252 pin and the real-server
+// pin in `mongodb-driver.test.ts`. It still belongs here: it is what proves the
+// door and the arm read DIFFERENT keys and disagree about them on purpose —
+// `reference_to` refused, `reference` indexed, from one call.
 
 import { describe, it, expect } from 'vitest';
 import type { Db } from 'mongodb';
@@ -187,40 +188,72 @@ describe('#13222 part (1) — driver-mongodb refuses `reference_to` at the schem
     expect(names(created)).toEqual(['idx_id_unique', 'idx_created_at', 'idx_updated_at']);
   });
 
-  it('leaves the join-index arm exactly as it was — part (2) is NOT taken here', async () => {
-    // ⚠️ THE NO-CHANGE CONTROL for this PR, and load-bearing in both directions.
+  it('refuses `reference_to` and INDEXES `reference` — two keys, two answers, one call', async () => {
+    // ⚠️ THE PAIRED CONTROL for the door, and load-bearing in both directions.
     //
-    // Positive half: a `user` field still gets `idx_owner_id_lookup`, which
-    // proves the arm still executes and that the harness is wired to something —
-    // without it the negative half below would pass just as happily against a
-    // function that created no indexes at all.
+    // The door refuses one relationship spelling; the arm indexes the other. A
+    // suite that only ever proves the refusal cannot tell "the door works" from
+    // "syncCollectionSchema throws on everything", so the two answers are taken
+    // from ONE call here on purpose.
     //
-    // Negative half: a canonically-spelled `reference` lookup still gets NO join
-    // index. That is the divergence #12252 pinned and part (2) of #13222 owns.
-    // ⛔ This case records what the driver DOES, not what it should do: the door
-    // added in this PR makes the arm's `field.reference_to` conjunct unreachable
-    // but deliberately does not delete it, because deleting it would start
-    // building indexes on existing deployments' large collections — an unruled
-    // behaviour change. When part (2) lands, this case is expected to flip to
-    // `toContain`, in the same stroke as the #12252 pin in
-    // `mongodb-schema-declared-indexes.test.ts`.
+    // `user` half: still `idx_owner_id_lookup`, and still the unconditional
+    // disjunct — it proves the arm executed and names the shape the assertion
+    // below is spelled in, so neither half can pass vacuously.
     //
-    // Bound through a variable rather than written inline: the driver's own
-    // `FieldDef` declares no `reference` key, so a fresh object literal carrying
-    // it trips TypeScript's excess-property check.
-    const canonicalLookup = { type: 'lookup', reference: 'company' };
-
+    // `reference` half: FLIPPED by part (2) of #13222. This case used to assert
+    // the canonical lookup got NO index — the divergence #12252 pinned, which
+    // held because the arm gated on `reference_to`, a key this very door
+    // refuses, making the conjunct unreachable for every input. The arm now
+    // gates on `reference`, so the lookup is indexed.
     const { db, created } = fakeDb();
     await syncCollectionSchema(db, 'lead', {
       name: 'lead',
-      fields: { company_id: canonicalLookup, owner_id: { type: 'user' } },
+      fields: {
+        company_id: { type: 'lookup', reference: 'company' },
+        owner_id: { type: 'user' },
+      },
     });
 
+    // Exact set, in creation order — closes the vacuity routes a `toContain`
+    // pair leaves open: an index appearing under another name, the two lookup
+    // indexes swapping fields, or a stray fourth index nobody declared.
     expect(names(created)).toEqual([
       'idx_id_unique',
       'idx_created_at',
       'idx_updated_at',
+      'idx_company_id_lookup',
       'idx_owner_id_lookup',
     ]);
+  });
+
+  it('does not index a `lookup` that declares no target — `reference` is read for truth, not presence', async () => {
+    // Measured on `FieldSchema` built from this tree: `{ type: 'lookup' }` with
+    // no `reference`, and `{ type: 'lookup', reference: '' }`, BOTH parse
+    // successfully — the spec's prose calls `reference` required for these
+    // types, but the schema does not enforce it. So this is a shape an author
+    // can really publish, not a hypothetical, and the arm has to answer for it.
+    //
+    // It answers by declining: `idx_FIELD_lookup` exists to serve a join, and a
+    // lookup with no declared target has no join to serve — the index would
+    // cost every write and buy no read. This is why the arm gates on
+    // truthiness and not on `!== undefined` like the door above does; the two
+    // predicates differ deliberately, because they are answering different
+    // questions about different keys.
+    for (const target of [undefined, '']) {
+      const { db, created } = fakeDb();
+      await syncCollectionSchema(db, 'lead', {
+        name: 'lead',
+        fields: { company_id: { type: 'lookup', reference: target }, owner_id: { type: 'user' } },
+      });
+
+      // The `user` control fires, so the arm ran and the zero below is a real
+      // zero rather than a harness that called nothing.
+      expect(names(created)).toEqual([
+        'idx_id_unique',
+        'idx_created_at',
+        'idx_updated_at',
+        'idx_owner_id_lookup',
+      ]);
+    }
   });
 });

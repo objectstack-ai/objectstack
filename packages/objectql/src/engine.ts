@@ -128,11 +128,13 @@ import { redactBoundStatement } from './driver-fault-redaction.js';
 import {
   resolveSystemWriteOrganization,
   resolveTenantFieldName,
-  isPlatformNamespaceObject,
   carriesOrganization,
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
+// [#13491] The per-object tenancy inventory that replaced the blanket
+// namespace exemption — the ONE reading both narrowed gates consult.
+import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/security';
 
@@ -3569,6 +3571,14 @@ export class ObjectQL implements IObjectQLEngine {
       !isFederated;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
+    // [#13491] The object's tenancy classification — the ONE reading both the
+    // mute below and `resolveSystemInsertOrganization` narrow by. An object
+    // with no tenant field is out by construction; a platform object is out
+    // unless the inventory adjudicated it tenant-scoped.
+    const isTenantAuditInScope =
+      resolveTenantFieldName(objectSchema) !== null &&
+      !isFederated &&
+      !isPlatformObjectOutOfTenantAuditScope(object);
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
     if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
@@ -3597,10 +3607,28 @@ export class ObjectQL implements IObjectQLEngine {
       // (autonumber `{YYYYMMDD}` tokens) resolves the calendar day correctly.
       opts.timezone = execCtx!.timezone;
     }
-    if (isSystem && opts.bypassTenantAudit === undefined) {
-      // System-elevated writes (boot-time seeds, internal mirrors, scheduled
-      // hooks) are unscoped by design — silence the audit warn for them but
-      // still flag genuine user-path bugs.
+    if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
+      // [#13491] The isSystem mute NARROWED by the object's tenancy
+      // classification, in the same stroke as the guard above and by the same
+      // reading (2026-08-31 ruling, execution point 1).
+      //
+      // It used to mute EVERY elevated write, whatever the object was. The
+      // #13178 census measured what that cost: 135 of 175 write call sites
+      // (77%) were silenced here — at the control's LARGEST gate, sitting
+      // ahead of the condition the control is about — and the control has
+      // never produced a finding, while all five known instances of the defect
+      // were found by a person reading call sites.
+      //
+      // What still mutes: an object with no tenant field at all (nothing to be
+      // unscoped from — the driver would exit at `resolveTenantField` anyway),
+      // and a platform object the inventory classified `global` or has not
+      // adjudicated. What no longer mutes: a tenant-scoped object, platform
+      // namespace or not. A caller that means it still passes
+      // `bypassTenantAudit: true` explicitly and is honoured above — this
+      // branch only fills in a value nobody supplied.
+      //
+      // ⚠️ Direction, per execution point 3: what this ADDS is a driver WARN
+      // line. It changes nothing about what any write touches.
       opts.bypassTenantAudit = true;
     }
     if (preserveAudit && opts.preserveAudit === undefined) {
@@ -3760,9 +3788,16 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // Platform namespaces stay global by design (#8672's reasoning, which the
-    // #8844 ruling confirms does not generalize to application objects).
-    if (isPlatformNamespaceObject(object)) return undefined;
+    // [#13491] Platform-namespace objects are excluded PER OBJECT, not
+    // wholesale. The 2026-08-31 ruling withdrew the blanket
+    // `isPlatformNamespaceObject(object)` exemption that used to stand here:
+    // #8672's "an org-less row is defensible for `sys_permission_set`"
+    // inherits per object, and the namespace also holds objects whose org-less
+    // rows are a defect — five instances of that class, all found by hand.
+    // `unclassified` keeps the old exclusion so an unadjudicated object's
+    // behaviour does not move; see `platform-object-tenancy.ts` for the
+    // inventory and why the classification cannot be read off the schema.
+    if (isPlatformObjectOutOfTenantAuditScope(object)) return undefined;
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason

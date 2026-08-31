@@ -163,9 +163,14 @@ object's `indexes[]` — the one surface an index is declared on (a field-level
 `indexed` flag is not a `FieldSchema` key and never built an index,
 #2377 / #6810).
 
-⚠️ Lookup fields are **not** indexed today. The lookup arm gates on
-`reference_to`, a spelling `FieldSchema` refuses, so a canonically-spelled
-`reference` lookup gets no join index — see #13222, which owns that fix.
+A `lookup` field that declares `reference` also indexes itself, as
+`idx_FIELD_lookup`, for join performance; so does a `user` field. A `lookup`
+with no `reference` does not — there is no declared target to join to.
+
+⚠️ **Upgrading:** this join index is newer than the driver. The first
+`syncSchema` after the upgrade builds it across collections that already hold
+data, which costs real IO and time on large ones. See `CHANGELOG.md` for the
+operational detail. Later boots are no-ops.
 
 ```typescript
 await driver.syncSchema('account', {
@@ -177,7 +182,8 @@ await driver.syncSchema('account', {
   },
   indexes: [{ fields: ['email'] }],
 });
-// Creates: idx_id_unique, idx_name_unique, idx_email
+// Creates: idx_id_unique, idx_created_at, idx_updated_at,
+//          idx_name_unique, idx_company_id_lookup, idx_email
 ```
 
 ### Aggregation

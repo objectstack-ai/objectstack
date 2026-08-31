@@ -323,6 +323,19 @@ export {
   GLOBAL_TENANT,
   DEFAULT_TENANT_FIELD,
 } from './tenancy/system-write-organization.js';
+
+// [#13491] The per-object tenancy inventory for the platform namespaces — the
+// 2026-08-31 ruling's replacement for the wholesale `sys_ / cloud_ / ai_`
+// exemption. Exported so the inventory is readable (and testable) from outside
+// the engine; the ledger itself is hand-adjudicated, never derived.
+export {
+  PLATFORM_OBJECT_TENANCY,
+  classifyPlatformObjectTenancy,
+  isPlatformObjectOutOfTenantAuditScope,
+  tenantScopedPlatformObjects,
+  type PlatformObjectTenancy,
+  type PlatformObjectTenancyEntry,
+} from './tenancy/platform-object-tenancy.js';
 export type {
   SystemWriteOrganizationDecision,
   SystemWriteRefusalReason,

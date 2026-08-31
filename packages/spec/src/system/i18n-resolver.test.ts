@@ -1605,6 +1605,154 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// #13218 — walkAddressedPageComponents, THE shared addressed-component walk
+// ────────────────────────────────────────────────────────────────────────────
+//
+// The exported contract behind both `translatePage` (above — its behaviour
+// through the walk is pinned by every fixture in that block) and the CLI
+// extractor's `collectExpectedEntries`. These pins address the walk DIRECTLY,
+// extractor-style, so each of the five converged invariants (#13218) has a
+// red test naming it in the package that owns it; the cross-package
+// differential lives in `packages/cli/test/platform-page-i18n-parity.test.ts`.
+
+import {
+  walkAddressedPageComponents,
+  type AddressedPageComponentContext,
+} from './i18n-resolver';
+
+describe('walkAddressedPageComponents (#13218)', () => {
+  /** Enumeration-style consumption: what the walk reports, in visit order. */
+  const trace = (doc: any): AddressedPageComponentContext[] => {
+    const rows: AddressedPageComponentContext[] = [];
+    walkAddressedPageComponents(doc, (component, ctx) => {
+      rows.push({ ...ctx });
+      return component;
+    });
+    return rows;
+  };
+
+  it('walks regions[].components[] only — slots is not a root', () => {
+    const doc: any = {
+      regions: [{ name: 'main', components: [{ id: 'a', type: 'object-metric', properties: {} }] }],
+      slots: { aside: { id: 'slot_child', type: 'object-metric', properties: {} } },
+    };
+    expect(trace(doc).map((r) => r.id)).toEqual(['a']);
+  });
+
+  it('descends properties.children only — body, footer and items[].children stay unvisited', () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'card',
+          type: 'page:card',
+          properties: {
+            children: [{ id: 'in_children', type: 'object-metric', properties: {} }],
+            body: [{ id: 'in_body', type: 'object-metric', properties: {} }],
+            footer: [{ id: 'in_footer', type: 'object-metric', properties: {} }],
+            items: [{ children: [{ id: 'in_items', type: 'object-metric', properties: {} }] }],
+          },
+        }],
+      }],
+    };
+    expect(trace(doc).map((r) => r.id)).toEqual(['card', 'in_children']);
+  });
+
+  it('stops the descent at the cap: a 40-chain is visited down to depth 32 and no further', () => {
+    const node = (depth: number): any => ({
+      id: `d${depth}`,
+      type: 'page:flex',
+      properties: depth + 1 < 40 ? { children: [node(depth + 1)] } : {},
+    });
+    const rows = trace({ regions: [{ name: 'main', components: [node(0)] }] });
+    expect(rows.length).toBe(33);
+    expect(rows[0]).toEqual({ id: 'd0', nested: false, depth: 0, addressed: true });
+    expect(rows[32]).toEqual({ id: 'd32', nested: true, depth: 32, addressed: true });
+  });
+
+  it('terminates on a self-referential children array, addressing the node once', () => {
+    const cyclic: any = { id: 'loop', type: 'page:flex', properties: { children: [] as unknown[] } };
+    cyclic.properties.children.push(cyclic);
+    const rows = trace({ regions: [{ name: 'main', components: [cyclic] }] });
+    expect(rows).toEqual([{ id: 'loop', nested: false, depth: 0, addressed: true }]);
+  });
+
+  it('arbitrates a repeated id as ruled: region level wins outright, even over an EARLIER nested sighting', () => {
+    const doc: any = {
+      regions: [
+        {
+          name: 'r1',
+          components: [{
+            id: 'wrap',
+            type: 'page:card',
+            properties: { children: [{ id: 'shared', type: 'object-metric', properties: {} }] },
+          }],
+        },
+        { name: 'r2', components: [{ id: 'shared', type: 'object-metric', properties: {} }] },
+      ],
+    };
+    expect(trace(doc)).toEqual([
+      { id: 'wrap', nested: false, depth: 0, addressed: true },
+      { id: 'shared', nested: true, depth: 1, addressed: false },
+      { id: 'shared', nested: false, depth: 0, addressed: true },
+    ]);
+  });
+
+  it('among nested components, the document-order first sighting is the addressed one', () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'wrap',
+          type: 'page:card',
+          properties: {
+            children: [
+              { id: 'twice', type: 'object-metric', properties: {} },
+              { id: 'twice', type: 'object-metric', properties: {} },
+            ],
+          },
+        }],
+      }],
+    };
+    expect(trace(doc).filter((r) => r.id === 'twice').map((r) => r.addressed)).toEqual([true, false]);
+  });
+
+  it("replaces each node with the visitor's return and re-attaches rebuilt children — never mutating the input", () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'card',
+          type: 'page:card',
+          properties: {
+            title: 'Card',
+            children: [
+              { id: 'kid', type: 'object-metric', properties: { title: 'Kid' } },
+              // `children` is `z.array(z.unknown())` — non-components are
+              // legal entries and pass through unvisited.
+              'bare-component-id-string',
+              null,
+            ],
+          },
+        }],
+      }],
+    };
+    const regions = walkAddressedPageComponents(doc, (component, { id }) => ({
+      ...component,
+      properties: { ...component.properties, title: `visited:${id}` },
+    })) as any;
+
+    const rebuilt = regions[0].components[0];
+    expect(rebuilt.properties.title).toBe('visited:card');
+    expect(rebuilt.properties.children[0].properties.title).toBe('visited:kid');
+    expect(rebuilt.properties.children.slice(1)).toEqual(['bare-component-id-string', null]);
+    // The source document is untouched — both walk consumers rely on it.
+    expect(doc.regions[0].components[0].properties.title).toBe('Card');
+    expect(doc.regions[0].components[0].properties.children[0].properties.title).toBe('Kid');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // #5377 — filter-preset tab labels (`objects.<o>._tabs.<tab>.label`)
 // ────────────────────────────────────────────────────────────────────────────
 

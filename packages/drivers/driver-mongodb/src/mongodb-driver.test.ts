@@ -362,31 +362,31 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
       expect(indexNames).toContain('idx_name_unique');
       expect(indexNames).toContain('idx_email');
       /**
-       * ⚠️ [#12252] DIVERGENCE PINNED, DISPOSITION OPEN (#13222) — a
-       * canonically-spelled lookup gets NO join index here.
+       * ⚠️ DIVERGENCE RETIRED (#13222) — a canonically-spelled lookup gets its
+       * join index here, verified against a REAL server rather than a recorder.
        *
-       * This fixture used to spell the field `reference_to: 'company'` and
-       * assert `idx_company_id_lookup` was CREATED. `reference_to` is a key
-       * `FieldSchema` REFUSES (`unrecognized_keys`), so the object it described
-       * was one no author could publish — and the assertion passed only because
-       * this fixture was the sole thing in the tree reaching the lookup arm of
-       * `mongodb-schema.ts`, which gates on `field.reference_to` and reads no
-       * other relationship key.
+       * This fixture once spelled the field `reference_to: 'company'`. That is
+       * a key `FieldSchema` REFUSES (`unrecognized_keys`), so the object it
+       * described was one no author could publish — and the assertion passed
+       * only because this fixture was the sole thing in the tree reaching the
+       * lookup arm of `mongodb-schema.ts`, which gated on `field.reference_to`
+       * and read no other relationship key. Correcting the spelling (#13224)
+       * therefore did not leave the outcome alone: the index disappeared, and
+       * the line was inverted to record that, with the disposition left open.
        *
-       * So correcting the spelling does not leave the outcome alone. Measured
-       * differentially against the real `syncCollectionSchema`,
-       * `idx_company_id_lookup` is the ONE index that disappears; a
-       * `type: 'user'` field still gets its index, so the gate is live rather
-       * than dead code. The consequence in production is that EVERY authored
-       * lookup on MongoDB is unindexed — 57/57 relationship fields across the
-       * 44 exported platform objects (#13222).
+       * #13222 settled the disposition in two parts: `reference_to` is now
+       * refused at the driver's door, and the arm gates on the canonical
+       * `reference`. So the line is inverted back — by a ruling, not by a
+       * re-baseline.
        *
-       * ⛔ This records what the driver DOES, not what it SHOULD do. Whether
-       * the lookup arm learns to read `reference` is #13222's to settle, ⛔ not
-       * this pin's — when it lands, this line flips back to `toContain`
-       * deliberately rather than the divergence reopening in silence.
+       * ⚠️ This copy is the one that runs against real MongoDB, which is what
+       * it is FOR: it proves the server actually materialized the index under
+       * that name, not merely that the driver asked for it. The recorder-driven
+       * twin in `mongodb-schema-declared-indexes.test.ts` is the copy that runs
+       * on every ordinary CI lane — this suite is `describe.skipIf(!sharedMongod)`.
+       * TWIN PIN — edit either, edit both.
        */
-      expect(indexNames).not.toContain('idx_company_id_lookup');
+      expect(indexNames).toContain('idx_company_id_lookup');
     });
 
     it('should be idempotent (safe to call multiple times)', async () => {

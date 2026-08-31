@@ -266,11 +266,30 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
       expect(scope({ name: { $startsWith: '_admin' } }).params).toEqual(['\\_admin%', '\\']);
     });
 
-    it('an empty `$in` / `$nin` still lowers to its boolean constant, not a refusal', () => {
+    it('an empty `$in` still lowers to its FALSE constant, not a refusal', () => {
       // The member scan runs AFTER the arity identities (#5134), so the empty
-      // list keeps compiling to `1 = 0` / `1 = 1` rather than becoming an error.
+      // INCLUSION keeps compiling to `1 = 0` rather than becoming an error. It
+      // KEEPS its #5322/#5243 reduction because that constant is FALSE —
+      // narrowing at this arm — and because a live producer depends on it: the
+      // RLS compiler deliberately emits `$in: []` at positive polarity inside
+      // composites (#13570's "own rows keep flowing" pin), and that filter
+      // reaches this compiler through `security.getReadFilter`.
       expect(scope({ status: { $in: [] } }).sql).toContain('1 = 0');
-      expect(scope({ status: { $nin: [] } }).sql).toContain('1 = 1');
+    });
+
+    it('an empty `$nin` is REFUSED — its constant is TRUE, which vacates the scope (#13571)', () => {
+      // Deliberately ASYMMETRIC with the `$in` case above, and not an
+      // oversight: the #5322 boundary is "shape errors throw, boolean
+      // identities reduce", and `$nin: []` sits on the THROW side because its
+      // faithful reduction is constant TRUE — a read scope silently widened to
+      // every row, the exact thing the module header forbids. No in-repo
+      // producer can emit the shape (the CEL lowering never emits `$nin`;
+      // #13570's guard drops even-polarity empty-`$nin` policies), so the
+      // refusal costs no live traffic. See read-scope-sql.ts's #13571 section.
+      const err = refusalOf(() => scope({ status: { $nin: [] } }));
+      expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err.status).toBe(500);
+      expect(err.message).toContain('$nin for "status" is empty');
     });
   });
 });

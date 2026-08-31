@@ -52,6 +52,27 @@ interface FieldDef {
    * no information the door needs.
    */
   reference_to?: unknown;
+  /**
+   * The CANONICAL relationship key — the only spelling `@objectstack/spec`
+   * declares (`FieldSchema.reference`), and the one the join-index arm in
+   * {@link syncCollectionSchema} gates on.
+   *
+   * Typed `unknown` for the same reason its rejected sibling above is: the
+   * metadata reaching this seam went around Zod — `MongoDBDriver.syncSchema(
+   * object, schema: unknown)` casts and forwards it verbatim — so `string`
+   * would be a claim about untrusted input nothing on this path checked. The
+   * arm reads TRUTHINESS and nothing else; the value is never dereferenced.
+   *
+   * ⚠️ Truthiness rather than `!== undefined`, and that difference is load
+   * bearing rather than inherited. Measured on `FieldSchema` built from this
+   * tree: `{ type: 'lookup' }` with NO `reference`, and `{ type: 'lookup',
+   * reference: '' }`, both parse SUCCESSFULLY — the "required for these types"
+   * in the spec's own prose is not enforced by the schema. So a lookup that
+   * points nowhere is a shape an author can really publish, and it must not
+   * get `idx_FIELD_lookup`: an index for a join whose target is undeclared
+   * costs writes and buys no read. Truthiness declines exactly that shape.
+   */
+  reference?: unknown;
   multiple?: boolean;
 }
 
@@ -151,18 +172,21 @@ interface ObjectDef {
  * fix is a one-word rename — the same envelope every other refusal in this
  * package speaks.
  *
- * ## ⛔ What this deliberately does NOT change
+ * ## ⛔ What this door does NOT decide
  *
- * The field-level join-index arm below is left BYTE-IDENTICAL, and its
- * `field.reference_to` conjunct is now unreachable — not oversight. Deleting
- * that conjunct would make a canonically-spelled `reference` lookup start
- * building `idx_FIELD_lookup`, which is a behaviour change for existing
- * deployments (index builds on large collections) and is a SEPARATE, still-open
- * ruling — part (2) of #13222, which the maintainer carries in a later batch.
- * Whoever takes that ruling owns the arm, its comment, and the `#12252` pin in
- * `mongodb-schema-declared-indexes.test.ts` in one stroke. Until then the arm's
- * observable behaviour is exactly what it was: a `user` field is indexed, a
- * canonical `reference` lookup is not.
+ * Whether a canonically-spelled `reference` lookup GETS `idx_FIELD_lookup` is a
+ * separate question from whether the rejected alias is refused, and it was
+ * ruled separately. This door refuses; the arm below indexes. Part (2) of the
+ * ruling repointed that arm's predicate from `field.reference_to` to
+ * `field.reference` and touched nothing here — the refusal's predicate,
+ * envelope, placement and instruction are unchanged by it.
+ *
+ * What part (2) DID change in this comment is the tail of the runtime message
+ * below, which until then told the reader that renaming the key would not, by
+ * itself, get the field an index. That was true when it was written and is
+ * false now: `reference` is exactly what the arm reads. A refusal that hands
+ * the caller a stale claim about what the fix achieves is a worse refusal, so
+ * the sentence moved with the behaviour it described.
  */
 function refuseRejectedReferenceAlias(collectionName: string, fieldName: string): never {
   const err = new Error(
@@ -172,10 +196,9 @@ function refuseRejectedReferenceAlias(collectionName: string, fieldName: string)
     `\`FieldSchema\` refuses this key with that same verdict (\`unrecognized_keys\`) on ANY field ` +
     `type — so a field still carrying it at schema-sync time went around the schema ` +
     `(\`syncSchema(object, schema: unknown)\` casts and forwards it verbatim, with no Zod). ` +
-    `Rename the key. Note that renaming does not, by itself, get the field a join index: this ` +
-    `driver's join-index arm still reads the refused spelling, so a canonical \`reference\` lookup ` +
-    `is unindexed here. That is a separate, still-open question — deliberately unchanged by the ` +
-    `door you just hit — and not something the rename above regresses.`,
+    `Rename the key. \`reference\` is also the spelling this driver's join-index arm reads, so a ` +
+    `\`lookup\` field declaring it gets \`idx_FIELD_lookup\` on the next schema sync — the rename ` +
+    `fixes the refusal and gets the join index in one step.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
@@ -230,10 +253,20 @@ export async function syncCollectionSchema(
       }
 
       // Lookup + user (a lookup specialized to sys_user) fields get an index for
-      // join performance. A `user` field always references sys_user, so it is
-      // indexed even when reference_to is not explicitly set.
+      // join performance, gated on the CANONICAL relationship key `reference`.
+      // A `user` field always references sys_user, so it needs no relationship
+      // key at all and is indexed unconditionally.
+      //
+      // This arm read `field.reference_to` until part (2) of the ruling below.
+      // That key is a REJECTED ALIAS the door above refuses outright, so the
+      // conjunct was unreachable and NO authored lookup was ever indexed here —
+      // measured as a complete case split over the key's value domain, not a
+      // sample: every value except `undefined` is refused at the door, and
+      // `undefined` is falsy, so the conjunct could not be satisfied by any
+      // input. `reference` is the only relationship spelling `FieldSchema`
+      // declares, so this is the predicate that reaches authored metadata.
       if (
-        (field.type === 'lookup' && field.reference_to) ||
+        (field.type === 'lookup' && field.reference) ||
         field.type === 'user'
       ) {
         indexOps.push({

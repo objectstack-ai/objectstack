@@ -162,72 +162,68 @@ describe('#6810 — syncCollectionSchema materializes declared indexes[]', () =>
   });
 });
 
-describe('#12252 — the field-level lookup arm, on a lane that actually runs', () => {
-  it('gives a canonically-spelled `lookup` NO join index, while a `user` field still gets one', async () => {
-    // ⚠️ [#12252] DIVERGENCE PINNED, DISPOSITION OPEN (#13222).
+describe('the field-level lookup arm, on a lane that actually runs', () => {
+  it('gives a canonically-spelled `lookup` its join index, alongside the `user` field', async () => {
+    // ⚠️ DIVERGENCE RETIRED — this line was inverted, and is now inverted back.
     //
-    // `mongodb-schema.ts`'s field-level join-index arm gates on
-    // `field.reference_to` and reads no other relationship key. `reference` is
-    // the CANONICAL spelling — `reference_to` is a key `FieldSchema` REFUSES
-    // (`unrecognized_keys`) — so a lookup any author could actually publish
-    // reaches that arm and falls straight through it: no `idx_company_id_lookup`
-    // is ever created. That is the divergence, and #13222 owns whether and how
-    // it closes.
-    //
-    // ⛔ This records what the driver DOES, not what it SHOULD do. When #13222
-    // teaches the arm to read `reference`, THIS assertion is expected to flip to
-    // `toContain` — deliberately, in that PR, as the signal to retire the
-    // divergence note here. Going red is the whole point of the line: it is what
-    // stops the divergence closing (or widening) in silence.
+    // The history is the reason this case is worth its length. The arm used to
+    // gate on `field.reference_to`, and `reference` — the CANONICAL and only
+    // spelling `FieldSchema` declares — was read nowhere in the driver. So a
+    // lookup any author could actually publish reached the arm and fell
+    // straight through it: `idx_company_id_lookup` was never created, for any
+    // authored object, on any deployment. #12252 pinned that as a divergence
+    // with the disposition open, and #13222 carried the disposition. Part (2)
+    // of its ruling repointed the predicate at `reference`, which is what this
+    // assertion now records.
     //
     // TWIN PIN — edit either, edit both. The same fact is pinned against a real
-    // server by #13224, which corrects the `reference_to` fixture in
-    // `mongodb-driver.test.ts` (`describe('syncSchema')` -> 'should create
-    // collection and indexes') and inverts its `idx_company_id_lookup`
-    // assertion in place. That suite is `describe.skipIf(!sharedMongod)`, opt-in
-    // behind `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1` because of #5517's ~123 MB
-    // binary download, so it runs on no ordinary CI lane — which is why the fact
-    // is asserted here too. THIS copy is the one that runs.
+    // server in `mongodb-driver.test.ts` (`describe('syncSchema')` -> 'should
+    // create collection and indexes'). That suite is
+    // `describe.skipIf(!sharedMongod)`, opt-in behind
+    // `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1` because of #5517's ~123 MB
+    // binary download, so it runs on no ordinary CI lane — which is why the
+    // fact is asserted here too. THIS copy is the one that runs.
     //
-    // ⚠️ The `user` half is the LOAD-BEARING control, not decoration.
-    // `field.type === 'user'` is the arm's unconditional disjunct, so its index
-    // proves the arm executed, that the harness really called the function, and
-    // that `idx_<field>_lookup` is still the name it builds. Without it,
-    // `not.toContain` would pass just as happily against a function that created
-    // no indexes at all, a renamed index, or a harness wired to nothing — the
-    // exact vacuity that makes a negative assertion worthless.
-
-    // Bound through a variable rather than written inline: the driver's own
-    // `FieldDef` declares only `reference_to`, so a fresh object literal
-    // carrying `reference` trips TypeScript's excess-property check — on the
-    // very key this case exists to record the driver does not read.
-    const canonicalLookup = { type: 'lookup', reference: 'company' };
+    // ⚠️ The `user` half stays the LOAD-BEARING control, not decoration.
+    // `field.type === 'user'` is the arm's unconditional disjunct: it fired
+    // before this change and after it, so it is the fixed point that tells a
+    // real flip apart from the arm having been broken in some new way. If the
+    // predicate were repointed at a key nothing supplies, the `user` index
+    // would still appear and only the `company_id` one would vanish.
 
     const { db, created } = fakeDb();
     await syncCollectionSchema(db, 'lead', {
       name: 'lead',
       fields: {
-        company_id: canonicalLookup,
+        company_id: { type: 'lookup', reference: 'company' },
         owner_id: { type: 'user' },
       },
     });
 
-    // Positive control: the unconditional disjunct fired, under the name the
-    // negative assertion below is spelled with.
+    // The control: the unconditional disjunct fired, under the name the
+    // assertion below is spelled with.
     const owner = byName(created, 'idx_owner_id_lookup');
     expect(owner).toBeDefined();
     expect(owner!.spec).toEqual({ owner_id: 1 });
 
-    // The divergence itself.
-    expect(names(created)).not.toContain('idx_company_id_lookup');
+    // The fact this case owns: the canonical lookup is indexed, on its own
+    // field, ascending — the spec is asserted, not just the name.
+    const company = byName(created, 'idx_company_id_lookup');
+    expect(company).toBeDefined();
+    expect(company!.spec).toEqual({ company_id: 1 });
+    // A join index, never a constraint: `unique`/`sparse` belong to the unique
+    // arm, and a lookup silently acquiring them would forbid two records
+    // pointing at the same parent.
+    expect(company!.options).toEqual({ name: 'idx_company_id_lookup' });
 
-    // Exact set — closes the remaining vacuity routes in one line: a lookup
-    // index appearing on `company_id` under ANY other name, the `user` index
-    // being renamed, or the core set drifting.
+    // Exact set — closes the remaining vacuity routes in one line: an extra
+    // index nobody declared, the two lookup indexes swapping fields, or the
+    // core set drifting.
     expect(names(created)).toEqual([
       'idx_id_unique',
       'idx_created_at',
       'idx_updated_at',
+      'idx_company_id_lookup',
       'idx_owner_id_lookup',
     ]);
   });
