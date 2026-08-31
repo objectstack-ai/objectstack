@@ -414,11 +414,46 @@
 //
 // COSTS, so the next person extending this list knows what they buy: an
 // externalised package cannot be `vi.mock`ed and is not instrumented for
-// coverage. Both were checked against this package when the entry landed —
-// `packages/cli` has no `vi.mock` of `@objectstack/types` (its only mock targets
-// are `../utils/optional-package.js`, `node:fs/promises` and
-// `@objectstack/cloud-connection`) — but neither is free, and a package added
-// here later must be re-checked for both.
+// coverage. Both were checked against this package when the entry landed, and
+// a package added here later must be re-checked for both — so the census that
+// re-check starts from is stated below, on the commit it was taken on.
+//
+// ## THE MOCK-TARGET CENSUS (#13873) — 55519d5036, 2026-08-31
+//
+// `@objectstack/types`, the one package externalised below, is NOT mocked here.
+// Zero sites — and the zero is not vacuous: 10 test files import it (both
+// `@objectstack/types` and `@objectstack/types/node`), so a mock of it is a
+// thing that could exist here and does not. That half has held since #11775.
+//
+// What a reader externalising something ELSE needs: 11 mock sites over 8
+// distinct targets. Five are relative or node-builtin specifiers, which this
+// predicate cannot reach. THREE are workspace packages, which it can:
+//
+//   @objectstack/cloud-connection         src/commands/doctor-ledger-read-failure.test.ts
+//   @objectstack/platform-objects/plugin  src/commands/secret/orphans.guards.test.ts
+//   @objectstack/lint                     test/i18n-flow-screen-coverage.test.ts
+//
+// ⭐ THREE, not the one this paragraph named until #13873 — and naming one was
+// worse than naming none. The sentence above sends the reader here to do a
+// re-check and then tells them what they will find, so a reader who trusted it
+// concluded that externalising a workspace package is free of mock conflicts in
+// this package. Externalising any of the three breaks the file that mocks it,
+// with an error pointing at that test rather than at the entry below that
+// caused it. Same shape as #12529 on this file.
+//
+// ⚠️ RE-TAKING IT: match the capital M, or you silently lose a third of the
+// census and get a plausible number back.
+//
+//   git grep -nE "vi[.](do)?[Mm]ock[(]" -- 'packages/cli/**/*.test.ts'
+//
+// `vi.(do)?mock(` — the obvious spelling — matches no `vi.doMock` call at all,
+// so it drops all four `doMock` sites, among them `@objectstack/cloud-connection`:
+// the ONE workspace package the old parenthesis did name. #13873 shipped that
+// spelling as its reproduce command while its table was taken another way, and
+// the two disagree by exactly those two targets — re-run on the card's own
+// commit, the command returns 6 where the table says 8. Whoever re-takes this:
+// print your commit here, and keep the census in exactly one place in this
+// file (#12499).
 //
 // ## WHY THE SPAWN SWAP IS NOT THIS GATE'S TRADE TO REFUSE (#11707, #12460)
 //
