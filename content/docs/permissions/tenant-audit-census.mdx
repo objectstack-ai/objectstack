@@ -1,0 +1,176 @@
+---
+title: Tenant-Audit Census
+description: The authoritative enumeration of every application-surface write call site against a tenancy-enabled object — how many thread an execution context, how many thread none, and how much of the population a static instrument can decide at all. Built by census over the whole repo, not by recall.
+---
+
+`SqlDriver.auditMissingTenant()` is the platform's one *diagnostic* on write-side
+tenancy. It warns when a write lands on a tenancy-enabled object without
+`options.tenantId` — the shape of a seed, migration or background path that
+forgot to thread the acting session.
+
+This page is **the authority** for the population that control acts on: every
+write call site on the application surface, what object it targets, and what
+execution context it threads. The figures below are generated, not written —
+rebuilt from the tree by `scripts/tenant-audit-census.mjs`, and
+`scripts/check-tenant-audit-census.mjs` fails the build when what is committed
+and what the tree says disagree.
+
+The per-site rows live next door, in
+`docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`, and are written by
+the same command. The split is the one `packages/spec`'s strictness ledger
+already uses and is there for the same reason: this page has prose worth
+preserving and the row table has none, so the table is regenerated whole while
+the page keeps a small generated region for the figures its prose reasons about.
+
+## ⚠️ Why this page exists at all
+
+The measurement this page carries used to live in **a comment on an issue**. That
+issue became unreachable — it returns 404 on unauthenticated REST, on the rendered
+web page and on authenticated API access alike, while its immediate neighbours
+answer 200 — and it took the census with it. Three open cards named that comment
+as their input, and nothing anywhere noticed that their input had gone.
+
+What survived did so by luck. A changeset author had happened to quote two of the
+figures in prose, so "175 write call sites, 24 of them carrying no tenant context"
+is still readable on `main` in
+`.changeset/tenant-audit-update-delete-half-repairs.md` — while the list of 24
+that a downstream card was briefed to classify is not recoverable at all.
+
+⇒ A census that decides a repair family's severity and a ruling's scope is not a
+comment. It is a re-runnable instrument plus a committed page. Losing any issue
+now costs nothing, and the population is **re-derivable** rather than quoted.
+
+## What the control does, and what a call site controls
+
+`auditMissingTenant(object, op, options)` is gated in this order:
+
+1. `OS_TENANT_AUDIT=0` — off entirely;
+2. `options.bypassTenantAudit` — the engine sets this for **every**
+   `ExecutionContext.isSystem` write (ObjectQL's `buildDriverOptions`);
+3. a present `options.tenantId` — the engine fills it from `execCtx.tenantId`;
+4. the deployment posture — the warning is only meaningful on a walled install;
+5. the object having a tenant field.
+
+Both of the guards a *caller* can move are downstream of one decision at the call
+site: **whether it threads an execution context at all**. Thread an elevated one
+and guard 2 silences the warning; thread a tenant-bearing one and guard 3 does;
+thread none and the site is what this census counts.
+
+## How the population is decided
+
+A site is a call to one of the three `IDataEngine` write doors — `insert`,
+`update`, `delete` — on a receiver whose declared type is an engine, in tracked
+non-test sources under `packages/services/` and `packages/plugins/`.
+
+**The verb name is not the signal.** `.delete()` alone answers some 250 call sites
+in this corpus, and most of them are `Map.delete`, `Set.delete`, `Headers.delete`,
+a crypto `Hash.update`, a blob-storage delete-by-key and a search-index de-index.
+So the receiver is typed structurally: a declared interface or type literal counts
+as an engine when it declares a write door whose first parameter is named
+`object` / `objectName` / `objectApiName` / `name` and typed `string` — the
+`IDataEngine` door signature. Interfaces that extend one inherit it; aliases that
+narrow one (`Partial<Pick<IDataEngine, …>>`) carry it.
+
+**The expensive failure direction is a keyword.** Sites whose receiver the author
+typed `any` have no type to read, and there are 45 of them — better than a fifth
+of the population, concentrated in exactly the seed and bootstrap paths this
+control exists for. Scoring an unreadable receiver as "not an engine" would have
+dropped every one of them silently, with a clean exit and a smaller number that
+reads exactly like a smaller truth. So `any` is not a classification here: it goes
+to the unreadable pile, and the unreadable pile is placed by facts about the tree
+(the argument names a declared object; the argument is a parameter declared
+`object: string`) or by a written `UNTYPED_RECEIVERS` row. **An unreadable
+receiver that none of the three place is an error, never a default.**
+
+Tenancy itself is enabled *by default* — `isTenancyDisabled()` reads
+`tenancy.enabled === false` and nothing else — so the object registry only has to
+find the opt-outs. Across 297 declared objects, exactly two opt out
+(`sys_api_key`, `sys_sso_provider`), and no write call site on this surface
+targets either.
+
+## ⛔ What this instrument cannot decide
+
+A site whose object name is an inline literal or a local `const` is statically
+decidable. A site whose name is a parameter or a field — `ql.insert(object, …)`
+inside a shared seed helper, `this.objectName` on a per-object service — is not,
+and no amount of AST work makes it so: the object is chosen at run time. Those are
+reported as `undecidable` rather than assumed either way.
+
+The same holds for elevation. A context spelled inline as `{ isSystem: true }`, or
+a local `const` holding one, is decidable; a context arriving from a helper call
+or a parameter is not.
+
+⇒ **A third of this population is undecidable, and that is reported rather than
+smoothed over.** A census that quietly guessed on those sites would publish a
+number in the one direction this page cannot survive — claiming completeness while
+short — and a gate seeded from it would then hold the page to it.
+
+## ⭐ Deviations from the carried figures, untrimmed
+
+Four figures were carried forward from the lost census. They are **control inputs
+for this re-derivation, not targets**, and this instrument was not shaped to
+reproduce them. Where it disagrees, it disagrees on the page:
+
+| carried figure | where it survives | this census |
+| :--- | :--- | ---: |
+| 175 write call sites | quoted in the merged changeset | **214** |
+| 24 carrying no tenant context | quoted in the merged changeset | **41** (decidably tenancy-enabled); **83** across all sites |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **143 of 214** decidable, **71** undecidable |
+| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 46 decidably elevated, 8 decidably not, 77 undecidable |
+| 141 and 132, two independent re-derivations | the card that filed this work | — |
+
+**The differences are not reconciled, and deliberately so.** The old census's
+population definition is not recoverable — that is the whole reason this page
+exists — so no honest reading can attribute the gap to a specific cause. What can
+be stated is what this instrument counts, which is written above and re-runnable
+at any commit.
+
+Two structural facts do plausibly widen this reading against any hand or regex
+one, and both are counted in the generated tables below: the 45 sites reached
+through an erased (`any`) receiver, and the 37 that name their object through a
+`const` rather than inline. An instrument that read either the way a person does
+would report a smaller number and would not say so.
+
+The fourth row is the one worth flagging to anyone citing it. **The 135 / 77%
+figure has no surviving corroboration anywhere in the tree**, and this census does
+not reproduce it: 46 sites are decidably elevated, and 77 have an elevation that
+is a run-time fact a static reading cannot settle. Cite `41 / 214` — both halves
+re-derivable here — rather than any share of the population that was silenced.
+
+{/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}
+
+## The measurement
+
+| what | count |
+| :--- | ---: |
+| write call sites on the application surface | **214** |
+| …whose object name is statically decidable | 143 |
+| …whose object name is chosen at run time | 71 |
+| …against an object with tenancy ENABLED | 143 |
+| …against an object that declares tenancy off | 0 |
+| carrying NO tenant context at all | **83** |
+| …of those, against a decidably tenancy-enabled object | **41** |
+| threading a decidably ELEVATED (`isSystem`) context | 46 |
+| threading a context that is decidably NOT elevated | 8 |
+| threading a context whose elevation is a run-time fact | 77 |
+
+| how the instrument reached the site | count |
+| :--- | ---: |
+| receiver carried a readable engine type | 169 |
+| receiver erased, placed by the object NAME | 19 |
+| receiver erased, placed by an `object: string` PARAMETER | 15 |
+| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 11 |
+
+| object name spelled inline | 106 |
+| object name spelled through a `const` | 37 |
+| object name is an `object: string` parameter | 18 |
+| object name is some other run-time expression | 53 |
+
+Scanned 533 tracked non-test sources under `packages/services/` and
+`packages/plugins/`, against 56 engine-shaped types and
+297 declared objects. 119 calls to a same-named
+method on something that is not a data engine were subtracted. Every site is
+listed in [`docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`](https://github.com/objectstack-ai/objectstack/blob/main/docs/audits/2026-08-tenant-audit-write-call-sites.counts.md),
+regenerated by the same command.
+
+{/* END GENERATED: tenant-audit-census */}

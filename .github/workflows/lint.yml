@@ -1381,6 +1381,45 @@ jobs:
           node scripts/check-system-context-census.mjs --self-test
           node scripts/check-system-context-census.mjs
 
+      # #13548 tenant-audit census. `content/docs/permissions/tenant-audit-census.mdx`
+      # carries the population `SqlDriver.auditMissingTenant` acts on: every
+      # application-surface write call site against a tenancy-enabled object, and
+      # what execution context each one threads.
+      #
+      # ⭐ The reason it is an in-tree artefact at all is the failure it replaces.
+      # That census used to live in a COMMENT on an issue; the issue became
+      # unreachable (404 on three independent channels while its neighbours
+      # answer 200) and took the list with it, while three open cards still named
+      # it as their input and nothing noticed. What survived did so because a
+      # changeset author had happened to quote two of the figures in prose. A
+      # measurement that decides a repair family's severity and a ruling's scope
+      # is not a comment.
+      #
+      # ⚠️ It is a DRIFT gate, deliberately NOT an anchor gate like its `isSystem`
+      # sibling above. The generated region aggregates by (file, verb, object,
+      # tenancy, context posture) and carries no line numbers, so a pure
+      # displacement — an import inserted above a site — cannot move it. That
+      # skips the sibling's whole open defect class: anchors that rot on
+      # displacement, and a repair arm that then misreads displacement as a
+      # population change and asserts it on a security-relevant surface. There is
+      # exactly one repair path here (`node scripts/tenant-audit-census.mjs
+      # --write`), it is mechanical, and it has no case where it must guess.
+      #
+      # It lives in THIS job, next to its sibling, for the same reason that one
+      # does: the job has no paths filter, so the census runs on code-only PRs —
+      # the ones that ADD a write call site. The `--self-test` invocation is what
+      # `check:self-test-wired` requires, and it is the only instrument on this
+      # gate's matching rules; a clean tree cannot tell a working rule from a
+      # weakened one.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. AST walk over 533
+      # tracked sources plus the object registry, no spawns; ~8s.
+      - name: Tenant-audit census matches the tree
+        run: |
+          node scripts/check-tenant-audit-census.mjs --self-test
+          node scripts/check-tenant-audit-census.mjs
+
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
       # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
