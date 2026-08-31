@@ -33,8 +33,10 @@
  *    and this repo writes module headers on either side of them); the first
  *    `const`/`export const`/… does.
  * 3. **Documenting nothing** — the block is not immediately followed by a
- *    declaration, and — when the block sits INSIDE the import block — no
- *    declaration sits on the far side of that plumbing either.
+ *    declaration, and — when the block sits INSIDE the import list, an import
+ *    the first thing on its far side — it carries the explicit `@module`
+ *    marker (see the #13334 section below; a far side that is nothing but
+ *    plumbing to the end of the file needs no marker).
  *
  * (3) is the load-bearing one, and it is simply TSDoc's own rule read back: a
  * doc block belongs to the declaration it immediately precedes, which is why
@@ -76,18 +78,31 @@
  *   `cloud/template-manifest` and `system/doc` — three real headers whose
  *   imports happen to be followed directly by a declaration — lose their
  *   opening paragraph.
- * - **A comment of any kind on the far side still ends the preamble.** A `// ═══`
- *   banner or a second doc block means the block did NOT sit against the
- *   declaration before the codemod ran, so the injection tells us nothing.
- *   `api/analytics` (banner) and `system/cache` (the next schema's own JSDoc)
- *   keep their headers through exactly this clause.
+ * - **A comment directly against the block's far side still ends the preamble.**
+ *   A `// ═══` banner or a second doc block as the FIRST thing after the block
+ *   means the block did NOT sit against an injected import at all, so the
+ *   codemod's ambiguity never arises. `api/analytics` (banner) keeps its header
+ *   through exactly this clause.
  *
- * What it deliberately does NOT decide is the block that sits inside the import
- * list with a comment on the far side: `system/cache` and `shared/mapping` are
- * genuine headers there and seven others are detached symbol docs, and no
- * positional or structural signal separates them — only the prose does. That
- * residue needs an explicit `@module` marker or a corpus pass, not a cleverer
- * detector; #13263 records the reading, module by module.
+ * ## Inside the import list, only `@module` selects (#13334)
+ *
+ * What position cannot decide is the block whose far side opens with an IMPORT
+ * and whose walk beyond that plumbing then meets a comment: `system/cache` and
+ * `shared/mapping` were genuine headers there and eight others were detached
+ * symbol docs, and every positional signal was measured and separates nothing —
+ * line number, imports-before count, block length, whether the next declaration
+ * has its own JSDoc; only the prose differs (#13334 carries the table). A
+ * first-sentence pattern check is the approach this header already rejects, so
+ * the rule asks the author instead: a block sitting inside the import list —
+ * imports before it, an import the first thing after it — is selected only when
+ * it carries an explicit `@module` marker on a prose line of its own. The
+ * marker is this repo's existing spelling for "this block is the module's"
+ * (fourteen headers above their imports already open with it), and it decides
+ * in BOTH directions: with it the block is the header whatever lies beyond the
+ * plumbing, without it the block is not selected even though a comment on the
+ * far side would once have kept it. One exception needs no marker: plumbing
+ * that runs to the end of the file leaves no symbol the block could have been
+ * torn from (a pure re-export module), so the block still selects bare.
  *
  * When no block qualifies, the module has no description and the page prints
  * none. 宁可缺,不要错 — a missing paragraph is a gap the reader can see, while
@@ -300,37 +315,51 @@ function nextNonBlankLine(lines: readonly string[], from: number): number | null
 }
 
 /**
- * Is there a declaration on the far side of the plumbing that starts at `from`
- * — i.e. does everything between hold nothing but blank lines and imports?
+ * What the walk from `from`, over blank lines and plumbing, reaches first.
  *
- * Only ever asked of a block that sits INSIDE the import block, where the one
- * thing known to put an import between a doc block and its symbol is the lazify
- * codemod (see the module comment). Answering `true` there restores the verdict
- * the block had before that import was injected.
+ * Only ever asked of a block that sits INSIDE the import list (see the module
+ * comment's #13334 section), where the answer routes an UNMARKED block:
+ * `'eof'` selects it — the plumbing runs to the end of the file, so there is
+ * no symbol the block could have been torn from (a pure re-export module) —
+ * while `'declaration'` (the #13263 codemod shape) and `'comment'` (the
+ * position #13334 measured as undecidable) both refuse it, leaving `@module`
+ * as the only thing that selects there.
  *
  * A comment of any kind — a `// ═══` banner, a second doc block, an import's
- * own explanatory note — answers `false` instead of being walked over. That is
- * the same boundary `nextNonBlankLine` draws and for the same reason: it means
- * the block was NOT sitting against the declaration beforehand either, so the
- * injected import carries no information about what the block documents. It is
- * what keeps `api/analytics` (banner) and `system/cache` (the next schema's own
- * JSDoc) opening with their real module headers.
+ * own explanatory note — stops the walk instead of being walked over. That is
+ * the same boundary `nextNonBlankLine` draws and for the same reason.
  *
  * Continuation and closing lines of a multi-line import (`  Foo,`,
  * `} from './x';`) are plumbing too — they open with neither an identifier
  * character nor a comment delimiter, exactly as `findModuleDocBlock`'s own walk
  * reads them.
  */
-function declarationBeyondPlumbing(lines: readonly string[], from: number): boolean {
+function beyondPlumbing(lines: readonly string[], from: number): 'declaration' | 'comment' | 'eof' {
   for (let i = from; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === '') continue;
-    if (line.trimStart().startsWith('/')) return false; // a comment ends the preamble
+    if (line.trimStart().startsWith('/')) return 'comment';
     if (MODULE_PLUMBING.test(line)) continue;
     if (!startsDeclaration(line)) continue; // continuation / closing punctuation
-    return true;
+    return 'declaration';
   }
-  return false;
+  return 'eof';
+}
+
+/**
+ * Does the block carry the `@module` marker — this repo's existing spelling
+ * for "this block documents the module" — on a prose line of its own?
+ *
+ * Judged on gutter-stripped lines through the same `classifyLines` model the
+ * renderer uses, so an `@module` shown inside a fenced example (an author
+ * illustrating the convention) is content, never a marker. The line must OPEN
+ * with the tag: fourteen real headers write it exactly that way (`@module
+ * ui/sharing`), and a mid-sentence mention of the tag is prose about it.
+ */
+function hasModuleMarker(inner: string): boolean {
+  const lines = stripDocGutter(inner);
+  const kind = classifyLines(lines);
+  return lines.some((line, i) => kind[i] === 'prose' && /^@module\b/.test(line));
 }
 
 /**
@@ -364,11 +393,25 @@ export function findModuleDocBlock(source: string): string | null {
       if (end >= lines.length) return null; // unterminated — nothing to trust
       const next = nextNonBlankLine(lines, end + 1);
       if (next !== null && startsDeclaration(lines[next])) return null; // documents a symbol
-      // …and the same verdict when only injected plumbing stands between the
-      // two: the import moved, the attachment did not.
-      if (insideImportBlock && declarationBeyondPlumbing(lines, end + 1)) return null;
       const raw = lines.slice(i, end + 1).join('\n');
-      return raw.slice(raw.indexOf('/**') + 3, raw.lastIndexOf('*/'));
+      const inner = raw.slice(raw.indexOf('/**') + 3, raw.lastIndexOf('*/'));
+      // INSIDE the import list — imports before the block, an import the first
+      // thing after it — position cannot say what the block documents (#13334;
+      // the measurement is in the module comment). Only the author's explicit
+      // `@module` marker selects it there, except when the plumbing runs to the
+      // end of the file and no symbol exists for the block to have been torn
+      // from. This subsumes #13263's far-side rule: an unmarked block with a
+      // declaration beyond the plumbing is still refused.
+      if (
+        insideImportBlock &&
+        next !== null &&
+        MODULE_PLUMBING.test(lines[next]) &&
+        !hasModuleMarker(inner) &&
+        beyondPlumbing(lines, next) !== 'eof'
+      ) {
+        return null;
+      }
+      return inner;
     }
 
     if (line.startsWith('/*')) { i = endOfBlockComment(lines, i) + 1; continue; }
