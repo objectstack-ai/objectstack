@@ -410,14 +410,89 @@ function main() {
 // --self-test
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The self-test's own battery registry, floor and verdict (#13489)
+// ---------------------------------------------------------------------------
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line. And
+// the dispatch below was `if (--self-test) selfTest()`, which discards the
+// call's completion: an early `return` anywhere above the verdict printed
+// NOTHING and still exited 0. Measured on 597020aa5 by injecting `return;` as
+// the first statement of `selfTest()` -- exit 0, zero bytes of output, in the
+// gate whose whole subject is that a shipped self-test actually runs.
+//
+// Both holes are closed the way PR #13487 validated on check-doc-authoring:
+// what is pinned is the registered NAMES, not a number. Every section opens
+// with `battery('<name>')`, every `ok()` is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count. A set difference names
+// WHICH battery stopped running; a count says only that something did.
+//
+// ⛔ A merely non-zero count is not the repair, and neither is a pinned TOTAL:
+// a battery dropping from 9 cases to 3 keeps a total "right" for the wrong
+// reason the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running, and the
+// remedy is to find what stopped registering -- never to lower the number.
+//
+// Measured on 597020aa5 by instrumenting `ok` and printing the per-battery
+// tally: 7 / 4 / 4 / 4 / 9 / 15, 43 in total.
+//
+// Five of the six are pinned at what they measure. `live ledger` is not, and
+// deliberately: its case count is `1 + one per SELF_TEST_RUN_OTHERWISE row's
+// worth`, and that list is ⛔ SHRINK-ONLY by design -- deleting a row is the
+// outcome the list exists to reach. A floor at today's 15 would turn every
+// legitimate shrink red and train the next author to edit the floor, which is
+// the one habit these floors exist to prevent. So what is pinned there is the
+// invariant that does NOT move with the list: the structural case ran AND at
+// least one row was actually audited (1 + 3). A loop that stops iterating, or
+// a ledger that empties without the structural case noticing, still reds.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'comment mask': 7,
+  'right boundary': 4,
+  'alias resolution': 4,
+  'population verdict': 4,
+  'ledger hygiene': 9,
+  'live ledger': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the registry's own size is pinned too. Adding a battery raises
+// this number; removing one is the same ⛔ deliberate edit as lowering a count.
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// Returned by `selfTest()` only after the floor has been evaluated and the
+// verdict printed. The dispatch refuses anything else: a `return` that leaves
+// the function early prints nothing and exits 0, which is the same
+// nothing-ran-nothing-complained pass one level up.
+const SELF_TEST_VERDICT = 'check-self-test-wired self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
+  const seen = new Map();
+  let openBattery = null;
+  // Declare the battery the following assertions belong to. The name must be a
+  // key of SELF_TEST_BATTERIES -- an unknown one reds by set difference,
+  // naming itself, rather than being counted somewhere it is not floored.
+  const battery = (name) => {
+    openBattery = name;
+  };
   const ok = (cond, label) => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
     if (!cond) failures.push(label);
   };
   const wf = (text, name = 'lint.yml') => [{ name, text }];
 
   // ── Prose never decides anything, in either direction ────────────────────
+  battery('comment mask');
   ok(
     !carriesSelfTest('scripts/x.mjs', '// run it with --self-test sometimes\nconst a = 1;\n'),
     'a `--self-test` that exists only in a JS comment was read as an implementation',
@@ -447,6 +522,7 @@ function selfTest() {
   }
 
   // ── Right boundary: the defect class this gate is itself in the family for ─
+  battery('right boundary');
   {
     const got = collectInvocations(wf('    - run: node scripts/g.mjs --self-test-extra\n'), {});
     ok(got.named.has('scripts/g.mjs'), 'the script was not seen at all — the boundary case would test nothing');
@@ -468,6 +544,7 @@ function selfTest() {
   }
 
   // ── Aliases: reached only when a workflow actually names them ────────────
+  battery('alias resolution');
   {
     const pkg = {
       'check:thing': 'node scripts/thing.mjs --self-test && node scripts/thing.mjs',
@@ -491,6 +568,7 @@ function selfTest() {
   }
 
   // ── The population verdict, both directions ──────────────────────────────
+  battery('population verdict');
   {
     const carriers = new Set(['scripts/g.mjs']);
     const run = (text, ledger = []) => {
@@ -511,6 +589,7 @@ function selfTest() {
   }
 
   // ── Ledger hygiene: every row must still be true, and still be needed ────
+  battery('ledger hygiene');
   {
     const carriers = new Set(['scripts/w.mjs', 'scripts/t.mjs']);
     const sources = {
@@ -561,6 +640,7 @@ function selfTest() {
   }
 
   // ── The live ledger, checked against the real tree ───────────────────────
+  battery('live ledger');
   {
     const sourceOf = (relPath) => {
       try {
@@ -582,18 +662,78 @@ function selfTest() {
     }
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases ─────────────
+  //
+  // Evaluated here, after every battery has had its chance and BEFORE the
+  // verdict -- so the line below can only be printed by a run in which the set
+  // of batteries that registered assertions equals the set declared.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  const totalCases = [...seen.values()].reduce((a, b) => a + b, 0);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    failures.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the registry takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    failures.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    failures.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed they hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+
   if (failures.length > 0) {
     console.error('check-self-test-wired --self-test FAILED:');
     for (const f of failures) console.error(`  - ${f}`);
+    if (floorBreached) {
+      console.error(
+        '\nA battery at or below its floor means cases STOPPED RUNNING — the battery is the bug,\n' +
+          'not the number. Find what stopped registering (an early return, a deleted block, a guard\n' +
+          'that now skips) and restore it. Raising a floor after ADDING cases is ordinary work;\n' +
+          'LOWERING one is not a co-equal option — "the count legitimately moved" and "something\n' +
+          'stopped running" need different edits, and only a measurement tells them apart.\n',
+      );
+    }
     process.exit(1);
   }
   console.log(
     `check-self-test-wired --self-test: ${SELF_TEST_RUN_OTHERWISE.length} live ledger row(s) verified, plus the ` +
-      'comment mask, the right boundary, alias resolution and both audit directions.',
+      'comment mask, the right boundary, alias resolution and both audit directions' +
+      ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery at or` +
+      ' above its pinned floor.',
   );
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else main();
+  if (process.argv.includes('--self-test')) {
+    // ⛔ Never `selfTest();` bare, and never `return selfTest()`. A `return`
+    // anywhere above that verdict prints nothing, evaluates no floor and exits
+    // 0 — the same nothing-ran-nothing-complained pass the battery floor
+    // refuses, one level up (#13489).
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-self-test-wired self-test: selfTest() returned without reaching its verdict, so no\n' +
+          'battery floor was evaluated and no success line was printed. Exiting 0 here would report a\n' +
+          'self-test that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else main();
 }
