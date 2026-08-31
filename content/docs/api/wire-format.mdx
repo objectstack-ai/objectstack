@@ -198,7 +198,7 @@ Updates specific fields on an existing record. Only include fields you want to c
 ```
 
 <Callout type="info">
-**Optimistic concurrency:** Pass the `updated_at` value you last read as an `If-Match` request header (or an `expectedVersion` field in the body) and the server returns `409 CONCURRENT_UPDATE` if the record changed in the meantime.
+**Optimistic concurrency:** Pass the `updated_at` value you last read as an `If-Match` request header (or an `expectedVersion` field in the body) and the server returns `409 CONCURRENT_UPDATE` if the record changed in the meantime. Omitting `If-Match`/`expectedVersion` entirely performs an unguarded write. Sending the empty entity-tag `If-Match: ""` (or `expectedVersion: '""'`) is refused `400 VALIDATION_FAILED` — an empty token can never match any stored version, so it is treated as a client defect rather than either "no guard requested" or a real conflict.
 </Callout>
 
 ### Response — `200 OK`
@@ -378,6 +378,24 @@ Returned when an `If-Match` / `expectedVersion` token no longer matches the stor
 }
 ```
 
+### Malformed Concurrency Token — `400 Bad Request`
+
+Returned when `If-Match` / `expectedVersion` is the empty entity-tag `""` — a
+syntactically legal [RFC&nbsp;7232](https://www.rfc-editor.org/rfc/rfc7232#section-2.3)
+token, but one that can never match a stored version. Distinct from both the
+409 above (a real token that lost a race) and an omitted `If-Match` (a
+deliberate unguarded write): sending `""` is treated as a client defect, since
+no stored version can ever equal "nothing".
+
+```json
+{
+  "error": "expectedVersion (If-Match) is the empty entity-tag \"\". An empty version token can never match any stored version, so this is almost certainly a client defect rather than a real concurrency check — send the real version token you read (e.g. the record's `updated_at`), or omit If-Match / expectedVersion entirely to perform an unguarded write.",
+  "code": "VALIDATION_FAILED",
+  "fields": [],
+  "object": "task"
+}
+```
+
 ### Datasource Unavailable — `503 Service Unavailable`
 
 Returned when the object's declared `datasource` has no live driver: the host's
@@ -543,7 +561,7 @@ When the batch is not atomic and some records fail, each failing entry carries a
 | `Content-Type` | Yes | `application/json` |
 | `X-Request-Id` | No | Client-generated request ID for tracing (honored by the observability dispatcher) |
 | `X-Environment-Id` | No | Targets a specific environment/project on unscoped routes |
-| `If-Match` | No | Optimistic-concurrency token for `PATCH` / `DELETE` (the `updated_at` you last read) |
+| `If-Match` | No | Optimistic-concurrency token for `PATCH` / `DELETE` (the `updated_at` you last read). Omit for an unguarded write; the empty entity-tag `""` is refused `400`, not treated as omitted. |
 | `Accept-Language` | No | Locale for translated labels (e.g., `en-US`) |
 
 ### Response Headers

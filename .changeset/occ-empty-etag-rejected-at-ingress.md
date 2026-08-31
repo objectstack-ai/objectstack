@@ -57,3 +57,6 @@ truthy — an empty value never reaches the wire on any first-party path. The
 exposure was to third-party and hand-rolled clients sending the RFC-7232
 empty-tag shape, which previously got an unguarded write where they asked for
 a guarded one.
+
+<!-- adr-0087: not-required (no-migration-prescription) no metadata key, spec symbol, or stored value is renamed/retired/converted — this narrows what a REQUEST-time client-supplied string (`expectedVersion`/`If-Match`) is accepted at the wire ingress, not any declared metadata surface `objectstack migrate meta` would touch -->
+
