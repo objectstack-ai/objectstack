@@ -38,6 +38,22 @@ name: Docs Drift Check
 # run the tool on their own worktree. A reader who did that got a different list and
 # reported a correct row as a false positive, and the investigation of the non-existent
 # defect cost a full round. Same posture, one more thing the run knows and used not to say.
+#
+# THE RECALL DENOMINATOR (#13306, maintainer ruling 2026-08-31) — the OTHER half of the
+# structural-invisibility paragraphs above. #11356/#11357 are about a page that IS already
+# in this tool's scope and still goes unlisted (it restates a rule without naming what this
+# tool anchors on). Separately, and wider: scripts/docs-audit/affected-docs.mjs's own header
+# declares the CORPUS this whole check claims to cover — hand-written docs, excluding
+# `content/docs/references/**` (generated, never hand-edited; excluding it is this check's
+# constructive design, not an omission). Any recall figure for this check must use THAT
+# corpus as its denominator; one computed against all edits under content/docs measures how
+# often the docs generator ran in the sampling window, not this check — measured 2026-08-30,
+# 31 of 46 ground-truth entries in the one figure ever computed that way were generated
+# pages this check can never list (method and correction in #13306). This check stays
+# advisory-only (see the top of this file) and the ceiling does not license widening the
+# corpus to improve the number. Full statement in affected-docs.mjs's header — this
+# paragraph only points at it so the two files compose instead of each stating their own
+# half.
 
 on:
   pull_request:

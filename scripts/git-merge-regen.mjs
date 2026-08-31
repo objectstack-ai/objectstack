@@ -61,13 +61,19 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  DEFAULT_OWNER,
   DRIVER_NAME,
   GIT_SETTINGS,
   NOT_DRIVER_MANAGED,
   PENDING_MARKER,
   REGEN_ARTIFACTS,
+  ROOT_OWNER,
   entryForPath,
+  ownerDir,
+  ownerOf,
+  ownerRunCommand,
 } from './regen-artifacts.mjs';
+import { workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -122,7 +128,7 @@ function drive(argv) {
   console.error(
     `  ⟳ ${path}\n`
       + `     not text-merged — it is generated. Regenerate from the merged tree:\n`
-      + `       pnpm --filter @objectstack/spec ${entry.gen}${dist}${tree}\n`
+      + `       ${ownerRunCommand(ownerOf(entry), entry.gen)}${dist}${tree}\n`
       + `     The pre-commit hook will not let this commit through until you do.`,
   );
   return 0;
@@ -165,20 +171,123 @@ function reconcileAttributes() {
   return ok;
 }
 
-/** Every `gen:`/`check:` the table names must still exist, or the driver's advice is a dead command. */
+/** Where an owner's manifest lives, repo-relative, given a resolved directory. */
+function manifestFor(dir) {
+  return dir === '.' ? 'package.json' : `${dir}/package.json`;
+}
+
+/**
+ * Every `gen:`/`check:` the table names must still exist **in the manifest of the
+ * row's declared owner**, or the driver's advice is a dead command.
+ *
+ * Resolution read `packages/spec/package.json` and nothing else until #13585, which
+ * made a root-owned artifact unregisterable and said so in a way that pointed at the
+ * wrong repair — "you named a script that does not exist" when the truth was "this
+ * artifact is not owned by packages/spec". Two things follow from that, and the
+ * second is the one worth guarding:
+ *
+ *   - resolution reads the owner's manifest, whichever that is; and
+ *   - the refusal NAMES the manifests it searched, so the reader can see that the
+ *     lookup went somewhere else rather than conclude the script is missing.
+ *
+ * It stays exact in the direction that matters. A name is looked for in ONE
+ * manifest — the declared owner's — never in "any manifest that has it", so a row
+ * that names a root-only script while claiming a package owner still fails, and the
+ * command the driver prints for it is the command the `pre-commit` gate spawns.
+ */
 function reconcileScripts() {
-  const pkg = join(REPO_ROOT, 'packages/spec/package.json');
-  if (!existsSync(pkg)) return fail('packages/spec/package.json not found');
-  const scripts = JSON.parse(readFileSync(pkg, 'utf8')).scripts ?? {};
-  const dead = [];
+  const workspace = workspacePackages(REPO_ROOT);
+  const byOwner = new Map();
   for (const e of REGEN_ARTIFACTS) {
-    if (!scripts[e.gen]) dead.push(`${e.path} → ${e.gen}`);
-    if (!scripts[e.check]) dead.push(`${e.path} → ${e.check}`);
+    const owner = ownerOf(e);
+    if (!byOwner.has(owner)) byOwner.set(owner, []);
+    byOwner.get(owner).push(e);
+  }
+
+  const dead = [];
+  const unresolved = [];
+  const searched = [];
+  for (const [owner, entries] of byOwner) {
+    const dir = ownerDir(owner, workspace);
+    const file = dir === null ? null : join(REPO_ROOT, manifestFor(dir));
+    if (file === null || !existsSync(file)) {
+      unresolved.push(`${owner} — declared by ${entries.map((e) => e.path).join(', ')}`);
+      continue;
+    }
+    searched.push(`${owner} (${manifestFor(dir)})`);
+    const scripts = JSON.parse(readFileSync(file, 'utf8')).scripts ?? {};
+    for (const e of entries) {
+      for (const name of [e.gen, e.check]) {
+        if (!scripts[name]) dead.push(`${e.path} → ${name}   [owner ${owner}, ${manifestFor(dir)}]`);
+      }
+    }
+  }
+
+  if (unresolved.length) {
+    return fail(`owner(s) named by the table resolve to no manifest:\n  ${unresolved.join('\n  ')}\n`
+      + '  An owner is a workspace package name, or ROOT_OWNER for the root manifest.\n'
+      + '  Unresolved is a REFUSAL, not a skip: those rows\' scripts were never verified.');
   }
   if (dead.length) {
-    return fail(`script(s) named by the table no longer exist in @objectstack/spec:\n  ${dead.join('\n  ')}`);
+    return fail(`script(s) named by the table do not exist in their declared owner:\n  ${dead.join('\n  ')}\n`
+      + `  Manifests searched: ${searched.join(', ')}\n`
+      + `  A row that declares no \`owner\` defaults to ${DEFAULT_OWNER}, so this can mean the row is\n`
+      + '  in the wrong package rather than that the script is gone. If ROOT tooling owns the\n'
+      + '  artifact, declare it — `owner: ROOT_OWNER` in scripts/regen-artifacts.mjs. ⛔ Do NOT move\n'
+      + '  the scripts into a package to satisfy the lookup: that lets this tool decide code ownership.');
   }
-  console.log(`✓ all ${REGEN_ARTIFACTS.length * 2} gen:/check: names resolve in @objectstack/spec`);
+  console.log(`✓ all ${REGEN_ARTIFACTS.length * 2} gen:/check: names resolve in their declared owner`
+    + ` (${searched.join(', ')})`);
+  return true;
+}
+
+/**
+ * The owner-resolution rule itself, pinned — the half a live tree cannot show.
+ *
+ * `reconcileScripts` above is green on this tree for the same reason it was green
+ * before #13585: every row is spec-owned, so it exercises exactly one manifest and
+ * would keep passing if the loosening were reverted. These cases read the REAL root
+ * manifest through the same functions the driver and the `pre-commit` gate use, so
+ * the root path is measured on every run rather than the first time somebody
+ * registers a root-owned artifact.
+ *
+ * The two-way case is the third one. A permissive lookup — "resolve the name in any
+ * manifest" — passes every other assertion here and fails that one, which is the
+ * whole difference between a resolution and a search.
+ */
+function reconcileOwnership() {
+  const workspace = workspacePackages(REPO_ROOT);
+  const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+  const specDir = ownerDir(DEFAULT_OWNER, workspace);
+  const specScripts = specDir === null
+    ? {}
+    : JSON.parse(readFileSync(join(REPO_ROOT, manifestFor(specDir)), 'utf8')).scripts ?? {};
+  // A name this repo defines at the ROOT and nowhere else. Asserted, not assumed:
+  // if it ever moves into a package, the assertion below says so instead of quietly
+  // testing nothing.
+  const rootOnly = 'check:merge-driver';
+
+  const cases = [
+    ['ROOT_OWNER is the root manifest\'s own name', rootScripts.name === ROOT_OWNER],
+    ['the root manifest resolves to the repo root', ownerDir(ROOT_OWNER, workspace) === '.'],
+    [`${DEFAULT_OWNER} resolves to a workspace directory`, specDir !== null && specDir !== '.'],
+    ['a row with no owner defaults to DEFAULT_OWNER', ownerOf({ path: 'x' }) === DEFAULT_OWNER],
+    ['a declared owner is used verbatim', ownerOf({ owner: ROOT_OWNER }) === ROOT_OWNER],
+    [`${rootOnly} exists in the root manifest`, Boolean(rootScripts.scripts?.[rootOnly])],
+    // ⭐ The two-way case: resolution is per-owner, not "wherever the name turns up".
+    [`${rootOnly} is NOT resolvable under ${DEFAULT_OWNER}`, !specScripts[rootOnly]],
+    ['an unknown owner refuses rather than skipping', ownerDir('@objectstack/not-a-package', workspace) === null],
+    ['the root command takes no --filter', ownerRunCommand(ROOT_OWNER, 'gen:x') === 'pnpm gen:x'],
+    [
+      'a package command filters to its owner',
+      ownerRunCommand(DEFAULT_OWNER, 'gen:x') === `pnpm --filter ${DEFAULT_OWNER} gen:x`,
+    ],
+    ['a spawn asks for silence', ownerRunCommand(ROOT_OWNER, 'check:x', { silent: true }) === 'pnpm -s check:x'],
+  ];
+
+  const failures = cases.filter(([, ok]) => !ok).map(([name]) => name);
+  if (failures.length) return fail(`owner resolution:\n  ${failures.join('\n  ')}`);
+  console.log(`✓ owner resolution: ${cases.length} case(s) pinned, root manifest read as ${ROOT_OWNER}`);
   return true;
 }
 
@@ -378,6 +487,7 @@ if (process.argv.includes('--self-test')) {
   const results = [
     reconcileAttributes(),
     reconcileScripts(),
+    reconcileOwnership(),
     hookIsExecutable(),
     registeredDriverResolves(),
     endToEnd(),

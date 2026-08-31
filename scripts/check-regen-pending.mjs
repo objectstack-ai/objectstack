@@ -70,19 +70,41 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PENDING_MARKER, entryForPath } from './regen-artifacts.mjs';
+import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SPEC_DIR = join(REPO_ROOT, 'packages/spec');
 
 /**
- * Where the `check:*` gates are spawned. `--self-test`'s fixtures point this at a
- * throwaway package so the two-commit sequence can be replayed without spawning
- * the real spec gates; nothing else sets it. A mistake here fails SAFE — a
- * directory without those scripts makes pnpm exit non-zero, which reads as stale.
+ * Overrides where the `check:*` gates are spawned. `--self-test`'s fixtures point
+ * this at a throwaway package so the two-commit sequence can be replayed without
+ * spawning the real spec gates; nothing else sets it.
  */
-const GATE_CWD = process.env.OS_REGEN_GATE_CWD || SPEC_DIR;
+const GATE_CWD_OVERRIDE = process.env.OS_REGEN_GATE_CWD || null;
+
+/**
+ * Where ONE artifact's gate is spawned: the directory of the package that declares
+ * it (#13585).
+ *
+ * This was `packages/spec` for every row unconditionally, and it is the half of the
+ * single-manifest assumption a lookup-only fix would have left standing. A
+ * root-owned row would have reconciled clean in `check:merge-driver` and then been
+ * spawned here in a directory that does not define its script — measured, `pnpm -s
+ * check:sdui-lockstep` exits 254 in this directory and 0 at the repo root — so the
+ * artifact reads as permanently stale and `pre-commit` refuses every commit from
+ * then on. Registered and unreconcilable is a worse defect than unregisterable,
+ * which is why the owner is read here and not only by the gate.
+ *
+ * A mistake still fails SAFE, in the direction it always did: a directory without
+ * the script makes pnpm exit non-zero, which reads as stale rather than as current.
+ */
+function gateCwd(entry, workspace) {
+  if (GATE_CWD_OVERRIDE) return GATE_CWD_OVERRIDE;
+  const dir = ownerDir(ownerOf(entry), workspace);
+  return dir === null || dir === '.' ? REPO_ROOT : join(REPO_ROOT, dir);
+}
 
 /**
  * Marker line recording a deferral, distinguished from the driver's path lines by
@@ -264,9 +286,9 @@ export function decide({ blocked, merging, deferral, allowDefer = true }) {
   return 'refuse-stale';
 }
 
-function runCheck(script) {
+function runCheck(script, cwd) {
   try {
-    execSync(`pnpm -s ${script}`, { cwd: GATE_CWD, stdio: ['ignore', 'pipe', 'pipe'] });
+    execSync(`pnpm -s ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     return { ok: true, output: '' };
   } catch (err) {
     return { ok: false, output: `${err?.stdout?.toString() ?? ''}${err?.stderr?.toString() ?? ''}`.trim() };
@@ -287,6 +309,9 @@ function main({ prePush = false } = {}) {
 
   const entries = pending.map((p) => ({ path: p, entry: entryForPath(p) })).filter((x) => x.entry);
   const unknown = pending.filter((p) => !entryForPath(p));
+  // Enumerated once, here rather than per gate: `gateCwd` needs an owner-to-directory
+  // answer and this is the repo's one parse of the workspace globs.
+  const workspace = workspacePackages(REPO_ROOT);
 
   console.error(
     `\nos-regen: ${pending.length} generated artifact(s) were merged WITHOUT a text merge and must be `
@@ -309,7 +334,7 @@ function main({ prePush = false } = {}) {
         `  ✗ ${paths.join(', ')}\n`
           + `      ${check} reads packages/spec/dist, which is older than src — NOT running it.\n`
           + `      On a stale dist this gate reports phantom removals and the generator WRITES them.\n`
-          + `      pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec ${entry.gen}`,
+          + `      pnpm --filter @objectstack/spec build && ${ownerRunCommand(ownerOf(entry), entry.gen)}`,
       );
       continue;
     }
@@ -323,11 +348,11 @@ function main({ prePush = false } = {}) {
         `  ✗ ${paths.join(', ')}\n`
           + `      ${check} reads packages/spec/json-schema/, which is missing or older than src —\n`
           + `      NOT running it. That tree is gitignored, so a merge never brings it with them.\n`
-          + `      pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec ${entry.gen}`,
+          + `      pnpm --filter @objectstack/spec gen:schema && ${ownerRunCommand(ownerOf(entry), entry.gen)}`,
       );
       continue;
     }
-    const { ok, output } = runCheck(check);
+    const { ok, output } = runCheck(check, gateCwd(entry, workspace));
     if (ok) {
       console.error(`  ✓ ${paths.join(', ')} — current`);
       continue;
@@ -335,7 +360,7 @@ function main({ prePush = false } = {}) {
     blocked++;
     const detail = output.split('\n').filter(Boolean).slice(0, 3).map((l) => `        ${l}`).join('\n');
     console.error(`  ✗ ${paths.join(', ')} — stale\n${detail ? `${detail}\n` : ''}`
-      + `      pnpm --filter @objectstack/spec ${entry.gen}`);
+      + `      ${ownerRunCommand(ownerOf(entry), entry.gen)}`);
   }
 
   for (const p of unknown) {
