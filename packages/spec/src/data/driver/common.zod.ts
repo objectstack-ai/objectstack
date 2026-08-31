@@ -411,6 +411,62 @@ export const MONGO_OPTIONS_CREDENTIAL_PATHS: readonly (readonly string[])[] = [
   ['auth', 'password'],
 ];
 
+/**
+ * Canonical inline-credential spellings — the key names the shipped driver
+ * contracts declare unwritable (`z.never()`), spelled out for the two places
+ * that must judge a key by NAME because no schema types the position: a driver
+ * the platform ships no contract for, and the interior of a passthrough
+ * `config` slot (`z.record(z.string(), z.unknown())` — the schema itself says
+ * "untyped from here down").
+ *
+ * Lived in `data/datasource-credential-redaction.ts` (read side only) until
+ * the nested-position finding: a credential-spelled key one level DOWN from the
+ * top-level key it mirrors was accepted at publish and served back cleartext,
+ * because the read side's list could not be reached from this module (import
+ * direction) and the write side had no list at all. This module is the bottom
+ * of the driver-schema import graph, so the ONE spelling list lives here and
+ * both doors read it — the #8300 posture (never two copies of a security
+ * list), applied to the list itself.
+ *
+ * Kept in sync with the schemas by `datasource-credential-redaction.test.ts`,
+ * which asserts every `z.never()` key across every builtin driver appears
+ * here — so a driver refusing a new credential key cannot land without this
+ * list learning it.
+ */
+export const CANONICAL_CREDENTIAL_KEYS = ['password', 'authToken'] as const;
+
+/**
+ * Pre-#8078 alias spellings of the keys above. They used to be `aliases` that
+ * the parse RENAMED onto the canonical key; #8078 moved them to `guidance`,
+ * which refuses them at the top level. A stored row written through a door
+ * that does not parse (the wizard persists through `metadata.register`, whose
+ * validation is a structural name/label check) can hold them verbatim — at the
+ * top level or nested — which is why the read path judges these names at
+ * every depth.
+ */
+export const FORMER_CREDENTIAL_ALIASES = [
+  'passwd',
+  'pwd',
+  'token',
+  'jwt',
+  'auth_token',
+  'authtoken',
+] as const;
+
+/**
+ * Every credential KEY SPELLING the platform judges by name — canonical plus
+ * former aliases. The one list behind the nested halves of both doors: the
+ * write door's passthrough walk ({@link credentialFreeMongoOptions}) refuses a
+ * non-empty string under any of these names at any depth, and the read
+ * redactor (`data/datasource-credential-redaction.ts`) hides the same names at
+ * the same depths, so publish-time refusal and read-time redaction treat a
+ * nested position identically to the top-level key it mirrors.
+ */
+export const CREDENTIAL_KEY_SPELLINGS: readonly string[] = [
+  ...CANONICAL_CREDENTIAL_KEYS,
+  ...FORMER_CREDENTIAL_ALIASES,
+];
+
 /** The value at `path` inside a record-ish value, or `undefined` off the walk. */
 function valueAtPath(value: unknown, path: readonly string[]): unknown {
   let node: unknown = value;
@@ -422,6 +478,34 @@ function valueAtPath(value: unknown, path: readonly string[]): unknown {
 }
 
 /**
+ * Refusal prescription for a credential-SPELLED key at an arbitrary nested
+ * position inside the driver-options passthrough — the nested mirror of the
+ * top-level inline refusal, for positions the measured list above does not
+ * name.
+ *
+ * Wording constraints, inherited and one added:
+ *
+ *  - No `${…}` placeholder advice (measured broken escape, #8078/#8336) —
+ *    same as every sibling message.
+ *  - It must NOT promise the bound secret "wins over" this value: that claim
+ *    is measured for `auth.password` only (#8696). For any other nested
+ *    position nothing is measured to read the value at all — which is the
+ *    point the message makes instead: the value performs no function the
+ *    author can observe, while sitting cleartext at rest.
+ */
+export const PASSTHROUGH_NESTED_CREDENTIAL_REFUSED = (path: string): string =>
+  `\`${path}\` is spelled like a credential and is not accepted in the driver-options `
+  + 'passthrough: the datasource is persisted whole into `sys_metadata`, which is served back '
+  + 'by the ordinary data API, so a nested credential lands in cleartext at rest exactly like '
+  + 'an inline `password` one level up — and unlike `auth.password`, no measured client '
+  + 'behaviour reads this position, so the value buys nothing for what it leaks. Remove it; if '
+  + "a real secret needs to reach the connection, bind it instead: the Setup → Datasources "
+  + "connection form's secret field hands it to the datasource secret binder, which encrypts "
+  + 'it into `sys_secret` and stores only an opaque handle at `external.credentialsRef`. '
+  + 'Placeholders are no escape either: a `${…}` span anywhere in `options` is itself refused '
+  + 'at publish.';
+
+/**
  * Attach the #9040 passthrough-credential refusal to mongo's `options` slot.
  *
  * Composes with `placeholderFreeDeep` the same way `credentialFreeUrl`
@@ -429,12 +513,33 @@ function valueAtPath(value: unknown, path: readonly string[]): unknown {
  * `superRefine`s judging the same value independently, an input violating both
  * reports both, and neither changes the other's semantics. Each finding is
  * reported at its own path so the author is pointed at the exact entry.
+ *
+ * Two refusal sources, disjoint by construction:
+ *
+ *  1. The MEASURED paths ({@link MONGO_OPTIONS_CREDENTIAL_PATHS}) — positions
+ *     the client resolves into a login credential the binder substitutes
+ *     (#9040's original walk, message unchanged).
+ *  2. The nested NAME judgment — a non-empty string under a key spelled like
+ *     a credential ({@link CREDENTIAL_KEY_SPELLINGS}), at ANY object depth of
+ *     the passthrough. Before this walk, `options.auth.password` was refused
+ *     while the byte-identical secret at `options.auth.token` or
+ *     `options.pool.password` was accepted in silence and sat cleartext in
+ *     `sys_metadata` — the nested twin of the top-level key refusal, judged
+ *     from the same one spelling list the read-path redactor consumes.
+ *
+ * Boundaries the walk shares with every other walker on this surface: arrays
+ *  are off the walk ({@link valueAtPath} posture), only a NON-EMPTY STRING is
+ * refused (`auth.password`'s own boundary — an empty string is the passthrough
+ * twin of `user:@host`, and a non-string is not a secret a client accepts),
+ * and a path already refused by source 1 is not reported twice.
  */
 export function credentialFreeMongoOptions<S extends z.ZodType>(schema: S, key: string) {
   return schema.superRefine((value, ctx) => {
+    const reported = new Set<string>();
     for (const path of MONGO_OPTIONS_CREDENTIAL_PATHS) {
       const leaf = valueAtPath(value, path);
       if (typeof leaf === 'string' && leaf.length > 0) {
+        reported.add(path.join('.'));
         ctx.addIssue({
           code: 'custom',
           path: [...path],
@@ -442,6 +547,32 @@ export function credentialFreeMongoOptions<S extends z.ZodType>(schema: S, key: 
         });
       }
     }
+    const walk = (node: unknown, prefix: readonly string[]): void => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      for (const [name, child] of Object.entries(node as Record<string, unknown>)) {
+        const path = [...prefix, name];
+        if (
+          CREDENTIAL_KEY_SPELLINGS.includes(name)
+          && typeof child === 'string'
+          && child.length > 0
+          && !reported.has(path.join('.'))
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            path,
+            message: PASSTHROUGH_NESTED_CREDENTIAL_REFUSED([key, ...path].join('.')),
+          });
+          continue;
+        }
+        walk(child, path);
+      }
+    };
+    // The judgment applies from the record's own top level down: every key
+    // under `options` is already one level below the config keys the driver
+    // schema types, so `options.password` mirrors the refused top-level
+    // `password` exactly as `options.auth.password` does (no measured client
+    // option carries any of these spellings at any depth).
+    walk(value, []);
   });
 }
 

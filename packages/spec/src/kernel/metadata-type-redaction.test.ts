@@ -114,6 +114,33 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
     expect(result.redactedKeys).toEqual(['config.authToken', 'config.encryptionKey', 'config.passwd']);
   });
 
+  it('a NESTED credential position OFF the passthrough table is withheld at this door too (the class control)', () => {
+    // The nested-position finding, measured at THIS consumer: a credential
+    // spelling one object level down (`options.auth.token` — deliberately not
+    // a `passthroughSecretPaths` row) used to flow through this hook verbatim
+    // with `redactedKeys: []`, so `/meta/datasource` — a door any
+    // authenticated caller reaches — served it cleartext.
+    const stored = {
+      name: 'events',
+      driver: 'mongodb',
+      config: {
+        database: 'app',
+        options: { auth: { username: 'svc', token: 'eyJhbGci.SECRET.y' }, replicaSet: 'rs0' },
+      },
+    };
+    const result = getMetadataTypeRedactor('datasource')!(stored) as MetadataRedactionResult;
+    expect(JSON.stringify(result.item)).not.toContain('SECRET');
+    expect(result.item.config).toEqual({
+      database: 'app',
+      options: { auth: { username: 'svc' }, replicaSet: 'rs0' },
+    });
+    // Dotted, item-relative — the shape the generic write-door carry-forward
+    // (`carryForwardRedactedValues`) walks, nested paths included.
+    expect(result.redactedKeys).toEqual(['config.options.auth.token']);
+    // Pure: the stored body keeps its material for the connect path.
+    expect((stored.config.options.auth as Record<string, unknown>).token).toBe('eyJhbGci.SECRET.y');
+  });
+
   it('an item with no config object is passed through as-is', () => {
     const noConfig = { name: 'x', driver: 'postgres' };
     expect(getMetadataTypeRedactor('datasource')!(noConfig)).toEqual({

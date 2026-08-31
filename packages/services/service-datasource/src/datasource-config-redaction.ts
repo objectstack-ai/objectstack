@@ -31,11 +31,7 @@
  * #8154's, deliberately not built here.
  */
 
-import {
-  passthroughSecretPaths,
-  redactableConfigKeys,
-  redactUrlCredentials,
-} from '@objectstack/spec/data';
+import { redactDatasourceConfig } from '@objectstack/spec/data';
 
 export {
   refusedCredentialKeys,
@@ -56,6 +52,24 @@ export {
  * where the patch is indistinguishable from what the read path served — an
  * absent key, or a URL that matches the stored URL once redacted. Anything the
  * author actually changed wins, including clearing a URL's password by hand.
+ * A patch whose CONTAINER for a nested leaf is removed is the author's word
+ * too (they deleted the block), so nothing is grafted there.
+ *
+ * ## Derived from the redactor, not restated beside it
+ *
+ * This function used to mirror the read path rule by rule — one loop per
+ * redaction source, each a copy that could silently fall behind (the docblock
+ * threat on every one of them: "a redaction the restore side did not mirror
+ * turns an untouched Save into silent credential deletion"). The nested-
+ * position fix made the read path recursive, which would have added two more
+ * loops — so the mirroring is now structural instead: compute what the read
+ * path SERVES for the stored row (`redactDatasourceConfig(driver, stored)`),
+ * and for every redacted path graft the stored value back exactly where the
+ * patch still matches the served projection. A future redaction source is
+ * mirrored here by construction, with nothing to forget. (Same inversion the
+ * metadata door's generic `carryForwardRedactedValues` performs; this one
+ * consumes the redactor's exact `redactedPaths` segments, so a stored key
+ * with a literal dot cannot be mis-split.)
  *
  * What this does NOT do is let a patch set a refused key: `assertValidConfig`
  * still runs on the merged record, so a caller that types `password` into the
@@ -69,43 +83,25 @@ export function restoreRedactedConfig(
   if (!patch || typeof patch !== 'object') return patch;
   if (!stored || typeof stored !== 'object') return patch;
 
-  const hidden = new Set(redactableConfigKeys(driver));
+  const served = redactDatasourceConfig(driver, stored);
   const out: Record<string, unknown> = { ...patch };
 
-  for (const key of hidden) {
-    // Only when the patch does not speak to the key at all. A patch that DOES
-    // carry it is the author's word, and (for a refused spelling) is about to
-    // be refused on its own merits rather than quietly overwritten here.
-    if (!(key in out) && stored[key] !== undefined) out[key] = stored[key];
-  }
-
-  for (const [key, storedValue] of Object.entries(stored)) {
-    if (hidden.has(key) || typeof storedValue !== 'string') continue;
-    // The SAME composite the read path applies (userinfo password + #8337
-    // credential query parameters) — a redaction this compare did not mirror
-    // would make the untouched "Save" it exists for delete the credential.
-    const redactedStored = redactUrlCredentials(storedValue);
-    // Unchanged by redaction ⇒ it carried no credential ⇒ nothing to restore.
-    if (redactedStored === storedValue) continue;
-    if (out[key] === redactedStored) out[key] = storedValue;
-  }
-
-  // The passthrough spellings (#9040) — the nested material the read path
-  // drops by PATH (`options.auth.password`, `options.proxyPassword`, …). The
-  // same narrow rule as the top-level keys, translated per leaf: restore ONLY
-  // when the patch's container for the leaf exists but does not speak to the
-  // leaf at all — exactly what the read path served. A patch carrying the leaf
-  // is the author's word (a typed-in `auth.password` is then refused by the
-  // #9040 write gate on its own merits); a patch with the CONTAINER removed is
-  // the author's word too (they deleted the block), so nothing is grafted.
-  for (const path of passthroughSecretPaths(driver)) {
+  for (const path of served.redactedPaths) {
     const storedLeaf = valueAt(stored, path);
     if (storedLeaf === undefined) continue;
     const parentPath = path.slice(0, -1);
     const leafKey = path[path.length - 1] as string;
-    const patchParent = valueAt(out, parentPath);
+    const patchParent = parentPath.length === 0 ? out : valueAt(out, parentPath);
     if (!patchParent || typeof patchParent !== 'object' || Array.isArray(patchParent)) continue;
-    if (leafKey in (patchParent as Record<string, unknown>)) continue;
+    // What the read path served at this position: `undefined` for a dropped
+    // key, the rewritten string for a URL redaction. The patch speaks for the
+    // author exactly where it DIFFERS from that projection.
+    const servedParent = parentPath.length === 0 ? served.config : valueAt(served.config, parentPath);
+    const servedLeaf =
+      servedParent && typeof servedParent === 'object' && !Array.isArray(servedParent)
+        ? (servedParent as Record<string, unknown>)[leafKey]
+        : undefined;
+    if ((patchParent as Record<string, unknown>)[leafKey] !== servedLeaf) continue;
     graftAt(out, path, storedLeaf);
   }
 
