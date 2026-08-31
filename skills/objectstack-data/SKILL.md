@@ -78,7 +78,7 @@ database table and exposes automatic CRUD APIs.
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field, or a formula field (`returnType: 'text'`) for a composite title |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
-| `titleFormat` | — | **Retired (ADR-0079)** — a render-only template the server can't return or query. Use `nameField`; for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
+| `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](#field-groups-mvp)) |
 | `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
@@ -740,9 +740,9 @@ A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated*
 
 ### Sensitive fields — `secret` type + `requiredPermissions`
 
-The former `encryptionConfig` and `maskingRule` field keys were **pruned from
-`FieldSchema`** — they had no runtime consumer (dead surface; setting them
-protected nothing). The real channels are:
+The former `encryptionConfig` field key was **pruned from `FieldSchema`** — it
+had no runtime consumer. `maskingRule` is **live** (plugin-security's
+FieldMasker enforces it). The real channels are:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** For reversible
 machine credentials (DB passwords, API keys, tokens): the engine encrypts the
@@ -783,8 +783,8 @@ For SaaS, set `tenancy` on the object schema for row-level tenant isolation
 
 ```typescript
 tenancy: {
-  enabled: true,             // enable row-level tenant isolation
-  tenantField: 'tenant_id',  // default: 'tenant_id'
+  enabled: true,   // enable row-level tenant isolation
+  // tenantField — NO default; omit it and the driver uses `organization_id`
 }
 ```
 
@@ -976,7 +976,7 @@ export const SetupApp = defineApp({
 > The former `softDelete` / `versioning` object keys were **removed** from the
 > spec (ADR-0049 enforce-or-remove) — authoring them is now a build
 > error with upgrade guidance. `partitioning` / `cdc` were never schema keys,
-> and the `encryptionConfig` / `maskingRule` field keys were pruned (see
+> and the `encryptionConfig` field key was pruned (see
 > [Sensitive fields](#sensitive-fields--secret-type--requiredpermissions)).
 
 ---

@@ -6,8 +6,7 @@ Guide for creating efficient database indexes in ObjectStack.
 
 ObjectStack automatically creates indexes for:
 - Primary keys (`id`)
-- Foreign keys (lookup/master_detail fields)
-- Unique constraints
+- Field-level `unique` — **not** foreign keys: declare those
 
 **Only declare non-default values.** `unique` defaults to `false` — omit it when using the default.
 
@@ -83,7 +82,7 @@ Notes an author has to know:
 
 ### ✅ Always Index
 
-1. **Foreign keys** — Automatic, but verify
+1. **Foreign keys** — declare them; never automatic
 2. **Filter fields** — Columns used in WHERE clauses
 3. **Sort fields** — Columns used in ORDER BY
 4. **Unique constraints** — Enforce uniqueness at DB level
@@ -328,7 +327,7 @@ SHOW INDEX FROM your_table;
 
 ## Best Practices
 
-1. **Index foreign keys** — Always (automatic in ObjectStack)
+1. **Index foreign keys** — always; declare each one
 2. **Composite for common queries** — Combine frequently filtered columns
 3. **Order matters** — Most selective field first
 4. **Partial for subsets** — but build it in a migration, not a declaration

@@ -17,7 +17,7 @@ import { lazySchema } from '../shared/lazy-schema';
  * data lives in each environment's own database — those data-plane DBs hold
  * no system tables.
  *
- * See ADR-0006 v4: `sys_environment` was renamed to `sys_environment`; the
+ * See ADR-0006 v4: `sys_project` was renamed to `sys_environment`; the
  * separate dev-workspace `Project` concept introduced in v3 has been
  * dropped — user code is now modelled as an implicit `sys_package` with
  * a per-org `manifest_id` (see ADR-0003), so a single package + version

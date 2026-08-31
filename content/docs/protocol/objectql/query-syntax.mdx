@@ -261,7 +261,7 @@ const query: QueryAST = {
 | `$ilike` | Same pattern language, **ignoring ASCII case** | `{ name: { $ilike: '%industries' } }` |
 | `$between` | Range (inclusive) | `{ close_date: { $between: ['2024-01-01', '2024-12-31'] } }` |
 | `$null` | Null check | `{ manager_id: { $null: true } }` / `{ phone: { $null: false } }` |
-| `$exists` | Field exists (NoSQL) | `{ metadata: { $exists: true } }` |
+| `$exists` | Field has a value — the inverse of `$null` | `{ metadata: { $exists: true } }` |
 
 ### `$like` is not a spelling of `$contains`
 
@@ -514,9 +514,20 @@ where: { manager_id: { $null: true } }
 // Field IS NOT NULL
 where: { phone: { $null: false } }
 
-// Field exists (NoSQL)
+// Field has a value — the same rows as { $null: false }
 where: { metadata: { $exists: true } }
 ```
+
+<Callout type="warn">
+**`$exists` is not a key-presence test.** It asks whether the field **has a
+value**, so a stored `null` counts as *no value* on every backend:
+`{ $exists: true }` compiles to `IS NOT NULL` and `{ $exists: false }` to
+`IS NULL`. It is the exact inverse of `$null` — `{ $exists: b }` selects the
+same rows as `{ $null: !b }` — and it is portable, not a NoSQL-only operator.
+On MongoDB the driver lowers it to `{ $ne: null }` / `{ $eq: null }` and never
+emits MongoDB's own `$exists`, which *would* have been key presence and would
+have kept a `null`-valued field.
+</Callout>
 
 ### Filtering Across Relationships
 

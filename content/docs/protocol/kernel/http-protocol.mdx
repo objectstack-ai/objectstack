@@ -394,7 +394,7 @@ GET /api/data/account?filter={"status":"active"}
 - `$endsWith` - String ends with
 - `$between` - Between two values (tuple)
 - `$null` - Null check (`{ "$null": true }` for IS NULL, `{ "$null": false }` for IS NOT NULL)
-- `$exists` - Field existence check
+- `$exists` - Field has a value — the inverse of `$null` (`{ "$exists": true }` is `IS NOT NULL`, `{ "$exists": false }` is `IS NULL`). Not a key-presence test: a stored `null` counts as no value on every backend, MongoDB included
 
 **OR conditions:**
 ```json
