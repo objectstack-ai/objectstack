@@ -49,7 +49,7 @@ nothing to do with elevation.
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts:269` | The elevation flag on an operation's context | ✅ |
 | `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1588` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts:125` | Built-in template; tenants may override but should not delete | ❌ |
-| `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:136` | Platform-infrastructure environment, not user data | ❌ |
+| `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:137` | Platform-infrastructure environment, not user data | ❌ |
 
 The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
 changes an object's **default sharing**, and `ExecutionContext.isSystem` changes

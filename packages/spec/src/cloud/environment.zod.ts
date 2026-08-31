@@ -26,7 +26,8 @@ import { lazySchema } from '../shared/lazy-schema';
  * Split of concerns:
  * - **Control Plane**: `sys_environment` (includes physical DB addressing),
  *   `sys_package_installation` (with `environment_id`), `sys_environment_credential`,
- *   `sys_environment_member`, `sys_metadata` (with `environment_id`).
+ *   `sys_environment_member`, `sys_metadata` (on the metadata tables, `environment_id`
+ *   is deprecated in favor of `organization_id` — ADR-0006 v4).
  * - **Data Plane**: each environment DB contains only business objects
  *   (account, task, …). No system tables, no `environment_id` columns.
  */
