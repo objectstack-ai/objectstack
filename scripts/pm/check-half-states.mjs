@@ -7359,14 +7359,27 @@ export function summaryLine(counts, findingCount) {
           'false — 199 rows were trimmed and not one rendered row carried an unresolved target)'
         : ''
     }` +
+    // #13650: this terminator is UNCONDITIONAL, and belongs to the CLAUSE
+    // rather than to either optional branch below. It used to exist only inside
+    // the cross-repo branch, so the single rendering that ended this sentence
+    // was the one where an unrelated optional probe happened to fire. On an
+    // ordinary healthy pass — no shortfall AND no probe, the common case — the
+    // clause stopped at `card(s)` and a lone space joined it straight onto
+    // H20's lead-in, which the live 2026-08-31 patrol rendered as
+    // `…card(s) Dispatch liveness (H20 + H27): …`: two disclosures read as one,
+    // with the boundary findable only by a reader who already knows the row
+    // inventory. Each optional branch now contributes ONLY its own text, which
+    // is what keeps the terminator independent of whether they fire — a branch
+    // carrying the sentence's end is how the two clauses ran together.
+    '. ' +
     `${
       crossRepoProbed > 0
-        ? ` Cross-repo reachability was measured directly on ${crossRepoProbed} sibling repo(s), of which ` +
+        ? `Cross-repo reachability was measured directly on ${crossRepoProbed} sibling repo(s), of which ` +
           `${crossRepoUnreadable} do(es) not answer this credential — those targets are unjudgeable by ` +
           'ruling (each install reads its own repo with its own repo-scoped token) and ⛔ no re-run ' +
-          'resolves them.'
+          'resolves them. '
         : ''
-    } ` +
+    }` +
     `Dispatch liveness (H20 + H27): remote branch read on ${refRead} of ${refTargets} distinct claimed ` +
     `branch(es) named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute ` +
     `threshold — one read serving both rows, so H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset ` +
@@ -13056,6 +13069,40 @@ function selfTest() {
   t('summary: …and that a re-run will not help', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('no re-run'), true);
   t('summary: no probes taken -> no cross-repo clause at all', saidBy('h19Blockers', summaryLine(xCounts(0, 0), 1)).includes('sibling repo(s)'), false);
   t('summary: absent cross-repo counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine(counts, 0)).includes('undefined'), false);
+
+  // -- H19 terminates its OWN sentence, on every shape (#13650) ---------------
+  //
+  // The `. ` every other clause on this line ends with used to exist only
+  // inside the cross-repo branch above, so the ONE rendering that terminated
+  // H19 was the one where an unrelated optional probe happened to fire. On an
+  // ordinary healthy pass — no shortfall AND no probe — the clause stopped at
+  // `card(s)` and a lone space joined it onto H20's lead-in, which the live
+  // 2026-08-31 patrol rendered as `…card(s) Dispatch liveness (H20 + H27): …`.
+  //
+  // ⚠️ Why the neighbouring `endsWith('not a gate verdict.')` cases could not
+  // catch it: those pin where the SENTENCE ends, which is H37's business. This
+  // is a claim about where H19's clause ends, and only the scoped extractor can
+  // make it. All four shapes are pinned rather than one, because the defect WAS
+  // that the shapes disagreed — a pin on the probe shape alone would have been
+  // green throughout the entire life of the bug.
+  const h19Terminated = (c) => saidBy('h19Blockers', summaryLine(c, 1)).endsWith('. ');
+  t('#13650: H19 ends its sentence on a healthy pass (no shortfall, no probe)', h19Terminated(btCounts2(28, 28)), true);
+  t('#13650: …and on a shortfall pass', h19Terminated(btCounts2(25, 28)), true);
+  t('#13650: …and on a cross-repo probe pass', h19Terminated(btCounts2(28, 28, { crossRepoProbed: 2, crossRepoUnreadable: 1 })), true);
+  t('#13650: …and when BOTH optional branches fire', h19Terminated(xCounts(2, 1)), true);
+  // The other half of the fix, and the way it would most plausibly be got
+  // wrong: the probe branch already ended in a period of its own, so a
+  // terminator appended AFTER it renders `resolves them.. ` — which satisfies
+  // every `endsWith('. ')` case above while reading as a typo in the report.
+  t('#13650: the probe shape does not double the period', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('.. '), false);
+  t('#13650: …and the probe branch closes the clause exactly once', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).endsWith('no re-run resolves them. '), true);
+  // Kept WHOLE-LINE on purpose, both of them: this is a claim about the
+  // boundary BETWEEN two clauses, so there is no single window to scope it to —
+  // the adjacency is the thing being asserted. It is safe from #13629's defect
+  // because no neighbour can manufacture this pairing: `card(s) ` is H19's last
+  // text and the H20 anchor is H20's first.
+  t('#13650: H20\'s clause is no longer joined onto H19\'s population', summaryLine(btCounts2(28, 28), 1).includes('card(s) Dispatch liveness'), false);
+  t('#13650: …and the rendered boundary reads as two sentences', summaryLine(btCounts2(28, 28), 1).includes('card(s). Dispatch liveness (H20 + H27)'), true);
 
   // -- H32's seat coverage pair (#11706) -------------------------------------
   const seatCounts = (seatMarkersRead, seatCandidates) => ({ ...counts, seatMarkersRead, seatCandidates });

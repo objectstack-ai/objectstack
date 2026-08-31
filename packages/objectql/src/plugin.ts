@@ -62,18 +62,33 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
 /**
  * Options for ObjectQLPlugin.
  *
- * `environmentId` scopes all metadata writes + reads to a specific project.
- * When set, `protocol.saveMetaItem` stamps `environment_id = <environmentId>` on
- * new sys_metadata rows, and `protocol.loadMetaFromDb` filters by the same
- * column. Leave undefined in single-kernel / self-hosted mode — rows land
- * in the platform-global scope (environment_id IS NULL).
+ * `environmentId` declares that this kernel serves ONE environment. It is a
+ * topology declaration, not a row filter. ADR-0005 (revised 2026-05) gave every
+ * environment its own physical database, so `protocol.saveMetaItem` stamps no
+ * `environment_id` column on new sys_metadata rows and `protocol.loadMetaFromDb`
+ * constrains on none — the isolation key that survived is `organization_id`.
+ * The column is deprecated on the metadata tables and new writes leave it NULL;
+ * `SysMetadataObject.environment_id` and `DatabaseLoaderOptions.environmentId`
+ * both carry that note, and `DatabaseLoader`'s own pin test asserts the write
+ * does not set it.
+ *
+ * What setting it still decides is topology: this kernel skips the boot-time
+ * `sys_metadata` hydration unless `hydrateMetadataFromDb` opts back in, skips
+ * bridging the process-wide SchemaRegistry into the metadata service (that
+ * registry is shared, so the bridge would leak sibling environments' objects),
+ * and does not provision the metadata-storage platform objects locally. Leave
+ * undefined in single-kernel / self-hosted mode.
  */
 export interface ObjectQLPluginOptions {
   /** Optional pre-built engine. When absent, one is lazily created in init. */
   ql?: ObjectQL;
   /** Passed to `new ObjectQL(...)` when `ql` is not supplied. */
   hostContext?: Record<string, any>;
-  /** Scope sys_metadata reads/writes to this project. */
+  /**
+   * Declare that this kernel serves one environment. Topology only — it does
+   * not scope sys_metadata rows by an `environment_id` column. See the
+   * interface docblock above.
+   */
   environmentId?: string;
   /**
    * [#6710] Which authoring channel this kernel's metadata writes arrive on —

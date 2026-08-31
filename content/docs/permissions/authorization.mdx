@@ -110,8 +110,14 @@ implementation detail:
    D1) is a separate always-first AND conjunct, not an OR-mergeable policy.
    `viewAllRecords` / `modifyAllRecords` (super-user bypass, posture-gated)
    short-circuit the object's *business* RLS. Crossing the **tenant wall**,
-   though, requires the **`PLATFORM_ADMIN` posture** (ADR-0099 D1), which derives
-   only from an **unscoped `admin_full_access` grant** — a *scoped* grant, or
+   though, requires the **`PLATFORM_ADMIN` posture** (ADR-0099 D1). That posture
+   is derived at one site from **two anchors**, either of which is sufficient:
+   the deployment's **configured administrator list** — an address declared in
+   `OS_PLATFORM_OWNER_EMAIL`, matched against the caller's own stored and
+   **email-verified** `sys_user` row — and an **unscoped `admin_full_access`
+   grant** row. See
+   [who holds `admin_full_access`](/docs/permissions/permission-sets#built-in-permission-sets)
+   for both. A *scoped* grant, or
    piecemeal platform capabilities (`studio.access`, `manage_users`, …), grant
    Studio/admin *functions* but never widen the tenant data boundary. A tenant
    `organization_admin` never crosses it (invariant I1).
@@ -331,7 +337,10 @@ a row outside its window simply stops resolving — in `resolveAuthzContext`,
 the explain engine, sharing-rule position expansion, and (transitively) the
 delegated-admin gate's held-scope resolution. No background cleanup job is
 involved (ADR-0049); the clock is checked on every resolution. An expired
-unscoped `admin_full_access` grant no longer derives `platform_admin`.
+unscoped `admin_full_access` grant no longer derives `platform_admin` — a
+statement about the *grant* anchor. The configured-administrator anchor is not
+a stored grant row at all, so it carries no validity window and nothing here
+dates it; it is revoked by changing the configuration.
 
 The explain engine reports an expired-but-present row as a dedicated
 contributor state ("held until 2026-08-01 — expired"), so "why did access
@@ -381,7 +390,10 @@ place, by the same discipline: **resolution-time filtering, fail-closed**, in
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a
   deactivated unscoped `admin_full_access` no longer derives `platform_admin`
-  — the flag is applied *before* the posture is derived, not after.
+  — the flag is applied *before* the posture is derived, not after. A
+  **configured** administrator is judged elsewhere: that anchor reads the
+  deployment's configuration and the caller's own `sys_user` row, never the
+  catalogue row, so the flag does not decide their standing.
 - A deactivated **position** stops carrying its permission sets, and its name
   stops appearing in `positions`, so a permission set that merely shares the
   position's name cannot resolve through it either.
@@ -407,12 +419,14 @@ away, so a row that predates the column keeps granting. The same predicate
 guard's simulation — a guard that modelled "deactivated" differently from the
 resolver would permit exactly the write it exists to refuse.
 
-**Deactivating the break-glass set is refused.** `admin_full_access` is what
-makes the environment's platform admins, so switching it off would un-make all
-of them in one write — and re-activating it needs the permission just lost.
-That write is judged like deleting or renaming the row (ADR-0024 D5.2): it is
-refused while it would leave the environment with no administrator who can
-sign in. Re-activation is never refused.
+**Deactivating the break-glass set is refused.** Switching `admin_full_access`
+off un-makes every platform admin who holds it *through a grant row*, in one
+write — and re-activating it needs the permission just lost. That write is
+judged like deleting or renaming the row (ADR-0024 D5.2): it is refused while
+it would leave the environment with no administrator who can sign in. The
+enumeration behind that judgement counts **both** anchors, so an environment
+whose administrators are configured rather than granted is not empty, and the
+write is permitted there. Re-activation is never refused.
 
 Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated

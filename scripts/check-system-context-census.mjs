@@ -184,7 +184,7 @@ export const NON_READ_ANCHORS = [
   },
   {
     file: 'packages/objectql/src/engine.ts',
-    needle: 'if (isSystem && opts.bypassTenantAudit === undefined) {',
+    needle: 'if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {',
     why: 'row 24 -- where `bypassTenantAudit` is threaded to the driver',
   },
   {
