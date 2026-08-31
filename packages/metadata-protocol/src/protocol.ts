@@ -1371,6 +1371,84 @@ export class ConcurrentUpdateError extends Error {
 }
 
 /**
+ * [#13576] Thrown when a caller-supplied `expectedVersion` — the `If-Match`
+ * header or the body/query `expectedVersion` field — is a syntactically legal
+ * but semantically empty RFC-7232 entity-tag: the quoted-empty token `""`.
+ *
+ * ## Why this is refused rather than silently treated as "no token" (the
+ * pre-#13576 behaviour) or silently treated as a conflict (409)
+ *
+ * `""` is valid `entity-tag` grammar (RFC 7232 §2.3: `weak? DQUOTE *etagc
+ * DQUOTE`, and `*etagc` — zero or more — permits an EMPTY opaque-tag). But an
+ * empty tag can never equal any stored `updated_at`, quoted or not: it is not
+ * "the version I read", it is nothing. A client that sends it is asking for a
+ * guarded write and could not possibly have a real version in hand — RFC
+ * legality does not make it a meaningful concurrency token, and the platform
+ * makes an explicit contract choice to treat the shape itself as a client
+ * defect. Before this it fell through {@link normaliseVersionToken}'s
+ * quote-strip into the same falsy `''` that "caller sent nothing" produces,
+ * so the OPPOSITE of what `If-Match` requests happened: the guard was
+ * SKIPPED rather than evaluated, silently, on the one token shape that opts
+ * OUT of the check instead of failing it (unlike a garbage-but-nonempty token
+ * such as `v2`, which still normalises to a real, comparable token and fails
+ * toward `409 CONCURRENT_UPDATE` — the safe direction for a concurrency
+ * primitive, and unchanged by this fix).
+ *
+ * A `409` here (the alternative the maintainer ruling rejected, decision #20
+ * ①, 2026-08-31) would have been safer than the pre-#13576 behaviour but
+ * would still have collapsed two different facts into one answer: "you lost a
+ * race" (409, actionable by reloading and retrying) and "you sent something
+ * that can never carry a version" (this — a client-side bug, not a race). A
+ * `400` keeps that distinction legible, which is the entire reason option 3
+ * was chosen over option 2.
+ *
+ * `VALIDATION_FAILED`/400 is this package's own house code for a
+ * caller-request defect the engine never has to touch (mirrors
+ * {@link rowRequiredIdError}) — already registered in the ADR-0112
+ * error-code ledger under `@objectstack/metadata-protocol`, so this needs no
+ * new ledger entry.
+ */
+export class MalformedVersionTokenError extends Error {
+    readonly code = 'VALIDATION_FAILED';
+    readonly status = 400;
+    readonly fields: never[] = [];
+    constructor() {
+        super(
+            'expectedVersion (If-Match) is the empty entity-tag `""`. An empty version '
+            + 'token can never match any stored version, so this is almost certainly a '
+            + 'client defect rather than a real concurrency check — send the real version '
+            + 'token you read (e.g. the record\'s `updated_at`), or omit If-Match / '
+            + 'expectedVersion entirely to perform an unguarded write.',
+        );
+        this.name = 'MalformedVersionTokenError';
+    }
+}
+
+/**
+ * [#13576] Guard for the CLIENT-SUPPLIED half of an OCC token — never call
+ * this on `current.updated_at`, which is server-computed and must keep its
+ * existing "no check" fallback on any falsy normalisation.
+ *
+ * Detects exactly the RFC-7232 quoted-empty shape (`""`, any surrounding
+ * whitespace) and nothing wider: the raw value denotes SOMETHING (it is
+ * non-empty once trimmed — the "no token at all" cases, `undefined`/`null`/
+ * `''`/whitespace-only, are unaffected and keep opting out of the guard, per
+ * the ruling's clause ②), yet {@link normaliseVersionToken} reduces it to
+ * nothing. That combination — "the caller supplied a token" AND "it
+ * normalises to no token" — has exactly one source in
+ * {@link normaliseVersionToken}'s body: the post-quote-strip emptiness check.
+ * A garbage-but-nonempty token (`v2`) normalises to a REAL (if opaque) token,
+ * so it never matches this predicate and keeps failing toward 409 unchanged.
+ */
+function assertVersionTokenNotMalformed(expectedVersion: string | undefined): void {
+    if (expectedVersion === null || expectedVersion === undefined) return;
+    const raw = String(expectedVersion).trim();
+    if (!raw) return; // no token at all — unaffected, stays "opt out of the guard"
+    if (normaliseVersionToken(expectedVersion) !== null) return; // a real, comparable token
+    throw new MalformedVersionTokenError();
+}
+
+/**
  * An ISO-8601 date-time that denotes an ABSOLUTE instant — it carries an
  * explicit `Z` or a numeric `±HH:mm` offset, so reading it never consults the
  * process timezone.
@@ -1452,6 +1530,16 @@ function canonicalVersionInstant(value: unknown, token: string): string | null {
  * RFC-7232-style quotes (`"…"`) that an HTTP `If-Match` header may carry, trims
  * whitespace, and returns null for empty / nullish input — a null is the
  * caller's "no token supplied", which opts out of the check.
+ *
+ * [#13576] This function's OWN contract is deliberately unchanged: `""` still
+ * normalises to null here, exactly as #13382 left it (see the load-bearing
+ * comment on the post-strip check below) — that is what keeps this a pure,
+ * side-effect-free reader that the SERVER-COMPUTED `current.updated_at` call
+ * can keep using with its "no check" fallback. The client-facing call sites
+ * (`assertVersionOf`, `assertVersionMatch`) now call
+ * {@link assertVersionTokenNotMalformed} FIRST, which distinguishes "caller
+ * sent nothing" (stays opted out) from "caller sent the quoted-empty tag"
+ * (throws 400) before either ever reaches this function's uniform null.
  *
  * ## Why this returns two forms rather than one string (#13382)
  *
@@ -10126,6 +10214,13 @@ export class ObjectStackProtocolImplementation implements
      * Behaviour:
      *  - Empty/missing token → no check (opt-in semantics; existing callers
      *    that haven't yet adopted OCC are unaffected).
+     *  - [#13576] The one exception to "empty → no check": a token that is
+     *    PRESENT but is the quoted-empty RFC-7232 entity-tag (`""`) is a
+     *    malformed concurrency token, not an absent one — see
+     *    {@link assertVersionTokenNotMalformed} — and throws
+     *    `MalformedVersionTokenError` (400) instead of silently skipping the
+     *    guard. Every other falsy shape (no header/field at all, `''`,
+     *    whitespace-only) is untouched by this and still opts out.
      *  - Record not found → no check. We intentionally do not treat "missing
      *    record" as a concurrency conflict; `updateData` has already answered
      *    404 by this point, and `deleteData` lets the driver report it.
@@ -10147,6 +10242,7 @@ export class ObjectStackProtocolImplementation implements
         current: any,
         expectedVersion: string | undefined,
     ): void {
+        assertVersionTokenNotMalformed(expectedVersion);
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
         if (!current) return;
@@ -10176,12 +10272,24 @@ export class ObjectStackProtocolImplementation implements
      * existence probe of its own: the driver's own `delete` return reports
      * whether a row matched (#4435). So this still probes ONLY when the caller
      * actually opted into OCC, keeping a plain DELETE at zero extra reads.
+     *
+     * [#13576] The malformed-token check runs FIRST, before the probe — a
+     * malformed client token is a request defect independent of whether the
+     * target record exists, and rejecting it costs nothing extra (no probe
+     * needed either way). This is a SEPARATE call from the one inside
+     * {@link assertVersionOf}, not a delegation to it: this function returns
+     * early on a well-formed-but-absent token (`if (!normaliseVersionToken(…))
+     * return`) BEFORE ever reaching `assertVersionOf`, so without its own
+     * check here a malformed token would take that same early return and the
+     * guard would stay silently skipped — exactly the two-doors shape the
+     * original defect had (measured, #13576 A2.2).
      */
     private async assertVersionMatch(
         object: string,
         id: string,
         expectedVersion: string | undefined,
     ): Promise<void> {
+        assertVersionTokenNotMalformed(expectedVersion);
         if (!normaliseVersionToken(expectedVersion)) return;
         const current = await this.probeRecord(object, id);
         this.assertVersionOf(object, id, current, expectedVersion);
