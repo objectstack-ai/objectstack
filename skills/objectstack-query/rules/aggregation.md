@@ -13,12 +13,11 @@ Guide for building ObjectStack aggregation queries.
 | `max` | `MAX(field)` | Maximum value | Yes |
 | `count_distinct` | `COUNT(DISTINCT field)` | Count unique values | Yes |
 
-> ⚠️ **Driver support varies.** On SQL datasources the driver executes only
-> `count` / `sum` / `avg` / `min` / `max` and **throws** (`Unsupported
-> aggregate function`) on `count_distinct`; the per-aggregation
-> `distinct: true` flag is also ignored there. The in-memory aggregation path
-> (driver-rest, driver-memory, timezone/date-bucket fallbacks) supports all six
-> functions plus `distinct`. For portable queries, stick to the first five.
+> ✅ **All six are portable.** `count_distinct` lowers to `COUNT(DISTINCT x)`
+> on `driver-sql` and turso's remote transport, and `driver-mongodb` /
+> `driver-memory` compute it too, so the declared-but-uncompiled set is empty.
+> The per-aggregation `distinct: true` flag went the other way — **removed in
+> 17**, refused at parse. For a deduplicated count, use `count_distinct`.
 
 > **Removed in 17.** `array_agg` and `string_agg` are no longer part of
 > the vocabulary — they were declared and lowered by no SQL backend, so a query
@@ -118,51 +117,38 @@ use `where` to shrink the scan, `having` to threshold the aggregates.
 
 ## Filtered Aggregation (FILTER WHERE)
 
-> ⚠️ **Per-aggregation `filter` is schema-reserved — NOT executed by the
-> engine yet.** The SQL driver never reads it and the in-memory path ignores
-> it, so the aggregation returns the **unfiltered** number — silently wrong
-> results. **Working alternative:** one aggregate call per condition, with
-> the condition in the query-level `where`:
+> ✅ **Enforced.** A per-aggregation `filter` scopes that one measure, so a
+> total and a conditional count share ONE call. Any aggregation carrying a
+> non-empty `filter` forces the in-memory path — no driver compiles a
+> conditional aggregate, and one reached directly refuses `NOT_IMPLEMENTED`;
+> unfiltered aggregations keep native push-down.
 
 ```typescript
-// ❌ filter on the aggregation is silently ignored — active_count
-//    would equal total!
-// { function: 'count', alias: 'active_count', filter: { status: 'active' } }
-
-// ✅ Separate aggregate calls, condition in `where`
-const [totals] = await engine.aggregate('user', {
-  aggregations: [{ function: 'count', alias: 'total' }],
+// ✅ Total and conditional count in one call
+const [row] = await engine.aggregate('user', {
+  aggregations: [
+    { function: 'count', alias: 'total' },
+    { function: 'count', alias: 'active_count', filter: { status: 'active' } },
+  ],
 });
-const [active] = await engine.aggregate('user', {
-  where: { status: 'active' },
-  aggregations: [{ function: 'count', alias: 'active_count' }],
-});
+// An unknown operator inside `filter` refuses INVALID_FILTER/400 — it never
+// silently answers the unfiltered number.
 ```
 
 ## DISTINCT Aggregation
 
-> ⚠️ **Not available on SQL datasources.** `count_distinct` **throws** on the
-> SQL driver, and the `distinct: true` flag is silently ignored there (see
-> the driver-support caveat above). Both forms work only on the in-memory
-> aggregation path. On SQL, get a distinct count by grouping on the field
-> and counting the result rows in app code:
-> `(await engine.aggregate('employee', { groupBy: ['department'], aggregations: [{ function: 'count', alias: 'n' }] })).length`.
+> ✅ **`count_distinct` runs everywhere** — `COUNT(DISTINCT field)` on the SQL
+> faces, the same answer in memory. `field` is REQUIRED; there is no
+> `COUNT(DISTINCT *)`. The per-aggregation `distinct: true` flag is NOT its
+> equivalent: **removed in 17**, refused at parse, because exactly one of the
+> six backends that read an aggregation ever honoured it.
 
 ```typescript
-// In-memory drivers only:
 // SQL: SELECT COUNT(DISTINCT department) FROM employee
 {
   object: 'employee',
   aggregations: [
     { function: 'count_distinct', field: 'department', alias: 'dept_count' }
-  ]
-}
-
-// Alternative (also in-memory only): use distinct flag
-{
-  object: 'employee',
-  aggregations: [
-    { function: 'count', field: 'department', alias: 'dept_count', distinct: true }
   ]
 }
 ```
