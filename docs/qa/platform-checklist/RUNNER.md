@@ -201,7 +201,7 @@ contradicts it, and correct it here when it does.
   proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
   the resolution but could not fix a boot that never exports the variable. **Check:**
   before scoring any connector clause, `GET /api/v1/automation/connectors` and read the
-  instance `baseUrl` — if it says `:3000` and your server does not listen there, the
+  instance `baseUrl` — if it says `` and your server does not listen there, the
   fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
   `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
@@ -209,7 +209,7 @@ contradicts it, and correct it here when it does.
 
 - **`ss` is not installed in these containers — read liveness with `curl`, never a socket
   table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
-  are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep :3000`
+  are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep`
   sends the error to stderr and prints nothing, so a **live** server is indistinguishable
   from a dead one — empty stdout, exit 1, no clue why. **Check instead:**
   `curl -s -o /dev/null -w '%{http_code}' http://localhost:PORT/api/v1/health` (substitute

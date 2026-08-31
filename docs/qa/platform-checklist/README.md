@@ -127,7 +127,7 @@ copy its shape rather than inventing a second one.
         "call": "POST /api/v1/packages",
         "body": { "…": "…" },            // optional; omit for a non-body step
         "expect": "what a correct response looks like — and the re-run/409 caveat",
-        "source": "framework file:line that grounds the call and its shape" }
+        "source": "framework file + symbol that grounds the call and its shape" }
     ],
     "teardown": "the one call (or the cheaper discard-the-DB path) that undoes it",
     "knownGaps": ["where the recipe is known to be sharp — e.g. an SDK helper that drops ?package="]
@@ -157,8 +157,14 @@ Why this shape:
   the only cleanup is the `teardown` line. That is what makes a recipe safe to replay on
   a live boot — and why `requires` must name the capability the recipe itself needs
   (e.g. a session holding `manage_metadata`) rather than assuming a bare admin session.
-- **Every call cites framework source at `file:line`.** Replay them literally; if one
-  4xxs, re-read the citation before assuming the recipe rotted.
+- **Every call cites framework source as `file` plus the symbol it lands in.** Replay
+  them literally; if one 4xxs, re-read the citation before assuming the recipe rotted.
+  ⛔ **Never pin a source LINE NUMBER** (`file.ts:NNN`, or a bare `:NNN` continuing an
+  earlier citation — both spellings are refused). A line number is the only part of a
+  citation that rots on an edit the citation has nothing to do with, and nothing can
+  tell a rotted one from a fresh one — so it keeps reading as "verified against source"
+  while pointing somewhere else. The file plus the symbol name is already the
+  load-bearing half. `check:platform-checklist` fails on any that reappear.
 - **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
   something — the same discipline as a coverage waiver. Landing the fixture in the
   showcase seeds proper retires the recipe; until then `why` says what is missing and

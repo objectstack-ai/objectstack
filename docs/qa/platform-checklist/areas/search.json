@@ -580,7 +580,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase app's navigation, which declares ALL FOUR palette-grouped leaf types (examples/app-showcase/src/ui/apps/index.ts): object items (:50-65, e.g. nav_projects/nav_tasks), page items (:30-40, e.g. nav_capability_map), dashboard items (:92-95, e.g. nav_ops → showcase_ops_dashboard), report items (:102-105, e.g. nav_report_summary) — plus nested groups, so the flattenNavigation leaf-only contract is exercisable",
+          "the showcase app's navigation, which declares ALL FOUR palette-grouped leaf types (examples/app-showcase/src/ui/apps/index.ts): object items (e.g. nav_projects/nav_tasks), page items (e.g. nav_capability_map), dashboard items (e.g. nav_ops → showcase_ops_dashboard), report items (e.g. nav_report_summary) — plus nested groups, so the flattenNavigation leaf-only contract is exercisable",
           "more than one registered active app (a stock boot registers showcase_app + setup + account — RUNNER.md environment facts), so the Switch-app group renders",
           "the objectui console app-shell (CommandPalette + CommandPaletteProvider)"
         ],
@@ -613,7 +613,7 @@
         {
           "clause": "the nav corpus renders grouped by TYPE from the active app's flattened navigation: object/dashboard/page/report leaves each under their own heading, nested nav groups flattened to leaves, no other app's items mixed in",
           "oracle": "dom",
-          "verify": "post-screenshot DOM shows the four headings with the showcase fixtures under the right ones (flattenNavigation + the per-type CommandGroup blocks, CommandPalette.tsx:255-328,391-402); a grouped leaf (e.g. a nested showcase nav child) is present as a flat entry",
+          "verify": "post-screenshot DOM shows the four headings with the showcase fixtures under the right ones (flattenNavigation + the per-type CommandGroup blocks, CommandPalette.tsx,391-402); a grouped leaf (e.g. a nested showcase nav child) is present as a flat entry",
           "evidence": "the grouped-palette screenshot + heading/entry DOM"
         },
         {
@@ -631,19 +631,19 @@
         {
           "clause": "the Switch-app group is honest: it renders only when more than one ACTIVE app exists, lists only apps with active !== false, and marks the current app — an inactive app never appears as a switch target",
           "oracle": "dom",
-          "verify": "the group lists exactly the stock active apps (showcase_app/setup/account shapes) with the 'current' marker on the active one (CommandPalette.tsx:331-355 filter a.active !== false)",
+          "verify": "the group lists exactly the stock active apps (showcase_app/setup/account shapes) with the 'current' marker on the active one (CommandPalette.tsx filter a.active !== false)",
           "evidence": "the switch-group screenshot + app list"
         },
         {
           "clause": "visibility-gated entries are ABSENT — both sides: a nav item whose visible/visibleOn predicate evaluates false for the current context appears in NO palette group, while a true-predicate sibling appears (the same evaluateVisibility filter the sidebar honours, so palette and sidebar cannot disagree about what exists)",
           "oracle": "dom",
-          "verify": "with the scratch fixture (knownGaps): the false-predicate item absent from every group, the true-predicate item present (CommandPalette.tsx:85-87 filter over flattenNavigation); on stock seeds score blocked(fixture)",
+          "verify": "with the scratch fixture (knownGaps): the false-predicate item absent from every group, the true-predicate item present (CommandPalette.tsx filter over flattenNavigation); on stock seeds score blocked(fixture)",
           "evidence": "the paired present/absent DOM reads"
         },
         {
           "clause": "'Open full search' hands off to the /search page: selecting it navigates to <baseUrl>/search with the palette closed — the boundary to search.console-global-search, which owns that page's behavior",
           "oracle": "screenshot",
-          "verify": "post-select the SearchResultsPage route is loaded (CommandPalette.tsx:374-385)",
+          "verify": "post-select the SearchResultsPage route is loaded (CommandPalette.tsx)",
           "evidence": "the handoff capture"
         }
       ],
@@ -656,9 +656,9 @@
       ],
       "traps": ["hydration-race", "stale-console-bundle", "automation-input"],
       "source": [
-        "objectui packages/app-shell/src/chrome/CommandPalette.tsx:2-8 (the palette's declared scope: 'quick navigation across apps, objects, dashboards, pages, reports, and global actions'), :84-98 (flattened nav corpus + evaluateVisibility filter + searchable-object whitelist), :255-328 (the four per-type CommandGroups, onSelect → navigate(resolveHref…)), :331-355 (Switch app, active !== false, current marker), :357-372 (theme commands via setTheme), :374-385 (Open full search → <baseUrl>/search), :391-402 (flattenNavigation leaves-only)",
+        "objectui packages/app-shell/src/chrome/CommandPalette.tsx (the palette's declared scope: 'quick navigation across apps, objects, dashboards, pages, reports, and global actions'), (flattened nav corpus + evaluateVisibility filter + searchable-object whitelist), (the four per-type CommandGroups, onSelect → navigate(resolveHref…)), (Switch app, active !== false, current marker), (theme commands via setTheme), (Open full search → <baseUrl>/search), (flattenNavigation leaves-only)",
         "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (the shared open path — covered by search.console-global-search clause 1, cross-referenced not re-proven)",
-        "examples/app-showcase/src/ui/apps/index.ts:30-40,50-65,92-95,102-105 (the fixture: page/object/dashboard/report nav declarations, nested groups)",
+        "examples/app-showcase/src/ui/apps/index.ts,50-65,92-95,102-105 (the fixture: page/object/dashboard/report nav declarations, nested groups)",
         "search.console-global-search (the sibling item owning the record-search half of the same palette: GET /api/v1/search hits, grouping #3371, recents, RLS parity, /search page — the boundary both items keep so neither double-covers)"
       ],
       "history": [

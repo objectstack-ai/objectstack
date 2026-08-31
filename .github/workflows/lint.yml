@@ -520,6 +520,27 @@ jobs:
       - name: Stack-collection enumerations answerable to stack.zod.ts
         run: pnpm check:stack-collection-maps
 
+      # The vendored HotCRM permissions artifact has NO non-test loader (#13419).
+      # `security-plugin.ts` folds a POSITION name into the permission-set
+      # request, so a permission set named after a position is granted with no
+      # `sys_position_permission_set` row behind it. The #13419 census reports
+      # exactly two such folds — `sales_rep` and `sales_manager` — and both take
+      # their permission-set half from a fixture that only one TEST reads. That
+      # makes them a collision between an example app's position names and a
+      # test fixture's set names rather than grants any deployment holds, which
+      # is why the ruling's 物化 worklist is empty in this repo. The empty
+      # worklist is the thing being pinned: wire that artifact into a real
+      # composition and this reddens, instead of two live authorization grants
+      # appearing with nothing said. Its `--self-test` supplies the loader cases
+      # a clean tree by construction does not contain — without them the
+      # production zero could equally be a scanner that stopped matching.
+      # Invoked as `node` rather than `pnpm check:*`: see the GATE INVOCATION
+      # IDIOM note at the top of this file. ~1s, no spawns.
+      - name: The #13419 name-fold fixture has no non-test loader
+        run: |
+          node scripts/check-position-name-fold-loaders.mjs --self-test
+          node scripts/check-position-name-fold-loaders.mjs
+
       # The dashboard widget `options` census vs the spec (#12926). The parser's
       # `CONSUMED_WIDGET_OPTION_KEYS` decides which `options` keys get a
       # `unconsumed-widget-option` warning, and five of its six members are the
