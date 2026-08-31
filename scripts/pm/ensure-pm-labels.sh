@@ -258,6 +258,20 @@ done
 # object: measured 2026-08-20, that object was grey with an EMPTY description,
 # so the claim this comment used to make had never been true — nothing had ever
 # checked it. `--reconcile` is what makes it true.
+#
+# ⚠️ WHAT THIS FILE DOES AND DOES NOT DO, because a card read it the other way
+# (#13922): everything here reconciles the label OBJECT — its colour and its
+# description. It says nothing about whether the label is HUNG correctly on any
+# pair, and it never did. Two other files answer that, and neither is this one:
+#   * `scripts/pm/check-half-states.mjs` H31 — the two carriers of one gate
+#     compared across the whole board, on the half-state patrol's schedule.
+#   * `scripts/pm/check-clause2-carriers.mjs` — the same comparison anchored on
+#     ONE pair (`--pair <pr>`, a pre-arm predicate), plus the two readings H31
+#     cannot make: the DECLARATION limb quoted three paragraphs up has no other
+#     reader in this repo, and a gate missing from BOTH carriers is a carrier
+#     comparison's silent case.
+# ⛔ None of the three writes the label. Hanging or clearing a review gate from
+# a script would be issuing the review verdict, which is 自查放行.
 gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it" 2>/dev/null || true
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
