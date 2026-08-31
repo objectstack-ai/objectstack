@@ -70,7 +70,7 @@
  * #5146 made `$not` NULL-safe and #5298 did the same for the non-negated
  * `$ne` / `$nin` / `$notContains`, so "the column has no value" now has ONE
  * cross-backend answer and belongs to the standard like any other. The
- * {@link FilterLogicRow.d} column carries it, and the four `d`-column cases
+ * {@link FilterLogicRow.d} column carries it, and the six `d`-column cases
  * below enforce it on every backend.
  *
  * ⚠️ That answer — the INCLUDE direction — was reversed by a ruling on
@@ -155,17 +155,19 @@
  * - **`$ne` / `$nin` / `$notContains` on a no-value row MATCH** — the include
  *   direction, ruled by #5146 for `$not`, extended to the operator family by
  *   #5298, shipped across all eleven surfaces below via `nullSafeNegative` and
- *   `nullValueSatisfiesOperator`, and enrolled in {@link FILTER_LOGIC_CASES}.
- *   Not merely unchallenged — challenged, measured, and re-affirmed with the
- *   reversal option on the table.
+ *   `nullValueSatisfiesOperator`, and enrolled in {@link FILTER_LOGIC_CASES}:
+ *   `$ne` / `$not` since #5903, `$nin` / `$notContains` since #13540 — the
+ *   last surface holding those two back was the reference matcher itself,
+ *   realigned by PR #13356 (#13166). Not merely unchallenged — challenged,
+ *   measured, and re-affirmed with the reversal option on the table.
  * - **`$exists` means "has a value"** (`!= null`), never key-presence — cell 2,
  *   the leg of the 07:33Z ruling that was never in conflict with #5298 and had
  *   already shipped in PR #5962. It stands.
  *
- * So the two enrolled rows `$ne returns the rows with no value` and `$not
- * returns the rows with no value` state the affirmed answer, and the `['2']`
- * that native three-valued SQL would give for `d <> 'v1'` is the answer this
- * platform deliberately does NOT take.
+ * So the four enrolled negation rows — `$ne` / `$not` / `$nin` /
+ * `$notContains` `… returns the rows with no value` — state the affirmed
+ * answer, and the `['2']` that native three-valued SQL would give for
+ * `d <> 'v1'` is the answer this platform deliberately does NOT take.
  *
  * ### Why the reversal was declined — the measurement
  *
@@ -176,7 +178,7 @@
  * | Surface | `$notContains` | `$nin` | `$exists: true` on a null value |
  * |---|---|---|---|
  * | `formula` `matchesFilterCondition` | MATCH | MATCH | no — already ruled-correct (#5962) |
- * | `driver-memory` reference matcher | no — DIVERGENT, frozen (#5499) | MATCH on a null value, no on a missing key | no — ruled-correct (#5962) |
+ * | `driver-memory` reference matcher | MATCH — realigned by PR #13356 | MATCH on both readings — realigned by PR #13356 | no — ruled-correct (#5962) |
  * | `driver-memory` live mingo path | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
  * | `driver-memory` analytics face | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
  * | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local | MATCH | MATCH | no — `IS NOT NULL` |
@@ -407,9 +409,10 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
   // Rows 3 and 4 have no `d`. The `$null` partition at the bottom of this
   // section is what makes that true of every harness: a fixture that quietly
   // stored `''` instead of NULL, or a `NOT NULL` column that rejected the seed,
-  // fails THERE rather than by turning one of the two cases here green for the
-  // wrong reason. Read the four together — a no-value row is either inside the
-  // negation or outside it, and the partition says which rows are which.
+  // fails THERE rather than by turning one of the negation cases here green
+  // for the wrong reason. Read the six together — a no-value row is either
+  // inside the negation or outside it, and the partition says which rows are
+  // which.
   //
   // The family completed here in #5903, the PR that made `driver-turso` REMOTE
   // answer them: it was the last backend of eleven still returning `['2']`, and
@@ -436,6 +439,39 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     filter: { $not: { d: 'v1' } },
     expected: ['2', '3', '4'],
     note: '#5146: the same ruling reached through the combinator. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
+  },
+
+  // [#13540] The negated OPERATOR forms of the same ruling, enrollable since
+  // PR #13356 realigned the reference matcher — the last of the eleven
+  // surfaces still answering either of them the pre-ruling way (#13166
+  // measured the divergence; the freeze that once excused it dissolved on
+  // 2026-08-11).
+  //
+  // Reading scope, stated so the next author knows what these rows do and do
+  // not measure: every harness seeds rows 3-4 with a stored NULL (`d: null`),
+  // so these cases hold all backends to the stored-null reading of "no
+  // value". The key-ABSENT reading — the shape a partial write leaves, and
+  // the reading `$nin` actually diverged on — is only distinguishable on the
+  // document faces and has no spelling in this shared fixture; it is pinned
+  // per face, three operators x both readings, in driver-memory's
+  // `memory-matcher-no-value-negated-operators.test.ts` (#13166).
+  //
+  // ⛔ Deliberately NOT enrolled beside them: the `[null]`-comparand axis
+  // (`$in: [null]` / `$nin: [null]`). PR #13356 disclosed that the reference
+  // matcher's answer for `$nin: [null]` on a missing key moved with the fix,
+  // but that cell has never been ruled cross-surface — it is #13357's axis,
+  // and a conformance row is a ruling ratchet, not a way to mint one.
+  {
+    name: '$nin returns the rows with no value',
+    filter: { d: { $nin: ['v1'] } },
+    expected: ['2', '3', '4'],
+    note: '#5298 option A: the list form of `$ne` — "not one of [v1]" is true of a row whose d is absent. A three-valued `NOT IN` drops rows 3-4; the reference matcher answered this way on a stored null but not on a missing key until PR #13356.',
+  },
+  {
+    name: '$notContains returns the rows with no value',
+    filter: { d: { $notContains: 'v1' } },
+    expected: ['2', '3', '4'],
+    note: '#5298 option A: a row with no value satisfies the negated substring test. The reference matcher failed BOTH readings of this one on the type test (`null` is not a string) until PR #13356; the SQL faces reach it through `nullSafeNegative`.',
   },
   {
     name: '$null true selects exactly the no-value rows',
