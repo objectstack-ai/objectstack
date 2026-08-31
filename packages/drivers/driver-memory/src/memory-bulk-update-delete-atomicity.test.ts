@@ -330,7 +330,7 @@ describe('[#13435] non-regression — updateMany and bulkCreate still behave as 
 });
 
 /**
- * [#13875] The batch's two id lookups must AGREE.
+ * [#13911] The batch's two id lookups must AGREE.
  *
  * `IDataDriver.bulkUpdate` declares `id: string | number`, so a caller may
  * legitimately name a row with an id whose JS type differs from the stored
@@ -352,7 +352,7 @@ describe('[#13435] non-regression — updateMany and bulkCreate still behave as 
  * ⛔ The discriminating fact is that a legitimate batch SUCCEEDS. A test that
  * only asserted "a collision still refuses" would pass against the defect.
  */
-describe('[#13875] caller id TYPE never changes the outcome of a batch', () => {
+describe('[#13911] caller id TYPE never changes the outcome of a batch', () => {
   let driver: InMemoryDriver;
 
   /** Numeric stored ids — the caller may still name them as strings. */
