@@ -318,6 +318,28 @@
  * probe, because a flag that let the rows read `✓ audited` without it would
  * reintroduce precisely the false green this leg exists to remove.
  *
+ * ### The #13307 reopen: the probe was never gated — the RUNS were stale
+ *
+ * The reopen asked, in words: is the reachability probe gated on
+ * `--repo-root`? The answer is NO, and it never was: the probe runs in
+ * `main()`'s sweep loop for every repo whose checkout resolved, discovered
+ * conventionally or overridden, in every window mode. What actually happened
+ * (measured, 2026-08-31): the two audit runs that printed the false green
+ * AFTER the fix landed quoted a row ending `— none in window; if that tip
+ * predates your last fetch, run \`git fetch origin main\` there` — and that
+ * text exists ONLY in the pre-fix render (the fix replaced it with the
+ * MEASURED-zero / unmeasured-zero split). Those runs executed a PRE-FIX COPY
+ * of this script from a stale tree; in a container whose shared checkout has
+ * its HEAD switched by other agents, `node scripts/pm/check-governed-merges.mjs`
+ * runs whatever version that tree happens to hold, and nothing in the output
+ * said which. So the header now prints `sweep code:` — the executing tree's
+ * HEAD and this file's own blob id, with a loud mismatch line when the
+ * running bytes are not the copy that HEAD records — making a stale-script
+ * run attributable instead of indistinguishable from the landed behaviour.
+ * ⛔ It cannot PREVENT a stale run (a stale tree prints a stale sha,
+ * truthfully); it makes the reading checkable, which is what the reopen's
+ * false conclusion lacked.
+ *
  * Queue-batch TOPOLOGY (#11996) is a separate question from the window below,
  * and it is answered: measured NON-BLIND 2026-08-27 (six batch topologies plus
  * a live batch replay) — re-measure if the repo's merge method changes, or if
@@ -1779,6 +1801,54 @@ export function summariseAttributionFailures(entries) {
   );
 }
 
+// ── sweep-code provenance (#13307 reopen) ───────────────────────────────────
+
+/**
+ * Which sweep ran? The reopen's false green was a PRE-FIX copy of this script
+ * executing from a stale tree, and nothing in the output said so — the reading
+ * was taken as the landed version's behaviour. Pure: `describeSweepCode` turns
+ * the reads into the line the header prints, so `--self-test` pins every
+ * branch; `readSweepCode` does the three local git reads (no network), and
+ * every failure is a stated UNKNOWN, never a crash and never a silent omission
+ * — a sweep that cannot attribute its own code says that out loud too.
+ */
+export function describeSweepCode(code) {
+  if (!code || !code.head || !code.blob) {
+    return (
+      `  sweep code: UNKNOWN (${code?.error ?? 'no reading'}) — this run cannot be attributed to a tree; ` +
+      `a version-dependent conclusion drawn from it is unattributed (#13307).`
+    );
+  }
+  if (code.headBlob && code.headBlob === code.blob) {
+    return `  sweep code: HEAD ${code.head} — the running file byte-matches that tree's copy (blob ${code.blob.slice(0, 10)}).`;
+  }
+  return (
+    `  ⚠️  sweep code: HEAD ${code.head}, but the RUNNING copy of this script (blob ${code.blob.slice(0, 10)}) is not ` +
+    `the copy that HEAD records (${code.headBlob ? `blob ${code.headBlob.slice(0, 10)}` : 'unreadable'}) — a locally ` +
+    `modified or stale copy. ⛔ Do not read this sweep as any landed version's behaviour (#13307: a pre-fix copy ` +
+    `printed a false green that was then attributed to the landed fix).`
+  );
+}
+
+/** The three local reads behind the line above — each failure is carried, not thrown. */
+function readSweepCode() {
+  const root = resolve(scriptDir, '..', '..');
+  const rel = 'scripts/pm/check-governed-merges.mjs';
+  const code = { head: null, blob: null, headBlob: null, error: null };
+  try {
+    code.blob = git(root, ['hash-object', '--', scriptPath]).trim() || null;
+  } catch (error) {
+    code.error = String(error?.message ?? error).split('\n')[0];
+  }
+  try {
+    code.head = git(root, ['rev-parse', '--short', 'HEAD']).trim() || null;
+    code.headBlob = git(root, ['rev-parse', `HEAD:${rel}`]).trim() || null;
+  } catch (error) {
+    code.error = code.error ?? String(error?.message ?? error).split('\n')[0];
+  }
+  return code;
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 
 /**
@@ -1884,7 +1954,7 @@ export function nextRoundRefLine(repos) {
 }
 
 /** The whole report as text — pure, so --self-test asserts on the words. */
-export function renderReport({ window, repos, scanned, entries, lookups }) {
+export function renderReport({ window, repos, scanned, entries, lookups, sweepCode = null }) {
   const audited = repos.filter((r) => r.status === 'audited');
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = audited.filter((r) => r.windowIncomplete);
@@ -1892,6 +1962,7 @@ export function renderReport({ window, repos, scanned, entries, lookups }) {
     `governed-merges sweep: ${entries.length} governed merge(s) since ${window.requestedIso} ` +
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
+    (sweepCode ? `${describeSweepCode(sweepCode)}\n` : '') +
     describeWindow(window);
   const auditedLines = audited.map(
     (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.windowMode ? `; window ${r.windowMode}${r.windowBase ? ` from ${r.windowBase.sha.slice(0, 9)}` : ''}${r.windowFellBack ? ` (fell back — ${r.windowFellBack})` : ''}${r.straddlers ? `, ${r.straddlers} boundary re-listing(s)` : ''}` : ''}${r.horizon ? `; history ${r.horizon}` : ''}${r.remote ? `; remote ${describeRemote(r.remote)}` : ''}${r.quiet ? (r.remote ? ' — none in window, and the remote tip was reached and matches this mirror: a MEASURED zero, not an unread one' : ' — none in window; ⚠️ no remote reading is recorded for this row, so the zero is not a measured one') : ''}`,
@@ -2155,12 +2226,14 @@ async function main() {
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = repos.filter((r) => r.status === 'audited' && r.windowIncomplete);
   const complete = !attributionFailed && unaudited.length === 0 && edged.length === 0;
+  const sweepCode = readSweepCode();
 
   if (args.includes('--json')) {
     console.log(
       JSON.stringify(
         {
           since: window.requestedIso,
+          sweepCode,
           window: {
             mode: window.mode,
             requested: window.requestedIso,
@@ -2194,7 +2267,7 @@ async function main() {
       ),
     );
   } else {
-    console.log(renderReport({ window, repos, scanned, entries, lookups }));
+    console.log(renderReport({ window, repos, scanned, entries, lookups, sweepCode }));
   }
 
   if (!complete) {
@@ -2695,6 +2768,7 @@ async function selfTest() {
     assert('and-the-same-sweep-over-a-LIVE-mirror-still-audits-and-still-says-a-true-zero',
       liveSweep.status === 0 && auditedRow.test(liveOut) && liveOut.includes('✅'),
       `status=${liveSweep.status} out=${liveOut.slice(0, 500)}`);
+    assert('every-real-sweep-prints-which-sweep-code-ran', liveOut.includes('sweep code:'), liveOut.slice(0, 400));
 
     // ── #13423, end to end: a raw clone-from-a-path keeps its local-path
     // origin — exactly the spelling the card names — and the SWEEP must
@@ -2743,6 +2817,35 @@ async function selfTest() {
   } finally {
     rmSync(fxRoot, { recursive: true, force: true });
   }
+
+  // ── sweep-code provenance (#13307 reopen) ─────────────────────────────────
+  //
+  // The reopen's false green was a pre-fix copy of this script running from a
+  // stale tree, read as the landed version's behaviour. Every branch of the
+  // line that now makes such a run attributable is pinned, and the structural
+  // reads are asserted against THIS repo — direction-agnostically, because a
+  // dev iterating on this very file legitimately runs it with uncommitted
+  // edits, and that state must render as the loud mismatch, not as a red pin.
+  const blobA = 'a'.repeat(40);
+  const blobB = 'b'.repeat(40);
+  const matchLine = describeSweepCode({ head: 'abc1234', blob: blobA, headBlob: blobA, error: null });
+  assert('a-matching-sweep-code-line-names-the-head-and-the-blob',
+    matchLine.includes('sweep code: HEAD abc1234') && matchLine.includes('byte-matches') && matchLine.includes(blobA.slice(0, 10)), matchLine);
+  const staleLine = describeSweepCode({ head: 'abc1234', blob: blobA, headBlob: blobB, error: null });
+  assert('a-stale-or-modified-copy-is-a-LOUD-mismatch-naming-both-blobs',
+    staleLine.includes('⚠️') && staleLine.includes('not') && staleLine.includes(blobA.slice(0, 10)) && staleLine.includes(blobB.slice(0, 10)) &&
+      staleLine.includes('Do not read this sweep as any landed version'), staleLine);
+  const unknownLine = describeSweepCode({ head: null, blob: null, headBlob: null, error: 'not a git repository' });
+  assert('an-unattributable-run-says-UNKNOWN-with-the-reason-never-crashes-or-omits',
+    unknownLine.includes('UNKNOWN') && unknownLine.includes('not a git repository') && unknownLine.includes('unattributed'), unknownLine);
+  assert('a-null-reading-is-the-UNKNOWN-branch-too', describeSweepCode(null).includes('UNKNOWN'));
+  const withCode = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 })),
+    scanned: 12, entries: [], lookups: 0,
+    sweepCode: { head: 'abc1234', blob: blobA, headBlob: blobA, error: null },
+  });
+  assert('the-report-head-carries-the-sweep-code-line-when-a-reading-is-supplied', withCode.includes('sweep code: HEAD abc1234'), withCode);
 
   // ── the report words an operator reads ────────────────────────────────────
   const allAudited = resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 }));
