@@ -22,7 +22,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "mongodb": "^7.5.0",
+    "mongodb": "^7.6.0",
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
