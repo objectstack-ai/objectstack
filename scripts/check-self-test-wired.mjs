@@ -107,6 +107,12 @@ import { maskComments } from './js-comment-mask.mjs';
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const WORKFLOW_DIR = '.github/workflows';
 
+// The token every gate in this farm writes when it names a path belonging to a
+// maintainer rather than to the landing author (#8435). Declared per gate by
+// convention, and read out of AUTHOR-FACING strings — a comment mentioning it
+// tells an author nothing, so it has to live in the message itself.
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
 /** Extensions whose files can be a `scripts/` entry point. */
 const SCRIPT_EXT = /\.(mjs|mts|js|sh)$/;
 
@@ -263,10 +269,13 @@ export function auditPopulation({ carriers, named, selfTested, ledger }) {
         '    `--self-test`, but no workflow ever executes it with that flag. An unrun\n' +
         '    self-test is a phantom check, and for a gate whose defect class is its\n' +
         '    matching rule it is also the ONLY instrument the rule has (#11150).\n' +
-        `    Wire \`node ${script} --self-test\` into the step that runs it. If the\n` +
-        '    self-test is already run some other way — the script drives another tool\'s,\n' +
-        '    or its ordinary run executes its own cases — add a SELF_TEST_RUN_OTHERWISE\n' +
-        '    row in scripts/check-self-test-wired.mjs naming the evidence for that.',
+        `    Wire \`node ${script} --self-test\` into the step that runs it. That is the\n` +
+        '    whole remedy, and it is the landing author\'s.\n' +
+        '    ⛔ Do not add a SELF_TEST_RUN_OTHERWISE row to clear this. That ledger is\n' +
+        '    shrink-only; adding an entry is not the fix, it is this finding written down\n' +
+        '    somewhere quieter. A row records that a self-test genuinely IS run another\n' +
+        '    way — a wrapper drives it, or the ordinary run executes its own cases — and\n' +
+        `    judging that evidence is ${RATCHET_AUTHORITY_MARKER}, never a way out of wiring.`,
     });
   }
   return findings;
@@ -706,8 +715,9 @@ function selfTest() {
         '\nA battery at or below its floor means cases STOPPED RUNNING — the battery is the bug,\n' +
           'not the number. Find what stopped registering (an early return, a deleted block, a guard\n' +
           'that now skips) and restore it. Raising a floor after ADDING cases is ordinary work;\n' +
-          'LOWERING one is not a co-equal option — "the count legitimately moved" and "something\n' +
-          'stopped running" need different edits, and only a measurement tells them apart.\n',
+          `LOWERING one is ${RATCHET_AUTHORITY_MARKER}, not a co-equal option — "the count\n` +
+          'legitimately moved" and "something stopped running" need different edits, and only a\n' +
+          'measurement tells them apart.\n',
       );
     }
     process.exit(1);
