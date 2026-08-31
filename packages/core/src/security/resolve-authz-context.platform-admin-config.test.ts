@@ -39,6 +39,17 @@ import {
 } from './resolve-authz-context.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
+/**
+ * [#13667] The two variables `resolveTenancyPosture()` reads, in its order:
+ * `OS_TENANCY_POSTURE` when set, else `OS_MULTI_ORG_ENABLED` (`true` ⇒
+ * `isolated`), else `single`. BOTH are driven by this file's harness, never
+ * just the canonical one — an arm that pinned only the first would inherit
+ * whatever the ambient environment happened to carry for the second, and the
+ * default-posture arm below exists precisely to assert what an environment
+ * carrying NEITHER resolves to.
+ */
+const POSTURE_ENV = 'OS_TENANCY_POSTURE';
+const MULTI_ORG_ENV = 'OS_MULTI_ORG_ENABLED';
 const NOW = Date.parse('2026-08-29T00:00:00.000Z');
 
 interface Recorded { object: string; where: unknown }
@@ -102,11 +113,17 @@ function makeSink(): PlatformAdminConfigSink & { errors: string[]; warns: string
 }
 
 let ambient: string | undefined;
+let ambientPosture: string | undefined;
+let ambientMultiOrg: string | undefined;
 let sink: ReturnType<typeof makeSink>;
 
 beforeEach(() => {
   ambient = process.env[ENV];
+  ambientPosture = process.env[POSTURE_ENV];
+  ambientMultiOrg = process.env[MULTI_ORG_ENV];
   delete process.env[ENV];
+  delete process.env[POSTURE_ENV];
+  delete process.env[MULTI_ORG_ENV];
   resetPlatformAdminEmailMemo();
   resetLegacyPlatformAdminGrantReport();
   sink = makeSink();
@@ -116,6 +133,10 @@ beforeEach(() => {
 afterEach(() => {
   if (ambient === undefined) delete process.env[ENV];
   else process.env[ENV] = ambient;
+  if (ambientPosture === undefined) delete process.env[POSTURE_ENV];
+  else process.env[POSTURE_ENV] = ambientPosture;
+  if (ambientMultiOrg === undefined) delete process.env[MULTI_ORG_ENV];
+  else process.env[MULTI_ORG_ENV] = ambientMultiOrg;
   resetPlatformAdminEmailMemo();
   resetLegacyPlatformAdminGrantReport();
   setPlatformAdminConfigSink(undefined);
@@ -126,6 +147,19 @@ function declare(value: string | undefined): void {
   if (value === undefined) delete process.env[ENV];
   else process.env[ENV] = value;
   resetPlatformAdminEmailMemo();
+}
+
+/**
+ * [#13667] Declare the deployment's REQUESTED tenancy posture for one arm.
+ * `undefined` clears BOTH inputs, which is how a rig that has configured no
+ * tenancy at all is spelled — and that rig resolves `single`, the default.
+ * There is no memo to drop: `resolveTenancyPosture()` re-reads the environment
+ * on every call.
+ */
+function requestPosture(value: 'single' | 'group' | 'isolated' | undefined): void {
+  delete process.env[MULTI_ORG_ENV];
+  if (value === undefined) delete process.env[POSTURE_ENV];
+  else process.env[POSTURE_ENV] = value;
 }
 
 describe('[#11663 L2] acceptance criterion — the configured, VERIFIED account', () => {
@@ -279,19 +313,26 @@ describe('⭐ [#11663 L2 pin P1] the derivation reads the STORED row, never the 
   });
 });
 
-describe('[#11663 L2 / P5] the legacy grant row is still honoured, loudly', () => {
-  const legacyTables = () => ({
-    sys_user: [{ id: 'usr_1', email: 'legacy@corp.example', email_verified: true }],
-    sys_member: [],
-    sys_user_position: [],
-    sys_position: [],
-    sys_position_permission_set: [],
-    sys_user_permission_set: [
-      { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'pst_1', organization_id: null },
-    ],
-    sys_permission_set: [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }],
-  });
+/**
+ * A principal whose PLATFORM_ADMIN rests on the LEGACY unscoped
+ * `admin_full_access` grant row and nothing else — the shape
+ * `bootstrapPlatformAdmin` mints when it promotes the first human user.
+ * Hoisted out of the `#11663 L2 / P5` suite so the `#13667` posture suite below
+ * drives the identical fixture rather than a second copy of it.
+ */
+const legacyTables = () => ({
+  sys_user: [{ id: 'usr_1', email: 'legacy@corp.example', email_verified: true }],
+  sys_member: [],
+  sys_user_position: [],
+  sys_position: [],
+  sys_position_permission_set: [],
+  sys_user_permission_set: [
+    { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'pst_1', organization_id: null },
+  ],
+  sys_permission_set: [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }],
+});
 
+describe('[#11663 L2 / P5] the legacy grant row is still honoured, loudly', () => {
   it('an unscoped admin_full_access grant still confers PLATFORM_ADMIN with no config at all', async () => {
     declare(undefined);
     const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
@@ -302,6 +343,10 @@ describe('[#11663 L2 / P5] the legacy grant row is still honoured, loudly', () =
 
   it('logs the deprecation pointer once, naming the holder and the config line', async () => {
     declare(undefined);
+    // [#13667] A WALLED posture — the rigs that really are inside the migration
+    // window. On the default `single` posture the same fixture is silent; that
+    // is the suite below.
+    requestPosture('isolated');
     const ql = makeQl(legacyTables());
     await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
     await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
@@ -341,5 +386,207 @@ describe('[#11663 L2] the sys_user read stays CONDITIONAL on config', () => {
     // email fallback and the ai_seat synthesis do.
     expect(ql.calls.filter((c) => c.object === 'sys_user')).toHaveLength(1);
     expect(grants.posture).toBe('PLATFORM_ADMIN');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * [#13667] The deprecation pointer is POSTURE-KEYED — the request side matching
+ * the boot side.
+ *
+ * `bootstrapPlatformAdmin` has always been posture-keyed: under `single` a
+ * pre-existing unscoped `admin_full_access` holder is `already_have_admin` and
+ * the boot exits silently, because under Choice 4A that row IS that rig's
+ * anchor — first-user promotion mints it and is ruled correct and unchanged.
+ * Only under a walled posture is the same row the LEGACY anchor. The
+ * request-side pointer carried no such gate, so the default posture — `single`,
+ * what an unconfigured deployment resolves to — was told once per process to
+ * migrate off an anchor that is not scheduled to go away, toward a variable its
+ * own promotion is pinned never to read.
+ *
+ * ⚠️ BOTH directions are pinned here, deliberately. Gating the notice is only
+ * correct if the walled rigs keep hearing it: the migration window's loudness
+ * is the thing #11663 P5 exists to provide, and a one-sided pin would let a
+ * later edit switch it off for everyone and stay green.
+ *
+ * ⛔ And every arm below asserts STANDING as well as the log. This card changes
+ * a log trigger, not access control; a `single` rig keeps exactly the
+ * PLATFORM_ADMIN it had, it merely stops being nagged about it.
+ */
+describe('[#13667] the legacy-grant pointer fires only on the rigs in the migration window', () => {
+  it('WALLED rigs still hear it — both walled postures, once per process, holder and config line named', async () => {
+    for (const walled of ['group', 'isolated'] as const) {
+      declare(undefined);
+      requestPosture(walled);
+      resetLegacyPlatformAdminGrantReport();
+      sink.warns.length = 0;
+
+      const ql = makeQl(legacyTables());
+      const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+      await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+
+      expect(grants.posture, walled).toBe('PLATFORM_ADMIN');
+      expect(sink.warns, walled).toHaveLength(1);
+      expect(sink.warns[0], walled).toContain('usr_1');
+      expect(sink.warns[0], walled).toContain(`${ENV}=legacy@corp.example`);
+    }
+  });
+
+  it('a `single` rig is SILENT — and keeps the identical PLATFORM_ADMIN standing', async () => {
+    declare(undefined);
+    requestPosture('single');
+    const ql = makeQl(legacyTables());
+    const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+
+    // The half this card repairs: no notice…
+    expect(sink.warns).toEqual([]);
+    // …and the half it must not disturb: the row still confers, exactly as before.
+    expect(grants.posture).toBe('PLATFORM_ADMIN');
+    expect(grants.positions[0]).toBe('platform_admin');
+    expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
+  });
+
+  it('the DEFAULT posture is silent too — an unconfigured deployment resolves `single`', async () => {
+    // The reach of the defect: `OS_TENANCY_POSTURE` and `OS_MULTI_ORG_ENABLED`
+    // both unset is what a deployment that has configured no tenancy at all
+    // looks like, and `resolveTenancyPosture()` answers `single` for it. This
+    // arm is the one that covers most rigs in the field.
+    declare(undefined);
+    requestPosture(undefined);
+    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+
+    expect(sink.warns).toEqual([]);
+    expect(grants.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('the legacy-anchor detection itself is untouched: `single` + a CONFIG anchor is silent for the other reason', async () => {
+    // The control that keeps the arm above honest. Silence under `single` must
+    // come from the posture gate, not from the fixture having quietly stopped
+    // resolving through the legacy row. Here the SAME user also matches the
+    // declared list, so standing no longer rests on the row and #11663 P5's own
+    // `else if` never runs — silence with a different cause, under both postures.
+    for (const p of ['single', 'isolated'] as const) {
+      declare('legacy@corp.example');
+      requestPosture(p);
+      resetLegacyPlatformAdminGrantReport();
+      sink.warns.length = 0;
+
+      const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+      expect(sink.warns, p).toEqual([]);
+      expect(grants.posture, p).toBe('PLATFORM_ADMIN');
+    }
+  });
+
+  it('adds NO read: the recorded query multiset is identical under both answers of the gate', async () => {
+    // The in-place claim at the call site — "the row is read only if it was
+    // already loaded, so this notice never adds a query (and so never moves the
+    // pinned query multiset)" — re-MEASURED rather than quoted, because this
+    // card is what put a new call into that branch. `resolveTenancyPosture()`
+    // asks the ENVIRONMENT, so the reads issued against the engine must be
+    // identical whichever way it answers.
+    const reads: Record<string, unknown[]> = {};
+    for (const p of ['single', 'isolated'] as const) {
+      declare(undefined);
+      requestPosture(p);
+      resetLegacyPlatformAdminGrantReport();
+      const ql = makeQl(legacyTables());
+      await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+      reads[p] = ql.calls.map((c) => ({ object: c.object, where: c.where }));
+    }
+    expect(reads.single).toEqual(reads.isolated);
+    expect(reads.single.length).toBeGreaterThan(0); // the fixture really did resolve
+  });
+
+  it('…and the notice still costs no sys_user read of its own — it fires with the row never loaded', async () => {
+    // The other half of the same claim, isolated. Above, `sys_user` IS read —
+    // for `grants.email` and the `ai_seat` synthesis, neither of which is this
+    // branch. Seed both of those and NOTHING in the resolution needs the row;
+    // the notice must still fire under a walled posture, reading `userRow` as
+    // the undefined it already was and falling back to the generic address
+    // placeholder. That is what "read only if it was already loaded" means, and
+    // it is unchanged by the gate.
+    const seeded = { nowMs: NOW, seedEmail: 'seeded@corp.example', seedPermissions: ['ai_seat'] };
+    for (const p of ['single', 'isolated'] as const) {
+      declare(undefined);
+      requestPosture(p);
+      resetLegacyPlatformAdminGrantReport();
+      sink.warns.length = 0;
+
+      const ql = makeQl(legacyTables());
+      const grants = await resolveUserAuthzGrants(ql, 'usr_1', seeded);
+
+      expect(ql.calls.filter((c) => c.object === 'sys_user'), p).toHaveLength(0);
+      expect(grants.posture, p).toBe('PLATFORM_ADMIN');
+      expect(sink.warns, p).toHaveLength(p === 'single' ? 0 : 1);
+    }
+    // The walled arm named the holder, and quoted the placeholder rather than an
+    // address it would have had to issue a read to learn.
+    expect(sink.warns[0]).toContain('usr_1');
+    expect(sink.warns[0]).toContain(`${ENV}=<the administrator's verified email address>`);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * [#13667] STANDING is invariant under the posture — all four arms of the
+ * `if (configConfersPlatformAdmin) / else if (hasPlatformAdminGrant)`
+ * derivation.
+ *
+ * The gate this card adds is nested INSIDE the `else if` body, so no arm of
+ * that chain changes shape. This suite is the measurement of that claim rather
+ * than an assertion about it: each of the four (config, grant) truth-table
+ * corners is resolved once under `single` and once under `isolated`, and the
+ * two envelopes must be deep-equal — same positions in the same order, same
+ * permissions, same rung.
+ *
+ * ⛔ If a future edit moves the posture test up into the `else if` condition, or
+ * anywhere else it could suppress a branch, one of these four corners changes
+ * and this suite goes red.
+ */
+describe('[#13667] standing is byte-identical across postures in all four derivation arms', () => {
+  const verified = { id: 'usr_1', email: 'a@b.c', email_verified: true };
+
+  const ARMS: Array<{ arm: string; env: string | undefined; tables: () => Record<string, Array<Record<string, unknown>>> }> = [
+    // config=T, grant=T — the config anchor wins and the `else if` is skipped.
+    { arm: 'config + legacy grant', env: 'legacy@corp.example', tables: legacyTables },
+    // config=T, grant=F — config-only standing.
+    { arm: 'config only', env: 'a@b.c', tables: () => configOnlyTables(verified) },
+    // config=F, grant=T — the arm this card gates the NOTICE inside.
+    { arm: 'legacy grant only', env: undefined, tables: legacyTables },
+    // config=F, grant=F — no standing at all.
+    { arm: 'neither', env: undefined, tables: () => configOnlyTables(verified) },
+  ];
+
+  for (const { arm, env, tables } of ARMS) {
+    it(`resolves the SAME envelope under \`single\` and under \`isolated\` — ${arm}`, async () => {
+      const envelopes: Record<string, unknown> = {};
+      for (const p of ['single', 'isolated'] as const) {
+        declare(env);
+        requestPosture(p);
+        resetLegacyPlatformAdminGrantReport();
+        envelopes[p] = await resolveUserAuthzGrants(makeQl(tables()), 'usr_1', { nowMs: NOW });
+      }
+      expect(envelopes.single).toEqual(envelopes.isolated);
+    });
+  }
+
+  it('and the four arms are genuinely DISTINCT — the matrix above is not four copies of one answer', async () => {
+    // Without this control the suite above would pass just as well on four
+    // fixtures that all resolved to the same thing, proving nothing about the
+    // arms it claims to cover.
+    const seen: string[] = [];
+    for (const { env, tables } of ARMS) {
+      declare(env);
+      requestPosture('single');
+      resetLegacyPlatformAdminGrantReport();
+      const g = await resolveUserAuthzGrants(makeQl(tables()), 'usr_1', { nowMs: NOW });
+      seen.push(`${g.posture}|${[...g.permissions].sort().join(',')}`);
+    }
+    // Arms 1-3 all confer PLATFORM_ADMIN (by design — that is what makes the
+    // notice, not the standing, the only thing this card moves); arm 4 does not.
+    expect(seen[0]).toContain('PLATFORM_ADMIN');
+    expect(seen[1]).toContain('PLATFORM_ADMIN');
+    expect(seen[2]).toContain('PLATFORM_ADMIN');
+    expect(seen[3]).toBe('MEMBER|');
   });
 });
