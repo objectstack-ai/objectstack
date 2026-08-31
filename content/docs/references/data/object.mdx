@@ -302,7 +302,7 @@ const result = ApiMethod.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group. |
+| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group, and by a layout section's `group`. |
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
 | **description** | `string` | optional | Optional description shown under the group header |
@@ -654,7 +654,7 @@ External datasource binding (ADR-0015)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group. |
+| **key** | `string` | ✅ | Group machine key (snake_case). Referenced by Field.group, and by a layout section's `group`. |
 | **label** | `string` | ✅ | Group display label |
 | **icon** | `string` | optional | Icon name (Lucide/Material) for the group header |
 | **description** | `string` | optional | Optional description shown under the group header |

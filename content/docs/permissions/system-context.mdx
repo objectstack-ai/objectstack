@@ -47,7 +47,7 @@ nothing to do with elevation.
 | Declaration | What it is | This page? |
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts:269` | The elevation flag on an operation's context | ✅ |
-| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1588` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
+| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1595` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts:125` | Built-in template; tenants may override but should not delete | ❌ |
 | `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:137` | Platform-infrastructure environment, not user data | ❌ |
 
