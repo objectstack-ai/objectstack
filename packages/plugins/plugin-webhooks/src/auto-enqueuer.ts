@@ -116,6 +116,21 @@ interface CachedSubscription {
     secret?: string;
     timeoutMs?: number;
     /**
+     * [#13546] The subscription's own organization — `sys_webhook` is
+     * organization-scoped (#8554), so each row carries the tenant that authored
+     * it. Stamped onto every delivery row this subscription produces
+     * (`EnqueueHttpInput.organizationId`), which is what makes the
+     * cross-organization wall on `redeliver()` (#10740) actually exclude other
+     * tenants' rows: a row enqueued without it lands `organization_id = NULL`,
+     * the driver's global-row arm, visible to every organization. There is no
+     * request context to read here — the enqueuer runs fire-and-forget off the
+     * write path — so the subscription row is the one honest source. Absent
+     * when the row itself carries no organization (a `single`-posture install):
+     * the delivery then lands NULL, which is honest for a subscription that
+     * belongs to no organization. Threaded, never fabricated (#11303's rule).
+     */
+    organizationId?: string;
+    /**
      * [#8069] Set when a credential this subscription needs could not be
      * recovered. The subscription stays CACHED — that is the change — but every
      * event it matches is written to `sys_http_delivery` as a parked `dead` row
@@ -783,6 +798,10 @@ export class AutoEnqueuer {
             // from their encrypted columns, NOT read off the row — see #7799
             // (secret) and #7986 (headers).
             timeoutMs: defn.timeoutMs,
+            // [#13546] The tenant column the kernel provisions on sys_webhook.
+            // This cache read is a dispatcher-side unscoped find, so the column
+            // comes back for every organization's rows.
+            organizationId: row.organization_id ? String(row.organization_id) : undefined,
         };
     }
 
@@ -867,6 +886,12 @@ export class AutoEnqueuer {
                 // subscription, so the delivery path is byte-identical to before.
                 undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
+                // [#13546] The delivery row belongs to the SUBSCRIPTION's
+                // organization — the one honest tenant in scope on this
+                // fire-and-forget path (no request context exists here).
+                // Absent for an org-less subscription; the row then lands
+                // NULL, the global-row shape.
+                organizationId: sub.organizationId,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
                 // publishers — since #4626 a `data.record.*` payload is a
@@ -960,6 +985,9 @@ export class AutoEnqueuer {
                 // an undeliverable row instead of enqueuing a delivery.
                 undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
+                // [#13546] See the per-record path — the subscription's own
+                // organization, absent for an org-less subscription.
+                organizationId: sub.organizationId,
                 // [#3946] Envelope keys last so the payload cannot rewrite them.
                 payload: {
                     ...payload,

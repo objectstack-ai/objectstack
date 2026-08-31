@@ -48,6 +48,11 @@ interface MessagingHttpSurface {
         signingSecret?: string;
         timeoutMs?: number;
         payload: unknown;
+        /**
+         * [#13546] Organization the delivery row belongs to — the tenant
+         * column the `redeliver()` cross-organization wall scopes by (#10740).
+         */
+        organizationId?: string;
     }): Promise<string>;
 }
 
@@ -121,6 +126,35 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             if (durable) {
                 const messaging = getMessaging();
                 if (messaging?.isHttpDeliveryReady?.() && messaging.enqueueHttp) {
+                    // [#13546] The organization this delivery belongs to,
+                    // THREADED from the run's own acting context — never
+                    // fabricated. Same source and same no-fallback rule as the
+                    // `notify` node's #11303 repair one file over:
+                    // `AutomationContext.tenantId` is the acting run's
+                    // organization, and a wrong value is worse than a null (a
+                    // null is visibly missing; a wrong one is silently
+                    // authoritative). Without it the sys_http_delivery row
+                    // lands `organization_id = NULL` — the driver's global-row
+                    // arm — visible to and replayable by EVERY organization
+                    // through the redeliver() door (#10740).
+                    const organizationId =
+                        typeof context.tenantId === 'string' && context.tenantId !== ''
+                            ? context.tenantId
+                            : undefined;
+                    if (!organizationId) {
+                        // Fail-LOUD, not fail-guess, not fail-closed (#11303's
+                        // triage): a `single`-posture install and a stack before
+                        // its first organization legitimately have none, and a
+                        // durable callout there must still enqueue.
+                        ctx.logger.warn(
+                            `[http] node '${node.id}': no organization in scope for this durable callout — its ` +
+                                `sys_http_delivery row will carry organization_id = NULL, which is a global row ` +
+                                `every organization's redeliver door can reach on a walled deployment (#13546). ` +
+                                `On a multi-organization install the triggering context lost its tenant: give the ` +
+                                `flow's trigger an acting organization (AutomationContext.tenantId). On a ` +
+                                `single-organization install this is expected and can be ignored.`,
+                        );
+                    }
                     try {
                         const deliveryId = await messaging.enqueueHttp({
                             source: 'flow',
@@ -133,6 +167,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             signingSecret,
                             timeoutMs,
                             payload: body ?? {},
+                            // [#13546] Absent (not null) when the run has no
+                            // organization; the outbox normalizes a missing
+                            // value to NULL exactly once, at the insert.
+                            ...(organizationId ? { organizationId } : {}),
                         });
                         // #4354 — the outbox row IS a durable effect this run
                         // caused, but it is NOT a countable one (#7882). What

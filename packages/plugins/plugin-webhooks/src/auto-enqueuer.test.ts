@@ -222,6 +222,48 @@ describe('AutoEnqueuer', () => {
         await ae.stop();
     });
 
+    // [#13546] The delivery row belongs to the SUBSCRIPTION's organization —
+    // `sys_webhook` is organization-scoped (#8554), the enqueuer runs
+    // fire-and-forget off the write path with no request context, so the
+    // subscription row is the one honest tenant source. Without the stamp the
+    // row lands `organization_id = NULL` — the driver's global-row arm — and
+    // the redeliver() cross-organization wall (#10740) excludes nothing.
+    it("stamps the subscription's organization onto the enqueue input (#13546)", async () => {
+        const engine = new FakeEngine({
+            sys_webhook: [webhook({ organization_id: 'org_pin_alpha' })],
+        });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        await flush();
+
+        expect(calls).toHaveLength(1);
+        // Verbatim from the sys_webhook row — threaded, never fabricated.
+        expect(calls[0].organizationId).toBe('org_pin_alpha');
+        await ae.stop();
+    });
+
+    it('an org-less subscription enqueues with NO organization (the honest global-row shape, #13546)', async () => {
+        // The over-denial control: a `single`-posture install has org-less
+        // sys_webhook rows, and their events must still deliver — org-less,
+        // never refused, never stamped with a guess.
+        const engine = new FakeEngine({ sys_webhook: [webhook()] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        await flush();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0].organizationId).toBeUndefined();
+        await ae.stop();
+    });
+
     it('[#4626] drops an off-contract data event instead of enqueuing it as "unknown"', async () => {
         // Pre-#4626 the enqueuer read `recordId ?? id ?? after?.id ?? 'unknown'`,
         // so a payload that named no record still produced a delivery whose
@@ -580,6 +622,25 @@ describe('AutoEnqueuer — bulk data events (#4639)', () => {
         expect(calls).toHaveLength(1);
         expect(calls[0].label).toBe('data.records.deleted');
         expect((calls[0].payload as any).matched).toBe(7);
+        await ae.stop();
+    });
+
+    it("the bulk path stamps the subscription's organization too (#13546)", async () => {
+        // Same tenant seam as the per-record path — a bulk delivery for an
+        // organization-owned subscription must not land as a global row either.
+        const engine = new FakeEngine({
+            sys_webhook: [webhook({ triggers: 'bulk_update', organization_id: 'org_pin_alpha' })],
+        });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('updated', 'contact', 3));
+        await flush();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0].organizationId).toBe('org_pin_alpha');
         await ae.stop();
     });
 

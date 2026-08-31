@@ -104,6 +104,15 @@ export interface HttpDelivery {
     timeoutMs?: number;
     /** JSON-serialisable body. */
     payload: unknown;
+    /**
+     * [#13546] Organization this delivery row belongs to — the read-back of
+     * the row's kernel-provisioned `organization_id` tenant column, which is
+     * the column the cross-organization wall on {@link IHttpOutbox.redeliver}
+     * scopes by (#10740). Absent for a global row (`organization_id = NULL`).
+     * Mirrors `NotificationDeliveryRecord.organizationId` on the sibling
+     * notification outbox.
+     */
+    organizationId?: string;
 
     /** Lifecycle state. */
     status: HttpDeliveryStatus;
@@ -158,6 +167,35 @@ export interface EnqueueHttpInput {
     signingSecret?: string;
     timeoutMs?: number;
     payload: unknown;
+    /**
+     * [#13546] Organization this delivery belongs to. Lands on the row's
+     * kernel-provisioned `organization_id` tenant column — the column the
+     * cross-organization wall on {@link IHttpOutbox.redeliver} scopes by
+     * (#10740). The driver's tenant term is
+     * `(organization_id = :tenantId OR organization_id IS NULL)`, so a row
+     * enqueued WITHOUT one lands in the deliberate global-row arm: visible
+     * to — and replayable by — every organization on a walled deployment.
+     * Producers MUST thread the organization they are acting for whenever
+     * they have one: the flow `http` node passes its run's acting tenant
+     * (`AutomationContext.tenantId`, the same source as the `notify` node's
+     * #11303 repair), the webhook auto-enqueuer its subscription's own
+     * organization (`sys_webhook.organization_id`). Threaded, never
+     * fabricated: a producer with genuinely no organization — a
+     * `single`-posture deployment, a stack before its first organization —
+     * leaves it absent, and the row lands NULL, the honest global-row shape.
+     *
+     * Deliberately OPTIONAL, mirroring `EnqueueDeliveryInput.organizationId`
+     * — the sibling notification outbox's identical repair — so the two
+     * outboxes in this package keep one convention. The
+     * required-but-`undefined`-able shape {@link RedeliverOptions.tenantId}
+     * uses was weighed and not chosen: that shape guards a REQUEST-reachable
+     * door any forgetful route can call, while this seam's producers are
+     * enumerated (the two above), each repaired in the same change to thread
+     * the value, and org-less enqueues remain legitimate for org-less
+     * deployments. Inherited by {@link UndeliverableHttpInput}, so parked
+     * rows are tenant-stamped the same way.
+     */
+    organizationId?: string;
     /**
      * [#8069] Transport-only discriminator for the ONE seam that carries both
      * kinds of write — `MessagingService.enqueueHttp()`, the single function a
