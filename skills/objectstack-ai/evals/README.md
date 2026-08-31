@@ -13,11 +13,11 @@ When implemented, evals will follow this structure:
 ```
 evals/
 ├── skills/
-│   ├── test-trigger-phrases.md
+│   ├── test-trigger-conditions.md
 │   └── test-surface-affinity.md
 ├── tools/
 │   ├── test-json-schema-parameters.md
-│   └── test-requires-confirmation.md
+│   └── test-strict-unknown-keys.md
 ├── knowledge/
 │   └── test-knowledge-source-filters.md
 └── ...
