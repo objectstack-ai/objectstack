@@ -1427,8 +1427,31 @@ jobs:
       # tracked sources plus the object registry, no spawns; ~8s.
       - name: Tenant-audit census matches the tree
         run: |
-          node scripts/tenant-audit-census.mjs --self-test
-          node scripts/check-tenant-audit-census.mjs --self-test
+          # Two INDEPENDENT self-tests, so they go through a collector rather
+          # than a bare sequence: under `bash -e` the first non-zero exit aborts
+          # the step and the second is never run — neither green nor red. The
+          # collector runs both unconditionally and still FAILS when either does,
+          # naming every one that failed. ⛔ Never let it swallow the exit code.
+          # Pinned by `node scripts/check-step-collectors.mjs`.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/tenant-audit-census.mjs --self-test
+          run_self_test node scripts/check-tenant-audit-census.mjs --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "tenant-audit census self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
           node scripts/check-tenant-audit-census.mjs
 
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
