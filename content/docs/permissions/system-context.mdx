@@ -306,7 +306,7 @@ still holds equal to the census on every pull request:
 | — in tests | 1013 | — |
 | — in non-test sources | 798 | — |
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
-| — parsed as a declaration | 21 | ✅ |
+| — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
 | — parsed as a property **read** | 115 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
@@ -335,6 +335,24 @@ whole argument of this section; they are unenforced because a count of lines in
 test files certifies nothing. ⛔ Do not re-add them to `DECLARED_COUNTS` — a
 self-test case in the gate refuses that by name. Re-measure them with
 `node scripts/isystem-census.mjs` when you want them current, and move the date.
+
+**What the enforced declarations row counts.** Not the four field declarations
+above — those are four *distinct fields* that happen to share a name, and only
+the first is elevation. This row counts every position where the parser puts the
+identifier in a **declaring** slot: those four, plus the structural type literals
+that restate `ExecutionContext.isSystem`'s shape inline rather than importing it
+(`{ isSystem: true; tenantId?: string }`, `context?: { isSystem?: boolean }`, and
+the `get isSystem()` accessor on the engine's context wrapper). A restatement is
+a producer's declaration of the shape it will build, never a read, so a new one
+moves this count and moves nothing else on this page — the census's read
+population, the anchored rows above, and the packages and files totals all stay
+where they are. The most recent arrival is the scoped
+seed context threaded into the org-admin permission-set lookup in
+`plugins/plugin-security/src/auto-org-admin-grant.ts`, so that read resolves
+against the granting organization's own catalog row rather than an
+organization-less one (#11670). ⛔ Cited without a line number deliberately: an
+anchor here would be refused, and rightly — this page anchors elevation
+**reads**, and a declaration is not one.
 
 Counting by hand is what made the previous edition wrong in two independent
 ways, so both are worth naming. Its headline said "80 distinct sites across 18
