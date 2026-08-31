@@ -29,6 +29,21 @@ const ADMIN = PermissionSetSchema.parse({
 
 const PRIVATE_SCHEMA = { name: 'leave_request', sharingModel: 'private' };
 
+// The ONE engine double this file declares: a `ql` whose `findOne` resolves the
+// `onBehalfOf` delegator, so D10 resolves instead of failing closed as
+// 'missing' (which is a different report entirely). Shared by every test that
+// needs a resolvable delegator — a second inline copy would be a second double
+// for `check:engine-double-contract` to ratchet, and reusing the one the file
+// already pins is cheaper than growing that ledger.
+const DELEGATOR_QL = {
+  getSchema: () => PRIVATE_SCHEMA,
+  findOne: async (object: string, query?: EngineFindOneQueryInput) => {
+    assertEngineFindOnePredicate(object, query);
+    return { id: 'u_boss' };
+  },
+  find: async () => [],
+};
+
 function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema?: any; rls?: any } = {}): ExplainEngineDeps {
   const evaluator = new PermissionEvaluator();
   return {
@@ -347,13 +362,7 @@ describe('explainAccess — fls reports partial masking (#9127)', () => {
   it('keeps the D10 delegator suffix when only partial masks apply', async () => {
     const d = await explainAccess(
       makeDeps({
-        // A resolvable delegator — otherwise D10 fails closed as 'missing' and
-        // `delegatorSets` stays null, which is a different report entirely.
-        ql: {
-          getSchema: () => PRIVATE_SCHEMA,
-          findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return ({ id: 'u_boss' }); },
-          find: async () => [],
-        },
+        ql: DELEGATOR_QL, // resolvable delegator — otherwise D10 fails closed
         getPartialMaskRules: async () => ({ phone: 'phone' }),
       }),
       {
@@ -1286,21 +1295,13 @@ describe('explainAccess — fail-closed RLS denial (#13639)', () => {
   const readOf = async (deps: ExplainEngineDeps) =>
     explainAccess(deps, { object: 'leave_request', operation: 'read', context: CTX });
 
-  // A resolvable delegator, so BOTH computeRlsFilter calls happen and
-  // `readFilter` is a real two-part composite (the only shape in which the
-  // payload collapse at §9 is observable).
-  const DELEGATED_QL = {
-    getSchema: () => PRIVATE_SCHEMA,
-    findOne: async (object: string, query?: EngineFindOneQueryInput) => {
-      assertEngineFindOnePredicate(object, query);
-      return { id: 'u_boss' };
-    },
-    find: async () => [],
-  };
+  // `DELEGATOR_QL` resolves the delegator, so BOTH computeRlsFilter calls happen
+  // and `readFilter` is a real two-part composite — the only shape in which the
+  // payload collapse at §9 is observable at all.
   const composedOf = async (delegatorFilter: Record<string, unknown>) =>
     explainAccess(
       makeDeps({
-        ql: DELEGATED_QL,
+        ql: DELEGATOR_QL,
         computeRlsFilter: async (_s: any, _o: string, _op: string, ctx: any) =>
           ctx?.userId === 'u_boss' ? delegatorFilter : { owner_id: 'u1' },
       }),
