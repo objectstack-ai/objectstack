@@ -534,8 +534,8 @@
           "the stock showcase artifact (artifact-backed objects like showcase_task and packaged views are the locked targets; a scratch name serves the allowed-create side)"
         ],
         "knownGaps": [
-          "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowOrgOverride: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts:208) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
-          "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:951-955 / 1311-1323) and `flow` declares allowOrgOverride:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
+          "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowOrgOverride: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
+          "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx / 1311-1323) and `flow` declares allowOrgOverride:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
         ]
       },
       "steps": [
@@ -596,8 +596,8 @@
         "packages/objectql/src/overlay-precedence.test.ts ('denied — must throw 403 (not_overridable or not_creatable)')",
         "packages/metadata-protocol/src/protocol.ts (isRuntimeCreateAllowed — the write-gate authority)",
         "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
-        "packages/spec/src/api/protocol.zod.ts:208 (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
-        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:951-955, 1311-1323 (the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
+        "packages/spec/src/api/protocol.zod.ts (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx, 1311-1323 (the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1108,20 +1108,20 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the stock read-only code package com.example.showcase with its packaged flows (showcase_urgent_task_alert, showcase_task_done_notify_owner, …) listed in the Automations rail — the rail merges published + draft flows package-scoped (objectui StudioDesignSurface.tsx:3286 loadPackageSurfaces)",
+          "the stock read-only code package com.example.showcase with its packaged flows (showcase_urgent_task_alert, showcase_task_done_notify_owner, …) listed in the Automations rail — the rail merges published + draft flows package-scoped (objectui StudioDesignSurface.tsx loadPackageSurfaces)",
           "a vendored console matching .objectui-sha — the pillar markup under test is objectui's, so a stale bundle tests yesterday's gate"
         ],
         "knownGaps": [
-          "CURRENT SHAPE, RECORDED SO RUNS DON'T RE-DERIVE IT (objectui f7c52e2): the AutomationsPillar's readOnly prop is documented as 'hide/disable flow-authoring affordances' (StudioDesignSurface.tsx:3218-3219) and the New-flow button (:3478) and autosave (:3390) consult it — but the enable/disable switch does NOT (disabled={!isEditable || !!saving}, :3442) and the flow node inspector mounts with readOnly hardcoded false (:3583), where the Data pillar threads the real flag into its editors (:2999, :3099). So today the switch is clickable-but-server-refused and inspector edits take locally and silently vanish on reload. The clauses below keep the PROMISE as the assertion and name this shape as the expected finding",
+          "CURRENT SHAPE, RECORDED SO RUNS DON'T RE-DERIVE IT (objectui f7c52e2): the AutomationsPillar's readOnly prop is documented as 'hide/disable flow-authoring affordances' (StudioDesignSurface.tsx) and the New-flow button and autosave consult it — but the enable/disable switch does NOT (disabled={!isEditable || !!saving}) and the flow node inspector mounts with readOnly hardcoded false, where the Data pillar threads the real flag into its editors. So today the switch is clickable-but-server-refused and inspector edits take locally and silently vanish on reload. The clauses below keep the PROMISE as the assertion and name this shape as the expected finding",
           "no automated pin exists in either repo for the Automations pillar's read-only posture (checked at objectui f7c52e2: no StudioDesignSurface read-only test covers the switch or the flow inspector) — this item is browser-driven end to end"
         ]
       },
       "steps": [
         "boot the showcase (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in admin@objectos.ai/admin123; open Studio, switch to the read-only com.example.showcase package, open the Automations pillar",
-        "pin the precondition: GET /api/v1/packages must report com.example.showcase writable:false — the pillar's readOnly gate is pkgWritable===false (objectui StudioDesignSurface.tsx:502) and an UNKNOWN writability (fetch failed / still loading) deliberately leaves the pillar ungated, so a race here fakes a gate failure (hydration-race)",
+        "pin the precondition: GET /api/v1/packages must report com.example.showcase writable:false — the pillar's readOnly gate is pkgWritable===false (objectui StudioDesignSurface.tsx) and an UNKNOWN writability (fetch failed / still loading) deliberately leaves the pillar ungated, so a race here fakes a gate failure (hydration-race)",
         "baseline the server truth: GET /api/v1/meta/flow/showcase_urgent_task_alert (full body) — every later clause diffs against this read",
         "affordance sweep with the network panel recording: confirm the New-flow button is ABSENT from the rail heading; select the packaged flow and wait past the autosave debounce after touching the canvas — no flow save may leave the browser",
-        "click the enable/disable switch in the pillar header and capture everything: whether it is disabled/absent, and if clickable, the exact request it fires (today: a flow DRAFT save flipping status active↔obsolete — StudioDesignSurface.tsx:3400-3417), the server's response, and what the UI surfaces (error banner :3524-3528)",
+        "click the enable/disable switch in the pillar header and capture everything: whether it is disabled/absent, and if clickable, the exact request it fires (today: a flow DRAFT save flipping status active↔obsolete — StudioDesignSurface.tsx), the server's response, and what the UI surfaces (error banner)",
         "select a flow node and edit a property in the inspector; record whether the edit visibly takes on the canvas/draft, and whether any affordance announces a read-only or will-not-persist state",
         "reload the pillar (re-open the package) and re-inspect: record whether the inspector edit survived or vanished, and whether its discard was ever announced",
         "close out: GET /api/v1/meta/flow/showcase_urgent_task_alert again and diff against the baseline — byte-identical"
@@ -1130,7 +1130,7 @@
         {
           "clause": "the courtesy gate holds on the affordances that consult it: on a read-only package the New-flow button is absent from the Automations rail and the flow autosave never fires — no draft write leaves the browser from ordinary canvas edits",
           "oracle": "network",
-          "verify": "the rail DOM carries no New button (gated on !readOnly, objectui StudioDesignSurface.tsx:3478); the network trace across the edit session and past the autosave debounce carries zero flow save/PUT from the autosave path (blocked on readOnly, :3388-3393)",
+          "verify": "the rail DOM carries no New button (gated on !readOnly, objectui StudioDesignSurface.tsx); the network trace across the edit session and past the autosave debounce carries zero flow save/PUT from the autosave path (blocked on readOnly)",
           "evidence": "the rail DOM read + the flow-write-free network trace over the debounce window"
         },
         {
@@ -1142,13 +1142,13 @@
         {
           "clause": "the enable/disable switch honors the read-only package lock exactly as the New-flow button does: clicking it produces NO metadata write",
           "oracle": "network",
-          "verify": "click the switch: the PASS shape is disabled/absent-or-inert (no request fires). CURRENT RECORDED FINDING (objectui f7c52e2): the switch is clickable — its disabled expression omits readOnly (StudioDesignSurface.tsx:3442) — and toggleEnabled fires a flow draft save flipping deployment status (:3400-3417) that the server refuses 422 writable_package_required, surfaced in the pillar error banner. That clickable-but-refused shape is this clause's expected FAIL with the server gate holding: record it as the standing finding, not a pass and not a new defect; only a 2xx on that write escalates to clause 2's hard FAIL",
+          "verify": "click the switch: the PASS shape is disabled/absent-or-inert (no request fires). CURRENT RECORDED FINDING (objectui f7c52e2): the switch is clickable — its disabled expression omits readOnly (StudioDesignSurface.tsx) — and toggleEnabled fires a flow draft save flipping deployment status that the server refuses 422 writable_package_required, surfaced in the pillar error banner. That clickable-but-refused shape is this clause's expected FAIL with the server gate holding: record it as the standing finding, not a pass and not a new defect; only a 2xx on that write escalates to clause 2's hard FAIL",
           "evidence": "the click's network capture (no request — or the refused request + the error-banner screenshot)"
         },
         {
           "clause": "inspector edits are inert OR their discard is announced: the flow node inspector on a read-only package either disables its inputs or tells the author the edit will not persist — an edit that visibly takes and silently vanishes on reload is the failure",
           "oracle": "dom",
-          "verify": "edit a node property, confirm what rendered, reload the pillar and re-read the inspector + canvas: the edit must not silently vanish. CURRENT SOURCE-PREDICTED SHAPE (objectui f7c52e2): the inspector mounts with readOnly hardcoded false (StudioDesignSurface.tsx:3583 — contrast the Data pillar threading the real flag, :2999/:3099) while autosave stays blocked, so the edit takes locally and vanishes on reload unannounced — the predicted verdict is this clause's FAIL; capture it as the finding",
+          "verify": "edit a node property, confirm what rendered, reload the pillar and re-read the inspector + canvas: the edit must not silently vanish. CURRENT SOURCE-PREDICTED SHAPE (objectui f7c52e2): the inspector mounts with readOnly hardcoded false (StudioDesignSurface.tsx — contrast the Data pillar threading the real flag) while autosave stays blocked, so the edit takes locally and vanishes on reload unannounced — the predicted verdict is this clause's FAIL; capture it as the finding",
           "evidence": "before-edit / after-edit / after-reload screenshots + the inspector input DOM state (disabled or not)"
         }
       ],
@@ -1159,14 +1159,14 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "source": [
-        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx:502 (readOnly = pkgWritable===false; unknown writability deliberately leaves the pillar ungated), :3218-3219 (the prop's own contract: 'hide/disable flow-authoring affordances'), :3388-3393 (autosave blocked on readOnly), :3436-3450 (the enable/disable switch — disabled={!isEditable || !!saving}, readOnly absent), :3400-3417 (toggleEnabled = client.save flow draft flipping status active↔obsolete), :3478 (New-flow gated on !readOnly), :3583 (inspector readOnly hardcoded false; contrast Data pillar threading :2999/:3099), :3286 (the rail lists package-scoped flows) — objectui owns this pillar's markup, so locator and gate fixes land there (ADR-0054)",
-        "packages/metadata-protocol/src/sys-metadata-repository.ts:1563 + packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts (the 422 [writable_package_required] refusal a read-only code package answers to metadata writes — the server half of the lock; com.example.showcase is source-loaded read-only)",
+        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly = pkgWritable===false; unknown writability deliberately leaves the pillar ungated), (the prop's own contract: 'hide/disable flow-authoring affordances'), (autosave blocked on readOnly), (the enable/disable switch — disabled={!isEditable || !!saving}, readOnly absent), (toggleEnabled = client.save flow draft flipping status active↔obsolete), (New-flow gated on !readOnly), (inspector readOnly hardcoded false; contrast Data pillar threading), (the rail lists package-scoped flows) — objectui owns this pillar's markup, so locator and gate fixes land there (ADR-0054)",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts + packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts (the 422 [writable_package_required] refusal a read-only code package answers to metadata writes — the server half of the lock; com.example.showcase is source-loaded read-only)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2/§3 (flow = Regime C: locked base, in-place edit refused loudly at the write door — card F2)",
         "#12438 (the ADR-0126 packaged flow/action sweep this item lands from)",
         "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board (the ledgered enable/disable surface — a different mechanism from this pillar's status flip)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438 card F2, UI half): the Studio Automations pillar's read-only package lock — the promise (no in-place edit, switch produces no metadata write, inspector edits inert or announced) asserted with the current source shape recorded as the expected finding: the switch is clickable with only the server-side 422 behind it (disabled expression omits readOnly, StudioDesignSurface.tsx:3442) and the inspector hardcodes readOnly:false (:3583) so edits take locally and silently vanish on reload; New-flow (:3478) and autosave (:3390) honor the gate. Grounded in objectui f7c52e2 + the framework's writable_package_required door; owns the Automations pillar only, cross-referencing readonly-package-locks-studio for the surfaces it already owns", "ref": "#12438" }
+        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438 card F2, UI half): the Studio Automations pillar's read-only package lock — the promise (no in-place edit, switch produces no metadata write, inspector edits inert or announced) asserted with the current source shape recorded as the expected finding: the switch is clickable with only the server-side 422 behind it (disabled expression omits readOnly, StudioDesignSurface.tsx) and the inspector hardcodes readOnly:false so edits take locally and silently vanish on reload; New-flow and autosave honor the gate. Grounded in objectui f7c52e2 + the framework's writable_package_required door; owns the Automations pillar only, cross-referencing readonly-package-locks-studio for the surfaces it already owns", "ref": "#12438" }
       ]
     },
     {
@@ -1187,9 +1187,9 @@
           "a vendored console matching .objectui-sha"
         ],
         "knownGaps": [
-          "DASHBOARD OVERLAY DOOR VERIFIED PRESENT at authoring time (this worktree): DEFAULT_METADATA_TYPE_REGISTRY declares dashboard allowOrgOverride:true (packages/spec/src/kernel/metadata-plugin.zod.ts:787), same as view (:785) — so the dashboard leg is ASSERTED, not waived. If a run finds the flag flipped, revise this item (ADR-0005 admission-pair change) before scoring",
+          "DASHBOARD OVERLAY DOOR VERIFIED PRESENT at authoring time (this worktree): DEFAULT_METADATA_TYPE_REGISTRY declares dashboard allowOrgOverride:true (packages/spec/src/kernel/metadata-plugin.zod.ts), same as view — so the dashboard leg is ASSERTED, not waived. If a run finds the flag flipped, revise this item (ADR-0005 admission-pair change) before scoring",
           "dashboards.system-overview-live-counts drives the SAME system_overview board expecting its stock shape — the dashboard leg here MUST end with the reset-overlay step; an overlay left behind corrupts that item's next run",
-          "the neighbouring failure class is objectui#4308 mis-tiering (an item in a WRITABLE package shown behind the installed-package lock): if the packaged view/dashboard opens LOCKED, read the ResourceEditPage tiering (isArtifactItem :1144-1148; artifact-backed canWrite = allowOrgOverride, :1592-1599) and the layered envelope's provenance, and forge the raw PUT, before filing a registry defect"
+          "the neighbouring failure class is objectui#4308 mis-tiering (an item in a WRITABLE package shown behind the installed-package lock): if the packaged view/dashboard opens LOCKED, read the ResourceEditPage tiering (isArtifactItem; artifact-backed canWrite = allowOrgOverride) and the layered envelope's provenance, and forge the raw PUT, before filing a registry defect"
         ]
       },
       "steps": [
@@ -1235,23 +1235,23 @@
         }
       ],
       "negative": [
-        "a packaged view or dashboard opening behind the installed-package lock is the FAIL of the shipped tier-1 claim (content/docs/capabilities/integrations.mdx:17, content/docs/build-without-code.mdx:37) — but before filing it as a registry defect, forge the raw PUT: if the server ACCEPTS while the UI locks, it is the objectui#4308 client mis-tiering class, filed against objectui, not the registry",
+        "a packaged view or dashboard opening behind the installed-package lock is the FAIL of the shipped tier-1 claim (content/docs/capabilities/integrations.mdx, content/docs/build-without-code.mdx) — but before filing it as a registry defect, forge the raw PUT: if the server ACCEPTS while the UI locks, it is the objectui#4308 client mis-tiering class, filed against objectui, not the registry",
         "a reset that answers 200 while the read or render still serves the overlay is a FAIL — the restore must flip the served body",
         "leaving the system_overview overlay behind after the run corrupts dashboards.system-overview-live-counts' stock fixture — the reset step is part of the item, not cleanup courtesy",
         "SCOPE: the raw-PUT registry gate in both directions (403 not_overridable on locked kinds, accepted overlay + DELETE reset semantics at API grain) is studio-authoring.org-override-registry-gate — cite it, never duplicate it; studio-authoring.view-authoring-live deliberately avoids packaged views, and this item is its packaged complement"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input", "cache-staleness"],
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts:785 (view allowOrgOverride:true), :787 (dashboard allowOrgOverride:true — the overlay door the dashboard leg rides, verified present), :828 (flow allowOrgOverride:false — the same-surface Regime-C negative)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (view allowOrgOverride:true), (dashboard allowOrgOverride:true — the overlay door the dashboard leg rides, verified present), (flow allowOrgOverride:false — the same-surface Regime-C negative)",
         "docs/adr/0126-packaged-metadata-customization-model.md §3 (Regime O = view, dashboard, report, translation, email_template; flow = Regime C)",
-        "content/docs/capabilities/integrations.mdx:17 + content/docs/build-without-code.mdx:37 (the E1 tier-1 claim under test: 'views and dashboards are yours to edit directly' on installed/packaged apps)",
+        "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 tier-1 claim under test: 'views and dashboards are yours to edit directly' on installed/packaged apps)",
         "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (the code-shipped built-in board the dashboard leg edits)",
-        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:1144-1148 (isArtifactItem tiering), :1592-1599 (artifact-backed canWrite = allowOrgOverride — why the view/dashboard open editable and the flow does not), :1190-1191 (resettable → the Reset-overlay verb), :2166-2190 (the installed-package lock banner) — objectui owns the designer and end-user markup, so locator fixes land there (ADR-0054); the framework owns the registry flags and the overlay/reset doors",
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (isArtifactItem tiering), (artifact-backed canWrite = allowOrgOverride — why the view/dashboard open editable and the flow does not), (resettable → the Reset-overlay verb), (the installed-package lock banner) — objectui owns the designer and end-user markup, so locator fixes land there (ADR-0054); the framework owns the registry flags and the overlay/reset doors",
         "#12438 (the ADR-0126 sweep this item lands from)",
         "studio-authoring.org-override-registry-gate (the raw-PUT registry-gate half — cross-referenced, not duplicated), studio-authoring.view-authoring-live (the non-packaged authoring loop this item complements), dashboards.system-overview-live-counts (the same board's live-count semantics — and the reason the overlay must be reset)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts:787 before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" }
+        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" }
       ]
     },
     {
@@ -1277,7 +1277,7 @@
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "GET /api/v1/meta/diagnostics on the live REST server and record the BARE body — { entries, total, scannedTypes, scannedItems, stats } with NO { success, data } envelope on this surface (rest-route-ledger.ts:146-148); ⛔ the route is REST-server-only, so a simulated dispatch is not an oracle here",
+        "GET /api/v1/meta/diagnostics on the live REST server and record the BARE body — { entries, total, scannedTypes, scannedItems, stats } with NO { success, data } envelope on this surface (rest-route-ledger.ts); ⛔ the route is REST-server-only, so a simulated dispatch is not an oracle here",
         "stats parity probe: for two or three types (object, view, flow), GET /api/v1/meta/<type> and compare stats[<type>].count against the list's item count and stats[<type>].packages against the sorted distinct _packageId set of those items",
         "package scoping: GET /api/v1/meta/diagnostics?package=com.example.showcase and record how stats narrows; then open Studio's metadata directory (/apps/<app>/metadata?package=com.example.showcase) and compare the tile counts against the scoped stats (DirectoryPage feeds its tiles from the package-scoped sweep)",
         "severity mechanism: GET /api/v1/meta/diagnostics?severity=warning — capture that it answers 200 and that the error entries are unchanged (no warning producer exists at head; see knownGaps)",
@@ -1290,7 +1290,7 @@
         {
           "clause": "the sweep contract holds on the live server: the bare body carries entries/total/scannedTypes/scannedItems/stats, total === entries.length, and scannedTypes covers exactly the registry types with a registered Zod schema (schema-less types are skipped as 'no opinion' — never counted valid, never failing the sweep)",
           "oracle": "api",
-          "verify": "the recorded body parses against GetMetaDiagnosticsResponseSchema's shape (protocol.zod.ts:1461); total equals the entries length; scannedTypes is the registry-with-schema count, not the full registry count (getMetaDiagnostics filters on getMetadataTypeSchema)",
+          "verify": "the recorded body parses against GetMetaDiagnosticsResponseSchema's shape (protocol.zod.ts); total equals the entries length; scannedTypes is the registry-with-schema count, not the full registry count (getMetaDiagnostics filters on getMetadataTypeSchema)",
           "evidence": "the /meta/diagnostics body"
         },
         {
@@ -1349,12 +1349,12 @@
         "ref": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts — pins the outage clause ONLY (503 rethrown, never '0 problems'); the live sweep, scoping parity, refusals, and both browser surfaces still need the run"
       },
       "source": [
-        "packages/rest/src/rest-server.ts:4094-4138 (the route: registered BEFORE /meta/:type so 'diagnostics' is not captured as a type; severity defaults 'error'; ?type/?severity/?package each single-valued via refuseRepeatedQueryParams #6877; 501 NOT_IMPLEMENTED when the kernel's protocol lacks getMetaDiagnostics; answers res.json(result) BARE)",
-        "packages/rest/src/rest-route-ledger.ts:146-148 (REST-only route, bare body = GetMetaDiagnosticsResponseSchema, client meta.getDiagnostics, #12038)",
-        "packages/metadata-protocol/src/protocol.ts:5539-5732 (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
+        "packages/rest/src/rest-server.ts (the route: registered BEFORE /meta/:type so 'diagnostics' is not captured as a type; severity defaults 'error'; ?type/?severity/?package each single-valued via refuseRepeatedQueryParams #6877; 501 NOT_IMPLEMENTED when the kernel's protocol lacks getMetaDiagnostics; answers res.json(result) BARE)",
+        "packages/rest/src/rest-route-ledger.ts (REST-only route, bare body = GetMetaDiagnosticsResponseSchema, client meta.getDiagnostics, #12038)",
+        "packages/metadata-protocol/src/protocol.ts (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
         "packages/metadata-protocol/src/metadata-diagnostics.ts (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
-        "packages/spec/src/api/protocol.zod.ts:1450-1470 (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
-        "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link ../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts:239-370 (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx:133-158,242-254 (package-scoped sweep drives tile badges; diagnostics link only when total > 0) + console/AppContent.tsx:882,982 (the metadata/_diagnostics route)",
+        "packages/spec/src/api/protocol.zod.ts (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
+        "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx,242-254 (package-scoped sweep drives tile badges; diagnostics link only when total > 0) + console/AppContent.tsx,982 (the metadata/_diagnostics route)",
         "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
       ],
       "history": [

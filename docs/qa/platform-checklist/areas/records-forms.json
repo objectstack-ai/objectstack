@@ -6,13 +6,13 @@
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed, nothing to un-seed beyond the teardown line) and every call below is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted.",
     "qa-feeds-disabled": {
       "title": "Scratch feeds-DISABLED parent (qa_nofeeds) — the FEEDS_DISABLED probe target",
-      "why": "Stock showcase declares NO object with `enable.feeds: false`. Feeds is opt-OUT (spec default true, packages/spec/src/data/object.zod.ts:290), so every showcase object has comments ON and there is no naturally-occurring disabled parent to borrow — the opposite of the files case, where opt-IN (default false) leaves most objects files-disabled incidentally and attachments-storage could probe showcase_account before qa_nofiles existed. Without this recipe BOTH FEEDS_DISABLED clauses of record-discussion-mentions are blocked(fixture) and the code survives in that item's `negative` list alone — named but never driven, which is the gap #12118 was filed against.",
+      "why": "Stock showcase declares NO object with `enable.feeds: false`. Feeds is opt-OUT (spec default true, packages/spec/src/data/object.zod.ts), so every showcase object has comments ON and there is no naturally-occurring disabled parent to borrow — the opposite of the files case, where opt-IN (default false) leaves most objects files-disabled incidentally and attachments-storage could probe showcase_account before qa_nofiles existed. Without this recipe BOTH FEEDS_DISABLED clauses of record-discussion-mentions are blocked(fixture) and the code survives in that item's `negative` list alone — named but never driven, which is the gap #12118 was filed against.",
       "provenance": "#12118 — the gap was measured from PR #12116 (the files-side twin, which added the FILES_DISABLED update-verb probe and reported this one rather than widening). Recipe shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670) rather than invented.",
       "app": "showcase",
       "requires": [
-        "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts:174, the `PUT /api/v1/meta/:type/:name` row)",
+        "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
         "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app",
-        "AuditPlugin active in the boot: it owns sys_comment AND registers the enable.feeds capability gate (packages/plugins/plugin-audit/src/audit-writers.ts:1456-1457). A boot without it accepts every comment and both probes go green for the wrong reason — confirm the gate is live before scoring either clause."
+        "AuditPlugin active in the boot: it owns sys_comment AND registers the enable.feeds capability gate (packages/plugins/plugin-audit/src/audit-writers.ts). A boot without it accepts every comment and both probes go green for the wrong reason — confirm the gate is live before scoring either clause."
       ],
       "sequence": [
         {
@@ -28,7 +28,7 @@
             "enableOnInstall": true
           },
           "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
-          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts:312 note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts:2144-2166"
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts"
         },
         {
           "step": 2,
@@ -48,11 +48,11 @@
               }
             }
           },
-          "expect": "2xx. `enable.feeds` is stated EXPLICITLY false — unlike files it cannot be omitted, because omission means the spec default `true` (object.zod.ts:290) and would give a feeds-ENABLED object that scores both probes green for the wrong reason. `sharingModel` is public_read_write ON PURPOSE: the probes must be refused by the CAPABILITY gate, not by record access, and a caller who can read and edit this parent isolates FEEDS_DISABLED from the sibling RECORD_NOT_ACCESSIBLE refusal (packages/plugins/plugin-audit/src/comment-access-hooks.ts:132).",
-          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts:290: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts:2144; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
+          "expect": "2xx. `enable.feeds` is stated EXPLICITLY false — unlike files it cannot be omitted, because omission means the spec default `true` (object.zod.ts) and would give a feeds-ENABLED object that scores both probes green for the wrong reason. `sharingModel` is public_read_write ON PURPOSE: the probes must be refused by the CAPABILITY gate, not by record access, and a caller who can read and edit this parent isolates FEEDS_DISABLED from the sibling RECORD_NOT_ACCESSIBLE refusal (packages/plugins/plugin-audit/src/comment-access-hooks.ts).",
+          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts:317) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
       "knownGaps": [
         "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
         "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
@@ -161,7 +161,7 @@
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
         "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
         "packages/rest/src/rest-server.ts (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS, stripReadonlyForInsert)",
-        "packages/rest/src/rest-route-ledger.ts:122 (POST /api/v1/data/:object/:id/clone, client data.clone)",
+        "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone)",
         "objectui: e2e/live/record-history-display.spec.ts",
         "cross-ref: the inline-edit atomic two-surface behavior (ONE Save bar / ONE PATCH carrying exactly the changed keys + ifMatch) is folded into records-forms.concurrent-edit-conflict, not here"
       ],
@@ -1579,7 +1579,7 @@
         "ref": "objectui: e2e/live/list-row-action-cel.spec.ts (row-level CEL visibility) + e2e/live/action-modal.spec.ts (dialog dispatch)"
       },
       "source": [
-        "packages/spec/src/ui/action.zod.ts:565 (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
+        "packages/spec/src/ui/action.zod.ts (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
         "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations)",
         "packages/lint/src/validate-action-locations.ts (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
         "objectui: packages/types/src/ui-action.ts `actionRendersAt` (the single placement predicate — a membership test, so an undeclared or empty `locations` matches nothing) + packages/.../action-bar.tsx, its consumer since objectui#3142",
@@ -1638,10 +1638,10 @@
         "app": "showcase",
         "requires": [
           "the seeded per-type rules: showcase_account account_lifecycle (state_machine), tax_id_format + billing_email_format (format), support_config_shape (json_schema), churn_reason_consistency (conditional); showcase_project end_after_start (cross_field), spent_within_budget (script), project_status_flow (state_machine)",
-          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts:149-167)"
+          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts)"
         ],
         "knownGaps": [
-          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts:1861-1868 tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
+          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
         ]
       },
       "variants": [
@@ -1651,7 +1651,7 @@
         "cross_field — project end_date < start_date → rule_violation naming end_date",
         "script — spent > budget → rule_violation",
         "conditional — status 'churned' without churn_reason → the wrapped rule fires; with churn_reason present it does not",
-        "severity — 'error' (the default, validation.zod.ts:129) blocks; 'warning'/'info' rules that MATCH do not block: the write lands and the message is logged server-side (rule-validator.ts:56 'only error blocks', :1861-1868)"
+        "severity — 'error' (the default, validation.zod.ts) blocks; 'warning'/'info' rules that MATCH do not block: the write lands and the message is logged server-side (rule-validator.ts 'only error blocks')"
       ],
       "steps": [
         "boot showcase isolated; sign in as admin",
@@ -1689,22 +1689,22 @@
         {
           "clause": "a MATCHING advisory rule does not block, and its message still surfaces where the contract puts it — the SERVER LOG, not the response: the green→red health jump answers 2xx, the row persists with the jumped value, and the log carries \"Validation rule 'project_health_progression' (warning): Health changed by more than one step…\" — advisory rules stay advisory (only severity 'error' feeds the ValidationError throw)",
           "oracle": "log",
-          "verify": "the 2xx response + the persisted re-read + the logger.warn line (packages/objectql/src/validation/rule-validator.ts:1861-1868 — non-error severities route to opts.logger.warn, never into `errors`). ⛔ Do not require the message in the RESPONSE body — best-effort logging is the documented surface; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
+          "verify": "the 2xx response + the persisted re-read + the logger.warn line (packages/objectql/src/validation/rule-validator.ts — non-error severities route to opts.logger.warn, never into `errors`). ⛔ Do not require the message in the RESPONSE body — best-effort logging is the documented surface; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
           "evidence": "response + re-read + the captured log line"
         }
       ],
       "negative": [
         "an unevaluable CEL expression must fail CLOSED (rule_violation), never fail-open silently accepting the write — the rule-validator's documented posture",
-        "the fail-closed posture is SEVERITY-SCOPED: an unevaluable 'warning'/'info' rule stays non-blocking (logged, never thrown — rule-validator.ts:86-88 'advisory rules stay advisory'); a warning rule that BLOCKS a write, evaluable or not, is a FAIL in the other direction",
+        "the fail-closed posture is SEVERITY-SCOPED: an unevaluable 'warning'/'info' rule stays non-blocking (logged, never thrown — rule-validator.ts 'advisory rules stay advisory'); a warning rule that BLOCKS a write, evaluable or not, is a FAIL in the other direction",
         "a matching warning rule that leaves NO log line is a FAIL of the surfacing half — flagged-not-blocked means flagged"
       ],
       "traps": [
         "wrong-persona"
       ],
       "source": [
-        "packages/spec/src/data/validation.zod.ts (ValidationRuleSchema, 6 discriminated variants; :129 severity enum ['error','warning','info'] default 'error')",
-        "packages/objectql/src/validation/rule-validator.ts (evaluateRule switch + per-type codes; :56 'only error blocks', :86-88 unevaluable-advisory stays non-blocking, :1861-1868 the severity fork)",
-        "examples/app-showcase/src/data/objects/{account,project,task}.object.ts (the seeded rules; project.object.ts:149-167 the advisory project_health_progression)",
+        "packages/spec/src/data/validation.zod.ts (ValidationRuleSchema, 6 discriminated variants; severity enum ['error','warning','info'] default 'error')",
+        "packages/objectql/src/validation/rule-validator.ts (evaluateRule switch + per-type codes; 'only error blocks', unevaluable-advisory stays non-blocking, the severity fork)",
+        "examples/app-showcase/src/data/objects/{account,project,task}.object.ts (the seeded rules; project.object.ts the advisory project_health_progression)",
         "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)"
       ],
       "history": [
@@ -1717,7 +1717,7 @@
         {
           "revision": 2,
           "date": "2026-08-30",
-          "change": "added the severity axis the matrix silently assumed away: every clause drove severity:'error' (the default) while the spec declares 'warning'/'info' and the evaluator routes them to a non-blocking logger.warn — a matching advisory rule was never proven NOT to block, and its message never proven to surface. New variant line, step, acceptance clause (log oracle — the message's contract surface is the server log, not the response) and two negatives, including that fail-closed (#4649) is severity-scoped. Register corrected against source: the sweep's claim that showcase rules are all default-error is FALSE — project.object.ts:149-167 ships the advisory project_health_progression precisely for this, so the warning leg is stock-drivable; only 'info' (same code branch) lacks a specimen",
+          "change": "added the severity axis the matrix silently assumed away: every clause drove severity:'error' (the default) while the spec declares 'warning'/'info' and the evaluator routes them to a non-blocking logger.warn — a matching advisory rule was never proven NOT to block, and its message never proven to surface. New variant line, step, acceptance clause (log oracle — the message's contract surface is the server log, not the response) and two negatives, including that fail-closed (#4649) is severity-scoped. Register corrected against source: the sweep's claim that showcase rules are all default-error is FALSE — project.object.ts ships the advisory project_health_progression precisely for this, so the warning leg is stock-drivable; only 'info' (same code branch) lacks a specimen",
           "ref": "#sweep-2026-08-30"
         }
       ]
@@ -2351,10 +2351,10 @@
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
         "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qa_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qa_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qa_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
-        "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts:1456-1457): re-read the comment afterward and confirm its thread_id is UNCHANGED",
+        "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
-        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts:290-294), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution"
+        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution"
       ],
       "acceptance": [
         {
@@ -2390,19 +2390,19 @@
         {
           "clause": "a NEW comment targeting a feeds-DISABLED parent is refused authoritatively: POST /api/v1/data/sys_comment with a qa_nofeeds thread_id answers 403 with code FEEDS_DISABLED, and no sys_comment row lands — the refusal is the oracle, and a silent no-op that returns 2xx while writing nothing is equally a FAIL",
           "oracle": "api",
-          "verify": "the POST returns status 403 and a body whose `code` is exactly \"FEEDS_DISABLED\" (plugin-audit enforceFeedsCapability throws { code: 'FEEDS_DISABLED', status: 403, object } and the REST layer forwards .status verbatim — packages/plugins/plugin-audit/src/audit-writers.ts:1440-1456), AND a follow-up GET /api/v1/data/sys_comment filtered by that thread_id returns ZERO rows. The same call against the feeds-ENABLED control parent must return 2xx, or the 403 is not attributable to the capability gate",
+          "verify": "the POST returns status 403 and a body whose `code` is exactly \"FEEDS_DISABLED\" (plugin-audit enforceFeedsCapability throws { code: 'FEEDS_DISABLED', status: 403, object } and the REST layer forwards.status verbatim — packages/plugins/plugin-audit/src/audit-writers.ts), AND a follow-up GET /api/v1/data/sys_comment filtered by that thread_id returns ZERO rows. The same call against the feeds-ENABLED control parent must return 2xx, or the 403 is not attributable to the capability gate",
           "evidence": "the 403 response body showing the code, the zero-row thread read, and the 2xx control"
         },
         {
           "clause": "RE-THREADING an existing comment onto a feeds-disabled parent is refused identically — the flag is a property of the TARGET OBJECT, not of the verb that made a row point at it (#10170) — and the stored thread_id is UNCHANGED after the refusal",
           "oracle": "api",
-          "verify": "the PATCH re-threading an existing sys_comment onto the qa_nofeeds record answers 403 FEEDS_DISABLED, and a re-read of that sys_comment row shows thread_id still naming the ORIGINAL feeds-enabled parent — same authoritative-rejection rule as the create clause above. Grounded engine-side by the #10170 pin describe '[#10170] enable.feeds is asked on the UPDATE verb too' (packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts:341), which covers the by-id and predicate shapes; this clause is the REST-surface half that pin does not reach. Note the deliberate boundary: an update that carries NO thread_id is not a re-thread and stays allowed, so an ordinary body edit on a grandfathered row must still succeed",
+          "verify": "the PATCH re-threading an existing sys_comment onto the qa_nofeeds record answers 403 FEEDS_DISABLED, and a re-read of that sys_comment row shows thread_id still naming the ORIGINAL feeds-enabled parent — same authoritative-rejection rule as the create clause above. Grounded engine-side by the #10170 pin describe '[#10170] enable.feeds is asked on the UPDATE verb too' (packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts), which covers the by-id and predicate shapes; this clause is the REST-surface half that pin does not reach. Note the deliberate boundary: an update that carries NO thread_id is not a re-thread and stays allowed, so an ordinary body edit on a grandfathered row must still succeed",
           "evidence": "the 403 response body, the unchanged-thread_id re-read, and the body-edit control"
         },
         {
           "clause": "PER-VARIANT: each of the four FeedFilterMode values shows exactly its subset — 'all' the full merged feed, 'comments_only' rows of feed type comment, 'changes_only' rows of feed type field_change, 'tasks_only' rows of feed type task (an EMPTY subset is a correct rendering when the record has no rows of that type — record it, don't fail it) — and switching back to 'all' restores every row",
           "oracle": "dom",
-          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx:164-175 filterItems; the four options offered are getFilterOptions :133-140). The mode TYPE is imported from @objectstack/spec/data (:31), so the control cannot offer a mode the spec does not declare",
+          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare",
           "evidence": "four screenshots + the per-mode row census against the API-read feed"
         },
         {
@@ -2417,7 +2417,7 @@
         "a mention notification delivered to a NON-mentioned user is a FAIL — the recipientId gate is the boundary",
         "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qa_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
         "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
-        "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts:132), so a run that reports the 403 without the 2xx control has not measured the gate",
+        "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts), so a run that reports the 403 without the 2xx control has not measured the gate",
         "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop"
       ],
       "variants": [
@@ -2441,14 +2441,14 @@
         "objectui: packages/plugin-detail/src/{RecordChatterPanel,CommentInput,MentionAutocomplete,extractMentions}.tsx (compose + @mention)",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (mergeFeedRows union-by-id, sys_comment + sys_activity fetch/merge, mentionSuggestions), packages/plugin-detail/src/renderers/recordActivityFeed.ts (activity→feed map)",
         "objectui: packages/collaboration/src/useMentionNotifications.ts (recipient-scoped bell, unreadCount)",
-        "framework: packages/spec/src/data/object.zod.ts:290 (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
-        "framework: packages/plugins/plugin-audit/src/audit-writers.ts:1440-1457 (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts:132 (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts:9 (thread_id is conventionally `{object}:{record_id}`)",
-        "framework: packages/spec/src/data/feed.zod.ts:51-56 (FeedFilterMode, 4 members — pinned above), :57+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts:290-294 (apiMethods ['get','list'] — why the probe cannot direct-POST)",
-        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx:31 (FeedFilterMode imported from the spec), :133-140 (the four filter options), :164-175 (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
+        "framework: packages/spec/src/data/object.zod.ts (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
+        "framework: packages/plugins/plugin-audit/src/audit-writers.ts (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts (thread_id is conventionally `{object}:{record_id}`)",
+        "framework: packages/spec/src/data/feed.zod.ts (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts (apiMethods ['get','list'] — why the probe cannot direct-POST)",
+        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
       ],
       "automated": {
         "kind": "api",
-        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts:341 (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control at :206 and the absent-thread_id boundary at :393) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts:317 (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts:69-76). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin."
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin."
       },
       "history": [
         {
@@ -2466,7 +2466,7 @@
         {
           "revision": 3,
           "date": "2026-08-30",
-          "change": "added the feed-filter axis: the four FeedFilterMode values (spec feed.zod.ts:51) and the #11507 open-vocabulary floor (an author-extended sys_activity.type renders via the generic fallback, never dropped) had no coverage — the item drove the feed's content but never its filter control. Two clauses, a variants list, and the FeedFilterMode enumSource pin (expect 4) so a fifth mode trips VARIANTS STALE. Register corrected against source on two counts: the mode type is NOT hand-local in objectui (RecordActivityTimeline.tsx:31 imports it from @objectstack/spec/data, and the icon/color maps are Total over FeedItemType with the objectui#5969 two-directional pin — no drift-risk caveat warranted), and the unknown-type probe cannot direct-POST sys_activity (apiMethods ['get','list']) — the sanctioned channel is activityMilestones[].type, with the objectui pin as the recorded fallback",
+          "change": "added the feed-filter axis: the four FeedFilterMode values (spec feed.zod.ts) and the #11507 open-vocabulary floor (an author-extended sys_activity.type renders via the generic fallback, never dropped) had no coverage — the item drove the feed's content but never its filter control. Two clauses, a variants list, and the FeedFilterMode enumSource pin (expect 4) so a fifth mode trips VARIANTS STALE. Register corrected against source on two counts: the mode type is NOT hand-local in objectui (RecordActivityTimeline.tsx imports it from @objectstack/spec/data, and the icon/color maps are Total over FeedItemType with the objectui#5969 two-directional pin — no drift-risk caveat warranted), and the unknown-type probe cannot direct-POST sys_activity (apiMethods ['get','list']) — the sanctioned channel is activityMilestones[].type, with the objectui pin as the recorded fallback",
           "ref": "#sweep-2026-08-30"
         }
       ]
@@ -2650,7 +2650,7 @@
       "source": [
         "objectui: packages/app-shell/src/views/CreateViewDialog.tsx (kanban groupByField), packages/plugin-view/src/ManageViewsDialog.tsx (rename/default/pin/delete affordances, read-only suppression)",
         "objectui: packages/app-shell/src/views/ObjectView.tsx (updateView/deleteView wiring), packages/data-objectstack/src/index.ts (createView/updateView/deleteView → meta.saveItem/deleteItem)",
-        "framework: packages/rest/src/rest-route-ledger.ts:94-95 (PUT/DELETE /api/v1/meta/:type/:name)",
+        "framework: packages/rest/src/rest-route-ledger.ts (PUT/DELETE /api/v1/meta/:type/:name)",
         "PENDING-GAPS §C saved-view-management; cross-ref studio-authoring.view-authoring-live (distinct — this is the runtime end-user/admin lifecycle)"
       ],
       "history": [
@@ -3006,7 +3006,7 @@
         "ref": "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts (both self-gate)"
       },
       "source": [
-        "framework: packages/rest/src/rest-route-ledger.ts:124-129 (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId])",
+        "framework: packages/rest/src/rest-route-ledger.ts (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId])",
         "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts",
         "PENDING-GAPS §C import-job-undo-cancel"
       ],
@@ -3042,7 +3042,7 @@
           "the four seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })): showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
-          "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts:321 log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe",
+          "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe",
           "a real running server: hooks fire in the ObjectQL engine on the live /api/v1/data/* route, never on a simulated dispatch"
         ],
         "knownGaps": [
@@ -3065,7 +3065,7 @@
         "CEL condition — total-record `!= null` guard, NOT has() (#4770) — FIXTURE: showcase_warn_over_budget `record.spent != null && record.budget != null && ...`; because `record` is made total over declared fields, `has(record.spent)` is uniformly TRUE even when the field holds null, so only `!= null` keeps `null > null` (which CEL has no overload for) from aborting the expression — an abort #4775 would turn into a REJECTED write",
         "async fire-and-forget (after* ONLY) — FIXTURE: showcase_audit_task_completion + showcase_warn_over_budget (async:true); the wrapper ignores async on before* events (hook-wrappers.ts: fireAndForget = Boolean(meta.async) && isAfterEvent)",
         "retryPolicy {maxRetries,backoffMs} — FIXTURE declares it: showcase_audit_task_completion {maxRetries:3, backoffMs:1000}; observing an actual RETRY needs a transiently-failing scratch body",
-        "capabilities:['log'] (L2 sandbox log capability) — FIXTURE: audit + warn bodies call ctx.log.info/warn wired to the engine logger (body-runner.ts:321)",
+        "capabilities:['log'] (L2 sandbox log capability) — FIXTURE: audit + warn bodies call ctx.log.info/warn wired to the engine logger (body-runner.ts)",
         "onError:'abort' (rollback) — FIXTURE declares it on showcase_normalize_task_title / showcase_stamp_inquiry_defaults; observing the ROLLBACK needs a THROWING before* scratch hook (the fixtures never throw)",
         "onError:'log' (tolerate + continue) — FIXTURE declares it on showcase_audit_task_completion / showcase_warn_over_budget; observing the SUPPRESSION needs a throwing async scratch (an async failure never rolls the triggering write back regardless)",
         "priority ordering (lowest-first, same object+event) — SCRATCH/knownGap: no two showcase hooks share object+event, so register two scratch hooks on one object+event with priorities e.g. 10 and 90 and read the execution order from the log",
@@ -3167,7 +3167,7 @@
         "packages/spec/src/data/hook.zod.ts (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
         "packages/objectql/src/hook-wrappers.ts (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
-        "packages/runtime/src/sandbox/body-runner.ts:321 (log: engineCtx.logger — the ['log'] capability routing that makes the audit/warn lines an observable log oracle)",
+        "packages/runtime/src/sandbox/body-runner.ts (log: engineCtx.logger — the ['log'] capability routing that makes the audit/warn lines an observable log oracle)",
         "packages/spec/liveness/hook.json (object/events/body/priority/async/condition/retryPolicy/timeout/onError all 'live'; label/description 'dead' but kept as docs)",
         "examples/app-showcase/src/data/objects/{task,inquiry,project}.object.ts (task.done boolean + task.title required; inquiry.status select['new' default:true]/source text no-default; project.budget/spent currency + spent_within_budget rule rejecting spent > budget*1.2)",
         "examples/app-showcase/src/data/seed/index.ts (done tasks 'Audit current IA'/'App wireframes'; not-done 'Build homepage'; projects 'Data Platform' 600000/420000 and 'Website Relaunch' 150000/60000)",
@@ -3539,8 +3539,8 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts:174) and an isolated boot — the item authors a scratch object",
-          "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts:85 and semantic-zoo.object.ts:67 — NEITHER carries visibleWhen"
+          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts) and an isolated boot — the item authors a scratch object",
+          "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts and semantic-zoo.object.ts — NEITHER carries visibleWhen"
         ],
         "knownGaps": [
           "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qa_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
@@ -3560,23 +3560,23 @@
         {
           "clause": "authoring accepts the canonical spelling and normalizes it: a bare CEL string on fieldGroups[].visibleWhen parses, and reads back as the { dialect: 'cel', source } Expression envelope; the envelope form is accepted verbatim",
           "oracle": "api",
-          "verify": "PUT + GET round-trip of qa_group_gate shows the normalized envelope (ExpressionInputSchema, packages/spec/src/data/object.zod.ts:1187); pinned by object-strictness-batch20.test.ts:477-503",
+          "verify": "PUT + GET round-trip of qa_group_gate shows the normalized envelope (ExpressionInputSchema, packages/spec/src/data/object.zod.ts); pinned by object-strictness-batch20.test.ts",
           "evidence": "the PUT payload + the GET body's fieldGroups entry"
         },
         {
           "clause": "the retired spelling is refused WITH the prescription: `visibleOn` on a field group rejects at parse (strict object) and the message names `visibleWhen` and states the semantics ('FALSE hides the whole group, header included') — nothing is stored",
           "oracle": "api",
-          "verify": "the 4xx body carries the KEY_GUIDANCE text (object.zod.ts:1155-1158); a meta re-read shows the visibleOn draft did not land",
+          "verify": "the 4xx body carries the KEY_GUIDANCE text (object.zod.ts); a meta re-read shows the visibleOn draft did not land",
           "evidence": "the refusal body + the unchanged re-read"
         },
         {
           "clause": "deriveFieldGroupLayout CARRIES the predicate verbatim onto the derived section, in both shapes real metadata arrives in (bare string and envelope) — grouping stays static layout, evaluation stays the renderer's contract",
           "oracle": "test",
-          "verify": "the visibleWhen-passthrough describe in packages/spec/src/data/field-group-layout.test.ts (from :117) is green; passthrough ruled at field-group-layout.ts:28-33",
+          "verify": "the visibleWhen-passthrough describe in packages/spec/src/data/field-group-layout.test.ts is green; passthrough ruled at field-group-layout.ts",
           "evidence": "test run output"
         },
         {
-          "clause": "⚠️ EXPECTED-FAIL at the sweep pins (objectstack a286411 / objectui 1e14d70): the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At those pins BOTH adapters drop the key between the shared derivation and the section shape — plugin-form/src/fieldGroups.ts:60-67 (deriveFieldGroupSections copies key/label/collapse only) and plugin-detail/src/synth/buildDefaultPageSchema.ts:622-635 (deriveFieldGroupDetailSections likewise) — so an authored predicate is silently INERT in the console: the spec's 'declared = enforced on day one' claim (object.zod.ts:1184) does not hold end-to-end. Record the observed behavior; tick green ONLY on a console build demonstrably carrying the copy (read the adapters at the running build's revision, or observe the gating itself)",
+          "clause": "⚠️ EXPECTED-FAIL at the sweep pins (objectstack a286411 / objectui 1e14d70): the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At those pins BOTH adapters drop the key between the shared derivation and the section shape — plugin-form/src/fieldGroups.ts (deriveFieldGroupSections copies key/label/collapse only) and plugin-detail/src/synth/buildDefaultPageSchema.ts (deriveFieldGroupDetailSections likewise) — so an authored predicate is silently INERT in the console: the spec's 'declared = enforced on day one' claim (object.zod.ts) does not hold end-to-end. Record the observed behavior; tick green ONLY on a console build demonstrably carrying the copy (read the adapters at the running build's revision, or observe the gating itself)",
           "oracle": "dom",
           "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — an unconditionally-rendered section at the pinned revisions is the EXPECTED result and must be recorded as such, not as a pass",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
@@ -3584,14 +3584,14 @@
         {
           "clause": "display-tier boundary (scored only once clause 4's gating actually exists on the running build): hiding a section gates DRAWING and nothing else — a hidden section's member values still submit untouched and its fields skip client-side validation; the server floor is unaffected. This is what separates visibleWhen from requiredWhen: visibility is display-tier, requiredness is enforcement-tier",
           "oracle": "api",
-          "verify": "the pre-filled pro_details member value survives a save made while its section is hidden — byte-identical API re-read. Ruled semantics of the renderer's section-gating contract (objectui components/src/renderers/form/form.tsx:1241 #6236 'visibility decides what is DRAWN and nothing else'; FormSection-twin pins sectionVisibleWhen-6111.test.tsx and tabbedFormSectionPredicate-6237.test.tsx)",
+          "verify": "the pre-filled pro_details member value survives a save made while its section is hidden — byte-identical API re-read. Ruled semantics of the renderer's section-gating contract (objectui components/src/renderers/form/form.tsx #6236 'visibility decides what is DRAWN and nothing else'; FormSection-twin pins sectionVisibleWhen-6111.test.tsx and tabbedFormSectionPredicate-6237.test.tsx)",
           "evidence": "before/after member-field reads across the hidden-section save"
         }
       ],
       "negative": [
         "a visibleOn draft accepted 2xx — or silently stripped — is a FAIL: the tombstone exists to prescribe, not to swallow",
         "a hidden section DROPPING its member values from the submit is a FAIL — visibility gates drawing only; record the display-tier/enforcement-tier boundary in the run record",
-        "a faulting or unknown-field predicate that produces a BLANK form or a crashed detail page is a FAIL. ⚠️ The failure DIRECTION is under-specified at head and must be recorded, not assumed: the spec docblock rules fail-CLOSED ('a faulting predicate — fail-closed — hides', object.zod.ts:1177-1182) while the renderer machinery the section-gating contract lives in documents fail-OPEN with a named diagnostic (objectui TabbedForm.tsx:62 'A broken predicate fails OPEN'; the #6236 divider replicates 'the same fail-open fallbacks'). Capture which the running build does and file the drift — do not tick either direction as the contract",
+        "a faulting or unknown-field predicate that produces a BLANK form or a crashed detail page is a FAIL. ⚠️ The failure DIRECTION is under-specified at head and must be recorded, not assumed: the spec docblock rules fail-CLOSED ('a faulting predicate — fail-closed — hides', object.zod.ts) while the renderer machinery the section-gating contract lives in documents fail-OPEN with a named diagnostic (objectui TabbedForm.tsx 'A broken predicate fails OPEN'; the #6236 divider replicates 'the same fail-open fallbacks'). Capture which the running build does and file the drift — do not tick either direction as the contract",
         "scoring clause 4 from the VIEW-section twin is a FAIL: FormSection.visibleWhen (form-view sections, driven by form-view-gallery on task.view.ts) reaches the renderer through a different authoring surface and different plumbing than the OBJECT-level fieldGroups slot this item exists for"
       ],
       "traps": [
@@ -3600,17 +3600,17 @@
         "automation-input"
       ],
       "source": [
-        "packages/spec/src/data/object.zod.ts:1155-1158 (visibleOn tombstone prescription), :1171-1191 (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
-        "packages/spec/src/data/field-group-layout.ts:28-33 (verbatim passthrough; evaluation ruled the renderer's), field-group-layout.test.ts:117+ and object-strictness-batch20.test.ts:477-503 (the pins)",
-        "objectui: packages/plugin-form/src/fieldGroups.ts:60-67 and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:622-635 — the two adapters that DROP the key at objectui 1e14d70 (clause 4's expected-fail); packages/components/src/renderers/form/form.tsx:1241 (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections would plug into",
-        "examples/app-showcase/src/data/objects/contact.object.ts:85, semantic-zoo.object.ts:67 (stock fieldGroups declarations, none with a predicate)",
+        "packages/spec/src/data/object.zod.ts (visibleOn tombstone prescription), (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
+        "packages/spec/src/data/field-group-layout.ts (verbatim passthrough; evaluation ruled the renderer's), field-group-layout.test.ts+ and object-strictness-batch20.test.ts (the pins)",
+        "objectui: packages/plugin-form/src/fieldGroups.ts and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts — the two adapters that DROP the key at objectui 1e14d70 (clause 4's expected-fail); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections would plug into",
+        "examples/app-showcase/src/data/objects/contact.object.ts, semantic-zoo.object.ts (stock fieldGroups declarations, none with a predicate)",
         "cross-ref: field-level FormField.visibleWhen is form-view-gallery's; view-section FormSection.visibleWhen is NOT this slot — this item is the object-level fieldGroups predicate #13030 re-introduced"
       ],
       "history": [
         {
           "revision": 1,
           "date": "2026-08-30",
-          "change": "initial — 3-angle sweep hit (spec-enums, routes/runtime, docs-claims): fieldGroups[].visibleWhen landed 2026-08-29 (#13030) with no checklist coverage. Authored the spec half as positive clauses (accept+normalize, tombstone prescription, derivation passthrough) and the console half as EXPECTED-FAIL after re-grounding the register against source: the register's renderer citations (ObjectForm.tsx:228/292, sectionFields.ts) are the VIEW-section FormSection.visibleWhen machinery, and at objectui 1e14d70 the two fieldGroups adapters (fieldGroups.ts, buildDefaultPageSchema.ts) drop the key, so the object-level predicate is inert in the console despite the spec's declared-equals-enforced claim",
+          "change": "initial — 3-angle sweep hit (spec-enums, routes/runtime, docs-claims): fieldGroups[].visibleWhen landed 2026-08-29 (#13030) with no checklist coverage. Authored the spec half as positive clauses (accept+normalize, tombstone prescription, derivation passthrough) and the console half as EXPECTED-FAIL after re-grounding the register against source: the register's renderer citations (ObjectForm.tsx/292, sectionFields.ts) are the VIEW-section FormSection.visibleWhen machinery, and at objectui 1e14d70 the two fieldGroups adapters (fieldGroups.ts, buildDefaultPageSchema.ts) drop the key, so the object-level predicate is inert in the console despite the spec's declared-equals-enforced claim",
           "ref": "#sweep-2026-08-30"
         }
       ]
@@ -3630,13 +3630,13 @@
         "app": "showcase",
         "requires": [
           "an isolated dev boot on the memory driver (the stock `os serve` default) + a manage_metadata session — the item authors its own scratch object",
-          "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts:100 only mentions the word in a comment)"
+          "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
           "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qa_unique object; landing a unique field on the field zoo would retire this gap",
           "the SQL-family live leg needs a SQL-datasource boot; without one, score clause 5's SQL half from the pinned suites (sql-driver-8577-tenant-scoped-declared-unique.test.ts drives 409 UNIQUE_VIOLATION over real REST) and record which of the two the verdict rests on",
-          "the per-organization scope leg needs TWO organizations with a colliding value in each — runtime-creatable via the better-auth org endpoints but not stock; record blocked(fixture) live and fall back to the unit pin (memory-unique-constraint.test.ts:229-297)",
-          "the autonumber-collision converge leg is not drivable over plain HTTP (it needs a stale counter planted mid-flight) — unit-pin verdict (memory-unique-constraint.test.ts:102), plus the engine's 'Autonumber collided — re-seeding' warn line if one occurs naturally"
+          "the per-organization scope leg needs TWO organizations with a colliding value in each — runtime-creatable via the better-auth org endpoints but not stock; record blocked(fixture) live and fall back to the unit pin (memory-unique-constraint.test.ts)",
+          "the autonumber-collision converge leg is not drivable over plain HTTP (it needs a stale counter planted mid-flight) — unit-pin verdict (memory-unique-constraint.test.ts), plus the engine's 'Autonumber collided — re-seeding' warn line if one occurs naturally"
         ]
       },
       "steps": [
@@ -3651,37 +3651,37 @@
         {
           "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), message naming object.field and stating 'No record was written', with NO driver prefix — and the row count is unchanged",
           "oracle": "api",
-          "verify": "the refusal body + a post-refusal count; wire identity single-sourced at packages/drivers/driver-memory/src/memory-unique-constraint.ts:92-106 (uniqueViolationError :203-216)",
+          "verify": "the refusal body + a post-refusal count; wire identity single-sourced at packages/drivers/driver-memory/src/memory-unique-constraint.ts (uniqueViolationError)",
           "evidence": "refusal response + before/after counts"
         },
         {
           "clause": "NULLs are NULL-DISTINCT, exactly as under SQL UNIQUE: two rows whose unique field carries no value both land — an optional unique column does not refuse its second row",
           "oracle": "api",
-          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts:70-77; pin :189)",
+          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts; pin)",
           "evidence": "the two creates + the list read"
         },
         {
           "clause": "the update paths are constrained too: an update onto a taken value is refused and the row keeps its old value; a row never collides with ITSELF (an update leaving the unique field alone passes)",
           "oracle": "api",
-          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins memory-unique-constraint.test.ts:135,141)",
+          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins memory-unique-constraint.test.ts,141)",
           "evidence": "both responses + the re-read"
         },
         {
           "clause": "updateMany refuses the WHOLE batch BEFORE mutating anything — a predicate update stamping one value onto two rows leaves zero rows changed, never a half-applied batch",
           "oracle": "api",
-          "verify": "post-refusal re-reads of every matched row are byte-identical to before (memory-driver.ts:611,627-631 'Prepare and CHECK every row before mutating any of them'; pin :155). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
+          "verify": "post-refusal re-reads of every matched row are byte-identical to before (memory-driver.ts,627-631 'Prepare and CHECK every row before mutating any of them'; pin). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
           "evidence": "the refusal + full before/after row reads"
         },
         {
-          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts:1599), answering the same 409 UNIQUE_VIOLATION over REST",
+          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), answering the same 409 UNIQUE_VIOLATION over REST",
           "oracle": "test",
-          "verify": "memory-unique-constraint.test.ts:229-297 (scope legs) + sql-driver-8577-tenant-scoped-declared-unique.test.ts green; live two-org probe only if two organizations are provisioned (knownGaps)",
+          "verify": "memory-unique-constraint.test.ts (scope legs) + sql-driver-8577-tenant-scoped-declared-unique.test.ts green; live two-org probe only if two organizations are provisioned (knownGaps)",
           "evidence": "test output (+ live scope probe where run)"
         },
         {
           "clause": "an autonumber collision CONVERGES instead of landing a duplicate business number: the driver's refusal is recognisable to the engine, which drops the stale counter, re-seeds from the store and re-issues (bounded attempts), so the insert succeeds with a fresh number",
           "oracle": "test",
-          "verify": "memory-unique-constraint.test.ts:102 ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'); engine path createWithAutonumberResync, packages/objectql/src/engine.ts:4488-4531",
+          "verify": "memory-unique-constraint.test.ts ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'); engine path createWithAutonumberResync, packages/objectql/src/engine.ts",
           "evidence": "test output"
         }
       ],
@@ -3700,10 +3700,10 @@
       },
       "source": [
         "packages/drivers/driver-memory/src/memory-unique-constraint.ts (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
-        "packages/drivers/driver-memory/src/memory-driver.ts:611 (updateMany check-before-mutate)",
-        "packages/drivers/driver-sql/src/schema-drift.ts:1599 (uniqueIndexesFromFields, ADR-0120 D1/D3)",
-        "packages/objectql/src/engine.ts:4488 (createWithAutonumberResync — the branch the enforcement makes reachable)",
-        "content/docs/capabilities/data.mdx:42 ('Uniqueness … per-field switches' — the docs claim this item makes testable)"
+        "packages/drivers/driver-memory/src/memory-driver.ts (updateMany check-before-mutate)",
+        "packages/drivers/driver-sql/src/schema-drift.ts (uniqueIndexesFromFields, ADR-0120 D1/D3)",
+        "packages/objectql/src/engine.ts (createWithAutonumberResync — the branch the enforcement makes reachable)",
+        "content/docs/capabilities/data.mdx ('Uniqueness … per-field switches' — the docs claim this item makes testable)"
       ],
       "history": [
         {
@@ -3728,10 +3728,10 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "cascade: showcase_invoice_line.invoice (master_detail, explicit deleteBehavior:'cascade', invoice.object.ts:184) and expense-report lines (expense-report.object.ts:134)",
-          "set_null scalar: showcase_contact.account (optional lookup, default set_null — contact.object.ts:52)",
-          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts:106)",
-          "required-FK escalation: showcase_invoice.account (lookup required:true with DEFAULT deleteBehavior — invoice.object.ts:69-71): deleting an account that invoices reference escalates set_null→restrict on stock seeds"
+          "cascade: showcase_invoice_line.invoice (master_detail, explicit deleteBehavior:'cascade', invoice.object.ts) and expense-report lines (expense-report.object.ts)",
+          "set_null scalar: showcase_contact.account (optional lookup, default set_null — contact.object.ts)",
+          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts)",
+          "required-FK escalation: showcase_invoice.account (lookup required:true with DEFAULT deleteBehavior — invoice.object.ts): deleting an account that invoices reference escalates set_null→restrict on stock seeds"
         ],
         "knownGaps": [
           "no showcase field declares an EXPLICIT deleteBehavior:'restrict' — the stock escalation path (invoice.account) exercises the same DELETE_RESTRICTED refusal but enters it via required+set_null; to drive the authored-restrict arm distinctly, author a scratch child with deleteBehavior:'restrict' (the qa-feeds-disabled PUT pattern) or record the substitution",
@@ -3745,7 +3745,7 @@
         "restrict — parent delete refused 409 DELETE_RESTRICTED, remedy naming deleteBehavior:'cascade'",
         "escalation — required scalar FK + resolved set_null becomes restrict; multi-value narrows per-row to exactly the rows the removal would EMPTY (#9688/#9447)",
         "master_detail + authored set_null — parse-REJECTED (#9689); a row arriving around the parse seam coerces to cascade with the loud [cascade-delete] error log",
-        "NOT enumSource-pinnable: deleteBehavior is an inline z.enum(['set_null','cascade','restrict']) inside FieldSchema (field.zod.ts:1071) with no named export — 3 members hand-pinned here; a fourth member will not trip a pin and must be caught by re-reading the enum"
+        "NOT enumSource-pinnable: deleteBehavior is an inline z.enum(['set_null','cascade','restrict']) inside FieldSchema (field.zod.ts) with no named export — 3 members hand-pinned here; a fourth member will not trip a pin and must be caught by re-reading the enum"
       ],
       "steps": [
         "boot showcase isolated; admin API token; work on rows created BY THIS RUN, not the seeds (the cascade probes destroy their parents)",
@@ -3760,37 +3760,37 @@
         {
           "clause": "set_null (the lookup default): deleting the referenced parent clears the child's scalar FK to null — the child row survives, the delete succeeds",
           "oracle": "api",
-          "verify": "post-delete re-read of the contact shows account: null (defaults ruled at packages/objectql/src/engine.ts:11377-11390)",
+          "verify": "post-delete re-read of the contact shows account: null (defaults ruled at packages/objectql/src/engine.ts)",
           "evidence": "the delete response + the child re-read"
         },
         {
           "clause": "multi-value set_null removes the deleted MEMBER and writes the REMAINDER — never [] while live members remain, never the untouched original",
           "oracle": "api",
-          "verify": "f_lookups re-read shows exactly the surviving account id (#9438; empty-array-as-no-link semantics engine.ts:2054-2064)",
+          "verify": "f_lookups re-read shows exactly the surviving account id (#9438; empty-array-as-no-link semantics engine.ts)",
           "evidence": "before/after f_lookups reads"
         },
         {
           "clause": "master_detail cascades by default and via explicit 'cascade': deleting the invoice deletes its lines through the PUBLIC delete path (children's own hooks/cascades fire), and the lines are authoritatively gone",
           "oracle": "api",
-          "verify": "post-delete line list returns 0 rows (recursion ruled at engine.ts:11722-11729 'Recurse via the public delete')",
+          "verify": "post-delete line list returns 0 rows (recursion ruled at engine.ts 'Recurse via the public delete')",
           "evidence": "the empty line read"
         },
         {
           "clause": "restrict refuses with the actionable envelope: 409, code DELETE_RESTRICTED, dependentObject named UNCONDITIONALLY, developerMessage carrying the deleteBehavior:'cascade' remedy — and dependentCount present only when the caller's own identity would see the rows (#12166)",
           "oracle": "api",
-          "verify": "the refusal body against engine.ts:11703-11720 (code/status/dependentObject/developerMessage; dependentCountIsDisclosable gate). As the admin the count should be disclosed; a lesser persona's refusal must name the object but MAY omit the count — record which shape was observed",
+          "verify": "the refusal body against engine.ts (code/status/dependentObject/developerMessage; dependentCountIsDisclosable gate). As the admin the count should be disclosed; a lesser persona's refusal must name the object but MAY omit the count — record which shape was observed",
           "evidence": "the refusal envelope"
         },
         {
           "clause": "required scalar FK escalates: an invoice's required account lookup (resolved set_null) refuses the account delete as DELETE_RESTRICTED naming the PARENT delete — never the child's misleading '<field> is required' 400 (a validation error about an object the caller never wrote)",
           "oracle": "api",
-          "verify": "DELETE of a referenced account answers 409 DELETE_RESTRICTED (escalation engine.ts:11424-11480: requiredSetNull && !multiValued → restrict; multi-value deferred and narrowed per-row to sets the removal would empty, #9688/#9447)",
+          "verify": "DELETE of a referenced account answers 409 DELETE_RESTRICTED (escalation engine.ts: requiredSetNull && !multiValued → restrict; multi-value deferred and narrowed per-row to sets the removal would empty, #9688/#9447)",
           "evidence": "the refusal + a control delete of an UNreferenced account succeeding"
         },
         {
           "clause": "the master_detail/set_null contradiction is closed at BOTH seams: FieldSchema parse-rejects the authored combination (#9689), and a row that reaches the engine around the parse seam is coerced to cascade with the loud [cascade-delete] error log naming the field, the coercion and the three remedies",
           "oracle": "test",
-          "verify": "a PUT authoring deleteBehavior:'set_null' on a master_detail field is refused at parse; the seam-side coercion + log is pinned by engine-cascade-delete.test.ts (log text at engine.ts:11410-11423)",
+          "verify": "a PUT authoring deleteBehavior:'set_null' on a master_detail field is refused at parse; the seam-side coercion + log is pinned by engine-cascade-delete.test.ts (log text at engine.ts)",
           "evidence": "the parse refusal + the pin's output"
         }
       ],
@@ -3798,7 +3798,7 @@
         "a restrict/escalation refusal surfacing as the child's 'field is required' 400 is a FAIL — the #9688 deferral exists precisely so the caller is told DELETE_RESTRICTED about the record they asked to delete",
         "a multi-value member removal that clears the WHOLE slot (or leaves the dead id in place) is a FAIL",
         "a cascade that leaves orphan children readable — or deletes them through a driver shortcut that skips their own hooks — is a FAIL",
-        "a dependentCount of 0 on a refusal is a FAIL (there is at least one dependent or the branch is unreachable — the envelope omits the key instead of lying, engine.ts:11713-11718)"
+        "a dependentCount of 0 on a refusal is a FAIL (there is at least one dependent or the branch is unreachable — the envelope omits the key instead of lying, engine.ts)"
       ],
       "traps": [
         "destructive-in-place",
@@ -3809,9 +3809,9 @@
         "ref": "packages/objectql/src/engine-cascade-delete.test.ts (+ engine-cascade-delete-atomic.test.ts, engine-cascade-delete-multivalue-probe.test.ts) — defaults, coercion+log, escalation, per-row multi-value narrowing"
       },
       "source": [
-        "packages/spec/src/data/field.zod.ts:1071 (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
-        "packages/objectql/src/engine.ts:11377-11480 (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), :11655-11729 (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts:69-71,184; contact.object.ts:52; field-zoo.object.ts:106; expense-report.object.ts:134 (the four stock arms)"
+        "packages/spec/src/data/field.zod.ts (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
+        "packages/objectql/src/engine.ts (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts,184; contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
         {
@@ -3856,11 +3856,11 @@
         {
           "clause": "the enable.clone gate holds BOTH ways: an explicit enable.clone:false object refuses with 403 code CLONE_DISABLED naming the object, and the default-on control (showcase_account, flag absent) answers 201 — absent block/flag means enabled, only explicit false blocks",
           "oracle": "api",
-          "verify": "the qa_noclone refusal ({code:'CLONE_DISABLED', status:403} thrown at packages/metadata-protocol/src/protocol.ts:9655-9662) + the account control 201; no qa_noclone row count change",
+          "verify": "the qa_noclone refusal ({code:'CLONE_DISABLED', status:403} thrown at packages/metadata-protocol/src/protocol.ts) + the account control 201; no qa_noclone row count change",
           "evidence": "both responses + the unchanged count"
         },
         {
-          "clause": "overrides WIN over copied business values — the override name lands on the clone — but cannot FORGE protected columns: stripReadonlyForInsert runs AFTER Object.assign(data, overrides) (protocol.ts:9690-9699), so a readonly/engine-owned key smuggled through overrides is dropped and re-derived, same as #3043's carried-over case",
+          "clause": "overrides WIN over copied business values — the override name lands on the clone — but cannot FORGE protected columns: stripReadonlyForInsert runs AFTER Object.assign(data, overrides) (protocol.ts), so a readonly/engine-owned key smuggled through overrides is dropped and re-derived, same as #3043's carried-over case",
           "oracle": "api",
           "verify": "the clone's re-read shows the override name AND the forged key re-derived (defaultValue / fresh audit stamp), not the smuggled value",
           "evidence": "the overrides payload + the clone re-read diff"
@@ -3868,11 +3868,11 @@
         {
           "clause": "the 201 body is BARE — res.status(201).json(result) with no envelope — and matches CloneDataResponseSchema: {object, id (new ≠ sourceId), sourceId, record} (#11924)",
           "oracle": "api",
-          "verify": "top-level keys of the raw response against the rest-route-ledger row (packages/rest/src/rest-route-ledger.ts:283-285) — no {data:…}/{result:…} wrapper",
+          "verify": "top-level keys of the raw response against the rest-route-ledger row (packages/rest/src/rest-route-ledger.ts) — no {data:…}/{result:…} wrapper",
           "evidence": "the raw 201 body"
         },
         {
-          "clause": "internal fields never ride the 201: omitInternalFieldsFromWriteResponse runs on the insert result (#7823, protocol.ts:9701-9707) — the write-response strip that guards the clone body the same as createData's",
+          "clause": "internal fields never ride the 201: omitInternalFieldsFromWriteResponse runs on the insert result (#7823, protocol.ts) — the write-response strip that guards the clone body the same as createData's",
           "oracle": "test",
           "verify": "metadata-protocol's search-clone-schema-conformance.test.ts (parses the real cloneData producer) + the #7823 strip suite green; live probe only where an internal-carrying object exists (knownGaps)",
           "evidence": "test output (+ live body scan where run)"
@@ -3880,7 +3880,7 @@
         {
           "clause": "the not-found refusals are the shared data-plane ones: an unknown id answers 404 RECORD_NOT_FOUND (also the RLS-invisible shape — crud-roundtrip clause 8 drives that side); an unregistered object answers the shared assertObjectRegistered refusal (#3770), not a bespoke clone error",
           "oracle": "api",
-          "verify": "both refusal envelopes; protocol.ts:9648-9652",
+          "verify": "both refusal envelopes; protocol.ts",
           "evidence": "the two refusals"
         }
       ],
@@ -3888,19 +3888,19 @@
         "a clone of an enable.clone:false object succeeding is a FAIL; equally, a DEFAULT object refusing (misreading absent-as-disabled) is a FAIL — the gate blocks on explicit false only",
         "an overrides payload minting a readonly value (an already-approved clone) is a FAIL — #3043's exact shape, entering through the overrides door instead of the copy",
         "an enveloped 201 body is a FAIL — clients bind the bare shape (#11924)",
-        "NOTE for the run record, not a clause: 'one-click record cloning' (content/docs/capabilities/integrations.mdx:22) has NO objectui caller of data.clone at objectui 1e14d70 — the surface is API-only today; the Studio switch that AUTHORS enable.clone does exist (objectui app-shell/src/views/studio-design/ObjectSettingsPanel.tsx:118). Docs-drift row is the orchestrator's to file"
+        "NOTE for the run record, not a clause: 'one-click record cloning' (content/docs/capabilities/integrations.mdx) has NO objectui caller of data.clone at objectui 1e14d70 — the surface is API-only today; the Studio switch that AUTHORS enable.clone does exist (objectui app-shell/src/views/studio-design/ObjectSettingsPanel.tsx). Docs-drift row is the orchestrator's to file"
       ],
       "traps": [
         "wrong-persona"
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/metadata-protocol — search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest — search-clone-route-schema-conformance.test.ts (drives the live mount); named on the ledger row rest-route-ledger.ts:283-285"
+        "ref": "packages/metadata-protocol — search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest — search-clone-route-schema-conformance.test.ts (drives the live mount); named on the ledger row rest-route-ledger.ts"
       },
       "source": [
-        "packages/metadata-protocol/src/protocol.ts:9648-9712 (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS :1391 + system/autonumber/formula/summary strip, overrides, stripReadonlyForInsert #3043, omitInternalFieldsFromWriteResponse #7823)",
-        "packages/rest/src/rest-route-ledger.ts:283-285 (POST /api/v1/data/:object/:id/clone, client data.clone, bare-201 note #11924)",
-        "objectui: packages/app-shell/src/views/studio-design/ObjectSettingsPanel.tsx:118 (Studio authors the enable.clone opt-out switch)",
+        "packages/metadata-protocol/src/protocol.ts (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, stripReadonlyForInsert #3043, omitInternalFieldsFromWriteResponse #7823)",
+        "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone, bare-201 note #11924)",
+        "objectui: packages/app-shell/src/views/studio-design/ObjectSettingsPanel.tsx (Studio authors the enable.clone opt-out switch)",
         "cross-ref: the clone HAPPY path + engine-column re-derivation + RLS-gated 404 are crud-roundtrip clauses 7-8 — this item drives only the contract edges that item does not, and deliberately re-states none of its oracles"
       ],
       "history": [
@@ -3926,8 +3926,8 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_account: enable.trackHistory:true (account.object.ts:49) + per-field trackHistory on industry/status (:55,:78) — the BOTH-halves fixture",
-          "showcase_task: per-field trackHistory on status/priority (task.object.ts:49,60) with NO object-level enable block — the natural negative for the tab/op gating"
+          "showcase_account: enable.trackHistory:true (account.object.ts) + per-field trackHistory on industry/status — the BOTH-halves fixture",
+          "showcase_task: per-field trackHistory on status/priority (task.object.ts,60) with NO object-level enable block — the natural negative for the tab/op gating"
         ],
         "knownGaps": [
           "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on"
@@ -3944,7 +3944,7 @@
         {
           "clause": "a tracked-field edit lands the DECLARATIVE activity: the update's sys_activity row carries the §5b rendered summary 'Industry: <old label> → <new label>' — field LABEL and select OPTION labels, localized through the write-time translator, not raw keys/values",
           "oracle": "api",
-          "verify": "the sys_activity read shows the old→new summary with display values (renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts:478-560; #7230 label + #7289 option-value localization); the timeline renders the same row",
+          "verify": "the sys_activity read shows the old→new summary with display values (renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts; #7230 label + #7289 option-value localization); the timeline renders the same row",
           "evidence": "the sys_activity row + a timeline screenshot"
         },
         {
@@ -3956,24 +3956,24 @@
         {
           "clause": "the History TAB gates on OBJECT-level enable.trackHistory, both ways: the account detail renders the tab (flag true) and the task detail does NOT (no enable block — per-field flags alone do not summon it)",
           "oracle": "dom",
-          "verify": "screenshot both detail pages after settle; gating ruled at objectui RecordDetailView.tsx:1216-1231 (trackHistory must be explicitly true)",
+          "verify": "screenshot both detail pages after settle; gating ruled at objectui RecordDetailView.tsx (trackHistory must be explicitly true)",
           "evidence": "both screenshots"
         },
         {
           "clause": "the derived `history` API operation follows get ∧ enable.trackHistory, both ways: present in showcase_account's effective operation vocabulary, absent from showcase_task's",
           "oracle": "api",
-          "verify": "GET /api/v1/auth/me/permissions apiOperations (or a 405 allowed array) — derivation ruled at packages/spec/src/data/api-derivation.ts:142 ({ all: ['get'], flag: trackHistory })",
+          "verify": "GET /api/v1/auth/me/permissions apiOperations (or a 405 allowed array) — derivation ruled at packages/spec/src/data/api-derivation.ts ({ all: ['get'], flag: trackHistory })",
           "evidence": "the two operation lists"
         },
         {
           "clause": "a tracked REFERENCE field renders TITLES, not raw ids, on both sides of the change — and the title reads are PLANNED (zero reads unless a tracked reference actually changed, the #6977 read-budget discipline)",
           "oracle": "test",
-          "verify": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts:304-320 green (planTrackedLookupReads audit-writers.ts:454-476, resolution :895-935); live only via a scratch tracked lookup (knownGaps)",
+          "verify": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts green (planTrackedLookupReads audit-writers.ts, resolution); live only via a scratch tracked lookup (knownGaps)",
           "evidence": "test output (+ live summary where authored)"
         }
       ],
       "negative": [
-        "an untracked edit producing an old→new diff row is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts:204 family note)",
+        "an untracked edit producing an old→new diff row is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note)",
         "a task detail rendering a History tab is a FAIL — per-field flags without the object-level opt-in must not summon it",
         "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that)",
         "cross-ref guard: do NOT re-score crud-roundtrip clause 5 (History-tab display quality on the create/update pair) here — this item owns the tracked/untracked boundary and the two gating directions, that one owns the tab's rendering contract"
@@ -3987,10 +3987,10 @@
         "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (tab display contract, cited by crud-roundtrip)"
       },
       "source": [
-        "packages/plugins/plugin-audit/src/audit-writers.ts:454-476 (planTrackedLookupReads), :478-560 (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), :895-935 (zero-reads-by-default plan)",
-        "packages/spec/src/data/object.zod.ts:48 (history derives from get ∧ trackHistory), :198-205 (opt-in default false); packages/spec/src/data/api-derivation.ts:142",
-        "objectui: packages/app-shell/src/views/RecordDetailView.tsx:1216-1231 (History tab three-precondition gate)",
-        "examples/app-showcase/src/data/objects/account.object.ts:43-49 (the deliberate both-halves fixture + its comment ruling the tab gate), task.object.ts:49,60"
+        "packages/plugins/plugin-audit/src/audit-writers.ts (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
+        "packages/spec/src/data/object.zod.ts (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
+        "objectui: packages/app-shell/src/views/RecordDetailView.tsx (History tab three-precondition gate)",
+        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), task.object.ts,60"
       ],
       "history": [
         {
@@ -4015,12 +4015,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped mapping showcase_inquiry_feed (examples/app-showcase/src/data/mappings/index.ts:20-39) — drives `none` (transform absent → direct copy) and `map` (Channel valueMap) on stock fixtures",
+          "the shipped mapping showcase_inquiry_feed (examples/app-showcase/src/data/mappings/index.ts) — drives `none` (transform absent → direct copy) and `map` (Channel valueMap) on stock fixtures",
           "scratch mappings for the remaining transforms, authored over the metadata channel (PUT /api/v1/meta/mapping/<name>) against showcase_inquiry or a scratch object"
         ],
         "knownGaps": [
           "only none + map are stock-drivable (the shipped mapping); constant / lookup / split / join / javascript each need a scratch mapping authored inline — score those legs blocked(fixture) if metadata authoring is unavailable on the boot under test",
-          "the unknown-transform runtime refusal (import-mapping.ts:154-159) guards rows that arrive AROUND the parse seam — spec parse rejects an unknown value at authoring, so it is not HTTP-drivable end-to-end; it lives in the negative list, not a clause"
+          "the unknown-transform runtime refusal (import-mapping.ts) guards rows that arrive AROUND the parse seam — spec parse rejects an unknown value at authoring, so it is not HTTP-drivable end-to-end; it lives in the negative list, not a clause"
         ]
       },
       "variants": [
@@ -4042,17 +4042,17 @@
         {
           "clause": "PER-VARIANT: each supported transform lands exactly its documented output on the created rows — none copies; constant writes params.value ignoring the source; map translates valueMap hits AND passes an unmapped raw value through unchanged; split distributes trimmed parts across its target list; join concatenates with the separator dropping empty members",
           "oracle": "api",
-          "verify": "per-variant row re-reads against the switch arms in packages/rest/src/import-mapping.ts:112-152 — one observed conversion per variant, none inferred from a sibling",
+          "verify": "per-variant row re-reads against the switch arms in packages/rest/src/import-mapping.ts — one observed conversion per variant, none inferred from a sibling",
           "evidence": "the vector files + per-variant row reads"
         },
         {
           "clause": "javascript is declared-but-refused, LOUDLY and BEFORE any row lands: a mapping carrying transform 'javascript' answers 400 code UNSUPPORTED_TRANSFORM whose message names the missing server-side sandbox and framework#2611 — and zero rows are created",
           "oracle": "api",
-          "verify": "the refusal (import-mapping.ts:96-101 — checked per-entry before applyMappingToRows runs) + an unchanged target count; the spec deliberately still admits the value (TransformType), so the DOOR is the contract",
+          "verify": "the refusal (import-mapping.ts — checked per-entry before applyMappingToRows runs) + an unchanged target count; the spec deliberately still admits the value (TransformType), so the DOOR is the contract",
           "evidence": "the 400 body + before/after counts"
         },
         {
-          "clause": "lookup copies the raw value for DOWNSTREAM resolution: the transform itself moves the source value verbatim (import-mapping.ts:124-127 'lookup values resolve downstream via metaMap'), and the created row's reference field holds a resolved real id, not the foreign display value",
+          "clause": "lookup copies the raw value for DOWNSTREAM resolution: the transform itself moves the source value verbatim (import-mapping.ts 'lookup values resolve downstream via metaMap'), and the created row's reference field holds a resolved real id, not the foreign display value",
           "oracle": "api",
           "verify": "the created row's FK re-read; a vector naming a nonexistent target must NOT land a dangling reference (the pipeline's own reference gate)",
           "evidence": "the row read + the dangling-vector refusal/report"
@@ -4060,14 +4060,14 @@
         {
           "clause": "the format guard is a named refusal: a JSON payload through a csv-declared mapping answers 400 MAPPING_FORMAT_MISMATCH naming both formats; an xlsx payload through the same mapping is accepted (csv-declared applies to tabular xlsx too)",
           "oracle": "api",
-          "verify": "both responses against import-mapping.ts:85-94",
+          "verify": "both responses against import-mapping.ts",
           "evidence": "the refusal + the xlsx acceptance"
         }
       ],
       "negative": [
         "a javascript-transform import that silently SKIPS the column (or worse, executes anything) is a FAIL — the refusal must be loud, total and row-free",
         "a map transform DROPPING an unmapped value (instead of passing it through unchanged) is a FAIL — the passthrough is the documented arm",
-        "an unknown transform string reaching applyMappingToRows answers 400 UNSUPPORTED_TRANSFORM 'unknown transform' (import-mapping.ts:154-159) — around-the-parse-seam guard, not HTTP-drivable end-to-end (spec parse rejects it at authoring); if ever observed answering 200, that is a FAIL",
+        "an unknown transform string reaching applyMappingToRows answers 400 UNSUPPORTED_TRANSFORM 'unknown transform' (import-mapping.ts) — around-the-parse-seam guard, not HTTP-drivable end-to-end (spec parse rejects it at authoring); if ever observed answering 200, that is a FAIL",
         "cross-ref guard: header mapping, idempotent re-import and the unknown-mappingName refusal are named-import-mapping's clauses — do not re-score them here"
       ],
       "traps": [
@@ -4080,9 +4080,9 @@
         "expect": 7
       },
       "source": [
-        "packages/spec/src/data/mapping.zod.ts:157-165 (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
-        "packages/rest/src/import-mapping.ts:85-101 (format guard + the javascript refusal naming #2611), :112-159 (the per-transform switch + around-the-seam unknown-transform refusal)",
-        "examples/app-showcase/src/data/mappings/index.ts:20-39 (showcase_inquiry_feed — the stock none+map carrier)",
+        "packages/spec/src/data/mapping.zod.ts (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
+        "packages/rest/src/import-mapping.ts (format guard + the javascript refusal naming #2611), (the per-transform switch + around-the-seam unknown-transform refusal)",
+        "examples/app-showcase/src/data/mappings/index.ts (showcase_inquiry_feed — the stock none+map carrier)",
         "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)"
       ],
       "history": [

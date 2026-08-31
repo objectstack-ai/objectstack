@@ -12,7 +12,7 @@ value a matrix item was pinned against (`enumSource` freshness ratchet).
 
 ⚠️ Those ratchets are **NOT wired into per-PR CI** — by maintainer decision they run on a
 periodic **manual** cadence (see this dir's [README.md](./README.md) "Operating cadence",
-and the recorded note at `.github/workflows/lint.yml:426`). So they do **not** catch drift
+and the recorded note at `.github/workflows/lint.yml`). So they do **not** catch drift
 on the PR that causes it; they catch it at the **next manual run**. Do not read a green
 ledger as "drift is already gated" — between runs, an unmapped kind or a grown enum sits
 undetected on `main`, which is precisely why a sweep must re-derive from source rather
