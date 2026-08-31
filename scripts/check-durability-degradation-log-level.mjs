@@ -1375,23 +1375,41 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // independently and risk multiplicatively.
 //
 // ⚠️ AND A RESOLUTION HAZARD THE GUARD CANNOT SEE, found while verifying the
-// six rather than looked for. `functionBodies` is keyed by BARE NAME and is
-// LAST-WINS. `protocol.ts` declares `lookup` three times (bodies at 6657, 6717,
-// 7129), and the hop in seams 1 and 2 resolves the call at 6674 to the
-// declaration at 7129 — not the one lexically enclosing it.
-// `contradictsWrapperResolution` admits it and is right to: the receiver is a
-// bare identifier and the arity matches, because the three declarations are
-// near-copies of one another. Both seams are real anyway — all three `lookup`
-// bodies read `sys_metadata` through `this.engine.findOne` — so nothing is
-// miscounted today. But the verdict is right by luck, and each additional hop
-// multiplies the number of names that must be unique for it to stay right.
-// That is the strongest argument on this tree for leaving the bound alone, and
-// it is an argument no seam COUNT can make.
+// six rather than looked for — CLOSED by #13474, and kept here because the
+// argument it supplied below moved with it. `functionBodies` WAS keyed by bare
+// name and LAST-WINS. `protocol.ts` declares `lookup` three times — three
+// near-identical single-parameter async arrows; anchor on that text, the line
+// numbers in the original filing had already drifted by ~131 lines when it was
+// dispatched — and the hop in seams 1 and 2 resolved the call inside
+// `findDraft` to the THIRD of them, not the one lexically enclosing it.
+// `contradictsWrapperResolution` admits that call and is right to: the receiver
+// is a bare identifier and the arity matches, because the three declarations
+// are near-copies of one another. Both seams were real anyway — all three
+// `lookup` bodies read `sys_metadata` through `this.engine.findOne` — so
+// nothing was miscounted. But the verdict was right by LUCK. #13474 replaced
+// the flat index with resolution through the call site's lexical scope chain,
+// which refuses a name it cannot settle rather than answering with the last one
+// in the file; see `indexFunctionBodies` for what it deliberately does NOT
+// narrow.
+//
+// WHAT THAT DID TO THE DEPTH ARGUMENT — stated here rather than left to be
+// rediscovered from a paragraph that no longer holds. The hazard no longer
+// grows with depth in its strong form: a longer chain no longer needs every
+// name in it to be UNIQUE, only to be resolvable at its own call site. What
+// survives is narrower and still real — a name declared exactly ONCE in the
+// file is still answered by name alone from any call site, so a longer chain
+// still crosses more of those. Measured with the new resolver in place:
+// `--list` and `--depth-cost` are byte-identical to the last-wins output, at
+// the shipped bound and at every probed depth 1..8, so closing the hazard moved
+// no number in this table.
 //
 // ⛔ THE BOUND IS NOT RAISED, and the reason is measurement rather than
 // caution. Three of them: admitting the six changes no finding, only a number;
 // that number is quoted by five other cards and #8901's restart conjunct (b)
-// reserves the census re-run; and the resolution hazard above grows with depth.
+// reserves the census re-run; and the resolution hazard above grew with depth
+// — ⚠️ that third reason is the one #13474 weakened, to the narrower form
+// stated just above. The first two are untouched. Raising the bound remains a
+// maintainer's decision about the census, never a consequence of this fix.
 // What lands instead is what the filing asked for and a comment cannot give —
 // the price is now RE-DERIVABLE on demand (`--depth-cost`, which prints the
 // admitted seams by name) and the bound is PINNED FROM ABOVE in the self-test,
