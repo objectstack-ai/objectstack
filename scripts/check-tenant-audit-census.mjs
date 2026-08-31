@@ -127,19 +127,49 @@ export const PROSE_COUNTS = [
     expected: (c) => c.declaredObjects,
   },
   {
+    name: 'sites whose options argument is unreadable (limits section)',
+    pattern: /\*\*(\d+) of the \d+ sites are spelled that way\*\*/,
+    expected: (c) => c.totals.tenantContextUnreadable,
+  },
+  {
+    name: 'the population that unreadable share is of',
+    pattern: /\*\*\d+ of the (\d+) sites are spelled that way\*\*/,
+    expected: (c) => c.totals.writeCallSites,
+  },
+  {
+    name: 'decidably-not-elevated is now zero',
+    pattern: /decidably-not-elevated sites is now \*\*(\d+)\*\*/,
+    expected: (c) => c.totals.nonElevatedContext,
+  },
+  {
+    name: 'sites the over-claim published as carrying no context',
+    pattern: /published \*\*(\d+) sites "carrying no tenant context at all"\*\*/,
+    expected: (c) => c.totals.provablyNoTenantContext + c.totals.tenantContextUnreadable,
+  },
+  {
+    name: 'of those, the ones that actually said so',
+    pattern: /when (\d+) said so and \d+ were simply unread/,
+    expected: (c) => c.totals.provablyNoTenantContext,
+  },
+  {
+    name: 'of those, the ones that were merely unread',
+    pattern: /when \d+ said so and (\d+) were simply unread/,
+    expected: (c) => c.totals.tenantContextUnreadable,
+  },
+  {
     name: 'deviation row: write call sites',
     pattern: /\| 175 write call sites \|[^|]*\| \*\*(\d+)\*\* \|/,
     expected: (c) => c.totals.writeCallSites,
   },
   {
-    name: 'deviation row: without tenant context, tenancy-enabled',
-    pattern: /\| 24 carrying no tenant context \|[^|]*\| \*\*(\d+)\*\* \(decidably tenancy-enabled\)/,
-    expected: (c) => c.totals.tenancyEnabledWithoutTenantContext,
+    name: 'deviation row: provable and tenancy-enabled',
+    pattern: /\| 24 carrying no tenant context \|[^|]*\| \*\*(\d+)\*\* provable and tenancy-enabled/,
+    expected: (c) => c.totals.tenancyEnabledProvablyNoContext,
   },
   {
-    name: 'deviation row: without tenant context, all sites',
-    pattern: /\(decidably tenancy-enabled\); \*\*(\d+)\*\* across all sites \|/,
-    expected: (c) => c.totals.withoutTenantContext,
+    name: 'deviation row: unreadable and tenancy-enabled',
+    pattern: /provable and tenancy-enabled; \*\*(\d+)\*\* more whose options argument is unreadable/,
+    expected: (c) => c.totals.tenancyEnabledContextUnreadable,
   },
   {
     name: 'deviation row: statically decidable',
@@ -172,14 +202,29 @@ export const PROSE_COUNTS = [
     expected: (c) => c.totals.elevationUndecidable,
   },
   {
+    name: 'the elevated share restated in prose',
+    pattern: /This census reads (\d+) of \d+ \(\d+%\) as decidably elevated/,
+    expected: (c) => c.totals.elevatedContext,
+  },
+  {
+    name: 'the population that elevated share is of',
+    pattern: /This census reads \d+ of (\d+) \(\d+%\) as decidably elevated/,
+    expected: (c) => c.totals.writeCallSites,
+  },
+  {
     name: 'the figure downstream cards should cite',
     pattern: /Cite `(\d+) \/ \d+`/,
-    expected: (c) => c.totals.tenancyEnabledWithoutTenantContext,
+    expected: (c) => c.totals.tenancyEnabledProvablyNoContext,
   },
   {
     name: 'the population that figure is of',
     pattern: /Cite `\d+ \/ (\d+)`/,
     expected: (c) => c.totals.writeCallSites,
+  },
+  {
+    name: 'the further sites that are neither in nor out',
+    pattern: /\*\*(\d+) further sites\*\* have an options argument this cannot read/,
+    expected: (c) => c.totals.tenancyEnabledContextUnreadable,
   },
 ];
 
@@ -339,7 +384,7 @@ export function selfTest() {
 
   // ── B PROSE ────────────────────────────────────────────────────────────────
   t('a stale hand-written number in the prose is a finding',
-    check(page.replace('Across 297 declared objects', 'Across 296 declared objects'))
+    check(page.replace(`Across ${census.declaredObjects} declared objects`, `Across ${census.declaredObjects - 1} declared objects`))
       .some((p) => p.startsWith('[prose-count]')));
 
   t('a stale number in the DEVIATION table is a finding',
@@ -352,12 +397,12 @@ export function selfTest() {
   // is not a page that passes. Rewording out of scope must red, or every prose
   // rule can be retired by deleting a sentence.
   t('a prose claim reworded out of the gate\'s reach is a finding, not a pass',
-    check(page.replace('Across 297 declared objects', 'Across many declared objects'))
+    check(page.replace(`Across ${census.declaredObjects} declared objects`, 'Across many declared objects'))
       .some((p) => p.startsWith('[prose-pattern-dead]')));
 
   t('the "cite this figure" line is held to the census',
     check(page.replace(
-      `Cite \`${census.totals.tenancyEnabledWithoutTenantContext} / ${census.totals.writeCallSites}\``,
+      `Cite \`${census.totals.tenancyEnabledProvablyNoContext} / ${census.totals.writeCallSites}\``,
       `Cite \`24 / ${census.totals.writeCallSites}\``,
     )).some((p) => p.startsWith('[prose-count]')));
 
@@ -409,8 +454,9 @@ function main(argv) {
   const t = census.totals;
   console.log(
     `✓ check-tenant-audit-census: OK -- ${t.writeCallSites} write call sites certified `
-    + `(${t.staticallyDecidableObjectName} decidable, ${t.tenancyEnabledWithoutTenantContext} `
-    + `tenancy-enabled with no tenant context), ${PROSE_COUNTS.length} prose figures held to the census.`,
+    + `(${t.staticallyDecidableObjectName} decidable; ${t.tenancyEnabledProvablyNoContext} tenancy-enabled `
+    + `sites PROVABLY carry no tenant context, ${t.tenancyEnabledContextUnreadable} more unreadable), `
+    + `${PROSE_COUNTS.length} prose figures held to the census.`,
   );
   return 0;
 }

@@ -93,17 +93,49 @@ targets either.
 A site whose object name is an inline literal or a local `const` is statically
 decidable. A site whose name is a parameter or a field — `ql.insert(object, …)`
 inside a shared seed helper, `this.objectName` on a per-object service — is not,
-and no amount of AST work makes it so: the object is chosen at run time. Those are
-reported as `undecidable` rather than assumed either way.
+and no amount of AST work makes it so: the object is chosen at run time. Those
+are reported as `undecidable` rather than assumed either way.
 
-The same holds for elevation. A context spelled inline as `{ isSystem: true }`, or
-a local `const` holding one, is decidable; a context arriving from a helper call
-or a parameter is not.
+The same holds twice over for the context. An options argument spelled as a
+literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
+forwarding shim cannot, and **67 of the 215 sites are spelled that way**. A
+context resolved from an inline literal or a local `const` can be tested for
+`isSystem`; one arriving from a helper call cannot.
 
-⇒ **A third of this population is undecidable, and that is reported rather than
-smoothed over.** A census that quietly guessed on those sites would publish a
-number in the one direction this page cannot survive — claiming completeness while
-short — and a gate seeded from it would then hold the page to it.
+⇒ **A third of this population is undecidable in one dimension or another, and
+that is reported rather than smoothed over.** A census that quietly guessed on
+those sites would publish a number in the one direction this page cannot survive
+— claiming completeness while short — and a gate seeded from it would then hold
+the page to it.
+
+## ⚠️ Two over-claims this instrument made, and what they cost
+
+Both were found by the drift gate firing on this page's own artifact, and both
+are recorded here rather than quietly corrected, because the numbers they moved
+were published first.
+
+**The elevation classifier read a spread as a denial.** It walked an object
+literal's named properties looking for `isSystem` and returned "not elevated"
+when the loop ended — so `{ ...SYSTEM_CTX }` was scored **decidably NOT
+elevated** while every `SYSTEM_CTX` in the tree is `{ isSystem: true, … }`. It
+also never unwrapped `as const`, so a bare `context: SYSTEM_CTX` read as
+undecidable. Fixing both moved **51 sites' verdicts**: 45 from undecidable to
+elevated, and 6 from *decidably not elevated* to *elevated* — an inversion, on a
+security-relevant classification. The count of decidably-not-elevated sites is
+now **0**: nothing on this surface threads a context that provably lacks the flag.
+
+**"No tenant context" counted sites it had not read.** An options argument the
+walker could not parse was folded into the same bucket as one it had read and
+found empty. That published **84 sites "carrying no tenant context at all"**
+when 17 said so and 67 were simply unread — an over-claim in the *alarming*
+direction, on the very figure this page tells other cards to cite. `carries` is
+now three-valued, and an unreadable argument can never contribute to the
+provable count.
+
+⭐ Both are the same shape as the failure this artefact exists for, wearing
+opposite hats: one scored an unread thing as *nothing to report*, the other
+scored an unread thing as *a finding*. `node scripts/tenant-audit-census.mjs
+--self-test` pins all of it — 18 cases, 6 of which red against the old reading.
 
 ## ⭐ Deviations from the carried figures, untrimmed
 
@@ -113,10 +145,10 @@ reproduce them. Where it disagrees, it disagrees on the page:
 
 | carried figure | where it survives | this census |
 | :--- | :--- | ---: |
-| 175 write call sites | quoted in the merged changeset | **214** |
-| 24 carrying no tenant context | quoted in the merged changeset | **41** (decidably tenancy-enabled); **83** across all sites |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **143 of 214** decidable, **71** undecidable |
-| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 46 decidably elevated, 8 decidably not, 77 undecidable |
+| 175 write call sites | quoted in the merged changeset | **215** |
+| 24 carrying no tenant context | quoted in the merged changeset | **9** provable and tenancy-enabled; **32** more whose options argument is unreadable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **143 of 215** decidable, **72** undecidable |
+| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 97 decidably elevated, 0 decidably not, 101 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
 **The differences are not reconciled, and deliberately so.** The old census's
@@ -132,10 +164,16 @@ through an erased (`any`) receiver, and the 37 that name their object through a
 would report a smaller number and would not say so.
 
 The fourth row is the one worth flagging to anyone citing it. **The 135 / 77%
-figure has no surviving corroboration anywhere in the tree**, and this census does
-not reproduce it: 46 sites are decidably elevated, and 77 have an elevation that
-is a run-time fact a static reading cannot settle. Cite `41 / 214` — both halves
-re-derivable here — rather than any share of the population that was silenced.
+figure has no surviving corroboration anywhere in the tree.** This census reads
+97 of 215 (45%) as decidably elevated, with 101 more whose elevation is a
+run-time fact — so the claim is neither confirmed nor refuted, and the honest
+answer is that a static reading cannot settle it.
+
+⇒ **Cite `9 / 215`, and say what it is**: the sites whose options argument was
+READ and holds no tenant context, against a decidably tenancy-enabled object.
+That is the control's provable yield surface. ⛔ Do not cite it as "the sites
+without tenant context" — **32 further sites** have an options argument this
+cannot read, and they are neither in nor out.
 
 {/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}
 
@@ -143,27 +181,30 @@ re-derivable here — rather than any share of the population that was silenced.
 
 | what | count |
 | :--- | ---: |
-| write call sites on the application surface | **214** |
+| write call sites on the application surface | **215** |
 | …whose object name is statically decidable | 143 |
-| …whose object name is chosen at run time | 71 |
+| …whose object name is chosen at run time | 72 |
 | …against an object with tenancy ENABLED | 143 |
 | …against an object that declares tenancy off | 0 |
-| carrying NO tenant context at all | **83** |
-| …of those, against a decidably tenancy-enabled object | **41** |
-| threading a decidably ELEVATED (`isSystem`) context | 46 |
-| threading a context that is decidably NOT elevated | 8 |
-| threading a context whose elevation is a run-time fact | 77 |
+| threading a tenant context | 131 |
+| PROVABLY carrying none (options read, no context key) | **17** |
+| …of those, against a decidably tenancy-enabled object | **9** |
+| options argument UNREADABLE — may or may not carry one | 67 |
+| …of those, against a decidably tenancy-enabled object | 32 |
+| threading a decidably ELEVATED (`isSystem`) context | 97 |
+| threading a context that is decidably NOT elevated | 0 |
+| threading a context whose elevation is a run-time fact | 101 |
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 169 |
+| receiver carried a readable engine type | 170 |
 | receiver erased, placed by the object NAME | 19 |
 | receiver erased, placed by an `object: string` PARAMETER | 15 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 11 |
 
 | object name spelled inline | 106 |
 | object name spelled through a `const` | 37 |
-| object name is an `object: string` parameter | 18 |
+| object name is an `object: string` parameter | 19 |
 | object name is some other run-time expression | 53 |
 
 Scanned 534 tracked non-test sources under `packages/services/` and

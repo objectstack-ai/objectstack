@@ -540,29 +540,43 @@ export function declaredObjects(root = ROOT) {
  * What execution context, if any, this write call threads -- and whether that
  * context is ELEVATED.
  *
- * Both halves matter, and they answer different questions about the same guard
- * chain. `auditMissingTenant` exits early on a present `options.tenantId`
- * (the engine fills it from `execCtx.tenantId`), and separately the engine sets
- * `bypassTenantAudit` for every `execCtx.isSystem` write -- a guard that sits
- * BEFORE the deployment-posture gate. So:
+ * ## ⛔ Three answers, because "I could not read it" is not "there is none"
  *
- *   - `carries: false`  -- the site threads nothing. This is the population the
- *     control exists to surface.
- *   - `carries: true, system: true` -- the site threads an ELEVATED context. It
- *     is scoped by decision, and it is silenced by the `bypassTenantAudit` arm
- *     rather than by carrying a tenant.
- *   - `carries: true, system: 'undecidable'` -- a context arrives from a helper
- *     call or a parameter, and whether it is elevated is a run-time fact. Said
- *     rather than guessed.
+ * `carries` is `true` / `false` / `'undecidable'`, and the third value is
+ * load-bearing. The first edition had two, and folded an unreadable options
+ * argument -- `engine.update(object, data, options)` inside a forwarding shim,
+ * `{ ...opts }`, a variable -- into `false`. That published **84 sites
+ * "carrying NO tenant context at all"** when only 17 of them said so; the other
+ * 67 were arguments the walker could not read.
+ *
+ * ⭐ That is an over-claim in the ALARMING direction, on the one figure this page
+ * tells other cards to cite. It is the same failure this whole artefact exists
+ * to stop, wearing the opposite hat: not a population under-counted into
+ * silence, but an unknown published as a finding. A number that cannot tell
+ * "provably unscoped" from "unread" is not evidence of anything.
+ *
+ * So:
+ *   - `false`        -- the options argument was READ and holds no context: an
+ *                       object literal with no `context` / `tenantId` key, or no
+ *                       options argument at all. This is the control's real
+ *                       yield surface.
+ *   - `'undecidable'` -- an options argument this cannot read. It may carry a
+ *                       context; a static reading cannot say.
+ *   - `true`         -- a `context` or `tenantId` key is there.
+ *
+ * A spread inside an otherwise readable literal makes the answer undecidable for
+ * the same reason it does in {@link elevationOf}: the spread may carry the key
+ * the literal never names.
  */
 export function tenantContextOf(node, sf, decls) {
   const args = node.arguments.slice(1);
   if (args.length === 0) return { carries: false, how: 'no-options-argument', system: false };
-  let sawOpaque = null;
+  let opaque = null;
+  let spread = null;
   for (const a of args) {
     if (ts.isObjectLiteralExpression(a)) {
       for (const prop of a.properties) {
-        if (ts.isSpreadAssignment(prop)) sawOpaque = `spread ${prop.expression.getText(sf)}`;
+        if (ts.isSpreadAssignment(prop)) { spread = prop.expression.getText(sf).replace(/\s+/g, ' ').slice(0, 40); continue; }
         const key = prop.name && (ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)) ? prop.name.text : null;
         if (key === 'context') {
           const value = ts.isPropertyAssignment(prop) ? prop.initializer : null;
@@ -572,10 +586,11 @@ export function tenantContextOf(node, sf, decls) {
       }
     } else if (!ts.isStringLiteralLike(a) && !ts.isNumericLiteral(a)
                && a.kind !== ts.SyntaxKind.TrueKeyword && a.kind !== ts.SyntaxKind.FalseKeyword) {
-      sawOpaque = a.getText(sf).replace(/\s+/g, ' ').slice(0, 60);
+      opaque = a.getText(sf).replace(/\s+/g, ' ').slice(0, 60);
     }
   }
-  if (sawOpaque) return { carries: false, how: 'opaque-options', opaque: sawOpaque, system: false };
+  if (opaque) return { carries: 'undecidable', how: 'options-argument-unreadable', opaque, system: 'undecidable' };
+  if (spread) return { carries: 'undecidable', how: 'options-spread-unreadable', opaque: spread, system: 'undecidable' };
   return { carries: false, how: 'no-context-key', system: false };
 }
 
@@ -915,8 +930,11 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
       objectNameRuntime: sites.filter((s) => s.objectNameKind === 'runtime').length,
       tenancyEnabled: tenancyEnabled.length,
       tenancyDisabled: sites.filter((s) => s.tenancy === 'disabled').length,
-      withoutTenantContext: sites.filter((s) => !s.carriesTenantContext).length,
-      tenancyEnabledWithoutTenantContext: tenancyEnabled.filter((s) => !s.carriesTenantContext).length,
+      provablyNoTenantContext: sites.filter((s) => s.carriesTenantContext === false).length,
+      tenantContextUnreadable: sites.filter((s) => s.carriesTenantContext === 'undecidable').length,
+      carriesTenantContext: sites.filter((s) => s.carriesTenantContext === true).length,
+      tenancyEnabledProvablyNoContext: tenancyEnabled.filter((s) => s.carriesTenantContext === false).length,
+      tenancyEnabledContextUnreadable: tenancyEnabled.filter((s) => s.carriesTenantContext === 'undecidable').length,
       placedByObjectName: sites.filter((s) => s.placedBy === 'object-name').length,
       placedByObjectNameParameter: sites.filter((s) => s.placedBy === 'object-name-parameter').length,
       placedByLedger: sites.filter((s) => s.placedBy === 'ledger').length,
@@ -970,11 +988,12 @@ export const END_MARKER = '{/* END GENERATED: tenant-audit-census */}';
 function aggregate(census) {
   const groups = new Map();
   for (const site of census.sites) {
-    const posture = site.carriesTenantContext
+    const posture = site.carriesTenantContext === true
       ? (site.elevatedContext === true ? 'elevated'
         : site.elevatedContext === false ? 'tenant-scoped'
         : 'context, elevation undecidable')
-      : 'NONE';
+      : site.carriesTenantContext === false ? 'PROVABLY NONE'
+      : 'options unreadable';
     const key = JSON.stringify([site.file, site.verb, site.objectName, site.tenancy, posture]);
     groups.set(key, (groups.get(key) ?? 0) + 1);
   }
@@ -997,8 +1016,11 @@ export function renderGeneratedRegion(census) {
   out.push(`| …whose object name is chosen at run time | ${t.undecidableObjectName} |`);
   out.push(`| …against an object with tenancy ENABLED | ${t.tenancyEnabled} |`);
   out.push(`| …against an object that declares tenancy off | ${t.tenancyDisabled} |`);
-  out.push(`| carrying NO tenant context at all | **${t.withoutTenantContext}** |`);
-  out.push(`| …of those, against a decidably tenancy-enabled object | **${t.tenancyEnabledWithoutTenantContext}** |`);
+  out.push(`| threading a tenant context | ${t.carriesTenantContext} |`);
+  out.push(`| PROVABLY carrying none (options read, no context key) | **${t.provablyNoTenantContext}** |`);
+  out.push(`| …of those, against a decidably tenancy-enabled object | **${t.tenancyEnabledProvablyNoContext}** |`);
+  out.push(`| options argument UNREADABLE — may or may not carry one | ${t.tenantContextUnreadable} |`);
+  out.push(`| …of those, against a decidably tenancy-enabled object | ${t.tenancyEnabledContextUnreadable} |`);
   out.push(`| threading a decidably ELEVATED (\`isSystem\`) context | ${t.elevatedContext} |`);
   out.push(`| threading a context that is decidably NOT elevated | ${t.nonElevatedContext} |`);
   out.push(`| threading a context whose elevation is a run-time fact | ${t.elevationUndecidable} |`);
@@ -1073,8 +1095,11 @@ export function renderCountsFile(census) {
   out.push(`| Object name chosen at run time | ${t.undecidableObjectName} |`);
   out.push(`| Against a tenancy-enabled object | ${t.tenancyEnabled} |`);
   out.push(`| Against an object declaring tenancy off | ${t.tenancyDisabled} |`);
-  out.push(`| Carrying no tenant context | ${t.withoutTenantContext} |`);
-  out.push(`| …and decidably tenancy-enabled | ${t.tenancyEnabledWithoutTenantContext} |`);
+  out.push(`| Threading a tenant context | ${t.carriesTenantContext} |`);
+  out.push(`| Provably carrying none | ${t.provablyNoTenantContext} |`);
+  out.push(`| …and decidably tenancy-enabled | ${t.tenancyEnabledProvablyNoContext} |`);
+  out.push(`| Options argument unreadable | ${t.tenantContextUnreadable} |`);
+  out.push(`| …and decidably tenancy-enabled | ${t.tenancyEnabledContextUnreadable} |`);
   out.push(`| Threading a decidably elevated context | ${t.elevatedContext} |`);
   out.push(`| Threading a decidably non-elevated context | ${t.nonElevatedContext} |`);
   out.push(`| Threading a context of undecidable elevation | ${t.elevationUndecidable} |`);
@@ -1184,6 +1209,41 @@ export function selfTest() {
   t('an options object with no context key carries no context',
     classify(call('{ raw: true }')), 'NO-CONTEXT');
 
+  // ── the three-valued `carries`, whose middle value was the second over-claim ──
+  const carries = (opts) => {
+    const src = `declare const e: any;\ne.insert('o', {}, ${opts});\n`;
+    const sf = parseSourceFile('selftest.ts', src);
+    const decls = declaredTypesIn(sf);
+    let out = 'NO-CALL';
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) out = String(tenantContextOf(node, sf, decls).carries);
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out;
+  };
+  t('an UNREADABLE options argument is undecidable, never "carries no context"',
+    carries('opts'), 'undecidable');
+  t('an options literal carrying only a SPREAD is undecidable',
+    carries('{ ...opts }'), 'undecidable');
+  t('a READ options literal with no context key provably carries none',
+    carries('{ raw: true }'), 'false');
+  t('no options argument at all provably carries none',
+    (() => {
+      const sf = parseSourceFile('selftest.ts', "declare const e: any;\ne.insert('o', {});\n");
+      const decls = declaredTypesIn(sf);
+      let out = 'NO-CALL';
+      const visit = (n) => {
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+            && WRITE_VERBS.includes(n.expression.name.text)) out = String(tenantContextOf(n, sf, decls).carries);
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+      return out;
+    })(), 'false');
+  t('a context key still reads as carried', carries('{ context: ctx }'), 'true');
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
   if (failed.length > 0) {
@@ -1192,7 +1252,8 @@ export function selfTest() {
   }
   console.log(
     `✓ tenant-audit-census self-test: ${cases.length} cases pass (an \`as const\` context, an `
-    + 'elevated SPREAD, an unresolvable spread refusing to answer `false`, and the ordinary verdicts).',
+    + 'elevated SPREAD, an unresolvable spread refusing to answer `false`, an unreadable '
+    + 'options argument refusing to answer "carries no context", and the ordinary verdicts).',
   );
   return 0;
 }
@@ -1224,7 +1285,8 @@ function main(argv) {
       `  object name decidable ${t.staticallyDecidableObjectName} · undecidable ${t.undecidableObjectName}`,
       `    inline literal ${t.objectNameInline} · const ${t.objectNameConst} · name parameter ${t.objectNameParameter} · other runtime ${t.objectNameRuntime}`,
       `  tenancy enabled ${t.tenancyEnabled} · declared off ${t.tenancyDisabled}`,
-      `  no tenant context ${t.withoutTenantContext} (tenancy-enabled: ${t.tenancyEnabledWithoutTenantContext})`,
+      `  tenant context: carried ${t.carriesTenantContext} · provably absent ${t.provablyNoTenantContext} · unreadable ${t.tenantContextUnreadable}`,
+      `    provably absent AND tenancy-enabled ${t.tenancyEnabledProvablyNoContext} · unreadable AND tenancy-enabled ${t.tenancyEnabledContextUnreadable}`,
       `  threads a context: elevated ${t.elevatedContext} · not elevated ${t.nonElevatedContext} · undecidable ${t.elevationUndecidable}`,
       `  untyped receivers placed: by object name ${t.placedByObjectName} · by name parameter ${t.placedByObjectNameParameter} · by ledger ${t.placedByLedger}`,
       `  non-engine calls subtracted ${c.nonEngineCalls} · unresolved receivers ${c.unresolved.length}`,
