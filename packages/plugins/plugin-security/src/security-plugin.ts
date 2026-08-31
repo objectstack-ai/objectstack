@@ -612,6 +612,22 @@ interface SecurityReportSink {
  * ASSIGNS `ctx.logger` over this field, above both of its early bail-outs
  * (#10706), so a degraded boot reports through the host too.
  */
+/**
+ * [#13419 执行要点 3] The stable event name stamped on every position-name-fold
+ * report — the structured half of {@link SecurityPlugin.reportNameFoldCollisions},
+ * so an operator can grep one token for every ungoverned same-name grant.
+ *
+ * Deliberately NOT exported from this package. The maintainer ruling this
+ * serves permits a warning and nothing more; adding a published symbol would
+ * widen the surface a slice that changes no resolution result has no business
+ * widening. Its pin asserts the literal rather than importing it, which is what
+ * makes a silent rename fail.
+ *
+ * snake_case per the precedent beside it (`platform_owner_wall_bypass`): this
+ * is a data value, not an error code (ADR-0112 governs those).
+ */
+const POSITION_NAME_FOLD_EVENT = 'position_name_fold_grant';
+
 const CONSOLE_SECURITY_SINK: SecurityReportSink = Object.freeze({
   warn: (...a: any[]) => { console.warn(...a); },
   error: (...a: any[]) => { console.error(...a); },
@@ -970,6 +986,20 @@ export class SecurityPlugin implements Plugin {
    * and for why `warn` is the member that is guaranteed (#9754 / #10556 (a)).
    */
   private logger: SecurityReportSink = CONSOLE_SECURITY_SINK;
+
+  /**
+   * [#13419 执行要点 3, warning half] Position names already reported by
+   * {@link reportNameFoldCollision}, so the warning is LOUD ONCE rather than
+   * once per request.
+   *
+   * Deduplication is what keeps it loud. This resolution runs on every request
+   * whose context misses {@link permissionSetMemo}, so an undeduplicated warn
+   * emits per request forever; that is the volume operators build a filter for,
+   * and a filtered warning is a silent one. The set is per plugin INSTANCE, so
+   * a restart re-reports — the condition is a deployment fact, and a fact worth
+   * saying is worth saying again on the next boot.
+   */
+  private readonly nameFoldWarned = new Set<string>();
 
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
@@ -4681,9 +4711,14 @@ export class SecurityPlugin implements Plugin {
     // declaring an `isDefault` set REPLACED `member_default` here, so every
     // member of that app lost the platform floor (and with it every built-in
     // Account destination) the moment the app declared a posture of its own.
+    // [#13419] Recorded, not merely pushed: a name granted by the BASELINE is in
+    // force whether or not the position-name fold exists, so it is not evidence
+    // of the fold and must not be warned about below.
+    const baselineApplied: string[] = [];
     if (!isAgent && context?.userId) {
       for (const name of baseline) {
         if (!requested.includes(name)) requested.push(name);
+        baselineApplied.push(name);
       }
     }
     let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
@@ -4693,6 +4728,9 @@ export class SecurityPlugin implements Plugin {
       this.dbLoaderForContext(context),
       { logger: this.logger },
     );
+    // [#13419 执行要点 3] Report — never alter — a grant that exists ONLY because
+    // this method folded a POSITION name into the permission-set request above.
+    this.reportNameFoldCollisions(positions, explicitPermissionSets, baselineApplied, permissionSets);
     // Post-resolution fallback — closes the fail-open hole where a populated
     // `positions` array maps to no permission set yet (no sys_position binding),
     // which would otherwise skip RLS entirely and expose every tenant's data.
@@ -4712,6 +4750,94 @@ export class SecurityPlugin implements Plugin {
       );
     }
     return permissionSets;
+  }
+
+  /**
+   * [#13419 执行要点 3, warning half] Report a permission-set name that collides
+   * with a POSITION name and has NO junction row — the ungoverned half of the
+   * position→set binding, said out loud.
+   *
+   * ## What is being reported
+   *
+   * {@link resolvePermissionSetsForContextUnmemoized} builds its request as
+   * `[...positions, ...explicitPermissionSets]`. That fold means a position
+   * called `sales_rep` resolves a permission set called `sales_rep` — with no
+   * `sys_position_permission_set` row, no audit line, and nothing declaring
+   * that it happens. The maintainer ruling (2026-08-31, 「同意」) makes the
+   * junction table the one governed channel and retires the fold; the fold's
+   * DELETION is not this method (see the boundary note below), so until it
+   * lands the grant is at least no longer silent.
+   *
+   * ## The predicate, and why each clause is there
+   *
+   * A position name `P` is reported when ALL of:
+   *
+   *   1. a permission set named `P` actually resolved — a position whose name
+   *      matches nothing grants nothing, and the seven inert positions
+   *      (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `guest`,
+   *      and app-showcase's `finance` / `legal`) are all of that kind. ⛔ A
+   *      false positive on a built-in identity is the most expensive failure
+   *      this warning has, and this clause is what prevents it;
+   *   2. `P` was NOT already requested through the governed channel. Junction
+   *      rows arrive as permission-set NAMES in `context.permissions`
+   *      (`resolve-authz-context.ts` §6b pushes `ps.name`), as do directly
+   *      assigned sets. Either way the grant does not depend on the fold, so
+   *      there is nothing ungoverned to report;
+   *   3. `P` is not one of the baseline names folded in just above — those are
+   *      in force for every authenticated caller regardless of the fold.
+   *
+   * ⚠️ Clause 2 is about the pair `(position P, set P)` SPECIFICALLY. A
+   * position bound to some OTHER set is still folded onto its own name: the
+   * #13419 census measured `sales_manager` bound to `crm_sales_user` and
+   * folding onto the same-named set anyway. Testing "is this position bound to
+   * anything?" would report neither of the two real name-folds in the repo
+   * while looking complete.
+   *
+   * ## Boundary (#13419 slice 2)
+   *
+   * ⛔ Purely additive. The resolution result is READ, never rewritten — 要点 5
+   * of the ruling: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」, and a
+   * warning is the permitted half. ⛔ Deleting the fold is NOT this change: the
+   * vendored HotCRM artifact carries that app's permission sets but not its
+   * position roster, so HotCRM's own same-name folds are NOT MEASURED rather
+   * than zero, and deleting the fold would silently revoke them.
+   */
+  private reportNameFoldCollisions(
+    positions: unknown,
+    explicitPermissionSets: unknown,
+    baselineApplied: string[],
+    resolved: PermissionSet[],
+  ): void {
+    if (!Array.isArray(positions) || positions.length === 0) return;
+    const governed = new Set<string>(
+      (Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []).filter(
+        (n): n is string => typeof n === 'string',
+      ),
+    );
+    for (const name of baselineApplied) governed.add(name);
+    const resolvedNames = new Set<string>(
+      resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'),
+    );
+    for (const position of positions) {
+      if (typeof position !== 'string' || position.length === 0) continue;
+      if (!resolvedNames.has(position)) continue;
+      if (governed.has(position)) continue;
+      if (this.nameFoldWarned.has(position)) continue;
+      this.nameFoldWarned.add(position);
+      this.logger.warn?.(
+        `[security/#13419] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
+          `because a POSITION of the same name resolved by name — there is no ` +
+          `sys_position_permission_set row binding them. This grant is in force and ungoverned: ` +
+          `it appears in no junction table an operator can inspect. Bind it explicitly ` +
+          `(sys_position_permission_set: position '${position}' -> permission set '${position}') ` +
+          `or rename one of the two.`,
+        {
+          event: POSITION_NAME_FOLD_EVENT,
+          position,
+          permissionSet: position,
+        },
+      );
+    }
   }
 
   /**
