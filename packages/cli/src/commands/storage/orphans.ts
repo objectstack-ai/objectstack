@@ -12,6 +12,7 @@ import {
   createTimer,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -106,7 +107,7 @@ export default class StorageOrphans extends Command {
       });
     } catch (error: any) {
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         this.exit(1);
       }
       printError(error.message || String(error));
@@ -178,7 +179,7 @@ export default class StorageOrphans extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         this.exit(1);
       }
       printError(error.message || String(error));

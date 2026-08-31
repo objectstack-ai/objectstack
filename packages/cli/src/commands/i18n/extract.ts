@@ -15,6 +15,7 @@ import {
   createTimer,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../../utils/format.js';
 import {
   extractTranslations,
@@ -371,7 +372,7 @@ export default class I18nExtract extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error.message }, 0, { compact: true });
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
       console.log('');

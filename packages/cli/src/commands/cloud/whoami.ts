@@ -7,7 +7,7 @@
  */
 
 import { Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError, emitJson, isExitSignal } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printError, emitJson, isExitSignal, errorCodeFields } from '../../utils/format.js';
 import { tryReadCloudConfig } from '../../utils/cloud-config.js';
 
 export default class CloudWhoami extends Command {
@@ -72,7 +72,7 @@ export default class CloudWhoami extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ success: false, error: error.message });
+        await emitJson({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
       printError(error.message || String(error));

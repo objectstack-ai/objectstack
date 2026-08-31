@@ -13,6 +13,7 @@ import {
   createTimer,
   emitJson,
   isExitSignal,
+  errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
@@ -166,7 +167,7 @@ export default class MigrateFilesToReferences extends Command {
         extraPlugins: await buildDataMigrationPlugins({ storage: true }),
       });
     } catch (error: any) {
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
       return;
@@ -295,7 +296,7 @@ export default class MigrateFilesToReferences extends Command {
       if (!result.gatePassed) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
-      if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
     } finally {

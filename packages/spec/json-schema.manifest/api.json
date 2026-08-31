@@ -208,6 +208,8 @@
     "api/GetUiViewRequest",
     "api/GetUiViewResponse",
     "api/HandlerStatus",
+    "api/HistoryMetaItemRequest",
+    "api/HistoryMetaItemResponse",
     "api/HttpFindQueryParams",
     "api/HttpMethod",
     "api/IdRequest",
