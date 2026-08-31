@@ -3893,12 +3893,33 @@ function selfTest() {
   // A REAL migration prescription, in the shape the live changesets carry. Its
   // presence is the whole point: this is the ONE category exempt from the
   // prescription refusal, and a fixture without one would prove nothing.
+  //
+  // ⛔ The table must demonstrate the fixture's OWN subject -- `queryDataset`, the
+  // symbol `TSO_REF` names and `TSO_BASE_CLIENT` declares. Two independent reasons,
+  // either sufficient on its own:
+  //
+  //   1. A table rewriting some OTHER method prescribes a migration this fixture's
+  //      diff does not ship. TSO-G1 would still pass, for a reason unrelated to
+  //      what it claims to pin.
+  //   2. This is a STRING LITERAL, and `scripts/js-comment-mask.mjs` blanks
+  //      comments only -- never literals. So a call-shaped example naming one of
+  //      the four methods `packages/client/src/envelope-caller-census.test.ts`
+  //      enumerates (`analytics.query` / `analytics.meta` / `analytics.explain`,
+  //      `automation.trigger`) is counted THERE as a real SDK call site, and that
+  //      census's ledger goes red on a count it has no row for. `queryDataset` is
+  //      deliberately outside those four and that census's section 4 pins its
+  //      absence.
+  //
+  // The direction below is the honest one for this method: its route is served
+  // BARE by `@objectstack/rest`, so there is no envelope to read through --
+  // `.data.rows` is a spelling `Promise< any >` used to permit and the annotation
+  // now refuses, which is precisely a prescription the COMPILER delivers.
   const TSO_BODY =
     'fix(client): bind the in-repo `return res.json()` methods, whose published type was `Promise< any >`\n\n' +
     '**BREAKING**: `any` is assignable to everything, so a consumer can stop compiling.\n\n' +
     '## Migration\n\n' +
     '| you wrote | write instead |\n| --- | --- |\n' +
-    '| `(await client.analytics.query(q)).rows` | `(await client.analytics.query(q)).data.rows` |\n';
+    '| `(await client.analytics.queryDataset(q)).data.rows` | `(await client.analytics.queryDataset(q)).rows` |\n';
   const TSO_CS = (inParens) =>
     CS({ bumps: [['@objectstack/client', 'minor']], body: `${TSO_BODY}\n<!-- adr-0087: not-required (${inParens}) ${TSO_WHY} -->\n` });
   const TSO_REF = 'packages/client/src/index.ts#queryDataset';
