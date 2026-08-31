@@ -19,6 +19,17 @@ import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ConnectionEngineLike } from '../datasource-connection-service.js';
 
 describe('ConnectionEngineLike is the contract, not a fork of it (#12010)', () => {
+  it('unregisterDriver answers a boolean — a no-op is distinguishable from a removal', () => {
+    // #13578. `void` would have made "evicted it" and "there was nothing to
+    // evict" indistinguishable to an idempotent caller (a retried DELETE, a
+    // teardown sweep after a partial one), which is the same
+    // exit-0-and-did-nothing shape the eviction fix exists to remove.
+    type Answer = ReturnType<NonNullable<ConnectionEngineLike['unregisterDriver']>>;
+    const exact: [Answer] extends [boolean] ? ([boolean] extends [Answer] ? 'exact' : never) : never =
+      'exact';
+    expect(exact).toBe('exact');
+  });
+
   it('the real engine contract is assignable to this view', () => {
     // The defect this card measured, stated as a compile: with
     // `registerDriver?: (driver: unknown, …)` the engine was NOT assignable
@@ -63,10 +74,19 @@ describe('ConnectionEngineLike is the contract, not a fork of it (#12010)', () =
     expect(exact).toBe('exact');
   });
 
-  it('declares exactly the seven derived members, each identical to its contract member', () => {
+  it('declares exactly the eight derived members, each identical to its contract member', () => {
+    // #13578 added `unregisterDriver`, taking the roster from seven to eight.
+    // The roster is deliberately restated rather than derived from the seam:
+    // its whole purpose is that widening the view is a decision someone writes
+    // down here, not a side effect of editing the type. The eighth member is
+    // `registerDriver`'s removal counterpart — the service needs it because
+    // `disconnect()` has to evict the driver it just closed, and a datasource
+    // deleted from the admin door was otherwise left in the engine registry
+    // where the readiness probe kept reporting it.
     type Declared = keyof ConnectionEngineLike;
     type Expected =
       | 'registerDriver'
+      | 'unregisterDriver'
       | 'registerDatasourceDef'
       | 'getDriverByName'
       | 'syncObjectSchema'
@@ -89,6 +109,7 @@ describe('ConnectionEngineLike is the contract, not a fork of it (#12010)', () =
         : never;
     const members: { [K in Expected]: Same<K> } = {
       registerDriver: 'same',
+      unregisterDriver: 'same',
       registerDatasourceDef: 'same',
       getDriverByName: 'same',
       syncObjectSchema: 'same',
@@ -98,7 +119,7 @@ describe('ConnectionEngineLike is the contract, not a fork of it (#12010)', () =
     };
 
     expect(roster).toBe('exact');
-    expect(Object.keys(members)).toHaveLength(7);
+    expect(Object.keys(members)).toHaveLength(8);
   });
 
   it('every member stays OPTIONAL — the graceful-degradation seam', () => {
