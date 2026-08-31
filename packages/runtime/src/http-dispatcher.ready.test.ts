@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { HttpDispatcher } from './http-dispatcher.js';
+import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
 
 function kernel(state: string, dataService?: unknown): any {
   return {
@@ -9,6 +9,34 @@ function kernel(state: string, dataService?: unknown): any {
   };
 }
 const ctx: any = {};
+
+/**
+ * `HttpDispatcherResult.response` is OPTIONAL, so every read of it is a
+ * `possibly undefined` in a type-checked program — and this package's test
+ * layer IS type-checked, by `check:type-check-debt --re-measure` against a
+ * shrink-only ledger, even though `pnpm test` never sees it. That asymmetry is
+ * exactly how 19 fresh errors got in here behind a green `pnpm --filter
+ * @objectstack/runtime typecheck`: the package's own tsconfig excludes every
+ * `.test.ts` file, so the program that reported zero had never read this one.
+ *
+ * Narrow once, and narrow LOUDLY — the shape is lifted from the #8287 suite in
+ * `http-dispatcher.keys.test.ts`, deliberately rather than invented again.
+ * `expect(res.response).toBeDefined()` would satisfy a reader and narrow
+ * nothing (vitest's matchers are not assertion signatures), and a `!` would
+ * silence the compiler while leaving the failure to surface as `undefined is
+ * not an object` three lines later. A probe that answered no response at all is
+ * a different defect from one that answered the wrong status; this keeps them
+ * distinguishable.
+ *
+ * Applied to the WHOLE file, not just the #13408 suite: the reads are identical
+ * in kind, the repair is one call each, and leaving the older ones would bank a
+ * green while knowingly holding fixable errors in a file already open.
+ */
+function responseOf(res: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
+  const { response } = res;
+  if (!response) throw new Error('GET /ready answered no response at all');
+  return response;
+}
 
 /** An engine whose `checkDriversHealth` reports the given verdicts. */
 function engine(results: Array<{ driverName: string; healthy: boolean }>) {
@@ -38,14 +66,14 @@ describe('HttpDispatcher — GET /ready readiness probe', () => {
   it('returns 200 when the kernel is running', async () => {
     const res = await new HttpDispatcher(kernel('running')).dispatch('GET', '/ready', undefined, undefined, ctx);
     expect(res.handled).toBe(true);
-    expect(res.response.status).toBe(200);
-    expect(res.response.body.data.state).toBe('running');
+    expect(responseOf(res).status).toBe(200);
+    expect(responseOf(res).body.data.state).toBe('running');
   });
 
   it('returns 503 while booting or shutting down', async () => {
     for (const state of ['idle', 'initializing', 'stopping', 'stopped']) {
       const res = await new HttpDispatcher(kernel(state)).dispatch('GET', '/ready', undefined, undefined, ctx);
-      expect(res.response.status).toBe(503);
+      expect(responseOf(res).status).toBe(503);
     }
   });
 
@@ -57,7 +85,7 @@ describe('HttpDispatcher — GET /ready readiness probe', () => {
         kernel('running', engine([{ driverName: 'sql', healthy: true }])),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
+      expect(responseOf(res).status).toBe(200);
     });
 
     it('returns 503 naming the driver when one is down, even though the kernel runs', async () => {
@@ -68,9 +96,9 @@ describe('HttpDispatcher — GET /ready readiness probe', () => {
         ])),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
-      expect(res.response.body.error.message).toBe('Data driver unavailable');
-      expect(res.response.body.error.details).toEqual({ state: 'running', drivers: ['sql'] });
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.message).toBe('Data driver unavailable');
+      expect(responseOf(res).body.error.details).toEqual({ state: 'running', drivers: ['sql'] });
     });
 
     it('does not re-probe within the memo TTL — k8s polls every few seconds', async () => {
@@ -91,14 +119,14 @@ describe('HttpDispatcher — GET /ready readiness probe', () => {
         }),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
+      expect(responseOf(res).status).toBe(200);
     });
 
     it('stays ready on an engine predating checkDriversHealth', async () => {
       const res = await new HttpDispatcher(kernel('running', { find: async () => [] }))
         .dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
+      expect(responseOf(res).status).toBe(200);
     });
   });
 });
@@ -122,11 +150,11 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         kernel('running', engineWithPrimary([{ driverName: 'pg', healthy: false }], primary('pg'))),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
-      expect(res.response.body.error.message).toBe('Data driver unavailable');
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.message).toBe('Data driver unavailable');
       // Byte-identical to the shape #3756 shipped — an operator's alerting on
       // this body must not be able to tell that the handler changed.
-      expect(res.response.body.error.details).toEqual({ state: 'running', drivers: ['pg'] });
+      expect(responseOf(res).body.error.details).toEqual({ state: 'running', drivers: ['pg'] });
     });
 
     it('the all-healthy 200 body carries NO degraded key', async () => {
@@ -134,9 +162,9 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         kernel('running', engineWithPrimary([{ driverName: 'pg', healthy: true }], primary('pg'))),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
-      expect(res.response.body.data).toEqual({ status: 'ready', state: 'running' });
-      expect(res.response.body.data).not.toHaveProperty('degraded');
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data).toEqual({ status: 'ready', state: 'running' });
+      expect(responseOf(res).body.data).not.toHaveProperty('degraded');
     });
 
     it('does not even ASK which datasource is primary while everything is healthy', () => {
@@ -164,11 +192,11 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         )),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
-      expect(res.response.body.data.status).toBe('ready');
+      expect(responseOf(res).status).toBe(200);
+      expect(responseOf(res).body.data.status).toBe('ready');
       // ⛔ The rejected fourth option — filtering the bad driver out so it
       // becomes invisible — would show an EMPTY degraded list here.
-      expect(res.response.body.data.degraded).toEqual({
+      expect(responseOf(res).body.data.degraded).toEqual({
         drivers: ['tenant_mongo'],
         primaryDatasource: 'pg',
       });
@@ -182,8 +210,8 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         )),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
-      expect(res.response.body.error.details.drivers).toEqual(['pg']);
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.details.drivers).toEqual(['pg']);
     });
 
     it('drains when BOTH are down — the primary is in the unhealthy set', async () => {
@@ -194,8 +222,8 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         )),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
-      expect(res.response.body.error.details.drivers).toEqual(['pg', 'tenant_mongo']);
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.details.drivers).toEqual(['pg', 'tenant_mongo']);
     });
   });
 
@@ -215,8 +243,8 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
       const res = await new HttpDispatcher(kernel('running', engine(secondaryDown)))
         .dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
-      expect(res.response.body.error.details).toEqual({
+      expect(responseOf(res).status).toBe(503);
+      expect(responseOf(res).body.error.details).toEqual({
         state: 'running',
         drivers: ['tenant_mongo'],
       });
@@ -228,7 +256,7 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         resolvePrimaryDatasource: () => { throw new Error('registry exploded'); },
       })).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
+      expect(responseOf(res).status).toBe(503);
     });
 
     it.each([
@@ -241,7 +269,7 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         kernel('running', engineWithPrimary(secondaryDown, verdict)),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
+      expect(responseOf(res).status).toBe(503);
     });
 
     it.each([
@@ -255,7 +283,7 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         kernel('running', engineWithPrimary(secondaryDown, verdict)),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(503);
+      expect(responseOf(res).status).toBe(503);
     });
 
     it('NON-VACUITY: the same fixture returns 200 the moment the criterion resolves', async () => {
@@ -265,7 +293,7 @@ describe('HttpDispatcher — GET /ready primary-vs-secondary drain (#13408)', ()
         kernel('running', engineWithPrimary(secondaryDown, primary('pg'))),
       ).dispatch('GET', '/ready', undefined, undefined, ctx);
 
-      expect(res.response.status).toBe(200);
+      expect(responseOf(res).status).toBe(200);
     });
   });
 
@@ -294,8 +322,8 @@ describe('HttpDispatcher — GET /health liveness probe', () => {
     const res = await new HttpDispatcher(kernel('running', e))
       .dispatch('GET', '/health', undefined, undefined, ctx);
 
-    expect(res.response.status).toBe(200);
-    expect(res.response.body.data.status).toBe('ok');
+    expect(responseOf(res).status).toBe(200);
+    expect(responseOf(res).body.data.status).toBe('ok');
     expect(e.checkDriversHealth).not.toHaveBeenCalled();
   });
 });

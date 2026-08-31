@@ -16,9 +16,20 @@
 // the refusal happens and is not silently a name.
 
 import { describe, it, expect } from 'vitest';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine.js';
 
-const driver = (name: string) => ({
+/**
+ * A registrable driver double.
+ *
+ * Annotated `IDataDriver` deliberately, rather than left as an inferred object
+ * literal: `registerDriver` takes the real contract, so an un-annotated double
+ * is checked only at the call site and silently drifts as the interface grows.
+ * The annotation makes THIS declaration the thing that fails when a member is
+ * added — which is how the first version of this fixture was found short of
+ * `upsert` and `dropTable`.
+ */
+const driver = (name: string): IDataDriver => ({
   name,
   version: '1.0.0',
   supports: {},
@@ -27,18 +38,20 @@ const driver = (name: string) => ({
   checkHealth: async () => true,
   find: async () => [],
   findOne: async () => null,
-  create: async (_o: string, data: any) => ({ id: '1', ...data }),
-  update: async (_o: string, id: string, data: any) => ({ id, ...data }),
+  create: async (_o, data) => ({ id: '1', ...data }),
+  update: async (_o, id, data) => ({ id, ...data }),
+  upsert: async (_o, data) => ({ id: '1', ...data }),
   delete: async () => true,
   count: async () => 0,
   bulkCreate: async () => [],
   bulkUpdate: async () => [],
   bulkDelete: async () => {},
-  execute: async () => ({}),
+  execute: async () => null,
   beginTransaction: async () => ({}),
   commit: async () => {},
   rollback: async () => {},
   syncSchema: async () => {},
+  dropTable: async () => {},
 });
 
 function newEngine(): ObjectQL {
