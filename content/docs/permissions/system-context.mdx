@@ -158,7 +158,7 @@ The largest single consumer — **20 of the 109 sites**.
 |:--|:---|:---|:---|:---|
 | 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:136` |
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:399` |
-| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4408`, `:5771`, `:6019`, `:6382`, `:6575` |
+| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4408`, `:5771`, `:6019`, `:6432`, `:6625` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
 | 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:246`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
