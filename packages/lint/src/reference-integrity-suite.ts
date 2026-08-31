@@ -97,6 +97,7 @@ import { validateActionBodyWrites } from './validate-action-body-writes.js';
 import { validateFlowNodeWrites } from './validate-flow-node-writes.js';
 import { validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
 import { validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
+import { validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
 import { validateReactPageProps } from './validate-react-page-props.js';
 
 export type ReferenceIntegritySeverity = 'error' | 'warning';
@@ -292,6 +293,25 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // caller-supplied values (#5591) — so the rule keys on the write CHANNEL,
   // and both directions are pinned in its tests.
   { name: 'validateReadonlyHookWrites', run: validateReadonlyHookWrites },
+  // [#13770] The THIRD write surface, and the one place the family's answer
+  // differs. An action body's `ctx.api` is `createContext({ ...ec, isSystem:
+  // true })` — elevated by design (#3914) — so the engine's STATIC readonly
+  // strip, which runs only under `!opCtx.context?.isSystem`, is skipped and a
+  // `readonly:true` write LANDS here. The conditional strip is not skipped
+  // (`isSystem` is explicitly not an exemption for it, #9107 LOCK 2), so what
+  // this member reports is exactly one shape: a `readonlyWhen` field written
+  // through a literal `ctx.api` update, which silently does not land on records
+  // whose predicate is TRUE. It advises rather than gates for the reason the
+  // flow and hook siblings advise on the same shape — the outcome depends on
+  // the ROW, not on anything this stack declares.
+  //
+  // `ctx.record` is excluded from its match set entirely, and that exclusion is
+  // the rule's load-bearing decision rather than an omission: an action's
+  // `ctx.record` is a dead snapshot the runtime never writes back, so no strip
+  // is ever consulted and a readonly verdict there would be false on every
+  // occurrence. `action-record-write-discarded` already owns that shape and
+  // states its real reason.
+  { name: 'validateReadonlyActionWrites', run: validateReadonlyActionWrites },
   // The `kind:'react'` page surface. Every prop a react block binds BY FIELD
   // NAME is resolved against the object it names (#4340) — `<ListView columns>`,
   // `<ObjectForm fields>`, `<Block type="element:…">` through the SAME

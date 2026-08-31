@@ -206,8 +206,14 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-/** One L2 action body found in the stack, with the location to report it at. */
-interface ActionBodySite {
+/**
+ * One L2 action body found in the stack, with the location to report it at.
+ *
+ * Exported alongside {@link collectActionBodies} for
+ * `validate-readonly-action-writes.ts` (#13770), which walks the identical set
+ * of bodies to ask a different question about them.
+ */
+export interface ActionBodySite {
   name: string;
   source: string;
   path: string;
@@ -259,8 +265,16 @@ function actionObjectBinding(action: AnyRec, parentObject?: string): string | un
  * a non-`script` body here would produce advice about writes that provably
  * never happen — noise pointing at metadata whose real defect is the `type`,
  * which the publish gate already names with its own prescription.
+ *
+ * Exported for `validate-readonly-action-writes.ts` (#13770) — shared rather
+ * than copied, for the reason `buildReadonlyIndex` is shared with the hook
+ * rule: two readings of "which bodies are there, and where do I report them?"
+ * that drift produce two rules disagreeing about the same body, and the
+ * disagreement is silent. Every subtlety above (both registration sites, the
+ * by-VALUE de-duplication of a merged action, the `type: 'script'` default, the
+ * authored-location path) is one this rule's sibling must get identically right.
  */
-function collectActionBodies(stack: AnyRec): ActionBodySite[] {
+export function collectActionBodies(stack: AnyRec): ActionBodySite[] {
   const sites: ActionBodySite[] = [];
   const seen = new Set<string>();
 
