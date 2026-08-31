@@ -237,7 +237,18 @@ export const CEILINGS = new Map([
   // dispatch-runbook entry above — and the only other in-place payment available
   // was deleting a ruled clause, refused on the state-machine precedent. Landed
   // count, headroom 0 again, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 51],
+  // Raised 51 → 57 by the in-seat contract-review rework (maintainer ruling
+  // 2026-08-31, verbatim: 「项目经理是fable 或者可以派fable的子任务都可以自己
+  // contract view吧?」— the clause-② release moves from the external review
+  // chain to the dispatching seat). The judgment checklist, the context-isolated
+  // fable review subagent and the chain's demotion to optional audit land HERE
+  // so the ratcheted main file stays principles-only (it paid its own bullet
+  // down to a pointer). Paid in place first: the wheel-ownership bullet, the
+  // request-review clause and the standalone qualification bullet were deleted
+  // or folded; the residual +6 could not be paid without deleting ruled clauses
+  // (refused on the state-machine precedent). Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 57],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
