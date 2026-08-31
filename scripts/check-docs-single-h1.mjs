@@ -81,34 +81,50 @@
 // wrong, and a gate disagreeing with the renderer about what a page says is the
 // same class of defect as no gate at all.
 //
-// ## Scope: one tree is excluded, and the exclusions are self-retiring
+// ## Scope: no tree is excluded, and the exclusions are self-retiring
 //
 // `EXCLUSIONS` carves out SUBTREES — never individual files. A file allowlist
 // is where new failures go to be forgotten; a subtree with a named owner is a
 // statement about who fixes that tree.
 //
+// **It is EMPTY, and empty is the goal state.** Both entries it has ever
+// carried were retired by the same limb:
+//
+// **An exclusion whose tree is CLEAN is a failure, not a pass.** The gate goes
+// red with `DEAD-EXCLUSION` and asks for its own carve-out to be deleted.
+// Without that limb an exclusion would outlive its reason and quietly shrink
+// the gate's scope forever — the vacuous-green shape (#4690) that this repo
+// treats as worse than no check.
+//
+//   - `content/docs/references/**` — 38 generated pages whose `# ` came from a
+//     JSDoc file header that `packages/spec/scripts/build-docs.ts` copied
+//     verbatim, so a hand-edit did not merely get reverted at the next
+//     generator run — `check:docs` regenerates the tree and fails on any
+//     difference, so it shipped CI-red immediately. #12249 fixed it where it
+//     was fixable, in the generator, which now renumbers a file header's
+//     headings to start at the page's section level; this gate went
+//     `DEAD-EXCLUSION` on the regenerated tree and the entry came out in that
+//     same change.
+//
 //   - `content/docs/releases/**` — `CLAUDE.md` puts a hard stop on this
-//     directory, and three of its four violations are not mechanical: the `# `
-//     headings in `v15`/`v16`/`v17.mdx` are real top-level dividers with `##`
-//     children, so demoting one makes it a sibling of its own subsections. Owned
-//     by #12250.
+//     directory, and three of its four violations were not mechanical: the `# `
+//     headings in `v15`/`v16`/`v17.mdx` were real top-level dividers with `##`
+//     children, so demoting one alone would have made it a sibling of its own
+//     subsections. #12250 cascaded those three instead — from each page's first
+//     body `# ` to EOF, every heading moved down one level, so an "in detail"
+//     section still owns its subsections — and deleted the one heading that
+//     merely repeated its frontmatter title. It shipped as a dedicated
+//     docs-only PR, which is that `CLAUDE.md` rule's own escape hatch. This
+//     gate went `DEAD-EXCLUSION` on the cleaned tree and the entry came out in
+//     that same change.
 //
-// **An exclusion whose tree is CLEAN is a failure, not a pass.** When #12250
-// lands, this gate goes red with `DEAD-EXCLUSION` and asks for its own carve-out
-// to be deleted. Without that limb an exclusion would outlive its reason and
-// quietly shrink the gate's scope forever — the vacuous-green shape (#4690)
-// that this repo treats as worse than no check.
-//
-// That limb has now been paid out once, which is the only evidence that it
-// works. `content/docs/references/**` was the second entry here: 38 generated
-// pages whose `# ` came from a JSDoc file header that
-// `packages/spec/scripts/build-docs.ts` copied verbatim, so a hand-edit did not
-// merely get reverted at the next generator run — `check:docs` regenerates the
-// tree and fails on any difference, so it shipped CI-red immediately. #12249
-// fixed it where it was fixable, in the generator, which now renumbers a file
-// header's headings to start at the page's section level; this gate went
-// `DEAD-EXCLUSION` on the regenerated tree and the entry came out in that same
-// change. Its 38 pages are judged here now, like every other page.
+// So the limb has been paid out TWICE, which is the whole of the evidence that
+// it works — and with the list empty, the live corpus exercises none of the
+// machinery it belongs to. That is why `scanTree` takes its exclusions as a
+// PARAMETER and the self-test drives them through a SYNTHETIC carve-out: an
+// `exclusionFor`, an `excluded` tally and a `DEAD-EXCLUSION` limb that only
+// ever ran against entries which no longer exist would be untested code by the
+// time a third carve-out needs them.
 //
 // The same reasoning gives the corpus-level limb: a run that reads ZERO pages
 // exits 1. "Nothing differs" must never be reachable by checking nothing.
@@ -164,16 +180,16 @@ const PAGE_EXTENSION = '.mdx';
 
 /**
  * Subtrees this gate does not judge, each with the issue that will make it
- * empty. Read the header's "Scope" section before adding a third: an entry
- * whose tree is clean FAILS, so every line here has a finite life.
+ * empty. Read the header's "Scope" section before adding one: an entry whose
+ * tree is clean FAILS, so every line here has a finite life — and both entries
+ * this list has ever carried died that way (#12249, then #12250).
+ *
+ * Empty is the goal state, and it is where the list now is. The machinery it
+ * feeds stays: it is how the next carve-out gets a named owner and a death
+ * date. `selfTest` keeps that machinery honest with a synthetic entry, because
+ * an empty live list exercises none of it.
  */
-const EXCLUSIONS = [
-  {
-    prefix: 'content/docs/releases/',
-    owner: '#12250',
-    why: 'CLAUDE.md stops code PRs at this directory, and three of the four violations need a cascading demotion',
-  },
-];
+const EXCLUSIONS = [];
 
 /** ATX heading: CommonMark allows up to three leading spaces. */
 const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
@@ -244,24 +260,29 @@ export function remedyFor(headingText, title) {
 }
 
 /** The exclusion covering `relPath`, or `null`. */
-function exclusionFor(relPath) {
-  return EXCLUSIONS.find((e) => relPath.startsWith(e.prefix)) ?? null;
+function exclusionFor(relPath, exclusions = EXCLUSIONS) {
+  return exclusions.find((e) => relPath.startsWith(e.prefix)) ?? null;
 }
 
 /**
  * Judge one tree. Returns `{ findings, excluded, scanned }` — `excluded` is
  * keyed by exclusion prefix so the caller can enforce the dead-exclusion rule.
+ *
+ * `exclusions` is a parameter rather than a read of the module constant so the
+ * self-test can drive the carve-out machinery with a synthetic entry. The live
+ * list is empty (see its docstring); without this seam every exclusion case
+ * would pass by having nothing to check.
  */
-export function scanTree(root, repoRoot = REPO_ROOT) {
+export function scanTree(root, repoRoot = REPO_ROOT, exclusions = EXCLUSIONS) {
   const findings = [];
-  const excluded = new Map(EXCLUSIONS.map((e) => [e.prefix, []]));
+  const excluded = new Map(exclusions.map((e) => [e.prefix, []]));
   let scanned = 0;
 
   for (const abs of listPages(root)) {
     const rel = relative(repoRoot, abs).split('\\').join('/');
     const src = readFileSync(abs, 'utf8');
     const headings = bodyH1s(src);
-    const exclusion = exclusionFor(rel);
+    const exclusion = exclusionFor(rel, exclusions);
     if (exclusion) {
       if (headings.length) excluded.get(exclusion.prefix).push({ rel, headings });
       continue;
@@ -376,7 +397,10 @@ export function selfTest() {
     write('content/docs/indented.mdx', `${fm('Indented')}   # Indented Heading\n\nProse.\n`);
     // A `# ` in the frontmatter block itself is not body content.
     write('content/docs/fm-hash.mdx', `---\ntitle: Hashy\ndescription: "# not a heading"\n---\n\nProse.\n`);
-    // The excluded subtree, dirty — the live shape.
+    // NOT excluded any more (#12250): the release pages are judged like every
+    // other page now. Kept as a fixture — with the carve-out gone this is the
+    // control proving the tree is back in scope rather than silently unread,
+    // and `# 9.0.0 in detail` is the exact shape that carve-out existed for.
     write('content/docs/releases/v9.mdx', `${fm('v9.0.0')}# 9.0.0 in detail\n\nProse.\n`);
     // NOT excluded any more (#12249): the generated tree is judged like every
     // other page now. Kept as a fixture — with the carve-out gone this is the
@@ -402,28 +426,58 @@ export function selfTest() {
     t('an h1 indented up to three spaces IS a finding', at('content/docs/indented.mdx').length === 1, JSON.stringify(at('content/docs/indented.mdx')));
     t('a `# ` inside the frontmatter block is not body content', at('content/docs/fm-hash.mdx').length === 0);
     t('the reported line number indexes the real file', at('content/docs/dup.mdx')[0]?.line === 5, JSON.stringify(at('content/docs/dup.mdx')));
-    t('an excluded subtree yields no findings', findings.every((f) => !exclusionFor(f.rel)));
-    t('...but its violations are still counted', excluded.get('content/docs/releases/').length === 1);
     t(
       'the generated references tree is judged, not excluded (#12249)',
       at('content/docs/references/gen.mdx').length === 1,
       JSON.stringify(at('content/docs/references/gen.mdx')),
     );
-    t('only judgeable pages are counted as scanned', scanned === 10, `scanned=${scanned}`);
+    t(
+      'the releases tree is judged, not excluded (#12250)',
+      at('content/docs/releases/v9.mdx').length === 1,
+      JSON.stringify(at('content/docs/releases/v9.mdx')),
+    );
+    t(
+      'the live EXCLUSIONS list carves nothing out of the corpus',
+      excluded.size === 0,
+      `excluded keys=${JSON.stringify([...excluded.keys()])}`,
+    );
+    t('every page is judgeable, so every page is scanned', scanned === 11, `scanned=${scanned}`);
+
+    // ── The carve-out machinery, driven by a SYNTHETIC exclusion ────────────
+    //
+    // `EXCLUSIONS` is empty, so nothing below would be exercised by the live
+    // list. These cases keep the mechanism itself under test against a carve-out
+    // that exists only here — the properties a real entry depends on: an
+    // excluded page yields no finding, is NOT counted as scanned, and is still
+    // READ and TALLIED, which is the fact the dead-exclusion limb is built on.
+    const SYNTHETIC = [
+      { prefix: 'content/docs/sandbox/', owner: '#12250 (self-test only)', why: 'exercises the carve-out machinery' },
+    ];
+    write('content/docs/sandbox/dirty.mdx', `${fm('Sandbox')}# Sandbox in detail\n\nProse.\n`);
+
+    const carved = scanTree(root, dir, SYNTHETIC);
+    t('an excluded subtree yields no findings', carved.findings.every((f) => !exclusionFor(f.rel, SYNTHETIC)));
+    t(
+      '...but its violations are still counted',
+      carved.excluded.get('content/docs/sandbox/').length === 1,
+      JSON.stringify([...carved.excluded]),
+    );
+    t('an excluded page is not counted as scanned', carved.scanned === 11, `scanned=${carved.scanned}`);
 
     // The dead-exclusion limb: a clean excluded tree must be reported empty so
-    // `main` can fail on it. This is the limb that retired the references
-    // carve-out in #12249, so it is the one that must keep working.
-    rmSync(join(dir, 'content/docs/releases/v9.mdx'));
-    const after = scanTree(root, dir);
-    t('a CLEAN excluded subtree reports zero — the dead-exclusion trigger', after.excluded.get('content/docs/releases/').length === 0);
+    // `main` can fail on it. This is the limb that retired BOTH carve-outs this
+    // gate has ever had — references in #12249, releases in #12250 — so it is
+    // the one that must keep working, including now that no live entry uses it.
+    rmSync(join(dir, 'content/docs/sandbox/dirty.mdx'));
+    const after = scanTree(root, dir, SYNTHETIC);
+    t('a CLEAN excluded subtree reports zero — the dead-exclusion trigger', after.excluded.get('content/docs/sandbox/').length === 0);
 
     // Anti-vacuity: a tree of nothing but excluded pages scans zero pages.
     const empty = mkdtempSync(join(tmpdir(), 'docs-single-h1-empty-'));
     try {
-      mkdirSync(join(empty, 'content/docs/releases'), { recursive: true });
-      writeFileSync(join(empty, 'content/docs/releases/v1.mdx'), `${fm('v1')}# 1.0.0 in detail\n`);
-      t('a corpus of only excluded pages scans ZERO', scanTree(join(empty, 'content/docs'), empty).scanned === 0);
+      mkdirSync(join(empty, 'content/docs/sandbox'), { recursive: true });
+      writeFileSync(join(empty, 'content/docs/sandbox/only.mdx'), `${fm('Only')}# 1.0.0 in detail\n`);
+      t('a corpus of only excluded pages scans ZERO', scanTree(join(empty, 'content/docs'), empty, SYNTHETIC).scanned === 0);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
@@ -437,7 +491,10 @@ export function selfTest() {
     console.error(`✗ check-docs-single-h1 self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`✓ check-docs-single-h1 self-test: ${cases.length} cases pass (both fence spellings, inline-code equality, indentation, and both anti-vacuity limbs).`);
+  console.log(
+    `✓ check-docs-single-h1 self-test: ${cases.length} cases pass (both fence spellings, inline-code equality, `
+      + `indentation, a synthetic carve-out, and both anti-vacuity limbs).`,
+  );
   return 0;
 }
 

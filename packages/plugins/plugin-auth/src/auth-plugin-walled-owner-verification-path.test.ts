@@ -6,9 +6,11 @@
  * A, verbatim 「全部同意」).
  *
  * ⛔ Nothing here may become a refusal: boot proceeds in EVERY shape below,
- * including the one that warns. The two refusals around this check
- * (`walled_owner_email_undeclared` at boot, `walled_owner_not_verified` at
- * elevation) are pinned by their own suites and are untouched.
+ * including the one that warns. The fail-closed clauses around this check —
+ * the `walled_owner_email_undeclared` boot refusal, and ([#11973] since the
+ * #11663 L4 re-anchor) the derivation site resolving an unverified declared
+ * address non-admin per request — are pinned by their own suites and are
+ * untouched.
  *
  * The load-bearing half of this file is the CONTROLS. A warning that fires on
  * every boot satisfies "the dead-end shape warns" just as well as a correct
@@ -110,8 +112,12 @@ describe('#11640 — the dead-end shape warns, by name and with the remedy', () 
     // exactly here.
     expect(msg).toContain('Either one alone clears this');
     // …and it says what goes wrong if nothing is wired, in the vocabulary of
-    // the refusal the owner will actually hit.
-    expect(msg).toContain('walled_owner_not_verified');
+    // the dead end the owner will actually hit ([#11973]: no elevation
+    // refusal exists post-L4 — an unverified declared address simply resolves
+    // no standing at the derivation site).
+    expect(msg).toContain('NO platform-admin standing');
+    expect(msg).toContain('derived at request time');
+    expect(msg).not.toContain('walled_owner_not_verified');
   });
 
   it('⛔ it is a WARNING, never a refusal — the text promises boot continues', () => {
@@ -287,7 +293,10 @@ describe('#12751 — the warning follows the owner account state', () => {
     const msg = resolveWalledOwnerVerificationPathWarning(nothingWired('owner-unverified'));
     expect(msg).toContain(WALLED_OWNER_NO_VERIFICATION_PATH);
     expect(msg).toContain('ALREADY EXISTS');
-    expect(msg).toContain('walled_owner_not_verified');
+    // [#11973] The dead end in the derivation's own vocabulary — the retired
+    // elevation refusal token must be gone.
+    expect(msg).toContain('NO platform-admin standing');
+    expect(msg).not.toContain('walled_owner_not_verified');
   });
 
   it('a populated store with NO owner account warns — the bootstrap window is spent and an invitee arrives unverified', () => {

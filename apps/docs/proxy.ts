@@ -108,5 +108,23 @@ export const config = {
   // - Next.js static files (/_next/static/*)
   // - Next.js image optimization (/_next/image/*)
   // - Favicon and other static assets
+  //
+  // The `.*\..*` limb -- exclude any path containing a DOT -- is load-bearing
+  // for two surfaces beyond static assets, and neither is visible from here:
+  //
+  // - `apps/docs/lib/source.ts`'s `getPageImage()` appends an `image.png`
+  //   marker to every Open Graph card URL. That marker's dot is the ONLY reason
+  //   `/og/docs/<page>/image.png` is not rewritten to `/en/og/docs/...`, which
+  //   is not a route -- the `app/og/` tree is top-level, not under
+  //   `app/[lang]/`. Widening this pattern 404s every `og:image` on the site at
+  //   once, and nothing fetches those URLs, so the break is silent. Already
+  //   ruled out as a surface to widen for the same reason from the other end:
+  //   it would also 404 `/llms.txt`, `/llms-full.txt`, `/og/**` and
+  //   `/docs/**.mdx`.
+  // - Conversely, BECAUSE dotted paths skip this proxy they reach `app/[lang]/`
+  //   with `lang` set to the literal segment (`robots.txt`, `ads.txt`), which is
+  //   why `apps/docs/lib/i18n.ts` carries the `isSupportedLanguage` guard.
+  //
+  // `pnpm check:docs-locale-catch-all` gates both halves.
   matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)'],
 };

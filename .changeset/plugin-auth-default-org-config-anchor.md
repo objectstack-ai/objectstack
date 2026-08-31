@@ -1,0 +1,5 @@
+---
+'@objectstack/plugin-auth': minor
+---
+
+Re-point the default-organization bootstrap at the platform-admin config anchor (#11973, #11663 leg L3). `ensureDefaultOrganization` now resolves "which user is the platform admin" from `OS_PLATFORM_OWNER_EMAIL` first — the first declared entry with a stored, email-verified `sys_user` account, matched through `@objectstack/core`'s own `matchesConfiguredPlatformAdmin`, the same oracle the authorization derivation reads — and falls back to the legacy unscoped `admin_full_access` grant row (which still anchors `single`-posture deployments and the honoured migration window). Its re-run trigger widens from `sys_user_permission_set` inserts to the new exported predicate `isDefaultOrganizationBootstrapTrigger`: `sys_user` inserts and `email`/`email_verified` updates (how a config-anchored administrator comes into standing — on fresh walled rigs no grant insert ever fires any more), plus the legacy grant-insert arm unchanged. `single`-posture behaviour is unchanged: with the variable unset, the config half costs no read and the grant anchor decides exactly as before.

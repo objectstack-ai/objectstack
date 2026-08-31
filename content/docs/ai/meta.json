@@ -1,7 +1,6 @@
 {
   "title": "AI",
   "pages": [
-    "index",
     "connect-mcp",
     "agents",
     "actions-as-tools",

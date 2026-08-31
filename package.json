@@ -54,6 +54,7 @@
     "check:page-declaration-shape": "node scripts/check-page-declaration-shape.mjs --self-test && node scripts/check-page-declaration-shape.mjs",
     "check:template-version-sync": "node scripts/sync-template-versions.mjs --self-test",
     "check:role-word": "node scripts/check-role-word.mjs --self-test && node scripts/check-role-word.mjs",
+    "check:corpus-claim-drift": "node scripts/check-corpus-claim-drift.mjs --self-test && node scripts/check-corpus-claim-drift.mjs",
     "check:quick-reference-counts": "node scripts/check-quick-reference-counts.mjs --self-test && node scripts/check-quick-reference-counts.mjs",
     "check:overlay-whitelist-table": "node scripts/check-overlay-whitelist-table.mjs --self-test && node scripts/check-overlay-whitelist-table.mjs",
     "check:runtime-services-index": "node scripts/check-runtime-services-index.mjs --self-test && node scripts/check-runtime-services-index.mjs",
@@ -146,7 +147,9 @@
     "check:tenant-chokepoint": "node scripts/check-tenant-chokepoint.mjs --self-test && node scripts/check-tenant-chokepoint.mjs",
     "check:stall-guard": "node scripts/run-with-stall-guard.mjs --self-test",
     "check:stall-guard-budget": "node scripts/check-stall-guard-budget.mjs --self-test && node scripts/check-stall-guard-budget.mjs",
-    "check:stall-guard-headroom": "node scripts/measure-stall-guard-headroom.mjs --self-test"
+    "check:stall-guard-headroom": "node scripts/measure-stall-guard-headroom.mjs --self-test",
+    "gen:system-context-census": "node scripts/check-system-context-census.mjs --fix",
+    "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs"
   },
   "keywords": [
     "objectstack",

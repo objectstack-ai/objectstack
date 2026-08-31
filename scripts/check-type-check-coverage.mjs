@@ -901,18 +901,23 @@ const TEST_DEBT = {
       + 'ead731756, which is what the lowering at the top of this note closed.',
   },
   '@objectstack/runtime': {
-    errors: 217,
-    note: 'TS18048 x98 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15, TS2835 x11, '
-      + 'TS2554 x11. LOWERED 227 -> 217 at ead731756 (#12723) -- the entry that card was filed on, where '
-      + 'the slack turned out to be 10 rather than the 1 it reported: the 226 it quoted was itself a '
-      + 'reading taken days earlier, which is the card\'s own point about a number that drifts. The tally '
-      + 'above was taken at 227 and is NOT re-tallied here; that sweep measured per-entry TOTALS only. Src '
-      + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Measured 220 -> '
+    errors: 206,
+    note: 'TS18048 x91 (possibly-undefined), TS18046 x27, TS2339 x17, TS2493 x15, TS2835 x13, TS2345 x10, '
+      + 'TS7006 x8, TS6133 x6, TS2554 x4, TS2353 x4, TS2571 x3, TS2550 x2 -- RE-TALLIED at 206 (#13408). '
+      + 'The previous note carried its composition from a 227-era sweep that measured per-entry TOTALS '
+      + 'only and said so; this one is a fresh per-code count of the same program the ratchet measures. '
+      + 'LOWERED 217 -> 206 (#13408), and the -11 is fully attributed to ONE file: '
+      + 'src/http-dispatcher.ready.test.ts held 30 TS18048 reads of the optional '
+      + '`HttpDispatcherResult.response` -- 19 added by that card\'s own new /ready suite and 11 that '
+      + 'pre-dated it -- and all 30 were replaced by a `responseOf()` narrowing helper, the shape already '
+      + 'used by the #8287 suite in src/http-dispatcher.keys.test.ts. That card found them the hard way: '
+      + 'the package `typecheck` excludes test files, so its green said nothing about the 19 it had just '
+      + 'added, and only this ratchet saw them. Nothing else in the package moved. Earlier lineage: 220 -> '
       + '218 (5ab08428, one of only two entries that ever shrank; TS6133 x25 collapsed to x7 while '
       + 'possibly-undefined grew, so that net -2 hid a much larger churn in both directions) -> 227 '
-      + '(e8db1a230). The latest +9 is fully attributed and is ONE file: every one of the nine is a '
-      + 'TS18048 in src/domains/meta-item-envelope.test.ts, added by #5563 / PR #5895 (the '
-      + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
+      + '(e8db1a230, +9 all TS18048 in src/domains/meta-item-envelope.test.ts from #5563 / PR #5895) -> '
+      + '217 (ead731756, #12723). Src graduated in #4311 (declares `typecheck`); this is purely the '
+      + 'hidden test layer.',
   },
   '@objectstack/cli': {
     errors: 144,
@@ -1087,7 +1092,18 @@ const TEST_DEBT = {
       + 'still import. One older claim is now false and is corrected rather than carried: '
       + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
-  '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
+  '@objectstack/formula': {
+    errors: 17,
+    note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
+      + 'at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again '
+      + 'rather than five new defects. The TS2739 was inside that 17 from the start and simply went '
+      + 'UNLISTED, so this tally read 16 over a field of 17 until #13631 re-measured 17 at cc837dbfec '
+      + 'and restored it -- COMPOSITION reads tier itemisations and does not sum per-code tallies, so '
+      + 'nothing mechanical read the gap. It is the only one of the 17 in `src/cel-to-filter.test.ts` '
+      + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
+      + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
+      + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
+  },
   '@objectstack/verify': {
     errors: 3,
     note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '

@@ -119,7 +119,9 @@
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/scripts/check-route-envelope.mjs"
+        "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
     "@objectstack/lint#test": {

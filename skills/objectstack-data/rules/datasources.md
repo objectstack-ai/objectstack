@@ -15,7 +15,7 @@ Full field reference: `node_modules/@objectstack/spec/src/data/datasource.zod.ts
 | `external` | A mature external DB ObjectStack does **not** own; DDL forbidden; boot mismatch **fails**. |
 | `validate-only` | Like `external`, but a mismatch **warns** instead of failing boot. |
 
-`external` settings are required iff `schemaMode !== 'managed'` (and forbidden otherwise).
+`external` settings are **required** when `schemaMode !== 'managed'`.
 
 ## Federated (external) objects
 
@@ -38,10 +38,10 @@ ObjectSchema.create({
 ### ✅ / ❌ Column mapping (ADR-0062 D7)
 
 - ✅ Map remote columns with **`external.columnMap`** (`remoteColumn → localField`).
-- ❌ **Never set `field.columnName` on an external object.** The driver's query
-  pipeline ignores it for federated objects, so it is a silent dual-source trap.
-  `os build` / `os validate` **rejects** it with a clear error. (`field.columnName`
-  on **managed** objects is unaffected.)
+- ❌ **`field.columnName` does not exist — on ANY object.** It was removed in the
+  16.x line (the SQL driver hardcodes the physical column to the field key, so a
+  custom name was ignored), and authoring it is a parse error everywhere, not
+  only on a federated object.
 
 ## Auto-connect (no `onEnable`)
 

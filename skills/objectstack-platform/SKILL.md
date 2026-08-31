@@ -174,14 +174,14 @@ export default defineStack({
 ### Full Configuration Reference
 
 `defineStack()` accepts an `ObjectStackDefinitionInput`. Each top-level key
-holds a collection of one metadata kind — `manifest`, `objects`,
-`objectExtensions`, `views`, `apps`, `pages`, `dashboards`,
-`reports`, `datasets`, `actions`, `flows`, `jobs`,
-`emailTemplates`, `docs`, `books`, `positions`, `permissions`,
-`capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `agents`,
-`tools`, `skills`, `hooks`, `functions`, `mappings`, `analyticsCubes`,
-`connectors`, `data` (seed), `datasources`, `datasourceMapping`,
-`translations`, `i18n`, `plugins`, `devPlugins`, `requires`, `tiers`.
+holds one metadata kind — `manifest`, `objects`, `objectExtensions`,
+`views`, `apps`, `pages`, `dashboards`, `reports`, `datasets`,
+`actions`, `flows`, `jobs`, `emailTemplates`, `docs`, `books`,
+`positions`, `permissions`, `capabilities`, `sharingRules`, `apis`,
+`webhooks`, `api`, `server`, `agents`, `tools`, `skills`, `hooks`,
+`functions`, `mappings`, `analyticsCubes`, `connectors`, `data` (seed),
+`datasources`, `datasourceMapping`, `translations`, `i18n`, `plugins`,
+`devPlugins`, `requires`, `tiers`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is authored as a flow with Approval nodes (ADR-0019), and record
@@ -315,7 +315,7 @@ manifest: {
 }
 ```
 
-**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is deprecated and ignored by the runtime.
+**Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
@@ -576,7 +576,7 @@ PORT=8080 os start   # production — pin the port explicitly (see Ports & netwo
 
 A minimal but complete project from scratch:
 
-**`package.json`** (mirrors the `blank` template):
+**`package.json`**:
 ```json
 {
   "name": "my-todo-app",
@@ -588,13 +588,13 @@ A minimal but complete project from scratch:
     "validate": "objectstack validate"
   },
   "dependencies": {
-    "@objectstack/spec": "^16.0.0-rc.1",
-    "@objectstack/runtime": "^16.0.0-rc.1",
-    "@objectstack/driver-memory": "^16.0.0-rc.1",
-    "@objectstack/plugin-hono-server": "^16.0.0-rc.1"
+    "@objectstack/spec": "^17.0.0",
+    "@objectstack/runtime": "^17.0.0",
+    "@objectstack/driver-memory": "^17.0.0",
+    "@objectstack/plugin-hono-server": "^17.0.0"
   },
   "devDependencies": {
-    "@objectstack/cli": "^16.0.0-rc.1",
+    "@objectstack/cli": "^17.0.0",
     "typescript": "^6.0.0"
   }
 }
@@ -741,7 +741,7 @@ import { ObjectKernel } from '@objectstack/core';
 
 const kernel = new ObjectKernel({
   logger: {
-    level: 'info',           // 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+    level: 'info',      // debug|info|warn|error|fatal|silent
     format: 'json',          // 'json' | 'text' | 'pretty'
   },
   defaultStartupTimeout: 30000,   // Per plugin (ms)
@@ -772,7 +772,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 export interface Plugin {
   name: string;               // Unique identifier (reverse domain recommended)
   version?: string;           // Semantic version
-  type?: string;              // 'standard' | 'ui' | 'driver' | 'server' | 'app'
+  type?: string;              // standard|ui|driver|server|app|theme|agent|objectql
   dependencies?: string[];    // Plugins that must init before this one
 
   // Phase 1: Register services

@@ -13,6 +13,11 @@ The ObjectStack Protocol defines three interconnected layers that together descr
   <Card icon={<Cpu />} title="Kernel: System Protocol" href="/docs/protocol/kernel" description="Runtime lifecycle, HTTP/realtime protocols, plugins, configuration, and i18n." />
 </Cards>
 
+All three layers move under one compatibility contract: which edits a MINOR may make, how long a
+deprecated property survives before it can be removed, and which `@objectstack/spec` exports are
+guaranteed stable within a MAJOR — see the [Backward Compatibility
+Policy](/docs/protocol/backward-compatibility).
+
 ## Design Principles
 
 - **Zod-First** — All schemas are defined in Zod for runtime validation and TypeScript inference.

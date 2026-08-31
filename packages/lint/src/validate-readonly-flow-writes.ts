@@ -65,7 +65,7 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-interface FieldReadonlyMeta {
+export interface FieldReadonlyMeta {
   /** Static `readonly: true`. */
   readonly: boolean;
   /** A non-empty `readonlyWhen` predicate is declared. */
@@ -77,8 +77,17 @@ interface FieldReadonlyMeta {
  * (array of `{name, readonly, readonlyWhen}` and name-keyed map). A field with
  * neither flag is recorded as `{false, false}` so callers can distinguish a
  * "known-writable field" from an "unknown field" (absent from the map).
+ *
+ * Exported for `validate-readonly-hook-writes.ts` (#13653), which asks the
+ * IDENTICAL question one surface over — "is this declared field writable
+ * through this channel?" — about a hook body's `ctx.api` update instead of a
+ * flow node's `config.fields`. Shared rather than copied for the reason #4330
+ * collapsed five hand-copied lists: two readings of `readonly`/`readonlyWhen`
+ * that drift produce two rules that disagree about the same field, and the
+ * disagreement is silent. `IMPLICIT_FIELDS` in `validate-hook-body-writes.ts`
+ * is shared across its three surfaces on exactly this reasoning.
  */
-function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, FieldReadonlyMeta>> {
+export function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, FieldReadonlyMeta>> {
   const idx = new Map<string, Map<string, FieldReadonlyMeta>>();
   for (const obj of objects) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;

@@ -80,13 +80,30 @@
  *   predicate — "matches nothing" and "matches everything" respectively — and
  *   both drivers say so in as many words. Arity is not this gate's business;
  *   only "is it a list at all".
- * - **The MEMBER types of any list.** `$between`'s members are checked by
- *   nobody (`driver-sql` checks arity and nothing else, and #5041 measured the
+ * - **The MEMBER types of any list — except `null`, refused BY RULING (next
+ *   section).** `$between`'s members are otherwise checked by nobody
+ *   (`driver-sql` checks arity and nothing else, and #5041 measured the
  *   member case and deliberately left it — ISO date strings are a legitimate
  *   range on every backend); `$in`/`$nin` members are #5234's subject, on the
  *   `driver-sql` object-syntax face, and are not re-judged here. The six
  *   accepted comparand TYPES are a different question, answered one file over
  *   by {@link normalizeFilterComparandTypes} (#7872).
+ *
+ * ## Refused BY RULING, 2026-08-31: a `null` list member (#13357)
+ *
+ * The carve-out is null-shaped and nothing wider. A `null` member of `$in` /
+ * `$nin`, and a `null` `$between` endpoint (#13495's shape), are refused at
+ * this door: no two backend camps ever agreed on what a null in a
+ * list-comparand position matches (`$in: [null]` / `$nin: [null]` split the
+ * reference matcher's two readings of "no value" while `$null` / `$ne: null`
+ * agree, and the SQL family's `NOT IN` answer is unconditional), and the
+ * maintainer ruled the divergence constructively unreachable rather than
+ * reconciled — ⛔ no cross-backend alignment; #5299 stays declined, and the
+ * matcher's own answers for these shapes are sealed behind this refusal, not
+ * repaired. "Equals X or has no value" has an explicit spelling —
+ * `$or: [{$in: […]}, {$null: true}]` — and the refusal text prescribes it.
+ * #5041's question (ISO date strings as legitimate `$between` bounds) and
+ * #5234's (object members on the `driver-sql` face) stand untouched.
  * - **A field spec with no `$` keys** (`{ author: { name: 'x' } }`) — a
  *   deep-equality comparand to `driver-memory` and `driver-mongodb` alike. This
  *   gate does not descend into one: a comparand is data, and a stricter reading
@@ -252,6 +269,68 @@ function malformedRangeComparandError(
 }
 
 /**
+ * A `null` MEMBER of a membership list — refused BY RULING, 2026-08-31
+ * (#13357); see the module note's "Refused BY RULING" section.
+ *
+ * The prescription is the ruling's own sentence: absence is stated with the
+ * null predicate, explicitly — `$or: [{$in: […]}, {$null: true}]` — never
+ * smuggled into a membership list no two backends read alike. The `$nin`
+ * author's usual intent ("has a value and it is not one of […]") is the
+ * `{$null: false}` half, so both halves are named. Same #5346/#5348 wording
+ * contract as {@link nonListComparandError}: operator, field, position,
+ * corrected shape, front-loaded; the schema door's twin is
+ * `nullListComparandMemberMessage` (`./filter.zod.ts`), reconciled by pin.
+ */
+function nullListMemberError(
+  context: string | undefined,
+  op: string,
+  field: string,
+  index: number,
+  path: string,
+): Error {
+  const spellings = LIST_COMPARAND_OPERATORS.get(op) ?? [];
+  return invalidFilterComparandError(
+    context,
+    `Operator "${op}" on field "${field}" does not accept null as a list member ` +
+    `(at ${path}[${index}]). No two backends agree on what it matches; state absence ` +
+    `explicitly with the null predicate: {"$or": [{"${field}": {"$in": […]}}, ` +
+    `{"${field}": {"$null": true}}]} is "one of […] OR has no value"; {"$null": false} ` +
+    `is "has a value". Authoring spellings: ${spellings.join(', ')}. The filter was NOT ` +
+    `applied, and an unapplied filter would have returned the UNFILTERED result set.`,
+  );
+}
+
+/**
+ * A `$between` bound that is `null` — the same 2026-08-31 ruling, #13495's
+ * shape, folded into this door.
+ *
+ * Its own message rather than an extension of
+ * {@link malformedRangeComparandError}: that one's leading sentence is kept
+ * verbatim from `driver-sql`'s and `driver-memory`'s ARITY arms (#5240's
+ * one-condition-one-wording rule), and a null bound is a different condition
+ * that NO driver refuses — there is no existing wording to share, and welding
+ * the new condition onto the arity sentence would misdescribe a well-arity
+ * `[null, max]` as "not a [min, max] value array".
+ */
+function nullRangeBoundError(
+  context: string | undefined,
+  field: string,
+  value: unknown,
+  index: number,
+  path: string,
+): Error {
+  return invalidFilterComparandError(
+    context,
+    `Operator "$between" on field "${field}" requires two non-null bounds. Received null ` +
+    `at ${path}[${index}] of ${shapePreview(value)}. A half-open range is "$gte"/"$lte"; ` +
+    `"in range OR has no value" is {"$or": [{"${field}": {"$between": [min, max]}}, ` +
+    `{"${field}": {"$null": true}}]}. The authoring spelling that lowers to "$between" is ` +
+    `"between". The filter was NOT applied, and an unapplied filter would have returned ` +
+    `the UNFILTERED result set.`,
+  );
+}
+
+/**
  * Walk one `FilterCondition` and refuse every list-shaped operator whose
  * comparand cannot be one.
  *
@@ -327,10 +406,26 @@ function assertFieldListComparands(
       if (!Array.isArray(comparand) || comparand.length !== 2) {
         throw malformedRangeComparandError(context, field, comparand, `${path}.${op}`);
       }
+      // Shape first (a list at all), then the null carve-out (2026-08-31
+      // ruling, #13495's shape) — so `$between: null` keeps the arity message
+      // it has always had and only a well-arity pair can reach this check.
+      const nullBound = comparand.indexOf(null);
+      if (nullBound !== -1) {
+        throw nullRangeBoundError(context, field, comparand, nullBound, `${path}.${op}`);
+      }
       continue;
     }
     if (!Array.isArray(comparand)) {
       throw nonListComparandError(context, op, field, comparand, `${path}.${op}`);
+    }
+    // The null-member carve-out (2026-08-31 ruling, #13357). `indexOf` is the
+    // O(list) pass the door already pays for `$between`'s arity — strict
+    // equality, so `undefined`, `''`, `0` and `false` members are untouched,
+    // and an EMPTY list never enters the branch (it has no members; `$in: []`
+    // / `$nin: []` stay the declared predicates they are).
+    const nullMember = comparand.indexOf(null);
+    if (nullMember !== -1) {
+      throw nullListMemberError(context, op, field, nullMember, `${path}.${op}`);
     }
   }
 }

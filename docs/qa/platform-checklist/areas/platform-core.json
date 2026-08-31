@@ -8,7 +8,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -64,7 +64,9 @@
         "dogfood-verification skill §0–§1",
         "#3415",
         "packages/runtime/src/route-ledger.ts (GET /health, GET /ready)",
-        "examples/app-showcase/src/ui/apps/index.ts (authored nav)"
+        "examples/app-showcase/src/ui/apps/index.ts (authored nav)",
+        "objectui e2e/console-boot-indicator.spec.ts (objectui#2628 — the pre-bundle window paints a boot indicator, never a pure white page: fcp-before-React-mount ordering + scripts-blocked cause; a permanent pin adjacent to this item's console-shell clause, objectui-repo-only so not runnable from this checkout)",
+        "objectui e2e/console-rendering.spec.ts (production-build bootstrap renders without critical console errors + client-side routing works — the 'blank page' failure class; same objectui-repo-only caveat)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" },
@@ -75,6 +77,12 @@
           "date": "2026-08-21",
           "change": "scoped clause 2's ERROR-line grep to the boot window and said why. A caller-error refusal logs at ERROR level with a full stack before answering its 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER — so any clause grepping the whole log for ERROR reads ordinary, correctly-refused 4xx traffic as a boot failure. The clause now names the window (process start to the first health 200, the instant clause 0 already records), prescribes cutting the log there or capturing it before the first request, and the negatives carry both directions so the false P0 is recognisable from either side. The security property is unchanged: a genuine ERROR-during-boot still fails independently of the probe (#10236 A5, measured #10257)",
           "ref": "#10236"
+        },
+        {
+          "revision": 5,
+          "date": "2026-08-30",
+          "change": "source-ref addition (2026-08-30 sweep, console-UI angle): the two live objectui e2e specs adjacent to this item's console-shell clause were referenced nowhere in the ledger — e2e/console-boot-indicator.spec.ts (objectui#2628, the pre-bundle white-page pin) and e2e/console-rendering.spec.ts (bootstrap/rendering blank-page pin). Added as source entries with the objectui-repo-only caveat (RUNNER.md standing fact), NOT as automated.ref — they pin the console build, not this item's boot protocol, so a run here may cite them as adjacent evidence but is not asked to execute them. No step/clause change",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     },
@@ -1631,6 +1639,969 @@
           "date": "2026-08-26",
           "change": "new — authored in the #12438 scoped sweep to ground the E1 tier-3 docs claim. Grounding CORRECTED the claim's third half before authoring: no collision refusal exists for generic object extensions (mergeObjectDefinitions spreads extension fields over the base and the schema documents override-by-priority; the managed-extension-fields build gate covers better-auth objects only and is adopted by ADR-0126 §3 as prior art, not as a live gate) — so that half is a knownGap with an explicit do-not-file-as-FAIL rule, and the item asserts the two halves source supports: additive merge + round-trip (cross-referenced to metadata-registry-serving, not duplicated) and the server-side in-place refusal at both write doors",
           "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.marketplace-install-local-lifecycle",
+      "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123 — admin_full_access carries manage_metadata)",
+        "a plain member (fresh runtime sign-up — member_default holds NO manage_metadata)",
+        "anonymous",
+        "operator (local shell — the `os package install` door)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts:1394-1444)",
+          "a compiled package artifact for the inline install: pnpm -C examples/app-crm build → dist/objectstack.json (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL)",
+          "admin credentials passed to the CLI door (--email/--password or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) — the runtime refuses an unauthenticated install with a 401 that names exactly that remedy (packages/cli/src/commands/package/install.ts:198-201)"
+        ],
+        "knownGaps": [
+          "the BROWSE leg (ALL /api/v1/marketplace/* passthrough, MarketplaceProxyPlugin) forwards to the public control plane with no credentials — on an egress-blocked or air-gapped runner the upstream fetch fails and the leg scores blocked(environment), never a product FAIL. What this item scores about browse is the MOUNT (present on boot A, absent on boot B), which needs no egress",
+          "installing FROM the catalog (POST with packageId, no inline manifest) also needs the control plane → same blocked(environment) posture; the inline-artifact leg is the one this item proves end to end"
+        ]
+      },
+      "steps": [
+        "boot A (no OS_CLOUD_URL), as admin: GET /api/v1/runtime/config and record features.marketplace + features.installLocal; probe the mounts — GET /api/v1/marketplace/install-local (authed) → 200, and the browse namespace answers as a mounted passthrough (a non-404 that reflects the upstream's reachability, not this kernel's routing). Capture the boot banner's Marketplace plugin line",
+        "boot B (OS_CLOUD_URL=off), as admin: GET /api/v1/runtime/config → still served, now reporting installLocal:true AND marketplace:false (#8389 discovery + #8356 route-table derivation); GET /api/v1/marketplace/install-local → 200 []; a browse-namespace probe (e.g. GET /api/v1/marketplace/packages) → 404 (the proxy did NOT mount); GET /api/v1/cloud-connection/status → 404 (cloud-connection did NOT mount)",
+        "build the artifact: pnpm -C examples/app-crm build; confirm dist/objectstack.json exists",
+        "air-gapped install against boot B: `os package install ./examples/app-crm/dist/objectstack.json` with admin credentials — the CLI signs in, then POSTs the manifest inline to /api/v1/marketplace/install-local (install.ts:170); capture the success output and the installed entry",
+        "confirm the install registered: GET /api/v1/meta/app lists the CRM app; a CRM object answers on /api/v1/data; GET /api/v1/marketplace/install-local as admin shows the entry WITH installedBy and storageDir",
+        "per-principal projection (#9011): repeat the GET as the plain member — 200, the entry listed, but installedBy/storageDir ABSENT from the body; repeat anonymous — 401",
+        "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts:1239-1315); restart boot B against the same DB and confirm the purged rows do NOT come back (sampleDataPurged persisted on the ledger entry)",
+        "POST …/:manifestId/reseed-sample-data as admin — the sample rows return and sampleDataPurged flips back off",
+        "capability gate both sides (#8976): as the plain member, POST install-local (any body), DELETE …/:manifestId, POST reseed, POST purge — each 403 naming the manage_metadata requirement; anonymous on each → 401; the admin's same calls succeeded above",
+        "DELETE /api/v1/marketplace/install-local/:manifestId as admin → 2xx whose message documents that a restart is needed to fully unload (engine.registerApp is additive); restart → the CRM app no longer registers (GET /meta/app drops it)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the wiring matrix holds on both boots: boot A (default cloud URL) mounts browse proxy + install-local + cloud-connection + runtime-config; boot B (OS_CLOUD_URL=off) mounts install-local + runtime-config ONLY, with the install-local instance pinned to the 'off' control plane so its catalog branch answers a refusal instead of dialing the PUBLIC default cloud (Serve.OFFLINE_CONTROL_PLANE — resolveCloudUrl treats '' as unset and would substitute cloud.objectos.ai)",
+          "oracle": "api",
+          "verify": "the mount probes from steps 0-1: on boot B the browse and cloud-connection namespaces 404 while install-local answers 200 — the exact opposite of the pre-#8343 regression, where install-local was the one that 404'd under `off` (measured on objectos-ee 4.0.5-rc.1, whose compose file ships OS_CLOUD_URL:-off as the DEFAULT)",
+          "evidence": "the per-route status table for both boots + the boot banner lines"
+        },
+        {
+          "clause": "runtime-config tells the TRUTH about this kernel on both boots: features.marketplace is DERIVED from the serving app's live route table (#8356) and features.installLocal is derived with the constructor option as a ceiling (#8388) — so boot B reports installLocal:true AND marketplace:false, and neither flag contradicts the same boot's own route probes",
+          "oracle": "api",
+          "verify": "cross-check each boot's GET /api/v1/runtime/config features against that boot's route-probe results from clause 0 — the flags and the routes must agree in all four cells (the payload/alias contract of the route itself is platform-core.runtime-config-boot-read's — do not double-score it here)",
+          "evidence": "the two runtime-config bodies beside the two route tables"
+        },
+        {
+          "clause": "the air-gapped inline install works end to end with NO control plane: `os package install ./dist/objectstack.json` against boot B answers success, the manifest is cached to disk, and the package's apps/objects register and serve",
+          "oracle": "api",
+          "verify": "the CLI success output + GET /meta/app listing the CRM app + a data read on an installed object; the ledger row's own note is the ground: `handleInstall`'s inline branch never reads this.cloudUrl (cloud-connection-route-ledger.ts, POST /api/v1/marketplace/install-local)",
+          "evidence": "CLI transcript + the meta/app listing + one data read"
+        },
+        {
+          "clause": "the listing is per-principal (#9011): admin sees installedBy + storageDir on each entry; an authenticated NON-manage_metadata member gets the entry WITHOUT those two fields; anonymous gets 401 — presence-preserving projection, not a hidden route",
+          "oracle": "api",
+          "verify": "the three GET /api/v1/marketplace/install-local bodies side by side; the member's body must still LIST the entry (a 403 or an empty list for the member is a different, wrong behavior)",
+          "evidence": "the three response bodies"
+        },
+        {
+          "clause": "purge deletes EXACTLY the manifest-declared sample rows: every seed-dataset id gone, the user-authored row untouched, already-deleted ids counted as skipped, and the emptiness is DURABLE — sampleDataPurged persists so the rehydrate-time healer does not re-seed on the next restart",
+          "oracle": "api",
+          "verify": "the purge response counts + the post-purge reads (user row present, seed ids absent) + the post-restart re-read (still absent); reseed then restores them and flips the flag back (marketplace-install-local-plugin.ts:324-364 rehydrate guard, :1306-1311 flag write)",
+          "evidence": "purge response + before/after/post-restart row reads"
+        },
+        {
+          "clause": "every MUTATING door (install POST, DELETE, reseed, purge) requires manage_metadata (#8976), proven BOTH sides: the admin's calls succeed, the plain member's answer 403 naming the capability, anonymous answers 401 — the same ADR-0066 D1 key the /meta write doors demand, deliberately not a new install-specific capability",
+          "oracle": "api",
+          "verify": "the 4×3 persona×door status matrix; run the member cells with the member's OWN session (auth-state-leak: prove the identity server-side before each cell)",
+          "evidence": "the status matrix with response codes/bodies"
+        },
+        {
+          "clause": "DELETE removes the cached manifest and the response says a restart is needed to fully unload; after restart the package is gone from /meta/app — remove is honest about its restart coupling rather than pretending a hot unload",
+          "oracle": "api",
+          "verify": "the DELETE response text + the post-restart meta/app listing",
+          "evidence": "the DELETE body + the post-restart listing"
+        }
+      ],
+      "negative": [
+        "install-local answering 404 under OS_CLOUD_URL=off is THE #8343 regression (the shipped EE default landed every self-hosted stack there) — P1, extract on sight",
+        "runtime-config advertising marketplace:true on a boot whose browse namespace 404s (or installLocal:true where the route is absent) is the #8356/#8388 declared-vs-derived gap re-opening",
+        "purge deleting a row the manifest's seed datasets do not declare is a data-loss FAIL — 'user-created records are never touched' is the handler's own contract",
+        "a 2xx for the plain member or anonymous on ANY mutating door is a FAIL of the #8976 gate — UI absence is not the gate, the server refusal is",
+        "purged sample rows reappearing after a restart is a FAIL of the sampleDataPurged rehydrate guard",
+        "a browse-leg upstream fetch failure on an egress-blocked runner filed as a product defect is a false finding — the mount is this kernel's contract, the upstream's reachability is not (score blocked(environment))"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference", "destructive-in-place", "wrong-persona", "auth-state-leak"],
+      "source": [
+        "packages/cli/src/commands/serve.ts:1394-1444 (planMarketplaceWiring — the pure wiring decision; cloud arm vs offline arm, host-composed instances never replaced), :1225-1310 (INSTALL_LOCAL/RUNTIME_CONFIG/MARKETPLACE_PROXY/CLOUD_CONNECTION identities + RUNTIME_CONFIG_OPTIONS + OFFLINE_CONTROL_PLANE and why '' vs 'off' must differ), ~:2938-3080 (the §5 wiring block: #8343 install-local deliberately NOT gated on a cloud URL; #8389 offline runtime-config mount)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts (header contract :4-47; INSTALL_LOCAL_CAPABILITY = manage_metadata with the #8976 rationale :80-108; reseed/purge mounts :250-251; purge semantics :1239-1315; rehydrate skip on sampleDataPurged :324-364)",
+        "packages/cloud-connection/src/cloud-connection-route-ledger.ts:198-244 (the five install-local rows: POST/GET/DELETE + reseed-sample-data + purge-sample-data, each with its gate stated), the marketplace-proxy passthrough row, and the runtime-config rows",
+        "packages/cli/src/commands/package/install.ts:98-135 (inline artifact mode), :170 (the POST to /api/v1/marketplace/install-local), :198-201 (the 401 remedy)",
+        "#8343 (install-local off the cloud gate), #8389 (offline runtime-config discovery), #8356 (features.marketplace derived), #8388 (features.installLocal derived), #8976 (manage_metadata gate), #9011 (per-principal projection)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 coverage sweep from a FOUR-angle register hit (console-UI, routes, built-in-apps, docs-claims all found the surface untested). Split per the register's suggestion into this api-lane lifecycle item and platform-core.marketplace-console-honesty (browser). Grounding confirmed every load-bearing citation: planMarketplaceWiring's two arms and the 'off' vs '' control-plane distinction, the #8976 manage_metadata gate and #9011 projection in the plugin source, purge's exactly-the-declared-ids semantics with the sampleDataPurged rehydrate guard, and the CLI's inline-artifact door at install.ts:170",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.marketplace-console-honesty",
+      "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load'), Installed Apps drives the real same-origin lifecycle, and the admin guard is checked before runtime resolution",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a plain member (fresh runtime sign-up — member_default)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the same two boots as platform-core.marketplace-install-local-lifecycle (boot A default cloud arm, boot B OS_CLOUD_URL=off offline arm) — reuse them and its installed CRM artifact for the Installed Apps content",
+          "the marketplace routes are registered by DefaultAppContent in @object-ui/app-shell (system/marketplace, system/marketplace/:packageId), so they exist for every host console"
+        ],
+        "knownGaps": [
+          "rendering the browse CATALOG (boot A) needs the public control plane reachable — on an egress-blocked runner the catalog leg is blocked(environment); the DISABLED state (boot B) is the leg this item can always prove, and it is the one #5504 was about"
+        ]
+      },
+      "steps": [
+        "boot B (OS_CLOUD_URL=off), as admin in Setup: confirm the group_apps nav carries Installed Apps (nav_marketplace_installed — the entry rides MARKETPLACE_INSTALLED_UI_BUNDLE, registered by the install-local plugin that IS mounted) and does NOT carry Browse Marketplace (nav_marketplace_browse rides the browse proxy, which is not mounted) — the marketplace-ui.ts ownership rule: 'the entry lives and dies with the capability → no dead page'",
+        "boot B: navigate directly to /apps/setup/system/marketplace — the page renders the MarketplaceDisabled card (data-testid marketplace-disabled): muted informational styling, a hint addressed to the operator naming the action, a Back-home button. Screenshot",
+        "boot B: open the Installed Apps page — the installed CRM entry renders with its manifest identity; drive reseed and purge from the page and capture the same-origin POSTs to /api/v1/marketplace/install-local/:manifestId/{reseed,purge}-sample-data on the wire",
+        "boot A (default), as admin: the group_apps nav now carries BOTH Browse Marketplace and Installed Apps plus Cloud Connection (nav_cloud_connection); open the browse page — if the control plane is reachable the catalog renders; if not, record blocked(environment) for the catalog leg only (the page mounting and asking is this kernel's part)",
+        "as the plain member on either boot: navigate directly to /apps/setup/system/marketplace — the ADMIN GUARD answers first (#5583 order: MarketplaceAccessDenied, not MarketplaceDisabled and not a load spinner), because access is decided before runtime-config resolution",
+        "on boot B reload the disabled page several times: confirm no transient red 'Failed to load' card paints before the disabled card settles (the objectui#5533/#5557 resolving-state work — MarketplaceResolving covers the gap)"
+      ],
+      "acceptance": [
+        {
+          "clause": "nav ownership: on the offline boot, Installed Apps is present and Browse Marketplace is ABSENT from Setup's group_apps; on the cloud boot both are present (plus Cloud Connection) — each entry registered by the plugin that owns its capability, so no nav entry ever points at a dead page",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/app?id=setup on each boot and diff the group_apps items (nav_marketplace_browse / nav_marketplace_installed / nav_cloud_connection presence per boot); confirm the rendered sidebar matches",
+          "evidence": "the two nav payloads + sidebar screenshots"
+        },
+        {
+          "clause": "the disabled state is a CONFIGURATION CONCLUSION, not a failure: features.marketplace === false renders the MarketplaceDisabled card — muted styling, operator-addressed hint, back action — never the destructive 'Failed to load marketplace' card and never inferred from a failed request (objectui#5504)",
+          "oracle": "screenshot",
+          "verify": "the boot-B marketplace page screenshot shows data-testid marketplace-disabled with informational styling; isMarketplaceEnabled() reads the server-pushed runtime config, so the card only appears when the server itself reported the capability absent",
+          "evidence": "the screenshot + the runtime-config body it rests on"
+        },
+        {
+          "clause": "Installed Apps is a real console: it lists the locally installed entry and its reseed/purge affordances issue the same-origin install-local POSTs, whose effects the api-lane item verifies — capture the wire calls here, score the row-level effects there (no double-cover)",
+          "oracle": "network",
+          "verify": "the captured POSTs to /api/v1/marketplace/install-local/:manifestId/reseed-sample-data and purge-sample-data from the page's buttons, answering 2xx as admin",
+          "evidence": "the network trace + the page screenshot"
+        },
+        {
+          "clause": "guard order (#5583): a non-admin hitting the marketplace URL gets the access-denied state BEFORE any runtime resolution — never the disabled card (which would leak configuration posture to a persona that may not read it) and never an indefinite spinner",
+          "oracle": "screenshot",
+          "verify": "the member's direct navigation renders MarketplaceAccessDenied on both boots; run as the member's own session (wrong-persona)",
+          "evidence": "the member screenshots on both boots"
+        },
+        {
+          "clause": "no transient failure flash: reloading the disabled page never paints a red failure card in the window before the runtime config resolves (the resolving state covers it)",
+          "oracle": "screenshot",
+          "verify": "several fresh loads of the boot-B page, screenshot early and settled — only resolving → disabled, never a destructive card frame (objectui#5533/#5557)",
+          "evidence": "the load-sequence screenshots"
+        }
+      ],
+      "negative": [
+        "the disabled runtime rendering 'Failed to load marketplace' (the pre-#5504 card, whose hint pointed operators back at the template that told them to set `off`) is the regression this item exists for",
+        "a Browse Marketplace nav entry on the offline boot is a dead page — a FAIL of the nav-ownership rule even if the entry renders a nice error",
+        "a member shown the disabled/configuration card instead of access-denied is a #5583 guard-order FAIL",
+        "ticking the disabled-state clause off a failed request (rather than the server-reported features.marketplace === false) is exactly the inference isMarketplaceEnabled() refuses to make — do not make it for the product"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "absence-inference", "wrong-persona"],
+      "source": [
+        "objectui packages/app-shell/src/console/marketplace/MarketplaceDisabled.tsx (the configuration-conclusion card, #5504 — its header states the whole design rationale), MarketplaceAccessDenied.tsx + MarketplacePackagePage.tsx:551 and MarketplacePage.tsx:210 (guard/disabled resolution order, #5583), MarketplaceResolving.tsx (the no-flash window, #5533/#5557), marketplaceApi.ts (isMarketplaceEnabled reads the server-pushed runtime config, never infers from failure)",
+        "packages/cloud-connection/src/marketplace-ui.ts (MARKETPLACE_BROWSE_UI_BUNDLE → nav_marketplace_browse owned by the proxy; MARKETPLACE_INSTALLED_UI_BUNDLE → nav_marketplace_installed + the marketplace_installed page owned by install-local)",
+        "packages/cloud-connection/src/cloud-connection-ui.ts (CLOUD_CONNECTION_NAV_CONTRIBUTIONS → nav_cloud_connection)",
+        "objectui apps/console/src/AppContent.tsx (marketplace routes registered by DefaultAppContent for every host)",
+        "platform-core.marketplace-install-local-lifecycle (the api-lane sibling this item's wire captures delegate their effects to)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the browser half of the sweep's four-angle marketplace hit, split from the api-lane lifecycle item. Grounded against the objectui marketplace console: the #5504 MarketplaceDisabled configuration-conclusion card and its 'never inferred from a failed request' rule, the #5583 admin-guard-before-runtime-resolution order, the resolving-state no-flash window, and the framework-side nav bundle ownership (entries live and die with their capability)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.runtime-config-boot-read",
+      "title": "Runtime config boot read: GET /api/v1/runtime/config answers 200 ANONYMOUSLY with cloud URL, capability flags, branding and telemetry posture; the legacy /api/v1/studio/runtime-config alias is byte-identical (same handler); nothing credential-shaped is in the body",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["anonymous", "seeded admin (control only)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "any stock isolated boot — a plain `objectstack dev` mounts RuntimeConfigPlugin through the marketplace wiring's cloud arm, and an OS_CLOUD_URL=off boot mounts it through the offline arm (#8389), so the route is served on BOTH stock shapes"
+        ]
+      },
+      "steps": [
+        "on a stock isolated boot, with NO session: GET /api/v1/runtime/config — capture status, headers and full body",
+        "confirm the payload shape: features (installLocal, marketplace, …), branding (productName, productShortName, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor), telemetry (errorReporting when configured), and the cloud/control-plane URL field",
+        "GET /api/v1/studio/runtime-config with the same (absent) auth — diff the two bodies byte for byte (the alias is mounted with the SAME handler instance; ledgered as its own row because it is its own wire path)",
+        "scan the serialised body for credential-shaped content: no session token, no secret handle plaintext, no Authorization material, no sys_secret ciphertext; telemetry.errorReporting.dsn, when present, is a PUBLIC client key by design — record its presence, it is not a finding",
+        "control: repeat the read WITH an admin session and confirm the payload is not silently enriched with anything the anonymous read withheld (the route is unauthenticated by construction — there is no per-principal projection to leak through)",
+        "repeat both reads on an OS_CLOUD_URL=off boot: still 200 anonymous, flags now reporting the offline truth (the flag/route agreement itself is scored by platform-core.marketplace-install-local-lifecycle clause 1 — here only that the route is served and anonymous on this boot shape too)"
+      ],
+      "acceptance": [
+        {
+          "clause": "anonymous 200 with the documented payload: an unauthenticated GET /api/v1/runtime/config returns the features/branding/telemetry envelope — the SPA must read this BEFORE it can authenticate, so any auth gate here is a boot-breaking regression",
+          "oracle": "api",
+          "verify": "the no-session curl answers 200 with the payload keys; the ledger row records the deliberate posture ('grepped for a session/principal/401 gate in this plugin and there is none')",
+          "evidence": "the anonymous response, status + body"
+        },
+        {
+          "clause": "the legacy alias is the same wire contract: GET /api/v1/studio/runtime-config answers byte-identically (same handler instance) with the same anonymous posture — older Studio bundles keep booting",
+          "oracle": "api",
+          "verify": "byte-diff of the two bodies fetched in the same instant; empty",
+          "evidence": "both bodies + the empty diff"
+        },
+        {
+          "clause": "the route is served on BOTH stock boot shapes: the default cloud arm AND the OS_CLOUD_URL=off offline arm (#8389 — without the offline mount, a working install-local was undiscoverable and read as 'feature missing' from every UI)",
+          "oracle": "api",
+          "verify": "the anonymous 200 on each boot from steps 0 and 5",
+          "evidence": "the two responses with their boot identities"
+        },
+        {
+          "clause": "nothing credential-shaped leaks: the body carries no session/token/secret material; the error-reporting DSN (a public client key) is the only key-like value and is there by design",
+          "oracle": "api",
+          "verify": "the scan of the serialised body from step 3; the admin-session control read from step 4 adds nothing withheld from anonymous",
+          "evidence": "the scanned body + the anonymous-vs-admin diff (empty)"
+        }
+      ],
+      "negative": [
+        "a 401/403 on this route is a boot-breaking regression: the console reads it before any session exists — a client that must authenticate to learn where to authenticate is circular",
+        "the alias drifting from the canonical body (or being dropped) breaks older Studio bundles silently — the ledger keeps them as separate rows precisely so a move is reported",
+        "session, secret-store, or credential material in this anonymous body is a security finding — capture and cross-file to access-security, do not tick past it",
+        "flags asserted here that contradict the same boot's live route table belong to the marketplace item's clause 1 — do not double-file, cross-reference"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference", "cache-staleness"],
+      "source": [
+        "packages/cloud-connection/src/runtime-config-plugin.ts (the payload contract in the header :6-22; features.marketplace derived from the live route table #8356 :146+; features.installLocal derived with the option as ceiling #8388 :165+; branding key resolution; telemetry.errorReporting #12681)",
+        "packages/cloud-connection/src/cloud-connection-route-ledger.ts:268-291 (both runtime-config rows: the anonymous-by-construction posture and why the alias is its own row)",
+        "packages/cli/src/commands/serve.ts (RuntimeConfigPlugin mounted on the cloud arm AND the offline arm — #8389; RUNTIME_CONFIG_OPTIONS shared by both on purpose so the arms differ only in what is mounted)",
+        "platform-core.marketplace-install-local-lifecycle (owns the flag-vs-route-table agreement; this item owns the route/alias/payload-hygiene contract)",
+        "api-backend.route-ledger-live-parity (samples GET /api/v1/runtime/config only for raw-app MOUNT parity and defers the marketplace/runtime-config depth to platform-core by its own words — the split is deliberate on both sides)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (routes angle): the anonymous boot-read the whole console SPA depends on had no item. Kept as its own item rather than clauses on the marketplace lifecycle item, split along the register's suggested seam: this item owns the route + alias + payload hygiene; the marketplace item owns the features-vs-live-routes agreement",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.docs-portal-render",
+      "title": "Docs portal render: /docs lists the installed corpus, a doc body renders with working intra-corpus links, a flat-doc URL redirects to its canonical in-book path, the per-app index scopes to one package, and a lesser persona's rendered tree equals the API's pruned subset — never a blank region",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a plain member (fresh runtime sign-up — member_default)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an installed doc corpus — the showcase ships package docs (the same fixture platform-core.docs-audience-gate relies on); at least one doc with intra-corpus links and one book (or the implicit per-package book) so the tree has structure"
+        ],
+        "knownGaps": [
+          "audience-gated cells (public / permissionSet books) may not exist in the stock corpus — the UI-mirror clause diffs whatever the API serves per persona, so it holds on the org-default corpus too; if the API-side item's gated cells are blocked(fixture), the corresponding UI cells are as well (mirror, never wider)"
+        ]
+      },
+      "steps": [
+        "as admin, open /docs: DocsLayout fetches book + doc once and shares it; the index (DocsIndex) renders the installed corpus grouped by book/package — screenshot first, then diff the rendered entries against GET /api/v1/meta/book + /api/v1/meta/doc",
+        "open a doc through the tree (BookSidebar → /docs/<book-slug>/<name>): the body renders; click an intra-corpus cross-reference — it resolves inside the portal viewer, not to a 404 or an external route",
+        "flat-doc permalink: navigate to /docs/<doc-name> (one segment, not a book slug) — DocsSlug redirects to the canonical /docs/<home-book>/<name> (every doc has a home book; identity stays single-coordinate per ADR-0046 §4/§6)",
+        "app-scoped index: open /apps/<packageId>/docs — AppDocsIndex lists ONLY that package's docs (grouping derives the package from the name's namespace prefix, doc-groups.ts); open one through it (/apps/<packageId>/docs/<name>)",
+        "as the plain member: the sidebar Documentation entry is PRESENT (it lives in the base home items, visible to all users, not the admin cluster — UnifiedSidebar); open /docs and capture the rendered tree",
+        "UI-mirror diff: fetch the book tree(s) via the API as the SAME member and diff the member's RENDERED entries against the API's pruned subset — equal sets; then open every entry the member's tree offers: each resolves, none errors (the UI half of platform-core.docs-audience-gate clause 3 — a nav entry that refuses on click is the exact defect the per-entry filter exists to prevent)",
+        "screenshot-first throughout: any empty region is re-checked on a settled reload before being read as missing"
+      ],
+      "acceptance": [
+        {
+          "clause": "the portal index renders the installed corpus: every book/doc the API serves for this persona appears in the rendered tree, and nothing rendered is absent from the API — an equal-set diff, not a spot check",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms render, diff rendered entries vs GET /meta/book + /meta/doc (admin persona)",
+          "evidence": "the screenshot + the empty diff"
+        },
+        {
+          "clause": "a doc body renders and intra-corpus links WORK: cross-references resolve to the portal's own viewer route",
+          "oracle": "screenshot",
+          "verify": "the rendered doc + a followed cross-link landing on the linked doc inside the portal",
+          "evidence": "both screenshots + the navigated URL"
+        },
+        {
+          "clause": "a flat-doc URL redirects to its canonical in-book path: /docs/<name> → /docs/<home-book>/<name> — the permalink shape keeps working after the book segment became derived nav",
+          "oracle": "network",
+          "verify": "the navigation trace shows the redirect and the canonical URL renders the doc",
+          "evidence": "the trace + the final URL"
+        },
+        {
+          "clause": "the per-app index is scoped: /apps/<packageId>/docs lists only that package's docs, and its entries open in the app container viewer (ADR-0048)",
+          "oracle": "dom",
+          "verify": "the app-scoped listing diffed against the corpus filtered to that package's namespace prefix; one entry opened",
+          "evidence": "the listing diff + the opened doc"
+        },
+        {
+          "clause": "the Documentation entry is visible to ALL personas (base home nav, not the admin cluster), and the lesser persona's rendered tree equals the API's pruned subset for that persona with every offered entry resolving — the UI mirrors the server's audience gate, neither wider nor narrower",
+          "oracle": "dom",
+          "verify": "the member's sidebar shows the entry; the member's rendered-tree vs member-API diff is empty; every member-visible entry opens without a 401/403 (run in the member's own session — auth-state-leak)",
+          "evidence": "member sidebar screenshot + the equal-set diff + per-entry open statuses"
+        },
+        {
+          "clause": "no blank region anywhere in the portal walk: index, book landing, reader and app-scoped index each render content or a NAMED empty state",
+          "oracle": "screenshot",
+          "verify": "per-surface screenshots after settle; a persistent blank after reload is the finding",
+          "evidence": "the screenshot set"
+        }
+      ],
+      "negative": [
+        "a rendered tree WIDER than the persona's API subset is an audience leak — cross-file to platform-core.docs-audience-gate and access-security rather than ticking any clause",
+        "a tree entry that 401/403s on click is a FAIL of the per-entry filter's UI mirror even though the tree itself rendered",
+        "a flat-doc URL answering 404 instead of redirecting breaks every historical permalink — FAIL",
+        "an empty index read once, right after navigation, is the hydration-race shape — screenshot-first, settle, re-read before any 'portal is empty' finding"
+      ],
+      "traps": ["hydration-race", "auth-state-leak", "stale-console-bundle", "wrong-persona"],
+      "source": [
+        "objectui apps/console/src/App.tsx:249-257 (/docs → DocsLayout with index/:slug/:slug/:name children) + AppContent.tsx:35-41,176-185 (app-scoped /apps/:packageId/docs — AppDocsIndex + the same DocsLayout children)",
+        "objectui apps/console/src/pages/{DocsLayout,DocsIndex,DocsSlug,BookSidebar,AppDocsIndex}.tsx (DocsSlug: a non-book segment is a flat doc name, redirected to /docs/<home-book>/<name>)",
+        "objectui apps/console/src/pages/doc-groups.ts (grouping by namespace prefix — the package is derived from the doc name, ADR-0046)",
+        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx:316-323 (the Documentation entry in the BASE home items — visible to all users by design, with the comment saying so)",
+        "ADR-0046 §6 (documentation spine; §6.2.1 derived membership; §6.4 implicit per-package book), ADR-0048 (package container docs)",
+        "platform-core.docs-audience-gate (the API-side gate this item's clause 4 mirrors — its clause 3 is the server half of the same contract)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep from a two-angle hit (console-UI + built-in-apps): the docs PORTAL UI had no item while its API-side gate (docs-audience-gate, v14.1) did. The load-bearing clause is the UI mirror: the lesser persona's rendered tree must equal the API's pruned subset and every offered entry must resolve — asserting the portal neither widens nor breaks the server's audience gate. since v16 by judgment: the portal predates the v17 window (the DocsLayout book-slug reshape is newer than the portal itself)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.url-overlay-contract",
+      "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, tab/palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?tab cold-loads, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock showcase data: an object list whose records open in the drawer, a record detail with related-list tabs, and a subtable child (e.g. invoice lines) for the formObject/formLink leg"
+        ],
+        "knownGaps": [
+          "the cross-object refusal's pin (objectui apps/console/src/components/FormPage.recordObject.test.tsx) lives entirely in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the standing 23-item objectui-pin fact in RUNNER.md); drive that clause by hand in the browser, or run the pin in an objectui checkout naming the revision"
+        ]
+      },
+      "steps": [
+        "record drawer: on an object list, open a record that renders in the drawer — the URL gains ?recordId=<id> as a PUSHED entry; press browser Back — the drawer closes and the list is still there (one history entry consumed, no page change)",
+        "form overlay create: trigger a create that uses the global overlay — ?form=new pushes; fill nothing; Back closes the overlay; re-open and confirm ?form=<recordId> (edit) behaves the same",
+        "child pre-link: from a parent record, create a subtable child via the overlay — capture ?form=new&formObject=<childObject>&formLink=<fkField>:<parentId>; the FK field arrives pre-linked to the parent; RELOAD the URL cold — the pre-link survives (refresh-safe by construction: the state is the URL)",
+        "tab cold-load: copy a record URL, append ?tab=related (or a related:<child> value), open in a fresh tab — the detail lands on that tab; now switch tabs in-page several times and press Back ONCE — you leave the record (or close the prior overlay), you do NOT step back through tab selections (tab REPLACEs)",
+        "palette/shortcuts chrome: open ?palette=1 and ?shortcuts=1 overlays, close them, and confirm Back never replays them (replace semantics — useUrlOverlay defaults to replace)",
+        "drill trail: from a record, drill into a related record — the URL carries from=…; the breadcrumb renders the ancestor trail and clicking a crumb navigates back to that level",
+        "cross-object refusal (#4292): take a real record id of object A; navigate to /forms/<formName>?recordId=<idOfA>&recordObject=<objectB> — the route renders an ERROR state; capture the network: NO /data/ read was issued for the mismatched pair (the refusal precedes the read, so nothing is read and nothing can be written); control: the same URL with the AGREEING recordObject loads and prefills normally",
+        "case probe: repeat the mismatch with only a case difference in recordObject — still refused (object names are not case-folded)"
+      ],
+      "acceptance": [
+        {
+          "clause": "user-opened overlays PUSH: the record drawer (?recordId) and the form overlay (?form=new/<id>) each add one history entry and browser Back closes them, returning to the surface beneath",
+          "oracle": "screenshot",
+          "verify": "open → screenshot → Back → screenshot (overlay gone, list/record intact), for drawer and both form modes; URL bar captured at each step",
+          "evidence": "the before/Back screenshot pairs with URLs"
+        },
+        {
+          "clause": "passive/chrome state REPLACEs: tab switches, the palette and the shortcuts dialog never stack history — one Back after N tab switches leaves the page rather than stepping through selections",
+          "oracle": "screenshot",
+          "verify": "N in-page tab switches + palette/shortcuts open-close, then a single Back — the resulting location proves no chrome entry was on the stack",
+          "evidence": "the switch sequence + the post-Back location"
+        },
+        {
+          "clause": "?tab cold-loads: a fresh navigation to <record>?tab=<value> lands directly on that tab (URL-addressable state, not just an in-page echo)",
+          "oracle": "screenshot",
+          "verify": "fresh-tab open of the copied URL shows the named tab active",
+          "evidence": "the cold-load screenshot"
+        },
+        {
+          "clause": "formObject/formLink pre-link a child create and are refresh-safe: the FK arrives pre-linked to the parent, and a cold reload of the same URL reproduces the pre-linked form",
+          "oracle": "screenshot",
+          "verify": "the overlay's FK field shows the parent on first open AND after a cold reload of the captured URL",
+          "evidence": "both screenshots + the URL"
+        },
+        {
+          "clause": "the from drill trail renders a clickable ancestor path and each crumb navigates to its level",
+          "oracle": "screenshot",
+          "verify": "the drilled record shows the trail; a crumb click lands on the ancestor",
+          "evidence": "trail screenshot + the crumb navigation"
+        },
+        {
+          "clause": "a recordId whose recordObject names ANOTHER object fails CLOSED (#4292): error state, NO /data read issued for the mismatch, no form to submit — and the refusal is exact (case differences refuse too); the agreeing control loads normally",
+          "oracle": "network",
+          "verify": "the network trace for the mismatched URL shows zero /data/ reads for the pair; the error surface renders; the agreeing control's trace shows the normal load. Pinned in objectui by FormPage.recordObject.test.tsx — from this checkout, drive by hand (knownGaps)",
+          "evidence": "both traces + the error-state screenshot"
+        }
+      ],
+      "negative": [
+        "Back paging through tab switches or re-opening the palette is a FAIL of the push-vs-replace rule — the registry's own table states which params push and which replace",
+        "a mismatched recordObject EDITING the same-id row of the wrong object is the silent-wrong-write #4292 closed — any /data read or write on the mismatch is a FAIL even if an error eventually renders",
+        "a page-scoped param reusing a reserved name (a view that repurposes ?recordId or ?form) is a contract violation — capture and file, the registry exists to make this a review-time offence",
+        "drawer/overlay state that survives only in memory (a cold reload of the captured URL losing the overlay or the pre-link) breaks URL-addressable state — FAIL"
+      ],
+      "traps": ["hydration-race", "automation-input", "shared-browser-tab"],
+      "automated": {
+        "kind": "unit",
+        "ref": "objectui: apps/console/src/components/FormPage.recordObject.test.tsx (the #4292 fail-closed matrix: mismatch → error state, no /data request, no write path, case-sensitive; agreeing control unchanged); objectui: packages/app-shell/src/hooks/__tests__/useUrlOverlay.test.tsx (replace semantics)"
+      },
+      "source": [
+        "objectui packages/app-shell/src/urlParams.ts:1-77 (the single registry of reserved params with the per-param push/replace column and the rule of thumb: user-opened overlays push so Back closes; passive selection and transient chrome replace so Back never pages through them; objectui#2269 P3, ADR-0054 C3)",
+        "objectui apps/console/src/components/FormPage.tsx (FORM_RECORD_OBJECT_PARAM :293; readFormRecordTarget create/edit/refuse :305-310 — recordObject can only ever refuse, never override; #4278/#4292)",
+        "objectui packages/app-shell/src/hooks/useUrlOverlay.ts (replace: true default for chrome overlays)",
+        "framework#2604 (form overlay D1/D2, formObject D3), objectui#2257 (stable tab values), objectui#4278 (?recordId on /forms), objectui#4292 (cross-object fail-closed)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (console-UI angle): the console's reserved-URL-param contract (ADR-0054 C3) had no item though it is the cross-route state contract every overlay and deep link rides. Grounded against urlParams.ts's own push/replace table and the FormPage #4292 fail-closed pin (objectui-repo-only, so the clause is drivable by hand per the RUNNER standing fact). since v16 by judgment from the issue numbers (#2269/#2604/#4278/#4292 pre-date the v17 window)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.keyboard-shortcut-surface",
+      "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the WIRED accelerators fire (⌘K, ⌘/Ctrl+B, ⌘⇧I where AI is present) — and the five advertised-but-DEAD accelerators (⌘/, N, R, ⌘E, ⌘D) plus the B-vs-⌘B display mismatch are EXPECTED-FAIL probes, never ticked green",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "any stock boot with the console; an object list open for the dead-accelerator probes (N/R/⌘E claim record actions, so probe them where a record surface could plausibly respond)"
+        ],
+        "knownGaps": [
+          "⌘⇧I (chat dock) is wired but the dock only exists when the AI surface is present — on a stock open boot the agent catalog is empty, the listener is not armed and ⌘⇧I is deliberately inert; that WHOLE cell (inert-when-gated AND armed-when-entitled) is scored by ai.console-ai-surface-gating — here record only that the accelerator's handler exists and is gated, never a second verdict",
+          "⌘⇧O / ⌘⇧S are advertised in the dialog's 'AI assistant' group but their handlers are PAGE-SCOPED to the AI chat page (matchAiChatShortcut in AiChatPage) — on a stock open boot that page is unreachable, so these two cells are blocked(fixture) on stock; on an AI-enabled deployment probe them ON the chat page and record the page-scope honestly"
+        ]
+      },
+      "steps": [
+        "press `?` on a settled console page (focus NOT in an input) — the shortcuts dialog opens (overlay data-testid overlay:keyboard-shortcuts) and the URL carries ?shortcuts=1; press Esc — it closes and the param clears",
+        "deep-link: open <any-route>?shortcuts=1 cold — the dialog is open on load (URL-addressable, ADR-0054)",
+        "input guard: focus a text input (e.g. a list filter), type `?` — the character lands in the input and NO dialog opens (the handler returns early for INPUT/TEXTAREA/contentEditable)",
+        "inventory the dialog: capture every advertised accelerator. At head the groups list: ⌘K palette / ? / Esc; B sidebar + ⌘/ focus-search; N create + R refresh + ⌘E edit; ⌘⇧O new chat + ⌘⇧S conversations; ⌘D dark mode",
+        "fire the WIRED set: ⌘K (or Ctrl+K) opens the command palette (depth of the palette itself belongs to search.console-global-search — here only that the accelerator fires); ⌘/Ctrl+B toggles the sidebar; ⌘⇧I is NOT probed here — its gated/entitled matrix belongs to ai.console-ai-surface-gating",
+        "display-mismatch probe: the dialog advertises bare `B` for the sidebar — press bare B (no modifier) outside any input: NOTHING happens (the handler requires metaKey||ctrlKey); press ⌘/Ctrl+B: the sidebar toggles. Record the mismatch as expected-fail",
+        "EXPECTED-FAIL probes, one by one on the object list, focus on the page body: ⌘/ (advertised focus-search), N (create record), R (refresh data), ⌘E (edit record), ⌘D (toggle dark mode) — for each, capture that NO corresponding effect occurs (no focused search box, no create overlay, no refetch on the wire, no edit mode, no theme class change). A repo grep across app-shell/console/components finds no handler for any of the five; these clauses record the actual behavior and MUST NOT tick green while the defect stands (defect K1 — filed by the sweep, not per run)",
+        "Esc closes the dialog from every open path; re-run `?` after the probes to confirm the dialog itself still works"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dialog's own contract holds: `?` opens it (guarded against input focus), ?shortcuts=1 deep-links it, Esc closes it, and the overlay carries its stable testid",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the overlay, assert overlay:keyboard-shortcuts present/absent across the open/close/deep-link/input-guard sequence",
+          "evidence": "the sequence screenshots + URL states"
+        },
+        {
+          "clause": "the wired accelerators fire: ⌘K opens the palette and ⌘/Ctrl+B toggles the sidebar (⌘⇧I's gated matrix is ai.console-ai-surface-gating's — not re-scored here)",
+          "oracle": "screenshot",
+          "verify": "before/after screenshots per accelerator; drive keys with real keyboard events (automation-input — synthetic events that skip the window listener fake a dead shortcut)",
+          "evidence": "the per-accelerator screenshot pairs"
+        },
+        {
+          "clause": "EXPECTED FAIL (defect K1a): the dialog advertises bare `B` for the sidebar while the only handler requires ⌘/Ctrl — bare B does nothing, ⌘/Ctrl+B works. The run records the mismatch; ticking this clause green requires the DISPLAY to be fixed to match the binding (or a bare-B handler to exist), at which point this item needs a revision",
+          "oracle": "dom",
+          "verify": "bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), ⌘/Ctrl+B flips it; the dialog's Navigation group still lists bare B",
+          "evidence": "the sidebar state trace + the dialog screenshot"
+        },
+        {
+          "clause": "EXPECTED FAIL (defect K1b): each of the five advertised accelerators ⌘/ (focus search), N (create), R (refresh), ⌘E (edit), ⌘D (dark mode) produces NO effect — no handler exists in the tree. Each probe is its own record: effect-absence proven against the specific advertised effect (focus, overlay, network refetch, edit surface, root theme class). A run must NOT tick these green while the shortcuts stay dead; when handlers land, flip the clauses to positive assertions in a revision",
+          "oracle": "network",
+          "verify": "per-key: the advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2",
+          "evidence": "the five per-key traces/DOM reads"
+        },
+        {
+          "clause": "the advertised-but-page-scoped pair is recorded honestly: ⌘⇧O/⌘⇧S are listed globally but handled only on the AI chat page — on stock open boots blocked(fixture); on AI-enabled deployments they fire ON that page and do nothing elsewhere",
+          "oracle": "dom",
+          "verify": "keypress outside the chat page: no effect; on the chat page (where reachable): new-chat/list-toggle occur (matchAiChatShortcut)",
+          "evidence": "both contexts' traces, or the blocked(fixture) record on stock"
+        }
+      ],
+      "negative": [
+        "ticking any advertised accelerator green off its LISTING in the dialog is the exact ticking-on-a-label failure this item exists to prevent — every accelerator is proven by firing it",
+        "a dead wired shortcut (⌘K or ⌘/Ctrl+B not responding) is a REAL fail, not an expected one — but rule out automation-input first: a synthetic event that does not reach the window/document listener fakes exactly this",
+        "if a future run finds the five dead shortcuts now WORKING, that is not a silent pass — the expected-fail clauses are stale and the item needs a revision flipping them to positive assertions (cite the fixing PR)",
+        "the `?` handler firing while an input is focused (swallowing typed text) would be a regression of the guard — probe it, it is cheap"
+      ],
+      "traps": ["automation-input", "stale-console-bundle", "absence-inference"],
+      "source": [
+        "objectui packages/app-shell/src/chrome/KeyboardShortcutsDialog.tsx:38-77 (the advertised groups — the full inventory this item probes), :80-97 (the `?` handler with the input/textarea/contentEditable guard; `?` is the ONLY key it handles), :36 (?shortcuts=1 via useUrlOverlay)",
+        "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx:56 (⌘/Ctrl+K — wired)",
+        "objectui packages/components/src/ui/sidebar.tsx:42 (SIDEBAR_KEYBOARD_SHORTCUT = 'b'), :115-127 (the handler requires metaKey||ctrlKey — the source of the B-vs-⌘B display mismatch)",
+        "objectui packages/app-shell/src/layout/chatDockState.ts:161-170 (matchChatDockShortcut — ⌘/Ctrl+Shift+I, composer-safe)",
+        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx:~605-615 (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
+        "repo-grep evidence for the five dead accelerators: no handler for ⌘/ / N / R / ⌘E / ⌘D anywhere in app-shell, console or components (the only near-misses are page-scoped: ApprovalsInboxPage's plain `r` quick-decide and useDebugMode's Ctrl+Shift+D — neither matches an advertised accelerator)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (console-UI angle). Grounding confirmed the register's defect hypothesis and widened it: the dialog advertises ⌘/, N, R, ⌘E and ⌘D with NO handler in the tree (expected-fail probes, defect K1 filed by the sweep), advertises bare B while the handler requires ⌘/Ctrl+B (display mismatch), and additionally advertises ⌘⇧O/⌘⇧S whose handlers are page-scoped to the AI chat page — recorded here as an honest page-scope cell the register had not listed. ⌘K and ⌘⇧I are wired (palette depth stays with search.console-global-search)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.home-admin-cluster-links",
+      "title": "Home admin cluster + System hub: every shell-hard-coded Administration link and every hub card resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), the five legacy system/* URLs redirect to their canonical object routes, hub counts reconcile against the API with honest error states, and a non-admin's home nav is Home + Documentation only",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123 — isWorkspaceAdmin)",
+        "a plain member (fresh runtime sign-up — member_default)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock boot — the cluster and hub are shell-hard-coded (not metadata), so no showcase-specific fixture; the hub counts need the seeded sys_user/sys_organization/sys_position/sys_permission_set/sys_audit_log rows any --seed-admin boot provides"
+        ],
+        "knownGaps": [
+          "the pinning suites (objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx and AppContent.legacyRedirects.test.tsx) live entirely in the objectui repo — not runnable from this checkout (the standing 23-item fact); the browser walk below is the from-here oracle"
+        ]
+      },
+      "steps": [
+        "as admin, open /home: the Administration cluster renders. Enumerate its entries against the source list — sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-objects → /apps/setup/metadata/object, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (9 entries; the two metadata-admin ones deliberately point at the canonical /metadata/:type routes, #3660/#3739)",
+        "click EVERY cluster entry: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
+        "open the System hub (/apps/setup/system): every card renders; click every card destination the same way. ⚠️ ONE carve-out: the 'AI Approvals' card is defect K2's subject — on an agent-less boot it renders ungated and its page polls a dead 501 endpoint; ai.console-ai-surface-gating owns that card's expected-fail scoring, so THIS walk records the observation and defers that single card's verdict there (never double-file K2)",
+        "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions — each redirects to its canonical object route per the #3655 map (users→sys_user, organizations→sys_organization list, roles→sys_position [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→sys_position, permissions→sys_permission_set) and the landing page renders",
+        "counts reconcile: read the hub's five badges (Users / Organizations / Positions / Permission Sets / Audit Logs) and diff each against a direct API count of sys_user / sys_organization / sys_position / sys_permission_set / sys_audit_log AS THE SAME ADMIN",
+        "honest failure shape: confirm the badge semantics — a 404'd object renders 0; a non-404 failure (denied/offline) renders NO badge rather than a confident 0 (objectui#3679: null omits the badge; per-call, so one denied object costs only its own number)",
+        "as the plain member, open /home: the nav is Home + Documentation ONLY — no Administration cluster (isWorkspaceAdmin gate); the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
+      ],
+      "acceptance": [
+        {
+          "clause": "all 9 Administration entries resolve to real pages: no RouteNotFound, no dead fall-through to a RecordDetailView for 'system', no 'No Apps Configured' dead end (the #3590 fresh-env case: sys-settings targets /apps/setup/system, which resolves in BOTH the no-app and app-bearing branches)",
+          "oracle": "screenshot",
+          "verify": "per-entry screenshot-then-DOM walk; the entry list diffed against UnifiedSidebar's adminItems source so a grown/renamed entry is caught, not silently outside the walk",
+          "evidence": "the 9 per-entry screenshots + the entry-list diff"
+        },
+        {
+          "clause": "every System hub card destination resolves the same way — these exact links dead-ended twice before (objectui#3655 history), which is why the whole surface is walked, not sampled; the 'AI Approvals' card alone is excluded from this clause's verdict (defect K2, scored by ai.console-ai-surface-gating)",
+          "oracle": "screenshot",
+          "verify": "per-card walk of SystemHubPage's destinations, the AI Approvals card recorded-not-scored",
+          "evidence": "the per-card verdict table"
+        },
+        {
+          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the hub's own emitted URLs keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
+          "oracle": "network",
+          "verify": "the navigation trace per legacy URL shows the redirect target object route; the landing renders",
+          "evidence": "the five redirect traces + landings"
+        },
+        {
+          "clause": "hub counts reconcile against the API for the same principal, and the failure shape is honest: 404 → 0, any other failure → NO badge (null), never a confident wrong number — per object, so one denial costs one badge",
+          "oracle": "api",
+          "verify": "badge-vs-API diff for the five counts; if a count cannot be provoked into failing, score the honest-failure half from the rendered state only when a real failure occurs and record none-encountered otherwise",
+          "evidence": "the count table + the failure-shape note"
+        },
+        {
+          "clause": "the member's home nav is Home + Documentation only — the Administration cluster is admin-gated in the shell, and the server refusal behind it is already proven by the builtin-apps item (both-sides split across the two items, neither double-scored)",
+          "oracle": "dom",
+          "verify": "the member's rendered home nav (own session — wrong-persona) contains exactly the two base entries",
+          "evidence": "the member nav screenshot + DOM excerpt"
+        }
+      ],
+      "negative": [
+        "a cluster link or hub card landing on RouteNotFound or a RecordDetailView for 'system' is the exact regression class this item pins (it shipped twice) — FAIL and extract",
+        "a legacy system/* URL answering 404 instead of redirecting breaks every bookmark from the pre-slimming console — FAIL",
+        "a hub badge rendering 0 for a DENIED read (rather than omitting the badge) is the #3679 conflation — an administrator cannot tell 'none' from 'unknown' — FAIL of the honesty clause",
+        "the Administration cluster rendering for a non-admin is a client-courtesy leak; capture it AND check the server half (the member still cannot obtain setup) before deciding severity"
+      ],
+      "traps": ["wrong-persona", "hydration-race", "stale-console-bundle"],
+      "source": [
+        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx:316-381 (homeNavigation: base Home + Documentation for everyone; the isWorkspaceAdmin-gated adminItems cluster with the #3590 /system targeting note and the #3660/#3739 canonical-metadata-route notes)",
+        "objectui apps/console/src/pages/system/SystemHubPage.tsx:100-160 (the five counts verified against the framework registry; sys_permission_set decided by #3655; null-on-error / 0-on-404 badge semantics, #3670/#3679)",
+        "objectui apps/console/src/AppContent.tsx:104-165 (SystemObjectRedirect — the five legacy URLs, the #3655 object map with the ADR-0090 roles→sys_position note, and the measured pre-fix landings) + the exported systemRoutes fragment",
+        "objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx + AppContent.legacyRedirects.test.tsx (the objectui-side pins — see knownGaps)",
+        "platform-core.builtin-apps-nav-render (owns the server-side Setup refusal for the member — this item owns the shell-hard-coded home cluster, which that item does not touch)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (built-in-apps angle): the shell-hard-coded home Administration cluster and SystemHubPage sit OUTSIDE every merged-nav walk (builtin-apps-nav-render walks meta/app payloads; these links are React source, not metadata), and their history shows exactly this class dead-ending twice (objectui#3655). Grounding refined the register: the cluster is 9 entries (the register named 7 — Object Manager and Datasources are also in the source list), and the hub's five counts carry the #3679 null-vs-0 honesty semantics now pinned as their own clause",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.lifecycle-retention-sweep",
+      "title": "ADR-0057 lifecycle sweep: backdated telemetry rows past retention are reaped BOUNDED under a system context on the hourly sweep, onlyWhen scoping spares live rows, an archive-declaring object is NEVER hot-deleted unarchived (retained + reported archive-pending when no archive datasource exists), the transient class stays on the primary, and OS_LIFECYCLE_DISABLED=1 disarms the sweep",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["operator (local shell + direct sqlite access)", "seeded admin (API reads)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access between boots — retention judges created_at, which no REST write lets a caller backdate, so the crash-shaped fixtures are hand-seeded into the sqlite file (the same fixture class platform-core.interrupted-migration-boot-report proved)",
+          "stock lifecycle declarations as the subjects: sys_automation_run (class telemetry, retention 30d, onlyWhen status ∈ completed|failed — the MIXED-table scoping), sys_audit_log (class audit, archive after 90d to the 'archive' datasource — the never-hot-delete subject), sys_inbox_message (class transient)",
+          "patience for the timer: the first sweep fires DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60s after engine start, then hourly — every probe boot needs a ≥60s settle before reading results (eventual-consistency: do not read the absence of a reap before the sweep ran)"
+        ],
+        "knownGaps": [
+          "the ARCHIVE-SUCCESS leg (rows copied to the archive datasource, then hot-deleted) needs a registered 'archive' datasource, which no stock boot has — that leg rides the unit pin (lifecycle-service.test.ts) and stays blocked(fixture) live; what IS live on stock is the SAFETY side: sys_audit_log rows older than 90d are RETAINED and the sweep reports the object skipped archive-pending",
+          "class-routing to a dedicated 'telemetry' datasource (ADR-0057 §3.6) engages only when a telemetry datasource is registered — absent on stock, so the routing leg is asserted at the unit/source level (engine.ts getDriver priority + SYSTEM_LEDGER_LIFECYCLE_CLASSES), not live",
+          "the ≤ REAP_BATCH_SIZE × REAP_MAX_BATCHES_PER_SWEEP bound (500×20 per object per sweep) is proven by the unit suite; staging >10k backdated rows live is not required — the live clause asserts the reap happened via the bounded per-id path (the aggregate log line), not the bound's edge"
+        ]
+      },
+      "steps": [
+        "boot once on the file DB so schema exists; stop the server",
+        "hand-seed via sqlite: (a) N sys_automation_run rows with created_at 40 days ago, status 'completed' (past the 30d window, terminal); (b) 2 rows created_at 40 days ago with status 'paused'/'running' (past the window but NOT terminal); (c) 1 sys_audit_log row created_at 100 days ago (past archive.after 90d); (d) 1 sys_inbox_message row (transient class). Record exact counts and ids",
+        "boot again (control boot, no env flag); wait ≥90s; grep the log for the aggregate sweep line '[lifecycle] sweep: … policy(ies) applied, ~… rows reaped …' (the ONE trace a sweep leaves — cleanup must not re-feed the tables it drains)",
+        "re-read via API/sqlite: the terminal 40d-old automation rows are GONE; the paused/running 40d-old rows SURVIVE (onlyWhen scoping); the 100d-old audit row SURVIVES and the sweep report lists sys_audit_log skipped archive-pending (no 'archive' datasource registered → retained, never dropped unarchived); the inbox row's fate follows its own declared policy only — the transient class got no cross-class treatment",
+        "idle proof: a second sweep interval later (or a fresh boot on the now-clean DB + 90s), the log carries NO sweep line — an idle sweep logs nothing (the line only prints when something was swept/errored/alerted)",
+        "kill switch: re-seed one terminal 40d-old automation row; boot with OS_LIFECYCLE_DISABLED=1; wait ≥90s; the row SURVIVES and no sweep line appears — and this absence is meaningful only because step 2 proved the sweep active on the same composition (absence-inference guarded)",
+        "run the unit pin for the legs live cannot stage: pnpm --filter @objectstack/objectql exec vitest run src/lifecycle/lifecycle-service.test.ts — the archive-declared skip ('skips hot deletion entirely while an archive is declared (retain → archive → delete)', report.skipped == [{object, reason: 'archive-pending'}]), the bounded-reap cases, and the rotation fallback"
+      ],
+      "acceptance": [
+        {
+          "clause": "retention reaps on the real timer under a system context: rows past retention.maxAge are deleted by the hourly sweep (first sweep 60s after engine start) with the one aggregate log line as its trace — no REST caller, no per-plugin sweeper, exactly the platform-owned enforcer ADR-0057 §3.3 demands",
+          "oracle": "log",
+          "verify": "the sweep line from step 2's boot + the before/after row reads; the deletes happened with no API traffic from the run",
+          "evidence": "the log excerpt + both row inventories"
+        },
+        {
+          "clause": "onlyWhen scopes the reap: 40d-old rows in NON-terminal statuses (paused/running) survive the same sweep that reaped their terminal neighbors — a suspended approval may legitimately stay paused for months, and the MIXED-table declaration exists for exactly this",
+          "oracle": "api",
+          "verify": "the surviving row ids from step 3 equal the seeded non-terminal set exactly",
+          "evidence": "the survivor read keyed by id"
+        },
+        {
+          "clause": "an archive-declaring object is NEVER hot-deleted unarchived: with no 'archive' datasource registered, the 100d-old sys_audit_log row is retained and the object reported skipped archive-pending — a compliance ledger must not be dropped because its archive target is missing; the success path (copy then delete) rides the unit pin (blocked(fixture) live)",
+          "oracle": "test",
+          "verify": "live: the audit row survives step 3's sweep; pinned: the lifecycle-service.test.ts archive-pending case is green (report.skipped names the object and reason)",
+          "evidence": "the surviving audit row + the vitest output"
+        },
+        {
+          "clause": "the reap is BOUNDED and per-id (#5194): at most REAP_BATCH_SIZE(500) × REAP_MAX_BATCHES_PER_SWEEP(20) rows per object per sweep, remainder draining across later sweeps — no unbounded multi:true DELETE holding the whole DB's write lock on the first sweep after a declaration lands on a big table",
+          "oracle": "test",
+          "verify": "the unit suite's bounded-reap cases; live corroboration: the sweep line's reaped count for the run's seeded population",
+          "evidence": "the vitest output + the sweep line"
+        },
+        {
+          "clause": "OS_LIFECYCLE_DISABLED=1 disarms the whole schedule: the seeded expired row survives and no sweep line appears — scored ONLY against a composition where the armed control boot already proved the sweep live (the enabled getter short-circuits before any timer is armed)",
+          "oracle": "log",
+          "verify": "step 5's survivor + empty grep, bracketed by step 2's armed control",
+          "evidence": "the two boots' grep results side by side + the survivor read"
+        },
+        {
+          "clause": "the class vocabulary this item's variants ride is the spec's own: LifecycleClassSchema = record|audit|telemetry|transient|event (5), with audit/telemetry/event forming the system-ledger carve-out set in the engine (SYSTEM_LEDGER_LIFECYCLE_CLASSES — transient deliberately absent because transient objects stay on the primary and never reach the gate)",
+          "oracle": "build",
+          "verify": "read the enum at packages/spec/src/data/object.zod.ts:820 and the engine set at packages/objectql/src/engine.ts:6582-6587; the enumSource pin below fails this item loudly when the spec grows a sixth class",
+          "evidence": "both source excerpts"
+        }
+      ],
+      "negative": [
+        "a sweep deleting a paused/running row past the age window is a data-loss FAIL of onlyWhen — resumable workflow state reaped as history",
+        "a hot delete of an archive-declaring object's cold rows while the archive copy did not succeed is THE compliance fail the safety rule exists for — P1, extract on sight",
+        "reading 'no reap happened' before the 60s initial delay elapsed is the eventual-consistency trap, and scoring the kill switch on a boot never proven to sweep is absence-inference — both boots must bracket the same composition",
+        "a sweep that logs per-row (re-feeding the tables it drains) violates the one-aggregate-line design — capture as a finding, not a style nit",
+        "backdating rows through any API write instead of sqlite is impossible by design — a run that claims to have done so tested something else"
+      ],
+      "variants": [
+        "class 'record' — default, no cross-class treatment",
+        "class 'audit' — archiver subject (sys_audit_log: archive after 90d, keep 7y); system-ledger carve-out member",
+        "class 'telemetry' — reaper subject (sys_automation_run 30d onlyWhen-terminal, sys_http_delivery); carve-out member",
+        "class 'transient' — stays on the primary, never routed (sys_inbox_message)",
+        "class 'event' — carve-out member (routing tier only on stock)"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/object.zod.ts",
+        "export": "LifecycleClassSchema",
+        "expect": 5
+      },
+      "traps": ["eventual-consistency", "clock-skew", "destructive-in-place", "absence-inference"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/lifecycle/lifecycle-service.test.ts (archive-pending skip, bounded reap, rotation fallback, governance)"
+      },
+      "source": [
+        "packages/objectql/src/lifecycle/lifecycle-service.ts (the ADR-0057 enforcer: header contract :13-58 — reaper/rotator/archiver, the never-hot-delete-unarchived safety rule, #5194 bounds; SYSTEM_CTX :62; DEFAULT_LIFECYCLE_SWEEP_MS 3_600_000 :80; DEFAULT_LIFECYCLE_INITIAL_DELAY_MS 60_000 :83; REAP_BATCH_SIZE 500 / REAP_MAX_BATCHES_PER_SWEEP 20 :347-348; enabled getter incl. OS_LIFECYCLE_DISABLED :411-414; start()/timer :425-440; archive safety :984-995; the aggregate sweep line :718-730)",
+        "packages/objectql/src/plugin.ts:432-451 (registered as service 'lifecycle' by the engine plugin — every kernel with data has enforcement; a declared retention driving no sweeper is ADR-0049 dead surface), :755-756 (armed at start), :774-778 (#4747 disarm on destroy)",
+        "packages/objectql/src/engine.ts:6582-6587 (SYSTEM_LEDGER_LIFECYCLE_CLASSES = audit|telemetry|event; transient deliberately absent) + the getDriver §3.6 class-routing priority note",
+        "packages/spec/src/data/object.zod.ts:820 (LifecycleClassSchema, 5 members)",
+        "packages/services/service-automation/src/sys-automation-run.object.ts:51-57 (telemetry 30d onlyWhen terminal — the MIXED-table rationale in its own comment), packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts:24-31 (archive 90d/7y + the never-hot-delete note), packages/services/service-messaging/src/objects/inbox-message.object.ts:28 (transient), http-delivery.object.ts:39 (telemetry)",
+        "ADR-0057 (§3.3 single enforcer, system context, isolation; §3.6 class separation), #5194 (bounded reap), #2834 (the automation-run declaration)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (spec-enums angle): the ADR-0057 lifecycle vocabulary had items nowhere though stock objects declare all the interesting shapes. Grounding sharpened the register on three points: (1) sys_audit_log stock-declares archive 90d, so the never-hot-delete SAFETY side is live-stageable (the success side stays unit-pinned); (2) the sweep has NO on-demand door — first fire is 60s after engine start, so every probe brackets that delay and the kill-switch clause requires an armed control boot; (3) the enum pin is LifecycleClassSchema expect 5, verified by member count at object.zod.ts:820",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.seed-mode-matrix",
+      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it)",
+          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place)"
+        ],
+        "knownGaps": [
+          "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
+          "`insert` mode's schema comment says 'fail on duplicate', but the loader does NO matching in insert mode (no existing-records preload) — the failure only materializes where the object itself carries a unique constraint; on an unconstrained scratch object an insert replay simply duplicates rows. The matrix records both shapes honestly"
+        ]
+      },
+      "steps": [
+        "author the scratch object (2 fields + a natural-key `name`) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
+        "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
+        "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
+        "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
+        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything. Record the declared-vs-implemented gap; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
+        "idempotence tie-in: re-publish the upsert draft unchanged → zero updates (all no-op skips), updated_at values untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
+        "teardown: the writable package's own delete, or discard the isolated DB"
+      ],
+      "acceptance": [
+        {
+          "clause": "upsert (the default) matches on externalId and does exactly create-or-update: unmatched rows insert, matched-and-different rows update IN PLACE (id stable), matched-and-identical rows SKIP as no-op replays — comparison covering only seed-declared fields so runtime edits to other columns never block the skip",
+          "oracle": "api",
+          "verify": "the id/value table across the two upsert publishes from step 1; ids stable, values as authored, A untouched on the replay",
+          "evidence": "the before/after row reads keyed by id"
+        },
+        {
+          "clause": "update only updates: an unmatched record is skipped, never created — row count unchanged across an update-mode publish declaring a nonexistent key",
+          "oracle": "api",
+          "verify": "count + the absent D after step 2",
+          "evidence": "the count pair + the D lookup (empty)"
+        },
+        {
+          "clause": "ignore only fills gaps: existing rows are never rewritten (A keeps its pre-publish value verbatim) while new rows insert — and the skip is provable from effect (unchanged value + counts), not assumed from silence",
+          "oracle": "api",
+          "verify": "A's value byte-identical across step 3; E present",
+          "evidence": "A's before/after read + E's read"
+        },
+        {
+          "clause": "insert never matches: a replay adds rows again on an unconstrained object (the duplication is the honest observation), and only an object-level unique constraint turns it into the schema comment's 'fail on duplicate' — record which shape this run's fixture produced",
+          "oracle": "api",
+          "verify": "the duplicate A-named rows (or the constraint refusal) after step 4",
+          "evidence": "the post-insert row listing (or the refusal body)"
+        },
+        {
+          "clause": "EXPECTED POSTURE (declared ≠ implemented): `replace` is documented 'Delete ALL records in object then insert (Dangerous)' but the implementation is bare insert — writeRecord's replace arm inserts with the comment 'caller should have cleared the table' and NO caller anywhere clears it, so pre-existing rows SURVIVE a replace-mode publish. The run records this gap (a checklist-accuracy/product finding routed through the sweep's anchor, not re-filed per run); it must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements the clear, this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
+          "oracle": "api",
+          "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert at seed-loader.ts:2062-2065 and decideWriteAction:2106 routes replace to insert",
+          "evidence": "F's surviving read + G's read + the source excerpt"
+        },
+        {
+          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('upsert'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
+          "oracle": "build",
+          "verify": "SeedMode members at seed.zod.ts:12-18; the resolution at metadata-protocol/src/seed-loader.ts:583; the runtime re-export shim proving one implementation",
+          "evidence": "the three source excerpts"
+        }
+      ],
+      "negative": [
+        "an upsert replay that bumps updated_at on identical rows is the churn isNoOpReplay exists to prevent (phantom edits in history, state-machine re-validation) — FAIL the skip clause",
+        "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL",
+        "ticking the replace clause as 'deletion correctly scoped' is a FALSE PASS twice over: nothing is deleted at head, and the clause exists to record exactly that",
+        "aiming replace/insert replays at seeded showcase objects contaminates platform-core.seed-integrity's baselines — destructive-in-place; scratch objects only"
+      ],
+      "variants": [
+        "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
+        "mode update — matched rows only; unmatched skipped, never created",
+        "mode upsert — create-or-update on externalId with no-op-replay skip (the default)",
+        "mode replace — DECLARED clear-then-insert, IMPLEMENTED bare insert (the expected-posture clause)",
+        "mode ignore — insert-if-absent; existing rows never rewritten"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/seed.zod.ts",
+        "export": "SeedMode",
+        "expect": 5
+      },
+      "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
+      "source": [
+        "packages/spec/src/data/seed.zod.ts:12-18 (SeedMode — the five modes with their declared semantics, incl. replace's 'Delete ALL records … Dangerous' claim)",
+        "packages/metadata-protocol/src/seed-loader.ts:583 (mode = dataset.mode || config.defaultMode), :634-640 (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), :2020-2075 (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment at :2062-2065), :2084-2112 (decideWriteAction — the batched mirror, replace → insert), :2117+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
+        "packages/spec/src/data/seed-loader.zod.ts:244 (defaultMode default 'upsert')",
+        "packages/metadata-protocol/src/protocol.ts:15603+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
+        "packages/runtime/src/seed-loader.ts (the MOVED shim — one SeedLoaderService for every path)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (seed: allowRuntimeCreate true — the scratch-draft fixture path)",
+        "platform-core.seed-integrity (owns the stock boot-seed baselines this item must not contaminate)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (spec-enums angle), with the register's central claim CORRECTED against source: the register said 'replace = clear-then-insert (decideWriteAction)', but at head NOTHING clears — writeRecord's replace arm is a bare insert whose own comment defers to a caller that does not exist (grepped: no clearTable/deleteMany/delete caller anywhere on the seed path), so pre-existing rows survive a replace publish. The clause is therefore an expected-posture record of the declared≠implemented gap, not a scoped-deletion assertion. Also recorded honestly: insert-mode 'fail on duplicate' rides the object's own constraints (the loader does no matching in insert mode)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.theme-mode-persistence",
+      "title": "Theme mode: dark/light apply the root class immediately and survive reload via localStorage (vite-ui-theme); system/auto resolves the OS preference at evaluation time (#2942 — never a dead 'auto' class); no half-themed surface after a toggle",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["any stock console boot; a driver that can emulate the OS color-scheme preference (CDP prefers-color-scheme override) for the system-mode cells"]
+      },
+      "steps": [
+        "open the console; locate the ModeToggle in the AppHeader; read the initial documentElement class and localStorage['vite-ui-theme']",
+        "pick Dark: documentElement gains class 'dark' IMMEDIATELY (no reload); the toggle shows the checkmark on Dark; screenshot a data-dense surface (list + header + sidebar) and confirm no half-themed region (a light-styled panel inside the dark shell)",
+        "reload: the dark class is present on load (localStorage read at provider init); localStorage carries 'dark'",
+        "pick Light: class flips to 'light' immediately; reload-persists the same way",
+        "pick System with the browser's emulated preference set to dark: the resolved class is 'dark' and localStorage stores 'system'; flip the emulated preference and RELOAD: the class follows the new preference (resolution happens at provider evaluation — the provider attaches NO matchMedia listener, so a live OS flip without reload updating the class is NOT asserted; assert resolution at load, and record live-tracking as not-implemented if probed)",
+        "regression probe (#2942): with a stored value of 'auto' (write it into localStorage by hand — the spec's ThemeModeSchema spelling), reload: the class resolves to the OS preference, never a literal 'auto' class locking light styling"
+      ],
+      "acceptance": [
+        {
+          "clause": "explicit dark/light apply the root class synchronously on selection and persist across reload via localStorage vite-ui-theme",
+          "oracle": "dom",
+          "verify": "documentElement.classList before/after each pick and after reload; localStorage value at each step",
+          "evidence": "the class/storage trace"
+        },
+        {
+          "clause": "system (and the spec's 'auto' spelling) resolve the OS preference at evaluation: emulated-dark yields the dark class, emulated-light the light class, on selection and on reload — and a stored 'auto' never lands as a dead literal class (#2942)",
+          "oracle": "dom",
+          "verify": "the four (stored value × emulated preference) cells read off documentElement after reload; the hand-written 'auto' cell included",
+          "evidence": "the cell matrix"
+        },
+        {
+          "clause": "no half-themed surface: after each toggle a dense surface renders coherently in the selected theme — no region stuck in the other palette",
+          "oracle": "screenshot",
+          "verify": "the per-theme screenshots of the same surface, eyeballed for stuck regions; any candidate re-checked after settle (hydration-race)",
+          "evidence": "the screenshot pairs"
+        }
+      ],
+      "negative": [
+        "a theme that applies only after reload (no immediate class flip) fails the immediacy half; one that flips immediately but resets on reload fails persistence — the two halves are separate verdicts",
+        "asserting LIVE OS-preference tracking (class following a preference flip without reload) would tick a listener that does not exist — the provider resolves once per evaluation; record the limitation, do not fail the product for the item's own over-claim",
+        "the theme resetting when a DIFFERENT browser profile/tab is used is not a finding — localStorage is per-origin-per-profile by design (shared-browser-tab: own the tab)"
+      ],
+      "traps": ["shared-browser-tab", "hydration-race"],
+      "source": [
+        "objectui packages/app-shell/src/chrome/ThemeProvider.tsx:27-33 (storageKey 'vite-ui-theme', initial read), :35-54 (the class effect — 'auto'/'system' resolve matchMedia ONCE per evaluation; the #2942 note: branching on 'system' alone sent 'auto' into classList.add('auto'), a class no Tailwind variant matches), :57-62 (setTheme persists then applies)",
+        "objectui packages/app-shell/src/layout/ModeToggle.tsx:6-38 (the three-way menu with checkmarks) + AppHeader.tsx:877 (mounted in the header)",
+        "objectui#2942 (the auto-class regression this item's last step re-probes)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (console-UI angle, optional-P2 register row). Grounding tightened one claim: the provider attaches NO matchMedia change listener, so 'system tracks the OS preference' holds at evaluation time only — the item asserts resolution on selection/reload and explicitly forbids failing the product for live-flip tracking it never implemented",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.console-installability-indicators",
+      "title": "Console installability + connectivity indicators: the PWA manifest is a runtime-branded blob injected at boot, the offline pill appears on connectivity loss and clears on restore, the connection status chip shows transient/error states honestly — and NO service worker is registered on a stock console (caching is opt-in via useETagCache)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a stock console boot; a driver that can emulate network loss (CDP offline emulation) for the offline-pill cells"]
+      },
+      "steps": [
+        "after console load, read document.head: exactly one link[rel=manifest] whose href is a blob: URL (the static /manifest.json link is REMOVED and replaced at boot); fetch the blob from page context and parse it — name/short_name/description/theme_color carry the runtime branding (the values GET /api/v1/runtime/config served), icons point at the branded favicon",
+        "confirm the branded favicon: the #favicon link's href/type follow the runtime config's faviconUrl",
+        "emulate offline: the header renders the Offline pill (yellow, pulsing dot, 'Offline' label — gated on useOffline().isOnline); screenshot; restore connectivity: the pill clears",
+        "connection status chip: on an app surface, observe the transient 'Connected' flash auto-hiding after ~2s; then stop the backend briefly (or emulate request failure) and confirm the chip shows the reconnecting/error state prominently instead of hiding",
+        "service-worker honesty: in page context run navigator.serviceWorker.getRegistrations() → EMPTY on a stock console (no SW is registered anywhere in the boot path; ETag caching is an opt-in hook, useETagCache, which no stock surface arms) — assert the absence so no run or doc claims offline-first caching the product does not ship"
+      ],
+      "acceptance": [
+        {
+          "clause": "the PWA manifest is generated from runtime branding and injected as a blob link replacing the static one — install prompts would carry the deployment's own name/colors, not a hardcoded default",
+          "oracle": "dom",
+          "verify": "the single blob manifest link + the parsed blob's fields diffed against the same boot's runtime-config branding",
+          "evidence": "the parsed manifest beside the runtime-config body"
+        },
+        {
+          "clause": "the offline pill is live both ways: appears under emulated offline, clears on restore — connectivity state is surfaced, not silently swallowed",
+          "oracle": "screenshot",
+          "verify": "the offline/online screenshot pair bracketing the emulation toggle",
+          "evidence": "both screenshots"
+        },
+        {
+          "clause": "the connection chip is honest about states: connected shows briefly then hides (no permanent green noise); reconnecting/error show prominently and persist while true",
+          "oracle": "screenshot",
+          "verify": "the transient flash observed on load; the error/reconnecting state provoked and captured; if the error state cannot be provoked cheaply, record that leg skipped rather than assumed",
+          "evidence": "the state screenshots (or the explicit skip note)"
+        },
+        {
+          "clause": "NO service worker on stock: getRegistrations() is empty — the honesty assertion that keeps 'installable PWA' claims scoped to what ships (a manifest and indicators, not offline caching)",
+          "oracle": "dom",
+          "verify": "the in-page getRegistrations() result on a settled stock console",
+          "evidence": "the empty registrations read"
+        }
+      ],
+      "negative": [
+        "a static unbranded /manifest.json surviving as the effective manifest (white-label deployments would install under the framework's name) is a FAIL of the injection",
+        "an offline pill that never clears after restore, or never appears when offline, fails its respective direction — test both",
+        "a service worker found registered on stock is a CHANGE to the shipped posture, not automatically a bug — capture and file for a maintainer decision rather than ticking or failing",
+        "reading the offline pill's absence immediately after the emulation toggle is a race — settle first (the hook listens to browser online/offline events)"
+      ],
+      "traps": ["absence-inference", "hydration-race", "stale-console-bundle"],
+      "source": [
+        "objectui apps/console/src/main.tsx:100-132 (branded favicon swap; generatePWAManifest from runtime branding → blob URL; the static manifest link removed and replaced)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx:132 (useOffline), :587-596 (the Offline pill + the ConnectionStatus mount)",
+        "objectui packages/app-shell/src/layout/ConnectionStatus.tsx:20-46 (the five states; connected auto-hides after 2s; error/reconnecting prominent)",
+        "objectui packages/react/src/hooks/useETagCache.ts (the OPT-IN caching hook — serviceWorkerUrl config exists but nothing stock arms it; the basis of the no-SW assertion)",
+        "platform-core.runtime-config-boot-read (the branding source these indicators consume)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — authored in the 2026-08-30 sweep (console-UI angle, optional-P2 register row; kept rather than dropped because every clause carries a real oracle: the blob manifest is parseable, the offline pill is drivable via CDP emulation, and the no-service-worker posture is a one-line in-page read). The service-worker clause is deliberately an ABSENCE assertion — it keeps installability claims honest about what ships",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     }

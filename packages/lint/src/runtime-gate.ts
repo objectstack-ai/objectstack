@@ -65,6 +65,12 @@ type AnyRec = Record<string, unknown>;
  * Only the types some rule declares in `runtimeTypes` need an entry; the guard
  * in `authoring-rule-wiring.test.ts` fails if a declared type is missing one,
  * so widening the gate cannot half-land.
+ *
+ * [#13390] The VALUES here are also one of the two inputs
+ * {@link NAME_KEYED_STACK_KEYS} is derived from — a stack key that some write
+ * type maps into is a key whose top-level index the caller cannot resolve. Adding
+ * a mapping onto a context collection therefore name-keys it by construction; it
+ * is no longer a second edit that nothing checks.
  */
 const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   flow: 'flows',
@@ -414,29 +420,117 @@ export function buildRuntimeWriteSnapshots(args: {
 }
 
 /**
+ * The name-keyed stack keys implied by a context shape and a write-type table:
+ * the context collections that some write type ALSO lands an item inside.
+ *
+ * Exported (#13390) as a pure function of its two inputs so the derivation can
+ * be exercised on SYNTHETIC sets. The real inputs are four keys that agree with
+ * the list they replaced, which shows the answer is right today and cannot show
+ * that the DERIVATION is the reason — the property this card buys is about the
+ * next widening, so it has to be measured on inputs that widen.
+ *
+ * Order follows `contextStackKeys`, deliberately: it keeps the derived value
+ * comparable to the hand list it replaced position for position, and it keeps
+ * the pattern built from it byte-identical to the literal it replaced.
+ */
+export function deriveNameKeyedStackKeys(
+  contextStackKeys: readonly string[],
+  writtenStackKeys: Iterable<string>,
+): readonly string[] {
+  const written = new Set(writtenStackKeys);
+  return contextStackKeys.filter((key) => written.has(key));
+}
+
+/**
+ * `['objects', 'pages']` → `/^(objects|pages)\[(\d+)\](.*)$/` — the top-level
+ * index matcher, BUILT from the name-keyed set instead of restating it (#13390).
+ *
+ * A derived alternation has two hazards a hand-written literal did not, and both
+ * are decided here rather than left implicit:
+ *
+ * - **Escaping.** Every member today is `[a-z]+`, so nothing needs escaping and
+ *   nothing would notice if it were skipped. But a stack key is a
+ *   {@link RuntimeStackContext} property name, and a quoted one may hold a `.`
+ *   or a `-`; an unescaped `.` matches ANY character, which is the silent-failure
+ *   direction. Members are escaped rather than trusted — one `replace`.
+ * - **Prefix ordering.** Alternation is ordered, so `page|pages` reads as though
+ *   the short branch shadows the long one. It does not in THIS pattern: the group
+ *   is anchored by `\[`, which fails the short branch and forces the engine to
+ *   backtrack into the long one. That is a property of the anchor, not of
+ *   alternation — so it is pinned by test with a synthetic `page` / `pages` pair
+ *   in BOTH orders, rather than papered over with a longest-first sort that would
+ *   silently stop being exercised and would leave the claim untested either way.
+ *
+ * An empty set yields a pattern matching nothing. Interpolating it would produce
+ * `^()\[(\d+)\](.*)$`, which name-keys EVERY top-level index — the failure
+ * direction that widens the rewrite instead of narrowing it.
+ */
+export function buildTopLevelIndexPattern(stackKeys: readonly string[]): RegExp {
+  if (stackKeys.length === 0) return /(?!)/;
+  const alternation = stackKeys.map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp(`^(${alternation})\\[(\\d+)\\](.*)$`);
+}
+
+/**
+ * The stack keys some write type lands an item INSIDE — the VALUES of
+ * {@link TYPE_TO_STACK_KEY}, read off the table rather than restated, so a new
+ * `type → key` mapping cannot arrive without this set seeing it.
+ *
+ * Exported for the pin in `runtime-gate.derived-name-keys.test.ts` and for that
+ * only — it is not on either package entry. The pin asks, per context
+ * collection, whether a top-level index is name-keyed, and it must ask that
+ * against the SAME table the gate uses; a test that restated the answer would
+ * be a sixth hand-written spelling of the very set this card removed.
+ */
+export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYPE_TO_STACK_KEY));
+
+/**
  * The collection-resident stack keys whose TOP-LEVEL index the gate rewrites
- * to a name key before findings leave it (#10064).
+ * to a name key before findings leave it (#10064) — DERIVED, not listed (#13390).
  *
  * These are the collections a written item lands INSIDE **and** that the
- * context also fills (`TYPE_TO_STACK_KEY` routes `object` / `permission` /
- * `book` / `page` writes into them) — so a finding's `objects[417]` is an
- * offset into this gate's per-write snapshot, an in-memory array the caller has
- * never seen and cannot enumerate. Every other write type is the sole member of
- * its own collection (`flows[0]` IS this write, trivially stable), and
- * `datasets` is context-only — no write type maps into it — so both keep their
- * positional spelling.
+ * context also fills — so a finding's `objects[417]` is an offset into this
+ * gate's per-write snapshot, an in-memory array the caller has never seen and
+ * cannot enumerate. Every other write type is the sole member of its own
+ * collection (`flows[0]` IS this write, trivially stable), and a context-only
+ * collection holds no write at all — so both keep their positional spelling.
  *
- * [#13216] `pages` JOINED this list in the same change that made `pages` a
- * context collection, and the pairing is the rule rather than a coincidence:
- * before that, a `page` write's snapshot held exactly one page, so `pages[0]`
- * was this write, trivially stable, and name-keying it would have been
- * pointless. The moment the live universe joins the snapshot, the index stops
- * meaning anything to the caller — `validatePresetComparands` already runs on
- * `page` writes and emits paths into this collection. So: adding a key to
- * {@link CONTEXT_STACK_KEYS} that some write type ALSO maps into means adding
- * it here too.
+ * ## Why it is derived
+ *
+ * That paragraph is not a judgement call, it is two conditions intersected, and
+ * both are already written down: the context fills the collection
+ * ({@link CONTEXT_STACK_KEYS}) and some write type maps into it
+ * ({@link TYPE_TO_STACK_KEY}). Kept as a literal it was the one spelling of that
+ * set with NO guard — `CONTEXT_STACK_KEYS` carries a `satisfies` clause, which
+ * is validity, not completeness, and the compiler holds nothing else. Omitting a
+ * member here did not fail to build, fail a test, or fail a gate; it emitted
+ * findings that LOOK correct whose `path` the caller cannot resolve, which is
+ * the #10064 defect re-created silently.
+ *
+ * [#13216] `pages` is the measurement that made the case: adding it touched
+ * FIVE spellings of this one set and only the fifth announced itself — the one
+ * the compiler could see, and only after that accumulator was retyped as a
+ * mapped type. The pairing is the rule rather than a coincidence. Before the
+ * live page universe joined the snapshot, a `page` write's snapshot held exactly
+ * one page, so `pages[0]` WAS this write and name-keying it would have been
+ * pointless; the moment the universe joins, the index stops meaning anything to
+ * the caller (`validatePresetComparands` already runs on `page` writes and emits
+ * paths into this collection). Derived, the two move together by construction
+ * and the next widening is a one-key edit again.
+ *
+ * ## Measured against the list it replaces (#13390)
+ *
+ * Same four members in the same order — `objects`, `permissions`, `books`,
+ * `pages`. `datasets` falls out on its own, for exactly the reason the old
+ * comment had to state by hand: it is context-only, no write type maps into it.
+ * So **no member needed a hand-written exception** and none is kept. If a future
+ * member ever does need one, state it here WITH its reason — quietly
+ * re-introducing a literal is the thing this constant now exists to prevent.
  */
-const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books', 'pages'] as const;
+const NAME_KEYED_STACK_KEYS: readonly string[] = deriveNameKeyedStackKeys(
+  CONTEXT_STACK_KEYS,
+  WRITTEN_STACK_KEYS,
+);
 
 /**
  * Machine names safe to splice into a dotted path. Matches the spec's
@@ -446,7 +540,7 @@ const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books', 'pages'] as co
  */
 const PATH_SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-const TOP_LEVEL_INDEX = /^(objects|permissions|books|pages)\[(\d+)\](.*)$/;
+const TOP_LEVEL_INDEX = buildTopLevelIndexPattern(NAME_KEYED_STACK_KEYS);
 
 /**
  * `objects[417].sharingModel` → `objects.acme_invoice.sharingModel` (#10064).
@@ -458,6 +552,13 @@ const TOP_LEVEL_INDEX = /^(objects|permissions|books|pages)\[(\d+)\](.*)$/;
  * purpose — within one named item they index the author's own document, which
  * the receiver holds and can resolve.
  *
+ * [#13390] Exported for the pin, not for callers (it is on neither package
+ * entry). It is the one place the derived set and the derived pattern MEET, so
+ * it is where the invariant is observable end to end: for each context
+ * collection, is the top-level index rewritten exactly when a write type maps
+ * into that collection? Asked here, the answer cannot be produced by a list
+ * that agrees with the derivation by luck.
+ *
  * Fallback is the positional spelling, never a hole: an entry that is missing,
  * unnamed, or whose name will not splice into a dotted path keeps the index.
  *
@@ -466,11 +567,11 @@ const TOP_LEVEL_INDEX = /^(objects|permissions|books|pages)\[(\d+)\](.*)$/;
  * stored items that (illegitimately) share a name must not have their distinct
  * findings merged or cancelled by the rewrite.
  */
-function nameKeyFindingPath(path: string, candidate: AnyRec): string {
+export function nameKeyFindingPath(path: string, candidate: AnyRec): string {
   const m = TOP_LEVEL_INDEX.exec(path);
   if (!m) return path;
   const [, stackKey, index, rest] = m;
-  if (!(NAME_KEYED_STACK_KEYS as readonly string[]).includes(stackKey!)) return path;
+  if (!NAME_KEYED_STACK_KEYS.includes(stackKey!)) return path;
   const collection = candidate[stackKey!] as readonly unknown[] | undefined;
   const entry = collection?.[Number(index)];
   const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;

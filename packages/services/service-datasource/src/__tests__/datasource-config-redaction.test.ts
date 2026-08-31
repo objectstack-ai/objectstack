@@ -442,6 +442,51 @@ describe('#9040 — the passthrough spelling, both halves at the service door', 
     expect((records[0].config!.options as any).auth.password).toBe('PLAINTEXT-IN-METADATA');
   });
 
+  it('an untouched round-trip keeps a working CSFLE config byte-identical — every kmsProviders family', async () => {
+    // The #13602 round-trip question, answered at the door that owns it: the
+    // read path drops the KMS key material (measured read by mongodb@7.5.0
+    // with mongodb-client-encryption installed; loud MongoMissingDependencyError
+    // without it), and an untouched Save grafts every stored leaf back, so the
+    // config the connect path hands the client never changes. Without the
+    // restore, the served projection is NOT a working client config (measured:
+    // construction throws `Failed to parse KMS provider` for aws/azure/gcp) —
+    // which is exactly why the structural mirror must cover these rows.
+    const CSFLE_MONGO: StoredDatasource = {
+      name: 'csfle_mongo',
+      driver: 'mongodb',
+      origin: 'runtime',
+      config: {
+        url: 'mongodb://app@mongo.internal:27017/events',
+        options: {
+          autoEncryption: {
+            keyVaultNamespace: 'encryption.__keyVault',
+            kmsProviders: {
+              aws: { accessKeyId: 'AKIAFAKEFAKEFAKEFAKE', secretAccessKey: 'AWS-SECRET', sessionToken: 'AWS-SESSION' },
+              azure: { tenantId: 'tenant-id', clientId: 'client-id', clientSecret: 'AZURE-SECRET' },
+              gcp: { email: 'svc@example.iam.gserviceaccount.com', privateKey: 'R0NQLUtFWQ==' },
+              local: { key: 'TE9DQUwtS0VZ' },
+            },
+          },
+        },
+      },
+    };
+    const { service, records } = makeService([CSFLE_MONGO]);
+    const read = await service.getDatasource('csfle_mongo');
+    // Served: key material withheld, and said so; identity halves intact.
+    expect(JSON.stringify(read!.config)).not.toMatch(/AWS-SECRET|AWS-SESSION|AZURE-SECRET|R0NQLUtFWQ|TE9DQUwtS0VZ/);
+    expect(read!.redactedConfigKeys).toEqual([
+      'options.autoEncryption.kmsProviders.aws.secretAccessKey',
+      'options.autoEncryption.kmsProviders.aws.sessionToken',
+      'options.autoEncryption.kmsProviders.azure.clientSecret',
+      'options.autoEncryption.kmsProviders.gcp.privateKey',
+      'options.autoEncryption.kmsProviders.local.key',
+    ]);
+    // Untouched Save: the stored row comes back byte-identical.
+    await service.updateDatasource('csfle_mongo', { config: read!.config, label: 'Renamed' });
+    expect(records[0].label).toBe('Renamed');
+    expect(records[0].config).toEqual(CSFLE_MONGO.config);
+  });
+
   it('an author who deletes the `auth` block WINS — a removed container is never re-grafted', async () => {
     const { service, records } = makeService([LEGACY_MONGO]);
     const read = await service.getDatasource('legacy_mongo');

@@ -231,7 +231,23 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 19,
     blindSpot: 61,
     populationRule: '`this.routeManager.register(` call sites; reachable = those inside registerMetadataEndpoints',
-    controls: { 'private register*Endpoints(': 17, 'this.routeManager.register(': 80, enforceAuth: 61 },
+    // [#13214] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
+    // exists to prove this census is still reading the file it thinks it is, and
+    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling on #13214
+    // was supposed to cause — `registerUiEndpoints` was the ONE route in this
+    // file that resolved no identity, and it is now guarded. The move is +3 over
+    // the whole file (`occurrences` counts the bare term, comments included):
+    // one new call site — `if (this.enforceAuth(req, res, context)) return;`,
+    // 52 -> 53 — plus two prose mentions in the new doc-comments. ⛔ Kept as an
+    // EXACT count rather than a range or a floor: a range would stop this row
+    // noticing the next move, which is the only thing it is for.
+    //
+    // ⚠️ The three sibling numbers were re-derived and did NOT move, which is
+    // what says this is a guard change and not a surface change: `population`
+    // 80, `reachable` 19, `private register*Endpoints(` 17 and
+    // `this.routeManager.register(` 80 are all unchanged — #13214 added no route
+    // and no registrar. `blindSpot` therefore stays 61 as well.
+    controls: { 'private register*Endpoints(': 17, 'this.routeManager.register(': 80, enforceAuth: 64 },
     note:
       'The single non-tripwire probe names ONE registrar of 17. The other 16 can never mint a key: ' +
       'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, registerReportsEndpoints, ' +

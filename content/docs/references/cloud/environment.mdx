@@ -17,7 +17,7 @@ This file defines the Control-Plane schemas for the `sys_environment`,
 data lives in each environment's own database — those data-plane DBs hold
 no system tables.
 
-See ADR-0006 v4: `sys_environment` was renamed to `sys_environment`; the
+See ADR-0006 v4: `sys_project` was renamed to `sys_environment`; the
 separate dev-workspace `Project` concept introduced in v3 has been
 dropped — user code is now modelled as an implicit `sys_package` with
 a per-org `manifest_id` (see ADR-0003), so a single package + version
@@ -26,7 +26,8 @@ a per-org `manifest_id` (see ADR-0003), so a single package + version
 Split of concerns:
 - **Control Plane**: `sys_environment` (includes physical DB addressing),
   `sys_package_installation` (with `environment_id`), `sys_environment_credential`,
-  `sys_environment_member`, `sys_metadata` (with `environment_id`).
+  `sys_environment_member`, `sys_metadata` (on the metadata tables, `environment_id`
+  is deprecated in favor of `organization_id` — ADR-0006 v4).
 - **Data Plane**: each environment DB contains only business objects
   (account, task, …). No system tables, no `environment_id` columns.
 

@@ -22,14 +22,10 @@ Expert instructions for constructing data queries using the ObjectStack
 Query DSL. This skill covers filter expressions, sorting, pagination,
 aggregation, full-text search, and the expand system for related records.
 
-**Schema vs. runtime:** the `QueryAST` schema declares more than the engine
-currently executes. Sections below marked
-
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.**
-
-describe properties that validate against the schema but are silently
-ignored (or rejected) at runtime. Never emit them in production queries —
-each caveat shows the working alternative.
+**Schema vs. runtime:** every callout below says which side a property is on —
+⛔ **REMOVED** (tombstoned; a query carrying it fails to parse), ⚠️ **not
+enforced** (validates, then silently ignored — never emit it), ✅ **Enforced**.
+Each removal callout names the live replacement.
 
 ---
 
@@ -217,13 +213,12 @@ Filter through relationships without an explicit join:
 
 ### Field References (Cross-Field Comparisons)
 
-> ⚠️ **Schema-reserved — NOT executed by the engine yet.** `$field` exists
-> only in the filter schema. No engine or driver code interprets it — the
-> `{ $field: '...' }` object binds as a **literal value**, so the query
-> silently returns zero rows. Do not use it.
+> ✅ **Enforced.** A `{ $field: '...' }` comparand compares two columns of the
+> same row. The in-memory evaluator resolves the reference against the record;
+> `driver-sql` pushes it down as a column-to-column predicate. Same rows.
 
 ```typescript
-// ❌ Schema-valid but NOT executed — matches nothing
+// ✅ Accounts whose actual revenue beat the estimate
 {
   where: {
     actual_revenue: { $gt: { $field: 'estimated_revenue' } }
@@ -231,11 +226,9 @@ Filter through relationships without an explicit join:
 }
 ```
 
-**Working alternatives:**
-- Define a **formula field** on the object that computes the comparison
-  (e.g. `exceeds_estimate` as a boolean), then filter on it:
-  `{ where: { exceeds_estimate: true } }` (see **objectstack-data**).
-- Fetch both fields and compare in **application code**.
+Legal in a **comparison** position only. As an `$in` / `$nin` member or a
+`$between` endpoint it is refused at parse — no evaluation path resolves a
+reference there.
 
 ---
 
@@ -331,12 +324,11 @@ unique or near-unique column such as `created_at` or `id`) so
 | `max` | Maximum | `MAX(field)` |
 | `count_distinct` | Unique count | `COUNT(DISTINCT field)` |
 
-> ⚠️ **Driver support varies.** On SQL datasources the driver executes only
-> `count` / `sum` / `avg` / `min` / `max` and **throws** on `count_distinct`;
-> the per-aggregation `distinct: true` flag is also ignored there. The
-> in-memory fallback path (driver-rest, driver-memory, timezone/date-bucket
-> fallbacks) supports all six functions plus `distinct`. For portable queries,
-> stick to the first five.
+> ✅ **All six are portable.** `count_distinct` lowers to `COUNT(DISTINCT x)`
+> on every SQL face and computes identically on the in-memory path, so the
+> declared-but-uncompiled set is empty. The per-aggregation `distinct: true`
+> flag went the other way — **removed in 17**, refused at parse; the live
+> spelling for a deduplicated count is `count_distinct`.
 
 > **Removed in 17.** `array_agg` and `string_agg` left this vocabulary:
 > declared but lowered by no SQL backend, so whether they worked depended on
@@ -387,25 +379,23 @@ const rows = await engine.aggregate('deal', {
 
 ### Filtered Aggregation
 
-> ⚠️ **Per-aggregation `filter` is schema-reserved — NOT executed by the
-> engine yet.** The SQL driver ignores it and the in-memory path ignores it
-> too, so a `filter`-carrying aggregation returns the **unfiltered** number —
-> silently wrong results. **Working alternative:** issue one aggregate call
-> per condition, moving the condition into the query-level `where`:
+> ✅ **Enforced.** A per-aggregation `filter` scopes that one measure, so a
+> total and a conditional count share one call. Any aggregation carrying a
+> non-empty `filter` forces the in-memory path — no driver compiles a
+> conditional aggregate, and one reached directly refuses `NOT_IMPLEMENTED`;
+> unfiltered aggregations keep native push-down.
 
 ```typescript
-// ❌ filter on the aggregation is silently ignored
-// { function: 'count', alias: 'high_value_orders',
-//   filter: { amount: { $gt: 1000 } } }
-
-// ✅ Separate aggregate calls, condition in `where`
-const [totals] = await engine.aggregate('order', {
-  aggregations: [{ function: 'count', alias: 'total_orders' }],
+// ✅ Total and conditional counts in ONE call
+const [kpis] = await engine.aggregate('order', {
+  aggregations: [
+    { function: 'count', alias: 'total_orders' },
+    { function: 'count', alias: 'high_value_orders',
+      filter: { amount: { $gt: 1000 } } },
+  ],
 });
-const [highValue] = await engine.aggregate('order', {
-  where: { amount: { $gt: 1000 } },
-  aggregations: [{ function: 'count', alias: 'high_value_orders' }],
-});
+// An unknown operator inside `filter` refuses INVALID_FILTER/400 — it never
+// silently answers the unfiltered number.
 ```
 
 ---
@@ -475,10 +465,10 @@ Load related records through lookup/master_detail fields:
 
 Only the **`query` + `fields`** subset of the search schema executes. The
 engine expands the search string into a driver-agnostic filter: each term
-becomes an `$or` of `$contains` predicates across the resolved searchable
-fields, and multiple whitespace-separated terms are **AND-ed** (every term
-must hit some field). Matching is case-insensitive; `select`/`status`
-fields match by option *label*, mapped to stored values.
+becomes an `$or` of `$icontains` predicates (the case-INSENSITIVE twin of the
+case-sensitive `$contains`) across the resolved searchable fields, and multiple
+whitespace-separated terms are **AND-ed** (every term must hit some field).
+`select`/`status` fields match by option *label*, mapped to stored values.
 
 ```typescript
 {
@@ -491,8 +481,8 @@ fields match by option *label*, mapped to stored values.
 }
 // Executes as:
 // { $and: [
-//   { $or: [{ title: { $contains: 'machine' } }, { content: { $contains: 'machine' } }] },
-//   { $or: [{ title: { $contains: 'learning' } }, { content: { $contains: 'learning' } }] },
+//   { $or: [{ title: { $icontains: 'machine' } }, { content: { $icontains: 'machine' } }] },
+//   { $or: [{ title: { $icontains: 'learning' } }, { content: { $icontains: 'learning' } }] },
 // ]}
 ```
 
@@ -529,19 +519,18 @@ maintained on write and listed in `task.searchableFields`:
   limit: 20,
 }
 // Expands to a single-table scan — no traversal, every driver:
-// { $and: [{ $or: [
-//   { name:         { $contains: 'apollo' } },
-//   { project_name: { $contains: 'apollo' } },
-// ]}]}
+// { $or: [
+//   { name:         { $icontains: 'apollo' } },
+//   { project_name: { $icontains: 'apollo' } },
+// ]}
 ```
 
 ❌ The mirror must be a **stored** field — a `formula` field is virtual, no
-driver materializes a column for it, so a `$contains` predicate against one has
-nothing to scan. Nothing rejects the mistake for you: `searchableFields` admits
-any field the object declares, so a formula entry clears both lint and the
-ingress gate and then never matches. The trade-off is mirror maintenance — hooks
-on both write paths (child re-parented, parent renamed) plus a backfill for rows
-written around the hooks.
+driver materializes a column for it, so a search predicate against one has
+nothing to scan. Two guards catch that: lint errors on a virtual
+`searchableFields` entry, and the ingress gate refuses one by name. The
+trade-off is mirror maintenance — hooks on both write paths (child re-parented,
+parent renamed) plus a backfill for rows written around the hooks.
 
 Cross-object search paths are rejected by design, not pending. Modelling side of
 this (the field, the hooks, the lint wording): **objectstack-data → Search Fields
@@ -606,24 +595,20 @@ use [`expand`](#expand-related-records).
 
 ### Dashboard Aggregation Pattern
 
-Unconditional KPIs can share one aggregate call; a KPI with its own
-condition needs a **separate call** with the condition in `where`
-(per-aggregation `filter` is schema-reserved — see Filtered Aggregation):
+Every KPI on a dashboard shares **one** aggregate call — unconditional
+measures plain, conditional ones carrying their own `filter`. `where` scopes
+the whole call, so reach for it only when every measure wants the same scope:
 
 ```typescript
-// KPI dashboard: unconditional aggregations share one call
+// KPI dashboard: one call, conditional measures scoped per aggregation
 const [kpis] = await engine.aggregate('deal', {
   aggregations: [
     { function: 'count', alias: 'total_deals' },
     { function: 'sum', field: 'amount', alias: 'pipeline_value' },
     { function: 'avg', field: 'amount', alias: 'avg_deal_size' },
+    { function: 'count', alias: 'won_deals',
+      filter: { stage: 'closed_won' } },
   ],
-});
-
-// Conditional KPI: separate call, condition in `where`
-const [won] = await engine.aggregate('deal', {
-  where: { stage: 'closed_won' },
-  aggregations: [{ function: 'count', alias: 'won_deals' }],
 });
 ```
 
@@ -636,9 +621,9 @@ code — the renderer issues the queries for you:
 
 | Query Need | Pattern |
 |:--|:--|
-| KPI widgets | Aggregates (`sum`, `count`, `avg`) over the object, each conditional KPI scoped by the widget/dataset filter. Add `compareTo: 'previousPeriod' \| 'previousYear'` on the widget for a one-line period-over-period delta. |
-| Time-series chart | Date filters + `categoryGranularity: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'` for server-side bucketing — never bucket by hand on the client. Pair with `compareTo` for an aligned YoY overlay. |
-| Matrix report | `groupingsDown` + `groupingsAcross` + `dateGranularity: 'quarter'` |
+| KPI widgets | Aggregates (`sum`, `count`, `avg`) over the object, each conditional KPI scoped by the widget/dataset filter. Add `compareTo: { kind: 'previousPeriod' \| 'previousYear' }` on the widget for a one-line period-over-period delta (the bare string form was removed in 17). |
+| Time-series chart | Date filters + `dateGranularity: 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'` on the widget's dataset selection for server-side bucketing — never bucket by hand on the client. Pair with `compareTo` for an aligned YoY overlay. |
+| Matrix report | Dataset-bound `rows` (down) + `columns` (across) + a `dateGranularity` dimension |
 | Funnel summary | Multi-level grouping (`owner -> stage`) + aggregated measures |
 | Operational filter | Prefer declarative operators (`$ne`, `$nin`, `$gte`) over hardcoded SQL |
 

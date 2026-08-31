@@ -1048,6 +1048,111 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         }
       ]
+    },
+    {
+      "id": "dashboards.report-schedule-dispatch-delivery",
+      "title": "Scheduled report dispatch: the dispatcher ticks on a stock boot, a due schedule runs under the OWNER's authority or FAILS CLOSED with the refusal recorded on the row — never an RLS-bypassed run — and the delivery/bookkeeping contract (format fork, subject template, next-run advance) holds",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "member (report + schedule owner — a fresh runtime sign-up, NOT the admin: the fail-closed clause is about a non-privileged owner's authority)",
+        "admin (reads the server log)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-signed-up member owning a saved report + a schedule (showcase seeds no sys_saved_report/sys_report_schedule rows — create both in-run, the same in-run pattern as dashboards.saved-report-ownership)",
+          "a schedule due within the session: intervalMinutes 1 (or cronExpression '* * * * *') so first fire lands ≤ interval + one dispatcher tick (~2 min on the 60s default)",
+          "the reports capability on the boot (CLI serve auto-loads @objectstack/plugin-reports — the dispatcher registers on kernel:ready) and the boot log kept for the whole run"
+        ],
+        "knownGaps": [
+          "THE POSITIVE DELIVERY LEGS ARE NOT LIVE-OBSERVABLE AT HEAD, BY THE PLATFORM'S OWN CHOICE: reports-plugin.ts constructs ReportService with resolveOwnerContext: undefined ('No owner-context resolver is wired yet — that is the reports-surface consumer of ADR-0073's user-less identity resolution (M2) — so until it lands, scheduled runs FAIL CLOSED'). Every scheduled dispatch on a real boot therefore takes the fail-closed arm — which makes THAT arm the live assertion, and the owner-scoped run / format fork / subject / advance-to-'ok' clauses scoreable only via the unit pin (report-service.test.ts injects a resolver). When ADR-0073 M2 wires the resolver, flip those clauses to live legs and revise this item",
+          "NO DOOR DRIVES dispatchDue ON DEMAND: the dispatcher is an internal tick (job service or setInterval, min 5s, default 60s; no REST/CLI trigger) — the runner waits for a tick rather than firing one; verdicts on schedule-row state must re-read after the tick window (eventual-consistency)",
+          "MAIL ON A STOCK BOOT IS THE LOG TRANSPORT: plugin-email defaults to provider 'log' ('no transport configured — using LogTransport (mail will NOT be sent)'), so even with a resolver wired, delivery evidence would be the transport's log line, never a mailbox; the reports-plugin :103 'no email service' warn arm fires only on boots without the email capability — record which arm the boot log shows"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); read the boot log for the dispatcher registration line — 'dispatcher registered with job service' or 'dispatcher registered (setInterval fallback)', with its intervalMs — and for the email arm (LogTransport line, or the 'no email service — schedules will fire without delivery' warn)",
+        "as a fresh member: POST /api/v1/reports (a report over an object the member can read, e.g. showcase_task) then POST /api/v1/reports/:id/schedule with { recipients: ['<member email>'], intervalMinutes: 1, format: 'csv', subjectTemplate: '{{name}}: {{rows}} on {{date}}' } — record the receipt's next_run_at (first fire = create time + interval; an invalid cronExpression is refused eagerly at create, not left to fall back silently at 3am)",
+        "wait past next_run_at + one dispatcher tick, then as the member GET /api/v1/reports/:id/schedules and read the row's last_status / last_error / last_sent_at / next_run_at",
+        "capture the server log lines for the tick (ReportService.dispatchDue warn/error lines)",
+        "prove the negative space of the fail-closed arm: confirm NO mail-send line landed for this schedule in the log window and the member's report data was not emailed anywhere",
+        "unit half: run packages/plugins/plugin-reports/src/report-service.test.ts and cite the dispatch describe blocks (owner-scoped run, fails-closed-without-resolver, csv attachment, subject template) for the clauses the wired-off resolver keeps off the live path",
+        "cross-owner/anonymous surfaces of /reports* are dashboards.saved-report-ownership — do not re-drive them here"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dispatcher is alive on a stock boot: the boot log shows the reports dispatcher registered (job-service or setInterval arm, interval recorded), and after the due window the schedule row's bookkeeping fields CHANGED — the tick provably visited the row",
+          "oracle": "log",
+          "verify": "the registration line + the row's last_status/last_error transitioning from empty to a recorded outcome within ~(interval + tick) of next_run_at; re-read after the window before concluding anything (eventual-consistency)",
+          "evidence": "boot-log excerpt + before/after schedule-row reads"
+        },
+        {
+          "clause": "a due schedule NEVER runs RLS-bypassed: with no owner-context resolver wired (head posture), the dispatch FAILS CLOSED — the row reads last_status 'failed' with last_error naming the refusal verbatim (\"owner '<id>' context unavailable — refusing to run scheduled report with RLS bypassed (#2849/#2980)\") and no mail-send line lands for the schedule. This is the guard against the #2980 regression class where a member's scheduled report emailed the target object's ENTIRE table under system authority",
+          "oracle": "api",
+          "verify": "the owner's GET /reports/:id/schedules row: last_status === 'failed', last_error carries the #2849/#2980 refusal naming the owner id; the log shows the dispatchDue failure/warn for it and NO email transport send for relatedId = the schedule id. A last_status 'ok' here at head is the FAIL — it would mean the run executed with no resolvable owner context, i.e. elevated",
+          "evidence": "the schedule-row read + the log window"
+        },
+        {
+          "clause": "owner-authority scoping (unit-pinned until ADR-0073 M2): with a resolver injected, dispatchDue resolves the REPORT's owner_id to a real RLS-bearing context and executes under IT — a member-owned schedule over a private-OWD object reads only the member's rows, and an unresolvable/disabled owner takes the fail-closed arm, never a system fallback",
+          "oracle": "test",
+          "verify": "run report-service.test.ts and cite the #2980 authorization block: the resolver receives report.owner_id, executeReport gets that context, and 'dispatchDue: fails closed (no RLS bypass) when no owner resolver is configured' passes",
+          "evidence": "the test output naming the passing cases"
+        },
+        {
+          "clause": "delivery contract (unit-pinned until ADR-0073 M2): format 'csv' sends the rendered body as a text/csv ATTACHMENT whose filename keeps unicode letters (a 周报 schedule name survives — only filesystem-hostile characters are stripped, never every non-ASCII char to '__') while 'html_table' sends the inline HTML table; the subject renders the {{name}}/{{date}}/{{rows}} template; both sends carry relatedObject sys_report_schedule + the schedule id",
+          "oracle": "test",
+          "verify": "report-service.test.ts: 'dispatchDue: csv schedule attaches a file' (filename /\\.csv$/, contentType text/csv) and the subject-template case ('Open leads: 2 on 2026-01-15'); the CJK-safe replace is report-service.ts's own \\p{L}\\p{N} class",
+          "evidence": "the test output"
+        },
+        {
+          "clause": "bookkeeping is per-arm and durable: success advances next_run_at (cron_expression wins over interval_minutes, evaluated in the schedule's timezone; invalid/no-future cron falls back to interval with a warn) and stamps last_status 'ok' + clears last_error; a thrown dispatch marks 'failed' with the message truncated to 500 chars; an orphaned schedule (report row gone) marks 'skipped' naming the missing report — each arm writes THROUGH markSchedule/advanceSchedule so the row, not the log, is the durable record",
+          "oracle": "test",
+          "verify": "the live run evidences the failed arm's row write (clause 2); the ok/skipped arms and the cron-vs-interval advance are cited from report-service.test.ts + nextRunAt/advanceSchedule/markSchedule source (the skipped arm is not honestly reachable live — deleteReport cascades its schedules, so an orphan row is not creatable through the owner API)",
+          "evidence": "test output + the live failed-arm row"
+        },
+        {
+          "clause": "absent email service degrades loudly, never silently: on a boot without the email capability the plugin warns at start ('no email service — schedules will fire without delivery') and each fired dispatch warns ('schedule fired but mail not sent') — and the run record notes that last_status 'ok' means DISPATCHED, not delivered: delivery truth is the transport line, the row's vocabulary never claims a mailbox",
+          "oracle": "log",
+          "verify": "record which email arm the boot log shows (stock = LogTransport registered, so this clause's warn arm needs a no-email boot variant — record as not-exercised on stock rather than ticking it); the :103 and dispatch warn lines are the oracle when the arm is driven",
+          "evidence": "boot-log excerpt naming the arm"
+        }
+      ],
+      "negative": [
+        "a scheduled dispatch reaching last_status 'ok' at head (resolver unwired) is the FAIL this item exists for — it means the run executed without an owner context, i.e. the #2980 silent-bypass regressed; the fail-closed refusal is the CORRECT behavior and must not be filed as a defect (it is the platform's recorded posture pending ADR-0073 M2)",
+        "a fail-closed dispatch that leaves last_error empty (or a generic message that does not name the owner/refusal) is a FAIL of the bookkeeping half — the row is the operator's only durable signal that their schedule is not delivering",
+        "a dead dispatcher — no registration line, or a due row still untouched long past next_run_at + tick — is a FAIL of the loop itself, distinct from any per-schedule outcome",
+        "SCOPE: cross-owner/anonymous denial on /reports* (including the schedule routes) is dashboards.saved-report-ownership; the export-permission axis at schedule-create time (#3544/#3710 assertExportAllowed) is adjacent and only its eager-refusal shape is relied on in step 2 — cite, don't re-prove"
+      ],
+      "traps": [
+        "eventual-consistency",
+        "clock-skew",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "test",
+        "ref": "packages/plugins/plugin-reports/src/report-service.test.ts — the dispatch describes: owner-scoped execution + fails-closed-without-resolver (#2980), csv attachment, subject template, cron/interval advance; the LIVE halves (dispatcher registration, the fail-closed row write on a real boot, the log arms) still need the run"
+      },
+      "source": [
+        "packages/plugins/plugin-reports/src/report-service.ts:698-800 (dispatchDue: due filter on next_run_at; owner fail-closed :728-744 with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename :758-783; renderSubject :191-194/:752-756; skipped arm :712-718), :812-828 (nextRunAt — cron wins, schedule timezone, warned fallback), :830-850 (advanceSchedule 'ok'/markSchedule), :588-637 (scheduleReport — first next_run_at, eager cron validation, recipients required)",
+        "packages/plugins/plugin-reports/src/reports-plugin.ts:97-104 (optional email + the :103 no-email warn), :125-138 (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), :141-174 (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
+        "packages/plugins/plugin-reports/src/report-service.test.ts (the unit pins cited by clauses 3-5)",
+        "packages/cli/src/commands/serve.ts (CAPABILITY_PROVIDERS.reports → @objectstack/plugin-reports — the dispatcher runs on stock boots)",
+        "packages/plugins/plugin-email/src/email-plugin.ts:379-381 (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
+        "docs/plans/release-15.1-test-plan.md §A10 (reports IDOR / 定时报表 RLS — #2980/#2981/#2975; the ownership half was imported as dashboards.saved-report-ownership, this item is the 定时报表-RLS dispatch leg that never was)",
+        "cross-ref: dashboards.saved-report-ownership (the /reports* owner-isolation surfaces, including schedule routes #6683)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new item (2026-08-30 sweep, angle 5): the dispatch loop was the un-imported leg of release-15.1 §A10 (定时报表 RLS) — nothing asserted the dispatcher runs on a real boot or that a due schedule cannot run RLS-bypassed. Grounded against source with one major correction to the register hypothesis: the register's positive framing ('a due schedule fires under the OWNER's RLS … mail lands at dev transport') is unreachable live at head, because reports-plugin.ts wires resolveOwnerContext: undefined (fail-closed pending ADR-0073 M2) and stock mail is the LogTransport — so the LIVE assertion is the fail-closed row write with the verbatim #2849/#2980 refusal (an 'ok' at head is the FAIL), and the owner-scoped/delivery/bookkeeping clauses are pinned at the unit layer with an explicit flip-to-live tripwire for when the resolver lands. Also recorded: no on-demand door drives dispatchDue (tick-wait protocol), and the skipped arm is unreachable through the owner API (deleteReport cascades schedules)",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
     }
   ]
 }

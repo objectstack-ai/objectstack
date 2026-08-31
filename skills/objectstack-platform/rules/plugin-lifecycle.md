@@ -45,7 +45,7 @@ export interface Plugin {
   version?: string;
 
   /** Plugin type */
-  type?: string;  // 'standard' | 'ui' | 'driver' | 'server' | 'app' | 'theme' | 'agent'
+  type?: string;  // standard|ui|driver|server|app|theme|agent|objectql
 
   /** Plugins that must init before this one */
   dependencies?: string[];

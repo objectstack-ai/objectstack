@@ -63,6 +63,51 @@ false positive: `const singular = request.type;` inside a method body is not an 
 longer listed. A `const` object **is** a container (its keys are metadata property names,
 which docs do name); a function body is not.
 
+### Every row says WHERE its anchor came from (#12824)
+
+A row used to read `organizationId (symbol)`, and a reader had no way to tell the single
+most on-target anchor the tool mints from pure noise. Now it reads:
+
+```
+- `content/docs/deployment/seed-tenancy-repair.mdx`  _(via organizationId (symbol, a field of interface MetaOverlayCacheKey))_
+- `content/docs/data-modeling/objects.mdx`           _(via userActions (symbol, a field of const object ObjectSchemaBase))_
+```
+
+Those two are **the same syntactic form** — `name:` inside an object or interface — and
+that is the point. One is a field of an internal cache struct and lands 10 pages that
+document an unrelated `organizationId`; the other is the canonical authorable key, and its
+row is the best one this tool produces. No syntactic test separates them (measured: the
+declaring *package* does not either — `schemaMode` is authorable and lives in
+`packages/objectql`). The **declaring container** does, and it is the field no row printed
+before.
+
+Each anchor kind names its own origin, from the same field the JSON publishes as
+`anchors[].from` — one derivation, never a second spelling:
+
+| kind | the clause |
+|:--|:--|
+| `symbol` | `a field of interface MetaOverlayCacheKey` · `a method of class RestServer` · `a top-level function` |
+| `route` | `a path literal in RestServer` · `bridged from symbol enforceEnvironmentOwnership — its registrar handler names it` |
+| `sdk` | `the route ledger binds it to GET /api/v1/ui/view/:object/:type` |
+| `literal` | `a string literal in cacheKeyOf` |
+| `command` | `read off packages/cli/src/commands/environments/bind.ts` |
+| `rule` | `a @docs-rule block in packages/objectql/src/engine.ts` |
+
+The bridge clauses are load-bearing for the same reason: an `sdk` row on a diff that never
+came near that route is the amplification this machinery is measured to produce, and it is
+only judgeable when the row names the hop it rode.
+
+⛔ **This is publication, not discrimination, and the difference is the ruling.** The
+maintainer's decision of 2026-08-31 took this (option C) and ruled OUT filtering on it
+(option B): dropping data-property anchors buys a 17.9% shorter list and pays in the
+`userActions` → `data-modeling/objects.mdx` and `schemaMode` → `data-modeling/drivers.mdx`
+rows. A false positive costs a reader a minute; a false negative ships a falsified page.
+So no guard, no threshold and no bridge hop reads `from` — `--self-test` pins that the
+provenance key set is exactly the anchor set, in both directions, so a future change
+cannot start deciding with it without going red. Container-qualified *discrimination*
+lives on #13712 (the spec half) and #13713 (the docs-audit half), and needs a TS-name →
+spec-name mapping this does not have.
+
 ### Two guards, and both publish what they removed
 
 The first build of this derivation was, on some PRs, *noisier* than the proxy it replaced

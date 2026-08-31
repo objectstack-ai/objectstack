@@ -1,7 +1,6 @@
 {
   "title": "Protocol Spec",
   "pages": [
-    "index",
     "diagram",
     "objectql",
     "objectui",

@@ -98,6 +98,68 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     expect(err.status).toBe(400);
   });
 
+  // ── the null carve-out, ruled 2026-08-31 (#13357; $between is #13495) ──
+
+  it.each([
+    ['$in, lowered array form', [['stage', 'in', [null]]]],
+    ['$in, object passthrough', { stage: { $in: [null] } }],
+    ['$nin, lowered array form', [['stage', 'not_in', [null]]]],
+    ['$nin, object passthrough', { stage: { $nin: [null] } }],
+    ['$in with a real neighbour', { stage: { $in: ['won', null] } }],
+  ])('refuses a null list MEMBER — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it.each([
+    ['[null, null]', { at: { $between: [null, null] } }],
+    ['[null, max]', { at: { $between: [null, '2026-07-15'] } }],
+    ['[min, null]', { at: { $between: ['2026-07-01', null] } }],
+  ])('refuses a null $between BOUND — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it('the null-member refusal prescribes the ruling\'s explicit spelling', () => {
+    // 2026-08-31: 「等于 X 或为空」的合法拼法是显式的 $or + $null — the
+    // refusal must spell it out, in both halves, and still name operator,
+    // field, position and authoring spellings (the #5346/#5348 contract).
+    const err = refusalOf(() => parseFilterAST({ stage: { $nin: [null] } }));
+    expect(err.message).toMatch(/^Operator "\$nin" on field "stage"/);
+    expect(err.message).toContain('where.stage.$nin[0]');
+    expect(err.message).toContain('{"$or": [{"stage": {"$in": […]}}, {"stage": {"$null": true}}]}');
+    expect(err.message).toContain('{"$null": false}');
+    expect(err.message).toMatch(/Authoring spellings: nin, not_in, notin/);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+  });
+
+  it('the null-bound refusal points at the offending index and the working alternatives', () => {
+    const err = refusalOf(() => parseFilterAST({ at: { $between: ['2026-07-01', null] } }));
+    expect(err.message).toMatch(/^Operator "\$between" on field "at" requires two non-null bounds/);
+    expect(err.message).toContain('where.at.$between[1]');
+    expect(err.message).toContain('"$gte"/"$lte"');
+    expect(err.message).toContain('{"at": {"$null": true}}');
+    expect(err.message).toMatch(/UNFILTERED result set/);
+  });
+
+  it('a null member is refused at its own path inside $and / $or / $not too', () => {
+    expect(refusalOf(() => parseFilterAST({ $not: { stage: { $in: [null] } } })).message)
+      .toContain('where.$not.stage.$in[0]');
+    expect(refusalOf(() => parseFilterAST({ $or: [{ stage: { $nin: [null] } }] })).message)
+      .toContain('where.$or[0].stage.$nin[0]');
+  });
+
+  it('refuses ONLY null — falsy and empty-ish members are values, not absence', () => {
+    // The carve-out is null-shaped and nothing wider: #5041's and #5234's
+    // member questions stand untouched, and every falsy VALUE keeps working.
+    expect(parseFilterAST({ n: { $in: [0, false, ''] } })).toEqual({ n: { $in: [0, false, ''] } });
+    expect(parseFilterAST({ n: { $nin: [0, false, ''] } })).toEqual({ n: { $nin: [0, false, ''] } });
+    expect(parseFilterAST({ at: { $between: ['', ''] } })).toEqual({ at: { $between: ['', ''] } });
+    expect(parseFilterAST({ n: { $between: [0, 0] } })).toEqual({ n: { $between: [0, 0] } });
+  });
+
   // ── the wording contract (#5346 / #5348), unchanged by the move ────────
 
   it('names the operator, the field, what arrived, where, and the fix', () => {
@@ -134,6 +196,13 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       [['stage', 'not_in', 'won']],
       [['stage', 'in', 'won']],
       [['amount', 'between', 5]],
+      // The 2026-08-31 null carve-out (#13357/#13495): the prescribed $or +
+      // $null spelling makes these the LONGEST messages this door assembles,
+      // so they live inside the same unrelaxed bound.
+      { stage: { $in: [null] } },
+      { stage: { $nin: [null] } },
+      { close_date: { $between: [null, null] } },
+      { close_date: { $between: ['2026-07-01', null] } },
     ]) {
       const err = refusalOf(() => parseFilterAST(where, "find('deal')"));
       expect(err.message.length, JSON.stringify(where)).toBeLessThan(500);

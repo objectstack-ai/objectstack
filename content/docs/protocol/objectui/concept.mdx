@@ -114,13 +114,15 @@ name: customer_edit
 object: customer
 layout:
   sections:
-    - label: Contact Information
+    - name: contact_information
+      label: Contact Information
       columns: 2
       fields:
         - name
         - email
         - phone
-    - label: Address
+    - name: address
+      label: Address
       columns: 1
       fields:
         - street
@@ -568,15 +570,18 @@ Show complexity only when needed:
 # Simple form for most users
 layout:
   sections:
-    - label: Basic Info
+    - name: basic_info
+      label: Basic Info
       fields: [name, email, phone]
 
 # Advanced section (collapsed by default)
 layout:
   sections:
-    - label: Basic Info
+    - name: basic_info
+      label: Basic Info
       fields: [name, email, phone]
-    - label: Advanced Settings
+    - name: advanced_settings
+      label: Advanced Settings
       collapsed: true
       fields: [api_key, webhook_url, rate_limit]
 ```

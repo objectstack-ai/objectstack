@@ -1,7 +1,6 @@
 {
   "title": "Runtime Services",
   "pages": [
-    "index",
     "data-service",
     "sharing-service",
     "audit-service",

@@ -567,6 +567,103 @@
         { "revision": 2, "date": "2026-08-11", "change": "two text corrections from run #7629, no clause substance changed. (1) The RLS-parity fixture carried the same stale invoice count as search.rls-both-personas — the seed ships 12 rows INV-1001..INV-1012, not 8; INV-1003's owner (linus) is now named so the invisible-row premise is checkable in place. (2) knownGaps records that this path inherits the declared-case-insensitive contract and the #7641 executor gap, since searchAll also emits `$contains` — without it a run scores a case-driven miss as a palette defect. Direction is per the #4706 Q2 = A ruling: case-insensitive is the declared truth, so the checklist reconciles toward the declaration and #7641 owns the product side", "ref": "#7647" },
         { "revision": 3, "date": "2026-08-12", "change": "the executor gap this item's third knownGap recorded is CLOSED, so the gap flips to past tense. #7641 found searchAll to be a SECOND producer of search clauses with the same declared≠enforced defect — metadata-protocol/src/protocol.ts built its AND-of-OR from `$contains` under a comment asserting `$contains` was the case-insensitive operator — and moved it onto `$icontains` in the same PR as search-filter.ts. No clause substance changed; a case-varying miss on a current build is now a real palette/UI defect rather than an expected executor FAIL, which is the scoring instruction this revision corrects", "ref": "#7641" }
       ]
+    },
+    {
+      "id": "search.command-palette-navigation",
+      "title": "The ⌘K palette is a NAVIGATOR beyond record search: the active app's nav corpus renders grouped (Objects/Dashboards/Pages/Reports), Enter navigates each type, app-switch and theme commands dispatch for real, and visibility-gated / inactive entries stay absent",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase app's navigation, which declares ALL FOUR palette-grouped leaf types (examples/app-showcase/src/ui/apps/index.ts): object items (:50-65, e.g. nav_projects/nav_tasks), page items (:30-40, e.g. nav_capability_map), dashboard items (:92-95, e.g. nav_ops → showcase_ops_dashboard), report items (:102-105, e.g. nav_report_summary) — plus nested groups, so the flattenNavigation leaf-only contract is exercisable",
+          "more than one registered active app (a stock boot registers showcase_app + setup + account — RUNNER.md environment facts), so the Switch-app group renders",
+          "the objectui console app-shell (CommandPalette + CommandPaletteProvider)"
+        ],
+        "knownGaps": [
+          "NO showcase nav item declares a visibility expression (`visible`/`visibleOn` — grepped apps/index.ts), so the gate-hidden clause's HIDDEN side has no stock fixture. App metadata is code-authored and NOT in the org-overridable runtime-write set (view/dashboard/report/translation/email_template only — RUNNER.md), so the fixture is a scratch-app nav item carrying `visible: 'false'` (or a persona-dependent CEL predicate), not a runtime edit; without it, score that side blocked(fixture) and record it",
+          "the /_console bundle is vendored and may be stale — verify palette behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)"
+        ]
+      },
+      "variants": [
+        "nav type: object (→ resolved object route)",
+        "nav type: dashboard (→ dashboard route)",
+        "nav type: page (→ page route)",
+        "nav type: report (→ report route)",
+        "Switch app (onAppChange — active apps only)",
+        "theme command (light / dark / system — setTheme dispatch)",
+        "Open full search (→ <baseUrl>/search)"
+      ],
+      "steps": [
+        "sign in as admin, open the palette (⌘K), screenshot the settled overlay (data-testid overlay:command-palette)",
+        "type a term matching nav labels (e.g. 'hours' hits the report items; 'tasks' hits objects) and screenshot: nav hits must render under their TYPE headings (Objects / Dashboards / Pages / Reports) — read the DOM only after the screenshot",
+        "confirm the corpus is the ACTIVE app's flattened navigation: a leaf inside a nav GROUP (e.g. the grouped showcase items) appears as a flat entry, and another app's nav items do NOT appear while showcase is active",
+        "Enter one item PER TYPE (ref-targeted select, never a coordinate click): object → its list route, dashboard/page/report → their routes; confirm each destination page renders and the palette closed",
+        "open the Switch-app group: it lists the OTHER active apps; select one and confirm the active app changes (URL + the palette's nav corpus now belongs to the target app); switch back",
+        "run a theme command ('Dark theme'): the root theme class flips immediately and the palette closes — the command dispatched, not just closed (persistence itself is platform-core.theme-mode-persistence's, not re-proven here)",
+        "select 'Open full search' and confirm navigation to /apps/<app>/search (deep coverage of that page stays with search.console-global-search)",
+        "the gate-hidden probe (blocked on stock seeds — see knownGaps): with a scratch nav item whose visibility predicate evaluates false, confirm it appears in NO group while a sibling with a true predicate appears; capture both sides",
+        "capture the browser console for the whole session"
+      ],
+      "acceptance": [
+        {
+          "clause": "the nav corpus renders grouped by TYPE from the active app's flattened navigation: object/dashboard/page/report leaves each under their own heading, nested nav groups flattened to leaves, no other app's items mixed in",
+          "oracle": "dom",
+          "verify": "post-screenshot DOM shows the four headings with the showcase fixtures under the right ones (flattenNavigation + the per-type CommandGroup blocks, CommandPalette.tsx:255-328,391-402); a grouped leaf (e.g. a nested showcase nav child) is present as a flat entry",
+          "evidence": "the grouped-palette screenshot + heading/entry DOM"
+        },
+        {
+          "clause": "Enter navigates PER TYPE: selecting an object/dashboard/page/report entry routes to its resolveHref destination and the page renders — one verification per variant, no type inferred from a sibling",
+          "oracle": "screenshot",
+          "verify": "four post-Enter screenshots, each at the expected route with the destination surface rendered (onSelect → runCommand(navigate(resolveHref(item, baseUrl, templateContext).href)))",
+          "evidence": "the four navigation captures (URL + screenshot)"
+        },
+        {
+          "clause": "global commands DISPATCH, not just close: a theme command applies the theme immediately (root class flips before any reload) and Switch-app changes the active app — the palette's own corpus re-derives from the target app on reopen",
+          "oracle": "dom",
+          "verify": "post-command DOM shows the theme class applied (setTheme via useTheme) and, after an app switch, the reopened palette lists the target app's nav items (onAppChange wired through ConsoleLayout)",
+          "evidence": "the before/after DOM reads + reopened-palette screenshot"
+        },
+        {
+          "clause": "the Switch-app group is honest: it renders only when more than one ACTIVE app exists, lists only apps with active !== false, and marks the current app — an inactive app never appears as a switch target",
+          "oracle": "dom",
+          "verify": "the group lists exactly the stock active apps (showcase_app/setup/account shapes) with the 'current' marker on the active one (CommandPalette.tsx:331-355 filter a.active !== false)",
+          "evidence": "the switch-group screenshot + app list"
+        },
+        {
+          "clause": "visibility-gated entries are ABSENT — both sides: a nav item whose visible/visibleOn predicate evaluates false for the current context appears in NO palette group, while a true-predicate sibling appears (the same evaluateVisibility filter the sidebar honours, so palette and sidebar cannot disagree about what exists)",
+          "oracle": "dom",
+          "verify": "with the scratch fixture (knownGaps): the false-predicate item absent from every group, the true-predicate item present (CommandPalette.tsx:85-87 filter over flattenNavigation); on stock seeds score blocked(fixture)",
+          "evidence": "the paired present/absent DOM reads"
+        },
+        {
+          "clause": "'Open full search' hands off to the /search page: selecting it navigates to <baseUrl>/search with the palette closed — the boundary to search.console-global-search, which owns that page's behavior",
+          "oracle": "screenshot",
+          "verify": "post-select the SearchResultsPage route is loaded (CommandPalette.tsx:374-385)",
+          "evidence": "the handoff capture"
+        }
+      ],
+      "negative": [
+        "a nav type rendered FLAT with no heading (or under the wrong heading) is a FAIL of the grouped contract — same class as the #3371 record-hit grouping",
+        "Enter closing the palette WITHOUT navigating is a FAIL — but rule out the automation-input trap first (ref-targeted select, not a coordinate click)",
+        "a false-predicate nav item appearing in the palette while the sidebar hides it is a FAIL: the palette must not be a side door around visibility expressions (courtesy-layer parity — server-side data access is not at issue here and is not what this clause claims)",
+        "an inactive app appearing as a switch target, or the switch group rendering with only one active app, is a FAIL",
+        "this item deliberately does NOT cover record hits, recents, RLS parity, or the open-affordance/idempotent-open matrix — those are search.console-global-search's clauses; a run must not double-score them here"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle", "automation-input"],
+      "source": [
+        "objectui packages/app-shell/src/chrome/CommandPalette.tsx:2-8 (the palette's declared scope: 'quick navigation across apps, objects, dashboards, pages, reports, and global actions'), :84-98 (flattened nav corpus + evaluateVisibility filter + searchable-object whitelist), :255-328 (the four per-type CommandGroups, onSelect → navigate(resolveHref…)), :331-355 (Switch app, active !== false, current marker), :357-372 (theme commands via setTheme), :374-385 (Open full search → <baseUrl>/search), :391-402 (flattenNavigation leaves-only)",
+        "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (the shared open path — covered by search.console-global-search clause 1, cross-referenced not re-proven)",
+        "examples/app-showcase/src/ui/apps/index.ts:30-40,50-65,92-95,102-105 (the fixture: page/object/dashboard/report nav declarations, nested groups)",
+        "search.console-global-search (the sibling item owning the record-search half of the same palette: GET /api/v1/search hits, grouping #3371, recents, RLS parity, /search page — the boundary both items keep so neither double-covers)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 1), authored as a SIBLING of search.console-global-search rather than an extension — writer's call per the register: that item's identity is the GET /api/v1/search record path (hits, grouping, RLS, recents, /search page) and already carries seven clauses, while the palette's other half — the client-side nav corpus (objects/dashboards/pages/reports groups from the active app's navigation), per-type Enter navigation, app switching, theme dispatch, and the evaluateVisibility gate — was wholly uncovered and is a different mechanism (app metadata + client filter, no server search). Grounded in CommandPalette.tsx; the gate-hidden side is blocked(fixture) on stock seeds because no showcase nav item declares a visibility expression and app metadata is not runtime-writable", "ref": "#sweep-2026-08-30" }
+      ]
     }
   ]
 }

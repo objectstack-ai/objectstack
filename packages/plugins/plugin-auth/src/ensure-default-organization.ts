@@ -3,9 +3,8 @@
 /**
  * ensureDefaultOrganization — default-org bootstrap helper (ADR-0081 D1).
  *
- * The platform admin (`admin_full_access` granted with `organization_id IS
- * NULL`) needs at least one `sys_organization` so their sessions can carry an
- * `activeOrganizationId`. Without it:
+ * The platform admin needs at least one `sys_organization` so their sessions
+ * can carry an `activeOrganizationId`. Without it:
  *   - multi-org: the default `tenant_isolation` RLS policy filters everything
  *     to zero rows and the admin sees an empty console;
  *   - single-org: better-auth `organization/invite-member` has no active org
@@ -17,12 +16,36 @@
  * injects its seed-ownership step via `claimSeedOwnership` (that machinery is
  * part of the per-org seed pipeline, not of the basics).
  *
- * Strategy (idempotent, run on `kernel:ready` and after every
- * `sys_user_permission_set` insert):
+ * ## Who "the platform admin" is (#11973 / #11663 L3, design §2 step 5)
  *
- *   1. Find the platform admin (oldest `sys_user_permission_set` row with
- *      `permission_set_id = admin_full_access` and `organization_id IS
- *      NULL`). If none, no-op.
+ * The POPULATION question this helper asks — "which user is the platform
+ * admin?" — has TWO anchors since the #11663 re-anchor, read in this order:
+ *
+ *   1. **Config anchor** (preferred, mirroring the derivation's own
+ *      preference): the first `OS_PLATFORM_OWNER_EMAIL` entry, in the order
+ *      the operator declared them, that a stored `sys_user` row holds with
+ *      `email_verified` reading VERIFIED. The membership + verified predicate
+ *      is `matchesConfiguredPlatformAdmin` from `@objectstack/core` — the
+ *      derivation site's own (`resolve-authz-context.ts` §6b-config) — so
+ *      this file re-implements NOTHING of the parse, the normalization or the
+ *      fail-closed verified read (⛔ no second derivation site). The lookup
+ *      shape — both spellings queried, matches re-checked through the shared
+ *      predicate, oldest verified row wins — is the same one
+ *      `plugin-security`'s `resolvePlatformAdminStanding` serves the audit
+ *      surface with, so the account this helper binds is the account the
+ *      audit surface reports as holding standing.
+ *   2. **Legacy grant anchor** (Choice 4A + P5): the oldest unscoped
+ *      `sys_user_permission_set` row on `admin_full_access`, exactly as
+ *      before. This is what still anchors `single`-posture deployments
+ *      (first-user promotion keeps writing the grant row there, by ruling)
+ *      and pre-migration walled deployments inside P5's honoured window. It
+ *      is removed with the legacy-grant removal leg (design §5 step 6), not
+ *      here — nothing in this leg is subtractive.
+ *
+ * Strategy (idempotent, run on `kernel:ready` and after every write matched
+ * by {@link isDefaultOrganizationBootstrapTrigger}):
+ *
+ *   1. Find the platform admin (two anchors, above). If none, no-op.
  *   2. If that user already has any `sys_member` row, no-op (they either
  *      created their own org or were invited into one — we respect that and
  *      never auto-create a "Default Organization" behind their back).
@@ -33,6 +56,8 @@
  *      default org.
  *   5. (optional, injected) hand the org's seeded rows to the admin.
  */
+
+import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -137,6 +162,100 @@ function genId(prefix: string): string {
   return `${prefix}_${ts}${rand}`;
 }
 
+/** Oldest `created_at` first; rows with no timestamp sort first (epoch 0). */
+function oldestFirst(a: any, b: any): number {
+  const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
+  const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
+  return ta - tb;
+}
+
+/**
+ * [#11973 / #11663 L3, design H4] Which writes can change this helper's
+ * answer — the trigger predicate for the default-org bootstrap re-run
+ * middleware. Exported so every wiring (plugin-auth's single-posture
+ * middleware, and the enterprise organizations package's walled bootstrap
+ * wiring) consumes the SAME predicate instead of re-deriving it — the
+ * `shouldReplayBootstrapFor` pattern next door in `plugin-security`.
+ *
+ * Three arms, one per way the POPULATION answer can move:
+ *
+ *  - **`sys_user` insert/create** — the config anchor: an
+ *    operator-provisioned account (`walled-owner-operator-stamp.ts`) or a
+ *    trusted-IdP insert arrives ALREADY VERIFIED, so the row that confers
+ *    standing can exist the moment it is created.
+ *  - **`sys_user` update touching `email` / `email_verified`** — the #11343
+ *    trigger set (design §2 step 5): the declared owner's verifying update is
+ *    exactly the moment `matchesConfiguredPlatformAdmin` starts answering
+ *    `true`, and on a fresh walled rig it is the ONLY write that ever will —
+ *    post-L4 no grant row is minted there, so a grant-insert trigger never
+ *    fires again (the interim window this leg closes).
+ *  - **`sys_user_permission_set` insert/create** — the LEGACY anchor's
+ *    trigger, kept verbatim: `single`-posture first-user promotion still
+ *    lands standing as a grant insert (Choice 4A), and P5's honoured window
+ *    still admits legacy walled grants. This arm is retired with the
+ *    legacy-grant removal leg (design §5 step 6), together with the grant
+ *    read it serves — ⛔ not as a side effect of this re-point.
+ *
+ * A `sys_user` DELETE never grows the population (the simulation direction
+ * `last-admin-guard.ts` documents), and an update touching neither standing
+ * column provably cannot move the answer — both cost no re-run.
+ */
+export function isDefaultOrganizationBootstrapTrigger(opCtx: {
+  object?: string;
+  operation?: string;
+  data?: unknown;
+}): boolean {
+  const op = opCtx?.operation;
+  if (opCtx?.object === 'sys_user') {
+    if (op === 'create' || op === 'insert') return true;
+    if (op === 'update') {
+      const data = opCtx?.data;
+      if (!data || typeof data !== 'object') return false;
+      return ['email_verified', 'email'].some((column) =>
+        Object.prototype.hasOwnProperty.call(data, column),
+      );
+    }
+    return false;
+  }
+  if (opCtx?.object === 'sys_user_permission_set') {
+    return op === 'create' || op === 'insert';
+  }
+  return false;
+}
+
+/**
+ * The CONFIG-anchored half of the population question: the first declared
+ * `OS_PLATFORM_OWNER_EMAIL` entry (operator order) holding standing, resolved
+ * to the oldest VERIFIED `sys_user` row that carries it. `undefined` when the
+ * variable is unset/blank/refused or no declared address has a verified
+ * account yet — the caller then falls back to the legacy grant anchor.
+ *
+ * Both spellings of each entry are queried (a driver `where` is an exact
+ * match and an imported/legacy row may not be stored lowercased), and every
+ * returned row is re-checked through `matchesConfiguredPlatformAdmin` — the
+ * derivation site's own predicate — so a case-folding collation's extra rows
+ * are dropped and the verified read stays the shared fail-closed one.
+ */
+async function findConfigAnchoredAdminUserId(ql: any): Promise<string | undefined> {
+  const config = resolvePlatformAdminEmails();
+  if (config.emails.length === 0) return undefined;
+  for (let i = 0; i < config.emails.length; i++) {
+    const email = config.emails[i]!;
+    const declaredSpelling = config.declaredSpellings[i] ?? email;
+    const byId = new Map<string, any>();
+    for (const spelling of new Set([email, declaredSpelling])) {
+      for (const u of await tryFind(ql, 'sys_user', { email: spelling }, 5)) {
+        if (u && typeof u === 'object' && u.id) byId.set(String(u.id), u);
+      }
+    }
+    const standing = [...byId.values()]
+      .filter((u) => matchesConfiguredPlatformAdmin(u, config))
+      .sort(oldestFirst);
+    if (standing[0]?.id) return String(standing[0].id);
+  }
+  return undefined;
+}
+
 export interface EnsureDefaultOrganizationResult {
   /** Whether a brand-new org row was inserted (vs. re-using slug=default). */
   defaultOrgCreated: boolean;
@@ -164,29 +283,34 @@ export async function ensureDefaultOrganization(
     return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
   }
 
-  // 1. Find the platform admin permission-set id.
-  const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
-  if (adminPs.length === 0 || !adminPs[0].id) {
-    return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
-  }
-  const adminPsId = adminPs[0].id;
+  // 1. Find the platform admin — CONFIG anchor first (#11973 / #11663 L3;
+  //    the derivation prefers config, so the population read does too).
+  //    With `OS_PLATFORM_OWNER_EMAIL` unset this costs no read at all, which
+  //    is what keeps every `single`-posture deployment on the path below
+  //    exactly as before (Choice 4A).
+  let adminUserId: string | undefined = await findConfigAnchoredAdminUserId(ql);
 
-  // 2. Find the platform admin user (oldest cross-tenant grant).
-  const adminGrants = await tryFind(
-    ql,
-    'sys_user_permission_set',
-    { permission_set_id: adminPsId, organization_id: null },
-    50,
-  );
-  if (adminGrants.length === 0) {
-    return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
+  // 2. LEGACY grant anchor (oldest cross-tenant `admin_full_access` grant) —
+  //    still what anchors `single` posture and P5's honoured migration
+  //    window; removed with the legacy-grant removal leg (design §5 step 6).
+  if (!adminUserId) {
+    const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
+    if (adminPs.length === 0 || !adminPs[0].id) {
+      return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
+    }
+    const adminPsId = adminPs[0].id;
+    const adminGrants = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { permission_set_id: adminPsId, organization_id: null },
+      50,
+    );
+    if (adminGrants.length === 0) {
+      return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
+    }
+    const sortedGrants = [...adminGrants].sort(oldestFirst);
+    adminUserId = sortedGrants[0]?.user_id ? String(sortedGrants[0].user_id) : undefined;
   }
-  const sortedGrants = [...adminGrants].sort((a, b) => {
-    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return ta - tb;
-  });
-  const adminUserId: string | undefined = sortedGrants[0]?.user_id;
   if (!adminUserId) {
     return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
   }
@@ -231,8 +355,9 @@ export async function ensureDefaultOrganization(
           + 'ON LOOKING HEALTHY: this line is the only notice. Remedy: make the sys_organization '
           + 'insert land — check the write permission and driver connectivity, and whether a legacy '
           + 'unique index on `slug` is refusing `default`; the bootstrap re-runs on every '
-          + 'kernel:ready and after every sys_user_permission_set insert, so no manual repair is '
-          + 'needed once the write can land.',
+          + 'kernel:ready and on every default-org bootstrap trigger (sys_user insert, an '
+          + 'email/email_verified update, or a legacy sys_user_permission_set insert), so no '
+          + 'manual repair is needed once the write can land.',
         { object: 'sys_organization', slug: 'default' },
       );
       return { defaultOrgCreated: false, memberCreated: false, reason: 'org_insert_failed' };
@@ -257,7 +382,8 @@ export async function ensureDefaultOrganization(
         + 'the deployment looks healthier than it is and this line is the only notice. Remedy: make '
         + 'the sys_member insert land — check the write permission, driver connectivity, and any '
         + 'unique index over (organization_id, user_id); the bootstrap re-runs on every kernel:ready '
-        + 'and after every sys_user_permission_set insert, so the next pass binds it.',
+        + 'and on every default-org bootstrap trigger (sys_user insert, an email/email_verified '
+        + 'update, or a legacy sys_user_permission_set insert), so the next pass binds it.',
       { object: 'sys_member', organization: defaultOrgId, user: adminUserId },
     );
     return {
