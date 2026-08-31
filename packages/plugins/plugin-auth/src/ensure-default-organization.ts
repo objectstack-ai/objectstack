@@ -85,6 +85,9 @@ interface BootstrapLogger {
  * tests — survive it perfectly, which is why no suite would catch it. The
  * property-access call form below keeps the receiver.
  */
+import { resolvePlatformAdminEmails, isConfiguredPlatformAdminEmail } from '@objectstack/core';
+import { isEmailVerifiedUserRow } from '@objectstack/types';
+
 function logDurabilityFailure(
   logger: BootstrapLogger | undefined,
   message: string,
@@ -164,29 +167,44 @@ export async function ensureDefaultOrganization(
     return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
   }
 
-  // 1. Find the platform admin permission-set id.
-  const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
-  if (adminPs.length === 0 || !adminPs[0].id) {
-    return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
-  }
-  const adminPsId = adminPs[0].id;
-
-  // 2. Find the platform admin user (oldest cross-tenant grant).
-  const adminGrants = await tryFind(
-    ql,
-    'sys_user_permission_set',
-    { permission_set_id: adminPsId, organization_id: null },
-    50,
-  );
-  if (adminGrants.length === 0) {
-    return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
-  }
-  const sortedGrants = [...adminGrants].sort((a, b) => {
+  const oldestFirst = (a: any, b: any) => {
     const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
     const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
     return ta - tb;
-  });
-  const adminUserId: string | undefined = sortedGrants[0]?.user_id;
+  };
+
+  // 1-2. Resolve the platform admin. The cross-tenant grant row is the
+  // historical spelling and still the primary answer where it exists
+  // (`single` posture first-user promotion, Choice 4A; legacy walled
+  // grants). Since #13514 (L4) a WALLED bootstrap mints no row at all —
+  // standing is config-derived at the authorization derivation site — so a
+  // missing row is no longer a verdict: fall back to the DECLARED VERIFIED
+  // OWNER, resolved with the same public predicates the derivation site
+  // asks (`resolvePlatformAdminEmails` + row-side membership + the #11343
+  // verified-email allow-list), oldest wins — the bootstrap's own tiebreak.
+  // Without this fallback the walled default-org bootstrap dead-ends on
+  // `no_admin` forever, which is how cloud's EE guided-path suite caught it.
+  let adminUserId: string | undefined;
+  const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
+  if (adminPs.length > 0 && adminPs[0].id) {
+    const adminGrants = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { permission_set_id: adminPs[0].id, organization_id: null },
+      50,
+    );
+    adminUserId = [...adminGrants].sort(oldestFirst)[0]?.user_id;
+  }
+  if (!adminUserId) {
+    const config = resolvePlatformAdminEmails();
+    if (config.emails.length > 0) {
+      const users = await tryFind(ql, 'sys_user', {}, 50);
+      const owners = users
+        .filter((u: any) => isConfiguredPlatformAdminEmail(u?.email, config) && isEmailVerifiedUserRow(u))
+        .sort(oldestFirst);
+      adminUserId = owners[0]?.id;
+    }
+  }
   if (!adminUserId) {
     return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
   }

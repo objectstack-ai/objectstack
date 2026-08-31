@@ -36,6 +36,71 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
   };
 }
 
+describe('the L4 config-derived owner fallback (#13514 follow-through)', () => {
+  // Under a walled posture the bootstrap mints NO grant row, so the grant
+  // lookup answers nothing — the declared VERIFIED owner must be the admin,
+  // resolved with the same public predicates the derivation site asks.
+  const OWNER = 'owner@walled.example';
+  const withOwnerEnv = async (value: string | undefined, fn: () => Promise<void>) => {
+    const prev = process.env.OS_PLATFORM_OWNER_EMAIL;
+    if (value === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+    else process.env.OS_PLATFORM_OWNER_EMAIL = value;
+    try { await fn(); } finally {
+      if (prev === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+      else process.env.OS_PLATFORM_OWNER_EMAIL = prev;
+    }
+  };
+
+  it('no grant row + declared VERIFIED owner ⇒ the owner gets the default org', async () =>
+    withOwnerEnv(OWNER, async () => {
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [
+          { id: 'u_other', email: 'bystander@walled.example', email_verified: true, created_at: '2026-01-01' },
+          { id: 'u_owner', email: OWNER, email_verified: true, created_at: '2026-01-02' },
+        ],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.defaultOrgCreated).toBe(true);
+      expect(res.memberCreated).toBe(true);
+      expect(ql.tables.sys_member[0]).toMatchObject({ user_id: 'u_owner', role: 'owner' });
+    }));
+
+  it('an UNVERIFIED declared owner stays no_admin — fail closed, the #11343 allow-list holds', async () =>
+    withOwnerEnv(OWNER, async () => {
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [{ id: 'u_owner', email: OWNER, email_verified: false, created_at: '2026-01-02' }],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.defaultOrgCreated).toBe(false);
+      expect(res.reason).toBe('no_admin');
+      expect(ql.tables.sys_member).toEqual([]);
+    }));
+
+  it('no declared owner at all stays no_admin — nobody is invented', async () =>
+    withOwnerEnv(undefined, async () => {
+      const ql = makeQl({
+        sys_user_permission_set: [],
+        sys_user: [{ id: 'u_owner', email: OWNER, email_verified: true, created_at: '2026-01-02' }],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.defaultOrgCreated).toBe(false);
+      expect(res.reason).toBe('no_admin');
+    }));
+
+  it('a grant row still WINS over the config fallback — the historical spelling stays primary', async () =>
+    withOwnerEnv(OWNER, async () => {
+      const ql = makeQl({
+        sys_user: [{ id: 'u_owner', email: OWNER, email_verified: true, created_at: '2026-01-02' }],
+      });
+      const res = await ensureDefaultOrganization(ql);
+      expect(res.defaultOrgCreated).toBe(true);
+      // makeQl's default grant row names u1 — that row, not the config owner.
+      expect(ql.tables.sys_member[0]).toMatchObject({ user_id: 'u1', role: 'owner' });
+    }));
+});
+
 describe('ensureDefaultOrganization (plugin-auth home)', () => {
   it('creates the default org and binds the admin as owner', async () => {
     const ql = makeQl();
