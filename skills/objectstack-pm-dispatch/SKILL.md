@@ -692,7 +692,12 @@ forming, more permissive once it is stable — and this axis reads it from there
 like every other project-specific rule.
 
 Your recommendation must be justified on **all four** axes. If they conflict,
-present the trade-off honestly and let the maintainer decide.
+present the trade-off honestly and let the maintainer decide. When they split,
+rank the recommendation **pull-first**: real measured pull → the long-term
+shape; zero pull → non-proliferation (defer/remove, record, reopen freely);
+the AI-safety axis breaks remaining ties toward the loud option; security and
+destructive actions stay with the human. The order ranks recommendations
+only — a split still escalates.
 
 ### 9. Round report, then next round
 
@@ -841,7 +846,10 @@ Analyze every option on four fixed axes:
   declaration. How tight the default is comes from the project's conventions
   file, not from this template.
 Justify your recommendation on all four axes; if they conflict, present the
-trade-off and let the maintainer decide.
+trade-off and let the maintainer decide, ranking the recommendation pull-first
+(real pull → long-term shape; zero pull → non-proliferation; the AI-safety
+axis breaks ties; security/destructive → always the maintainer); the ranking
+orders recommendations only — a split still escalates.
 
 Return "blocked" (with evidence) when the default branch is broken under you, a
 dependency issue is unmerged, or CI infrastructure fails — after retrying

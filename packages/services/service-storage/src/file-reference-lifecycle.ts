@@ -83,6 +83,67 @@ const PACKAGE_ID = 'com.objectstack.service.storage';
 // every internal page). Inert on write contexts.
 const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as const;
 
+/**
+ * The bookkeeping context for a `sys_file` write, carrying the acting
+ * organization when the triggering write had one (#13547).
+ *
+ * ## Why the organization has to travel with the copy
+ *
+ * `sys_file` declares no `tenancy` key, so `isTenancyDisabled()` reads `false`
+ * and the registry provisions `organization_id` on it. {@link copyOwnedFile}
+ * INSERTS a row on that object, and it did so carrying `isSystem` and nothing
+ * else — so `ObjectQLEngine.buildDriverOptions` emitted no
+ * `DriverOptions.tenantId`, `SqlDriver.injectTenantOnInsert` had no value to
+ * stamp from, and every copied file landed `organization_id = NULL`. The
+ * driver's tenant term is `(organization_id = :tenantId OR organization_id IS
+ * NULL)`, so those rows are reachable from every organization.
+ *
+ * ⚠️ Nothing warned. `isSystem` also sets `bypassTenantAudit = true`, which is
+ * exactly the guard `SqlDriver.auditMissingTenant` returns at — so the
+ * `[tenant-audit]` line that names this defect ("writes will not be
+ * tenant-isolated") never fired for it. The absence of the warning was
+ * explained, not reassuring.
+ *
+ * ## The same channel the four repaired doors use
+ *
+ * This mirrors `StorageMetadataStore`'s `StorageWriteContext` threading
+ * (`createFile` #12745, `createSession` #12928, the update/delete halves
+ * #13178) rather than inventing a second convention: the caller hands the
+ * engine the organization it is acting in as an execution context, and the
+ * platform's existing insert-side chokepoint decides the rest. ⛔ The
+ * organization is NOT written onto the payload here — whether this object has
+ * a tenant column at all, and whether an explicit value on the row wins, are
+ * `resolveTenantField` / `injectTenantOnInsert`'s answers, and restating them
+ * one package away from the schema is how the two answers drift apart.
+ *
+ * No organization ⇒ the key is absent entirely, and the write proceeds exactly
+ * as it did before. `tenantId: undefined` would NOT be the same thing: it is a
+ * key the context carries, and `buildDriverOptions` reads presence.
+ */
+function systemWriteContext(organizationId?: string | null): Record<string, unknown> {
+  return typeof organizationId === 'string' && organizationId.length > 0
+    ? { ...SYSTEM_CTX, tenantId: organizationId }
+    : { ...SYSTEM_CTX };
+}
+
+/**
+ * The organization the write that triggered this hook is acting in, or `null`.
+ *
+ * `HookContext.session.organizationId` is the blessed developer-facing name
+ * for the caller's active org, and ObjectQL's `buildSession()` copies it
+ * verbatim from `ExecutionContext.tenantId` — the same value that would have
+ * reached the driver had the caller's own write been the one inserting. So the
+ * copy is stamped for the organization whose record triggered it, which is
+ * also the organization the `sys_file` organization sweep derives from a
+ * file's field-reference holder. ⛔ Never a lookup and never a default: a
+ * caller with no active organization yields `null` and the insert stays
+ * unstamped rather than being guessed into somebody's tenant.
+ */
+function actingOrganizationOf(ctx: any): string | null {
+  const org = ctx?.session?.organizationId;
+  return typeof org === 'string' && org.length > 0 ? org : null;
+}
+
 /** Bound on owned files released per record delete. */
 const RELEASE_BATCH_LIMIT = 1_000;
 
@@ -341,6 +402,7 @@ async function copyOwnedFile(
   engine: FileReferenceEngine,
   storage: IStorageService,
   src: Record<string, unknown>,
+  organizationId: string | null,
 ): Promise<string> {
   const srcKey = typeof src.key === 'string' ? src.key : '';
   if (!srcKey) throw new Error('source file has no storage key');
@@ -360,6 +422,12 @@ async function copyOwnedFile(
   const now = new Date().toISOString();
   // Ownership columns are deliberately left NULL — the after-hook claims the
   // copy for the slot that triggered it, on the same path as any other file.
+  //
+  // [#13547] The TENANT column is not one of them, and the after-hook does not
+  // claim it: `claimFile` patches `ref_object` / `ref_id` / `ref_field` (and
+  // `status` / `deleted_at` on a revive) and never names `organization_id`.
+  // So the acting organization has to be threaded HERE, on the insert, which
+  // is the only point that can still stamp it.
   await engine.insert(
     'sys_file',
     {
@@ -377,7 +445,7 @@ async function copyOwnedFile(
       created_at: now,
       updated_at: now,
     },
-    { context: { ...SYSTEM_CTX } },
+    { context: systemWriteContext(organizationId) },
   );
   return newId;
 }
@@ -405,6 +473,7 @@ async function applyCopyOnClaim(
   recordId: string | null,
   data: Record<string, unknown>,
   fileFields: string[],
+  organizationId: string | null,
 ): Promise<void> {
   for (const field of fileFields) {
     if (!(field in data)) continue;
@@ -447,7 +516,7 @@ async function applyCopyOnClaim(
         continue;
       }
       try {
-        replacements.set(token, await copyOwnedFile(engine, storage, row));
+        replacements.set(token, await copyOwnedFile(engine, storage, row, organizationId));
         logger.debug?.(
           `[storage] file reference: copied ${token} for ${object}.${field} (exclusive ownership)`,
         );
@@ -619,7 +688,7 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
-      await applyCopyOnClaim(engine, getStorage, logger, object, null, data, fileFields);
+      await applyCopyOnClaim(engine, getStorage, logger, object, null, data, fileFields, actingOrganizationOf(ctx));
     },
     { packageId: PACKAGE_ID },
   );
@@ -673,7 +742,7 @@ export function installFileReferenceHooks(
       // copy-on-claim pass is what makes "the before hook always reconciles the
       // payload it is given" a property of this handler instead of a case
       // analysis a later edit has to re-derive.
-      await applyCopyOnClaim(engine, getStorage, logger, object, recordId, data, fileFields);
+      await applyCopyOnClaim(engine, getStorage, logger, object, recordId, data, fileFields, actingOrganizationOf(ctx));
     },
     { packageId: PACKAGE_ID },
   );

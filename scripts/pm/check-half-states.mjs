@@ -19,8 +19,14 @@
  * backlog sat on the board; not one predicate here had fired, because nothing
  * standing ever called them. An alarm added to a script nobody runs is still
  * silence, and the transport note below explains why "some seat should run it"
- * kept not happening: the live sweep cannot run inside a PM session container
- * at all.
+ * kept not happening: in every container class measured at the time, the live
+ * sweep could not run at all.
+ *
+ * ⚠️ That last clause is no longer true of every agent container, and saying so
+ * is #13544's whole point — see "Routing node through the session proxy" below.
+ * The scheduled caller stays regardless: it is right for the #9844 reason (a
+ * lane that has to REMEMBER to run a patrol does not run it), never for a
+ * transport reason. The on-demand path is restored BESIDE it, ⛔ not instead.
  *
  * So the caller is now `.github/workflows/half-state-patrol.yml` — a scheduled
  * workflow, on a runner where the transport prerequisite is met, landing the
@@ -703,6 +709,19 @@
  *       the proxy itself. Live mode cannot run, and the reading that used to say
  *       it could is the reason this probe now has a second stage.
  *
+ *   Proxied cloud dev session, node ROUTED through the proxy (#13544, measured
+ *       2026-08-31) — the same container class as the two above, and this time
+ *       every stage answers as GitHub: `/rate_limit` 200 (15000 core), `/user`
+ *       200 (the real login), and `GET /repos/objectstack-ai/objectstack` 200
+ *       with `server: github.com` and a real `x-github-request-id`. Live mode
+ *       runs fully. The SAME container with node NOT routed reads 401
+ *       authenticated and 403 anonymous on all three — so the fourth class's
+ *       refusal and this class's success are both true readings, of different
+ *       ROUTES, and the proxy's repo-scope policy is per-container rather than
+ *       a property of "being proxied". ⇒ stage 2 stays exactly as it is: it is
+ *       the only thing that tells this class from the fourth, and the fourth is
+ *       still out there.
+ *
  * That fourth class is the one that broke the probe, and its mechanism is worth
  * stating exactly, because the obvious hypothesis is WRONG and was measured to
  * be wrong. `/rate_limit` there is not the proxy fabricating a quota: it carries
@@ -745,6 +764,69 @@
  * cannot make one request. The first draft of the probe below did exactly that.
  * `probeIsUsable` is that lesson, and the self-test pins it.
  *
+ * ## Routing node through the session proxy (#13544)
+ *
+ * Requirement 1 above has a REMEDY this script can apply to itself, and not
+ * applying it was a measured defect. In a proxied agent container this probe
+ * printed PREREQUISITE NOT MET — "the token in the environment is not a valid
+ * GitHub credential", prescribing `export GITHUB_TOKEN=` — while `curl` on the
+ * same host, with the same token, in the same second, answered 200. A
+ * diagnostic that reports the opposite of the truth on the exact question "can
+ * a reading be taken here?" is the #4690 class INVERTED: readable looks like
+ * unreadable. The inverted direction is the more durable one, because it costs
+ * the tool nothing and only ever costs the caller — a probe that says "you
+ * can't" is not argued with. It cost the on-demand path for weeks, while the
+ * population that path exists to watch grew unobserved (#13526).
+ *
+ * So a live mode now RE-EXECS itself once with `--use-env-proxy` when a proxy
+ * is configured and this process is not already routed through it
+ * (`proxyRearmPlan`). `scripts/pm/check-governed-merges.mjs` carries the same
+ * mechanism for the same reason; this file keeps its OWN copy rather than
+ * importing it, because the patrol pair is copied VERBATIM into sibling repos
+ * (#11217) and must not acquire a dependency on a file that is not part of that
+ * pair.
+ *
+ * Three properties of that shape, each measured rather than argued:
+ *
+ *   - It has to be a re-exec. The flag is read at process START: assigning
+ *     `process.env.NODE_USE_ENV_PROXY = '1'` from inside the script is too late
+ *     (measured 2026-08-31 — still 403 from `server: Varnish`, i.e. still the
+ *     bypassed route). The alternative shape, constructing an undici
+ *     `EnvHttpProxyAgent` and calling `setGlobalDispatcher`, was measured and
+ *     rejected: `undici` does not resolve from this repo
+ *     (`require.resolve('undici')` -> MODULE_NOT_FOUND), so it would put a
+ *     dependency into a file whose entire adoption story is "copy it verbatim".
+ *   - It is a NO-OP where no proxy is configured — which is precisely the
+ *     GitHub Actions runner the scheduled caller runs on. `proxyRearmPlan`
+ *     returns `rearm: false` for an environment carrying no `HTTPS_PROXY` /
+ *     `https_proxy`, so the runner spawns no child, prints no extra line and
+ *     takes the code path it took before, byte for byte. Pinned in the
+ *     self-test, both directions.
+ *   - It never touches STDOUT. The notice goes to stderr, because the
+ *     `--format=markdown` consumer redirects stdout into an issue body: a
+ *     status line landing there would be PUBLISHED as part of the report.
+ *
+ * ⛔ What the re-exec deliberately does NOT do is weaken the refusal. A failed
+ * probe still prints PREREQUISITE NOT MET and still exits 3. Restoring the
+ * on-demand path means fixing the ROUTE the probe takes, never lowering the bar
+ * it applies to what comes back — a sweep that runs on an unreachable API and
+ * reports a clean board is strictly worse than a refusal, which is #4690 in the
+ * direction this file was written for. The control is run both ways and the
+ * unreachable leg is a first-class case, not an afterthought: with the proxy
+ * pointed at a dead port the re-exec still happens, the child still cannot
+ * reach the host, and the run still exits 3.
+ *
+ * And when a bypassed reading DOES reach the report — an older node that will
+ * not accept the flag, a re-exec that could not spawn — the verdict carries
+ * `describeTransportRoute`'s bypassed note: the `Fix:` line becomes the ROUTE,
+ * and the credential remedy is demoted to "if the route is not the problem". The
+ * old text sent the next reader looking for a credential they do not need. The
+ * SAME reading, taken on the routed side, retires a sentence that the re-exec
+ * falsified: the host-unreachable branch used to reassure every reader that
+ * "node's fetch does not use HTTPS_PROXY", which stops being true the moment
+ * this file routes it — and a stale reassurance inside a refusal is the same
+ * defect one layer down.
+ *
  * So the script PROBES before it sweeps, in two stages, and the staging is the
  * whole cost story:
  *
@@ -781,8 +863,11 @@
  * transport or a required-real-token doctrine. That depends on where
  * `scripts/pm/**` live modes are meant to execute, which is a maintainer call
  * (#7412 triage, explicitly out of scope). This change only stops the file from
- * lying about the transport it has. It does not drop, substitute or re-route the
- * token, so a container where the sweep worked before works identically after.
+ * lying about the transport it has. It still does not drop or substitute the
+ * TOKEN — which identity to send stays the caller's decision — and the #13544
+ * re-exec re-routes the TRANSPORT only, on the one environment shape that
+ * carries a proxy, so a container where the sweep worked before works
+ * identically after.
  *
  * REST only, never GraphQL (Operational notes 3: the loop's hot path stays on
  * the core quota).
@@ -802,7 +887,8 @@
  */
 
 import process from 'node:process';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 /**
@@ -878,6 +964,8 @@ export function resolveSweepRepo(env = {}) {
 const SWEEP_REPO = resolveSweepRepo(process.env);
 const OWNER_REPO = SWEEP_REPO.repo;
 const API = 'https://api.github.com';
+/** This file, resolved for the #13544 proxy re-exec (see `rearmThroughProxy`). */
+const SELF_PATH = fileURLToPath(import.meta.url);
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 
 // ---------------------------------------------------------------------------
@@ -7166,6 +7254,135 @@ export function parseOutputOptions(argv) {
 export const EXIT_PREREQUISITE_NOT_MET = 3;
 
 /**
+ * The node flag that points `fetch` at the session proxy, and the env guard that
+ * stops a re-exec from re-execing (#13544).
+ *
+ * `NODE_USE_ENV_PROXY=1` is the env spelling of the same switch and is honoured
+ * identically — both are read at process START, which is the whole reason this
+ * is a re-exec rather than an assignment (header, "Routing node through the
+ * session proxy").
+ */
+export const PROXY_FLAG = '--use-env-proxy';
+export const PROXY_REARM_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+
+/**
+ * Is a proxy configured, and is THIS process already routed through it? Pure,
+ * and split out because two different decisions read it: whether to re-exec,
+ * and whether a failing verdict was taken on a bypassed route.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[] }} [ctx]
+ */
+export function proxyRoute({ env = {}, execArgv = [] } = {}) {
+  const proxy = env.HTTPS_PROXY || env.https_proxy || null;
+  const routed =
+    (execArgv ?? []).includes(PROXY_FLAG) ||
+    String(env.NODE_OPTIONS ?? '').includes(PROXY_FLAG) ||
+    String(env.NODE_USE_ENV_PROXY ?? '') === '1';
+  return { proxy, routed };
+}
+
+/**
+ * Does this run need re-executing with `PROXY_FLAG` before it can reach GitHub
+ * at all? Pure, so every branch is offline-testable — and the branches are the
+ * point: a proxied run without the flag answers 401 authenticated and 403
+ * anonymous on every endpoint and reads exactly like a credential problem, which
+ * is the defect #13544 was filed for.
+ *
+ * ⭐ The `no HTTPS_PROXY` branch is the one that keeps this file safe to copy
+ * VERBATIM into a sibling repo (#11217): a GitHub Actions runner carries no
+ * proxy env, so it never re-execs and behaves exactly as it did before.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[], flagSupported?: boolean }} [ctx]
+ * @returns {{ rearm: boolean, hint: boolean, flag?: string, reason: string }}
+ */
+export function proxyRearmPlan({ env = {}, execArgv = [], flagSupported = true } = {}) {
+  const { proxy, routed } = proxyRoute({ env, execArgv });
+  if (!proxy) {
+    return { rearm: false, hint: false, reason: 'no HTTPS_PROXY in the environment — node fetch reaches api.github.com directly' };
+  }
+  if (routed) return { rearm: false, hint: false, reason: `already routed through the proxy (${PROXY_FLAG} / NODE_USE_ENV_PROXY=1)` };
+  if (env[PROXY_REARM_GUARD] === '1') return { rearm: false, hint: false, reason: 'already re-armed once this run' };
+  if (!flagSupported) {
+    return { rearm: false, hint: true, reason: `this node does not accept ${PROXY_FLAG}; every request will bypass ${proxy}` };
+  }
+  return { rearm: true, hint: false, flag: PROXY_FLAG, reason: `HTTPS_PROXY is set (${proxy}) and node's fetch does not read it` };
+}
+
+/**
+ * WHICH route the observations were taken on, described for the report (#13544).
+ * Pure. `null` where no proxy is configured — a runner, where every sentence the
+ * classifier already prints is correct.
+ *
+ * Two directions, because the refusal text was wrong in BOTH:
+ *
+ *   `bypassed: true`  — a proxy is configured and this process is not using it.
+ *       The verdict gains the note below and its remedy becomes the ROUTE. This
+ *       is the #13544 defect: the un-noted wording prescribed
+ *       `export GITHUB_TOKEN=<a real GitHub token>` in a container where the
+ *       proxy SUPPLIES the credential and no token is needed, sending the reader
+ *       after a secret instead of a route.
+ *   `bypassed: false` — this process IS routed through the proxy. Nothing is
+ *       folded in, but the host-unreachable branch owes a different sentence:
+ *       its standing "node's fetch does not use HTTPS_PROXY, so this says
+ *       nothing about `curl`/`gh`" became FALSE the moment the re-exec landed,
+ *       and a stale reassurance in a refusal is the same defect one layer down.
+ *
+ * ⛔ Neither direction changes the VERDICT. A refusal stays a refusal and exit 3
+ * still means NOT MEASURED; only the wording moves.
+ *
+ * @param {{ env?: Record<string,string|undefined>, execArgv?: string[] }} [ctx]
+ */
+export function describeTransportRoute({ env = {}, execArgv = [] } = {}) {
+  const { proxy, routed } = proxyRoute({ env, execArgv });
+  if (!proxy) return null;
+  if (routed) return { proxy, bypassed: false, detail: [], fix: [] };
+  return {
+    proxy,
+    bypassed: true,
+    detail: [
+      `⚠️  This reading was taken on a route that BYPASSES the configured proxy:`,
+      `\`HTTPS_PROXY=${proxy}\` is set and node's fetch does not read it, while \`curl\`,`,
+      `\`gh\` and the \`mcp__github__*\` tools do. So the status above is evidence about`,
+      `the ROUTE this process took, not about what this container can reach.`,
+      ``,
+      `In an agent container the proxy is also what swaps the 14-character \`prox…\``,
+      `placeholder for a real credential — so a bypassed route sends the placeholder`,
+      `to GitHub and earns the 401 it would then report as the container's verdict.`,
+    ],
+    fix: [
+      `node ${PROXY_FLAG} scripts/pm/check-half-states.mjs …   (or NODE_USE_ENV_PROXY=1)`,
+      `  ↑ this script normally re-execs itself with that flag; reaching this text`,
+      `    means the re-exec did not happen — an older node that will not take it,`,
+      `    or a child process that failed to spawn.`,
+    ],
+  };
+}
+
+/**
+ * Fold a transport note into a verdict. Pure, and deliberately additive: the
+ * `kind` is untouched, the original evidence stays, and the original remedy is
+ * kept as a named alternative rather than replaced — the route is the likelier
+ * cause in a proxied container, but it is not the only one.
+ *
+ * ⛔ A `reachable` verdict is returned unchanged: a run that got a real reading
+ * needs no advice about how it got there.
+ */
+export function withTransportNote(verdict, note) {
+  if (!verdict || !note || !note.bypassed || verdict.kind === 'reachable') return verdict;
+  const previous = verdict.fix ?? [];
+  return {
+    ...verdict,
+    detail: [...(verdict.detail ?? []), ``, ...note.detail],
+    fix: [
+      ...note.fix,
+      ``,
+      `If the route is not the problem: ${previous[0] ?? 'unknown'}`,
+      ...previous.slice(1),
+    ],
+  };
+}
+
+/**
  * What the token in the environment LOOKS like — never whether it is valid; only
  * GitHub can say that, and a 401 is it saying so. This exists to enrich the
  * report ("…and it carries no GitHub token prefix"), never to pre-reject a token:
@@ -7367,9 +7584,21 @@ function classifyRepoRead(tok, primary, repo) {
  *   gathered only when the account-scoped evidence already reads `reachable`.
  *   Absent, this classifies the account-scoped evidence alone — the behaviour
  *   every caller had before #9946.
+ *
+ *   `transport` is the OPTIONAL `describeTransportRoute` reading for the route
+ *   the observations were taken on (#13544). Absent, no note is folded in, no
+ *   sentence changes, and every verdict is byte-identical to what it was — which
+ *   is what keeps the other importer (`scripts/pm/ci-failure.mjs`, which passes
+ *   no such field) unchanged.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
+  return withTransportNote(classifyProbeObservations(obs), obs?.transport ?? null);
+}
+
+/** The classification itself, over the observations alone. Pure. */
+function classifyProbeObservations(obs) {
+  const route = obs?.transport ?? null;
   const token = obs?.token ?? '';
   const tok = describeToken(token);
   const authed = obs?.authed ?? null;
@@ -7395,9 +7624,18 @@ export function classifyTransportProbe(obs) {
       detail: [
         `\`GET /rate_limit\` did not complete: ${primary.networkError}`,
         ``,
-        `Node's fetch does not use HTTPS_PROXY, so this says nothing about \`curl\`, \`gh\``,
-        `or the \`mcp__github__*\` tools — those may all work here and still not be this`,
-        `script's transport.`,
+        ...(route && !route.bypassed
+          ? [
+              `This request DID go through the configured proxy (\`${route.proxy}\`) — the`,
+              `#13544 re-exec routed it — so the route is not the missing piece here and`,
+              `re-running with \`${PROXY_FLAG}\` will not change this answer. Either the proxy`,
+              `itself is unreachable, or it cannot reach \`api.github.com\`.`,
+            ]
+          : [
+              `Node's fetch does not use HTTPS_PROXY, so this says nothing about \`curl\`, \`gh\``,
+              `or the \`mcp__github__*\` tools — those may all work here and still not be this`,
+              `script's transport.`,
+            ]),
       ],
       fix: [
         'run this from a container with direct egress to api.github.com (CI, or the',
@@ -7575,12 +7813,16 @@ export function needsRepoProbe(accountVerdict) {
 }
 
 async function probeTransport() {
+  // The route these observations are taken on rides into every verdict (#13544)
+  // so a refusal gathered on a bypassed route says so instead of blaming a
+  // credential. `null` on a runner and on an already-routed re-exec alike.
+  const transport = describeTransportRoute({ env: process.env, execArgv: process.execArgv });
   const first = await probeRateLimit(TOKEN);
   const account = !TOKEN
-    ? classifyTransportProbe({ token: '', anon: first })
+    ? classifyTransportProbe({ token: '', anon: first, transport })
     : first.status === 200
-      ? classifyTransportProbe({ token: TOKEN, authed: first })
-      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit('') });
+      ? classifyTransportProbe({ token: TOKEN, authed: first, transport })
+      : classifyTransportProbe({ token: TOKEN, authed: first, anon: await probeRateLimit(''), transport });
 
   if (!needsRepoProbe(account)) return account;
 
@@ -7588,8 +7830,45 @@ async function probeTransport() {
   // stage-1 verdict: one classifier, one place where a verdict is named.
   const repo = await probeRepoRead(TOKEN);
   return TOKEN
-    ? classifyTransportProbe({ token: TOKEN, authed: first, repo })
-    : classifyTransportProbe({ token: '', anon: first, repo });
+    ? classifyTransportProbe({ token: TOKEN, authed: first, repo, transport })
+    : classifyTransportProbe({ token: '', anon: first, repo, transport });
+}
+
+/**
+ * The re-exec (#13544). Returns the child's exit code when this run was handed
+ * off, or `null` when the caller should carry on in-process.
+ *
+ * ⚠️ Everything it prints goes to STDERR: the `--format=markdown` caller
+ * redirects stdout into a GitHub issue body, so a status line on stdout would be
+ * published as part of the report.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: process.env,
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container — the verdict says which.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The proxy agent is experimental and says so once per run. An operator cannot
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); ` +
+      'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
 }
 
 /**
@@ -12922,6 +13201,67 @@ function selfTest() {
   // repo's anchor can see WHICH board was read (and a wrong one is legible).
   t('sweep repo: the rendered summary names the swept repo', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0).includes('objectstack-ai/objectui'), true);
 
+  // -- The proxy route (#13544): a probe that answers on the BYPASSED route
+  // -- answers about the wrong route, and its refusal reads as the container's
+  // -- verdict. These pin the re-exec decision and the corrected remedy.
+  // The leg that keeps this file safe to copy verbatim: an Actions runner has
+  // no proxy env, so it must never spawn a child or change a single word.
+  t('proxy: no HTTPS_PROXY means no re-exec (the Actions runner leg)', proxyRearmPlan({ env: {} }).rearm, false);
+  t('proxy: …and the reason says why, for a reader of the run log', proxyRearmPlan({ env: {} }).reason.includes('reaches api.github.com directly'), true);
+  t('proxy: a configured proxy re-execs', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309' } }).rearm, true);
+  t('proxy: …with the flag node actually reads at start', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' } }).flag, PROXY_FLAG);
+  t('proxy: the lowercase spelling counts too', proxyRearmPlan({ env: { https_proxy: 'http://x' } }).rearm, true);
+  t('proxy: the flag already in execArgv stops the re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] }).rearm, false);
+  t('proxy: …in NODE_OPTIONS, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_OPTIONS: `--enable-source-maps ${PROXY_FLAG}` } }).rearm, false);
+  t('proxy: …and the env spelling NODE_USE_ENV_PROXY=1, likewise', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', NODE_USE_ENV_PROXY: '1' } }).rearm, false);
+  t('proxy: the guard env stops an infinite re-exec loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  // An older node gets a printed hint, never a bad-option crash.
+  t('proxy: an unsupported flag hints instead of re-execing', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).hint, true);
+  t('proxy: …and does not re-exec', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).rearm, false);
+
+  // The note. Absent where there is nothing to say — which is every runner.
+  t('route: no proxy configured, nothing to describe', describeTransportRoute({ env: {} }), null);
+  t('route: proxied and bypassed is the reportable direction', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }).bypassed, true);
+  t('route: …and it names the proxy the reader has to check', describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:40309' } }).detail.join(' ').includes('http://127.0.0.1:40309'), true);
+  t('route: …with the remedy being the route, not a secret', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }).fix[0].includes(PROXY_FLAG), true);
+  t('route: already routed is described, not nulled — the wording differs', describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] }).bypassed, false);
+  // ⛔ The routed direction must fold in NOTHING: there is no route advice to
+  // give a run that already took the route.
+  t('route: a routed reading folds no note into the verdict', withTransportNote({ kind: 'bad-credential', headline: 'h', detail: ['d'], fix: ['f'] }, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] })).fix.length, 1);
+  // The sentence the re-exec falsified: on a routed run the refusal must not
+  // reassure the reader that node ignores HTTPS_PROXY — it just used it.
+  const deadRouted = classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' }, execArgv: [PROXY_FLAG] }) });
+  t('route: a routed refusal says the proxy WAS used', deadRouted.detail.join(' ').includes('DID go through the configured proxy'), true);
+  t('route: …and drops the sentence the re-exec made false', deadRouted.detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), false);
+  t('route: a BYPASSED refusal keeps that sentence, where it is still true', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), true);
+  t('route: …and a run with no transport reading at all is unchanged', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' } }).detail.join(' ').includes("Node's fetch does not use HTTPS_PROXY"), true);
+
+  // Folding it in changes the REMEDY and never the verdict (H2/H3: the refusal
+  // stays a refusal, exit 3 stays NOT MEASURED).
+  const badCred = { kind: 'bad-credential', headline: 'h', detail: ['d'], fix: ['export GITHUB_TOKEN=<a real GitHub token> and re-run.'] };
+  const noted = withTransportNote(badCred, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }));
+  t('transport note: the verdict KIND is untouched — a refusal stays a refusal', noted.kind, 'bad-credential');
+  t('transport note: the route becomes the first remedy', noted.fix[0].includes(PROXY_FLAG), true);
+  t('transport note: the credential remedy survives, demoted and named', noted.fix.some((l) => l.startsWith('If the route is not the problem: export GITHUB_TOKEN=')), true);
+  t('transport note: the original evidence survives', noted.detail[0], 'd');
+  t('transport note: a reachable verdict is returned unchanged', withTransportNote({ kind: 'reachable', headline: 'h', detail: [], fix: [] }, describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } })).fix.length, 0);
+  t('transport note: no note is the identity', withTransportNote(badCred, null), badCred);
+
+  // The two REAL readings from the same container, one second apart (#13544,
+  // measured 2026-08-31) — the pair that proves the refusal was about the route.
+  const bypassedObs = { token: 'proxy-injected', authed: { status: 401, rateLimitRemaining: null }, anon: { status: 200, rateLimitRemaining: 0 } };
+  t('#13544 bypassed route: still classified as a bad credential', classifyTransportProbe(bypassedObs).kind, 'bad-credential');
+  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical (ci-failure.mjs)', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
+  t('#13544 bypassed route: with the transport handed in, the remedy is the route', classifyTransportProbe({ ...bypassedObs, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).fix[0].includes(PROXY_FLAG), true);
+  // The same container, same token, routed through the proxy: all three stages
+  // answer as GitHub, including the repo-scoped one. This is the reading the
+  // refusal was hiding.
+  t('#13544 routed: the same container reads REACHABLE', classifyTransportProbe({ token: 'proxy-injected', authed: { status: 200, rateLimitRemaining: 14472 }, repo: { status: 200, rateLimitRemaining: 14893 } }).kind, 'reachable');
+  // ⛔ The refusal must survive the fix, or a false negative became a false
+  // positive: an unreachable host still classifies, still with exit 3.
+  t('#13544 control: a genuinely unreachable host still refuses', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' } }) }).kind, 'host-unreachable');
+  t('#13544 control: …and the refusal exit code is still 3', EXIT_PREREQUISITE_NOT_MET, 3);
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;
@@ -12966,6 +13306,11 @@ if (isMain) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else if (process.argv.includes('--probe')) {
+    // Transport before questions about it (#13544): the probe's own requests go
+    // through the same fetch the sweep uses, so a probe that answers on the
+    // BYPASSED route answers about the wrong route. Re-exec first, then ask.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
+    if (rearmed !== null) process.exit(rearmed);
     // "Can live mode run HERE?" answered on its own, so a seat can find out
     // without a sweep and without reading a raw HTTP status off a label page.
     probeTransport().then((v) => {
@@ -12986,6 +13331,11 @@ if (isMain) {
       console.error(`check-half-states: ${options.error}`);
       process.exit(2);
     }
+    // After argument validation, so a bad-usage run never pays for a child
+    // process — the ordering `check-governed-merges.mjs` settled on for the
+    // same re-exec.
+    const rearmed = rearmThroughProxy(process.argv.slice(2));
+    if (rearmed !== null) process.exit(rearmed);
     sweep(options).catch((err) => {
       // The in-loop net. The pre-sweep probe answers the common case, but the
       // transport can also fail mid-run (a quota exhausted by this very sweep,
