@@ -168,7 +168,7 @@ Kernel checks ServiceRequirementDef (@objectstack/spec/system):
   'metadata'  → core    → auto-inject createMemoryMetadata() if missing
   'cache'     → core    → auto-inject createMemoryCache() if missing
   'queue'     → core    → auto-inject createMemoryQueue() if missing
-  'job'       → core    → NO fallback — warns; getService throws (#10746)
+  'job'       → core    → NO fallback — warns; getService throws if missing
   'i18n'      → core    → auto-inject createMemoryI18n() if missing
   'auth'      → core    → NO fallback — warns; getService throws if missing
   'realtime'  → optional → skip, plugins should check availability
