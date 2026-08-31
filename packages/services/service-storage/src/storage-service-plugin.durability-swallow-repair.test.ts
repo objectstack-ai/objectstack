@@ -49,6 +49,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import { StorageServicePlugin } from './storage-service-plugin.js';
+import type { SwappableStorageService } from './swappable-storage-service.js';
 
 function makeCtx() {
   const services = new Map<string, any>();
@@ -134,7 +135,12 @@ async function bootedPlugin(settings: unknown) {
   await plugin.init(ctx);
   await plugin.start(ctx);
   await ctx._flushReady();
-  return { plugin, ctx, dir };
+  // Typed HERE rather than at each call site: the fake ctx is `any`, so
+  // `ctx.getService<T>(…)` is a type argument on an untyped call (TS2347) and
+  // `as any` would be a slot-lookup erasure (#4251). A plain typed assignment
+  // is neither.
+  const storage: SwappableStorageService = ctx.getService('storage');
+  return { plugin, ctx, dir, storage };
 }
 
 const BINDING_HEADLINE = 'settings namespace binding FAILED';
@@ -177,9 +183,9 @@ describe('StorageServicePlugin site A: settings binding (#12981)', () => {
 describe('StorageServicePlugin site B: storage/test probe cleanup (#12981)', () => {
   it('a refused probe cleanup is reported, and names the stray key', async () => {
     const settings = makeFakeSettings();
-    const { ctx } = await bootedPlugin(settings);
+    const { ctx, storage } = await bootedPlugin(settings);
     const broken = makeBrokenAdapter({ upload: true, delete: true });
-    (ctx.getService('storage') as any).swap(broken.adapter);
+    storage.swap(broken.adapter);
 
     const result = await settings._runAction('storage', 'test', { values: {} });
 
@@ -205,9 +211,9 @@ describe('StorageServicePlugin site B: storage/test probe cleanup (#12981)', () 
   // above cannot pass on a seam that warns on every failed probe.
   it('CONTROL: a probe failure whose cleanup SUCCEEDS reports nothing on that channel', async () => {
     const settings = makeFakeSettings();
-    const { ctx } = await bootedPlugin(settings);
+    const { ctx, storage } = await bootedPlugin(settings);
     const broken = makeBrokenAdapter({ upload: true, delete: false });
-    (ctx.getService('storage') as any).swap(broken.adapter);
+    storage.swap(broken.adapter);
 
     const result = await settings._runAction('storage', 'test', { values: {} });
 

@@ -82,16 +82,25 @@ function makeEngine(rows: MetaRow[]) {
     let updateAttempts = 0;
 
     const engine = {
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
+            // This double implements NEITHER a `where` combinator NOR a bound,
+            // and REFUSES both rather than answering them silently. Every case
+            // in this file adopts env-wide orphans, so the producer passes
+            // `{ where: {} }` and no `limit`; the org-scoped `$or` branch and
+            // paging belong to tests that do not exist yet. A double looser
+            // than the engine it stands in for converts a green suite into no
+            // suite at all (#4434) — and the reason to refuse rather than
+            // approximate is that the approximation is invisible on the day the
+            // producer starts using the shape.
             const where = opts?.where ?? {};
-            return [...store.values()].filter((r) => {
-                const or = (where as { $or?: Array<Record<string, unknown>> }).$or;
-                if (!or) return true;
-                return or.some((c) =>
-                    Object.entries(c).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v),
-                );
-            });
+            if (Object.keys(where).length > 0) {
+                throw new Error(`fake engine: unsupported where ${JSON.stringify(where)}`);
+            }
+            if (opts?.limit !== undefined) {
+                throw new Error('fake engine: unsupported `limit` — this double holds no bound');
+            }
+            return [...store.values()];
         },
         async update(_table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);

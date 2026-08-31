@@ -463,9 +463,9 @@ export class StorageServicePlugin implements Plugin {
       // identically -- `catch { }` with a comment that named only the first.
       // Resolving the service on its own line leaves the catch below covering
       // exactly the second.
-      let settings: any;
+      let settings: StorageSettingsSlot | undefined;
       try {
-        settings = ctx.getService<any>('settings');
+        settings = ctx.getService<StorageSettingsSlot>('settings');
       } catch {
         // A DECLARED absence, and silence is correct here: a bare kernel
         // registers no `settings` service, so nothing ever claimed the admin
@@ -628,6 +628,28 @@ export class StorageServicePlugin implements Plugin {
       }
     });
   }
+}
+
+/**
+ * [#12981] The slice of the `settings` service `start()` uses.
+ *
+ * Named rather than erased to `any` because splitting the lookup from the
+ * declaration is exactly `check:slot-lookup`'s FOURTH erasure shape (#4251):
+ * `let x: any; try { x = ctx.getService('…'); }` erases the contract in a
+ * position none of the rule's other selectors reach. Everything past
+ * `createClient` is feature-detected at its call site, so it is declared
+ * OPTIONAL here rather than assumed — the declaration says what the code
+ * actually requires, which is the property that makes it worth writing.
+ */
+interface StorageSettingsSlot {
+  createClient(namespace: string): unknown;
+  getNamespace(namespace: string): Promise<{ values: Record<string, unknown> }>;
+  subscribe?(namespace: string, listener: () => void): void;
+  registerAction?(
+    namespace: string,
+    id: string,
+    handler: (input: any) => Promise<unknown>,
+  ): void;
 }
 
 /**
