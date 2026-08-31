@@ -1375,23 +1375,41 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // independently and risk multiplicatively.
 //
 // ⚠️ AND A RESOLUTION HAZARD THE GUARD CANNOT SEE, found while verifying the
-// six rather than looked for. `functionBodies` is keyed by BARE NAME and is
-// LAST-WINS. `protocol.ts` declares `lookup` three times (bodies at 6657, 6717,
-// 7129), and the hop in seams 1 and 2 resolves the call at 6674 to the
-// declaration at 7129 — not the one lexically enclosing it.
-// `contradictsWrapperResolution` admits it and is right to: the receiver is a
-// bare identifier and the arity matches, because the three declarations are
-// near-copies of one another. Both seams are real anyway — all three `lookup`
-// bodies read `sys_metadata` through `this.engine.findOne` — so nothing is
-// miscounted today. But the verdict is right by luck, and each additional hop
-// multiplies the number of names that must be unique for it to stay right.
-// That is the strongest argument on this tree for leaving the bound alone, and
-// it is an argument no seam COUNT can make.
+// six rather than looked for — CLOSED by #13474, and kept here because the
+// argument it supplied below moved with it. `functionBodies` WAS keyed by bare
+// name and LAST-WINS. `protocol.ts` declares `lookup` three times — three
+// near-identical single-parameter async arrows; anchor on that text, the line
+// numbers in the original filing had already drifted by ~131 lines when it was
+// dispatched — and the hop in seams 1 and 2 resolved the call inside
+// `findDraft` to the THIRD of them, not the one lexically enclosing it.
+// `contradictsWrapperResolution` admits that call and is right to: the receiver
+// is a bare identifier and the arity matches, because the three declarations
+// are near-copies of one another. Both seams were real anyway — all three
+// `lookup` bodies read `sys_metadata` through `this.engine.findOne` — so
+// nothing was miscounted. But the verdict was right by LUCK. #13474 replaced
+// the flat index with resolution through the call site's lexical scope chain,
+// which refuses a name it cannot settle rather than answering with the last one
+// in the file; see `indexFunctionBodies` for what it deliberately does NOT
+// narrow.
+//
+// WHAT THAT DID TO THE DEPTH ARGUMENT — stated here rather than left to be
+// rediscovered from a paragraph that no longer holds. The hazard no longer
+// grows with depth in its strong form: a longer chain no longer needs every
+// name in it to be UNIQUE, only to be resolvable at its own call site. What
+// survives is narrower and still real — a name declared exactly ONCE in the
+// file is still answered by name alone from any call site, so a longer chain
+// still crosses more of those. Measured with the new resolver in place:
+// `--list` and `--depth-cost` are byte-identical to the last-wins output, at
+// the shipped bound and at every probed depth 1..8, so closing the hazard moved
+// no number in this table.
 //
 // ⛔ THE BOUND IS NOT RAISED, and the reason is measurement rather than
 // caution. Three of them: admitting the six changes no finding, only a number;
 // that number is quoted by five other cards and #8901's restart conjunct (b)
-// reserves the census re-run; and the resolution hazard above grows with depth.
+// reserves the census re-run; and the resolution hazard above grew with depth
+// — ⚠️ that third reason is the one #13474 weakened, to the narrower form
+// stated just above. The first two are untouched. Raising the bound remains a
+// maintainer's decision about the census, never a consequence of this fix.
 // What lands instead is what the filing asked for and a comment cannot give —
 // the price is now RE-DERIVABLE on demand (`--depth-cost`, which prints the
 // admitted seams by name) and the bound is PINNED FROM ABOVE in the self-test,
@@ -2112,8 +2130,17 @@ function enclosingFunctionNode(node) {
  *
  * Indexed in one pass and resolved with the same resolver, so a fallback stored
  * in a const is read exactly like a fallback called inline. Only `const`/`let`
- * declarations with an initializer are indexed, keyed by bare name — the same
- * key model, with the same trade-off, as `indexFunctionBodies` above.
+ * declarations with an initializer are indexed, keyed by bare name and
+ * LAST-WINS.
+ *
+ * That is deliberately NOT the scope-aware model `indexFunctionBodies` moved to
+ * for #13474, and the reason is measured rather than assumed: across the whole
+ * scan surface this index holds ZERO same-file name collisions, so there is
+ * nothing here for a scope chain to disambiguate. Widening the key anyway would
+ * be an unmeasured change to a resolver whose errors — like the function-body
+ * one's — have no safe direction, which is the argument AGAINST making it, not
+ * for it. Should a collision ever appear here, the remedy is the resolver next
+ * door, not a wider key: give this index a call site too and reuse it.
  */
 function indexLogAliases(sf, functionBodies) {
     const byName = new Map();
@@ -2333,21 +2360,132 @@ function catchDeliversFailure(block, declared) {
 }
 
 /**
+ * The node a declaration is VISIBLE FROM — the scope key the resolver matches
+ * a call site's ancestor chain against.
+ *
+ * Two kinds, because the two things this file indexes are reached in two
+ * different ways:
+ *
+ *   LEXICAL (`function foo() {}`, `const foo = () => {}`) — visible inside the
+ *   nearest enclosing block-like node. `let`/`const` are block-scoped and a
+ *   function declaration is block-scoped in a module, so "nearest block" is the
+ *   correct key for both. `var` is function-scoped and would be visible wider
+ *   than this says; treating it as block-scoped can only make the resolver
+ *   decline a hop, never follow a wrong one, which is this file's declared
+ *   direction of error. (Measured: no `var` function binding in the scan root.)
+ *
+ *   MEMBER (`foo() {}` in a class or object literal) — not a lexical binding at
+ *   all; it is reached through a receiver. Its key is the class/object literal
+ *   that owns it, so a call inside a SIBLING member of the same class resolves
+ *   and a call from an unrelated class in the same file does not.
+ *
+ * @param node The declaration node.
+ * @param member `true` for a method declaration, `false` for the lexical forms.
+ * @returns The scope node, or `undefined` if there is none (cannot happen for a
+ *          parsed file, since `SourceFile` terminates every chain).
+ */
+function declarationScopeOf(node, member) {
+    for (let n = node.parent; n; n = n.parent) {
+        if (member) {
+            if (
+                ts.isClassDeclaration(n) ||
+                ts.isClassExpression(n) ||
+                ts.isObjectLiteralExpression(n)
+            ) {
+                return n;
+            }
+            continue;
+        }
+        if (
+            ts.isBlock(n) ||
+            ts.isSourceFile(n) ||
+            ts.isModuleBlock(n) ||
+            ts.isCaseBlock(n) ||
+            ts.isForStatement(n) ||
+            ts.isForInStatement(n) ||
+            ts.isForOfStatement(n)
+        ) {
+            return n;
+        }
+    }
+    return undefined;
+}
+
+/**
  * Index every named function-like body in the file, so a `catch` that delegates
- * to a helper can be judged by what the helper does.
+ * to a helper can be judged by what the helper does — and resolve a name AT THE
+ * CALL SITE, through that call site's lexical scope chain.
  *
  * Covers `function foo() {}`, `const foo = () => {}` / `= function () {}`, and
- * class methods `foo() {}` — the three shapes the repo actually uses. Keyed by
- * bare name: same-file collisions are rare and the effect of one would only be
- * to consider a catch louder, never quieter than it is.
+ * class methods `foo() {}` — the three shapes the repo actually uses.
+ *
+ * ## Why this is not keyed by bare name alone (#13474)
+ *
+ * It was, and it was LAST-WINS: one `Map<name, body>` filled in source order,
+ * so when a file declared the same name more than once every call to it
+ * resolved to the LAST declaration, wherever the call was written. That is not
+ * an approximation with a direction — it is a coin flip. A collision where only
+ * SOME of the same-named bodies read either INVENTS a seam (the unsafe
+ * direction: a fake member of the denominator #5186, #6451, #9165, #8845 and
+ * #8901 are quoted against) or DROPS a real one, and nothing in the output
+ * distinguishes either case from a correct resolution.
+ *
+ * The live instance, measured: `packages/metadata-protocol/src/protocol.ts`
+ * declares `lookup` three times as near-identical single-parameter async
+ * arrows. The call inside `findDraft` is enclosed by the FIRST of them; the
+ * flat index answered with the THIRD, in a different method entirely, chosen
+ * only because it is last in the file. It cost nothing on that tree — all three
+ * bodies happen to read `sys_metadata` through `this.engine.findOne`, so the
+ * two seams that hop through the call were genuine under any of the three
+ * resolutions — but "accidentally right" is not an invariant, and the blast
+ * radius grows with `MAX_READ_WRAPPER_DEPTH`: every extra hop is one more name
+ * that has to be unique for the chain to stay correct.
+ *
+ * ## What the resolver does, and what it deliberately leaves alone
+ *
+ * `get(name, from)` walks OUTWARD from the call site and returns the first
+ * declaration of `name` whose scope is one of the call site's ancestors —
+ * innermost wins, which is what the language does. Two deliberate departures
+ * from a strict lexical resolver, each measured:
+ *
+ *   ONE DECLARATION ⇒ UNCHANGED. When a name has exactly one body in the file
+ *   there is nothing to choose and no lexical information can improve on the
+ *   answer, so it is returned whatever the call site is. This keeps every hop
+ *   the census already depends on — notably a wrapper reached through an
+ *   identifier receiver (`store.fetch(…)`), whose owning class is not on the
+ *   caller's ancestor chain — and confines this change to exactly the
+ *   collisions. Over-fixing here is as dangerous as under-fixing, for the same
+ *   reason: the mechanism has no safe direction.
+ *
+ *   AMBIGUOUS AND OUT OF SCOPE ⇒ REFUSE. When a name has several bodies and
+ *   none of them encloses the call site, the hop is NOT followed. File order is
+ *   not evidence, and declining is the under-counting direction AGENTS.md
+ *   declares for this family — the same direction `contradictsWrapperResolution`
+ *   takes one step later.
+ *
+ * ⛔ `contradictsWrapperResolution` is NOT changed by this and must not be: it
+ * answers a different question (a name collision across RECEIVERS, refuted by
+ * receiver depth and arity), both of its clauses pass correctly on the `lookup`
+ * instance above, and it stays load-bearing here — a UNIQUE name reached
+ * through a compound receiver is admitted by the one-declaration rule above and
+ * refused by that predicate.
+ *
+ * @returns `{ has(name), get(name, from) }` — `has` is membership only (no call
+ *          site needed); `get` needs the call site and returns `undefined` when
+ *          it cannot settle the name.
  */
 function indexFunctionBodies(sf) {
     const byName = new Map();
+    const record = (name, body, scope) => {
+        const declared = byName.get(name);
+        if (declared) declared.push({ body, scope });
+        else byName.set(name, [{ body, scope }]);
+    };
     walkAll(sf, (node) => {
         if (ts.isFunctionDeclaration(node) && node.name && node.body) {
-            byName.set(node.name.text, node.body);
+            record(node.name.text, node.body, declarationScopeOf(node, false));
         } else if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.body) {
-            byName.set(node.name.text, node.body);
+            record(node.name.text, node.body, declarationScopeOf(node, true));
         } else if (
             ts.isVariableDeclaration(node) &&
             ts.isIdentifier(node.name) &&
@@ -2355,10 +2493,27 @@ function indexFunctionBodies(sf) {
             (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) &&
             node.initializer.body
         ) {
-            byName.set(node.name.text, node.initializer.body);
+            record(node.name.text, node.initializer.body, declarationScopeOf(node, false));
         }
     });
-    return byName;
+    return {
+        has: (name) => byName.has(name),
+        get: (name, from) => {
+            const declared = byName.get(name);
+            if (!declared) return undefined;
+            if (declared.length === 1) return declared[0].body;
+            if (!from) return undefined;
+            for (let n = from; n; n = n.parent) {
+                // Last within ONE scope: two declarations sharing a scope are
+                // the only case file order was ever evidence for, and it is the
+                // tie-break the flat index already made.
+                let hit;
+                for (const d of declared) if (d.scope === n) hit = d;
+                if (hit) return hit.body;
+            }
+            return undefined;
+        },
+    };
 }
 
 /**
@@ -2396,7 +2551,7 @@ function collectLoggedLevels(block, ctx, lineOf, seen = new Set(), depth = 0) {
         if (depth >= 3) return;
         const name = calleeName(child);
         if (!name || seen.has(name)) return;
-        const body = ctx.functionBodies.get(name);
+        const body = ctx.functionBodies.get(name, child);
         if (!body) return;
         seen.add(name);
         for (const l of collectLoggedLevels(body, ctx, lineOf, seen, depth + 1)) {
@@ -2601,7 +2756,7 @@ function isReadCall(node, functionBodies, seen = new Set(), depth = 0, maxDepth 
     // same-file helper that happens to be called `find` is still followed. The
     // shape test subtracts a false positive; it must not subtract a real read.
     if (depth >= maxDepth || seen.has(name)) return false;
-    const body = functionBodies.get(name);
+    const body = functionBodies.get(name, node);
     if (!body) return false;
     // #12358: the hop's own shape check. Without it a callee NAME that merely
     // collides with a same-file declaration is followed into that body, and the
@@ -2771,7 +2926,7 @@ function establishesBenign(expr, ctx) {
     const seen = ctx.guardSeen ?? new Set();
     const depth = ctx.guardDepth ?? 0;
     if (seen.has(name) || depth >= MAX_GUARD_DEPTH) return false;
-    const body = ctx.functionBodies.get(name);
+    const body = ctx.functionBodies.get(name, call);
     if (!body || !ts.isBlock(body)) return false;
     const exits = [];
     const consulted = new Set();
@@ -5949,6 +6104,134 @@ function selfTestReadSeams() {
                     }
                 }`,
             maxReadWrapperDepth: MAX_READ_WRAPPER_DEPTH + 1,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+
+        // ── The wrapper hop's NAME resolution, both directions (#13474) ──────
+        //
+        // The regression control for the lexical scope chain in
+        // `indexFunctionBodies`. Before it, the index was one flat
+        // `Map<name, body>` filled in source order, so every call to a
+        // repeated name resolved to the LAST declaration in the file wherever
+        // the call was written.
+        //
+        // These four are a SET, and each one is here because the other three
+        // cannot fail for its reason:
+        //
+        //   (1) the flat index DROPS a real seam — the enclosing body reads,
+        //       the last one does not;
+        //   (2) the flat index INVENTS one — the last body reads, the
+        //       enclosing one does not. This is the unsafe direction, the
+        //       fake member of the denominator #5186, #6451, #9165, #8845 and
+        //       #8901 are quoted against;
+        //   (3) the live shape, three same-named single-parameter async
+        //       arrows, resolved from inside the FIRST — the instance the
+        //       card was filed on, reduced;
+        //   (4) the non-narrowing pin: a name declared ONCE still resolves
+        //       from anywhere. Without it, "resolve only through the lexical
+        //       chain" passes the three above while silently dropping every
+        //       hop through a wrapper reached on an identifier receiver, and
+        //       the census shrinks with nothing here to say so.
+        //
+        // Measured with the fix withheld (the resolver reduced to the old flat
+        // last-wins map): (1) reports 0 seams, (2) reports 1, (3) reports 0 —
+        // red in the direction each one names — while (4) stays green, which is
+        // what makes (4) a test of the OTHER failure, over-fixing.
+        {
+            name: 'flags: #13474 — the enclosing same-named body is the one resolved (a later twin must not drop the seam)',
+            code: `
+                class R {
+                    async outer(type: string) {
+                        const read = async (t: string) => {
+                            return await this.driver.findOne('sys_metadata', { t });
+                        };
+                        try { return await read(type); }
+                        catch { return null; }
+                    }
+                    async elsewhere(type: string) {
+                        const read = async (t: string) => {
+                            return this.memo.get(t);
+                        };
+                        return await read(type);
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: #13474 — a later same-named body that reads must not INVENT a seam at a call it does not enclose',
+            code: `
+                class R {
+                    async outer(type: string) {
+                        const read = async (t: string) => {
+                            return this.memo.get(t);
+                        };
+                        try { return await read(type); }
+                        catch { return null; }
+                    }
+                    async elsewhere(type: string) {
+                        const read = async (t: string) => {
+                            return await this.driver.findOne('sys_metadata', { t });
+                        };
+                        return await read(type);
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // The live instance reduced: `protocol.ts` declares `lookup` three
+            // times as near-identical single-parameter async arrows, and the
+            // call inside `findDraft` is enclosed by the FIRST. The flat index
+            // answered with the third. Here the third is the one that does not
+            // read, so the wrong answer is visible in the verdict instead of
+            // being masked by all three bodies happening to read the same table
+            // — which is the only reason the live instance cost nothing.
+            name: 'flags: #13474 — three same-named bodies, resolved from inside the first (the live `lookup` shape)',
+            code: `
+                class P {
+                    async findDraft(type: string) {
+                        const lookup = async (t: string) => {
+                            return await this.engine.findOne('sys_metadata', { t });
+                        };
+                        try { return await lookup(type); }
+                        catch { return undefined; }
+                    }
+                    async findPublished(type: string) {
+                        const lookup = async (t: string) => {
+                            return await this.engine.findOne('sys_metadata', { t });
+                        };
+                        return await lookup(type);
+                    }
+                    async findOverlay(type: string) {
+                        const lookup = async (t: string) => {
+                            return this.memo.get(t);
+                        };
+                        return await lookup(type);
+                    }
+                }`,
+            expectViolation: true,
+            expectSeams: 1,
+        },
+        {
+            // The over-fixing pin. `fetch` is declared once, on a class the
+            // caller's ancestor chain never reaches, and it is still the only
+            // body that name can mean. A resolver that required a lexical hit
+            // would refuse this hop — and the live census is full of them.
+            name: 'flags: #13474 — a name declared ONCE still resolves from outside its scope (the fix must not narrow the census)',
+            code: `
+                class Store {
+                    async fetch(t: string) {
+                        return await this.driver.findOne('sys_metadata', { t });
+                    }
+                }
+                class R {
+                    async outer(store: Store, type: string) {
+                        try { return await store.fetch(type); }
+                        catch { return null; }
+                    }
+                }`,
             expectViolation: true,
             expectSeams: 1,
         },

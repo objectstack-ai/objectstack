@@ -39,12 +39,17 @@
  */
 
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
-// [#13279, ruled 2026-08-30] The one "was this READ failure just an
-// unprovisioned table?" predicate. It was `@objectstack/metadata`'s until this
-// resolver needed it; metadata depends on core, so the ruling relocated it to
-// `@objectstack/types` — which core already depends on — rather than let a
+// [#13279, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
+// failure just an unprovisioned table?" predicate. It was `@objectstack/metadata`'s
+// until this resolver needed it; metadata depends on core, so the ruling relocated
+// it to `@objectstack/types` — which core already depends on — rather than let a
 // second copy of a security-relevant classifier exist. See `tryFind`'s catch.
-import { isMissingTableError } from '@objectstack/types';
+//
+// [#13667] `resolveTenancyPosture` is the REQUESTED tenancy posture. It is read at
+// exactly one place below (§6b-config) to key the legacy-grant deprecation pointer
+// to the same walled postures the BOOT-side detector already keys on — the same
+// module, the same function, the same fail-stricter direction that detector reads.
+import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -787,8 +792,39 @@ export async function resolveUserAuthzGrants(
     // migration is loud, not breaking — with a once-per-process pointer at the
     // config line that re-anchors it. The row is read only if it was already
     // loaded, so this notice never adds a query (and so never moves the pinned
-    // query multiset for a deployment that declared nothing).
-    reportLegacyPlatformAdminGrant({ userId, email: userRow?.email });
+    // query multiset for a deployment that declared nothing). The posture read
+    // below keeps that property: it reads the environment, never the engine.
+    //
+    // [#13667] …and the pointer is POSTURE-KEYED, matching the BOOT-side
+    // detector (`plugin-security/src/bootstrap-platform-admin.ts` §2, which
+    // spells the same `postureEnforcesWall(resolveTenancyPosture())`). Under
+    // `single` — the DEFAULT posture — `bootstrapPlatformAdmin` MINTS this very
+    // row to promote the first human user, and Choice 4A rules that promotion,
+    // and its row, correct and UNCHANGED. Both halves of the notice are
+    // therefore false for such a rig: the row is not "removed in a later
+    // release", and re-anchoring through the config line gets the operator
+    // nothing, because the `single` promotion is pinned NEVER to consult that
+    // variable (`bootstrap-platform-admin-walled-owner.test.ts`, "never
+    // consults the owner-email variable"). That holds whichever way Choice 4B
+    // (#11979) is eventually ruled: under 4A the row is that rig's permanent
+    // anchor, and under 4B the advice only becomes true once 4B actually lands.
+    // So the migration window's loudness is scoped to the rigs actually in it —
+    // the walled ones, where the row really is the LEGACY anchor.
+    //
+    // ⛔ This gates the NOTICE and nothing else. Standing is derived by the
+    // `if (configConfersPlatformAdmin) / else if (hasPlatformAdminGrant)` chain
+    // this sits inside, and that chain is deliberately untouched — the
+    // condition is nested WITHIN the arm precisely so no arm of it can change
+    // shape. A `single` rig keeps exactly the PLATFORM_ADMIN it had; it simply
+    // stops being told to migrate off an anchor that is not going anywhere.
+    //
+    // The REQUESTED posture is the input, not the effective one — the same
+    // source and the same fail-stricter direction the boot side reads: a
+    // deployment that ASKED for a wall stays inside the migration window even
+    // while running degraded (`OS_ALLOW_DEGRADED_TENANCY=1`).
+    if (postureEnforcesWall(resolveTenancyPosture())) {
+      reportLegacyPlatformAdminGrant({ userId, email: userRow?.email });
+    }
   }
 
   // 6c. Project the derived platform_admin built-in role (leads the list).

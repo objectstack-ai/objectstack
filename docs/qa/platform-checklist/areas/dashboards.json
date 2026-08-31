@@ -1071,7 +1071,7 @@
         "knownGaps": [
           "THE POSITIVE DELIVERY LEGS ARE NOT LIVE-OBSERVABLE AT HEAD, BY THE PLATFORM'S OWN CHOICE: reports-plugin.ts constructs ReportService with resolveOwnerContext: undefined ('No owner-context resolver is wired yet — that is the reports-surface consumer of ADR-0073's user-less identity resolution (M2) — so until it lands, scheduled runs FAIL CLOSED'). Every scheduled dispatch on a real boot therefore takes the fail-closed arm — which makes THAT arm the live assertion, and the owner-scoped run / format fork / subject / advance-to-'ok' clauses scoreable only via the unit pin (report-service.test.ts injects a resolver). When ADR-0073 M2 wires the resolver, flip those clauses to live legs and revise this item",
           "NO DOOR DRIVES dispatchDue ON DEMAND: the dispatcher is an internal tick (job service or setInterval, min 5s, default 60s; no REST/CLI trigger) — the runner waits for a tick rather than firing one; verdicts on schedule-row state must re-read after the tick window (eventual-consistency)",
-          "MAIL ON A STOCK BOOT IS THE LOG TRANSPORT: plugin-email defaults to provider 'log' ('no transport configured — using LogTransport (mail will NOT be sent)'), so even with a resolver wired, delivery evidence would be the transport's log line, never a mailbox; the reports-plugin :103 'no email service' warn arm fires only on boots without the email capability — record which arm the boot log shows"
+          "MAIL ON A STOCK BOOT IS THE LOG TRANSPORT: plugin-email defaults to provider 'log' ('no transport configured — using LogTransport (mail will NOT be sent)'), so even with a resolver wired, delivery evidence would be the transport's log line, never a mailbox; the reports-plugin 'no email service' warn arm fires only on boots without the email capability — record which arm the boot log shows"
         ]
       },
       "steps": [
@@ -1117,7 +1117,7 @@
         {
           "clause": "absent email service degrades loudly, never silently: on a boot without the email capability the plugin warns at start ('no email service — schedules will fire without delivery') and each fired dispatch warns ('schedule fired but mail not sent') — and the run record notes that last_status 'ok' means DISPATCHED, not delivered: delivery truth is the transport line, the row's vocabulary never claims a mailbox",
           "oracle": "log",
-          "verify": "record which email arm the boot log shows (stock = LogTransport registered, so this clause's warn arm needs a no-email boot variant — record as not-exercised on stock rather than ticking it); the :103 and dispatch warn lines are the oracle when the arm is driven",
+          "verify": "record which email arm the boot log shows (stock = LogTransport registered, so this clause's warn arm needs a no-email boot variant — record as not-exercised on stock rather than ticking it); the and dispatch warn lines are the oracle when the arm is driven",
           "evidence": "boot-log excerpt naming the arm"
         }
       ],
@@ -1137,11 +1137,11 @@
         "ref": "packages/plugins/plugin-reports/src/report-service.test.ts — the dispatch describes: owner-scoped execution + fails-closed-without-resolver (#2980), csv attachment, subject template, cron/interval advance; the LIVE halves (dispatcher registration, the fail-closed row write on a real boot, the log arms) still need the run"
       },
       "source": [
-        "packages/plugins/plugin-reports/src/report-service.ts:698-800 (dispatchDue: due filter on next_run_at; owner fail-closed :728-744 with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename :758-783; renderSubject :191-194/:752-756; skipped arm :712-718), :812-828 (nextRunAt — cron wins, schedule timezone, warned fallback), :830-850 (advanceSchedule 'ok'/markSchedule), :588-637 (scheduleReport — first next_run_at, eager cron validation, recipients required)",
-        "packages/plugins/plugin-reports/src/reports-plugin.ts:97-104 (optional email + the :103 no-email warn), :125-138 (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), :141-174 (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
+        "packages/plugins/plugin-reports/src/report-service.ts (dispatchDue: due filter on next_run_at; owner fail-closed with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename; renderSubject; skipped arm), (nextRunAt — cron wins, schedule timezone, warned fallback), (advanceSchedule 'ok'/markSchedule), (scheduleReport — first next_run_at, eager cron validation, recipients required)",
+        "packages/plugins/plugin-reports/src/reports-plugin.ts (optional email + the no-email warn), (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
         "packages/plugins/plugin-reports/src/report-service.test.ts (the unit pins cited by clauses 3-5)",
         "packages/cli/src/commands/serve.ts (CAPABILITY_PROVIDERS.reports → @objectstack/plugin-reports — the dispatcher runs on stock boots)",
-        "packages/plugins/plugin-email/src/email-plugin.ts:379-381 (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
+        "packages/plugins/plugin-email/src/email-plugin.ts (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
         "docs/plans/release-15.1-test-plan.md §A10 (reports IDOR / 定时报表 RLS — #2980/#2981/#2975; the ownership half was imported as dashboards.saved-report-ownership, this item is the 定时报表-RLS dispatch leg that never was)",
         "cross-ref: dashboards.saved-report-ownership (the /reports* owner-isolation surfaces, including schedule routes #6683)"
       ],

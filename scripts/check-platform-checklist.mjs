@@ -62,7 +62,32 @@ import { maskComments } from './js-comment-mask.mjs';
 import { join, basename } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const AREAS_DIR = join(ROOT, 'docs/qa/platform-checklist/areas');
+const CHECKLIST_DIR = join(ROOT, 'docs/qa/platform-checklist');
+const AREAS_DIR = join(CHECKLIST_DIR, 'areas');
+
+/**
+ * Every authored `.json`/`.md` file in the checklist family, as paths relative
+ * to `CHECKLIST_DIR`. `runs/` is excluded: run records are outputs, written by
+ * a runner against whatever the ledger said at the time, and holding a past
+ * record to today's authoring rules would make the rule unfixable.
+ *
+ * @param {string} dir
+ * @param {string} [prefix]
+ * @returns {string[]}
+ */
+function familyFiles(dir, prefix = '') {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === 'runs') continue;
+      out.push(...familyFiles(join(dir, entry.name), rel));
+    } else if (entry.name.endsWith('.json') || entry.name.endsWith('.md')) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
 
 const STATUSES = new Set(['active', 'draft', 'retired']);
 const PRIORITIES = new Set(['P0', 'P1', 'P2']);
@@ -1114,18 +1139,100 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
   return { checked, failures };
 }
 
+// ── Source-line citations ───────────────────────────────────────────────────
+// An item's `source` (and the prose beside it) is the evidence pointer a later
+// runner uses to decide whether the item still describes reality. This ledger
+// used to pin those pointers at `file:line` — and a line number is the ONE part
+// of a citation that rots on an edit the citation has nothing to do with: two
+// TSDoc blocks widening in the cited file shift every symbol below them, and
+// every pinned line silently starts naming something else. Nothing here
+// resolved a citation, so the rot was exit-0 by construction: the pointer keeps
+// reading as "verified against source" while pointing somewhere else, which is
+// strictly worse than no pointer at all.
+//
+// The whole class was stripped: `file` plus the symbol name is the load-bearing
+// half and does not rot in place. This check keeps them from coming back. It is
+// deliberately NOT a symbol resolver (that is the follow-up) — it is the cheap
+// half, and the cheap half is the one that removes a false signal today.
+//
+// A citation is a colon-then-digits reached one of two ways, because the ledger
+// spelled it both ways: anchored to a source filename (`manifest.zod.ts:158`),
+// or BARE, continuing a filename named earlier in the same sentence
+// (`ManifestSchema id :140 and version :202`). The bare half is why a plain
+// "filename followed by a colon" rule is not enough — and the bare half is the
+// worse one, since it carries no file at all, only a number.
+//
+// The second branch is a negative lookbehind rather than a list of allowed
+// prefixes: it is what separates a citation from the neighbours that share the
+// colon-then-digit shape, all of which occur in this ledger and must stay
+// silent — HTTP status (`status:409`), config literals (`{maxRetries:3}`),
+// ports (`http://localhost:3000`), clock times (`08:00`, `...T00:00:00Z`) and
+// JSON quoted in prose (`{"scannedTypes":1}`). Each is pinned below.
+const SOURCE_LINE_CITATION =
+  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):\d+(?:-\d+)?/g;
+
+/**
+ * @param {string} text
+ * @returns {string[]} every line-number citation in `text`, with context
+ */
+function findSourceLineCitations(text) {
+  const hits = [];
+  for (const m of text.matchAll(SOURCE_LINE_CITATION)) {
+    const from = Math.max(0, m.index - 55);
+    hits.push(`${text.slice(from, m.index)}«${m[0]}»${text.slice(m.index + m[0].length, m.index + m[0].length + 20)}`.replace(/\s+/g, ' '));
+  }
+  return hits;
+}
+
+/**
+ * Both directions, because this detector's whole value is the boundary: it must
+ * fire on every spelling of a line citation the ledger actually used, and stay
+ * silent on the five colon-then-digit shapes that legitimately live beside them.
+ * A detector that over-fires would be silenced by the first author it blocked.
+ */
+function selfTestSourceLineCitations() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok) => {
+    checked++;
+    if (!ok) failures.push(what);
+  };
+  const n = (s) => findSourceLineCitations(s).length;
+
+  // FIRES — the spellings this ledger actually carried.
+  t('C1 a file-anchored citation is caught', n('packages/spec/src/kernel/manifest.zod.ts:158') === 1);
+  t('C2 a line RANGE is caught, as one hit not two', n('rest-server.ts:1276-1331') === 1);
+  t('C3 a bare continuation citation is caught', n('ManifestSchema id :140 and version :202') === 2);
+  t('C4 a parenthesised bare citation is caught', n('Ada Auditor holds ONLY auditor (:395)') === 1);
+  t('C5 an approximate `~:` citation is caught', n('computeAuthGate ~:5084-5160') === 1);
+  t('C6 a comma/slash-chained run is caught in full', n('storage-routes.ts:241-243,:255,:267') === 3);
+
+  // STAYS SILENT — the neighbours that share the colon-then-digit shape.
+  t('S1 an HTTP status in prose is not a citation', n("thrown {code:'DELETE_RESTRICTED', status:409}") === 0);
+  t('S2 a config literal is not a citation', n('retry {maxRetries:3, backoffMs:1000}') === 0);
+  t('S3 a URL port is not a citation', n('probe http://localhost:3000/_console/') === 0);
+  t('S4 a clock time is not a citation', n('daily 08:00 UTC; today() == 2026-08-31T00:00:00Z') === 0);
+  t('S5 JSON quoted in prose is not a citation', n('a 200 {"scannedTypes":1,"stats":{}}') === 0);
+  t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
+  t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
+
+  return { failures, checked };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
   const unref = selfTestUnreferencedRecipes();
   const metaCall = selfTestMetaCallSpelling();
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures];
+  const cites = selfTestSourceLineCitations();
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
-        ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold.',
+        ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
+        ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban.',
     );
     process.exit(0);
   }
@@ -1171,6 +1278,19 @@ const metaCallControl = selfTestMetaCallSpelling();
 if (metaCallControl.failures.length) {
   console.error("check-platform-checklist: the `/meta` call-spelling refusal's own positive control FAILED — an executable step instructing a folded plural spelling would pass unreported, which is the exact defect this check was added to close.\n");
   for (const f of metaCallControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+// And for the source-line-citation refusal. The control matters more here than
+// anywhere else in this file: the ledger is CLEAN of line citations now, so
+// this check's real output is permanently empty and its green says nothing on
+// its own. A detector that silently stopped matching would be indistinguishable
+// from the ledger staying clean — which is precisely the exit-0-by-construction
+// shape this check was added to end.
+const citationControl = selfTestSourceLineCitations();
+if (citationControl.failures.length) {
+  console.error('check-platform-checklist: the source-line-citation refusal\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
+  for (const f of citationControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
 
@@ -1512,6 +1632,22 @@ if (!existsSync(COVERAGE_FILE)) {
   }
 }
 
+// The source-line-citation sweep, over the whole family rather than the area
+// files alone: the same rot lives in README/RUNNER/SWEEP/FOLLOW-UPS prose, and
+// FOLLOW-UPS in particular carried more citations than most area files.
+let citationsScanned = 0;
+for (const rel of familyFiles(CHECKLIST_DIR)) {
+  const hits = findSourceLineCitations(readFileSync(join(CHECKLIST_DIR, rel), 'utf8'));
+  citationsScanned++;
+  for (const hit of hits) {
+    err(
+      rel,
+      null,
+      `SOURCE LINE CITATION — \`${hit}\`. Line numbers rot on the next unrelated edit to the cited file and nothing can tell a stale one from a fresh one, so the pointer keeps reading as "verified against source" while naming something else. Cite the FILE plus the SYMBOL instead (README.md → "Every call cites framework source as \`file\` plus the symbol it lands in").`,
+    );
+  }
+}
+
 if (errors.length) {
   console.error(`check-platform-checklist: ${errors.length} problem(s)\n`);
   for (const e of errors) console.error(`  ✗ ${e}`);
@@ -1531,5 +1667,6 @@ console.log(
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling assertions).`,
+    ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation assertions).`,
 );
