@@ -1526,10 +1526,12 @@ function contradictsDriverReadShape(node) {
  * The same question one level up: can this call be a call to THAT declaration?
  *
  * `contradictsDriverReadShape` asks it of `IDataDriver`. The wrapper hop in
- * `isReadCall` asked nothing at all. `functionBodies` is a flat, file-scoped
- * index keyed by BARE NAME, so any call whose `calleeName` happens to equal a
+ * `isReadCall` asked nothing at all. `functionBodies` WAS a flat, file-scoped
+ * index keyed by BARE NAME, so any call whose `calleeName` happened to equal a
  * function declared in the same file was followed into that function's body —
- * whatever it was called ON, and whatever it was passed.
+ * whatever it was called ON, and whatever it was passed. (That index is no
+ * longer flat: #13474 made it scope-aware. It did not close THIS question —
+ * see the last block of this docblock.)
  *
  * That is #11921's defect on the WRAPPER name instead of the vocabulary name,
  * and it runs the other way. A vocabulary false positive over-counts a seam
@@ -1586,6 +1588,21 @@ function contradictsDriverReadShape(node) {
  * This clause is not a list of receiver NAMES, and it does not require `this`:
  * it reads receiver DEPTH, admits every bare identifier, and is measured at
  * zero seams on the whole scan root.
+ *
+ * WHY #13474 DID NOT SUBSUME THIS, stated here because the paragraph at the
+ * top narrates an index shape the file no longer has. `indexFunctionBodies`
+ * now resolves a name through the CALL SITE's lexical scope chain, which
+ * settles a collision between same-named BODIES — a different collision from
+ * the one asked about here, which is across RECEIVERS. Its ONE DECLARATION
+ * ⇒ UNCHANGED rule keeps it that way on purpose: a name with exactly one body
+ * in the file is answered from any call site, so a unique name reached on a
+ * compound receiver is admitted there and refused only here.
+ * `indexFunctionBodies`' own docblock records the same from its side, and this
+ * is the near half of that pair. Re-measured on this tree after the resolver
+ * changed, with this predicate ablated: the two #12358 cases in the self-test
+ * report 1 seam each instead of 0, and `--list` over the scan root is
+ * byte-identical either way — the zero-seam cost stated just above, still
+ * zero.
  */
 function contradictsWrapperResolution(node, body) {
     const expr = node.expression;

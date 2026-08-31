@@ -100,7 +100,7 @@ declaration to shadow a built-in one. Match → policy chain (`rateLimit` → `a
 | `type` | Delegates to | Request shape |
 |:---|:---|:---|
 | `object_operation` | the same `callData` binding that serves `/api/v1/data/{object}` | `find` reads its criteria from the query string; `get` / `update` / `delete` take the record id from `query.id`; `create` / `update` take the body. `create` answers `201`, the rest `200` |
-| `flow` | the same automation pipeline as `POST /api/v1/automation/{name}/trigger` | the request body is the flow input. A refused or failed run answers a real status: `404` unknown flow, `409` `FLOW_DISABLED`, `422` `FLOW_NO_START_NODE`, `400` `FLOW_FAILED` |
+| `flow` | the same automation pipeline as `POST /api/v1/automation/{name}/trigger` | the request body is the flow input. A refused or failed run answers a real status: `404` unknown flow, `409` `FLOW_DISABLED`, `422` `FLOW_NO_START_NODE`, `422` `FLOW_INPUT_SCHEMA_INVALID`, `400` `FLOW_FAILED` |
 
 The frozen vocabulary has **no path-template syntax**, so an endpoint cannot express
 `/leads/{id}` — a record id travels as `?id=…`. A method that no declaration claims

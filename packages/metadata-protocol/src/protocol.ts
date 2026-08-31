@@ -17815,6 +17815,28 @@ export class ObjectStackProtocolImplementation implements
         );
 
         const reassigned: Array<{ type: string; name: string }> = [];
+        // [#12981] The refusal channel this loop used to lack entirely.
+        //
+        // The catch below is the card's defining shape, and this method is the
+        // sharpest instance of it in the file: a refused `update` was dropped
+        // whole -- not logged, not rethrown, not carried on the response -- and
+        // the return then reported `success: reassigned.length > 0`. So an
+        // adoption where 99 of 100 orphans were refused answered
+        // `{success: true, reassignedCount: 1}`, byte-identical in shape to a
+        // healthy run with one orphan to move, and the 99 stayed orphans with
+        // nothing anywhere recording that they had been tried. Nothing retries
+        // them and no later boot reconstructs the attempt.
+        //
+        // A COUNTER plus one report AFTER the loop, deliberately, and not a
+        // `console.error` inside the catch: AGENTS.md -> "Degradation log
+        // levels" says an operator-facing degradation is stated ONCE, at the
+        // first occurrence, not once per failed write -- and a refused
+        // `sys_metadata` write is refused for every row, so the per-row
+        // spelling would print one line per orphan in the environment. This is
+        // the same shape #12923's shared refusal accumulator takes at the other
+        // repaired seams of this family.
+        let refusedCount = 0;
+        let firstRefusal = '';
         for (const row of orphans) {
             try {
                 await this.engine.update(
@@ -17823,9 +17845,36 @@ export class ObjectStackProtocolImplementation implements
                     { where: { id: row.id } },
                 );
                 reassigned.push({ type: row.type, name: row.name });
-            } catch {
-                /* skip a row that fails to update; report only what moved */
+            } catch (e: any) {
+                // Control flow is UNCHANGED: a row that cannot be rebound must
+                // not abort the adoption of the rows that can. Only the
+                // silence changes.
+                refusedCount += 1;
+                if (firstRefusal === '') firstRefusal = e?.message ?? String(e);
             }
+        }
+        if (refusedCount > 0) {
+            // `error` and not `warn`, by the one question AGENTS.md turns this
+            // on -- after the degradation the system still looks normal from
+            // the outside while something it claims to have persisted did not
+            // land. It is the same verdict, on the same sink, that
+            // `recordPackageCommit` in this file already reaches for the
+            // `sys_metadata_commit` write, and the inverse of the one
+            // `clientFacingRowFailureText` records for its `console.warn`
+            // (there the row reports `success: false` and the counters
+            // reconcile, so nothing was silently dropped; here neither holds).
+            console.error(
+                `[Protocol] reassignOrphanedMetadata: ${refusedCount} of ${orphans.length} orphaned `
+                + `metadata row(s) were NOT rebound to package '${request.targetPackageId}' -- the `
+                + `update was REFUSED. The call still answers reassignedCount=${reassigned.length}`
+                + `${reassigned.length > 0 ? ' with success: true' : ''}, so nothing looks broken, but `
+                + 'those rows are STILL orphans: they keep `package_id` null or the `sys_metadata` '
+                + 'sentinel, this environment has NOT converged on the package-first model (ADR-0070 '
+                + 'D5 completes when an environment has no orphans), and nothing retries them. '
+                + `First refusal: ${firstRefusal}. Fix: restore write access to \`sys_metadata\` for `
+                + 'the system context and run the adoption again -- it is idempotent, rows already '
+                + 'bound to a real package are left untouched.',
+            );
         }
         return {
             success: reassigned.length > 0,

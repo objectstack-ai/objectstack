@@ -373,7 +373,7 @@ The **HttpDispatcher** is the central request router in ObjectStack.
 
 ### Dispatcher Error Codes
 
-| HTTP Status | Error Type | When |
+| HTTP Status | Error Code | When |
 |:------------|:-----------|:-----|
 | 404 | `ROUTE_NOT_FOUND` | No route matches the path |
 | 405 | `METHOD_NOT_ALLOWED` | Route exists but method not supported |
@@ -390,9 +390,9 @@ Every endpoint has a handler status:
 | `stub` | Handler exists but returns mock data |
 | `planned` | Handler is defined in the spec but not yet coded |
 
-> **Best practice:** Always set `handlerStatus` explicitly. The dispatcher
-> returns `501 NOT_IMPLEMENTED` for `stub` and `planned` handlers, giving
-> clear feedback to API consumers.
+> **Best practice:** `handlerStatus` is DOCUMENTATION — nothing reads it at
+> runtime. The dispatcher's `501 NOT_IMPLEMENTED` comes from the endpoint
+> executor, never from this field.
 
 ---
 
@@ -406,9 +406,9 @@ Realtime contracts are pointer-style — read the spec source for exact shapes:
   `RealtimeConfigSchema`. Note: the `RealtimeEventType` enum is declared but
   not yet enforced — the runtime emits `data.record.*` event names instead.
 - `node_modules/@objectstack/spec/src/api/websocket.zod.ts` — the WebSocket
-  message protocol: subscribe/unsubscribe messages, event delivery with
-  filters, presence, cursor and collaborative-edit messages, and
-  ack/error/ping/pong frames.
+  message protocol: subscribe/unsubscribe messages, event delivery
+  (`filters` not enforced), presence, cursor and collaborative-edit
+  messages, and ack/error/ping/pong frames.
 
 ---
 
@@ -502,12 +502,11 @@ Registered driver ids in the datasource driver catalog:
 |:-------|:---------|
 | `postgres` | Primary production database |
 | `mysql` | Legacy systems, WordPress integration |
-| `mongo` | Document store (MongoDB) |
+| `mongodb` | Document store (`mongo` is a legacy alias) |
 | `sqlite` | Local development, embedded apps |
+| `sqlite-wasm` | Browser / edge SQLite (WASM) |
+| `turso` | Edge SQLite (`@objectstack/driver-turso`) |
 | `memory` | Unit tests, development |
-
-Edge SQLite (Turso/libSQL) is available via the separate
-`@objectstack/driver-turso` package (driver name `turso`).
 
 ---
 
@@ -518,7 +517,7 @@ Edge SQLite (Turso/libSQL) is available via the separate
 ObjectStack uses typed service contracts defined in `@objectstack/spec/contracts`.
 The data contract is `IDataEngine` (`find(objectName, query?: EngineQueryOptions)`,
 `findOne`, `insert`, `update`, `delete`, `count`, `aggregate`, plus optional
-`vectorFind`/`batch`/`execute`) — there is no `DataService` contract.
+`vectorFind`/`execute`) — there is no `DataService` contract, and no `batch`.
 
 ### Kernel Service Resolution
 
@@ -548,19 +547,18 @@ async function firstTenAccounts() {
    for business logic that cannot be expressed through CRUD + triggers.
 3. **Return consistent error shapes.** The dispatcher envelope is
    `DispatcherErrorResponseSchema`: `{ success: false, error: { code, message,
-   type?, route?, service?, hint? } }`, where `code` is the **numeric** HTTP
-   status and `code`/`message` are required. General API errors use
+   httpStatus?, route?, service?, hint? } }`, where `code` is the **semantic**
+   string and `code`/`message` are required. General API errors use
    `ErrorResponseSchema` (`errors.zod.ts`). Be aware the shipped data routes
    return flat `{ error, code }` bodies instead (e.g. `CONCURRENT_UPDATE` →
    409, `VALIDATION_FAILED` → 400) — do not assume every error arrives in the
    `success: false` envelope.
 4. **Document every endpoint** with `description` and response schemas.
-5. **Set `handlerStatus`** to communicate implementation progress to consumers.
-6. **Apply least-privilege auth.** Every endpoint should declare its required
+5. **Apply least-privilege auth.** Every endpoint should declare its required
    permissions explicitly.
-7. **Design idempotent writes deliberately.** `upsert` exists as an
-   `apiMethods` enum value, but `@objectstack/rest` generates no upsert route
-   today. External integrations should query by a unique external ID and then
+6. **Design idempotent writes deliberately.** `upsert` is DERIVED (`create` ∧
+   `update`), not an `apiMethods` value, and `@objectstack/rest` generates no
+   upsert route today. External integrations query by a unique external ID and
    branch to create or update (the per-object
    `POST /api/v1/data/{object}/batch` endpoint can group those writes).
 

@@ -448,6 +448,7 @@
     "ui/FormSection:visibleOn",
     "ui/FormSection:visibleWhen",
     "ui/FormSelectOption:color",
+    "ui/FormSelectOption:description",
     "ui/FormSelectOption:label",
     "ui/FormSelectOption:value",
     "ui/FormSelectOption:visibleWhen",

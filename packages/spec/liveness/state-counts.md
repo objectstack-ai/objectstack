@@ -28,7 +28,7 @@ for both corollaries.
 | Type | live | exp | dead | planned | classified |
 |---|---|---|---|---|---|
 | `object` | 51 | 0 | 0 | 1 | 52 |
-| `field` | 88 | 0 | 1 | 2 | 91 |
+| `field` | 89 | 0 | 1 | 2 | 92 |
 | `flow` | 34 | 0 | 6 | 0 | 40 |
 | `action` | 41 | 0 | 3 | 2 | 46 |
 | `hook` | 18 | 0 | 2 | 0 | 20 |
@@ -58,4 +58,4 @@ for both corollaries.
 | `capability` | 12 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 5 | 0 | 9 |
 | `manifest` | 22 | 0 | 16 | 0 | 38 |
-| **total** | **820** | **5** | **75** | **10** | **910** |
+| **total** | **821** | **5** | **75** | **10** | **911** |

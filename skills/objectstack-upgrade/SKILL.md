@@ -105,15 +105,15 @@ Everything below is the long form of those four steps.
 `--from` is the protocol major the metadata was **authored** against, not the
 one installed. Three sources, in order of authority:
 
-1. **`manifest.protocol`** in the stack config (`'16.0.0'` → `--from 16`). This
-   is the declared answer and the kernel checks it at load time.
+1. **`manifest.engines.protocol`** in the stack config (`'16.0.0'` → `--from
+   16`). The declared answer, checked by the boot handshake.
 2. **The last `@objectstack/spec` major the project ever installed** — read the
    lockfile history (`git log -p pnpm-lock.yaml | grep -m5 '@objectstack/spec'`)
    when the manifest is absent or stale.
 3. **Ask.** A manifest that says 16 on a project last touched two years ago is a
-   claim, not a measurement. If (1) and (2) disagree, the lower one is the safe
-   `--from` — the chain is idempotent, so replaying a hop that has already been
-   applied is a no-op, while skipping a hop loses its rewrites.
+   claim, not a measurement. If (1) and (2) disagree, settle it — ⛔ never
+   default to the lower one: a default flip ([3.3](#33-validate)) stamps its
+   constraint onto a source already past that major.
 
 Arriving several majors late is the designed-for case. `os migrate meta --from 10`
 replays every step in order; there is no penalty for lateness and no requirement
@@ -296,24 +296,21 @@ The shape in a protocol-16 project:
 
 The chain deletes the key (`field-mapping-transform-removed`) and the schema
 tombstones it, so the parse error *is* the prescription: the union had five
-members and **no runtime ever executed any of them**, so nothing is lost by
-deleting the key — but the customer wrote it because they wanted a
-transformation, and that need is real even though the key never served it.
+members and **no runtime ever executed any of them**. The customer wrote it
+because they wanted a transformation, and that need is real regardless.
 
-The prescription names two live targets, and choosing between them is the
-business decision:
+The prescription names one live target; the rest is the business decision:
 
 | If the intent was… | The v17 home is… |
 |:--|:--|
-| per-row value shaping on an import | **Import mapping** `mapping.fieldMapping[].transform` — a flat string enum (`none`/`constant`/`map`/`split`/`join`/`lookup`) with settings in `params`, executed row by row by the REST import path. |
-| multi-source, multi-stage transformation | an **ETL transformation step**. |
+| per-row value shaping on an import | **Import mapping** `mapping.fieldMapping[].transform` — a string enum, settings in `params`; the REST import path runs `none`/`constant`/`map`/`split`/`join`, passes `lookup` to reference resolution, rejects `javascript` (400). |
+| multi-source, multi-stage transformation | **nothing** — the L2 ETL layer retired at 17, unexecuted. Do it where it runs: warehouse ELT, a `flow`, a job. |
 | nothing — the value was already correct | delete the key and record that the transformation never ran. |
 
-That third row is not a joke and it is frequently the truth: the member never
-executed, so the connector has been landing raw values for as long as it has
-been running. Whether the downstream data is therefore wrong is a question only
-the owner can answer, and it is exactly the kind of finding the report exists to
-surface.
+That third row is frequently the truth: the member never executed, so the
+connector has been landing raw values for as long as it has been running.
+Whether the downstream data is wrong is a question only the owner can answer —
+exactly the kind of finding the report exists to surface.
 
 <a id="decide-alone-or-ask"></a>
 
@@ -533,7 +530,7 @@ you must say which you expect:
      invalid_type: `FieldMapping.transform` … was removed in @objectstack/spec
      17.0.0 (ADR-0049) … Delete the key. The transform pipeline that IS
      enforced is the import mapping's … Run `os migrate meta --from 16` to
-     rewrite it automatically.
+     list the mechanical edits for existing sources; apply them by hand.
      expected: never
    ```
 

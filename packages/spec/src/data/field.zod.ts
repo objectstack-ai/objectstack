@@ -139,6 +139,35 @@ export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
 ] as const satisfies readonly FieldType[]);
 
 /**
+ * Field types whose value is edited in a MULTILINE text editor whose inline
+ * (non-fullscreen) surface is sized by the HTML `rows` attribute — the set on
+ * which an authored `rows` height hint reaches a real reader (objectui#6140,
+ * maintainer ruling 2026-08-25, Option A).
+ *
+ * Measured from the consuming widgets, the #11566 method (the list with a
+ * measured reader is the one promoted to the protocol): objectui's
+ * `TextAreaField` reads the key for `textarea` (`textareaField?.rows || 4`),
+ * and `RichTextField` — the one widget registered for the `markdown`, `html`
+ * and `richtext` keys (objectui#5498) — reads it for the other three
+ * (`richField?.rows || 8`, passed to the inline editor surface; the
+ * fullscreen/dialog surface sizes itself and ignores it). The RULED pair is
+ * `markdown`/`html` — the two objectui metadata types that lacked the
+ * declaration, while `TextareaFieldMetadata` already declared `rows` and is
+ * the precedent the ruling cites. `textarea`/`richtext` are members because
+ * the same measured read serves them and this schema refuses the key on
+ * EVERY type today — declaring the ruled pair while still refusing the
+ * precedent type's own declared key would manufacture a fresh
+ * declared-vs-enforced split on the type the ruling aligns to.
+ *
+ * Deliberately NOT here: `code` (its editor has no `rows` read — the only
+ * `rows` occurrences in objectui's field widgets are the two quoted above),
+ * and every single-line string type.
+ */
+const MULTILINE_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'textarea', 'markdown', 'html', 'richtext',
+] as const satisfies readonly FieldType[]);
+
+/**
  * Field types whose stored value the RUNTIME owns outright — issued by the
  * engine (or the driver's persistent sequence), never supplied by a caller on
  * either write path. Today exactly `autonumber` (#5503).
@@ -227,6 +256,23 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
 }, {
   label: z.string().describe('Display label (human-readable, any case allowed)'),
   value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)'),
+  /**
+   * Optional secondary text for the option (objectui#6153, inheriting the
+   * objectui#6140 ruling frame — maintainer 2026-08-25: a key that is
+   * genuinely consumed gets declared). Consumed-but-undeclared until now:
+   * objectui's `LookupField` takes a lookup's authored static `options` as its
+   * own open local type and SEARCHES this key (`opt.description &&
+   * opt.description.toLowerCase().includes(q)`), and its `recordToOption`
+   * produces the same key for fetched options — while this strict shape
+   * refused it at publish, so the search behaviour was real for a key no
+   * author could legally write. The object-definition authoring form
+   * (`object.form.ts` options repeater) has offered a `description` input all
+   * along; this declaration is what makes that offer honest. Per the same
+   * inherited ruling, `dependsOn` is NOT declared here — the canonical
+   * spelling `depends_on` already exists at the field level, and a camelCase
+   * twin would be a second spelling for a declared concept.
+   */
+  description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.'),
   color: z.string().optional().describe('Color code for badges/charts'),
   default: z.boolean().optional().describe('Is default option'),
   /**
@@ -910,7 +956,24 @@ export const FieldSchema = lazySchema(() => {
   // metadata author mass-produces — and is refused loudly at authoring instead
   // of parsing cleanly and asserting nothing.
   minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
-  
+
+  // objectui#6140 (maintainer ruling 2026-08-25, Option A — verbatim:
+  // 「就全部接受，然后继续下一批」): `rows` was consumed-but-undeclared.
+  // objectui's `RichTextField` has always read it (`richField?.rows || 8`,
+  // behind the `markdown`/`html`/`richtext` registry keys — reached through an
+  // `as any` on the metadata carrier) and `TextAreaField` likewise
+  // (`textareaField?.rows || 4`), while this strict shape refused the key at
+  // publish — the capability worked in the running app and failed for exactly
+  // the author who wrote it legally. Declared here for precisely the measured
+  // consumption set (MULTILINE_EDITOR_FIELD_TYPES; the superRefine below is
+  // the #11566 template). The value shape follows the house count discipline
+  // (#8321 / #11566: a row count of 0, -5 or 2.5 has no defined meaning;
+  // objectui's `TextareaFieldMetadata` spells `rows?: number` only because a
+  // TS interface cannot say more). The ruling's capability expansion STOPS at
+  // `rows` — the four inert rich-text editor keys (`toolbar` / `preview` /
+  // `minHeight` / `maxHeight`) stay undeclared.
+  rows: z.number().int().min(1).optional().describe('Height of the INLINE multiline editor, in text rows (positive integer — the HTML textarea `rows` attribute; fullscreen/dialog editor surfaces size themselves and ignore it). Only authorable on multiline editor types: textarea, markdown, html, richtext. Omit it for the widget default height.'),
+
   /** Number Constraints */
   // #8321 — `precision`/`scale` are digit COUNTS, so a non-integer or negative
   // declaration has no defined meaning. #7501 made `scale` enforced at write
@@ -1722,6 +1785,29 @@ export const FieldSchema = lazySchema(() => {
         'character length for the bound to constrain, so the declaration would parse and ' +
         'enforce nothing (the write-time validator applies `minLength` to exactly those ' +
         'types). Drop the key, or use a bounded string type.',
+    });
+  }
+
+  // objectui#6140 (maintainer ruling 2026-08-25, Option A): `rows` is only
+  // authorable on the multiline editor types whose widget actually reads it
+  // (MULTILINE_EDITOR_FIELD_TYPES — see its docblock for the measured
+  // consumption set). On any other type the declaration would parse and do
+  // nothing — the declared-but-inert shape ADR-0078 keeps out — so it is
+  // refused at the authoring seam, where the fix is one keystroke away.
+  // `rows` has no schema default, so `undefined` here always means "not
+  // authored" — a field without the key can never fire this. The message
+  // enumerates the set ITSELF rather than a prose copy of it (#12017
+  // two-copies failure shape).
+  if (field.rows !== undefined && !MULTILINE_EDITOR_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['rows'],
+      message:
+        `\`rows\` is only valid on multiline editor field types — ` +
+        `${[...MULTILINE_EDITOR_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its widget renders no rows-sized ` +
+        'editor surface, so the declaration would parse and change nothing. ' +
+        'Drop the key, or use a multiline editor type.',
     });
   }
 
