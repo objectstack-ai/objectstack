@@ -13740,10 +13740,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * running its own `--self-test` fired all of THIS file's assertions inside it,
  * printing a second summary line and putting an unrelated file's failures on
  * the importer's exit code. That is the same defect PR #9897 fixed in
- * `check-governed-merges.mjs` at 77 assertions; this file carries it at 334. A
- * self-test is a mode of the file being RUN, never a side effect of importing
- * it, and a shared module that exits on import is a shared module nobody can
- * share.
+ * `check-governed-merges.mjs`, which carried 77 assertions at that PR; this
+ * file carries it at more than ten times that many. That multiple is a FLOOR,
+ * and it is written as one on purpose. The live figure is whatever
+ * `--self-test` prints from `cases.length`; it moves on most edits to this
+ * file, and over this file's history it has never once gone down — so a floor
+ * stays true where a reading rots. A reading stood here before and had drifted
+ * by more than a factor of three before anyone repaired it, so do not
+ * "helpfully" refresh this back into one. A self-test is a mode of the file
+ * being RUN, never a side effect of importing it, and a shared module that
+ * exits on import is a shared module nobody can share.
  *
  * The guard is ONE site wrapping the whole chain, not a condition repeated per
  * branch: a branch added inside it later cannot forget to carry it.
