@@ -119,6 +119,36 @@
  * of zero files, a declared-count pattern that matches nothing, an UNENFORCED row
  * that vanished or lost its date, and a ledger row that locates nothing are all
  * exit 1 naming what could not be read.
+ *
+ * ## ⭐ Wiring, and why the self-test asserts it (#13646)
+ *
+ * This gate IS the "regenerate and diff" instrument for the page: it re-derives the
+ * census from the tree and reddens when the committed anchors disagree. That makes
+ * it the only thing standing between the page and the failure mode that has no
+ * other signal -- an anchor going stale because the file it CITES moved, in a merge
+ * that produced no conflict at all.
+ *
+ * Measured on `cc837dbfec` by shifting `plugin-sharing/src/sharing-service.ts` down
+ * 29 lines (main's real delta in the #13625 window) with the page untouched, which
+ * is the branch-never-touched-that-file case git merges clean and silent:
+ *
+ *   gate on the shifted tree   exit 1, 16 findings, naming every one of the five
+ *                              sharing-service anchors and the ledger row
+ *   `--fix` then the gate      109 sites re-anchored, exit 0
+ *
+ * So the anchors are recoverable and the loss is loud -- PROVIDED the gate is
+ * scheduled. Nothing asserted that it was. `check-self-test-wired` is conditional
+ * in the wrong direction here: it requires that a script CI runs also has its
+ * `--self-test` run, so deleting BOTH invocations from `lint.yml` retires this gate
+ * with every check still green. The self-test therefore reads the workflow text and
+ * asserts both legs, the way `check-doc-frontmatter`, `check-aggregator-roster` and
+ * `check-ci-filter-parity` each assert their own -- a gate that exists and is not
+ * scheduled is the dormant shape seen from the other side.
+ *
+ * ⚠️ The pin deliberately needs NO workflow edit: `lint.yml` already invokes both
+ * legs, in the required `Lint & Repo Gates` job, on a trigger set that includes
+ * `merge_group` and with no `paths:` filter. It is the repo's busiest file and the
+ * assertion reads it rather than adding to it.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -1500,6 +1530,36 @@ function selfTest() {
       refusalText.includes('anchor, NO target'),
     refusalText
   );
+
+  // ── WIRING: this gate, and its self-test, really run in CI ──────────────────
+  //
+  // ⭐ The half a clean tree cannot show, and the reason this block exists. Every
+  // other case above judges the RULES; this one judges whether anything runs them.
+  // `check-self-test-wired` is conditional in the wrong direction for that -- it
+  // requires "if CI runs the script, CI runs its --self-test too", so deleting BOTH
+  // lines from `lint.yml` leaves it green and silently retires the only instrument
+  // that catches a stale anchor. Measured: the census is what reddens when a cited
+  // file moves underneath a page nobody edited, so its scheduling is load-bearing,
+  // not incidental.
+  //
+  // Asserted against the workflow TEXT, following the precedent `check-doc-frontmatter`,
+  // `check-aggregator-roster` and `check-ci-filter-parity` set -- and, like the second
+  // docs root that gate added, this needed NO workflow edit: `lint.yml` already invokes
+  // both legs, and it is the repo's busiest file.
+  const SELF = 'scripts/check-system-context-census.mjs';
+  let lintYml = null;
+  try {
+    lintYml = readFileSync(join(ROOT, '.github/workflows/lint.yml'), 'utf8');
+  } catch (err) {
+    t(`WIRING: .github/workflows/lint.yml is readable`, false, err.code ?? err.message);
+  }
+  if (lintYml !== null) {
+    t(
+      'WIRING: lint.yml invokes this gate directly (the GATE INVOCATION IDIOM, not a package.json fence)',
+      lintYml.includes(`node ${SELF}\n`)
+    );
+    t('WIRING: lint.yml runs the --self-test leg too', lintYml.includes(`node ${SELF} --self-test`));
+  }
 
   process.stdout.write(
     failures === 0

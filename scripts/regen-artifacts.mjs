@@ -179,6 +179,45 @@ export const REGEN_ARTIFACTS = Object.freeze([
     gen: 'gen:liveness-counts',
     check: 'check:liveness',
   },
+  // #13646. The elevation census page — a generated `file:line` anchor table, and
+  // the first row here owned by ROOT tooling rather than by `packages/spec` (the
+  // owner field #13585 added exists for exactly this).
+  //
+  // ⚠️ The row is the FILE, not `content/docs/permissions/**`, and the difference
+  // is safety rather than tidiness. Its routed sibling `content/docs/references/**`
+  // is a whole generated tree; `content/docs/permissions/` is 22 hand-written prose
+  // pages with ONE generated page among them, so the directory glob would hand 21
+  // prose files to a driver that resolves to OURS — laundering away a sibling's
+  // prose edit, which is the exact trade `migrations/registry.ts` is kept out of
+  // this table for. The glob is recorded in NOT_DRIVER_MANAGED below.
+  //
+  // Why it belongs here at all: two PRs that each ran `--fix` against their own
+  // tree write correct-for-themselves line numbers into the same rows, and the
+  // merged tree's correct values equal NEITHER side — measured on #13625's merge,
+  // where the five conflicted anchors resolved to `4408/5771/6019/6382/6575`
+  // against branch `4407/5770/…` and main `4284/5647/…`. A text merge cannot reach
+  // that answer from either input, so this is a deferral-and-regenerate shape.
+  //
+  // ⭐ And the deferral is safe in the direction that matters, which is the
+  // question `os-regen-merge.sh` raises about every path here — a driver that
+  // exits 0 trades a loud failure for a silent one unless something else still
+  // reddens. Here something does, on every PR: `check-system-context-census.mjs`
+  // runs in the required `Lint & Repo Gates` job with no `paths:` filter and on
+  // `merge_group`, it re-derives the census from the tree rather than reading the
+  // page back, and its scheduling is pinned by its own `--self-test` (#13646). The
+  // driver is therefore the cheap half here and never the only signal.
+  //
+  // No `readsDist`/`readsSchemaTree`: the census is an AST walk over `src/`, so a
+  // merged tree is the whole prerequisite. `gen` cannot launder a POPULATION change
+  // either — `--fix` re-anchors a pure shift and REFUSES when a site arrived or
+  // vanished, leaving the page untouched and the gate red (measured: exit 1, zero
+  // anchors rewritten, `[declared-count] ruling-sites says 109, the census says 110`).
+  {
+    path: 'content/docs/permissions/system-context.mdx',
+    gen: 'gen:system-context-census',
+    check: 'check:system-context-census',
+    owner: ROOT_OWNER,
+  },
 ]);
 
 /**
@@ -237,6 +276,17 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'split per-entry alongside the migrations registry by #7297: the #6957 ruling names two append '
       + 'registries and the other one is `scripts/adr-anchors.json` (#7301). Splitting this one too is '
       + 'a follow-up with its own measurement, not a rider.',
+  },
+  {
+    path: 'content/docs/permissions/**',
+    why:
+      'the DIRECTORY is not what #13646 routed, and recording that is the point of this ledger. '
+      + '22 of its 23 pages are hand-written permissions prose; exactly one — `system-context.mdx`, '
+      + 'declared above — is a generated anchor table. Routing the tree the way its sibling '
+      + '`content/docs/references/**` is routed reads as symmetry and is not: that sibling is '
+      + 'generated whole, this one would defer 21 prose files to OURS and lose the other side\'s '
+      + 'edits silently. Route the generated FILE; leave the neighbours to text-merge, which is '
+      + 'correct for prose and always was.',
   },
   {
     path: 'docs/audits/**',
