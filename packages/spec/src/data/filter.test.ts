@@ -215,12 +215,39 @@ describe('SetOperatorSchema', () => {
     });
 
     it('leaves every other member shape open — the list is field-AGNOSTIC', () => {
-      // The check removes ONE shape. A plain object member is still a legal
-      // membership value (a JSON column stores documents), and narrowing the
-      // member type would refuse working filters this schema cannot judge.
-      expect(SetOperatorSchema.safeParse({ $in: [{ nested: 1 }, null, 3, new Date()] }).success)
+      // The checks remove TWO shapes — `{ $field }` (#7596) and, since the
+      // 2026-08-31 ruling (#13357), `null` — and nothing else. A plain object
+      // member is still a legal membership value (a JSON column stores
+      // documents), and narrowing the member TYPE would refuse working filters
+      // this schema cannot judge. `null` sat in this openness fixture until
+      // that ruling carved it out; its refusal is pinned by name below.
+      expect(SetOperatorSchema.safeParse({ $in: [{ nested: 1 }, 3, new Date()] }).success)
         .toBe(true);
       expect(SetOperatorSchema.safeParse({ $in: [] }).success).toBe(true);
+    });
+
+    it('refuses a null member of $in / $nin — ruled 2026-08-31 (#13357)', () => {
+      for (const op of ['$in', '$nin'] as const) {
+        const result = SetOperatorSchema.safeParse({ [op]: ['won', null] });
+        expect(result.success, op).toBe(false);
+        const issue = result.error?.issues[0];
+        expect(issue?.path).toEqual([op, 1]);
+        expect(issue?.message).toContain(`${op} member at index 1`);
+        // The prescription is the ruling's own explicit spelling — both
+        // halves, so the `$nin` author finds the has-a-value direction too.
+        expect(issue?.message).toContain('{"$or": [{"$in": […]}, {"$null": true}]}');
+        expect(issue?.message).toContain('{"$null": false}');
+      }
+    });
+
+    it('refuses a null $between endpoint with the pointed message, not zod\'s generic union text', () => {
+      // `null` never passed the endpoint union (it is none of number | Date |
+      // string) — the ruling adds the POINTED message for it (#13495's shape).
+      const result = RangeOperatorSchema.safeParse({ $between: [null, '2026-01-01'] });
+      expect(result.success).toBe(false);
+      const messages = (result.error?.issues ?? []).map((i) => i.message).join('\n');
+      expect(messages).toContain('$between endpoint at index 0');
+      expect(messages).toContain('{"$null": true}');
     });
 
     it('is matched by the enforced copy — FieldOperatorsSchema', () => {

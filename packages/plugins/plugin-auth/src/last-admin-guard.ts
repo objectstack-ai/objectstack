@@ -35,7 +35,13 @@
  *     else, or (ADR-0049, since `active` became a resolution-time predicate)
  *     switch it off, and every grant, every `sys_user` row and every
  *     `sys_member` row survives untouched while nobody is a platform admin any
- *     more — one write, the whole platform-admin population. Unlike (3) this one
+ *     more — one write, the whole GRANT-anchored platform-admin population.
+ *     ([#11973] Since the #11663 re-anchor that is no longer the whole
+ *     population: a CONFIG-anchored administrator — shape (5)'s subject —
+ *     survives every write to this table, so where one stands these three
+ *     refusals are priced away by the enumeration itself and the write is
+ *     permitted; they still hold wherever the row remains the load-bearing
+ *     anchor. See the re-pricing note in `resolveAdminUserIds`.) Unlike (3) this one
  *     is not driven by an IdP at all: it is written by a metadata delete, an
  *     `os meta` run, a package uninstall — or, for the deactivation spelling, by
  *     one click on a Setup row action that carries no visibility or condition
@@ -108,14 +114,21 @@
  * guard is unchanged and still counts both, so the definition stands on its own
  * here, enumerated in the opposite direction:
  *
- *  1. **platform admin** — an UNSCOPED (`organization_id = null`), in-window
- *     (ADR-0091) `sys_user_permission_set` grant of `admin_full_access`. This
- *     is the same evidence `resolveAuthzContext` derives `platform_admin` from
+ *  1. **platform admin, grant-anchored** — an UNSCOPED
+ *     (`organization_id = null`), in-window (ADR-0091)
+ *     `sys_user_permission_set` grant of `admin_full_access`. This is the same
+ *     evidence `resolveAuthzContext` derives `platform_admin` from
  *     (ADR-0068 D2 / ADR-0095 D3) — never a stored `sys_user.role` string.
  *  2. **organization owner / admin** — a `sys_member` row whose role carries
  *     the `owner` or `admin` grade (ADR-0108's closed vocabulary). Grade, not
  *     capability: it is read here only as "who administers this org", which is
  *     the standing ADR-0057 D4 leaves on that column.
+ *  3. **platform admin, config-anchored** (#11663 L2) — a `sys_user` row whose
+ *     own verified `email` is on the deployment's declared
+ *     `OS_PLATFORM_OWNER_EMAIL` list, counted through the resolver's own
+ *     `matchesConfiguredPlatformAdmin` so the enumeration and the derivation
+ *     cannot disagree. This is the class shape (5) protects — and the class
+ *     whose survival re-prices the shape-(4) refusals ([#11973], above).
  *
  * `delegated_admin` deliberately does NOT count. ADR-0105 D8 defines it as a
  * grade that can REACH an endpoint, carrying no authority of its own — counting
@@ -939,11 +952,21 @@ export function registerLastAdminGuard(
     //    which is why every deployment that has not adopted the config anchor
     //    sees this guard behave exactly as it did.
     //
-    //    ⛔ NOT re-priced here: which of this guard's REFUSALS become obsolete
-    //    once no runtime write can empty the platform-admin population is a
-    //    separate, reviewed step (design §5 step 5). This addition is only the
-    //    half that keeps the count honest — it can make the guard refuse MORE,
-    //    never less.
+    //    [#11973] RE-PRICED (design §5 step 5 — the reviewed step the note
+    //    here used to defer to). The re-pricing needed NO per-refusal edits,
+    //    and that is a property worth stating rather than assuming: every
+    //    refusal in this file is the OUTPUT of this one enumeration, so
+    //    pricing the population re-prices them all mechanically. Concretely:
+    //    a shape-(4) permission-set write (delete / rename / deactivate) is
+    //    PERMITTED while a config-anchored administrator stands — exactly the
+    //    refusals the re-anchor made obsolete, self-relaxed by the set
+    //    arithmetic — and the same write is still REFUSED where the row
+    //    remains the load-bearing anchor (`single` posture under Choice 4A,
+    //    and P5's honoured legacy window). The zero-population tri-state
+    //    (`refuseIfEmptiedRatherThanFresh`) keeps its price unchanged: it is
+    //    reachable only when no administrator of ANY anchor stands, which the
+    //    config anchor makes strictly rarer, never wronger. Each direction is
+    //    pinned in `last-admin-guard.re-pricing.test.ts`.
     //    The `where` pushes the NORMALIZED addresses down, and the predicate
     //    re-checks each returned row in JS — the same two-step
     //    `auth-manager.ts`'s invitation lookup argues for, for the same two
