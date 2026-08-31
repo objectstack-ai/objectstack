@@ -47,3 +47,5 @@ disagree.
 
 Nothing links to the old `#pre-10-disclaimer` anchor (grepped repo-wide), so the
 retitle breaks no inbound reference.
+
+<!-- adr-0087: not-required (unpublished) The only bumped package is @objectstack/docs, which is `private: true` and absent from the Changesets `fixed` group, so nothing here reaches a published surface. This changeset removes, renames and narrows nothing; the BREAKING wording in the body quotes changelog entries that already shipped, and is not a breaking change declared by this diff. -->
