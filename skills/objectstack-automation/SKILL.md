@@ -131,7 +131,7 @@ variables: [
 ### Flow Example — Auto-Escalate Overdue Cases
 
 > **Nodes connect via `edges`, not a `next` property.** The engine traverses
-> `flow.edges` (`{ source, target }`); a bare `next:` on a node is ignored.
+> `flow.edges` (`{ source, target }`); a bare `next:` on a node is refused.
 > `update_record` selects rows with **`filter`** — an ObjectQL `where` **map**
 > of `field → value` / `field → { $operator: value }`, NOT the UI view-filter
 > `[{ field, operator, value }]` triples — and writes with **`fields`**
@@ -187,10 +187,9 @@ variables: [
       type: 'start',
       label: 'Daily at 09:00',
       // The cadence lives HERE, on the start node's config — FlowSchema has NO
-      // top-level `schedule` key (one there is silently stripped and the flow
-      // never binds). A bare cron string also works: schedule: '0 9 * * *'.
-      // Do NOT use the cron`…` tagged template — its envelope is not a
-      // recognized schedule shape.
+      // top-level `schedule` key (one there is a named parse error, not a silent
+      // strip). A bare cron string also works: schedule: '0 9 * * *'. Do NOT use
+      // the cron`…` tagged template — its envelope is not a recognized shape.
       config: { schedule: { type: 'cron', expression: '0 9 * * *' } },
     },
     {
@@ -477,12 +476,12 @@ still missing.
 |:-------|:------------|
 | `user`       | A specific user id (`value` = user id) |
 | `position`   | Holders of a position — `value` = the position machine name, resolved via `sys_user_position` (ADR-0090 D3) |
-| `org_membership_level` | The better-auth **org-membership tier** — `value` is one of `owner`/`admin`/`member`, and nothing else. **NOT** a position: `{ type: 'org_membership_level', value: 'sales_manager' }` matches nobody; use `position`. Spelled `role` before ADR-0090 D3 — that spelling is deprecated, still resolves, and is removed in the next major |
+| `org_membership_level` | The **org-membership tier** — `value` is one of `owner`/`admin`/`delegated_admin`/`member`. **NOT** a position: `{ type: 'org_membership_level', value: 'sales_manager' }` matches nobody; use `position`. Spelled `role` before ADR-0090 D3 — that spelling is deprecated, still resolves, and is removed in the next major |
 | `team`       | Members of a flat `sys_team` |
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
-| `queue`      | A data-ownership queue |
+| `queue`      | ⛔ Declared but never resolved — the slot routes to nobody. Do not author |
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 ### Dynamic approvers (`type: 'expression'`)
@@ -602,11 +601,11 @@ pre-write row, both made total over the object's declared fields. See
 |:------|:--------|
 | `approvers` | Who may act (≥ 1 — see Approver Types above). Each approver may carry an optional **`group`** label (e.g. `{ type: 'position', value: 'auditor', group: 'finance' }`) — with `behavior: 'per_group'`, approvers sharing a label form one group; unlabelled approvers each form their own |
 | `behavior` | `first_response` (first approver decides), `unanimous` (all must approve), `quorum` (`minApprovals` of N — M-of-N collective sign-off), or `per_group` (EACH approver `group` must reach `minApprovals` — one-from-each-group sign-off, 会签). In every mode a single rejection finalizes the node as `rejected`. Default `first_response` |
-| `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Default `1`; clamped at runtime to the resolvable approver count so a misconfiguration can never deadlock |
+| `minApprovals` | Approvals required — total for `quorum`, per group for `per_group`. Omitted ⇒ ALL resolvable approvers under `quorum`, `1` per group; clamped at runtime so a misconfiguration can never deadlock |
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
-| `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
+| `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
 
@@ -620,13 +619,9 @@ These are wired on the **graph**, not in node config:
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise (the old `back_to_previous`).
-- **Send back for revision (ADR-0044)** — distinct from a plain reject: an
-  Approval node can emit a third decision **`revise`** on a `revise`-labeled
-  out-edge that routes to an **`approval_revise`** rework window (not a plain
-  `wait`). The submitter edits and resubmits, re-entering the node via an
-  edge `type: 'back'` (a declared back-edge — traversed at run time but excluded
-  from DAG cycle validation). `maxRevisions` (node config, default `3`) caps the
-  loop before auto-reject.
+- **Send back for revision (ADR-0044)** — distinct from a plain reject: a
+  `revise` out-edge into an **`approval_revise`** window, closed by a
+  `type: 'back'` resubmit edge. See *Send-back for revision* above.
 - **Hard reject** — route the `reject` edge to an `end` node (the old
   `reject_process`).
 
@@ -666,7 +661,7 @@ defineStack({
   //   + 'job'   for scheduled (cron) flows
   //   + 'queue' for inbound-webhook ('api') flows — the trigger-api plugin
   //             depends on the queue service; without it every inbound POST
-  //             returns 503 queue_unavailable.
+  //             returns 503 SERVICE_UNAVAILABLE.
 });
 ```
 
@@ -697,6 +692,7 @@ read at runtime, not Zod-validated):
 | `record-after-update` | after update | `afterUpdate` |
 | `record-before-delete` | before delete | `beforeDelete` |
 | `record-after-delete` | after delete | `afterDelete` |
+| `record-before-write` / `record-after-write` | create OR update — one flow, both events | both insert + update hooks |
 
 ### Trigger Configuration — on the `start` node
 
@@ -725,7 +721,7 @@ read at runtime, not Zod-validated):
 > **`previous`** and **`record`** are the CEL variables available in update
 > triggers — `previous.x` is the value before the change, `record.x` is the
 > value after. (Salesforce-flavor `OLD` / `NEW` were removed in M9.5 and now
-> evaluate to `null`.) See [objectstack-formula](../objectstack-formula/SKILL.md).
+> fault the predicate.) See [objectstack-formula](../objectstack-formula/SKILL.md).
 
 ### Time-relative triggers — scheduled per-record date sweep
 
@@ -850,7 +846,7 @@ them right the first time:
    ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
    name in call position **fails the node** with a named error naming the
    supported set. The build does **not** catch these (conditions are checked,
-   value expressions are not) and a `fault` edge cannot route it.
+   call-position names are not) and a `fault` edge cannot route it.
 
 7. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.
@@ -968,7 +964,7 @@ syntax error, an unknown function (`PRIOR()`) or a `{…}`-wrapped reference
 **throws**, located and corrective — never silent.
 
 **Node values** take the single-brace `flow-template` dialect (`'{round(x)}'`);
-no validator implements it, so an unknown function there is NOT build-checked —
+no validator checks its call names, so an unknown function is NOT build-checked —
 it throws `FlowExpressionFunctionError` at **run time**.
 
 The quiet case is a typo'd *field* name: bare refs (`status == 'open'`) DO
