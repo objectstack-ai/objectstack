@@ -8,26 +8,56 @@
 // enforced rows additionally reference an end-to-end dogfood proof. The
 // companion test (`authz-conformance.test.ts`) asserts every referenced proof
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
-// ratchets completeness over a CURATED table of HTTP/transport entry points
-// (`discover()`: 16 probes over 11 named source files) — a new ungated route
-// there is UNCLASSIFIED, a deleted guard is STALE, and either breaks CI.
-// The count said 15 from 2026-08-16, when it was true, until a 16th probe
-// landed on 2026-08-18 without the sentence moving; a reach census pinned the
-// drift rather than repairing it, and the sentence is now held EQUAL to the
-// table by `authz-probe-blind-spot.test.ts` instead of restated by hand.
-// Each of those 16 probes now DECLARES its instrument kind
+// ratchets completeness at ROUTE-FAMILY AND DISPATCHER-DOMAIN granularity over
+// the two route ledgers, plus a curated table of named gates and transport
+// tripwires (`discover()`: 18 probes over 13 named source files) — a new REST
+// route FAMILY or dispatcher DOMAIN is UNCLASSIFIED, a deleted named guard is
+// STALE, and either breaks CI.
+//
+// ⭐ READ THAT GRANULARITY LITERALLY; it is the whole claim and there is no
+// caveat hiding behind it. A route added inside an EXISTING family or domain
+// mints no key and this gate stays green — measured, not assumed: injecting an
+// ungated route into `registerUiEndpoints` leaves every assertion here passing,
+// because `ui` is already a family. What is ratcheted is that no route family
+// and no dispatcher domain can arrive unclassified, which is a strictly
+// stronger claim than the one this sentence made while it was sourced from a
+// hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
+// dispatcher domain files.
+//
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (94 rows
+// / 19 families) and `packages/runtime/src/route-ledger.ts` (80 rows / 21
+// domains) because those two are enumerated from a RUNNING server and guarded
+// in both directions by their own conformance tests — so a new family or
+// domain cannot be silently absent from them, and therefore cannot be silently
+// absent from here. Widening a regex instead was refused: it rots on the next
+// added file, which is the mechanism this replaces. Deriving "gated" from
+// source syntax was refused too, on a measurement — 22 of 30 apparently
+// ungated `register(` sites in `rest-server.ts` are false, a 73% false-ungated
+// rate — because that trades a visible gap for a written-down false assurance.
+// The ledgers supply the POPULATION; the classification stays a reviewed row
+// here.
+//
+// Of the 40 ledger keys, 6 are classified by rows below that already pinned
+// the same surface through a probe; the other 34 are enumerated one by one,
+// dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`. That
+// list can only get shorter: growth, staleness, a classified entry left behind
+// or a duplicate each fail CI. Before 2026-08-31 those 34 surfaces minted no
+// key at all, so nothing about them was visible in either direction.
+//
+// Each of the 18 probes DECLARES its instrument kind
 // (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
 // non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
 // blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
 // keyed on a KEY, so a probe whose population is deleted before any row
 // covered it goes quiet without either firing.
 //
-// ⚠️ What this table's route population is DERIVED FROM remains an open
-// question, deliberately not answered here: the probes reach 1 of the 17 route
-// registrars in `packages/rest/src/rest-server.ts`, a measured gap the reach
-// census sizes in full. Widening the patterns is NOT the repair — it rots
-// again on the next added file — and the alternatives carry a contract
-// decision (see the census's population-source record).
+// A ledger row may also DECLARE the authorization posture it has been reviewed
+// to have, by naming the row here that classifies it (`authz:`, phased exactly
+// like `responseSchema` in those same files: optional, filled only where
+// conformance coverage exists, never mass-produced). The companion test
+// refuses a name that is not a row id and refuses a row that is not
+// `enforced`, so the declaration is a checked fact at the producer rather than
+// a second place to write an unverified claim.
 // [#9083] Classification itself is state-gated for the transport tripwires: a
 // discovered TRANSPORT-WIRED key may be covered ONLY by an `enforced` row, so
 // silencing that particular red costs an enforcement site rather than a
@@ -36,12 +66,12 @@
 // [#8711] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 51 carry no `covers` key at all (7 rows, 9 keys, every one an
+// 44 of 51 carry no `covers` key at all (7 rows, 15 keys, every one an
 // HTTP/transport pin), and 38 of the file's 44 `enforced` rows are exactly
 // that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception. Of the
-// 9 `covers` keys that DO exist, 5 are GATE pins tied to the enforcement call
+// 15 `covers` keys that DO exist, 5 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
 // `/actions`, `/automation` or `/packages`, or drop the MCP context-threading
 // / stdio principal binding, and the pinned key vanishes from source, its row
@@ -151,7 +181,18 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'anonymous-deny-meta', summary: 'anonymous-deny on the metadata endpoints (#2567 surface 1)', state: 'enforced',
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'],
+    // [2026-08-31] The two ledger-sourced keys are NOT a new claim: they name
+    // the same two surfaces the two probe keys beside them already pin, at the
+    // granularity the ledger population uses. The enforcement text above is
+    // family-wide by construction on both — a wrapping guarded registrar for
+    // every REST /meta route, and one dispatcher handler body for the domain —
+    // which is exactly the property a family/domain key needs and the reason
+    // these two were classified while the other 34 keys were enumerated into
+    // the shrink-only baseline instead.
+    covers: [
+      'meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata',
+      'rest-family:rest-route-ledger.ts:metadata', 'dispatcher-domain:route-ledger.ts:/meta',
+    ],
     note: '#11373 — for most of this row\'s life the cited proof drove ONE anonymous `GET /meta`, so the row read as covering a surface while only its read face was exercised. The mutating doors (`_migrate-stored`, the single save, the reset, publish, rollback — six when measured, five since #12176 D3 retired the compound save) are now driven there as real HTTP: measured 2026-08-23 on the booted showcase, every mounted door answers 401 UNAUTHENTICATED in the rest-flat envelope, nothing persists, and the same URL/method/body with a session answers 403 (member) or runs the door (admin) — so the 401 is the floor and not a broken probe; the retired compound spelling has its own case there pinning 404-for-everyone, since an auth floor only speaks for a door that exists. The write half was previously pinned only in `rest/src/meta-write-door-capability-enumeration.test.ts`, which invokes `route.handler` over a `vi.fn()` transport and therefore could not show that the composed app routes a real request into the guarded registrar at all.' },
   // #5519 — the two DISPATCHER-mounted execution surfaces. `@objectstack/rest`
   // gated `/data` and `/meta`; these routes are mounted by a SECOND
@@ -163,12 +204,20 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'anonymous-deny-actions', summary: 'anonymous-deny on the business-action dispatch surface (#2567 surface 2 / #5519)', state: 'enforced',
     enforcement: 'runtime/domains/actions.ts handleActionsRequest — shouldDenyAnonymous as the handler\'s FIRST statement, ahead of the ADR-0066 D4 requiredPermissions gate and the ADR-0104 param contract; those keep their semantics and simply run after the auth baseline, so an anonymous caller never reaches action dispatch and never learns the route\'s shape',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['actions:domains/actions.ts:anonymous-gate'],
+    // [2026-08-31] Same surface as the gate pin beside it, at ledger
+    // granularity: the enforcement above is DOMAIN-WIDE by construction (the
+    // gate is the single handler body's first statement), so the domain key
+    // adds no claim the pinned gate did not already carry.
+    covers: ['actions:domains/actions.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/actions'],
     note: 'A `type: \'script\'` action body runs `isSystem: true` (elevated), so an ungated POST was an anonymous privilege-escalating WRITE, not merely an information leak — #5519 measured `POST /actions/showcase_task/showcase_mark_done/:id` answering 200 with the update applied. Internal dispatch is unaffected: this handler is a pure HTTP seam (the MCP `run_action` bridge enters through action-execution.invokeBusinessAction, declarative endpoints through the transport fallback seam with their own `authRequired` gate), so `authRequired: false` public endpoints stay public.' },
   { id: 'anonymous-deny-automation', summary: 'anonymous-deny on the automation/flow surface (#2567 surface 3 / #5519)', state: 'enforced',
     enforcement: 'runtime/domains/automation.ts handleAutomationRequest — shouldDenyAnonymous DOMAIN-WIDE at the top, and deliberately BEFORE the isServiceServeable probe so the 401/501 difference cannot be used to fingerprint whether a deployment mounts automation; per-route capability predicates run after this floor — `manage_metadata` for the four gated flow writes (create `POST /` / update `PUT /:name` / deregister `DELETE /:name`, #10145, plus enablement `POST /:name/toggle` since the #10243 ruling of 2026-08-23, which measured that the enabled bit is not a ROW and so reaches every organization on the deployment), all selected by the ONE `isFlowAuthoringWrite` predicate, fail-closed by construction (an absent executionContext, an absent `systemPermissions` or an empty one all refuse) and answering 403 `PERMISSION_DENIED`, with only engine `isSystem` bypassing; the run-state reads (#7900) and `resume` (#3801 / #5561) carry their own separate per-route predicates, and the execution doors (trigger / execute) sit outside all of them — including `POST /trigger/:name` for a flow literally NAMED `toggle`, which the toggle arm deliberately excludes so a name cannot cost a member its run door',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['automation:domains/automation.ts:anonymous-gate'],
+    // [2026-08-31] Ledger granularity for the same DOMAIN-WIDE gate named
+    // above — the property the note already relies on ("gating the DOMAIN
+    // rather than each route is what keeps a newly added automation route from
+    // arriving ungated").
+    covers: ['automation:domains/automation.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/automation'],
     note: 'Ungated, an anonymous caller could start real flow runs (`POST /:name/trigger`), read the full flow inventory (`GET /automation`), and DEREGISTER a registered flow (`DELETE /:name` → `{deleted:true}`) — the destructive one, which #5519 did not originally record. Gating the DOMAIN rather than each route is what keeps a newly added automation route from arriving ungated. Engine-internal triggers (record-change, schedule) never speak HTTP and are untouched.' },
   // #7033 / #7023 — the SIXTH dispatcher domain to join the baseline. `/packages`
   // was the last routed domain with ZERO authorization predicates: a survey drove
@@ -182,7 +231,12 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'anonymous-deny-packages', summary: 'anonymous-deny on the package-management surface (#7033 / #7023)', state: 'enforced',
     enforcement: 'runtime/domains/packages.ts handlePackagesRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the ObjectQL registry probe so the 401-vs-503 difference cannot fingerprint whether the package service is mounted; per-route capability predicates run after this floor — `manage_metadata` for every state-changing route (install / enable / disable / publish / publish-drafts / discard-drafts / commit-revert / rollback / revert / adopt-orphans / duplicate / manifest-PATCH / DELETE), and the ADR-0106 D4 read set (`studio.access` / `setup.access`) for every read (list / detail / commits / export)',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['packages:domains/packages.ts:anonymous-gate'],
+    // [2026-08-31] The DISPATCHER domain only. ⛔ NOT the REST `packages`
+    // family, which is a different registrar on a different server and stays
+    // in the shrink-only baseline: every /packages TRANSPORT converging on one
+    // handler body is a statement about the dispatcher domain, not about the
+    // four routes @objectstack/rest mounts itself.
+    covers: ['packages:domains/packages.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/packages'],
     note: 'Ungated, a guest-principal caller reached the whole domain: `GET /packages` (the id ENUMERATION face — first step of the chain), `GET /packages/:id/export` (27 metadata types read whole), and — destructively — `POST /packages/:id/discard-drafts` (drop every pending draft) and `POST /packages/:id/publish-drafts` (promote every draft to active + load seed rows + flip ADR-0045 visibility). Gating the DOMAIN rather than each route keeps a newly added package route from arriving ungated. Engine-internal / SDK internal calls never enter this HTTP handler. The per-route capability gates are unit-pinned in runtime/domains/packages-capability-gate.test.ts.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
@@ -208,7 +262,14 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // is wired; the real gap is the opt-in stdio transport.)
   { id: 'mcp-http-identity', summary: 'MCP HTTP surface (/api/v1/mcp) admits the caller identity — anonymous denied, OAuth scope-gated, caller ExecutionContext threaded to every tool\'s data op', state: 'enforced',
     enforcement: 'runtime/http-dispatcher.ts handleMcp — requires ec.userId||ec.isSystem (401 else, RFC 9728 WWW-Authenticate advertised when the OAuth track is live); OAuth-token provenance narrows the exposed tool families to the granted MCP scopes (403 on none, #2698); buildMcpBridge(context) threads the caller ExecutionContext into every bridge op (callData(..., ec)), and mcp-server-runtime.ts handleHttpRequest builds a fresh per-request McpServer from that principal-bound bridge (registerObjectTools/registerActionTools) — so RLS / FLS / tenant apply exactly as on REST /data',
-    covers: ['mcp:http-dispatcher.ts:handleMcp', 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)'],
+    // [2026-08-31] The dispatcher `/mcp` domain, at ledger granularity — the
+    // same handler the two keys beside it already pin. ⛔ NOT `/mcp/skill`:
+    // that is a second handler body (handleMcpSkillRequest) this row's
+    // enforcement text does not name, so it stays in the shrink-only baseline.
+    covers: [
+      'mcp:http-dispatcher.ts:handleMcp', 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)',
+      'dispatcher-domain:route-ledger.ts:/mcp',
+    ],
     proof: 'showcase-mcp-http-identity.dogfood.test.ts',
     note: 'The per-request principal-bound tool server is isolated from the long-lived UNSCOPED stdio server (see mcp-stdio-authority). HIGH-RISK, proven end-to-end (#3167 PR-B): the proof boots the real showcase + security + MCP plugin and drives POST /api/v1/mcp — an anonymous tools/call is 401 before any tool runs, and a member\'s query_records over the owner-private showcase_private_note returns ONLY their own rows (if the tool ran unscoped/system — the stdio posture — the other owner\'s rows would leak). Dropping the buildMcpBridge(context) threading (or building an unscoped/system bridge for HTTP) makes the context-threaded key STALE → red CI; a new sibling MCP data handler appears as an UNCLASSIFIED surface until a row covers it. Dispatcher-level unit coverage: http-dispatcher.mcp.test.ts (401, EC-to-bridge) + http-dispatcher.mcp-oauth.test.ts (scope 403).' },
   { id: 'mcp-stdio-authority', summary: 'MCP stdio transport admits an env-supplied API-key principal — RLS/FLS/tenant applied to record reads, fail-closed on a missing/invalid key, no `system` bypass (opt-in: autoStart / OS_MCP_STDIO_ENABLED=true + OS_MCP_STDIO_API_KEY)', state: 'enforced',

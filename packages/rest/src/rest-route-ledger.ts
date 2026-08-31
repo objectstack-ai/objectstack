@@ -101,6 +101,47 @@ export interface RestRouteLedgerEntry {
    * resolution belongs in the guard that can import the spec, not in the data.
    */
   responseSchema?: string;
+  /**
+   * The AUTHORIZATION posture this route has been REVIEWED to have, named by
+   * the `authz-conformance.matrix.ts` row that classifies it (ADR-0056 D10).
+   *
+   * WHY A DECLARED FACT AND NOT A DERIVED ONE. Every other field here grades
+   * SDK expressibility; none of them says whether a caller must be
+   * authenticated, and `public` states INTENT for a handful of browser-facing
+   * routes rather than measuring a gate. Deriving the answer from source
+   * syntax instead was measured and rejected: scanning all 80
+   * `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
+   * reads 50 gated / 30 ungated, and 22 of those 30 are FALSE — a wrapping
+   * `guardedRouteManager` gates 19 of them with no `enforceAuth` at the call
+   * site, and one registrar shares a handler const across its 3 mounts. A 73%
+   * false-ungated rate on the largest registrar is a written-down false
+   * assurance, which is strictly worse than an honest blank. So the posture is
+   * DECLARED at the producer, where a new route is already reviewed, instead of
+   * guessed at the consumer.
+   *
+   * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
+   * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
+   * above and for the same ruled reason: mass-producing declarations nobody
+   * validated is how "declared but unverified" surfaces come to exist. A blank
+   * one changes no behaviour and is not a defect.
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE. The rule the seeded
+   * rows were chosen by, and the one to keep applying: the matrix row named
+   * here must be `enforced`, its cited dogfood proof must DRIVE this route at a
+   * literal wire path (no parameter binding inferred from a sibling), and its
+   * enforcement text must name the site that serves it. A name written ahead of
+   * the test it points at would BE the surface this programme exists to remove.
+   *
+   * A NAME rather than a live reference, deliberately — this module stays
+   * import-free, and the resolution belongs in the guard that can import the
+   * vocabulary. `packages/qa/dogfood/test/authz-conformance.test.ts` resolves
+   * every name written here against the live matrix and refuses two things: a
+   * name that is not a row id (a typo, or a row renamed out from under it), and
+   * a row that is not `enforced` (an `experimental` or `removed` row records an
+   * ABSENCE, so pointing a route at one would declare "reviewed" over "there is
+   * nothing here").
+   */
+  authz?: string;
   /** One-line rationale. Required for every non-`sdk` disposition. */
   note?: string;
 }
@@ -128,7 +169,16 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'interactive Scalar HTML page' },
 
   // ── metadata ──────────────────────────────────────────────────────────────
-  { route: 'GET /api/v1/meta', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getTypes' },
+  // [2026-08-31] SEEDED under the field's fill rule: `anonymous-deny-meta` is
+  // `enforced`, its enforcement text names both the REST guarded registrar and
+  // the dispatcher mirror, and its cited proof
+  // (`showcase-anonymous-deny-surfaces.dogfood.test.ts`) drives THIS wire path
+  // literally on a booted showcase — anonymous 401, authenticated not-401 as
+  // the positive control. ⛔ The sibling rows in this family are deliberately
+  // left blank: the family-wide gate is a real property, but writing it onto
+  // 19 rows in one change is the mass production the field's rule forbids.
+  { route: 'GET /api/v1/meta', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getTypes',
+    authz: 'anonymous-deny-meta' },
   // [#7526] The same `listMetaTypes` closure as the row above, at the spelling
   // the dispatcher branch and `route-ledger.ts` have always used. It is
   // `server-only` for the reason that ledger's row gives — Studio tooling
@@ -149,7 +199,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts',
     responseSchema: 'ListDraftsResponseSchema',
     note: '[#12038] on THIS surface the payload is answered BARE (`res.json(result)`); the dispatcher twin (runtime ledger row) answers the same payload through the `{ success, data }` envelope — the named schema is the PAYLOAD, true on both surfaces. Describe-only transcription of `listDrafts`\'s declared return; conformance: spec `api/protocol.test.ts`' },
+  // [2026-08-31] SEEDED — same rule as `GET /api/v1/meta` above; this door is
+  // one of the five mutating /meta seams that proof drives by literal path.
   { route: 'POST /api/v1/meta/_migrate-stored', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateStored',
+    authz: 'anonymous-deny-meta',
     note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }. DELIBERATELY UNBOUND (#12038 ruling 2C) — this row would name the schema, but the report\'s only named type, `StoredMigrationReport`, lives in `@objectstack/metadata-protocol` (unreachable from the spec/api namespace this field resolves against); a second declaration in spec would drift against the CLI rendering the same report. Answered BARE on this surface, enveloped on the dispatcher twin' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences',

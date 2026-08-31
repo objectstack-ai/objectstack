@@ -465,8 +465,22 @@ describe('[#13279 option A] the classifier is the RELOCATED one, not a second co
     // The ruling's structural half, pinned in source. A local re-spelling of
     // the predicate here would pass every behavioural test above and still be
     // the duplication-drift the ruling rejected (option B).
+    //
+    // ⚠️ [#13667] The positive assertion matches the BINDING LIST, not the whole
+    // import statement. It used to demand the exact text
+    // `import { isMissingTableError } from '@objectstack/types';`, which also
+    // pinned something the ruling never decided: that this symbol is the ONLY
+    // one core takes from that module. It is not any more — the walled-posture
+    // gate at §6b-config reads `resolveTenancyPosture` from the same package —
+    // and the exact-text form went red on a change that did not touch the
+    // predicate, the classifier, or the dependency edge. What the ruling
+    // decided is asserted below, undiminished: the predicate arrives by IMPORT
+    // from `@objectstack/types`, it is not re-spelled locally, and
+    // `@objectstack/metadata` is not imported here. `[^}]*` cannot cross a
+    // closing brace, so the binding still has to sit in THAT statement's list.
+    // ⛔ Do not "restore" the exact-text form: it re-pins the incidental half.
     const src = readFileSync(join(REPO_ROOT, 'packages/core/src/security/resolve-authz-context.ts'), 'utf8');
-    expect(src).toMatch(/import \{ isMissingTableError \} from '@objectstack\/types';/);
+    expect(src).toMatch(/import \{[^}]*\bisMissingTableError\b[^}]*\} from '@objectstack\/types';/);
     expect(src).not.toMatch(/function\s+isMissingTableError/);
     // ⛔ core must not IMPORT `@objectstack/metadata` — metadata depends on
     // core, and that edge is why the predicate moved rather than being imported.
