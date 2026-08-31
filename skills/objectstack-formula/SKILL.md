@@ -152,12 +152,10 @@ in `coalesce(..., '')`.
 
 ## ObjectStack CEL standard library
 
-Registered automatically. Source:
-`node_modules/@objectstack/formula/src/stdlib.ts`.
-
-The canonical list is `CEL_STDLIB_FUNCTIONS` in
-`node_modules/@objectstack/formula/src/validate.ts` — a
-test asserts every entry resolves at runtime, so this table stays in sync with it.
+Registered automatically by `@objectstack/formula`, which ships `dist` only —
+there is no `src/` to read in an installed app. Its exported
+`CEL_STDLIB_FUNCTIONS` is the canonical list, pinned by two tests: every entry
+resolves at runtime, and this table documents them all.
 
 **Dates**
 
@@ -172,7 +170,7 @@ test asserts every entry resolves at runtime, so this table stays in sync with i
 | `addMonths(d, n)` | timestamp | Shift **any** date by `n` months; clamps to month-end (`addMonths(date('2026-01-31'), 1)` → Feb 28) |
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
 
-> **No date arithmetic.** Do NOT write `end - start`, `date + n`, or `today() + 30` — CEL has no numeric arithmetic on dates, so these fault and the field silently nulls (the build now rejects them). Use `daysBetween(start, end)` for a span in days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. Inclusive day span: `daysBetween(record.start_date, record.end_date) + 1`. Tenure in years: `daysBetween(record.hire_date, today()) / 365`. For a genuine sub-day offset use `now() + duration("3h")` — the calendar-day helpers always land on UTC midnight.
+> **No date arithmetic.** Do NOT write `end - start`, `date + n`, or `today() + 30` — a date mixed with a number faults and the field silently nulls (the build rejects it); `end - start` does not fault, it yields a `duration` stored as `{}`. Use `daysBetween(start, end)` for a span in days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. Inclusive day span: `daysBetween(record.start_date, record.end_date) + 1`. Tenure in years: `daysBetween(record.hire_date, today()) / 365`. For a genuine sub-day offset use `now() + duration("3h")` — the calendar-day helpers always land on UTC midnight.
 
 **Numbers**
 
@@ -418,14 +416,14 @@ to the envelope.
 | `Field` | `expression` (when `type: 'formula'`) | cel |
 | `Field` | `visibleWhen` / `readonlyWhen` / `requiredWhen` | cel |
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
-| `Field` | `defaultValue` (M9.9b) | cel |
+| `Field` | `defaultValue` (envelope only; bare string = literal) | cel |
 | `ConditionalValidation` | `when` | cel |
 | `View` / `Page` | `visibleOn` / `visibility` (deprecated aliases of `visibleWhen`, ADR-0089) | cel |
 | `Action` | `disabled` | cel (or boolean) |
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |
-| `Dataset.records[*]` | any value | cel (via `cel\`\``) |
+| `Seed.records[*]` | any value | cel (via `cel\`\``) |
 | `audit` / `metrics` / `tracing` | `condition` / `successCriteria` | structured \| cel |
 
 View list filters are **not** a CEL surface — they are structured JSON filter
@@ -439,7 +437,7 @@ All accept bare strings (auto-wrapped to `{dialect:'cron', source}`) or the
 | Surface | Field |
 |:---|:---|
 | `Job.schedule.expression` | canonical |
-| `connector.schedule`, `etl.schedule`, `sync.schedule` | pipelines |
+| `connector.schedule` | scheduled connector sync |
 | `system/cache.schedule` | warmup |
 | `system/disaster-recovery.schedule` | backup + drill |
 | `automation/execution.cronExpression` | scheduled state |
@@ -472,9 +470,8 @@ tmpl`Deal {{ record.name }} — {{ record.amount | currency }} closes {{ record.
 | Surface | Field |
 |:---|:---|
 | `Object.titleFormat` | record title — **deprecated** (→ `nameField`, ADR-0079) |
-| `system/notification` | email subject + body, SMS message, push body + message (5 fields) |
 | `ai/model-registry` | `promptTemplate.system`, `promptTemplate.user` |
-| `integration/connector/github` | titleTemplate, bodyTemplate (PR + release) |
+| `system/email-template` | `subject`, `bodyHtml`, `bodyText` (plain strings, `{{ }}` rendered by the email pipeline) |
 
 There is no JS expression surface: procedural JS is the L2
 `ScriptBody { language: 'js' }` surface (hook bodies), not an expression
