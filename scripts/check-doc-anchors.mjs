@@ -456,7 +456,30 @@ function runCheck() {
         '\n\n  The heading id is computed with `github-slugger`, the same package\n' +
         '  fumadocs-core uses to render the page, so what this gate says the anchor is\n' +
         '  is what the site says it is. Print a page\'s real ids with:\n' +
-        "      node -e \"import('./scripts/check-doc-anchors.mjs').then(m=>console.log(m.headingIds(require('node:fs').readFileSync('<file>','utf8')).join('\\n')))\"\n" +
+        // ⚠️ The specifier below is spelled ABSOLUTE — `process.cwd()+'/scripts/…'` — and that is
+        // load-bearing rather than style. This line is a REMEDY: prose for a human, to be pasted
+        // into a shell already sitting at the repo root. Spelled the natural way, as a quoted
+        // `./scripts/…` literal, it is ALSO a well-formed watch-hint DECLARATION to the dispatch
+        // derivation, which scans a gate's module body for quoted path-shaped literals and
+        // resolves the relative ones against the directory of the file that WROTE them. This gate
+        // lives in `scripts/`, so a literal written in the ROOT frame came back with its own
+        // directory prepended — a lead naming a path that has never existed on this tree, pasted
+        // into every dispatch prompt whose file surface brushes this family, and indistinguishable
+        // there from a real one.
+        //
+        // Neither half was wrong on its own: the remedy is correct for its reader and the extractor
+        // is correct about a declaration — the fabrication came from one being read as the other.
+        // Tightening the reader was measured and REFUSED (#13312: the sanctioned declaration idiom
+        // is structurally indistinguishable from an incidental module-scope constant, priced at 8.6
+        // real populations deleted per fabrication removed), so the repair belongs to the PRODUCER:
+        // spell the path so it cannot be read as a declaration. The leading `/` inside the quotes is
+        // the whole mechanism — the extractor's admission test requires a literal to begin with a
+        // word character, `.` or `@`, so an absolute path is refused outright — and `process.cwd()`
+        // is what keeps the command runnable verbatim from the repo root, which is the only reason a
+        // remedy line exists. ⛔ Do not "tidy" it back to a quoted relative specifier. What this gate
+        // really reads is declared above and deliberately, in `CONTENT_GLOB` and
+        // `ROOT_FILE_WATCH_HINTS` (#13449).
+        "      node -e \"import(process.cwd()+'/scripts/check-doc-anchors.mjs').then(m=>console.log(m.headingIds(require('node:fs').readFileSync('<file>','utf8')).join('\\n')))\"\n" +
         '  Fix the link, or fix the heading. Do not add an exemption — an anchor that\n' +
         '  nobody may check is the defect this gate exists to remove (#7484).',
     );
