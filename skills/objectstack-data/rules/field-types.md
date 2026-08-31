@@ -3,8 +3,8 @@
 Quick reference for choosing the right field type from 49 available options.
 
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs
-> beyond these do **not** exist — an unknown field key is silently stripped at
-> parse (dead metadata), so don't invent config like `theme`, `rows`, or
+> beyond these do **not** exist — an unknown field key is REFUSED at parse
+> (`unrecognized_keys`), so don't invent `theme`, `rows`, or
 > `fileAttachmentConfig`. Source of truth:
 > `node_modules/@objectstack/spec/src/data/field.zod.ts`.
 
@@ -343,7 +343,7 @@ The `format` is literal text interleaved with `{...}` tokens:
 1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique). The literal separator keeps distinct groups apart.
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
-4. **Only known tokens are interpolated.** Date tokens are **case-sensitive and exact** (`{YYYY}`, not `{yyyy}` or `{YYYY-MM}`). An unrecognized `{...}` is emitted **literally** into the number — `{ YYYY }` (spaces) renders the text `{ YYYY }`.
+4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
 
 ### Vector (AI Embeddings)
 
@@ -354,8 +354,8 @@ The `format` is literal text interleaved with `{...}` tokens:
 }
 ```
 
-There is **no** `vectorConfig` block — an authored `vectorConfig` is silently
-stripped (dead metadata). `dimensions` is the flat field-level key.
+There is **no** `vectorConfig` block — an authored `vectorConfig` is refused at
+parse. `dimensions` is the flat field-level key.
 
 ## Incorrect vs Correct
 

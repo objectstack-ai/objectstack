@@ -6,23 +6,21 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
-| `lookup` | Independent | Optional by default | Independent | Not available | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Always required | Inherits parent | Supported via `summary` | "Owned by" |
+| `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
+| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent | Supported via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional | N/A | Not available | Hierarchical |
 
 ## When to Use lookup vs master_detail
 
 ### Use `lookup` When:
 - Child record can exist independently
-- Parent deletion should not affect child (`deleteBehavior: 'set_null'`)
-- No roll-up aggregations needed
+- Parent deletion should only clear the FK (`deleteBehavior: 'set_null'`, the default)
 - Relationship is optional
 - **Example:** `task.assigned_to → user` (task can exist without assignment)
 
 ### Use `master_detail` When:
 - Child record is meaningless without parent
 - Parent deletion should cascade to children
-- Need roll-up summaries (count, sum, min, max, avg)
 - Relationship is mandatory
 - **Example:** `invoice_line_item.invoice_id → invoice` (line items belong to invoice)
 
