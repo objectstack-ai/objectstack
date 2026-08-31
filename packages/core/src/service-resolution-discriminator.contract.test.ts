@@ -11,28 +11,35 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectKernel } from './kernel';
-import { PluginLoader, ServiceLifecycle } from './plugin-loader';
-import { createLogger } from './logger';
-import type { PluginContext } from './types';
+import { ObjectKernel } from './kernel.js';
+import { PluginLoader, ServiceLifecycle } from './plugin-loader.js';
+import { createLogger } from './logger.js';
+import type { PluginContext } from './types.js';
 import {
     isServiceNotRegisteredError,
     SERVICE_NOT_REGISTERED_CODE,
-} from './service-not-registered';
+} from './service-not-registered.js';
 
 function makeLoader(withContext = true): PluginLoader {
     const logger = createLogger({ level: 'error' });
     const loader = new PluginLoader(logger);
     if (withContext) {
-        loader.setContext({
+        // A real `PluginContext`, not a cast: the loader only ever hands this to
+        // a factory, and every member is spelled so the compiler checks the
+        // shape instead of a `as unknown as` silencing it.
+        const ctx: PluginContext = {
             registerService: () => {},
+            registerServiceFactory: () => {},
             getService: () => { throw new Error('Mock service not found'); },
+            replaceService: () => {},
+            getServiceScoped: async () => { throw new Error('not used'); },
+            getServices: () => new Map<string, any>(),
             hook: () => {},
             trigger: async () => {},
-            getServices: () => new Map(),
             logger,
             getKernel: () => ({}) as any,
-        } as PluginContext);
+        };
+        loader.setContext(ctx);
     }
     return loader;
 }
@@ -218,7 +225,7 @@ describe('[#13905] the SUPPORTED no-data-plane kernel stays quiet, the broken on
 
 describe('[#13905] the published increment', () => {
     it('reaches consumers through the package entry point, and is exactly two symbols', async () => {
-        const core: Record<string, unknown> = await import('./index');
+        const core: Record<string, unknown> = await import('./index.js');
 
         expect(typeof core.isServiceNotRegisteredError).toBe('function');
         expect(core.SERVICE_NOT_REGISTERED_CODE).toBe('SERVICE_NOT_REGISTERED');
