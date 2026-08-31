@@ -274,6 +274,42 @@ import {
  * no 4xx (option B reintroduces both defects #5367 closed). The paragraph above
  * beginning "⚠️ Deliberately NOT a 4xx of any flavour" is that ruling's own text
  * and is not to be rewritten.
+ *
+ * ## An EMPTIED `$nin` is refused, not folded (#13571, `domain:services` ruling 2026-08-31)
+ *
+ * FOURTEEN refusing sites. `$nin: []` used to fold to `'1 = 1'` — constant
+ * TRUE — which on this lowering VACATES the read scope: every row admitted,
+ * with no `$not` required. That is the first bullet above ("a read-scope
+ * predicate must never be silently dropped") in its most literal form, so the
+ * empty exclusion now throws, in the same envelope as the other thirteen.
+ *
+ * ⚠️ DELIBERATELY ASYMMETRIC with `$in: []`, which KEEPS folding to
+ * {@link FALSE_CLAUSE}. The #5322 boundary (section above) is "shape errors
+ * THROW, boolean identities REDUCE"; both empty memberships have ruled
+ * reductions, but they land on opposite constants. `$in: []` reduces to
+ * constant FALSE — narrowing at its own arm, the safe direction on a read
+ * scope — and is LOAD-BEARING: the RLS compiler deliberately emits it at
+ * positive polarity inside composites (`{ $or: [{ owner: { $in: [] } },
+ * { owner: 'u_me' }] }` — an emptied membership beside an own-rows grant,
+ * pinned by #13570's `rls-empty-membership-polarity.test.ts` as "own rows keep
+ * flowing"), and that filter reaches this compiler through
+ * `security.getReadFilter`. `$nin: []` reduces to constant TRUE — scope-
+ * vacating — and has ZERO producers: the CEL lowering never emits `$nin`, and
+ * #13570's guard drops even-polarity empty-`$nin` policies before they are
+ * emitted. Refusing it therefore costs no live traffic and closes the one
+ * single-step widening fold this compiler had. A uniform throw at both arms
+ * was measured and REJECTED (#13571 verdict): it would have 500'd the pinned
+ * live composite above on every analytics query for any user whose membership
+ * set resolves empty beside an own-rows grant.
+ *
+ * ⚠️ Declared residue, ruled follow-up — NOT covered here: `$not` over
+ * `$in: []` still compiles to constant TRUE at this lowering for a producer
+ * that is not the (#13570-guarded) RLS compiler. Closing that needs a
+ * polarity-aware design whose interaction with the #5322 `$not`-over-identity
+ * reductions is ruled first — a naive "refuse NOT of the FALSE constant"
+ * cannot tell net polarity (see #13571's verdict). Separately, the ObjectQL
+ * ENGINE execution path never reaches this compiler at all (#13640): this
+ * refusal guards the NativeSQL path and the `/analytics/sql` echo only.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -948,7 +984,14 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     }
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
-      if (val.length === 0) return '1 = 1'; // NOT IN () excludes nothing
+      // [#13571] An EMPTIED exclusion is refused, not folded. Its faithful
+      // reduction is constant TRUE ("NOT IN () excludes nothing"), which on
+      // this lowering VACATES the whole read scope — every row admitted, no
+      // `$not` needed. Deliberately ASYMMETRIC with `$in: []` → FALSE_CLAUSE
+      // two arms above: that fold is a ruled #5322/#5243 identity, narrowing at
+      // its own arm, and a live RLS composite depends on it. Read the module
+      // header's #13571 section before "harmonising" the two arms.
+      if (val.length === 0) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" is empty — an empty exclusion excludes nothing and would compile the read scope to constant TRUE (fail-closed).`);
       assertCompilableMembers(op, field, val);
       // [#5298] NULL-safe: "not among this list" holds vacuously for a value
       // that is not there.

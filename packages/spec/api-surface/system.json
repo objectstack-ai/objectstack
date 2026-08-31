@@ -10,6 +10,7 @@
     "ActionResultDialogTranslation (type)",
     "ActionResultDialogTranslationSchema (const)",
     "AddFieldOperation (const)",
+    "AddressedPageComponentContext (interface)",
     "AdvancedAuthConfig (type)",
     "AdvancedAuthConfigSchema (const)",
     "AnalyzerConfig (type)",
@@ -834,6 +835,7 @@
     "translateObject (function)",
     "translatePage (function)",
     "translateView (function)",
-    "validationMessageTranslationKey (function)"
+    "validationMessageTranslationKey (function)",
+    "walkAddressedPageComponents (function)"
   ]
 }

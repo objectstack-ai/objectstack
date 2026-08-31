@@ -7409,6 +7409,119 @@ export function summaryLine(counts, findingCount) {
 }
 
 /**
+ * Every window that speaks on the summary line, in RENDER order, with the
+ * lead-in phrase that opens its clause.
+ *
+ * The list is the segmentation: a window's clause runs from its own anchor to
+ * whichever other anchor comes next in the rendered string. Two properties are
+ * required of every entry and both are pinned as cases (`summaryClause:` in the
+ * self-test), because the extractor is silently wrong rather than loud if
+ * either lapses:
+ *
+ *   UNIQUE   — the anchor occurs EXACTLY ONCE in the rendered line, under every
+ *              shape of `counts`. An anchor that can appear twice would hand a
+ *              case the wrong half of the sentence.
+ *   PRESENT  — the anchor is rendered UNCONDITIONALLY, never behind a flag. An
+ *              anchor that disappears when its window has nothing to say makes
+ *              its clause collapse into the previous window's, which is the
+ *              defect this whole mechanism removes.
+ *
+ * ⚠️ Adding a window to `summaryLine`? Add it here too, in render position.
+ * Skipping this does not break loudly — the new clause is simply absorbed into
+ * the window above it, and that window's cases start passing on text it never
+ * wrote. The `summaryClause: the declared order IS the rendered order` case is
+ * what catches a misplacement; the coverage case is what catches an omission.
+ */
+export const SUMMARY_CLAUSE_ANCHORS = [
+  ['head', 'check-half-states: swept '],
+  ['h8Window', "H8's merged window is a TIME cap of "],
+  ['h22Read', 'H22 read '],
+  ['h22Window', "H22's closed-card window is a"],
+  ['h23Read', 'H23 read '],
+  ['h23Window', "H23's commit window is a"],
+  ['openListings', 'The open listings (H1–H18 inventory, H13 unscoped pass, open PRs) is an '],
+  ['h17Holds', 'Hold comments read on '],
+  ['h14Fallback', '`Blocked-by:` comment fallback read on '],
+  ['h9Restart', '`Restart-when:` hold comments read on '],
+  ['h19Blockers', 'Blocker liveness (H19): '],
+  ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
+  ['h32Seats', 'Seat liveness (H32): '],
+  ['h35GatePatrol', 'Gate-removal patrol (H35): '],
+  ['h36SharedFiles', 'Shared-file holds (H36): '],
+  ['h37Folds', 'Family folds (H37): '],
+  ['reportOnly', 'Report-only: '],
+];
+
+/**
+ * ONE window's clause, cut out of a rendered summary line (#13629).
+ *
+ * `summaryLine` returns a single sentence carrying every pass's disclosure, so
+ * `summary.includes(phrase)` is answered by the WHOLE line: any window's clause
+ * can satisfy any window's case. That was exact while H8 was the only speaker
+ * (#13499) and became a check that cannot fail the moment #13606 put four more
+ * clauses beside it — the positive case "a completed window says the horizon
+ * was reached" kept passing with H8's own disclosure deleted outright, because
+ * a NEIGHBOUR said it. #13628 measured the other direction the hard way: the
+ * matching negative case went red on a truncated H8 window because H22's
+ * healthy clause standing beside it carried the phrase.
+ *
+ * #13628 held the line with a naming convention — one phrase per speaker, see
+ * `describeWindowBound`'s "boundary reached" — which keeps today's cases
+ * falsifiable but is a convention, and the next author reaching for the obvious
+ * word retires a check silently. This is the structural half: assert on the
+ * extraction and a case can only be satisfied by the window it names, whatever
+ * words the neighbours choose.
+ *
+ * ⚠️ Two failure modes, deliberately NOT symmetric:
+ *
+ *   unknown KEY     -> throws. An author error, and there is no run in which it
+ *                      is correct to continue: silently returning '' would show
+ *                      up as an ordinary red case whose message names a phrase
+ *                      rather than the typo, so the loud abort is cheaper. It
+ *                      can only fire while writing a case, never mid-ablation
+ *                      (an ablation edits `summaryLine`, never these keys).
+ *   missing ANCHOR  -> returns ''. This is the ABLATION path and it must never
+ *                      throw: deleting one window's clause has to leave every
+ *                      OTHER window's cases running and green, and a throw
+ *                      inside a `t()` argument aborts the whole suite (see the
+ *                      row-wrapper note in `selfTest`). '' satisfies no positive
+ *                      `.includes`, so the ablated window's own cases go red —
+ *                      which is exactly the acceptance this card was cut for.
+ *
+ * ⚠️ '' also satisfies every NEGATIVE case vacuously, so a negative alone
+ * cannot prove a clause is present. That is what the per-window presence
+ * controls (`summaryClause: <key> renders its own clause`) are for — they are
+ * the leg that goes red when a window stops speaking at all.
+ *
+ * @param {string} summary a rendered `summaryLine`
+ * @param {string} key a key from `SUMMARY_CLAUSE_ANCHORS`
+ * @returns {string} that window's clause, or '' when it did not speak
+ */
+export function summaryClause(summary, key) {
+  const line = String(summary ?? '');
+  const entry = SUMMARY_CLAUSE_ANCHORS.find(([k]) => k === key);
+  if (!entry) {
+    throw new Error(
+      `summaryClause: unknown window key ${JSON.stringify(key)} — ` +
+        `declare it in SUMMARY_CLAUSE_ANCHORS (known: ${SUMMARY_CLAUSE_ANCHORS.map(([k]) => k).join(', ')})`
+    );
+  }
+  const start = line.indexOf(entry[1]);
+  if (start < 0) return '';
+  // The clause ends where the NEXT speaker begins. Computed by scanning every
+  // other anchor rather than by taking the next one in declaration order, so a
+  // neighbour that is itself absent (the ablation case) widens this clause to
+  // the following speaker instead of truncating it to nothing.
+  let end = line.length;
+  for (const [otherKey, otherAnchor] of SUMMARY_CLAUSE_ANCHORS) {
+    if (otherKey === key) continue;
+    const at = line.indexOf(otherAnchor);
+    if (at > start && at < end) end = at;
+  }
+  return line.slice(start, end);
+}
+
+/**
  * The H17 section, in either medium — one builder so the two renderers can
  * never drift on WHAT the index says, only on how it is marked up.
  *
@@ -10404,6 +10517,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  // -- Summary-disclosure cases go through THIS, never through the raw line ---
+  //
+  // `summaryLine` is one sentence carrying every window's disclosure, so a bare
+  // `summaryLine(...).includes(phrase)` asks "did ANY window say this" when the
+  // case name promises "did H8 say this". #13628 measured both directions of
+  // the resulting defect: a neighbour's clause silently SATISFIED a positive
+  // case (which would keep passing with the named window's disclosure deleted
+  // outright) and silently BROKE a negative one (red, blaming the wrong
+  // window). `saidBy` cuts the named window's own clause out first, so a case
+  // can only be answered by the speaker it names — see `summaryClause`.
+  //
+  // ⚠️ The two whole-line cases below that do NOT go through this are
+  // deliberate and marked where they sit: the sentence-terminal `endsWith`
+  // contract, and the one case asserting no clause ANYWHERE prints `undefined`.
+  // Both are claims about the assembled sentence rather than about a window.
+  const saidBy = (key, line) => summaryClause(line, key);
   const issue = (labels, assignees = [], body = '', title = '') => ({
     labels: labels.map((name) => ({ name })),
     assignees: assignees.map((login) => ({ login })),
@@ -11249,14 +11378,14 @@ function selfTest() {
 
   // The summary line's H22 clause — a pass that read nothing must not read the
   // same as a board with no residue (#4690), so the count is always stated.
-  t('summary: the H22 clause states what the closed pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('H22 read 200 recently-closed issue(s)'), true);
-  t('summary: an absent closed count degrades to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H22 read 0 recently-closed'), true);
+  t('summary: the H22 clause states what the closed pass read', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0)).includes('H22 read 200 recently-closed issue(s)'), true);
+  t('summary: an absent closed count degrades to 0, never to undefined', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('H22 read 0 recently-closed'), true);
   // …and when a floor is in force the line SAYS so: "read 200" with a floor
   // silently applied would overstate what was judged, which is the same
   // unread-reads-as-clean defect the count itself exists to prevent.
-  t('summary: a floored pass names the floor date', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('only cards closed on/after 2026-08-28 are judged'), true);
-  t('summary: …and says the earlier closures are not a reading about them', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0).includes('NOT a reading about them'), true);
-  t('summary: an unfloored pass adds no floor clause', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('are judged'), false);
+  t('summary: a floored pass names the floor date', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('only cards closed on/after 2026-08-28 are judged'), true);
+  t('summary: …and says the earlier closures are not a reading about them', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('NOT a reading about them'), true);
+  t('summary: an unfloored pass adds no floor clause', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0)).includes('are judged'), false);
 
   // -- H23: the COMMIT-MESSAGE surface (#10942) -------------------------------
   //
@@ -11358,14 +11487,14 @@ function selfTest() {
   // The summary line's H23 clause — with a yield of ~6 in 1,546 a quiet row is
   // the NORMAL reading, so the coverage numbers are the only thing separating a
   // read surface from an unread one (#4690).
-  t('summary: the H23 clause states what the commit pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('H23 read 300 squash commit message(s)'), true);
-  t('summary: …and the binding totals a promotion decision would need', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
+  t('summary: the H23 clause states what the commit pass read', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0)).includes('H23 read 300 squash commit message(s)'), true);
+  t('summary: …and the binding totals a promotion decision would need', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0)).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
   // #13606 — H23's boundary is a TIME cap now, so the phrase this case used to
   // pin ('invisible by design', which stated a boundary without ever saying what
   // bounded it) no longer exists. The case keeps its subject — the summary must
   // state the window boundary — against the disclosure that replaced it.
-  t('summary: …and states the window boundary', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitPages: 4 }, 0).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s), read in 4 page(s)`), true);
-  t('summary: absent H23 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H23 read 0 squash commit message(s)'), true);
+  t('summary: …and states the window boundary', saidBy('h23Window', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitPages: 4 }, 0)).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s), read in 4 page(s)`), true);
+  t('summary: absent H23 counts degrade to 0, never to undefined', saidBy('h23Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('H23 read 0 squash commit message(s)'), true);
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
   const hold = (body) => issue(['pm:on-hold'], [], body);
@@ -11817,10 +11946,10 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     fallbackProbed, fallbackCandidates,
   });
-  t('summary: the fallback pair is reported', summaryLine(fbCounts(24, 26), 3).includes('comment fallback read on 24 of 26 candidate(s)'), true);
-  t('summary: a shortfall announces the suspended stale direction', summaryLine(fbCounts(24, 26), 3).includes('stale direction is SUSPENDED'), true);
-  t('summary: a complete pass says nothing about suspension', summaryLine(fbCounts(26, 26), 3).includes('SUSPENDED'), false);
-  t('summary: absent fallback counts still render a sentence', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('comment fallback read on 0 of 0'), true);
+  t('summary: the fallback pair is reported', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('comment fallback read on 24 of 26 candidate(s)'), true);
+  t('summary: a shortfall announces the suspended stale direction', saidBy('h14Fallback', summaryLine(fbCounts(24, 26), 3)).includes('stale direction is SUSPENDED'), true);
+  t('summary: a complete pass says nothing about suspension', saidBy('h14Fallback', summaryLine(fbCounts(26, 26), 3)).includes('SUSPENDED'), false);
+  t('summary: absent fallback counts still render a sentence', saidBy('h14Fallback', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('comment fallback read on 0 of 0'), true);
 
   // -- H15: oldest unclaimed `pm:blocking` (selection-order visibility) -------
   const blockingCard = (number, { assignees = [], created = daysAgo(3) } = {}) => ({
@@ -12079,18 +12208,18 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     blockerResolved, blockerTargets,
   });
-  t('summary: the H19 coverage pair is reported', summaryLine(btCounts(11, 12), 1).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
-  t('summary: …and says the unit is DISTINCT targets, not per-card edges', summaryLine(btCounts(11, 12), 1).includes('distinct'), true);
-  t('summary: …scoped to the population H19 judges', summaryLine(btCounts(11, 12), 1).includes('named by open `pm:blocked` card(s)'), true);
+  t('summary: the H19 coverage pair is reported', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('targets resolved on 11 of 12 distinct `Blocked-by:` target(s)'), true);
+  t('summary: …and says the unit is DISTINCT targets, not per-card edges', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('distinct'), true);
+  t('summary: …scoped to the population H19 judges', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('named by open `pm:blocked` card(s)'), true);
   // The shortfall clause still points at the rows that carry the gap — but it
   // no longer PROMISES they survive, it says what makes them survive (the
   // unjudged sort band). The bare "never dropped" wording was measurably false
   // on 2026-08-25T02:08Z; see `UNJUDGED_MARKER`.
-  t('summary: an H19 shortfall points at the rows that carry it', summaryLine(btCounts(11, 12), 1).includes("unresolved target(s) are named on their own cards' rows"), true);
-  t('summary: …and names the mechanism instead of promising the outcome', summaryLine(btCounts(11, 12), 1).includes('sort ABOVE the size trim'), true);
-  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts(12, 12), 1).includes('unresolved target(s) are named'), false);
-  t('summary: absent H19 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('resolved on 0 of 0 distinct'), true);
-  t('summary: …and the H19 clause never prints the string undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('undefined'), false);
+  t('summary: an H19 shortfall points at the rows that carry it', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes("unresolved target(s) are named on their own cards' rows"), true);
+  t('summary: …and names the mechanism instead of promising the outcome', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('sort ABOVE the size trim'), true);
+  t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('unresolved target(s) are named'), false);
+  t('summary: absent H19 counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('resolved on 0 of 0 distinct'), true);
+  t('summary: …and the H19 clause never prints the string undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('undefined'), false);
   t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
 
   // -- H20: a `pm:dispatched` card nobody is working (#10312) ----------------
@@ -12274,17 +12403,17 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     dispatchRefRead, dispatchRefTargets,
   });
-  t('summary: the H20 coverage pair is reported', summaryLine(refCounts(4, 5), 1).includes('remote branch read on 4 of 5 distinct claimed branch(es)'), true);
-  t('summary: …scoped to the population H20 judges', summaryLine(refCounts(4, 5), 1).includes('named by open `pm:dispatched` card(s)'), true);
-  t('summary: …and names the threshold that bounded it', summaryLine(refCounts(4, 5), 1).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
-  t('summary: an H20 shortfall points at the rows that carry it', summaryLine(refCounts(4, 5), 1).includes('each unread branch is named on its own card\'s row, never dropped'), true);
-  t('summary: a complete H20 pass adds no shortfall clause', summaryLine(refCounts(5, 5), 1).includes('each unread branch'), false);
-  t('summary: absent H20 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('remote branch read on 0 of 0 distinct'), true);
+  t('summary: the H20 coverage pair is reported', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('remote branch read on 4 of 5 distinct claimed branch(es)'), true);
+  t('summary: …scoped to the population H20 judges', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('named by open `pm:dispatched` card(s)'), true);
+  t('summary: …and names the threshold that bounded it', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
+  t('summary: an H20 shortfall points at the rows that carry it', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('each unread branch is named on its own card\'s row, never dropped'), true);
+  t('summary: a complete H20 pass adds no shortfall clause', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('each unread branch'), false);
+  t('summary: absent H20 counts degrade to 0, never to undefined', saidBy('h20Dispatch', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('remote branch read on 0 of 0 distinct'), true);
   // The pair is H27's coverage number too, and a reader seeing a quiet H27
   // needs to know that — one read serves both rows.
-  t('summary: the pair is declared as serving BOTH rows', summaryLine(refCounts(5, 5), 1).includes('Dispatch liveness (H20 + H27)'), true);
-  t('summary: …naming H27\'s threshold', summaryLine(refCounts(5, 5), 1).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
-  t('summary: …and that it costs no request of its own', summaryLine(refCounts(5, 5), 1).includes('costs no request of its own'), true);
+  t('summary: the pair is declared as serving BOTH rows', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('Dispatch liveness (H20 + H27)'), true);
+  t('summary: …naming H27\'s threshold', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
+  t('summary: …and that it costs no request of its own', saidBy('h20Dispatch', summaryLine(refCounts(5, 5), 1)).includes('costs no request of its own'), true);
 
   t('summary: the report-only contract still ends the sentence after H20', summaryLine(refCounts(5, 5), 1).endsWith('not a gate verdict.'), true);
 
@@ -12814,40 +12943,127 @@ function selfTest() {
   t('markdown: an H19 row links the card it names', renderMarkdown([h19Row], counts).includes('- **H19** [#10112](https://example.test/10112)'), true);
   t('markdown: …and is NOT sorted above the loud band', renderMarkdown([h19Row, loudRow], counts).indexOf('#900') < renderMarkdown([h19Row, loudRow], counts).indexOf('#10112'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
-  t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
-  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', summaryLine(counts, 0).includes('unscoped pass (H13–H15, H18)'), true);
+  t('summaryLine: names what was READ, not only what was found', saidBy('head', summaryLine(counts, 0)).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', saidBy('head', summaryLine(counts, 0)).includes('unscoped pass (H13–H15, H18)'), true);
   // H16's pair is the row-granular half of the same #4690 property: a detail
   // pass that read NOTHING must not be indistinguishable from a board with no
   // conflicts, so the sentence carries `read X of Y` rather than only findings.
-  t('summaryLine: reports the H16 detail reads, not only the H16 findings', summaryLine(counts, 0).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
-  t('summaryLine: …and a partial read says so', summaryLine({ ...counts, conflictProbed: 1 }, 0).includes('read on 1 of 2'), true);
+  t('summaryLine: reports the H16 detail reads, not only the H16 findings', saidBy('head', summaryLine(counts, 0)).includes('merge state read on 2 of 2 H16 candidate(s)'), true);
+  t('summaryLine: …and a partial read says so', saidBy('head', summaryLine({ ...counts, conflictProbed: 1 }, 0)).includes('read on 1 of 2'), true);
   // Counts assembled without the pair still render a sentence, never `undefined`.
-  t('summaryLine: absent H16 counts degrade to 0, never to undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('read on 0 of 0'), true);
-  t('summaryLine: …and never prints the string undefined', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0).includes('undefined'), false);
+  t('summaryLine: absent H16 counts degrade to 0, never to undefined', saidBy('head', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0)).includes('read on 0 of 0'), true);
+  t('summaryLine: …and never prints the string undefined', saidBy('head', summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0)).includes('undefined'), false);
+
+  // -- The clause extractor every summary case above rides on (#13629) --------
+  //
+  // `saidBy` is only as good as the anchor table, and a wrong table is SILENT:
+  // a mis-ordered entry hands a case its neighbour's text, an omitted window
+  // dissolves into the clause above it. Neither shows up as a red anywhere
+  // else, so the table's two required properties are pinned here directly.
+  //
+  // The PARTITION case is the load-bearing one and covers both at once: if the
+  // per-window clause lengths sum to the whole line, then every character
+  // belongs to exactly one declared window — no window is missing from the
+  // table (that would leave a gap) and no clause reaches into another (that
+  // would overlap). Run over two renderings deliberately: `bareLine` is the
+  // shape where every optional sub-clause is absent, `richLine` the shape where
+  // all of them fire, and a window that speaks only in one of the two is the
+  // exact failure the PRESENT property forbids.
+  const bareLine = summaryLine({}, 0);
+  const richLine = summaryLine({
+    repo: 'o/r', issues: 3, unscoped: 4, prs: 2, merged: 5,
+    closed: 200, closedFloor: '2026-08-28', closedPages: 12, closedWindowTruncated: true,
+    mergedPages: 12, mergedWindowTruncated: true,
+    commits: 300, commitBindings: 51, commitBindingMessages: 44, commitPages: 12, commitWindowTruncated: true,
+    openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'],
+    holdProbed: 3, holdCandidates: 9, fallbackProbed: 24, fallbackCandidates: 26,
+    restartProbed: 2, restartCandidates: 7, blockerResolved: 25, blockerTargets: 28,
+    crossRepoProbed: 2, crossRepoUnreadable: 1, dispatchRefRead: 4, dispatchRefTargets: 5,
+    seatMarkersRead: 2, seatCandidates: 6, gateRemovals: 7, eventPages: 24,
+    gate_unjudgeable: 5, gate_undated: 1, eventWindowTruncated: true,
+    sharedFileProbed: 17, sharedFileCandidates: 19,
+    liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0,
+  }, 1);
+  const clauseTotal = (line) => SUMMARY_CLAUSE_ANCHORS.reduce((n, [k]) => n + saidBy(k, line).length, 0);
+  t('summaryClause: the clauses PARTITION a bare line — no gap, no overlap', clauseTotal(bareLine), bareLine.length);
+  t('summaryClause: …and partition a line where every optional clause fires', clauseTotal(richLine), richLine.length);
+  const occurrences = (hay, needle) => hay.split(needle).length - 1;
+  t('summaryClause: every anchor occurs EXACTLY ONCE in a bare line', SUMMARY_CLAUSE_ANCHORS.every(([, a]) => occurrences(bareLine, a) === 1), true);
+  t('summaryClause: …and exactly once in a fully-loaded line', SUMMARY_CLAUSE_ANCHORS.every(([, a]) => occurrences(richLine, a) === 1), true);
+  t('summaryClause: the declared order IS the rendered order', SUMMARY_CLAUSE_ANCHORS.map(([, a]) => richLine.indexOf(a)).every((at, i, all) => i === 0 || at > all[i - 1]), true);
+  // PRESENT: every window speaks on every run. A clause that appears only when
+  // its counts are interesting would be absorbed by its neighbour on the runs
+  // where it is silent, and its cases would then read that neighbour's text.
+  for (const [key, anchor] of SUMMARY_CLAUSE_ANCHORS) {
+    t(`summaryClause: ${key} opens its own clause on every run`, saidBy(key, bareLine).startsWith(anchor) && saidBy(key, richLine).startsWith(anchor), true);
+  }
+  // The ablation contract: a window whose clause is gone yields '' rather than
+  // throwing, so ITS cases go red while every other window's keep running. A
+  // throw inside a `t()` argument aborts the suite (see the wrapper note above)
+  // and would make the per-window ablation this card was cut for unreadable.
+  const withoutClause = (line, key) => line.replace(saidBy(key, line), '');
+  t('summaryClause: an absent clause extracts as the empty string, never a throw', saidBy('h8Window', withoutClause(richLine, 'h8Window')), '');
+  t('summaryClause: …so the ablated window\'s own positive case goes red', saidBy('h8Window', withoutClause(richLine, 'h8Window')).includes('TIME cap'), false);
+  t('summaryClause: …while its neighbours keep answering for themselves', saidBy('h22Read', withoutClause(richLine, 'h8Window')).includes('H22 read 200 recently-closed'), true);
+  t('summaryClause: an unknown key is an author error and throws', (() => { try { saidBy('h99Nope', richLine); return false; } catch { return true; } })(), true);
+  // ⛔ THE DEFECT ITSELF, pinned in both directions (#13629). These two cases
+  // are the whole reason the extractor exists, so they assert against a line
+  // that has been DOCTORED to make a neighbour speak H8's words — which is
+  // precisely what a future author reaching for the obvious phrase would do.
+  const h8Truncated = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true, closed: 200 }, 0);
+  const neighbourSpeaks = h8Truncated.replace('H22 read ', 'H22 read (horizon reached) ');
+  t('#13629 loud direction: a neighbour saying "horizon reached" DOES reach the whole line', neighbourSpeaks.includes('horizon reached'), true);
+  t('#13629: …but H8\'s truncated clause still does not claim it', saidBy('h8Window', neighbourSpeaks).includes('horizon reached'), false);
+  // The silent direction, and the worse of the two: H8's own disclosure deleted
+  // outright while a neighbour carries the phrase. Whole-line, the positive
+  // case passes and pins nothing; scoped, it goes red as it must.
+  const h8Complete = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, mergedPages: 9, mergedWindowTruncated: false, closed: 200 }, 0);
+  const h8Deleted = withoutClause(h8Complete, 'h8Window').replace('H22 read ', 'H22 read (horizon reached) ');
+  t('#13629 silent direction: the whole line still says it, from the neighbour', h8Deleted.includes('horizon reached'), true);
+  t('#13629: …and the scoped case refuses to be satisfied by that', saidBy('h8Window', h8Deleted).includes('horizon reached'), false);
+  // Two windows legitimately share a phrase today ("never invent one", H36 and
+  // H37), which is the convention-only defence #13628 was left holding. Scoped,
+  // each answers for itself no matter how many neighbours reuse the words.
+  t('#13629: a phrase two windows share is present twice on the line', occurrences(richLine, 'never invent one'), 2);
+  t('#13629: …yet H36 answers only for H36', saidBy('h36SharedFiles', richLine).includes('never invent one'), true);
+  t('#13629: …and H37 only for H37', saidBy('h37Folds', richLine).includes('never invent one'), true);
+  // Kept whole-line ON PURPOSE: this is a claim about the assembled sentence,
+  // not about any one window, and scoping it would only weaken it. It replaces
+  // the whole-line reach the per-window `…never to undefined` cases gave up
+  // when they were scoped — each of those now speaks only for its own clause,
+  // so without this nothing would be watching the gaps between them.
+  //
+  // ⚠️ Built on `optionalsAbsent`, NOT on `bareLine`: the `?? 0` degradation
+  // contract covers the OPTIONAL counts, while `repo`/`issues`/`unscoped`/
+  // `prs`/`merged` are required by the docblock and ungated by design.
+  // `summaryLine({})` therefore does print `undefined`, from those five and
+  // only those five — a caller violating the signature, not a lapsed guard.
+  const optionalsAbsent = summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1 }, 0);
+  t('summaryLine: no clause ANYWHERE prints the string undefined', optionalsAbsent.includes('undefined') || richLine.includes('undefined'), false);
 
   // -- The H19 coverage clause, and the promise it used to make falsely -------
   const btCounts2 = (blockerResolved, blockerTargets, extra = {}) => ({ ...counts, blockerResolved, blockerTargets, ...extra });
-  t('summary: a complete H19 pass adds no shortfall clause', summaryLine(btCounts2(12, 12), 1).includes('unresolved target(s) are named'), false);
-  t('summary: an H19 shortfall counts the unresolved targets', summaryLine(btCounts2(25, 28), 1).includes('the 3 unresolved target(s) are named on their own cards\' rows'), true);
-  t('summary: …and promises the TRIM cannot drop them, which is the fixable half', summaryLine(btCounts2(25, 28), 1).includes('sort ABOVE the size trim'), true);
-  t('summary: …and cites the sweep on which the old promise was false', summaryLine(btCounts2(25, 28), 1).includes('2026-08-25T02:08Z'), true);
-  t('summary: …and no longer makes the bare "never dropped" claim for H19', summaryLine(btCounts2(25, 28), 1).includes('each unresolved target is named on its own card\'s row, never dropped'), false);
+  t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts2(12, 12), 1)).includes('unresolved target(s) are named'), false);
+  t('summary: an H19 shortfall counts the unresolved targets', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('the 3 unresolved target(s) are named on their own cards\' rows'), true);
+  t('summary: …and promises the TRIM cannot drop them, which is the fixable half', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('sort ABOVE the size trim'), true);
+  t('summary: …and cites the sweep on which the old promise was false', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('2026-08-25T02:08Z'), true);
+  t('summary: …and no longer makes the bare "never dropped" claim for H19', saidBy('h19Blockers', summaryLine(btCounts2(25, 28), 1)).includes('each unresolved target is named on its own card\'s row, never dropped'), false);
 
   // -- The cross-repo reachability pair (#11218) ------------------------------
   const xCounts = (crossRepoProbed, crossRepoUnreadable) => btCounts2(25, 28, { crossRepoProbed, crossRepoUnreadable });
-  t('summary: cross-repo probes are reported', summaryLine(xCounts(2, 1), 1).includes('measured directly on 2 sibling repo(s)'), true);
-  t('summary: …naming how many refused', summaryLine(xCounts(2, 1), 1).includes('1 do(es) not answer this credential'), true);
-  t('summary: …and that a re-run will not help', summaryLine(xCounts(2, 1), 1).includes('no re-run'), true);
-  t('summary: no probes taken -> no cross-repo clause at all', summaryLine(xCounts(0, 0), 1).includes('sibling repo(s)'), false);
-  t('summary: absent cross-repo counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('undefined'), false);
+  t('summary: cross-repo probes are reported', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('measured directly on 2 sibling repo(s)'), true);
+  t('summary: …naming how many refused', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('1 do(es) not answer this credential'), true);
+  t('summary: …and that a re-run will not help', saidBy('h19Blockers', summaryLine(xCounts(2, 1), 1)).includes('no re-run'), true);
+  t('summary: no probes taken -> no cross-repo clause at all', saidBy('h19Blockers', summaryLine(xCounts(0, 0), 1)).includes('sibling repo(s)'), false);
+  t('summary: absent cross-repo counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine(counts, 0)).includes('undefined'), false);
 
   // -- H32's seat coverage pair (#11706) -------------------------------------
   const seatCounts = (seatMarkersRead, seatCandidates) => ({ ...counts, seatMarkersRead, seatCandidates });
-  t('summary: the H32 seat pair is reported', summaryLine(seatCounts(6, 6), 1).includes('marker thread read on 6 of 6 HELD seat post(s)'), true);
-  t('summary: …scoped to lanes countable on this board', summaryLine(seatCounts(6, 6), 1).includes('countable on THIS board'), true);
-  t('summary: …and says a sibling-lane seat is out of scope', summaryLine(seatCounts(6, 6), 1).includes("a seat held for a sibling repo's lane is out of scope"), true);
-  t('summary: …and that an unread thread declines rather than accuses', summaryLine(seatCounts(2, 6), 1).includes('decline to judge that seat rather than accuse it'), true);
-  t('summary: absent H32 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('marker thread read on 0 of 0'), true);
+  t('summary: the H32 seat pair is reported', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes('marker thread read on 6 of 6 HELD seat post(s)'), true);
+  t('summary: …scoped to lanes countable on this board', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes('countable on THIS board'), true);
+  t('summary: …and says a sibling-lane seat is out of scope', saidBy('h32Seats', summaryLine(seatCounts(6, 6), 1)).includes("a seat held for a sibling repo's lane is out of scope"), true);
+  t('summary: …and that an unread thread declines rather than accuses', saidBy('h32Seats', summaryLine(seatCounts(2, 6), 1)).includes('decline to judge that seat rather than accuse it'), true);
+  t('summary: absent H32 counts degrade to 0, never to undefined', saidBy('h32Seats', summaryLine(counts, 0)).includes('marker thread read on 0 of 0'), true);
 
   // -- The dispatch-liveness pair was COMPUTED and never forwarded -----------
   //
@@ -12858,7 +13074,7 @@ function selfTest() {
   // cache is the only way to produce. Pinned as the CONTRACT the assembly owes,
   // so a future edit that drops the keys again fails here rather than in the
   // anchor body six hours later.
-  t('summary: the H20/H27 pair is a real reading, not a constant 0 of 0', summaryLine(refCounts(4, 5), 1).includes('read on 0 of 0 distinct claimed'), false);
+  t('summary: the H20/H27 pair is a real reading, not a constant 0 of 0', saidBy('h20Dispatch', summaryLine(refCounts(4, 5), 1)).includes('read on 0 of 0 distinct claimed'), false);
   t('summary: SWEEP_COUNT_KEYS names every count the summary consumes', SWEEP_COUNT_KEYS.includes('dispatchRefTargets') && SWEEP_COUNT_KEYS.includes('dispatchRefRead'), true);
   t('summary: …including the pairs added since', SWEEP_COUNT_KEYS.includes('crossRepoProbed') && SWEEP_COUNT_KEYS.includes('seatCandidates'), true);
 
@@ -13030,13 +13246,13 @@ function selfTest() {
   t('H17 budget: an over-cap index announces the omission', overflow.includes('3 further card(s) omitted'), true);
   t('H17 budget: …and renders exactly the cap', overflow.split('\n').filter((l) => /^- \[?#?\d/.test(l)).length, H17_INDEX_ROW_CAP);
   // The summary line's H17 half, mirroring the H16 `read X of Y` discipline.
-  t('summaryLine: reports the H17 hold-comment reads', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
-  t('summaryLine: …and a partial hold read says so', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0).includes('read on 12 of 79'), true);
-  t('summaryLine: absent H17 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('Hold comments read on 0 of 0'), true);
+  t('summaryLine: reports the H17 hold-comment reads', saidBy('h17Holds', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0)).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
+  t('summaryLine: …and a partial hold read says so', saidBy('h17Holds', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0)).includes('read on 12 of 79'), true);
+  t('summaryLine: absent H17 counts degrade to 0, never to undefined', saidBy('h17Holds', summaryLine(counts, 0)).includes('Hold comments read on 0 of 0'), true);
   // The summary line's H9 half (#10403), same `read X of Y` discipline.
-  t('summaryLine: reports the H9 restart-comment reads', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
-  t('summaryLine: …and a partial restart read says so', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
-  t('summaryLine: absent H9 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('`Restart-when:` hold comments read on 0 of 0'), true);
+  t('summaryLine: reports the H9 restart-comment reads', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0)).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
+  t('summaryLine: …and a partial restart read says so', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0)).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
+  t('summaryLine: absent H9 counts degrade to 0, never to undefined', saidBy('h9Restart', summaryLine(counts, 0)).includes('`Restart-when:` hold comments read on 0 of 0'), true);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.
@@ -13704,14 +13920,14 @@ function selfTest() {
   // measurement nobody can act on, so both directions are pinned on the one
   // line every run ends with.
   const h8win = (extra) => summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 900, ...extra }, 0);
-  t('H8 summary: the window is stated as a TIME cap', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes(`TIME cap of ${MERGED_WINDOW_DAYS} day(s)`), true);
-  t('H8 summary: …with the pages it actually cost', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('read in 9 page(s)'), true);
-  t('H8 summary: a completed window says the horizon was reached', h8win({ mergedPages: 9, mergedWindowTruncated: false }).includes('horizon reached'), true);
+  t('H8 summary: the window is stated as a TIME cap', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes(`TIME cap of ${MERGED_WINDOW_DAYS} day(s)`), true);
+  t('H8 summary: …with the pages it actually cost', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes('read in 9 page(s)'), true);
+  t('H8 summary: a completed window says the horizon was reached', saidBy('h8Window', h8win({ mergedPages: 9, mergedWindowTruncated: false })).includes('horizon reached'), true);
   // ⛔ The inversion this repair removed: a ceiling-bound pass is a page cap
   // again and must never read as a completed time window (#4690).
-  t('H8 summary: a ceiling-bound window says TRUNCATED', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('TRUNCATED'), true);
-  t('H8 summary: …and does NOT claim the horizon was reached', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('horizon reached'), false);
-  t('H8 summary: …and says a delivery past it is invisible', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('is invisible'), true);
+  t('H8 summary: a ceiling-bound window says TRUNCATED', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('TRUNCATED'), true);
+  t('H8 summary: …and does NOT claim the horizon was reached', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('horizon reached'), false);
+  t('H8 summary: …and says a delivery past it is invisible', saidBy('h8Window', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true })).includes('is invisible'), true);
 
   // -- The remaining count-shaped windows, converted (#13606) ----------------
   //
@@ -13821,21 +14037,21 @@ function selfTest() {
   // never printed is a measurement nobody can act on.
   const win13606 = (extra) =>
     summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1, closed: 5, ...extra }, 0);
-  t('H22 summary: the window is stated as a TIME cap', win13606({ closedPages: 6 }).includes(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s)`), true);
-  t('H22 summary: …and names the divisor honestly as ACTIVITY', win13606({ closedPages: 6 }).includes('consumed by closed-issue ACTIVITY'), true);
-  t('H22 summary: …and contrasts it with the closure rate it read as', win13606({ closedPages: 6 }).includes('not by closures'), true);
-  t('H22 summary: a completed window says the boundary was reached', win13606({ closedPages: 6 }).includes('boundary reached'), true);
-  t('H22 summary: a ceiling-bound window says TRUNCATED', win13606({ closedPages: 12, closedWindowTruncated: true }).includes('⛔ TRUNCATED'), true);
-  t('H23 summary: the commit window is stated as a TIME cap', win13606({ commitPages: 4 }).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s)`), true);
-  t('H23 summary: a ceiling-bound commit window says TRUNCATED', win13606({ commitPages: 12, commitWindowTruncated: true }).includes(`${COMMIT_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
-  t('open summary: a complete inventory says so', win13606({ openListingPages: 11 }).includes('EXHAUSTIVE listing'), true);
-  t('open summary: …and claims the whole population', win13606({ openListingPages: 11 }).includes('the whole population'), true);
-  t('open summary: a ceiling-bound listing is NAMED on the line', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] }).includes('Ceiling-bound listing(s): listAllOpenIssues'), true);
-  t('open summary: …and says the inventory is a PREFIX', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] }).includes('PREFIXES, not populations'), true);
-  t('open summary: …and a complete pass says none of that', win13606({ openListingPages: 11 }).includes('Ceiling-bound listing(s)'), false);
+  t('H22 summary: the window is stated as a TIME cap', saidBy('h22Window', win13606({ closedPages: 6 })).includes(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s)`), true);
+  t('H22 summary: …and names the divisor honestly as ACTIVITY', saidBy('h22Window', win13606({ closedPages: 6 })).includes('consumed by closed-issue ACTIVITY'), true);
+  t('H22 summary: …and contrasts it with the closure rate it read as', saidBy('h22Window', win13606({ closedPages: 6 })).includes('not by closures'), true);
+  t('H22 summary: a completed window says the boundary was reached', saidBy('h22Window', win13606({ closedPages: 6 })).includes('boundary reached'), true);
+  t('H22 summary: a ceiling-bound window says TRUNCATED', saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true })).includes('⛔ TRUNCATED'), true);
+  t('H23 summary: the commit window is stated as a TIME cap', saidBy('h23Window', win13606({ commitPages: 4 })).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s)`), true);
+  t('H23 summary: a ceiling-bound commit window says TRUNCATED', saidBy('h23Window', win13606({ commitPages: 12, commitWindowTruncated: true })).includes(`${COMMIT_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
+  t('open summary: a complete inventory says so', saidBy('openListings', win13606({ openListingPages: 11 })).includes('EXHAUSTIVE listing'), true);
+  t('open summary: …and claims the whole population', saidBy('openListings', win13606({ openListingPages: 11 })).includes('the whole population'), true);
+  t('open summary: a ceiling-bound listing is NAMED on the line', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('Ceiling-bound listing(s): listAllOpenIssues'), true);
+  t('open summary: …and says the inventory is a PREFIX', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('PREFIXES, not populations'), true);
+  t('open summary: …and a complete pass says none of that', saidBy('openListings', win13606({ openListingPages: 11 })).includes('Ceiling-bound listing(s)'), false);
   // ⛔ No bare-number rendering of a capped pass: every truncated window must
   // carry the word, in every medium the summary feeds.
-  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(win13606({ closedPages: 12, closedWindowTruncated: true })), false);
+  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true }))), false);
   t('summary: all three converted windows ride the enumerated contract', ['closedPages', 'closedWindowTruncated', 'commitPages', 'commitWindowTruncated', 'openListingPages', 'openListingsTruncated'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
@@ -14393,16 +14609,16 @@ function selfTest() {
   // The summary line carries the residue, so a quiet section cannot read as
   // "the gate is watched" when most removals are structurally unwatchable.
   const gateCounts = { gateRemovals: 7, eventPages: 24, gate_unjudgeable: 5, gate_undated: 1 };
-  t('H35 summary: the removal count is reported', summaryLine(gateCounts, 1).includes('7 removal(s) of a gate-semantic label'), true);
-  t('H35 summary: …with the pages read', summaryLine(gateCounts, 1).includes('24 page(s) of the repo-wide issue-event stream'), true);
-  t('H35 summary: …and states it made no per-card fetch', summaryLine(gateCounts, 1).includes('no per-card timeline fetch'), true);
-  t('H35 summary: …and carries the unjudgeable residue', summaryLine(gateCounts, 1).includes('5 of them are UNJUDGEABLE'), true);
-  t('H35 summary: …and the undated count', summaryLine(gateCounts, 1).includes('1 more had no hang inside the window'), true);
-  t('H35 summary: a truncated window is announced, never silent', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('TRUNCATED'), true);
-  t('H35 summary: …and says a quiet section is a SHORT READ', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0).includes('short read, not a clean board'), true);
-  t('H35 summary: an untruncated window makes no such claim', summaryLine(gateCounts, 1).includes('TRUNCATED'), false);
+  t('H35 summary: the removal count is reported', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('7 removal(s) of a gate-semantic label'), true);
+  t('H35 summary: …with the pages read', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('24 page(s) of the repo-wide issue-event stream'), true);
+  t('H35 summary: …and states it made no per-card fetch', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('no per-card timeline fetch'), true);
+  t('H35 summary: …and carries the unjudgeable residue', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('5 of them are UNJUDGEABLE'), true);
+  t('H35 summary: …and the undated count', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('1 more had no hang inside the window'), true);
+  t('H35 summary: a truncated window is announced, never silent', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('TRUNCATED'), true);
+  t('H35 summary: …and says a quiet section is a SHORT READ', saidBy('h35GatePatrol', summaryLine({ ...gateCounts, eventWindowTruncated: true }, 0)).includes('short read, not a clean board'), true);
+  t('H35 summary: an untruncated window makes no such claim', saidBy('h35GatePatrol', summaryLine(gateCounts, 1)).includes('TRUNCATED'), false);
   // Absent counts degrade to 0, never to `undefined` — H32's pair does the same.
-  t('H35 summary: absent counts degrade to 0', summaryLine({}, 0).includes('0 removal(s) of a gate-semantic label'), true);
+  t('H35 summary: absent counts degrade to 0', saidBy('h35GatePatrol', summaryLine({}, 0)).includes('0 removal(s) of a gate-semantic label'), true);
 
   // -- H36 — cross-lane same-file holds (report-only patrol input, #12286) ---
   const h36pr = (number, opts = {}) => ({
@@ -14469,8 +14685,8 @@ function selfTest() {
   t('H36: zero candidates is a clean reading', h36DetailPassUnreadable(0, 0), false);
   t('H36: a partial read is a bounded gap, not a failure', h36DetailPassUnreadable(3, 1), false);
   // The coverage pair reaches the summary line, and degrades to 0.
-  t('H36 summary: the pair is reported', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0).includes('changed-file page read on 17 of 19 open PR(s)'), true);
-  t('H36 summary: …and states the miss-only direction', summaryLine({}, 0).includes('MISS a hold, never invent one'), true);
+  t('H36 summary: the pair is reported', saidBy('h36SharedFiles', summaryLine({ sharedFileProbed: 17, sharedFileCandidates: 19 }, 0)).includes('changed-file page read on 17 of 19 open PR(s)'), true);
+  t('H36 summary: …and states the miss-only direction', saidBy('h36SharedFiles', summaryLine({}, 0)).includes('MISS a hold, never invent one'), true);
   t('H36: both count keys ride the enumerated contract', SWEEP_COUNT_KEYS.includes('sharedFileCandidates') && SWEEP_COUNT_KEYS.includes('sharedFileProbed'), true);
   // The markdown medium renders an H36 row like every other finding row.
   t('markdown: an H36 row links the PR it names', renderMarkdown([[{ number: 100, html_url: 'https://example.test/100' }, 'H36', 'shares a file']], { repo: 'r', issues: 0, unscoped: 0, prs: 2, merged: 0 }).includes('- **H36** [#100](https://example.test/100)'), true);
@@ -14752,11 +14968,11 @@ function selfTest() {
   t('H37: a wide fold names the cap and counts the rest', h37row1(wide37, h37map(h37card(11678, ['pm:dispatched']), h37card(11671, ['pm:queue'])), new Map()).includes(`+${7 - H37_MEMBER_LIST_CAP} more`), true);
 
   // The coverage pair reaches the summary line, and degrades to 0.
-  t('H37 summary: the pair is reported', summaryLine({ liveFolds: 2, memberReadProbed: 38, memberReadCandidates: 40 }, 0).includes('member comment page read on 38 of 40'), true);
-  t('H37 summary: …and the fold count with it', summaryLine({ liveFolds: 2 }, 0).includes('2 live shared branch(es)'), true);
-  t('H37 summary: …stating the miss-only direction', summaryLine({}, 0).includes('never invent one'), true);
-  t('H37 summary: an all-failed pass is named as the transport', summaryLine({ liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0 }, 0).includes('NO member page was readable'), true);
-  t('H37 summary: …and 0 of 0 makes no such claim', summaryLine({}, 0).includes('NO member page was readable'), false);
+  t('H37 summary: the pair is reported', saidBy('h37Folds', summaryLine({ liveFolds: 2, memberReadProbed: 38, memberReadCandidates: 40 }, 0)).includes('member comment page read on 38 of 40'), true);
+  t('H37 summary: …and the fold count with it', saidBy('h37Folds', summaryLine({ liveFolds: 2 }, 0)).includes('2 live shared branch(es)'), true);
+  t('H37 summary: …stating the miss-only direction', saidBy('h37Folds', summaryLine({}, 0)).includes('never invent one'), true);
+  t('H37 summary: an all-failed pass is named as the transport', saidBy('h37Folds', summaryLine({ liveFolds: 1, memberReadCandidates: 40, memberReadProbed: 0 }, 0)).includes('NO member page was readable'), true);
+  t('H37 summary: …and 0 of 0 makes no such claim', saidBy('h37Folds', summaryLine({}, 0)).includes('NO member page was readable'), false);
   t('H37: all three count keys ride the enumerated contract', ['liveFolds', 'memberReadCandidates', 'memberReadProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   // The markdown medium renders an H37 row like every other finding row.
   t('markdown: an H37 row links the card it names', renderMarkdown([[{ number: 11680, html_url: 'https://example.test/11680' }, 'H37', 'member pointer without the label']], { repo: 'r', issues: 1, unscoped: 0, prs: 0, merged: 0 }).includes('- **H37** [#11680](https://example.test/11680)'), true);
@@ -14805,7 +15021,7 @@ function selfTest() {
   t('sweep repo: no env at all is the same as an empty one', resolveSweepRepo().repo, DEFAULT_SWEEP_REPO);
   // The sweep target rides into the rendered report, so a reader of a sibling
   // repo's anchor can see WHICH board was read (and a wrong one is legible).
-  t('sweep repo: the rendered summary names the swept repo', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0).includes('objectstack-ai/objectui'), true);
+  t('sweep repo: the rendered summary names the swept repo', saidBy('head', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0)).includes('objectstack-ai/objectui'), true);
 
   // -- The proxy route (#13544): a probe that answers on the BYPASSED route
   // -- answers about the wrong route, and its refusal reads as the container's
