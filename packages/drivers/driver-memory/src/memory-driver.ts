@@ -895,8 +895,13 @@ export class InMemoryDriver implements IDataDriver {
    *
    * A missing id follows `update`'s OWN existing contract — never a third
    * posture: refuse the WHOLE batch (before any row is touched) when
-   * `strictMode` is on, resolve that position to `null` (skipped) when it is
-   * off, exactly as a single `update()` call on a missing id already does.
+   * `strictMode` is on, skip it when it is off. The returned array holds
+   * only the rows actually updated, in `updates` order, with no placeholder
+   * for a skipped id — `IDataDriver.bulkUpdate` is declared
+   * `Promise<Record<string, unknown>[]>`, no `null` member, and `SqlDriver`'s
+   * own `bulkUpdate` (`packages/drivers/driver-sql`) already resolves a
+   * missing id the same way (`if (updated) results.push(updated)`); this
+   * follows that established convention rather than inventing a second one.
    */
   async bulkUpdate(object: string, updates: { id: string | number, data: Record<string, any> }[], options?: DriverOptions) {
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
@@ -946,7 +951,10 @@ export class InMemoryDriver implements IDataDriver {
 
     if (pending.length > 0) this.markDirty();
     this.logger.debug('BulkUpdate completed', { object, count: pending.length });
-    return perUpdate.map((entry) => (entry ? { ...entry.row } : null));
+    // `pending` already holds only the rows that were actually resolved and
+    // written — a skipped (non-strict missing) id never entered it — so this
+    // is `updates` order with no placeholder for the ones that were skipped.
+    return pending.map((row) => ({ ...row }));
   }
 
   /**

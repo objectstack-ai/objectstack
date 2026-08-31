@@ -165,13 +165,16 @@ describe('[#13435] bulkUpdate refuses BEFORE writing — no surviving prefix', (
   });
 
   describe('non-strict missing id (default `strictMode`)', () => {
-    it('a missing id resolves to null at its position; the rest of the batch still lands', async () => {
+    it('a missing id is SKIPPED (no placeholder); the rest of the batch still lands', async () => {
+      // `IDataDriver.bulkUpdate` is declared `Promise<Record<string, unknown>[]>`
+      // — no `null` member — so a skipped id is OMITTED, not padded, mirroring
+      // `SqlDriver.bulkUpdate`'s own `if (updated) results.push(updated)`.
       const out = await driver.bulkUpdate('doc', [
         { id: 'ghost', data: { doc_no: 'D-9999' } },
         { id: '1', data: { doc_no: 'D-0100' } },
       ]);
-      expect(out[0]).toBeNull();
-      expect(out[1]?.doc_no).toBe('D-0100');
+      expect(out).toHaveLength(1);
+      expect(out[0].doc_no).toBe('D-0100');
       expect((await driver.find('doc', { where: { id: '1' } }))[0].doc_no).toBe('D-0100');
     });
   });
