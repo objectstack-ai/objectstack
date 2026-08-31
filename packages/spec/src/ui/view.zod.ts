@@ -3240,7 +3240,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
             path: [key, index, 'visibleWhen'],
             message:
               '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
-              + '(ruled objectui#6237) — steps are entered in array order behind the step gate, '
+              + '— steps are entered in array order behind the step gate, '
               + 'never conditionally. Put the predicate on the fields inside the step, or use a '
               + "`simple`/`tabbed` form for section-level visibility. (The deprecated `visibleOn` "
               + 'alias folds into `visibleWhen` and is refused the same way.)',

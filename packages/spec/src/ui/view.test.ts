@@ -767,8 +767,11 @@ describe('FormViewSchema', () => {
       expect(r.success).toBe(false);
       const issue = issueAt(r, 'sections.1.visibleWhen');
       expect(issue?.message).toMatch(/no predicate slot/);
-      expect(issue?.message).toMatch(/objectui#6237/);
       expect(issue?.message).toMatch(/fields inside the step/);
+      // Customer-facing sink text carries no internal issue ids (the
+      // doc-authoring gate's rule) — the #6237 provenance lives in the
+      // adjacent source comment, not in the message.
+      expect(issue?.message).not.toMatch(/#\d+/);
     });
 
     it('refuses the deprecated `visibleOn` spelling the same way (folded to `visibleWhen` pre-refine)', () => {
