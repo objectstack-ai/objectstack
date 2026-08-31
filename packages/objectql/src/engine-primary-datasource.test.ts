@@ -200,11 +200,18 @@ describe('ObjectQL.resolvePrimaryDatasource() — the #13408 criterion', () => {
     });
 
     it('a registered system object bound nowhere at all ⇒ no answer can be true', () => {
+      // ⚠️ STRUCTURAL close, not a live production state today: `registerDriver`
+      // makes the FIRST driver the default (`isDefault || drivers.size === 1`),
+      // so step 5 always answers once any driver exists, and this branch is
+      // reachable only with none registered. It is pinned anyway because the
+      // engine has no driver eviction YET — adding it is #13578's half of this
+      // card — and an eviction that removes the default is exactly how a
+      // registered system object stops being bound anywhere. When that lands,
+      // this must already read as "cannot tell", not as a name.
       const engine = newEngine();
-      // No default driver: nothing to fall through to at step 5.
-      engine.registerDriver(driver('pg'));
       registerSys(engine, 'sys_user');
 
+      expect(engine.getDefaultDriverName()).toBeUndefined();
       expect(engine.resolvePrimaryDatasource()).toEqual({
         resolved: false,
         reason: 'system-object-unbound',
