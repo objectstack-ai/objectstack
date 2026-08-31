@@ -93,9 +93,21 @@
 // separated by a clause or a line break.
 //
 // So a site is a version token with a watched family name WITHIN A WINDOW, the
-// design `check-corpus-claim-drift.mjs` proved on the teaching corpus. The width
-// is swept rather than guessed — `--window-sweep` prints the population at each
-// width, and the header block below records today's reading.
+// design `check-corpus-claim-drift.mjs` proved on the teaching corpus.
+//
+// The width is swept rather than guessed, and the sweep says something different
+// from what was expected. The SITE count has no plateau at all — it climbs
+// monotonically (198 at width 1, 249 at 4, 343 at 20 on today's corpus), because
+// a wider window always drags more version tokens near some family mention. A
+// plateau there was never going to exist, and a width picked by looking for one
+// would have been picked on a fiction.
+//
+// The number that decides anything is the FAILING set, and it is flat: 0 at
+// every width from 1 to 20. The verdict is window-INSENSITIVE on this corpus,
+// because a live-reading claim and the version it names are the same clause —
+// they are never four lines apart. So the width is a cheap knob, not a
+// calibration, and `--window-sweep` prints both columns so the next author can
+// see which is which rather than re-deriving it.
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -647,11 +659,20 @@ for (const family of WATCHED_FAMILIES) {
     console.log(`\nwindow sweep — ${family.id}`);
     for (const w of [1, 2, 3, 4, 6, 8, 12, 20]) {
       let n = 0;
+      let failing = 0;
       for (const file of files) {
         if (file === SELF) continue;
-        n += findStampSites(readFileSync(file, 'utf8'), family, { window: w }).length;
+        const text = readFileSync(file, 'utf8');
+        for (const site of findStampSites(text, family, { window: w })) {
+          n++;
+          if (classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict === 'live-stale') failing++;
+        }
       }
-      console.log(`  window ${String(w).padStart(2)}: ${n} site(s)`);
+      // Both numbers, because only the second one is a DECISION. The site count
+      // climbs with any window — more tokens fall near a family mention — so a
+      // plateau in it was never going to exist. What the width has to leave
+      // alone is the FAILING set, and that is what this column reports.
+      console.log(`  window ${String(w).padStart(2)}: ${String(n).padStart(4)} site(s), ${failing} failing`);
     }
     continue;
   }

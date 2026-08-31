@@ -2130,6 +2130,26 @@ jobs:
       - name: CLI test child-env guard
         run: pnpm check:cli-test-child-env
 
+      # #13940. A version stamp about a PINNED VENDOR is an attestation: it says a
+      # behaviour was MEASURED against the version it names. The same drift has
+      # been swept by hand four times (#10073: 29 stamps, #10188: +3, #11362: +2,
+      # #13940: 95) and the population GREW each round, so the sweep was trailing
+      # a producer rather than converging.
+      # The producer is a sentence that fuses a permanent fact with a LIVE READING
+      # of a value that moves — "the installed better-auth 1.7.1" is not stale
+      # after a bump, it is false. This gate reds on exactly that shape and on
+      # nothing else. It deliberately does NOT hold stamps equal to the resolved
+      # pin: restamping without re-measuring manufactures an attestation nobody
+      # made, which is strictly worse than a stale one, and 130 of today's stamps
+      # are anchored historical facts that must never be rewritten. Drift is
+      # measured and REPORTED, never enforced.
+      # Static text scan over ~5,600 sources; no build, no install (the pin comes
+      # from pnpm-lock.yaml). Runs its own --self-test first: the gate computes
+      # its own population, so a scan that stopped matching would print a
+      # confident green over a tree it never read.
+      - name: Vendor version stamps
+        run: pnpm check:vendor-version-stamps
+
       # #12016. A CLI command id spelled as a string literal OUTSIDE the CLI
       # package has nothing tying it to the command file it names: rename the
       # command, update the CLI and the docs, and the engine's own drift warning
