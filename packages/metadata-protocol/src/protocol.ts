@@ -4099,18 +4099,20 @@ export class ObjectStackProtocolImplementation implements
     private engine: MetadataHostEngine;
     private getServicesRegistry?: () => Map<string, any>;
     /**
-     * Project scope applied to sys_metadata reads/writes. When undefined
-     * (single-kernel deployments), rows land in / come from the
-     * platform-global bucket (`environment_id IS NULL`). When set, every
-     * saveMetaItem insert/update and loadMetaFromDb query is filtered by
-     * `environment_id = environmentId`, so per-project kernels see only their own
-     * metadata even if several projects share the same physical database.
+     * Environment scope this protocol instance is bound to. It is a topology
+     * declaration, not a row filter. ADR-0005 (revised 2026-05) gave every
+     * environment its own physical database, so no saveMetaItem insert/update
+     * writes an `environment_id` column and no loadMetaFromDb query constrains
+     * on one — the isolation key that survived is `organization_id`, which is
+     * what `ensureOverlayIndex` below indexes and what `loadMetaFromDb`'s own
+     * where-clause names. Legacy rows may still carry the column; nothing here
+     * reads it.
      *
-     * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
-     * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
-     * the local metadata-storage provisioning decision — but it no longer
-     * decides whether the #4463 runtime authoring rules run.
-     * See {@link authoringChannel}.
+     * [#6710] Topology ONLY. This key keeps every one of its other jobs — the
+     * ADR-0005 overlay-whitelist gate, the ADR-0010 metadata-lock evaluation,
+     * the SchemaRegistry hydration/listing posture, the local metadata-storage
+     * provisioning decision — but it no longer decides whether the #4463
+     * runtime authoring rules run. See {@link authoringChannel}.
      *
      * [#7674] …and no longer whether the #3050 pre-persistence authoring gate
      * runs either. The sentence above used to list "the #3050 authoring-gate
@@ -4489,12 +4491,14 @@ export class ObjectStackProtocolImplementation implements
         // mechanism, because the failure mode being designed out is precisely
         // "a new assembly variant nobody thought about".
         //
-        // `environmentId` keeps its row-scoping jobs — the `environment_id`
-        // stamp/filter and the ADR-0005 overlay-whitelist gate. [#7674] It no
-        // longer keys the #3050 authoring gate below either: #6710 re-keyed
-        // this activation and left that one on the retired proxy, which cost
-        // the ADR-0090 D11 object posture gate every host-config deployment
-        // until #7674 finished the move.
+        // `environmentId` keeps its topology jobs — the ADR-0005
+        // overlay-whitelist gate and the registry / provisioning postures. It
+        // never stamps or filters an `environment_id` column: ADR-0005 (revised
+        // 2026-05) retired that job when each environment got its own database.
+        // [#7674] It no longer keys the #3050 authoring gate below either:
+        // #6710 re-keyed this activation and left that one on the retired
+        // proxy, which cost the ADR-0090 D11 object posture gate every
+        // host-config deployment until #7674 finished the move.
         if (this.authoringChannel === 'package-author') return [];
         if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -5084,10 +5088,12 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Exposes the project scope the protocol is bound to. Consumers like
+     * Exposes the environment scope the protocol is bound to. Consumers like
      * the HTTP dispatcher use this to decide whether to trust the process-
-     * wide SchemaRegistry or whether they must route a read through the
-     * protocol's environment_id-filtered lookup.
+     * wide SchemaRegistry (an unscoped kernel owns it) or whether they must
+     * route the read through this protocol's own sys_metadata lookup — which
+     * is scoped by `organization_id`, never by an `environment_id` column
+     * (ADR-0005 revised 2026-05).
      */
     getProjectId(): string | undefined {
         return this.environmentId;
@@ -19635,9 +19641,13 @@ export class ObjectStackProtocolImplementation implements
      * Loads all active metadata records and registers them in the in-memory registry.
      * Safe to call repeatedly — idempotent (latest DB record wins).
      *
-     * Per ADR-0005, project-kernel mode ALSO hydrates from sys_metadata —
-     * customization overlay rows must survive restart. Scope filter
-     * (`environment_id = this.environmentId ?? null`) keeps tenants isolated.
+     * Per ADR-0005, environment-kernel mode ALSO hydrates from sys_metadata —
+     * customization overlay rows must survive restart. The where-clause below
+     * is `{ state: 'active', organization_id: null }`: env-wide rows only, with
+     * per-org overlays left to `getMetaItem`'s on-demand read so one org's
+     * customization never lands in the process-wide SchemaRegistry. There is no
+     * `environment_id` constraint — ADR-0005 (revised 2026-05) gave each
+     * environment its own database and `organization_id` is the isolation key.
      *
      * #3903 — two contract duties run per row, and their split is deliberate:
      *

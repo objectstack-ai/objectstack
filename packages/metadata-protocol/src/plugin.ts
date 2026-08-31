@@ -48,10 +48,15 @@ import type { MetadataAuthoringChannel } from './protocol.js';
 
 export interface MetadataProtocolPluginOptions {
     /**
-     * Per-project scope (cloud per-env kernels). When set, `saveMetaItem`
-     * stamps `environment_id` on new sys_metadata rows, `loadMetaFromDb`
-     * filters by it, and the metadata-storage objects are NOT provisioned
-     * locally (per-project kernels source metadata from the control plane).
+     * Per-environment scope (cloud per-env kernels). Setting it does NOT put an
+     * `environment_id` column on anything: `saveMetaItem` no longer stamps that
+     * column and `loadMetaFromDb` no longer filters by it (ADR-0005 revised
+     * 2026-05 — each environment owns its own database, and `organization_id`
+     * is the isolation key that survived). What it still decides is that the
+     * metadata-storage objects are NOT provisioned locally (per-environment
+     * kernels source metadata from the control plane), plus the other topology
+     * postures listed on `ObjectStackProtocolImplementation`'s own
+     * `environmentId` field.
      * Mirrors `ObjectQLPluginOptions.environmentId` — pass the same value.
      */
     environmentId?: string;
