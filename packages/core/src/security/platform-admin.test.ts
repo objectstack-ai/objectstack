@@ -11,7 +11,7 @@
  * row it has no business looking at.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   isConfiguredPlatformAdminEmail,
@@ -260,6 +260,39 @@ describe('[#11663 P5] reportLegacyPlatformAdminGrant', () => {
     // there. A fully-seeded API-key principal has no row loaded.
     reportLegacyPlatformAdminGrant({ userId: 'usr_1' });
     expect(sink.warns[0]).toContain(`${ENV}=<the administrator's verified email address>`);
+  });
+
+  it('⭐ [#11975] the latch is PER PROCESS, never persistent — a fresh instance re-announces', async () => {
+    // The migration window's loudness discipline (#11975), in the half nothing
+    // else pins. Every sibling pin asserts SUPPRESSION — this file's
+    // "once per process" above, and plugin-security's boot-side
+    // `bootstrap-platform-admin-walled-owner.test.ts` "EXACTLY ONE line ... even
+    // across repeated bootstraps" — so all of them stay GREEN if the latch is
+    // ever hardened past the process: moved onto `globalThis`, stored in a
+    // module the host keeps alive, or persisted to a row or file to quiet the
+    // noise. Any of those turns "once per process" into "once EVER", and a
+    // deployment restarted onto the old anchor is then never told again, which
+    // is the silent dual-track the window exists to prevent.
+    //
+    // A fresh module registry is the closest in-process stand-in for a boot: it
+    // re-instantiates the module scope the latch lives in exactly as a new
+    // process would. ⛔ Do not "fix" a red here by resetting the latch in the
+    // loop — the point is that nothing had to.
+    const linesPerBoot: number[] = [];
+    for (let boot = 0; boot < 3; boot++) {
+      vi.resetModules();
+      const fresh = await import('./platform-admin.js');
+      const bootSink = makeSink();
+      fresh.setPlatformAdminConfigSink(bootSink);
+      // Twice, so a per-call regression is caught by the same assertion.
+      fresh.reportLegacyPlatformAdminGrant({ userId: 'usr_1', email: 'ada@example.com' });
+      fresh.reportLegacyPlatformAdminGrant({ userId: 'usr_1', email: 'ada@example.com' });
+      fresh.setPlatformAdminConfigSink(undefined);
+      linesPerBoot.push(bootSink.warns.length);
+    }
+    // Exactly one per boot: not 0 (a latch that outlived the process) and not 2
+    // (a pointer that became per-call).
+    expect(linesPerBoot).toEqual([1, 1, 1]);
   });
 });
 

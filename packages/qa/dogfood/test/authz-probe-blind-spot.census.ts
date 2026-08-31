@@ -7,8 +7,15 @@
 // "ratchets completeness over a CURATED table of HTTP/transport entry points"
 // and that "a new ungated route there is UNCLASSIFIED ... and breaks CI". That
 // promise is true only for the entry points a probe can actually mint a key
-// for. This module measures, for EVERY one of the 11 files the `PROBES` table
+// for. This module measures, for EVERY one of the 13 files the `PROBES` table
 // names, how far that reach extends — and records the result so it cannot rot.
+//
+// ⭐ Since 2026-08-31 two of those files are the ROUTE LEDGERS, and they are
+// the reason the matrix header now claims family/domain completeness rather
+// than route completeness. Their rows read `blindSpot: 0` for a reason no
+// other row here has — every ledger row is reachable by a mintable key — and
+// that must NOT be read as "the route blind spot is closed". It is not:
+// `BLIND_SPOT_TOTAL_STATIC` / `_RUNTIME` below are UNCHANGED at 75 / 80.
 //
 // ⛔ WHAT IS **NOT** CLAIMED HERE. Nothing in this file asserts that any route
 // is unguarded, unauthenticated or exploitable. Route-level enforcement is
@@ -81,7 +88,7 @@
 // protocol). The static reading is the one pinned because it is the one this
 // package can re-derive without depending on `@objectstack/rest`.
 //
-// ── THE POPULATION SOURCE: measured, and still an OPEN CONTRACT DECISION ──
+// ── THE POPULATION SOURCE: measured, then DECIDED (2026-08-31) ────────────
 //
 // The obvious repair is to source this ratchet's route population from the
 // route ledgers instead of from a regex table, and that was measured before
@@ -145,12 +152,35 @@
 //     from the one this matrix header states, and adopting it is a contract
 //     decision rather than a repair.
 //
-// ⇒ ⛔ NOT DECIDED HERE, and deliberately not worked around: widening the
-// regex is the rot this instrument already has, and inventing a syntactic
-// "gated" reading would convert a visible gap into a written-down false
-// assurance — strictly worse than an honest UNCLASSIFIED. What this file does
-// instead is close the mechanism that was SILENT (the dead probe), leave the
-// population untouched, and hand the decision on with the reading attached.
+// ⇒ ⭐ DECIDED 2026-08-31, and the three blockers above are why the answer is
+// what it is rather than the obvious one. The ledgers now supply the
+// POPULATION at FAMILY / DOMAIN granularity — 19 REST families + 21 dispatcher
+// domains = 40 keys — and nothing else. They do NOT supply the
+// CLASSIFICATION: blocker 1 stands, so "is it gated" remains a reviewed matrix
+// row, never a ledger disposition. Blocker 2 stands as the reason no syntactic
+// reading was attempted anywhere. Blocker 3 is not fixed and is not hidden: a
+// route added inside an existing family mints nothing and this gate stays
+// green, which is stated at that exact granularity in the matrix header with
+// no caveat attached to a wider claim.
+//
+// What the change buys is the FILE-SELECTION layer rather than the route
+// layer: a family or domain can no longer be silently absent, because both
+// ledgers are enumerated from a running server and guarded in both directions.
+// 6 of the 40 keys are classified by rows that already pinned the same
+// surface; the other 34 are enumerated, dated and pinned shrink-only in
+// `authz-ledger-population.baseline.ts`. Before that date those 34 surfaces
+// minted no key at all — no UNCLASSIFIED, no STALE, nothing.
+//
+// The DIRECTION half went to the producer: a ledger row may declare the authz
+// posture it has been reviewed to have (`authz:`, phased exactly like
+// `responseSchema` — optional, no coverage no fill, never mass-produced), and
+// the companion test resolves every declaration against an `enforced` matrix
+// row. That is what eventually makes blocker 3 answerable at the ledger review
+// point, where a new route is already being read.
+//
+// ⛔ Two readings stay REJECTED and are recorded here so they are not
+// re-proposed: deriving "gated" from source syntax (73% false-ungated), and
+// taking a ledger disposition as an authorization fact (blocker 1).
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -200,7 +230,7 @@ export interface ProbeTableReading {
   keys: number;
 }
 
-export const PROBE_TABLE: ProbeTableReading = { entries: 16, files: 11, keys: 9 };
+export const PROBE_TABLE: ProbeTableReading = { entries: 18, files: 13, keys: 15 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -219,9 +249,61 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 16, files: 11, keys: 9 
  * in a third file. ⛔ Do not re-point this at a hand-written number — it is
  * read out of the matrix header's own text.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 16;
+export const MATRIX_HEADER_PROBE_CLAIM = 18;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
+  // ── the two LEDGER files: the population source since 2026-08-31 ───────
+  //
+  // ⭐ These two rows read differently from every other row here, and the
+  // difference is the point of the change that added them: `blindSpot` is 0
+  // NOT because the file mounts nothing (the reading four rows below give) but
+  // because EVERY row in the table is reachable by a mintable key. Each ledger
+  // row carries a `family` / `domain`, and each distinct value mints a key, so
+  // there is no row the ratchet cannot name.
+  //
+  // ⚠️ `population` here counts LEDGER ROWS, not registrar call sites, and the
+  // two are not interchangeable. A `blindSpot` of 0 says every ledger row is
+  // covered by some key at FAMILY / DOMAIN granularity; it does NOT say every
+  // route mints its own key, and it does not touch the 75/80 route-level blind
+  // spot recorded below — that number is unchanged by this change and Leg A of
+  // the reverse verification is what proves it unchanged.
+  {
+    file: 'packages/rest/src/rest-route-ledger.ts',
+    kinds: ['ROUTE_ENUMERATION'],
+    probes: 1,
+    keys: 19,
+    population: 94,
+    reachable: 94,
+    blindSpot: 0,
+    populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
+    controls: { "route: '": 94, "family: '": 94, RestRouteLedgerEntry: 2 },
+    note:
+      'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
+      'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
+      'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
+      'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
+      'and therefore cannot be silently absent from the authz ratchet either. 19 families; 1 classified by a ' +
+      'matrix row (metadata), 18 enumerated in the shrink-only baseline.',
+  },
+  {
+    file: 'packages/runtime/src/route-ledger.ts',
+    kinds: ['ROUTE_ENUMERATION'],
+    probes: 1,
+    keys: 21,
+    population: 80,
+    reachable: 80,
+    blindSpot: 0,
+    populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
+    controls: { "route: '": 80, "domain: '": 80, RouteLedgerEntry: 2 },
+    note:
+      'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
+      '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
+      'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
+      'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
+      'construction — all 16 DomainRoute prefixes declared across the 15 domain files that declare one are ' +
+      'ledger domains today, including the 11 files no probe has ever named. 21 domains; 5 classified ' +
+      '(/meta, /actions, /automation, /packages, /mcp), 16 in the shrink-only baseline.',
+  },
   {
     file: 'packages/rest/src/rest-server.ts',
     kinds: ['ROUTE_ENUMERATION', 'TRIPWIRE'],
@@ -431,6 +513,40 @@ export function deriveProbeFileCensus(): {
   kinds: Map<string, ProbeKind[]>;
 } {
   const files = new Map<string, { population: number; reachable: number; controls: Record<string, number> }>();
+
+  // ── the two ledger files (the population source) ────────────────────────
+  //
+  // Scoped to the exported array literal, exactly as the probes are: the
+  // patterns are the ledger's own row vocabulary, so a doc-comment or a type
+  // declaration spelling the same tokens outside the table would inflate the
+  // reading. `controls` stay WHOLE-FILE counts, like every other row here —
+  // they answer "is this still the file I think it is", which is a question
+  // about the file and not about the table.
+  for (const [rel, marker, keyField] of [
+    ['packages/rest/src/rest-route-ledger.ts', 'REST_ROUTE_LEDGER', 'family'],
+    ['packages/runtime/src/route-ledger.ts', 'ROUTE_LEDGER', 'domain'],
+  ] as ReadonlyArray<readonly [string, string, string]>) {
+    const src = read(rel);
+    const from = src.indexOf(`export const ${marker}`);
+    const to = from < 0 ? -1 : src.indexOf('\n];', from);
+    // A marker that has moved reads as an EMPTY table, never as the whole file:
+    // a silently wider scope would still produce plausible numbers.
+    const table = from < 0 || to < 0 ? '' : src.slice(from, to);
+    const rowRe = /route: '/g;
+    const keyRe = new RegExp(`${keyField}: '`, 'g');
+    const entryName = keyField === 'family' ? 'RestRouteLedgerEntry' : 'RouteLedgerEntry';
+    files.set(rel, {
+      population: occurrences(table, rowRe),
+      // Every row carrying the key field is reachable: each distinct value
+      // mints a key. A row that ever loses it shows up as a blind spot here.
+      reachable: occurrences(table, keyRe),
+      controls: {
+        "route: '": occurrences(src, /route: '/g),
+        [`${keyField}: '`]: occurrences(src, new RegExp(`${keyField}: '`, 'g')),
+        [entryName]: occurrences(src, new RegExp(entryName, 'g')),
+      },
+    });
+  }
 
   // ── rest-server.ts ──────────────────────────────────────────────────────
   {
