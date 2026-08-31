@@ -347,9 +347,29 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
       expect(ids({ $not: { stage: { $ne: null } } })).toEqual(['3', '4']);
     });
 
-    it('an empty `$in` / `$nin` under a `$not` keeps its constant value', () => {
+    it('an empty `$in` under a `$not` keeps its constant value; an empty `$nin` refuses before `$not` matters (#13571)', () => {
+      // `$in: []` keeps its #5322/#5243 reduction — constant FALSE, total, no
+      // guard — and the negation flips it to TRUE: every row. That widened
+      // composition is the #13571 verdict's DECLARED residue for a non-RLS
+      // producer (the in-repo RLS compiler cannot emit the shape — #13570's
+      // polarity guard drops it upstream); closing it is a ruled follow-up
+      // design, not an edit to this pin.
       expect(ids({ $not: { stage: { $in: [] } } })).toEqual(ALL);
-      expect(ids({ $not: { stage: { $nin: [] } } })).toEqual([]);
+      // `$nin: []` no longer HAS a constant to keep: its reduction is TRUE —
+      // scope-vacating on its own — so `compileOperator` refuses it whatever
+      // the polarity above it. Deliberately asymmetric with the `$in` line
+      // above ("shape errors throw, boolean identities reduce" is the #5322
+      // boundary, and a scope-vacating reduction is on the THROW side) — see
+      // read-scope-sql.ts's #13571 header section.
+      let refusal: (Error & { code?: unknown; status?: unknown }) | undefined;
+      try {
+        ids({ $not: { stage: { $nin: [] } } });
+      } catch (e) {
+        refusal = e as Error & { code?: unknown; status?: unknown };
+      }
+      expect(refusal?.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(refusal?.status).toBe(500);
+      expect(String(refusal?.message)).toContain('$nin for "stage" is empty');
     });
   });
 

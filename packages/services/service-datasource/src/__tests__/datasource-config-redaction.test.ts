@@ -475,3 +475,78 @@ describe('#9040 — the passthrough spelling, both halves at the service door', 
     ).rejects.toThrow(/options\.auth\.password/);
   });
 });
+
+describe('nested credential positions OFF the passthrough table — the class control, at this door', () => {
+  /**
+   * The nested-position finding, at the admin door: a credential spelling one
+   * object level down from the key the top level hides — deliberately NOT a
+   * `passthroughSecretPaths` row — used to be served by `getDatasource()` in
+   * cleartext with `redactedConfigKeys: []`, and accepted by the write gate in
+   * silence (measured on the pre-fix build). Regression cases against table
+   * rows were already green and prove nothing about this class.
+   */
+  const OFF_TABLE_MONGO: StoredDatasource = {
+    name: 'off_table_mongo',
+    driver: 'mongodb',
+    origin: 'runtime',
+    config: {
+      database: 'events',
+      options: { replicaSet: 'rs0', auth: { username: 'app', token: 'eyJhbGci.OFFTABLE.y' } },
+    },
+  };
+
+  it('read path: the off-table nested credential does not reach the caller, and is named', async () => {
+    const { service } = makeService([OFF_TABLE_MONGO]);
+    const read = await service.getDatasource('off_table_mongo');
+    expect(JSON.stringify(read!.config)).not.toContain('OFFTABLE');
+    expect(read!.config!.options).toEqual({ replicaSet: 'rs0', auth: { username: 'app' } });
+    expect(read!.redactedConfigKeys).toContain('options.auth.token');
+  });
+
+  it('an untouched round-trip keeps the stored off-table credential — the restore mirrors the recursion', async () => {
+    const { service, records } = makeService([OFF_TABLE_MONGO]);
+    const read = await service.getDatasource('off_table_mongo');
+    await service.updateDatasource('off_table_mongo', { config: read!.config, label: 'Renamed' });
+    expect(records[0].label).toBe('Renamed');
+    expect((records[0].config!.options as any).auth).toEqual({
+      username: 'app',
+      token: 'eyJhbGci.OFFTABLE.y',
+    });
+  });
+
+  it('a TYPED-IN off-table nested credential is refused at the write gate on its own merits', async () => {
+    const { service } = makeService([OFF_TABLE_MONGO]);
+    await expect(
+      service.updateDatasource('off_table_mongo', {
+        config: {
+          database: 'events',
+          options: { auth: { username: 'app', token: 'typed-new-secret' } },
+        },
+      }),
+    ).rejects.toThrow(/options\.auth\.token/);
+  });
+
+  it('a NESTED URL string is redacted and restored like a top-level one — contract-less driver included', async () => {
+    const stored: StoredDatasource = {
+      name: 'vendor_ds',
+      driver: 'com.vendor.custom',
+      origin: 'runtime',
+      config: { endpoint: 'x', replication: { url: 'postgresql://svc:hunter2@replica/db' } },
+    };
+    const { service, records } = makeService([stored]);
+    const read = await service.getDatasource('vendor_ds');
+    expect((read!.config!.replication as any).url).toBe('postgresql://svc@replica/db');
+    expect(read!.redactedConfigKeys).toContain('replication.url');
+    // Untouched round-trip: the served (redacted) URL is indistinguishable
+    // from the stored one once redacted, so the stored value is carried back.
+    await service.updateDatasource('vendor_ds', { config: read!.config });
+    expect((records[0].config!.replication as any).url).toBe('postgresql://svc:hunter2@replica/db');
+    // An author who rewrites the nested URL by hand still WINS.
+    const edited = {
+      ...read!.config,
+      replication: { url: 'postgresql://svc@other-replica/db' },
+    };
+    await service.updateDatasource('vendor_ds', { config: edited });
+    expect((records[0].config!.replication as any).url).toBe('postgresql://svc@other-replica/db');
+  });
+});

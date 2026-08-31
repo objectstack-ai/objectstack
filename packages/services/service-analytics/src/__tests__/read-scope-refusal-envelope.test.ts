@@ -93,7 +93,7 @@ function refusalFor(filter: unknown, alias = 'crm_opportunity'): Refusal | undef
 /**
  * Every refusing site in `read-scope-sql.ts`, in source order.
  *
- * FOURTEEN rows over TWELVE throw sites: TWO sites are each reached by two
+ * FIFTEEN rows over THIRTEEN throw sites: TWO sites are each reached by two
  * triggers, and every trigger is listed on purpose.
  *
  *   - `quoteIdent`, with two `kind` values. That alias-vs-field split was option
@@ -208,14 +208,26 @@ const REFUSALS: Array<{
     sensitive: 'region_code',
   },
   {
-    name: '⑬ $between without [min,max]',
+    // [#13571] The empty EXCLUSION refuses; the empty INCLUSION keeps its
+    // constant — see the ACCEPTED table's "#5243" row. Deliberate asymmetry
+    // ("shape errors throw, boolean identities reduce" — #5322; a reduction to
+    // constant TRUE vacates the scope, so it is on the throw side), not an
+    // oversight: read-scope-sql.ts's #13571 header section carries the ruling.
+    name: '⑬ $nin with an EMPTY array',
+    site: 'compileOperator: empty $nin vacates the scope',
+    filter: { region_code: { $nin: [] } },
+    message: /\$nin for "region_code" is empty — an empty exclusion excludes nothing and would compile the read scope to constant TRUE \(fail-closed\)/,
+    sensitive: 'region_code',
+  },
+  {
+    name: '⑭ $between without [min,max]',
     site: 'compileOperator: $between needs [min,max]',
     filter: { credit_limit: { $between: [10] } },
     message: /\$between for "credit_limit" needs \[min,max\] \(fail-closed\)/,
     sensitive: 'credit_limit',
   },
   {
-    name: '⑭ unsupported operator',
+    name: '⑮ unsupported operator',
     site: 'compileOperator: unsupported operator',
     filter: { owner_email: { $regex: 'admin@' } },
     message: /unsupported operator "\$regex" on "owner_email" \(fail-closed\)/,
@@ -244,6 +256,11 @@ const ACCEPTED: Array<{ name: string; filter: unknown; sql: string; params: unkn
     params: ['emea', 'apac'],
   },
   {
+    // [#13571] STAYS accepted while the empty `$nin` refuses (REFUSALS ⑬):
+    // this constant is FALSE — narrowing at its own arm — and the RLS compiler
+    // deliberately emits the shape at positive polarity inside composites
+    // (#13570's "own rows keep flowing" pin), so refusing it here would 500 a
+    // live, ruled-correct scope. The asymmetry is the #13571 ruling itself.
     name: 'an empty $in as the FALSE constant (#5243)',
     filter: { region_code: { $in: [] } },
     sql: '1 = 0',
@@ -306,13 +323,14 @@ describe('[#5367] every read-scope refusal carries the ADR-0112 envelope (READ_S
     // #5352's lesson, stated as a guard: seven of `filter-normalizer.ts`'s nine
     // sites carrying an envelope was indistinguishable from none of them at the
     // HTTP boundary, because the commonest input hit one of the two bare ones.
-    // Fourteen inputs over the module's TWELVE throw sites (see the table's note
-    // on the two sites with two triggers each), and every one of them enveloped.
-    // [#6125] added the eleventh site, [#6387] the twelfth; these two numbers
+    // Fifteen inputs over the module's THIRTEEN throw sites (see the table's
+    // note on the two sites with two triggers each), and every one of them
+    // enveloped. [#6125] added the eleventh site, [#6387] the twelfth, and
+    // [#13571] the thirteenth (the empty-`$nin` refusal); these two numbers
     // are the ratchet that makes a future unenveloped `throw` fail HERE instead
     // of at an HTTP boundary.
-    expect(REFUSALS).toHaveLength(14);
-    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(12);
+    expect(REFUSALS).toHaveLength(15);
+    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(13);
     for (const c of REFUSALS) {
       expect(refusalFor(c.filter, c.alias)?.code, `${c.site} is still bare`).toBe('READ_SCOPE_COMPILE_FAILED');
     }

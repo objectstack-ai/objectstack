@@ -101,6 +101,17 @@ function matchOps(value: unknown, ops: Record<string, unknown>): boolean {
       case '$exists':
         if ((value !== undefined) !== arg) return false;
         break;
+      case '$regex': {
+        // [#13540] Written by the translator for `$contains`/`$notContains`
+        // (an escaped literal pattern), so the conformance sweep produces it
+        // the moment those operators have enrolled rows. MongoDB applies
+        // `$regex` to STRING values only: a null, missing or non-string value
+        // never matches — which is exactly what makes the emitted
+        // `{ $not: { $regex } }` satisfy a no-value row.
+        if (typeof arg !== 'string') throw new UnsupportedShape('$regex with a non-string pattern');
+        if (typeof value !== 'string' || !new RegExp(arg).test(value)) return false;
+        break;
+      }
       case '$not': {
         // The per-field negation — the only `$not` MongoDB accepts, and it
         // takes an operator document, never a plain value.
@@ -258,8 +269,17 @@ describe('the in-process matcher discriminates', () => {
   });
 
   it('refuses any operator it does not model, rather than treating it as true', () => {
-    expect(() => matchDoc(FILTER_LOGIC_ROWS[0], { a: { $regex: 'x' } })).toThrow(/unsupported/);
+    expect(() => matchDoc(FILTER_LOGIC_ROWS[0], { a: { $mod: [2, 0] } })).toThrow(/unsupported/);
     expect(() => matchDoc(FILTER_LOGIC_ROWS[0], { $expr: {} })).toThrow(/unsupported/);
+  });
+
+  it('models $regex the way the server applies it: strings only, so a negated pattern satisfies a no-value row', () => {
+    // [#13540] `$regex` joined the modelled vocabulary when the
+    // `$notContains` row enrolled (the translator emits `{ $not: { $regex } }`
+    // for it). Pin both halves of the string-only rule: the positive form
+    // never matches the null rows, and the negated form always does.
+    expect(select({ d: { $regex: 'v' } })).toEqual(['1', '2']);
+    expect(select({ d: { $not: { $regex: 'v1' } } })).toEqual(['2', '3', '4']);
   });
 
   it('honours $nor and the per-field $not the translator is allowed to emit', () => {

@@ -123,9 +123,17 @@
 # ⛔ THIS IS A DISCLOSURE, NOT A REPAIR, and the difference is deliberate.
 # Routing CPU-heavy gate runs through this entry point would make the name match
 # the guarantee — and it would trade every seat's PARALLELISM for contention on
-# a resource the lock does not cover today. The direction of that trade is
-# unmeasured, so it is a separate card that owes the measurement as its
-# evidence, not a rider on the sentence that admits the gap. Nothing here
+# a resource the lock does not cover today. That trade has since been MEASURED,
+# and it came back one-directional: see
+# docs/audits/2026-08-verify-lock-gate-routing-measurement.md. Serialising gate
+# runs was never the throughput maximum at any concurrency tested (W=1 lost to
+# W=4 by 2.38x on an unsaturated box and tied on a saturated one), and every
+# routing policy raised the exit-99 rate — the NOT MEASURED outcome — above
+# today's 2.0%, best case 4.0%, across a 64-cell sweep. The two heaviest
+# families cost 534.5s together against this file's 540s budget, so one routed
+# sweep can consume another caller's whole acquisition budget on its own. ⛔ The
+# measurement did not decide the policy and this file still implements no
+# routing: what is serialised here is unchanged. Nothing here
 # refuses, shortens or reshapes a hold on account of coverage: same doctrine as
 # the filter preflight and declared unlocked mode — say the true thing loudly,
 # never silently narrow what the caller asked for.

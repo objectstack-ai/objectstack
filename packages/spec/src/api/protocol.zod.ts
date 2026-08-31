@@ -566,7 +566,21 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
 
 /**
  * Save Metadata Item Request
- * Create or update a metadata item
+ * Create or update a metadata item — the request shape for
+ * `PUT /api/v1/meta/:type/:name` (the `saveMetaItem` protocol method).
+ *
+ * Declared member for member against the implementation's parameter type in
+ * `@objectstack/metadata-protocol` and the REST save door's actual sends — a
+ * declared-surface catch-up, not a new capability (#12004, the #11006
+ * maintainer-ruled pattern, 2026-08-22 option B, carried one door over
+ * exactly as #11679/PR #12003 carried it to the reset twin). `saveMetaItem`
+ * is a REQUIRED protocol member, so this was the sharpest instance of the
+ * request-shape gap: the schema declared 3 of the ~11 members the door
+ * sends, and the call-site literal had to stay behind an `as any` cast
+ * (removing it surfaced `TS2353` on the undeclared keys — pure
+ * request-shape smuggling, never member-existence feature detection).
+ * Every member below already ships and is read and enforced by the
+ * implementation.
  *
  * `name` carries the enforced item-name grammar (#12194 — lowercase
  * snake_case segments, optionally dot-qualified; `shared/identifiers.zod.ts`
@@ -574,6 +588,30 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  * the door with `400 INVALID_REQUEST`, so declared = enforced. The read and
  * delete request shapes deliberately stay `z.string()`: pre-grammar residue
  * rows must remain listable and clearable.
+ *
+ * Two members the implementation's parameter type family carries are
+ * deliberately NOT declared:
+ *
+ * - `environmentId` — the TRANSPORT-level multi-kernel routing key, OUT of
+ *   protocol request shapes by the #9741 maintainer ruling (2026-08-18):
+ *   `resolveProtocol(environmentId)` has already selected the target kernel
+ *   before this method is entered, and `packages/rest` layers that one
+ *   member on top of the declared shape via its `TransportScopedMetaRequest`
+ *   wrapper, which is where a routing key belongs.
+ * - `source` — write-provenance for the history/audit rows
+ *   (`'protocol.saveMetaItem'` by default). The implementation declares it,
+ *   but NO door sends it: its only producer is the implementation's own
+ *   internal `migrateStoredMetadata` call (`'migrate-stored'`), which does
+ *   not travel through this contract. The publish-door precedent (#11426)
+ *   leaves such a member undeclared until a producer on THIS contract pulls
+ *   it — declaring it here would advertise a wire-authorable provenance
+ *   channel the REST layer deliberately never reads.
+ *
+ * `writeFace` IS declared, and the distinction with `source` is the point:
+ * both are server-stated, but `writeFace` is sent by two doors and the
+ * duplicate-package internal call — three real producers on this parameter
+ * — and the implementation branches its refusal envelopes on it. See the
+ * member's own doc for why declaring it does not make it client-authorable.
  */
 export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -583,6 +621,74 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'the publish door.',
   ),
   item: z.unknown().describe('Metadata item definition'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the write. Load-bearing, not advisory: '
+    + 'it selects the overlay partition (ADR-0005) the row lands in — an '
+    + 'org-scoped save writes that tenant\'s own overlay, while an org-less '
+    + 'save writes the environment-wide row every tenant reads — and it is '
+    + 'the scope stamped on the write\'s audit row. An org-scoped write of a '
+    + 'type whose registry entry declares `allowOrgOverride: false` is '
+    + 'refused (403). Absent = environment-wide.',
+  ),
+  parentVersion: z.string().nullable().optional().describe(
+    'ADR-0008 optimistic-concurrency pin: the version token the caller '
+    + 'believes is current (on the REST door, the `If-Match` request '
+    + 'header). Present as a string, a concurrent edit is reported as a 409 '
+    + 'conflict instead of silently overwritten. ⚠️ `null` is NOT the same '
+    + 'as absent: a present `null` asserts "no current row of this '
+    + 'lifecycle" — the first-write pin, refused 409 when a row already '
+    + 'exists — while an ABSENT key is unpinned: the implementation adopts '
+    + 'the current row\'s hash as the parent (last-write-wins). Nullable '
+    + 'because that is the implementation\'s parameter type, and unlike the '
+    + 'reset twin (which folds a present `null` back to the current hash) '
+    + 'this verb passes `null` through to the repository\'s conflict check '
+    + 'unchanged.',
+  ),
+  actor: z.string().optional().describe(
+    'Identity recorded on the write\'s history event (`recorded_by`, a '
+    + 'lookup into `sys_user`) and audit row. On the REST door this is the '
+    + 'request\'s authenticated identity (one producer) — never a '
+    + 'caller-supplied header. Absent, the event is recorded actor-less '
+    + '(null), deliberately not attributed to "system".',
+  ),
+  force: z.boolean().optional().describe(
+    'Destructive-change acknowledgement (`?force=true` on the REST door): '
+    + 'skips the safety diff that refuses an `object` save whose body drops '
+    + 'fields or narrows types the stored item still carries (409 with the '
+    + 'findings otherwise). Only `object` saves reach that diff, so the '
+    + 'flag is inert for every other type. Absent = the guard runs.',
+  ),
+  mode: z.enum(['draft', 'publish']).optional().describe(
+    'Per-item lifecycle (ADR-0005 drafts): `draft` stages the body as a '
+    + 'pending draft overlay (`?mode=draft` on the REST door; the publish '
+    + 'door promotes it later); `publish` or ABSENT writes straight to the '
+    + 'live `active` row — the legacy default, kept so callers that '
+    + 'predate the draft/publish split keep working. Any value other than '
+    + '`draft` is read as `publish`.',
+  ),
+  packageId: z.string().nullable().optional().describe(
+    'ADR-0048 — the software package to bind the saved row to '
+    + '(`sys_metadata.package_id`; `?package=<id>` on the REST door, sent '
+    + 'only when it names a real package). Set when authoring inside a '
+    + 'Studio package workspace; a named read-only base package is refused. '
+    + 'On create the row is stamped with this id; on update an existing '
+    + 'binding is preserved, never silently re-bound. Absent = env-local '
+    + 'overlay (no package stamp); it also scopes which row the unpinned '
+    + 'parent-version resolution reads.',
+  ),
+  writeFace: z.enum(['package-duplicate', 'meta-envelope', 'meta-dispatch']).optional().describe(
+    'Which write door a refusal is being rendered FOR — stated by the '
+    + 'SERVER, never by a remote caller: every door builds this request '
+    + 'field by field and never spreads a request body into it, so there is '
+    + 'no path for a client to smuggle a face in, and a face arriving in a '
+    + 'wire body is simply never read. Two refusals branch on it, for '
+    + 'different questions: the 409 destructive-change remedy names the '
+    + 'acknowledgement mechanism that actually exists on the refusing door '
+    + '(`?force=true` on the REST doors; the dispatcher and the '
+    + 'duplicate-package door have none), and the 422 invalid-metadata '
+    + 'message adapts to whether a structured `issues[]` channel reaches '
+    + 'the consumer beside it. Absent = the conservative default wording.',
+  ),
 }));
 
 /**
