@@ -823,8 +823,11 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
+            // The post-hook declared-field door (#13657) is what refuses it; the
+            // id stays in this comment rather than in the string, which reaches
+            // authors and operators who cannot resolve a tracker number.
             `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
-            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271, #13657). The ` +
+            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271). The ` +
             `record is never written, and the refusal names the field far from the body that wrote it.`,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
