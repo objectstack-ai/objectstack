@@ -7552,120 +7552,6 @@ export function parseOutputOptions(argv) {
 }
 
 // ---------------------------------------------------------------------------
-// The EGRESS PREREQUISITE — why this gate could not run in an agent container,
-// and the one line of plumbing that was actually missing (#13526).
-//
-// ## The finding, and why it read as a credential problem for months
-//
-// This file's standing diagnosis of an agent container was "no usable
-// credential": `GITHUB_TOKEN` holds the proxy's 14-character `prox…`
-// placeholder, which 401s, and the anonymous fallback is a shared-NAT quota
-// that neighbours have already spent — so `classifyTransportProbe` returned
-// `bad-credential` and the run exited 3. Every word of that verdict was TRUE
-// and the conclusion drawn from it was wrong, because it measured the wrong
-// transport.
-//
-// Measured 2026-08-31 in an agent container, same container, same second:
-//
-//   node  fetch('https://api.github.com/rate_limit')          -> 401 / anon 0 left
-//   curl  https://api.github.com/rate_limit                   -> 200, limit 15000
-//   curl  https://api.github.com/repos/objectstack-ai/objectstack -> 200
-//
-// The container has FULL authenticated repo-scoped REST access. It is reached
-// through `HTTPS_PROXY`, which injects the credential — and **Node's global
-// `fetch` does not honour `HTTPS_PROXY`**. So this script egressed directly,
-// arrived unauthenticated on the shared NAT IP, and correctly diagnosed the
-// only transport it had ever tried.
-//
-// ⭐ The knowledge was already in this file and never acted on: the
-// `host-unreachable` verdict says, in as many words, "Node's fetch does not use
-// HTTPS_PROXY, so this says nothing about `curl`, `gh` or the `mcp__github__*`
-// tools". It was written as a caveat on a failure message instead of as the
-// cause, and the population the gate guards grew unobserved behind it — the
-// #13526 filing's whole point: **a gate nobody can run is indistinguishable
-// from a gate that finds nothing.**
-//
-// ## The fix, and why it is a RE-EXEC rather than a dispatcher call
-//
-// Node 22 can route `fetch` through the environment's proxy, but only via
-// `NODE_USE_ENV_PROXY=1`, which is read at BOOTSTRAP — after this module runs
-// there is no supported way to set it, and `undici` is not resolvable here (no
-// dependency in `scripts/`). So the process re-executes itself ONCE with the
-// flag set. The decision is a pure function the self-test drives; the exec is
-// three lines in the entrypoint.
-//
-// ⚠️ The properties that make this safe, each deliberate:
-//
-//   - **CI is byte-identical.** A GitHub Actions runner sets no proxy variable,
-//     so `resolveProxyRelaunch` returns `relaunch: false` and the scheduled
-//     patrol's every request path is unchanged. This adds a path for the
-//     container that could not run; it does not alter the one that could.
-//   - **Exactly once.** The child carries `PM_SWEEP_PROXY_RELAUNCHED`, so a
-//     misconfigured proxy cannot produce a fork bomb — the child runs with
-//     whatever transport it has and reports its own verdict.
-//   - **`--self-test` never relaunches.** It makes no request and must stay
-//     runnable in any container whatever the environment carries — the same
-//     exemption the malformed-repo and malformed-floor refusals already make.
-//   - **An unsupported flag is not passed.** `--disable-warning` (which mutes
-//     undici's experimental `EnvHttpProxyAgent` notice) is Node 21.3+; on an
-//     older runtime passing it would make node refuse to start, turning a
-//     degraded reading into no reading at all. It is gated on
-//     `process.allowedNodeEnvironmentFlags`, and an older Node that ignores
-//     `NODE_USE_ENV_PROXY` simply lands back on today's honest exit 3.
-// ---------------------------------------------------------------------------
-
-/** The guard the child carries, so a relaunch can happen at most once. */
-export const PROXY_RELAUNCH_GUARD = 'PM_SWEEP_PROXY_RELAUNCHED';
-
-/**
- * The proxy variables Node's `EnvHttpProxyAgent` itself reads, in its own
- * precedence order. Listed rather than probed so the decision stays pure, and
- * matched case-insensitively in BOTH spellings because the lowercase form is
- * the one most container images actually export.
- */
-export const PROXY_ENV_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'];
-
-/**
- * Should this process re-exec itself with `NODE_USE_ENV_PROXY=1`?
- *
- * Pure, so the self-test pins every branch — including the two that must NEVER
- * relaunch (a CI runner with no proxy, and a child that already did).
- *
- * @param {Record<string,string|undefined>} env
- * @param {string[]} argv — the argv TAIL (`process.argv.slice(2)`).
- * @returns {{ relaunch: boolean, reason: string, proxy: string|null }}
- */
-export function resolveProxyRelaunch(env = {}, argv = []) {
-  const proxyVar = PROXY_ENV_VARS.find((name) => String(env?.[name] ?? '').trim().length > 0);
-  const proxy = proxyVar ? String(env[proxyVar]).trim() : null;
-  if (argv.includes('--self-test')) {
-    return { relaunch: false, reason: 'self-test makes no request and stays runnable anywhere', proxy };
-  }
-  if (String(env?.[PROXY_RELAUNCH_GUARD] ?? '') === '1') {
-    return { relaunch: false, reason: 'already relaunched once; this IS the child', proxy };
-  }
-  if (String(env?.NODE_USE_ENV_PROXY ?? '') === '1') {
-    return { relaunch: false, reason: 'the caller already set NODE_USE_ENV_PROXY', proxy };
-  }
-  if (!proxy) {
-    return { relaunch: false, reason: 'no proxy in the environment (a CI runner: direct egress)', proxy: null };
-  }
-  return { relaunch: true, reason: `${proxyVar} is set and node's fetch ignores it`, proxy };
-}
-
-/**
- * The child's `execArgv`. Separated from the decision because it depends on the
- * RUNTIME's flag support rather than on the environment, and because passing an
- * unsupported flag is the one way this mechanism could make things worse.
- *
- * @param {{ has: (flag: string) => boolean }} allowed — normally
- *   `process.allowedNodeEnvironmentFlags`.
- */
-export function proxyRelaunchExecArgv(allowed) {
-  return allowed?.has?.('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
-}
-
-// ---------------------------------------------------------------------------
 // Transport prerequisite — the classifier (pure) and the probe that feeds it.
 //
 // Modelled on `scripts/cli-build-prerequisite.mjs`: the knowledge lives in pure
@@ -8143,15 +8029,14 @@ function reportPrerequisiteNotMet(v, options = {}) {
       v.fix.slice(1).map((l) => `        ${l}\n`).join('') +
       `\n${nothing.join('\n')}\n\n` +
       `  A GATE NOBODY CAN RUN IS INDISTINGUISHABLE FROM A GATE THAT FINDS NOTHING (#13526).\n` +
-      `  That is not a slogan here, it is this refusal's measured cost: while this exit was the\n` +
-      `  only thing an agent container could get out of this script, the population it guards —\n` +
-      `  closed cards still carrying \`pm:*\` state — grew to 100+ per lane per label across at\n` +
-      `  least three lanes, back to 2026-08-05, and no reading anywhere said so. If you are\n` +
-      `  seeing this in a proxy-mediated container, check the egress prerequisite FIRST: node's\n` +
-      `  \`fetch\` ignores \`HTTPS_PROXY\`, and this script now re-execs itself with\n` +
-      `  \`NODE_USE_ENV_PROXY=1\` when a proxy is set (see \`resolveProxyRelaunch\`). Reaching this\n` +
-      `  line WITH a proxy configured means the relaunch already happened and the credential the\n` +
-      `  proxy injects is genuinely not working — not that the transport was never tried.\n` +
+      `  That is not a slogan here, it is this refusal's measured cost. For as long as this exit\n` +
+      `  was the only thing an agent container could get out of this script, the population it\n` +
+      `  guards grew unobserved — and when the route was finally fixed and a census run, closed\n` +
+      `  cards still carrying \`pm:*\` came to 2,063 \`pm:dispatched\` and 846 \`pm:queue\`, with 555\n` +
+      `  carrying BOTH, back to 2026-08-02. The filing seat could only say "at least 100 per lane\n` +
+      `  per label", because a first page is not a count and this gate could not be run to get one.\n` +
+      `  ⇒ Treat this exit as an unread instrument, never as a quiet board: the H39 census below\n` +
+      `  does not appear at all in a run that ends here.\n` +
       `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from the unclassified failure's 2 — but piping this\n` +
       `  reports the PIPE's status, so \`… | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
   );
@@ -13032,35 +12917,6 @@ function selfTest() {
   t('H8 summary: …and does NOT claim the horizon was reached', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('horizon reached'), false);
   t('H8 summary: …and says a delivery past it is invisible', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('is invisible'), true);
 
-  // -- The EGRESS prerequisite: proxy relaunch (#13526 leg 1) ----------------
-  //
-  // Measured: an agent container's `GITHUB_TOKEN` is a 14-char proxy
-  // placeholder and node's fetch bypasses the proxy that holds the real
-  // credential, so this gate exited 3 while the container had a working
-  // 15,000/h authenticated path the whole time.
-  const PROXY = 'http://proxy.internal:8080';
-  t('proxy: a proxied container relaunches', resolveProxyRelaunch({ HTTPS_PROXY: PROXY }, []).relaunch, true);
-  t('proxy: …and names the proxy it found', resolveProxyRelaunch({ HTTPS_PROXY: PROXY }, []).proxy, PROXY);
-  t('proxy: the lowercase spelling is read too', resolveProxyRelaunch({ https_proxy: PROXY }, []).relaunch, true);
-  t('proxy: HTTP_PROXY alone is enough', resolveProxyRelaunch({ HTTP_PROXY: PROXY }, []).relaunch, true);
-  // The property that keeps CI byte-identical: no proxy, no relaunch.
-  t('proxy: a CI runner with no proxy does NOT relaunch', resolveProxyRelaunch({}, []).relaunch, false);
-  t('proxy: …and says why, so a reader is not left guessing', resolveProxyRelaunch({}, []).reason.includes('no proxy'), true);
-  t('proxy: an empty proxy value is unset, not a proxy', resolveProxyRelaunch({ HTTPS_PROXY: '' }, []).relaunch, false);
-  t('proxy: whitespace is unset too', resolveProxyRelaunch({ HTTPS_PROXY: '   ' }, []).relaunch, false);
-  // Exactly once — the guard is what makes a misconfigured proxy cost one extra
-  // process rather than a fork bomb.
-  t('proxy: the child does NOT relaunch again', resolveProxyRelaunch({ HTTPS_PROXY: PROXY, [PROXY_RELAUNCH_GUARD]: '1' }, []).relaunch, false);
-  t('proxy: a caller who already set the flag is left alone', resolveProxyRelaunch({ HTTPS_PROXY: PROXY, NODE_USE_ENV_PROXY: '1' }, []).relaunch, false);
-  // `--self-test` must stay runnable in ANY container, whatever it carries —
-  // the same exemption the malformed-repo and malformed-floor refusals make.
-  t('proxy: --self-test never relaunches', resolveProxyRelaunch({ HTTPS_PROXY: PROXY }, ['--self-test']).relaunch, false);
-  // Passing an unsupported flag would make node refuse to START, turning a
-  // degraded reading into no reading — the direction this whole change refuses.
-  t('proxy: the warning flag is passed when the runtime supports it', proxyRelaunchExecArgv(new Set(['--disable-warning']))[0], '--disable-warning=UNDICI-EHPA');
-  t('proxy: …and omitted on a runtime that would reject it', proxyRelaunchExecArgv(new Set()).length, 0);
-  t('proxy: …and a missing flag set is not a crash', proxyRelaunchExecArgv(undefined).length, 0);
-
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
   const waiting = (number = 1119) => ({
@@ -14045,31 +13901,6 @@ function selfTest() {
 
 const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
-  // The EGRESS prerequisite (#13526), answered before anything else — including
-  // the malformed-input refusals below, which cost nothing to re-run in the
-  // child and would otherwise be printed twice. See `resolveProxyRelaunch` for
-  // why this exists: without it, node's `fetch` bypasses the proxy that holds
-  // this container's credential and every run here ends in exit 3.
-  const relaunch = resolveProxyRelaunch(process.env, process.argv.slice(2));
-  if (relaunch.relaunch) {
-    const child = spawnSync(
-      process.execPath,
-      [
-        ...proxyRelaunchExecArgv(process.allowedNodeEnvironmentFlags),
-        fileURLToPath(import.meta.url),
-        ...process.argv.slice(2),
-      ],
-      {
-        stdio: 'inherit',
-        env: { ...process.env, NODE_USE_ENV_PROXY: '1', [PROXY_RELAUNCH_GUARD]: '1' },
-      },
-    );
-    // A child that could not be spawned at all falls THROUGH to the in-process
-    // path rather than failing the run: the parent's transport is worse, but a
-    // worse reading beats no reading, and its own prerequisite verdict is the
-    // honest report of what it then finds. A child that ran owns the exit code.
-    if (!child.error) process.exit(child.status ?? 1);
-  }
   // A malformed sweep target is bad usage (exit 2), refused BEFORE any request
   // — including the probe's, whose second stage is a repo-scoped read of this
   // very string. Silently falling back to the default would sweep a board
