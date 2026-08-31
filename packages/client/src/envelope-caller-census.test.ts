@@ -86,12 +86,32 @@
  *  - **`objectui` is a RECORDED constant, not a live scan.** A test in this
  *    repo cannot read that checkout. `OBJECTUI_CENSUS` carries the revision it
  *    was measured at and the command that reproduces it.
+ *  - **The ratchet in section 3 is only as live as turbo's cache.** This suite
+ *    walks the whole workspace, but `@objectstack/client#test` declares as
+ *    inputs its own package plus the named cross-package files — NOT every
+ *    tree it reads. So a new call site added in ANOTHER package can leave this
+ *    suite cached-green until something else invalidates it. Declaring
+ *    `packages/**` here would re-run the client suite on virtually every
+ *    commit, which is why it is recorded as a known bound rather than bought
+ *    at that price: on a cold cache and in CI's full run the count is exact,
+ *    and a call site added inside `packages/client` — where every site lives
+ *    today — invalidates normally.
  */
 
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts` beside it
+// is a hand-written declaration, so this resolves with types.
+//
+// ⛔ NOT a private `stripComments` regex. This tree has ONE code/prose
+// separator and `check:comment-mask-adoption` enforces it — a naive regex opens
+// a phantom comment on any `/*` inside a string literal and then reports clean
+// over code it never read, which for THIS file would silently shrink the
+// census. `maskComments` blanks comment spans in place, so every byte offset
+// and line number below stays true to the original file.
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** `packages/client/src` → the workspace root. */
@@ -123,16 +143,6 @@ interface Site {
     visibleToLineGrep: boolean;
 }
 
-/**
- * Blank out block and line comments, preserving byte offsets so reported line
- * numbers stay true to the original file.
- */
-function blankComments(src: string): string {
-    return src
-        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-        .replace(/(^|[^:])\/\/[^\n]*/g, (m, lead: string) => lead + ' '.repeat(m.length - lead.length));
-}
-
 function walk(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
         if (SKIP_DIRS.has(entry)) continue;
@@ -153,7 +163,7 @@ function scanCallSites(root: string): Census {
     for (const abs of files) {
         let raw: string;
         try { raw = readFileSync(abs, 'utf8'); } catch { continue; }
-        const code = blankComments(raw);
+        const code = maskComments(raw);
         const rawLines = raw.split('\n');
         for (const [ns, method] of METHODS) {
             // `\s*` spans newlines because the match runs over the WHOLE file,
