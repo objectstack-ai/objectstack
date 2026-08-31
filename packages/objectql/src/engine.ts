@@ -99,6 +99,7 @@ import {
   type DriverHealth,
   type DatasourceUnavailableInfo,
   type DatasourceUnavailableKind,
+  type PrimaryDatasourceVerdict,
 } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // [#5979] The ONE shared "which read failure is benign?" predicate (#4825
@@ -146,7 +147,7 @@ import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/
 export type InsertManyRowOutcome =
   | { ok: true; record: any }
   | { ok: false; error: unknown };
-import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
+import { CoreServiceName, StorageNameMapping, PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import {
   BulkDataEventSchema,
@@ -7060,6 +7061,101 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * WHICH datasource is this deployment's PRIMARY one — the single
+   * implementation of the criterion ruled on #13408 (2026-08-31, 第 6 场总监席
+   * 决裁批 #12, maintainer verbatim 「同意」).
+   *
+   * The ruling's words, quoted rather than paraphrased because the constraint
+   * is on the *kind* of answer, not only the answer:
+   *
+   * > 「主/默认」判据必须是一条读得出来的事实:定义为「承载平台系统对象(sys_*)的
+   * > 那个数据源」或等价的可机读事实,⛔ 不得用「第一个注册的」之类启发式。
+   *
+   * So the fact read here is: **where do this deployment's platform system
+   * objects actually live**, answered through {@link resolveDatasourceBinding}
+   * — the same five-step order every query routes by. Not registration order,
+   * not `getDefaultDriverName()` on its own. `getDefaultDriverName()` names the
+   * driver flagged default at registration, which is a *configuration* input to
+   * step 5, not evidence about where anything is stored; a deployment that
+   * routes `sys_*` elsewhere by an explicit binding or a `datasourceMapping`
+   * rule would make that answer confidently wrong, and wrong in the direction
+   * that keeps a dead replica in rotation.
+   *
+   * ## Who votes
+   *
+   * The curated `PLATFORM_PROVIDED_OBJECT_NAMES` registry (`@objectstack/spec`)
+   * intersected with what this registry actually holds — a name no package
+   * registered here says nothing about this deployment, and asking
+   * `resolveDatasourceBinding` about it would produce a step-5 answer read off
+   * an object that does not exist.
+   *
+   * **Minus the ADR-0057 §3.6 system ledgers** ({@link isSystemLedgerObject} —
+   * `audit` / `telemetry` / `event`), which are *deliberately* routed off the
+   * primary when a `telemetry` datasource is registered. They are excluded
+   * because including them would report `system-objects-split` for every
+   * deployment that adopted lifecycle separation — a permanent drain-always
+   * verdict for a configuration the platform recommends. `transient` is
+   * deliberately NOT excluded, matching step 3: those objects stay on the
+   * primary, so they are evidence about it.
+   *
+   * ## What it refuses to answer
+   *
+   * Disagreement, silence and a name with no driver behind it all return
+   * `resolved: false`. That is the ruling's 「错向红」 requirement:
+   *
+   * > 判据解析失败或歧义时 ⇒ fail toward draining(宁可误摘不可静默保留)
+   *
+   * ⛔ The direction lives in the CALLER, because only the caller can drain —
+   * this method's contract is that it never invents a name, and a caller that
+   * treats `resolved: false` as "no primary is unhealthy" inverts the ruling.
+   * The readiness caller's pins are in
+   * `packages/runtime/src/http-dispatcher.ready.test.ts`.
+   *
+   * Never throws for a routing reason: every failure is a verdict. (A registry
+   * that throws is not modelled here — that is a broken kernel, and the
+   * readiness caller catches it into the same drain direction.)
+   */
+  resolvePrimaryDatasource(): PrimaryDatasourceVerdict {
+    const byDatasource = new Map<string, number>();
+    for (const objectName of PLATFORM_PROVIDED_OBJECT_NAMES) {
+      // Not registered in THIS deployment (OSS runtime vs cloud, plugins not
+      // installed) — no evidence either way, so it does not vote.
+      if (!this._registry.getObject(objectName)) continue;
+      // ADR-0057 §3.6: deliberately off the primary. See the header.
+      if (this.isSystemLedgerObject(objectName)) continue;
+
+      const binding = this.resolveDatasourceBinding(objectName);
+      // A registered platform object that routes NOWHERE is a broken
+      // deployment, not a quiet abstention: there is no binding and no default
+      // driver, so no answer about "the primary" can be true.
+      if (!binding) return { resolved: false, reason: 'system-object-unbound' };
+
+      byDatasource.set(binding.datasource, (byDatasource.get(binding.datasource) ?? 0) + 1);
+    }
+
+    if (byDatasource.size === 0) return { resolved: false, reason: 'no-system-objects-registered' };
+    if (byDatasource.size > 1) {
+      return {
+        resolved: false,
+        reason: 'system-objects-split',
+        candidates: [...byDatasource.keys()].sort(),
+      };
+    }
+
+    const [[datasource, witnesses]] = [...byDatasource];
+    // Steps 1-2 of the resolution order answer with a name even when nothing is
+    // registered under it (that is deliberate — `getDriver` throws loudly on
+    // it). A readiness probe cannot use such a name: `checkDriversHealth()`
+    // reports only REGISTERED drivers, so an unregistered primary would be
+    // absent from the unhealthy list and read as healthy — the silent
+    // don't-drain the ruling forbids.
+    if (!this.drivers.has(datasource)) {
+      return { resolved: false, reason: 'no-driver-registered', candidates: [datasource] };
+    }
+    return { resolved: true, datasource, witnesses };
+  }
+
+  /**
    * Does this object declare a media field at all? Cached per schema object —
    * the registry hands back the same instance per object, so this scans a
    * field map once rather than on every write.
@@ -8548,7 +8644,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * ADR-0061: expand `search` into a server-resolved cross-field `$or` of
-   * `$contains`, AND it with any caller `where`, then strip the search keys off
+   * `$icontains`, AND it with any caller `where`, then strip the search keys off
    * the AST.
    *
    * Shared by `find` and `findOne` (#4419). It lived inline in `find` and
@@ -8565,7 +8661,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Field resolution is server-side (declared `searchableFields` →
    * auto-default); the optional `searchFields` override is intersected with the
-   * allowed set, never widened. All drivers already execute `$or`/`$contains`,
+   * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
    * The keys are deleted whether or not anything expanded — leaving them on

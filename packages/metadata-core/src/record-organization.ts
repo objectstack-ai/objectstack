@@ -53,14 +53,41 @@ import { SystemFieldName } from '@objectstack/spec/system';
  * columns on the same table, and a second hand-rolled probe would answer
  * differently on the day one of them is fixed.
  *
- * Why the probe exists at all: the SchemaRegistry auto-injects
- * `organization_id` only in multi-tenant mode (`applySystemFields({
- * multiTenant })`), so on single-tenant stacks the `sys_audit_log` /
- * `sys_activity` tables have no such column. Unconditionally stamping it there
+ * Why the probe exists at all — and what has changed under it. It was built
+ * for a posture-conditional `organization_id`: the SchemaRegistry used to
+ * auto-inject the column only in multi-tenant mode (`applySystemFields({
+ * multiTenant })`), so on a single-tenant stack the `sys_audit_log` /
+ * `sys_activity` tables had no such column. Unconditionally stamping it there
  * made every audit INSERT fail with "table sys_audit_log has no column named
  * organization_id" — and the error was swallowed, so audit logging was silently
- * non-functional. Resolve the field set lazily from the engine schema and cache
- * it; object schemas are static after registration.
+ * non-functional.
+ *
+ * ⚠️ That premise no longer holds. The `organization_id` COLUMN is provisioned
+ * UNCONDITIONALLY, subject only to the explicit opt-outs (`systemFields:
+ * false`, `systemFields.tenant: false`, `managedBy: 'better-auth'`,
+ * `tenancy.enabled: false`); the multi-tenant flag now governs only whether the
+ * column is INDEXED, never whether it EXISTS. Three sources agree:
+ * `applySystemFields` says so at the injection site
+ * (`objectql/src/registry.ts`); the derivation it consumes
+ * (`resolveInjectedSystemColumns`, `spec/src/data/injected-system-columns.ts`)
+ * takes no `multiTenant` input to decide with; and
+ * `objectql/src/registry-tenancy-posture.test.ts` pins it executably. Both
+ * tables named above resolve the column on every posture.
+ *
+ * The stale sentence is corrected rather than dropped, because it is the stated
+ * REASON for this probe and read literally it now invites two wrong moves:
+ * ⛔ deleting the probe as dead once someone checks the column is always
+ * provisioned, and ⛔ hand-rolling a fresh posture-conditional probe elsewhere
+ * on the premise it used to carry. (`sql-driver.ts`'s `applyTenantScope`
+ * docstring names the class: "which is exactly how a docstring becomes the last
+ * place a wrong fact survives.")
+ *
+ * The probe never read the flag, and it still has work. What it answers is
+ * PROVENANCE, not posture: the column is absent exactly where this process does
+ * not provision it — an ADR-0015 `external` object, the explicit opt-outs
+ * above, and (next paragraph) an engine with no `getSchema`. Resolve the field
+ * set lazily from the engine schema and cache it; object schemas are static
+ * after registration.
  *
  * Best-effort in both directions: an engine with no `getSchema` (an in-memory
  * test double) reports every field absent, which skips the stamp rather than

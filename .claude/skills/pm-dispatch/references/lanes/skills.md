@@ -9,8 +9,8 @@
   `CLAUDE.md`;governed 面的治理执行文件(`.github/CODEOWNERS` 治理路由半边 +
   SUBJECT 是 governed 面本身的门禁/审计)。全量判据与裁决引文在 SKILL.md 域车道
   表;governed 面统一定义见 SKILL.md「ACCEPT 之后的路径分叉」。
-- QA 管理循环执行归本席;qa-run 记录是协议载体不是工作;契约复审链与决裁勤务归项目
-  总监席(`lanes/director.md`);本席保留 skill 文本/governance 面与本车道,⛔ 不再代行。
+- QA 管理循环执行归本席;qa-run 记录是协议载体不是工作;契约复核归派发席席内、决裁勤务
+  归项目总监席(`lanes/director.md`);本席保留 skill 文本/governance 面与本车道,⛔ 不再代行。
 
 ## 常设承诺
 

@@ -318,6 +318,58 @@
  * probe, because a flag that let the rows read `✓ audited` without it would
  * reintroduce precisely the false green this leg exists to remove.
  *
+ * ### The #13307 reopen: the probe was never gated — the RUNS were stale
+ *
+ * The reopen asked, in words: is the reachability probe gated on
+ * `--repo-root`? The answer is NO, and it never was: the probe runs in
+ * `main()`'s sweep loop for every repo whose checkout resolved, discovered
+ * conventionally or overridden, in every window mode. What actually happened
+ * (measured, 2026-08-31): the two audit runs that printed the false green
+ * AFTER the fix landed quoted a row ending `— none in window; if that tip
+ * predates your last fetch, run \`git fetch origin main\` there` — and that
+ * text exists ONLY in the pre-fix render (the fix replaced it with the
+ * MEASURED-zero / unmeasured-zero split). Those runs executed a PRE-FIX COPY
+ * of this script from a stale tree; in a container whose shared checkout has
+ * its HEAD switched by other agents, `node scripts/pm/check-governed-merges.mjs`
+ * runs whatever version that tree happens to hold, and nothing in the output
+ * said which. So the header now prints `sweep code:` — the executing tree's
+ * HEAD and this file's own blob id, with a loud mismatch line when the
+ * running bytes are not the copy that HEAD records — making a stale-script
+ * run attributable instead of indistinguishable from the landed behaviour.
+ * ⛔ It cannot PREVENT a stale run (a stale tree prints a stale sha,
+ * truthfully); it makes the reading checkable, which is what the reopen's
+ * false conclusion lacked.
+ *
+ * ### The nondeterministic audit surface (#13836): the flip is the freshness
+ * ### leg failing closed, and it must be attributable without footer diffing
+ *
+ * Measured 2026-08-31: two identical invocations, same cwd, ~15 minutes
+ * apart — run 1 audited objectui and enumerated 12 entries, run 2 put
+ * objectui among the unaudited and enumerated zero, with nothing local
+ * touching that checkout between them. Root cause, by ENUMERATION plus
+ * REPRODUCTION rather than by the card's first suspect: for a repo pinned
+ * topologically (its anchor resolving), the only per-run preconditions that
+ * can change with zero local writes live in the freshness leg — the remote
+ * probe and the tip-identity comparison. The recorded shallow-boundary-
+ * connectivity hypothesis is structurally unreachable in that mode: the
+ * #9902 horizon guard runs only where a DATE window is in force (`if
+ * (!base)`), the anchor resolves from the object store (an upstream push
+ * moves neither), and enumeration reads the local graph. `--self-test`
+ * reproduces the flip on real fixtures: the same argv audits (exit 0, a
+ * true zero), the remote receives ONE push, and it refuses BEHIND — the
+ * safe direction (#4690), on a busy remote, as often as the remote moves.
+ *
+ * What the flip OWED was attribution, and that is the fix: every unaudited
+ * row now carries a machine-readable precondition category
+ * (`no-checkout` · `unparseable-origin` · `wrong-origin` ·
+ * `unreachable-remote` · `remote-tip-unreadable` · `local-tip-unreadable` ·
+ * `stale-mirror` · `unprobeable-ref` · `history-horizon` · `ref-unreadable`),
+ * printed on the row, in the INCOMPLETE footer per repo, and in `--json` —
+ * so two footers minutes apart differ by a stated reason, never only by a
+ * slug list an operator has to diff across runs. (A pin that does not
+ * resolve is NOT one of these: by the #12633 route-B ruling it falls back to
+ * the date window and the row says so via `fellBack` — loud already.)
+ *
  * Queue-batch TOPOLOGY (#11996) is a separate question from the window below,
  * and it is answered: measured NON-BLIND 2026-08-27 (six batch topologies plus
  * a live batch replay) — re-measure if the repo's merge method changes, or if
@@ -847,22 +899,62 @@ export function slugFromRemote(url) {
 
 /**
  * Where each governed repo's checkout is, and whether it can be audited at
- * all. Pure: `probe(path)` answers `{ exists, slug }`, so the whole
- * absent/wrong-origin/present fork is offline-testable. An unresolvable repo
- * is `status: 'unaudited'` with a stated reason — the #4690 rule in code:
- * absence must be loud, and must never render as a clean repo.
+ * all. Pure: `probe(path)` answers `{ exists, slug, origin }`, so the whole
+ * absent/unparseable/wrong-origin/present fork is offline-testable. An
+ * unresolvable repo is `status: 'unaudited'` with a stated reason — the #4690
+ * rule in code: absence must be loud, and must never render as a clean repo.
+ *
+ * ⚠️ IDENTITY IS PROVEN, NEVER ASSUMED (#13423). The wrong-origin refusal used
+ * to be spelled `if (seen.slug && seen.slug !== repo.slug)`, so a checkout
+ * whose origin `slugFromRemote` could not parse — a filesystem path, an SSH
+ * shorthand, no origin remote at all — had a falsy `seen.slug`, slipped the
+ * guard, and fell straight through to `status: 'audited'` UNDER THE GOVERNED
+ * NAME with no evidence it is that repo. Same class as the #13307 leg one
+ * function down: "a local checkout is not evidence it is the repo you think",
+ * and it failed in the direction that reads as safety. The #13421 reachability
+ * probe raised the bar without closing this — a local or mirror remote is
+ * REACHABLE, so it passed the new probe and still slipped the slug check. The
+ * enumeration of every "parse failure ⇒ success branch" shape this function
+ * held is now zero by construction: `audited` is the single fall-through, and
+ * it is reachable only with `seen.slug === repo.slug` — a parsed, matching
+ * identity. (A `probe` that answers null/undefined coerces to
+ * `exists: false`, which refuses too.)
+ *
+ * What an unparseable origin SHOULD do is the judgment #13421 deliberately
+ * left unfixed (a legitimate mirror URL and a bogus one are both unparseable,
+ * and the tree has no basis for telling them apart) — so the answer is the
+ * register's standing one: NOT MEASURED. Never a policy of which spellings
+ * are trustworthy; the row states what is missing (proof of identity) and the
+ * remedy, and the sweep is INCOMPLETE while it stands.
  */
 export function resolveRepoCheckouts({ repos = GOVERNED_REPOS, selfId = SELF_REPO_ID, selfRoot, siblingDir, overrides = {}, probe }) {
   return repos.map((repo) => {
     const candidate = overrides[repo.id] ?? (repo.id === selfId ? selfRoot : join(siblingDir, repo.id));
-    const seen = probe(candidate) ?? { exists: false, slug: null };
+    const seen = probe(candidate) ?? { exists: false, slug: null, origin: null };
     if (!seen.exists) {
-      return { ...repo, path: candidate, status: 'unaudited', reason: `no git checkout at ${candidate}` };
+      return { ...repo, path: candidate, status: 'unaudited', precondition: 'no-checkout', reason: `no git checkout at ${candidate}` };
     }
-    if (seen.slug && seen.slug !== repo.slug) {
-      return { ...repo, path: candidate, status: 'unaudited', reason: `the checkout at ${candidate} has origin ${seen.slug}, not ${repo.slug}` };
+    if (!seen.slug) {
+      const declared = seen.origin ? `origin '${seen.origin}'` : 'no origin remote (or an unreadable one)';
+      return {
+        ...repo,
+        path: candidate,
+        status: 'unaudited',
+        precondition: 'unparseable-origin',
+        reason:
+          `NOT MEASURED: the checkout at ${candidate} has ${declared}, which does not parse to a ` +
+          `github.com owner/name slug — nothing proves this checkout is ${repo.slug}, so auditing it under ` +
+          `that name would certify an arbitrary tree (#13423). A reachable remote is not identity: a local ` +
+          `or mirror remote passes the #13307 probe and is still not evidence of WHICH repo this is. ` +
+          `Remedy: point the checkout's origin at https://github.com/${repo.slug} (a transport rewrite ` +
+          `belongs in \`url.<base>.insteadOf\`, which keeps the declared origin readable), or pass ` +
+          `--repo-root ${repo.id}=<a checkout whose origin declares ${repo.slug}>.`,
+      };
     }
-    return { ...repo, path: candidate, status: 'audited', reason: null };
+    if (seen.slug !== repo.slug) {
+      return { ...repo, path: candidate, status: 'unaudited', precondition: 'wrong-origin', reason: `the checkout at ${candidate} has origin ${seen.slug}, not ${repo.slug}` };
+    }
+    return { ...repo, path: candidate, status: 'audited', precondition: null, reason: null };
   });
 }
 
@@ -1312,6 +1404,7 @@ export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
   const parts = remoteRefParts(ref);
   if (!parts) {
     return {
+      precondition: 'unprobeable-ref',
       reason:
         `NOT MEASURED: '${ref}' does not name a remote-tracking ref, so this sweep cannot establish that ` +
         `any remote was consulted for ${path}. A local ref is not evidence of a remote reading (#13307).`,
@@ -1319,6 +1412,7 @@ export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
   }
   if (!remote || remote.reachable !== true) {
     return {
+      precondition: 'unreachable-remote',
       reason:
         `NOT MEASURED: the remote '${parts.remote}' could not be reached from ${path} ` +
         `(${remote?.error ?? 'no probe result'}). ⛔ A local tip is NOT evidence the remote was consulted: ` +
@@ -1333,6 +1427,7 @@ export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
   }
   if (!isObjectId(remote.sha)) {
     return {
+      precondition: 'remote-tip-unreadable',
       reason:
         `NOT MEASURED: the remote '${parts.remote}' answered for ${path} but named no commit on ` +
         `'${parts.branch}' (read: ${JSON.stringify(remote.sha ?? null)}). An unreadable remote tip is a ` +
@@ -1342,6 +1437,7 @@ export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
   }
   if (!isObjectId(localSha)) {
     return {
+      precondition: 'local-tip-unreadable',
       reason:
         `NOT MEASURED: '${ref}' in ${path} did not resolve to a commit id (read: ` +
         `${JSON.stringify(localSha ?? null)}), so there is nothing to compare the remote tip against. ` +
@@ -1350,6 +1446,7 @@ export function remoteFreshnessVerdict({ ref, path, localSha, remote }) {
   }
   if (localSha.trim() !== remote.sha.trim()) {
     return {
+      precondition: 'stale-mirror',
       reason:
         `NOT MEASURED: this mirror is BEHIND its remote — '${ref}' here is ${localSha.trim().slice(0, 9)} ` +
         `but ${parts.remote} names ${remote.sha.trim().slice(0, 9)} on '${parts.branch}'. Enumerating ` +
@@ -1396,12 +1493,25 @@ export function refForRepo(window, repoId) {
  *
  * Returns `{ error }` for a window this sweep cannot parse. A window it cannot
  * parse is a hard failure, never a default (the `parseSince` rule, one level up).
+ *
+ * ⚠️ EVERY REF RESOLVES IN ITS OWN REPO (#13424). The refs are per-repo by
+ * construction — `<id>=<ref>` pins one repo, a bare ref is tried wherever it
+ * resolves — and the fallback DATE this function derives is now resolved the
+ * same way: `resolveRefDate(ref, repoId)` is asked per pair, an `<id>=<ref>`
+ * pin only in its own repo, a bare ref across `repoIds`. It used to be asked
+ * of the SELF checkout only, so a sweep pinning only sibling-repo tips
+ * (`--since-ref objectui=TIP`, no objectstack pin) exited 1 with `does not
+ * resolve to a commit` although every ref resolved perfectly in its own
+ * repository — a false red: a usable sweep rejected, the constraint
+ * undeclared and incidental. The hard failure survives exactly where it is
+ * honest: no named ref resolves in ANY repo it names.
  */
 export function resolveWindow({
   sinceRefArgs = [],
   sinceArg = null,
   now = new Date(),
   budgetSeconds = SKEW_BUDGET_SECONDS,
+  repoIds = GOVERNED_REPOS.map((r) => r.id),
   resolveRefDate = () => null,
 } = {}) {
   const pinnedRefs = new Map();
@@ -1423,11 +1533,24 @@ export function resolveWindow({
   // The topological window still carries a date: it is what a repo the ref does
   // not resolve in falls back to, and what `historyHorizon` is asked about
   // there. The OLDEST resolved ref date is the conservative choice — a wider
-  // fallback window over-lists, which this audit tolerates by design.
-  const named = [bareRef, ...pinnedRefs.values()].filter((r) => r != null);
-  const dates = named.map((r) => resolveRefDate(r)).filter((d) => typeof d === 'string' && d !== '' && !Number.isNaN(Date.parse(d)));
+  // fallback window over-lists, which this audit tolerates by design. Each
+  // pair resolves in ITS OWN repo (#13424): a pin in the repo it names, a bare
+  // ref in every governed checkout.
+  const pairs = [
+    ...[...pinnedRefs].map(([repoId, r]) => ({ repoId, ref: r })),
+    ...(bareRef !== null ? repoIds.map((repoId) => ({ repoId, ref: bareRef })) : []),
+  ];
+  const dates = pairs
+    .map(({ repoId, ref }) => resolveRefDate(ref, repoId))
+    .filter((d) => typeof d === 'string' && d !== '' && !Number.isNaN(Date.parse(d)));
   if (dates.length === 0) {
-    return { error: `--since-ref ${named.map((r) => `'${r}'`).join(', ')} does not resolve to a commit.` };
+    const named = [...new Set(pairs.map((p) => p.ref))];
+    return {
+      error:
+        `--since-ref ${named.map((r) => `'${r}'`).join(', ')} does not resolve to a commit in any repo it names ` +
+        `(an <id>=<ref> pin resolves in that repo's own checkout, a bare ref in every governed checkout — ` +
+        `never only in the self checkout, #13424).`,
+    };
   }
   const requestedIso = new Date(Math.min(...dates.map((d) => Date.parse(d)))).toISOString();
   return { mode: 'topological', bareRef, pinnedRefs, requestedIso, effectiveIso: backOff(requestedIso), budgetSeconds };
@@ -1547,17 +1670,28 @@ export function commitPaths(root, sha) {
   return out.split('\n').filter((p) => p !== '');
 }
 
-/** Is `path` a git checkout, and of what? The real `probe` for resolveRepoCheckouts. */
+/**
+ * Is `path` a git checkout, and of what? The real `probe` for
+ * resolveRepoCheckouts. The identity read is the DECLARED origin —
+ * `git config --get remote.origin.url`, the URL the checkout claims — never
+ * `git remote get-url origin`, which applies `url.<base>.insteadOf` rewrites
+ * first (measured: with a rewrite in force, `get-url` answers the rewrite
+ * target — a filesystem path — while the raw config still names github.com).
+ * A transport rewrite is an operator's routing choice; the declared URL is the
+ * identity claim this sweep audits under, and `git ls-remote` (#13307) applies
+ * the same rewrites itself, so transport stays exactly as git resolves it.
+ */
 function probeCheckout(path) {
   try {
     git(path, ['rev-parse', '--git-dir']);
   } catch {
-    return { exists: false, slug: null };
+    return { exists: false, slug: null, origin: null };
   }
   try {
-    return { exists: true, slug: slugFromRemote(git(path, ['remote', 'get-url', 'origin']).trim()) };
+    const origin = git(path, ['config', '--get', 'remote.origin.url']).trim();
+    return { exists: true, slug: slugFromRemote(origin), origin: origin || null };
   } catch {
-    return { exists: true, slug: null };
+    return { exists: true, slug: null, origin: null };
   }
 }
 
@@ -1702,6 +1836,54 @@ export function summariseAttributionFailures(entries) {
   );
 }
 
+// ── sweep-code provenance (#13307 reopen) ───────────────────────────────────
+
+/**
+ * Which sweep ran? The reopen's false green was a PRE-FIX copy of this script
+ * executing from a stale tree, and nothing in the output said so — the reading
+ * was taken as the landed version's behaviour. Pure: `describeSweepCode` turns
+ * the reads into the line the header prints, so `--self-test` pins every
+ * branch; `readSweepCode` does the three local git reads (no network), and
+ * every failure is a stated UNKNOWN, never a crash and never a silent omission
+ * — a sweep that cannot attribute its own code says that out loud too.
+ */
+export function describeSweepCode(code) {
+  if (!code || !code.head || !code.blob) {
+    return (
+      `  sweep code: UNKNOWN (${code?.error ?? 'no reading'}) — this run cannot be attributed to a tree; ` +
+      `a version-dependent conclusion drawn from it is unattributed (#13307).`
+    );
+  }
+  if (code.headBlob && code.headBlob === code.blob) {
+    return `  sweep code: HEAD ${code.head} — the running file byte-matches that tree's copy (blob ${code.blob.slice(0, 10)}).`;
+  }
+  return (
+    `  ⚠️  sweep code: HEAD ${code.head}, but the RUNNING copy of this script (blob ${code.blob.slice(0, 10)}) is not ` +
+    `the copy that HEAD records (${code.headBlob ? `blob ${code.headBlob.slice(0, 10)}` : 'unreadable'}) — a locally ` +
+    `modified or stale copy. ⛔ Do not read this sweep as any landed version's behaviour (#13307: a pre-fix copy ` +
+    `printed a false green that was then attributed to the landed fix).`
+  );
+}
+
+/** The three local reads behind the line above — each failure is carried, not thrown. */
+function readSweepCode() {
+  const root = resolve(scriptDir, '..', '..');
+  const rel = 'scripts/pm/check-governed-merges.mjs';
+  const code = { head: null, blob: null, headBlob: null, error: null };
+  try {
+    code.blob = git(root, ['hash-object', '--', scriptPath]).trim() || null;
+  } catch (error) {
+    code.error = String(error?.message ?? error).split('\n')[0];
+  }
+  try {
+    code.head = git(root, ['rev-parse', '--short', 'HEAD']).trim() || null;
+    code.headBlob = git(root, ['rev-parse', `HEAD:${rel}`]).trim() || null;
+  } catch (error) {
+    code.error = code.error ?? String(error?.message ?? error).split('\n')[0];
+  }
+  return code;
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 
 /**
@@ -1807,7 +1989,7 @@ export function nextRoundRefLine(repos) {
 }
 
 /** The whole report as text — pure, so --self-test asserts on the words. */
-export function renderReport({ window, repos, scanned, entries, lookups }) {
+export function renderReport({ window, repos, scanned, entries, lookups, sweepCode = null }) {
   const audited = repos.filter((r) => r.status === 'audited');
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = audited.filter((r) => r.windowIncomplete);
@@ -1815,11 +1997,12 @@ export function renderReport({ window, repos, scanned, entries, lookups }) {
     `governed-merges sweep: ${entries.length} governed merge(s) since ${window.requestedIso} ` +
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
+    (sweepCode ? `${describeSweepCode(sweepCode)}\n` : '') +
     describeWindow(window);
   const auditedLines = audited.map(
     (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.windowMode ? `; window ${r.windowMode}${r.windowBase ? ` from ${r.windowBase.sha.slice(0, 9)}` : ''}${r.windowFellBack ? ` (fell back — ${r.windowFellBack})` : ''}${r.straddlers ? `, ${r.straddlers} boundary re-listing(s)` : ''}` : ''}${r.horizon ? `; history ${r.horizon}` : ''}${r.remote ? `; remote ${describeRemote(r.remote)}` : ''}${r.quiet ? (r.remote ? ' — none in window, and the remote tip was reached and matches this mirror: a MEASURED zero, not an unread one' : ' — none in window; ⚠️ no remote reading is recorded for this row, so the zero is not a measured one') : ''}`,
   );
-  const unauditedLines = unaudited.map((r) => `  ⚠️  UNAUDITED  ${r.slug} — ${r.reason}`);
+  const unauditedLines = unaudited.map((r) => `  ⚠️  UNAUDITED  ${r.slug} — [${r.precondition ?? 'unstated'}] ${r.reason}`);
   const edgeLines = edged.map((r) => `  ⚠️  WINDOW EDGE  ${r.slug} — ${r.windowIncomplete}`);
   const unauditedNote =
     unaudited.length > 0
@@ -1930,15 +2113,33 @@ async function main() {
   }
   const repoSet = only.length > 0 ? GOVERNED_REPOS.filter((r) => only.includes(r.id)) : GOVERNED_REPOS;
 
+  // The checkouts resolve BEFORE the window (#13424): the window's fallback
+  // date is derived per repo, so the resolver needs to know where each repo's
+  // checkout is. This runs again in the re-exec'd child (below) — a handful of
+  // local `git rev-parse`/`config` reads per repo, paid twice by design rather
+  // than threaded through an exec boundary.
+  const repos = resolveRepoCheckouts({
+    repos: repoSet,
+    selfRoot,
+    siblingDir: dirname(selfRoot),
+    overrides,
+    probe: probeCheckout,
+  });
+  const repoById = new Map(repos.map((r) => [r.id, r]));
+
   // The window (#12633). `--since-ref` is topological and `--since` is a date
   // boundary backed off by the declared skew budget; both are resolved here as
-  // data so the report can SAY which one it ran and what it cost.
+  // data so the report can SAY which one it ran and what it cost. Each ref
+  // resolves in ITS OWN repo's checkout (#13424), never only in the self one.
   const window = resolveWindow({
     sinceRefArgs: argsOf('--since-ref'),
     sinceArg: argOf('--since'),
-    resolveRefDate: (r) => {
+    repoIds: repoSet.map((r) => r.id),
+    resolveRefDate: (r, repoId) => {
+      const repo = repoById.get(repoId);
+      if (!repo) return null;
       try {
-        return git(selfRoot, ['log', '-1', '--format=%cI', `${r}^{commit}`]).trim();
+        return git(repo.path, ['log', '-1', '--format=%cI', `${r}^{commit}`]).trim() || null;
       } catch {
         return null;
       }
@@ -1972,14 +2173,6 @@ async function main() {
     console.error(`⚠️  could not re-exec with ${rearm.flag} (${child.error?.message ?? 'no exit status'}); continuing in-process — attribution may fail.`);
   }
 
-  const repos = resolveRepoCheckouts({
-    repos: repoSet,
-    selfRoot,
-    siblingDir: dirname(selfRoot),
-    overrides,
-    probe: probeCheckout,
-  });
-
   const entries = [];
   let scanned = 0;
   for (const repo of repos) {
@@ -1997,6 +2190,7 @@ async function main() {
       const stale = remoteFreshnessVerdict({ ref, path: repo.path, localSha: sha, remote });
       if (stale) {
         repo.status = 'unaudited';
+        repo.precondition = stale.precondition ?? 'unstated';
         repo.reason = stale.reason;
         continue;
       }
@@ -2011,6 +2205,7 @@ async function main() {
         const horizon = historyHorizon({ cwd: repo.path, ref, sinceMs: Date.parse(window.effectiveIso) });
         if (!horizon.covered) {
           repo.status = 'unaudited';
+          repo.precondition = 'history-horizon';
           repo.reason = truncatedHorizonReason({ ref, horizon });
           continue;
         }
@@ -2025,6 +2220,7 @@ async function main() {
       if (walked.anchorAtEdge) repo.windowIncomplete = windowEdgeReason({ budgetSeconds: window.budgetSeconds });
     } catch (error) {
       repo.status = 'unaudited';
+      repo.precondition = 'ref-unreadable';
       repo.reason = `cannot read ${ref} in ${repo.path}: ${String(error.message ?? error).split('\n')[0]} — run \`git fetch origin main\` there`;
       continue;
     }
@@ -2040,7 +2236,7 @@ async function main() {
   if (repos.every((r) => r.status !== 'audited')) {
     console.error(
       `❌  no governed repo could be audited — not one checkout resolved. This is a failed sweep, not a\n` +
-        `    clean window.\n${repos.map((r) => `    • ${r.slug}: ${r.reason}`).join('\n')}`,
+        `    clean window.\n${repos.map((r) => `    • ${r.slug} [${r.precondition ?? 'unstated'}]: ${r.reason}`).join('\n')}`,
     );
     return EXIT_CANNOT_SWEEP;
   }
@@ -2068,12 +2264,14 @@ async function main() {
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = repos.filter((r) => r.status === 'audited' && r.windowIncomplete);
   const complete = !attributionFailed && unaudited.length === 0 && edged.length === 0;
+  const sweepCode = readSweepCode();
 
   if (args.includes('--json')) {
     console.log(
       JSON.stringify(
         {
           since: window.requestedIso,
+          sweepCode,
           window: {
             mode: window.mode,
             requested: window.requestedIso,
@@ -2086,6 +2284,7 @@ async function main() {
             slug: r.slug,
             path: r.path,
             status: r.status,
+            precondition: r.precondition ?? null,
             reason: r.reason,
             tip: r.tip ?? null,
             remote: r.remote ? { ref: r.remote.ref, remote: r.remote.remoteName, sha: r.remote.sha, matchesLocalTip: true } : null,
@@ -2107,12 +2306,16 @@ async function main() {
       ),
     );
   } else {
-    console.log(renderReport({ window, repos, scanned, entries, lookups }));
+    console.log(renderReport({ window, repos, scanned, entries, lookups, sweepCode }));
   }
 
   if (!complete) {
     const why = [];
-    if (unaudited.length > 0) why.push(`${unaudited.length} governed repo(s) unaudited (${unaudited.map((r) => r.slug).join(', ')})`);
+    // The footer names WHICH precondition failed per repo (#13836): two
+    // footers minutes apart used to differ only by a slug list, so a repo
+    // dropped between identical invocations was attributable only by
+    // cross-run diffing against the rows above the fold.
+    if (unaudited.length > 0) why.push(`${unaudited.length} governed repo(s) unaudited (${unaudited.map((r) => `${r.slug}: ${r.precondition ?? 'unstated'}`).join(', ')})`);
     if (edged.length > 0) why.push(`${edged.length} governed repo(s) at the WINDOW EDGE (${edged.map((r) => r.slug).join(', ')}) — the boundary could not be proven`);
     if (attributionFailed) why.push('at least one entry has no merged_by reading on any channel');
     console.error(
@@ -2317,6 +2520,47 @@ async function selfTest() {
   assert('an-unresolvable---since-ref-is-a-hard-failure-never-a-default-window',
     typeof resolveWindow({ sinceRefArgs: ['nope'], resolveRefDate: () => null }).error === 'string');
   assert('and-so-is-an-unparseable---since', typeof resolveWindow({ sinceArg: 'yesterday' }).error === 'string');
+  // ── #13424: every ref resolves in ITS OWN repo, never only in self ────────
+  // The measured defect: `--since-ref objectui=TIP` with no objectstack pin
+  // exited 1 `does not resolve to a commit`, because the DATE derivation asked
+  // the self checkout about a sibling's tip. The control below is the old
+  // self-only resolver, verbatim in behaviour: it still errors, which is what
+  // proves the fix moved the question and not the failure.
+  const uiOnly = resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectui' && r === 'uitip000000' ? '2026-08-14T05:55:02Z' : null),
+  });
+  assert('a-sweep-pinning-only-a-sibling-repo-tip-resolves-its-date-in-that-repo-and-is-not-an-error',
+    uiOnly.error === undefined && uiOnly.mode === 'topological' && uiOnly.requestedIso === '2026-08-14T05:55:02.000Z', JSON.stringify(uiOnly));
+  const selfOnlyControl = resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectstack' ? '2026-08-14T05:55:02Z' : null),
+  });
+  assert('control-a-resolver-that-answers-only-for-self-still-errors-the-defect-was-WHERE-the-question-went',
+    typeof selfOnlyControl.error === 'string' && selfOnlyControl.error.includes('does not resolve to a commit'), JSON.stringify(selfOnlyControl.error));
+  // A pin is asked ONLY of its own repo — asking self about a sibling's tip is
+  // the exact read the defect was made of, so the resolver records its calls.
+  const askedPairs = [];
+  resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000', 'cloud=cloudtip0000'],
+    resolveRefDate: (r, repoId) => {
+      askedPairs.push(`${repoId}=${r}`);
+      return repoId === 'objectui' ? '2026-08-14T05:55:02Z' : null;
+    },
+  });
+  assert('a-pinned-ref-is-resolved-in-its-own-repo-only-never-in-self',
+    askedPairs.join(',') === 'objectui=uitip000000,cloud=cloudtip0000', JSON.stringify(askedPairs));
+  // A bare ref is tried in every governed checkout, and resolving ANYWHERE is
+  // enough — the old shape resolved it in self alone.
+  const bareAnywhere = resolveWindow({
+    sinceRefArgs: ['v9.9.9'],
+    repoIds: ['objectstack', 'objectui'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectui' ? '2026-08-13T00:00:00Z' : null),
+  });
+  assert('a-bare-ref-that-resolves-in-any-governed-checkout-is-enough',
+    bareAnywhere.error === undefined && bareAnywhere.requestedIso === '2026-08-13T00:00:00.000Z', JSON.stringify(bareAnywhere));
+  assert('the-per-repo-error-says-where-refs-are-resolved-so-the-constraint-is-declared-not-incidental',
+    selfOnlyControl.error.includes('its own') || selfOnlyControl.error.includes('own checkout'), selfOnlyControl.error);
   // The enumeration itself: topological consults NO date, and a repo the ref
   // does not resolve in says why it took the date window instead.
   const topoWalk = mainlineCommitsInWindow('/w/objectstack', 'origin/main', topo, {
@@ -2388,6 +2632,34 @@ async function selfTest() {
     probe: () => ({ exists: true, slug: 'someone-else/objectui' }),
   })[0];
   assert('a-checkout-with-the-wrong-origin-is-UNAUDITED-not-audited-under-the-wrong-name', wrongOrigin.status === 'unaudited' && wrongOrigin.reason.includes('someone-else/objectui'), JSON.stringify(wrongOrigin));
+  // ── the #13423 hole: a slug the parser cannot read must refuse, not audit ──
+  // The old guard was `if (seen.slug && seen.slug !== repo.slug)` — a null
+  // slug slipped it and fell through to `audited` under the governed name.
+  // Both null-slug shapes are pinned (an unparseable URL, and no origin remote
+  // at all), plus the property the fix makes structural: `audited` is
+  // reachable only through a parsed, MATCHING slug.
+  const unparseable = resolveRepoCheckouts({
+    repos: [GOVERNED_REPOS[2]],
+    selfRoot: '/w/objectstack',
+    siblingDir: '/w',
+    probe: () => ({ exists: true, slug: null, origin: '/srv/mirrors/cloud' }),
+  })[0];
+  assert('an-origin-no-slug-parses-from-is-UNAUDITED-never-audited-under-the-governed-name',
+    unparseable.status === 'unaudited' && unparseable.reason.includes('NOT MEASURED') && unparseable.reason.includes('/srv/mirrors/cloud') && unparseable.reason.includes('objectstack-ai/cloud'),
+    JSON.stringify(unparseable));
+  assert('and-that-refusal-says-a-reachable-remote-is-not-identity', unparseable.reason.includes('not evidence of WHICH repo'), unparseable.reason);
+  const noRemote = resolveRepoCheckouts({
+    repos: [GOVERNED_REPOS[2]],
+    selfRoot: '/w/objectstack',
+    siblingDir: '/w',
+    probe: () => ({ exists: true, slug: null, origin: null }),
+  })[0];
+  assert('a-checkout-with-no-origin-remote-refuses-too-and-names-that-shape',
+    noRemote.status === 'unaudited' && noRemote.reason.includes('no origin remote'), JSON.stringify(noRemote));
+  assert('a-probe-that-answers-nothing-at-all-still-refuses',
+    resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w', siblingDir: '/w', probe: () => null })[0].status === 'unaudited');
+  assert('the-only-fall-through-to-audited-is-a-parsed-MATCHING-slug',
+    resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w', siblingDir: '/w', probe: () => ({ exists: true, slug: 'objectstack-ai/cloud', origin: 'https://github.com/objectstack-ai/cloud.git' }) })[0].status === 'audited');
   const overridden = resolveRepoCheckouts({ repos: [GOVERNED_REPOS[2]], selfRoot: '/w/objectstack', siblingDir: '/w', overrides: { cloud: '/srv/cloud' }, probe: (p) => (p === '/srv/cloud' ? { exists: true, slug: 'objectstack-ai/cloud' } : { exists: false, slug: null }) })[0];
   assert('--repo-root-relocates-a-checkout', overridden.status === 'audited' && overridden.path === '/srv/cloud');
 
@@ -2443,6 +2715,12 @@ async function selfTest() {
     behind !== null && behind.reason.includes('BEHIND') && behind.reason.includes(liveTip.slice(0, 9)) && behind.reason.includes(otherTip.slice(0, 9)) && behind.reason.includes('git -C /w/objectos fetch origin main'), JSON.stringify(behind));
   const badRef = remoteFreshnessVerdict({ ref: 'main', path: '/w/x', localSha: liveTip, remote: reached });
   assert('a-ref-whose-remote-cannot-be-named-refuses-rather-than-skipping', badRef !== null && badRef.reason.includes('NOT MEASURED'), JSON.stringify(badRef));
+  // #13836: every freshness refusal carries a machine-readable precondition,
+  // so a dropped repo is attributable from the footer, not from footer diffs.
+  assert('every-freshness-refusal-names-its-precondition-category',
+    gone?.precondition === 'unreachable-remote' && behind?.precondition === 'stale-mirror' && bothEmpty?.precondition === 'remote-tip-unreadable' &&
+      noLocal?.precondition === 'local-tip-unreadable' && badRef?.precondition === 'unprobeable-ref',
+    JSON.stringify([gone?.precondition, behind?.precondition, bothEmpty?.precondition, noLocal?.precondition, badRef?.precondition]));
   assert('the-verified-row-says-what-was-reached-and-what-matched', describeRemote(reached) === `origin/main reached at origin, tip ${liveTip.slice(0, 9)} matches this mirror`, describeRemote(reached));
 
   // ── the REAL prober, on real git fixtures (#13307) ────────────────────────
@@ -2463,6 +2741,18 @@ async function selfTest() {
       });
     const seed = join(fxRoot, 'seed');
     g(fxRoot, 'init', '-q', seed);
+    // Three commits, the first two BACKDATED, so a --depth 2 clone is a real
+    // shallow clone whose floor still predates the default 24 h window (the
+    // covered case), while --depth 1 puts the floor INSIDE it (#13836's
+    // shallow-clone path, both directions).
+    const backdated = (msg, when) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg],
+        { cwd: seed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when } },
+      );
+    backdated('chore: forty days ago', new Date(Date.now() - 40 * 86_400_000).toISOString());
+    backdated('chore: thirty-five days ago', new Date(Date.now() - 35 * 86_400_000).toISOString());
     execFileSync('sh', ['-c', `printf 'x\\n' > "${join(seed, 'README.md')}"`]);
     g(seed, 'add', '-A');
     g(seed, 'commit', '-qm', 'chore: seed');
@@ -2474,6 +2764,17 @@ async function selfTest() {
     const coGone = join(fxRoot, 'co-gone');
     g(fxRoot, 'clone', '-q', bareLive, coLive);
     g(fxRoot, 'clone', '-q', bareGone, coGone);
+    // Each checkout DECLARES the governed origin and routes its transport to
+    // the local bare via `url.<base>.insteadOf` — the split the #13423 fix
+    // reads deliberately: identity is the raw configured URL, transport is
+    // git's own resolution (ls-remote applies the rewrite; measured, so these
+    // fixtures stay offline while carrying a parseable governed identity).
+    const declareOrigin = (co, bare, slug = 'objectstack-ai/cloud') => {
+      g(co, 'remote', 'set-url', 'origin', `https://github.com/${slug}`);
+      g(co, 'config', `url.${bare}.insteadOf`, `https://github.com/${slug}`);
+    };
+    declareOrigin(coLive, bareLive);
+    declareOrigin(coGone, bareGone);
     rmSync(bareGone, { recursive: true, force: true }); // the repo leaves the fleet's scope
 
     const liveProbe = probeRemoteTip(coLive, 'origin/main');
@@ -2523,11 +2824,65 @@ async function selfTest() {
     assert('the-SWEEP-itself-refuses-a-dead-mirror-not-merely-its-helpers',
       deadSweep.status !== 0 && deadOut.includes('NOT MEASURED') && !auditedRow.test(deadOut) && !deadOut.includes('✅'),
       `status=${deadSweep.status} out=${deadOut.slice(0, 500)}`);
+    assert('and-the-dead-mirror-refusal-names-its-precondition',
+      /objectstack-ai\/cloud \[unreachable-remote\]/.test(deadOut), deadOut.slice(-600));
     const liveSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLive}`], { encoding: 'utf8', env: sweepEnv });
     const liveOut = `${liveSweep.stdout ?? ''}${liveSweep.stderr ?? ''}`;
     assert('and-the-same-sweep-over-a-LIVE-mirror-still-audits-and-still-says-a-true-zero',
       liveSweep.status === 0 && auditedRow.test(liveOut) && liveOut.includes('✅'),
       `status=${liveSweep.status} out=${liveOut.slice(0, 500)}`);
+    assert('every-real-sweep-prints-which-sweep-code-ran', liveOut.includes('sweep code:'), liveOut.slice(0, 400));
+
+    // ── #13423, end to end: a raw clone-from-a-path keeps its local-path
+    // origin — exactly the spelling the card names — and the SWEEP must
+    // refuse it. Wired like the dead-mirror pin above and for the same
+    // reason: the pure refusal alone stays green if `probeCheckout` stops
+    // reading the raw declared URL, or if `resolveRepoCheckouts` stops being
+    // consulted. This run never touches the network — the identity refusal
+    // comes before the reachability probe.
+    const coLocal = join(fxRoot, 'co-local');
+    g(fxRoot, 'clone', '-q', bareLive, coLocal);
+    const localSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLocal}`], { encoding: 'utf8', env: sweepEnv });
+    const localOut = `${localSweep.stdout ?? ''}${localSweep.stderr ?? ''}`;
+    assert('the-SWEEP-refuses-a-checkout-whose-origin-parses-to-no-slug',
+      localSweep.status !== 0 && localOut.includes('does not parse') && localOut.includes('NOT MEASURED') && !auditedRow.test(localOut) && !localOut.includes('✅'),
+      `status=${localSweep.status} out=${localOut.slice(0, 500)}`);
+
+    // ── #13836, the shallow-clone path, both directions ──────────────────────
+    // A shallow clone DEEP ENOUGH for the window audits exactly as a complete
+    // one (its row names the floor it was swept against); one whose floor sits
+    // inside the window refuses with the precondition NAMED in the footer, so
+    // a dropped repo needs no cross-run footer diffing to attribute.
+    const coShallowCovered = join(fxRoot, 'co-shallow-covered');
+    const coShallowInside = join(fxRoot, 'co-shallow-inside');
+    g(fxRoot, 'clone', '-q', '--depth', '2', `file://${bareLive}`, coShallowCovered);
+    g(fxRoot, 'clone', '-q', '--depth', '1', `file://${bareLive}`, coShallowInside);
+    declareOrigin(coShallowCovered, bareLive);
+    declareOrigin(coShallowInside, bareLive);
+    const coveredSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coShallowCovered}`], { encoding: 'utf8', env: sweepEnv });
+    const coveredOut = `${coveredSweep.stdout ?? ''}${coveredSweep.stderr ?? ''}`;
+    assert('a-shallow-clone-deep-enough-for-the-window-still-audits-and-names-its-floor',
+      coveredSweep.status === 0 && auditedRow.test(coveredOut) && coveredOut.includes('history shallow, oldest visible'),
+      `status=${coveredSweep.status} out=${coveredOut.slice(0, 500)}`);
+    const insideSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coShallowInside}`], { encoding: 'utf8', env: sweepEnv });
+    const insideOut = `${insideSweep.stdout ?? ''}${insideSweep.stderr ?? ''}`;
+    assert('a-shallow-clone-whose-floor-sits-inside-the-window-refuses-with-the-precondition-NAMED',
+      insideSweep.status !== 0 && /objectstack-ai\/cloud \[history-horizon\]/.test(insideOut) && !auditedRow.test(insideOut) && !insideOut.includes('✅'),
+      `status=${insideSweep.status} out=${insideOut.slice(0, 500)}`);
+
+    // ── #13424, end to end: a sweep pinning ONLY a sibling repo's tip — no
+    // pin for the self repo — must produce a report, not exit 1. This exact
+    // invocation shape used to answer `does not resolve to a commit` because
+    // the window's date derivation asked the self checkout about the pin.
+    const siblingPinSweep = spawnSync(
+      process.execPath,
+      [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLive}`, '--since-ref', `cloud=${localTip}`],
+      { encoding: 'utf8', env: sweepEnv },
+    );
+    const siblingPinOut = `${siblingPinSweep.stdout ?? ''}${siblingPinSweep.stderr ?? ''}`;
+    assert('a-sweep-pinning-only-a-sibling-tip-produces-a-report-instead-of-exit-1',
+      siblingPinSweep.status === 0 && auditedRow.test(siblingPinOut) && siblingPinOut.includes('window topological') && !siblingPinOut.includes('does not resolve'),
+      `status=${siblingPinSweep.status} out=${siblingPinOut.slice(0, 500)}`);
 
     // Freshness by IDENTITY: advance the remote, leave the mirror untouched.
     const pusher = join(fxRoot, 'pusher');
@@ -2540,6 +2895,39 @@ async function selfTest() {
     const behindVerdict = remoteFreshnessVerdict({ ref: 'origin/main', path: coLive, localSha: localTip, remote: behindProbe });
     assert('a-mirror-the-remote-has-moved-past-is-NOT-MEASURED-on-a-real-repo',
       behindProbe.reachable === true && behindProbe.sha !== localTip && behindVerdict !== null && behindVerdict.reason.includes('BEHIND'), JSON.stringify({ behindProbe, behindVerdict }));
+
+    // ── #13836, the flip REPRODUCED: the identical invocation that audited
+    // above (exit 0, ✓ audited, a true zero) now refuses — the only delta is
+    // ONE upstream push, nothing local touched the mirror. This is the
+    // measured run-1-vs-run-2 shape: the freshness leg failing closed on a
+    // busy remote, in the safe direction (#4690) — and the run must be
+    // attributable from its own output: the row and the INCOMPLETE footer
+    // both name the stale-mirror precondition, so two footers minutes apart
+    // differ by a stated reason, never only by a slug list.
+    const flipSweep = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLive}`], { encoding: 'utf8', env: sweepEnv });
+    const flipOut = `${flipSweep.stdout ?? ''}${flipSweep.stderr ?? ''}`;
+    assert('the-run-1-vs-run-2-flip-reproduces-with-zero-local-writes-and-refuses-loudly',
+      flipSweep.status !== 0 && flipOut.includes('BEHIND') && /objectstack-ai\/cloud \[stale-mirror\]/.test(flipOut) && !auditedRow.test(flipOut) && !flipOut.includes('✅'),
+      `status=${flipSweep.status} out=${flipOut.slice(0, 500)}`);
+
+    // And the INCOMPLETE footer form of the same attribution: one repo still
+    // audits while the flipped one refuses, so the sweep exits 2 and the
+    // footer names slug AND precondition — the reading the measured incident
+    // could only reconstruct by diffing two footers across runs.
+    const coFresh = join(fxRoot, 'co-fresh-objectos');
+    g(fxRoot, 'clone', '-q', bareLive, coFresh);
+    declareOrigin(coFresh, bareLive, 'objectstack-ai/objectos');
+    const mixedSweep = spawnSync(
+      process.execPath,
+      [scriptPath, '--repos', 'cloud,objectos', '--repo-root', `cloud=${coLive}`, '--repo-root', `objectos=${coFresh}`],
+      { encoding: 'utf8', env: sweepEnv },
+    );
+    const mixedOut = `${mixedSweep.stdout ?? ''}${mixedSweep.stderr ?? ''}`;
+    assert('a-mixed-sweep-attributes-the-dropped-repo-in-the-INCOMPLETE-footer-itself',
+      mixedSweep.status === 2 && /✓ audited\s+objectstack-ai\/objectos/m.test(mixedOut) &&
+        /UNAUDITED\s+objectstack-ai\/cloud — \[stale-mirror\]/.test(mixedOut) &&
+        /unaudited \([^)]*objectstack-ai\/cloud: stale-mirror[^)]*\)/.test(mixedOut),
+      `status=${mixedSweep.status} out=${mixedOut.slice(0, 700)}`);
   } catch (error) {
     // ⛔ Never a silent skip: an environment that cannot run these is an
     // environment where this leg is unpinned, and that must read as red.
@@ -2547,6 +2935,35 @@ async function selfTest() {
   } finally {
     rmSync(fxRoot, { recursive: true, force: true });
   }
+
+  // ── sweep-code provenance (#13307 reopen) ─────────────────────────────────
+  //
+  // The reopen's false green was a pre-fix copy of this script running from a
+  // stale tree, read as the landed version's behaviour. Every branch of the
+  // line that now makes such a run attributable is pinned, and the structural
+  // reads are asserted against THIS repo — direction-agnostically, because a
+  // dev iterating on this very file legitimately runs it with uncommitted
+  // edits, and that state must render as the loud mismatch, not as a red pin.
+  const blobA = 'a'.repeat(40);
+  const blobB = 'b'.repeat(40);
+  const matchLine = describeSweepCode({ head: 'abc1234', blob: blobA, headBlob: blobA, error: null });
+  assert('a-matching-sweep-code-line-names-the-head-and-the-blob',
+    matchLine.includes('sweep code: HEAD abc1234') && matchLine.includes('byte-matches') && matchLine.includes(blobA.slice(0, 10)), matchLine);
+  const staleLine = describeSweepCode({ head: 'abc1234', blob: blobA, headBlob: blobB, error: null });
+  assert('a-stale-or-modified-copy-is-a-LOUD-mismatch-naming-both-blobs',
+    staleLine.includes('⚠️') && staleLine.includes('not') && staleLine.includes(blobA.slice(0, 10)) && staleLine.includes(blobB.slice(0, 10)) &&
+      staleLine.includes('Do not read this sweep as any landed version'), staleLine);
+  const unknownLine = describeSweepCode({ head: null, blob: null, headBlob: null, error: 'not a git repository' });
+  assert('an-unattributable-run-says-UNKNOWN-with-the-reason-never-crashes-or-omits',
+    unknownLine.includes('UNKNOWN') && unknownLine.includes('not a git repository') && unknownLine.includes('unattributed'), unknownLine);
+  assert('a-null-reading-is-the-UNKNOWN-branch-too', describeSweepCode(null).includes('UNKNOWN'));
+  const withCode = renderReport({
+    window: dateWindowFor('2026-08-17T00:00:00Z'),
+    repos: resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 })),
+    scanned: 12, entries: [], lookups: 0,
+    sweepCode: { head: 'abc1234', blob: blobA, headBlob: blobA, error: null },
+  });
+  assert('the-report-head-carries-the-sweep-code-line-when-a-reading-is-supplied', withCode.includes('sweep code: HEAD abc1234'), withCode);
 
   // ── the report words an operator reads ────────────────────────────────────
   const allAudited = resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 }));
@@ -2560,6 +2977,7 @@ async function selfTest() {
   assert('an-unaudited-repo-never-renders-as-a-clean-window', !withAbsent.includes('✅') && withAbsent.includes('UNAUDITED') && withAbsent.includes('NOT a clean window'), withAbsent);
   assert('and-the-clean-case-does-print-the-tick', clean.includes('✅'), clean);
   assert('the-unaudited-line-names-the-repo-and-the-reason', withAbsent.includes('objectstack-ai/cloud') && withAbsent.includes('no git checkout'), withAbsent);
+  assert('and-it-carries-the-machine-readable-precondition-tag', withAbsent.includes('[no-checkout]'), withAbsent);
 
   // ── an unreachable remote never renders as a clean window (#13307) ────────
   //
@@ -3071,7 +3489,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
@@ -3080,13 +3498,23 @@ function runTestModeExitFor(paths) {
   return testVerdict(paths).governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
-// `invokedDirectly` for the same reason line 810 carries it: this module is
-// imported for its exported predicates (`proxyRearmPlan` — see
-// scripts/pm/ci-failure.mjs), and an unguarded trigger ran THIS file's 77
-// assertions inside the importer's own `--self-test`, printing a second
-// summary and putting an unrelated file's failures on the importer's exit
-// code. A self-test is a mode of the file that is being RUN, never a side
-// effect of importing it.
+// `invokedDirectly` for the same reason the main-invocation guard above
+// carries it: this module is imported for its exported predicates
+// (`proxyRearmPlan` — see scripts/pm/ci-failure.mjs), and an unguarded
+// trigger ran this file's whole self-test inside the importer's own
+// `--self-test`, printing a second summary and putting an unrelated file's
+// failures on the importer's exit code. The suite was 77 assertions at PR
+// #9897, where this guard landed, and is now more than three times that: the
+// 77 is anchored to that PR and frozen as a historical fact, while the
+// multiple is a FLOOR and is written as one on purpose. The live figure is
+// whatever `--self-test` prints from `checked`; it moves on most edits to
+// this file and has never once gone down across this file's history, so a
+// floor stays true where a reading rots. Both figures that stood here had
+// rotted before anyone looked — 77 was written as THIS file's current size
+// and was by then off by a factor of three, and the neighbouring "line 810"
+// had drifted onto unrelated code — so do not "helpfully" refresh either
+// back into a reading. A self-test is a mode of the file that is being RUN,
+// never a side effect of importing it.
 if (invokedDirectly && process.argv.includes('--self-test')) {
   await selfTest();
 }

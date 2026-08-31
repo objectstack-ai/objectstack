@@ -20,7 +20,7 @@
 // synthetic `ctx`. That is the right shape for the guard's own predicate, and
 // it is structurally blind to the defect this file pins: hook ORDER relative to
 // endpoint middleware does not exist in a synthetic call. So every assertion
-// here goes through `AuthManager.handleRequest` on the installed better-auth
+// here goes through `AuthManager.handleRequest` on the then-installed better-auth
 // 1.7.1, where the vendor's own middleware really runs, and reads a status and
 // a code off a real `Response`.
 //

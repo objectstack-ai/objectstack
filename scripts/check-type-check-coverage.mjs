@@ -46,6 +46,40 @@
 //                                    #   -- see BUILT CLOSURE.
 //   node scripts/check-type-check-coverage.mjs --self-test
 //
+// ## Exit codes -- and why a REFUSAL has one of its own
+//
+//   0  the tree was read and every invariant above holds.
+//   1  a FINDING: a structural problem, or -- under `--re-measure` -- a ledger
+//      entry that drifted UPWARD. A claim about the tree.
+//   3  PREREQUISITE NOT MET. The gate refused to measure, so nothing was
+//      measured and the run says NOTHING about the ledger. NOT a pass, and
+//      NOT a finding.
+//
+// The split is the sibling convention, not a local invention:
+// `check-test-completeness.mjs` states it in its own failure text ("Exit code
+// 3, distinct from a finding's 1") and `check-dual-build-cjs-loads.mjs`
+// answers the IDENTICAL condition -- a gate that reads built output, run
+// against a tree with no `dist/` -- with 3. This gate used to answer it by
+// letting the refusal reach node's uncaught handler, which exits 1.
+//
+// ⭐ Why the class matters HERE in particular, more than it does for a gate
+// whose 1 means "something is wrong somewhere". Exit 1 from this gate has one
+// specific meaning: a package's recorded debt went UP. The remedy that meaning
+// prescribes ends at the ledger below, and raising a DEBT/TEST_DEBT entry is a
+// MAINTAINER-only act this file spells out at length. So a reader who takes an
+// unmeasurable run for that red is pointed straight at the one place this
+// evidence must never send them. The prose said so all along -- but the prose
+// is not what an exit-code reader reads. A CI step, a wrapper, or an agent
+// reconciling a derived gate family sees the number and nothing else.
+//
+// ⛔ The boundary, deliberately. Exit 3 is for a prerequisite the WORLD failed
+// to supply and that the caller clears with a named command: an unbuilt or
+// stale dependency closure, a closure that does not build, an absent `turbo`
+// or `tsc` binary, a tsc that could not be spawned or could not read the
+// project it was handed. A malformed `tsconfig.json` checked INTO the tree
+// stays exit 1 -- that is a fact about the tree, which is what a finding is,
+// and `readTsconfig` keeps throwing it.
+//
 // Invariants, per workspace package (the root workspace package included --
 // #4311's audit counted its top-level TypeScript like any other package's):
 //
@@ -468,6 +502,74 @@ import {
 const ROOT = resolve(import.meta.dirname, '..');
 const SELF = 'scripts/check-type-check-coverage.mjs';
 const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/4311';
+
+// The exit-code contract, NAMED rather than spelled inline at each site, so the
+// self-test pins the value each path actually returns instead of a comment
+// about it -- the shape `check-test-completeness.mjs` uses for the same split.
+//
+// ⛔ Module-local, NOT exported, and that is a decision rather than an
+// oversight: this file's top level RUNS (it is a gate, invoked as a script and
+// nothing else), so exporting any binding at all would make it importable for
+// that binding and run the whole gate inside the importer -- the class
+// `check:entry-guard` refuses, and it caught this constant block on its first
+// run. The sibling that does export its codes carries `isEntrypoint` for
+// exactly this reason. Nothing imports this file today; the day something
+// needs to, the guard comes with the export.
+const EXIT_OK = 0;
+const EXIT_FINDINGS = 1;
+const EXIT_PREREQUISITE_NOT_MET = 3;
+
+/**
+ * The text a refusal prints, as a VALUE -- so the self-test can assert on the
+ * advisory without spawning a process or stubbing `process.exit`, the split
+ * `import-prerequisite.mjs` documents for the same reason.
+ *
+ * The gate's own refusal message is embedded VERBATIM. Every one of them was
+ * already argued at length at its throw site, and none of that reasoning is
+ * this frame's to restate, shorten or improve -- the frame adds only the two
+ * things a reader could not get from the message: what CLASS of result this is,
+ * and which exit code carries it.
+ *
+ * The pipe advisory is not decoration. `EXIT=$?` written after `cmd | tail -40`
+ * reads TAIL's status, and `head`/`tail` essentially never fail -- so a refusal
+ * and a green run are the same `0` there, which is the one reading this whole
+ * exit-code split exists to make impossible.
+ *
+ * @param {string} message the refusal, in the words of the site that raised it
+ * @returns {string}
+ */
+function prerequisiteNotMetText(message) {
+  return (
+    `\ncheck-type-check-coverage: PREREQUISITE NOT MET\n\n` +
+    `${message}\n\n` +
+    `  ⛔ This is NOT a pass and NOT a finding: nothing was measured, so this run says\n` +
+    `  NOTHING about whether any DEBT or TEST_DEBT number is still correct. In particular\n` +
+    `  it is NOT evidence that a recorded number went up, and ⛔ no ledger entry below may\n` +
+    `  be raised on it -- raising one is a maintainer's act even when the evidence is real.\n` +
+    `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
+    `  \`node ${SELF} --re-measure > /tmp/type-check-debt.log 2>&1; echo "EXIT=$?"\`.\n` +
+    `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+    `  is the false green. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover this gate's own code.)`
+  );
+}
+
+/**
+ * Refuse to measure, and say so in the exit code as well as in the prose.
+ *
+ * ⛔ Prints and EXITS rather than throwing. A thrown refusal reaches node's
+ * uncaught handler, which exits 1 -- the code this gate reserves for "a
+ * recorded debt number went UP" -- and prints a stack trace over a message
+ * whose whole job is to be read. The self-test pins that the three functions
+ * that refuse contain no bare `throw new Error(` for exactly this reason: the
+ * rot this repairs is one careless `throw` away from returning.
+ *
+ * @param {string} message the refusal, in the words of the site that raised it
+ * @returns {never}
+ */
+function refusePrerequisite(message) {
+  console.error(prerequisiteNotMetText(message));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
 // An `exclude` pattern that names tests (`**/*.test.ts`, `**/*.spec.tsx`, ...)
 // and the files such a pattern hides. Kept deliberately broad: the question is
 // "does this config steer tsc away from the test layer", not "which exact glob".
@@ -901,18 +1003,23 @@ const TEST_DEBT = {
       + 'ead731756, which is what the lowering at the top of this note closed.',
   },
   '@objectstack/runtime': {
-    errors: 217,
-    note: 'TS18048 x98 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15, TS2835 x11, '
-      + 'TS2554 x11. LOWERED 227 -> 217 at ead731756 (#12723) -- the entry that card was filed on, where '
-      + 'the slack turned out to be 10 rather than the 1 it reported: the 226 it quoted was itself a '
-      + 'reading taken days earlier, which is the card\'s own point about a number that drifts. The tally '
-      + 'above was taken at 227 and is NOT re-tallied here; that sweep measured per-entry TOTALS only. Src '
-      + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Measured 220 -> '
+    errors: 206,
+    note: 'TS18048 x91 (possibly-undefined), TS18046 x27, TS2339 x17, TS2493 x15, TS2835 x13, TS2345 x10, '
+      + 'TS7006 x8, TS6133 x6, TS2554 x4, TS2353 x4, TS2571 x3, TS2550 x2 -- RE-TALLIED at 206 (#13408). '
+      + 'The previous note carried its composition from a 227-era sweep that measured per-entry TOTALS '
+      + 'only and said so; this one is a fresh per-code count of the same program the ratchet measures. '
+      + 'LOWERED 217 -> 206 (#13408), and the -11 is fully attributed to ONE file: '
+      + 'src/http-dispatcher.ready.test.ts held 30 TS18048 reads of the optional '
+      + '`HttpDispatcherResult.response` -- 19 added by that card\'s own new /ready suite and 11 that '
+      + 'pre-dated it -- and all 30 were replaced by a `responseOf()` narrowing helper, the shape already '
+      + 'used by the #8287 suite in src/http-dispatcher.keys.test.ts. That card found them the hard way: '
+      + 'the package `typecheck` excludes test files, so its green said nothing about the 19 it had just '
+      + 'added, and only this ratchet saw them. Nothing else in the package moved. Earlier lineage: 220 -> '
       + '218 (5ab08428, one of only two entries that ever shrank; TS6133 x25 collapsed to x7 while '
       + 'possibly-undefined grew, so that net -2 hid a much larger churn in both directions) -> 227 '
-      + '(e8db1a230). The latest +9 is fully attributed and is ONE file: every one of the nine is a '
-      + 'TS18048 in src/domains/meta-item-envelope.test.ts, added by #5563 / PR #5895 (the '
-      + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
+      + '(e8db1a230, +9 all TS18048 in src/domains/meta-item-envelope.test.ts from #5563 / PR #5895) -> '
+      + '217 (ead731756, #12723). Src graduated in #4311 (declares `typecheck`); this is purely the '
+      + 'hidden test layer.',
   },
   '@objectstack/cli': {
     errors: 144,
@@ -1527,12 +1634,14 @@ function gitIgnoredPaths(rels) {
     maxBuffer: 16 * 1024 * 1024,
   });
   if (res.error) {
-    throw new Error(`git check-ignore could not run, so GENERATED_COVERED cannot be judged`, { cause: res.error });
+    refusePrerequisite(
+      `git check-ignore could not run, so GENERATED_COVERED cannot be judged: ${res.error.message}`,
+    );
   }
   // 0 = some path is ignored, 1 = none is. Anything else (128: not a git
   // checkout, bad option) is a failed MEASUREMENT, not a clean tree.
   if (res.status !== 0 && res.status !== 1) {
-    throw new Error(
+    refusePrerequisite(
       `git check-ignore exited ${res.status}, so GENERATED_COVERED cannot be judged: ${String(res.stderr).trim()}`,
     );
   }
@@ -2696,14 +2805,14 @@ function workspaceBuildGraph(packages) {
 function refreshBuiltClosure() {
   const bin = join(ROOT, 'node_modules', '.bin', 'turbo');
   if (!existsSync(bin)) {
-    throw new Error(`--re-measure needs the workspace's own turbo at ${bin}; run \`pnpm install\` first.`);
+    refusePrerequisite(`--re-measure needs the workspace's own turbo at ${bin}; run \`pnpm install\` first.`);
   }
   const args = ['run', 'build', '--filter=./packages/*', '--filter=./packages/*/*'];
   const run = spawnSync(bin, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  if (run.error) throw new Error(`the closure build could not be run: ${run.error.message}`);
+  if (run.error) refusePrerequisite(`the closure build could not be run: ${run.error.message}`);
   if (run.status !== 0) {
     const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
-    throw new Error(
+    refusePrerequisite(
       `--re-measure cannot run: the ledgered packages' dependency closure does not build, so there is no `
         + `world to measure against. Fix the build first -- every number in DEBT and TEST_DEBT is measured `
         + `with tsc resolving workspace imports through each dependency's built \`dist/*.d.ts\`.\n`
@@ -2924,7 +3033,7 @@ const REMEASURE_HEAP = remeasureHeapCeiling({
 function tscErrorCount(project, options = {}) {
   const bin = join(ROOT, 'node_modules', '.bin', 'tsc');
   if (!existsSync(bin)) {
-    throw new Error(`--re-measure needs the workspace's own tsc at ${bin}; run \`pnpm install\` first.`);
+    refusePrerequisite(`--re-measure needs the workspace's own tsc at ${bin}; run \`pnpm install\` first.`);
   }
   const run = spawnSync(bin, ['--noEmit', '--pretty', 'false', '-p', project], {
     cwd: ROOT,
@@ -2936,10 +3045,10 @@ function tscErrorCount(project, options = {}) {
     // dressed as a different one.
     env: heapCappedEnv(process.env, REMEASURE_HEAP.mb),
   });
-  if (run.error) throw new Error(`tsc could not be run for ${project}: ${run.error.message}`);
+  if (run.error) refusePrerequisite(`tsc could not be run for ${project}: ${run.error.message}`);
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   if (TSC_SETUP_ERROR.test(output)) {
-    throw new Error(`tsc could not read ${project} -- the measurement is invalid, not zero:\n${output.trim()}`);
+    refusePrerequisite(`tsc could not read ${project} -- the measurement is invalid, not zero:\n${output.trim()}`);
   }
   const errors = countTscErrors(output, options);
   // Exit 0 means a clean program; anything else must have produced diagnostics
@@ -2951,7 +3060,7 @@ function tscErrorCount(project, options = {}) {
   // the `return 0` below -- refusing there would turn "this test layer is clean
   // apart from an artefact of our own generated config" into a hard crash.
   if (run.status !== 0 && countTscErrors(output) === 0) {
-    throw new Error(
+    refusePrerequisite(
       `tsc exited ${run.status} for ${project} but printed no recognisable diagnostics -- ` +
         `refusing to record 0:\n${output.trim().slice(0, 2000)}`,
     );
@@ -3194,10 +3303,20 @@ function measureTestDebt(dir, hiddenTests = []) {
   const holder = mkdtempSync(join(tmpdir(), 'objectstack-debt-remeasure-'));
   const configPath = join(holder, REMEASURE_CONFIG);
   writeFileSync(configPath, `${JSON.stringify(project, null, 2)}\n`);
+  // Registered on `exit` as WELL as in the `finally`, because `tscErrorCount`
+  // can now REFUSE, and a refusal calls `process.exit` -- which runs `exit`
+  // handlers and does NOT run `finally`. Belt and braces on purpose: the
+  // `finally` keeps the directory's lifetime visible where it is created, and
+  // the handler is what makes the refusal path leave nothing behind. `off`
+  // first in the `finally` so a run measuring 34 entries does not accumulate 34
+  // live handlers on a directory each has already removed.
+  const cleanup = () => rmSync(holder, { force: true, recursive: true });
+  process.once('exit', cleanup);
   try {
     return tscErrorCount(configPath, { dropRootDirDiagnostics: true });
   } finally {
-    rmSync(holder, { force: true, recursive: true });
+    process.off('exit', cleanup);
+    cleanup();
   }
 }
 
@@ -3223,7 +3342,7 @@ function measureLedgers(packages, rootName, state) {
     .filter((name) => dirOf.has(name));
   const unbuilt = unbuiltClosure(ledgered, workspaceBuildGraph(packages));
   if (unbuilt.length > 0) {
-    throw new Error(
+    refusePrerequisite(
       `--re-measure cannot run: ${unbuilt.length} workspace dependenc(ies) of the ledgered packages have `
         + `no built type entry point on disk -- ${unbuilt.join(', ')}.\n`
         + `Every number in DEBT and TEST_DEBT is measured with tsc resolving workspace imports through each `
@@ -3257,7 +3376,7 @@ function measureLedgers(packages, rootName, state) {
   // caller can act on.
   const stale = staleClosure(ledgered, workspaceBuildGraph(packages));
   if (stale.length > 0) {
-    throw new Error(
+    refusePrerequisite(
       `--re-measure cannot run: ${stale.length} workspace dependenc(ies) of the ledgered packages still have `
         + `a type entry point OLDER than their own sources after a full closure build -- ${stale.join(', ')}.\n`
         + `The build covers \`./packages/*\` and \`./packages/*/*\`, so a package that survives it is one those `
@@ -5373,6 +5492,79 @@ function selfTest() {
     }
   }
 
+  // ── THE EXIT-CODE CLASS ───────────────────────────────────────────────────
+  //
+  // Pinned because it is exactly the kind of fact that rots back silently. The
+  // defect this replaces was not a wrong number typed anywhere: it was a
+  // refusal that reached node's UNCAUGHT handler, which exits 1 -- so the
+  // regression shape is one careless `throw new Error(...)` added to a refusing
+  // function by an author who never thought about exit codes at all, and it
+  // announces itself with a green CI (every consumer of this gate treats any
+  // non-zero as failure, so 1-instead-of-3 is invisible to all of them) and a
+  // human-readable message that still says the right thing. Nothing else in
+  // this file would notice.
+  //
+  // So the pin is over the FUNCTION BODIES, not over a constant. Reading the
+  // real `Function.prototype.toString()` of the four functions that refuse is
+  // what makes a re-added `throw` fail here rather than in six weeks, on a card
+  // about something else.
+  const REFUSING = [refreshBuiltClosure, tscErrorCount, measureLedgers, gitIgnoredPaths];
+  for (const fn of REFUSING) {
+    const body = fn.toString();
+    if (/throw new Error\(/.test(body)) {
+      failures.push(
+        `${fn.name} raises a bare \`throw new Error(\` — an uncaught throw exits 1, the code this gate ` +
+          `reserves for a ledger entry that drifted UPWARD. A refusal must go through ` +
+          `refusePrerequisite() so it exits ${EXIT_PREREQUISITE_NOT_MET}.`,
+      );
+    }
+    if (!body.includes('refusePrerequisite(')) {
+      failures.push(`${fn.name} no longer refuses through refusePrerequisite() — the exit-code class is unpinned`);
+    }
+  }
+  // The NEGATIVE control, and the reason the loop above is a measurement rather
+  // than a tautology over an empty set: `readTsconfig` still throws, on purpose.
+  // A `tsconfig.json` checked into the tree that does not parse is a fact about
+  // the TREE -- a finding -- not a prerequisite the caller forgot to supply, so
+  // it keeps exit 1 and the pin above must be able to SEE a bare throw.
+  if (!/throw new Error\(/.test(readTsconfig.toString())) {
+    failures.push(
+      'readTsconfig no longer throws — the bare-throw pin above can no longer fail, so it stopped measuring',
+    );
+  }
+
+  const exitCodeCases = [
+    { label: 'the refusal code is 3', ok: EXIT_PREREQUISITE_NOT_MET === 3 },
+    { label: 'a finding is 1', ok: EXIT_FINDINGS === 1 },
+    { label: 'the refusal code is distinct from a finding and from a pass',
+      ok: EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== EXIT_OK },
+  ];
+  for (const c of exitCodeCases) {
+    if (!c.ok) failures.push(`exit-code contract — ${c.label}`);
+  }
+
+  // The refusal TEXT. Four load-bearing clauses, each one a thing a reader who
+  // sees only the exit code cannot get anywhere else.
+  const refusalFixture = '--re-measure cannot run: 48 workspace dependenc(ies) have no built type entry point';
+  const refusalText = prerequisiteNotMetText(refusalFixture);
+  const textCases = [
+    { label: 'carries the raising site\'s own message VERBATIM', ok: refusalText.includes(refusalFixture) },
+    { label: 'names the class', ok: refusalText.includes('PREREQUISITE NOT MET') },
+    { label: 'says it is neither a pass nor a finding', ok: /NOT a pass and NOT a finding/.test(refusalText) },
+    { label: 'names its own code and the finding code it is distinct from',
+      ok: refusalText.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`)
+        && refusalText.includes(`a finding's ${EXIT_FINDINGS}`) },
+    // The specific misreading this whole change exists to stop: taking an
+    // unmeasurable run for "a recorded debt went up" routes the reader to the
+    // ledger, and raising an entry there is a maintainer's act.
+    { label: 'turns the reader away from the ledger rather than toward it',
+      ok: /no ledger entry below may\n?\s*be raised on it/.test(refusalText) },
+    { label: 'warns that the code must be captured before any pipe', ok: refusalText.includes('BEFORE any pipe') },
+  ];
+  for (const c of textCases) {
+    if (!c.ok) failures.push(`prerequisiteNotMetText — ${c.label}`);
+  }
+
   // The shared workspace enumerator is a plain module with no CI invocation of
   // its own (#11510); every gate that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
@@ -5391,7 +5583,8 @@ function selfTest() {
         + ceilingCases.length + heapEnvCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
       `built-closure case(s) + ` +
-      `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) hold.`,
+      `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) + ` +
+      `${REFUSING.length * 2 + 1 + exitCodeCases.length + textCases.length} exit-code case(s) hold.`,
   );
 }
 

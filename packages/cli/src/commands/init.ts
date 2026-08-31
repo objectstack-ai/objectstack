@@ -147,8 +147,10 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    finding.
  *
  *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
- *    names scim. Stable `@better-auth/scim@1.7.1` still peers
- *    `@better-auth/utils@0.4.2`, so this skew outlives that pin. They retire
+ *    names scim. Stable `@better-auth/scim@1.7.2` still peers
+ *    `@better-auth/utils@0.4.2` EXACTLY — re-read off the installed package
+ *    manifest on 2026-08-31 for #13940, unchanged from 1.7.1 — so this skew
+ *    outlives that pin. They retire
  *    when the four packages accept 0.5.0 upstream, or when
  *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
  *    resolution so that all four land on 0.4.2 by themselves. Measured on the

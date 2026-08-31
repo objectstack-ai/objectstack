@@ -439,7 +439,13 @@ describe('FieldSchema', () => {
 
       it('absent maxLength stays absent — no default materializes, on any type', () => {
         for (const type of ['text', 'boolean', 'lookup'] as const) {
-          const result = FieldSchema.parse({ name: 'f', label: 'F', type }) as Record<string, unknown>;
+          // #13632: `lookup` requires a non-empty `reference` at parse — the
+          // type stays in this sample set for its key-absence behavior, in
+          // legal shape.
+          const fixture = type === 'lookup'
+            ? { name: 'f', label: 'F', type, reference: 'company' }
+            : { name: 'f', label: 'F', type };
+          const result = FieldSchema.parse(fixture) as Record<string, unknown>;
           expect('maxLength' in result).toBe(false);
         }
       });
@@ -532,7 +538,13 @@ describe('FieldSchema', () => {
 
       it('absent minLength stays absent — no default materializes, on any type', () => {
         for (const type of ['text', 'boolean', 'lookup'] as const) {
-          const result = FieldSchema.parse({ name: 'f', label: 'F', type }) as Record<string, unknown>;
+          // #13632: `lookup` requires a non-empty `reference` at parse — the
+          // type stays in this sample set for its key-absence behavior, in
+          // legal shape.
+          const fixture = type === 'lookup'
+            ? { name: 'f', label: 'F', type, reference: 'company' }
+            : { name: 'f', label: 'F', type };
+          const result = FieldSchema.parse(fixture) as Record<string, unknown>;
           expect('minLength' in result).toBe(false);
         }
       });
@@ -2123,5 +2135,73 @@ describe('Polymorphic pointer pair — referenceVia (#11339, ADR-0052 §5)', () 
     expect(prop!.description).toMatch(/sibling/i);
     expect(prop!.description).toMatch(/seed/i);
     expect(prop!.description).toMatch(/referential integrity/);
+  });
+});
+
+describe('Relationship target — `reference` required on lookup/master_detail (ADR-0049 declared = enforced)', () => {
+  // The key's own TSDoc has always called `reference` required on these two
+  // types; the schema now enforces it. A missing key and the empty string are
+  // the SAME hole (both were measured as accepted before the check landed),
+  // so each gets its own pin per type.
+
+  it.each(['lookup', 'master_detail'] as const)(
+    'refuses a %s with no reference, prescribing the key on the `reference` path',
+    (type) => {
+      const result = FieldSchema.safeParse({ name: 'company_id', label: 'Company', type });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'reference');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain(`\`${type}\``);
+      expect(issue!.message).toMatch(/non-empty `reference`/);
+      expect(issue!.message).toMatch(/target object/);
+    },
+  );
+
+  it.each(['lookup', 'master_detail'] as const)(
+    'refuses a %s with an empty-string reference — a spelled-out missing target',
+    (type) => {
+      const result = FieldSchema.safeParse({
+        name: 'company_id',
+        label: 'Company',
+        type,
+        reference: '',
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'reference');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(/non-empty `reference`/);
+    },
+  );
+
+  it.each(['lookup', 'master_detail'] as const)(
+    'accepts a %s with a non-empty reference (positive control: the check refuses only the hole)',
+    (type) => {
+      const result = FieldSchema.safeParse({
+        name: 'company_id',
+        label: 'Company',
+        type,
+        reference: 'company',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.reference).toBe('company');
+    },
+  );
+
+  it('leaves non-relationship types alone — a bare text field parses with no reference', () => {
+    const result = FieldSchema.safeParse({ name: 'title', label: 'Title', type: 'text' });
+    expect(result.success).toBe(true);
+  });
+
+  it('helper builders emit the target as `reference`, so helper-authored fields pass', () => {
+    const viaLookup = FieldSchema.safeParse({
+      name: 'account',
+      ...Field.lookup('crm_account', { label: 'Account' }),
+    });
+    expect(viaLookup.success).toBe(true);
+    const viaMasterDetail = FieldSchema.safeParse({
+      name: 'order',
+      ...Field.masterDetail('crm_order', { label: 'Order' }),
+    });
+    expect(viaMasterDetail.success).toBe(true);
   });
 });

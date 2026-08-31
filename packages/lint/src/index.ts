@@ -124,6 +124,29 @@ export type {
   ReadonlyFlowWriteSeverity,
 } from './validate-readonly-flow-writes.js';
 
+export {
+  validateReadonlyHookWrites,
+  HOOK_API_UPDATE_READONLY_FIELD,
+  HOOK_API_UPDATE_READONLY_WHEN_FIELD,
+  READONLY_HOOK_WRITE_PATTERN_IDS,
+  READONLY_HOOK_WRITE_EXCLUSIONS,
+} from './validate-readonly-hook-writes.js';
+export type {
+  ReadonlyHookWriteFinding,
+  ReadonlyHookWriteSeverity,
+} from './validate-readonly-hook-writes.js';
+
+export {
+  validateReadonlyActionWrites,
+  ACTION_API_UPDATE_READONLY_WHEN_FIELD,
+  READONLY_ACTION_WRITE_PATTERN_IDS,
+  READONLY_ACTION_WRITE_EXCLUSIONS,
+} from './validate-readonly-action-writes.js';
+export type {
+  ReadonlyActionWriteFinding,
+  ReadonlyActionWriteSeverity,
+} from './validate-readonly-action-writes.js';
+
 export { validateViewContainers, VIEW_CONTAINER_SHAPE } from './validate-view-containers.js';
 export type { ViewContainerFinding, ViewContainerSeverity } from './validate-view-containers.js';
 
@@ -183,6 +206,7 @@ export {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
   FORM_COLSPAN_ABSOLUTE,
+  FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
 
@@ -406,8 +430,20 @@ export {
   validatePageFieldBindings,
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
+  PAGE_SECTION_GROUP_UNKNOWN,
 } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
+
+// [#13855] The shared field-group reference half both layout surfaces resolve
+// against — exported so an out-of-repo consumer (cloud graph-lint, the AI
+// authoring path) can ask the same question of the same index rather than
+// rebuilding it from `objects[].fieldGroups` by hand.
+export {
+  indexObjectFieldGroups,
+  sectionGroupRefs,
+  checkSectionGroupRefs,
+} from './object-field-groups.js';
+export type { SectionGroupRef, SectionGroupFinding } from './object-field-groups.js';
 
 export {
   validateComponentProps,

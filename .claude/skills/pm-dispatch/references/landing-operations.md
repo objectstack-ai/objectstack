@@ -26,8 +26,8 @@
 车道 PM 的权责:验收(复核清单);**首次入队** —— ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁
 job 结论,绿即转 ready + 挂 auto-merge,未绿阶梯重挂;CI success webhook 不可靠,⛔ 不坐等不忙轮询;
 定点文本照定时器写法纪律;确认 **MERGED** —— 每轮同时读队列分支与 `origin/main`
-两个读数。**契约复审链 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(清标与落地同一笔,
-见 `contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
+两个读数。**契约复核 PASS 落地的 PR 到窗口时已 ready + auto-merge 在挂**(席内清标与落地同一
+笔,见 `contract-review.md`)—— 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 
 **转 ready / 挂 auto-merge 之前先判受管面**:`node scripts/pm/check-governed-merges.mjs --test` 加 PR 变更路
 径,一条命中 ⇒ 整 PR 改走人工合并道(复核照写 + 留 draft + 向授权批准人请审 + 状态评

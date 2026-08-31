@@ -9,6 +9,32 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // now a consumer of that one definition, exactly as the lint gate is; there is
 // no second copy for the `=` / `IN` bridge to drift against.
 import { compileCelToFilter, isSupportedRlsExpression, sqlPredicateToCel } from '@objectstack/formula';
+import type { CelFilterFailReason } from '@objectstack/formula';
+
+/**
+ * Why a policy's predicate produced no filter — the compiler's OWN answer,
+ * carried instead of discarded.
+ *
+ * `compileCelToFilter` already returns `{ reason, detail }` on every refusal;
+ * until #13639 `compileExpression` consumed `!ok` and threw the rest away one
+ * line before the only place that could surface it. The extra member is this
+ * file's own drop, which the compiler reports as a SUCCESS (`ok: true`) and
+ * {@link isEmptyMembershipFilter} then refuses — same silent denial, so it
+ * joins the same vocabulary rather than staying unnamed.
+ */
+type RlsDropReason = CelFilterFailReason | 'empty-membership';
+
+/** A dropped policy's cause: the compiler's reason plus its human `detail`. */
+interface RlsDropCause {
+  reason: RlsDropReason;
+  /** The compiler's `detail` — names the variable path, the member index, the bound. */
+  detail: string;
+}
+
+/** {@link RLSCompiler.compileExpressionOutcome}'s answer: the filter, or why there is none. */
+type RlsCompileOutcome =
+  | { filter: Record<string, unknown>; cause?: undefined }
+  | { filter: null; cause: RlsDropCause };
 
 /**
  * RLS User Context
@@ -208,6 +234,22 @@ export class RLSCompiler {
   }
 
   /**
+   * Causes already WARNed about by {@link warnFailClosedDenial}, so a policy
+   * that denies on every read warns ONCE per distinct cause rather than once
+   * per request. This seam runs on the read path: the "no active organization"
+   * denial is a persistent SESSION state, not a one-off, so an un-memoised line
+   * would be a line per query for as long as the state lasts.
+   *
+   * Not a new mechanism — it is `cel-to-filter.ts`'s `warnedOverLimit` memo, the
+   * immediately-upstream module in this same call chain, at the same bound and
+   * with the same clear-on-overflow: an unbounded set keyed by author-controlled
+   * strings is a leak. Per INSTANCE (the plugin holds one long-lived compiler),
+   * so a test's fresh `new RLSCompiler()` starts from an empty memo.
+   */
+  private warnedDenials = new Set<string>();
+  private static readonly WARNED_DENIALS_MAX = 500;
+
+  /**
    * Compile RLS policies into a query filter for the given user context.
    * Multiple policies for the same object/operation are OR-combined (any match allows access).
    *
@@ -252,6 +294,11 @@ export class RLSCompiler {
     }
 
     const filters: Record<string, unknown>[] = [];
+    /**
+     * [#13639] Policies whose SHAPE was fine but whose evaluation refused — the
+     * class that produced the reported failure mode: zero rows, no error, no log.
+     */
+    const deniedBy: { policy: RowLevelSecurityPolicy; cause: RlsDropCause }[] = [];
     let applicable = 0;
 
     for (const policy of policies) {
@@ -265,19 +312,29 @@ export class RLSCompiler {
       // WITHOUT counting it toward the fail-closed deny below.
       if (!predicate) continue;
       applicable++;
-      const filter = this.compileExpression(predicate, userCtx);
-      if (filter) {
-        filters.push(filter);
+      const outcome = this.compileExpressionOutcome(predicate, userCtx);
+      if (outcome.filter) {
+        filters.push(outcome.filter);
       } else if (!isSupportedRlsExpression(predicate)) {
         // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. arithmetic, functions,
         // subqueries) compiles to nothing and would silently vanish, leaving the
-        // object unprotected. Surface it instead of dropping in silence. (A
-        // SUPPORTED shape that returned null is the intentional "context var
-        // absent" path — it fails closed downstream and is not warned here.)
+        // object unprotected. Surface it instead of dropping in silence. This
+        // branch is an AUTHORING fault — the predicate can never enforce, for any
+        // input — so it warns on every drop, denial or not, and it now carries the
+        // compiler's `detail` (WHICH shape was refused) rather than only the fact.
         this.logger?.warn?.(
           `[RLS] policy '${(policy as { name?: string }).name ?? '(unnamed)'}' on '${(policy as { object?: string }).object ?? '?'}' ` +
-            `has an uncompilable predicate (${clause} clause) and was DROPPED (no enforcement): ${predicate}`,
+            `has an uncompilable predicate (${clause} clause) and was DROPPED (no enforcement): ${predicate}` +
+            ` — ${outcome.cause.detail}`,
         );
+      } else {
+        // [#13639] The previously SILENT branch. The shape is fine; the REQUEST
+        // could not be evaluated — an unresolved `current_user.*` variable, an
+        // unresolved MEMBER of a membership array, or an emptied membership set.
+        // Collected, not warned yet: on its own a dropped policy is not a denial
+        // (a sibling policy may still grant, and the caller sees rows), so the
+        // line is emitted below only if this clause actually fails closed.
+        deniedBy.push({ policy, cause: outcome.cause });
       }
     }
 
@@ -291,12 +348,60 @@ export class RLSCompiler {
       // expression we couldn't compile). Fail closed — return a sentinel
       // filter that matches no rows. This prevents the "user without an
       // active org sees every tenant's data" class of bug.
+      //
+      // [#13639] And SAY SO. This is the fail-closed path working as designed,
+      // which is exactly why it needs a trace: the caller gets zero rows, no
+      // error is raised, and a correct refusal is indistinguishable from "the
+      // data genuinely doesn't match" — a search that costs hours and that the
+      // compiler's own `detail` ends in one line.
+      for (const { policy, cause } of deniedBy) this.warnFailClosedDenial(policy, clause, cause);
       return RLS_DENY_FILTER;
     }
     if (filters.length === 1) return filters[0];
 
     // Multiple policies: OR-combine (any policy allows access)
     return { $or: filters };
+  }
+
+  /**
+   * [#13639] The line an operator needs when a read returns nothing.
+   *
+   * The failure shape this exists for is the worst-shaped one available: the
+   * user sees zero rows, no error is raised, and every other signal points away
+   * from the cause. The information that ends the search — WHICH variable did
+   * not resolve, and at which member index — was computed by the compiler and
+   * then discarded one line before it could be used. This carries it.
+   *
+   * Emitted only when the clause actually DENIES (see {@link compileFilter}) and
+   * only once per distinct cause, because this seam runs on read paths.
+   */
+  private warnFailClosedDenial(
+    policy: RowLevelSecurityPolicy,
+    clause: 'using' | 'check',
+    cause: RlsDropCause,
+  ): void {
+    const name = (policy as { name?: string }).name ?? '(unnamed)';
+    const object = (policy as { object?: string }).object ?? '?';
+    const predicate = (policy as { using?: string; check?: string })[clause] ?? policy.using ?? '';
+    const key = `${object}|${clause}|${name}|${cause.reason}|${cause.detail}`;
+    if (this.warnedDenials.has(key)) return;
+    if (this.warnedDenials.size >= RLSCompiler.WARNED_DENIALS_MAX) this.warnedDenials.clear();
+    this.warnedDenials.add(key);
+    this.logger?.warn?.(
+      `[RLS] DENY (fail closed): policy '${name}' on '${object}' could not be evaluated for this request ` +
+        `(${clause} clause, ${cause.reason}): ${cause.detail}. Every applicable policy dropped, so the request ` +
+        `is filtered by RLS_DENY_FILTER ('${String(RLS_DENY_FILTER.id).split(':')[0]}') and returns ZERO ROWS — ` +
+        `a deliberate REFUSAL, not an empty result set. Predicate: ${predicate}`,
+      {
+        object,
+        policy: name,
+        clause,
+        reason: cause.reason,
+        detail: cause.detail,
+        predicate,
+        filter: RLS_DENY_FILTER.id,
+      },
+    );
   }
 
   /**
@@ -323,7 +428,22 @@ export class RLSCompiler {
     expression: string,
     userCtx: RLSUserContext
   ): Record<string, unknown> | null {
-    if (!expression) return null;
+    return this.compileExpressionOutcome(expression, userCtx).filter;
+  }
+
+  /**
+   * [#13639] {@link compileExpression}'s answer WITH the reason it refused.
+   *
+   * Same compile, same decision, same returned filter — the only difference is
+   * that the compiler's `{ reason, detail }` survives to the caller instead of
+   * being collapsed into `null` at the `!result.ok` line. `compileExpression`
+   * stays exactly as published (`Record | null`) and delegates here.
+   */
+  private compileExpressionOutcome(
+    expression: string,
+    userCtx: RLSUserContext
+  ): RlsCompileOutcome {
+    if (!expression) return { filter: null, cause: { reason: 'parse-error', detail: 'empty expression' } };
     // [ADR-0058 D1] CEL is canonical. The legacy SQL-ish form still compiles via
     // the transitional bridge, but we surface it so authored policies migrate to
     // CEL — the bridge will be removed once no stored predicate needs it.
@@ -340,7 +460,11 @@ export class RLSCompiler {
     // Any fault — unsupported shape, parse error, or an unresolved/null
     // `current_user.*` variable — drops the policy. With a single applicable
     // policy this surfaces as RLS_DENY_FILTER upstream (fail closed).
-    if (!result.ok) return null;
+    // [#13639] The refusal keeps its REASON. `reason` + `detail` are what the
+    // compiler already computed — the variable path, the member index, the bound
+    // that was overrun — and discarding them here is what left an operator with
+    // zero rows and no signal at all.
+    if (!result.ok) return { filter: null, cause: { reason: result.reason, detail: result.detail } };
     // Parity: an empty pre-resolved membership (`field in current_user.<empty>`)
     // compiles to `{ field: { $in: [] } }`. The legacy compiler dropped the
     // policy in this case; preserve that so the deny sentinel (not a literal
@@ -348,8 +472,21 @@ export class RLSCompiler {
     // polarity-aware: the same emptied set under a supported `not in`
     // (`$not` wrapping, at any composition depth) is dropped too — otherwise
     // it inverts to a constant-TRUE clause and the policy compiles ALLOW-ALL.
-    if (isEmptyMembershipFilter(result.filter as Record<string, unknown>)) return null;
-    return result.filter as Record<string, unknown>;
+    if (isEmptyMembershipFilter(result.filter as Record<string, unknown>)) {
+      // [#13639] The compiler answered `ok`, so there is no `detail` to carry —
+      // this drop is THIS file's, and it is just as silent and just as
+      // fail-closed. It names itself rather than being reported as a success.
+      return {
+        filter: null,
+        cause: {
+          reason: 'empty-membership',
+          detail:
+            'a pre-resolved membership set is EMPTY, so the policy is degenerate ' +
+            `(compiled to ${JSON.stringify(result.filter)}) and was dropped rather than enforced`,
+        },
+      };
+    }
+    return { filter: result.filter as Record<string, unknown> };
   }
 
   /**

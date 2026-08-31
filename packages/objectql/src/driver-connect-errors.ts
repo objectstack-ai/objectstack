@@ -19,6 +19,54 @@ export interface DriverHealth {
   skipped?: boolean;
 }
 
+/**
+ * Why {@link PrimaryDatasourceVerdict} could not name a primary datasource.
+ *
+ * Every member means the SAME thing to a readiness probe — *we cannot tell* —
+ * and the ruling on #13408 fixes what a probe must do with that answer: fall
+ * back to the old whole-node 503 (fail toward draining), never to "don't
+ * drain". They are distinguished only so the reason can be logged and reported;
+ * ⛔ a caller must not branch on them to keep a replica in rotation.
+ */
+export type PrimaryDatasourceUnresolvedReason =
+  /** No platform system object is registered here — nothing to read the fact off. */
+  | 'no-system-objects-registered'
+  /** The platform's system objects are split across more than one datasource. */
+  | 'system-objects-split'
+  /** A registered system object routes nowhere: no binding and no default driver. */
+  | 'system-object-unbound'
+  /** The name resolved, but no driver is registered under it, so nothing probes it. */
+  | 'no-driver-registered';
+
+/**
+ * WHICH datasource carries this deployment's platform system objects — the
+ * machine-readable "primary/default datasource" fact the #13408 ruling requires
+ * (2026-08-31, 第 6 场总监席决裁批 #12), stated as a verdict rather than a
+ * `string | undefined` so "we could not tell" can never be mistaken for a name.
+ *
+ * ⛔ The ruling forbids deriving this from a heuristic such as "the first
+ * datasource registered". The one implementation is
+ * `ObjectQL.resolvePrimaryDatasource()`.
+ */
+export type PrimaryDatasourceVerdict =
+  | {
+      resolved: true;
+      /** The datasource name, which is also a registered driver's name. */
+      datasource: string;
+      /**
+       * How many registered platform system objects agreed on it. Never 0 — a
+       * verdict read off nothing is `no-system-objects-registered`, not a name,
+       * so a caller cannot act on a vacuous agreement.
+       */
+      witnesses: number;
+    }
+  | {
+      resolved: false;
+      reason: PrimaryDatasourceUnresolvedReason;
+      /** The distinct datasource names seen, when more than one disagreed. */
+      candidates?: readonly string[];
+    };
+
 /** `error.message` when it is an Error, its string form otherwise. */
 function failureMessage(error: unknown): string {
   if (error instanceof Error) return error.message || error.name;

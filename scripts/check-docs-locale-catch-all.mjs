@@ -92,10 +92,28 @@
 // no type. Silent by construction, which is the same reason the catch-all guard
 // above needed a gate rather than a comment.
 //
-// This limb asserts the half that was asserted nowhere: the URL `getPageImage()`
-// builds ends in a final segment containing a dot. It deliberately does NOT
-// re-assert that the matcher excludes dotted paths -- that condition is read
-// once, above, and both halves are reported in the summary line.
+// This limb asserts the invariant on the URL itself, from BOTH ends, because
+// the two ends are one surface and either one moving breaks it:
+//
+//   1. the URL `getPageImage()` builds ends in a final segment containing a
+//      dot -- the marker side; and
+//   2. that URL, compiled against the matcher `proxy.ts` carries TODAY, is not
+//      matched by it -- the proxy side.
+//
+// (2) is the direct reading, and it is what makes the conditional catch-all
+// requirement below safe to keep. That requirement relaxes when dotted paths
+// stop bypassing the proxy, which is correct on its own terms -- but the same
+// widening 404s every `og:image`, so a gate that only read the flag could go
+// ENTIRELY green on the change that breaks the whole surface: catch-all limb
+// relaxed, i18n limb relaxed, and this limb still seeing a dotted marker. A
+// reading that licenses a relaxation and is asserted nowhere is not a check; it
+// is a statistic with a veto. So the flag keeps its licensing role and this
+// limb holds the surface, measured on the built URL rather than on either side.
+//
+// The two are not redundant: a matcher that widened its dot exclusion but still
+// excludes the `/og/` prefix relaxes the catch-all requirement AND leaves the
+// cards served, and this limb correctly stays green there. It fires on the
+// break, not on the flag.
 //
 // The assertion is made on the URL the function RETURNS, not on the array
 // literal alone. The marker is the URL's final segment only while the returned
@@ -347,8 +365,12 @@ export function checkApp({ appDir, proxyPath, i18nPath, sourcePath }) {
   // Unconditional, unlike the catch-all guard below -- a matcher that stopped
   // excluding dotted paths would not relax this requirement, it would break the
   // surface outright, so there is no condition under which a dotless marker is
-  // the right answer. The matcher half is read once above and reported, never
-  // re-asserted here.
+  // the right answer. Asserted from BOTH ends on the built URL: the marker must
+  // still carry a dot, AND the URL must still escape the matcher `proxy.ts`
+  // carries today. The second is the one the `dottedBypassesProxy` flag alone
+  // could never make -- the flag LICENSES relaxations below, so leaving its
+  // consequence for this surface unasserted is what let a widened matcher take
+  // every limb green at once.
   if (!existsSync(sourcePath)) {
     findings.push(`missing ${sourcePath}`);
   } else {
@@ -370,6 +392,24 @@ export function checkApp({ appDir, proxyPath, i18nPath, sourcePath }) {
           + 'site 404s at once, and nothing fetches these URLs, so no other check sees it. Restore a '
           + "final segment containing a dot in apps/docs/lib/source.ts (the marker's NAME is free; its "
           + 'dot is not).',
+        );
+      } else if (!stats.ogUrlSkipsProxy) {
+        // The break from the OTHER direction: the marker still carries its dot,
+        // but the matcher moved under it. Reported here rather than left to the
+        // `dottedBypassesProxy` flag, which merely relaxes two limbs below and
+        // asserts nothing -- the whole reason this widening could land green.
+        findings.push(
+          `the OG card URL \`${OG_BUILDER}()\` builds -- \`${probe}\` -- IS matched by proxy.ts's `
+          + `matcher, even though its final segment \`${finalSegment}\` still contains a dot. The `
+          + 'exclusion the marker relies on moved on the PROXY side: this URL is now locale-rewritten '
+          + `to \`/<locale>${probe}\`, a path app/og/ does not serve, because that tree is top-level `
+          + 'and not under app/[lang]/. Every `og:image` on the site 404s at once, and nothing fetches '
+          + 'these URLs, so no other check sees it. Note this is NOT relaxed by the same widening '
+          + 'relaxing the catch-all requirement below: rewriting dotted paths removes the need for the '
+          + `locale guard and breaks the OG cards, both at once. Restore an exclusion in `
+          + `apps/docs/proxy.ts that covers this URL -- the dot limb (\`.*\\..*\`) is what covered it, `
+          + `and excluding the \`/og/\` prefix outright is the narrower alternative. Matcher(s) read: `
+          + `${JSON.stringify(read.matchers)}.`,
         );
       }
     }
@@ -545,14 +585,54 @@ function selfTest() {
     assert(run.stats.segments === 2 && run.stats.guarded === 1, `both segments must be counted -- got ${summarise(run.stats)}`);
 
     // 6. The condition is LIVE, not decorative: a matcher that DOES cover dotted
-    //    paths makes the guard unnecessary, and the missing guard goes green.
+    //    paths makes the locale guard unnecessary, and the missing guard is NOT
+    //    demanded. That relaxation is kept -- it is correct on its own terms.
+    //    What is no longer allowed is for it to be the WHOLE story: the same
+    //    widening takes every `og:image` to 404, so the OG limb reports it here
+    //    and the run as a whole is red. Before that limb existed this fixture
+    //    was silent, which is the hole this case now pins from both sides.
     paths = writeFixture(dir, {
       proxy: `export const config = { matcher: ['/((?!api|_next/static).*)'] };\n`,
       layout: FIXTURE_LAYOUT.replace('  if (!isSupportedLanguage(lang)) notFound();\n', ''),
     });
     run = checkApp(paths);
-    assert(run.findings.length === 0, `a proxy that rewrites dotted paths must not demand the guard -- got ${JSON.stringify(run.findings)}`);
     assert(run.stats.dottedBypassesProxy === false, 'the widened matcher must be read as covering dotted paths');
+    assert(
+      !run.findings.some((f) => /never calls|is a top-level catch-all|does not read/.test(f)),
+      `a proxy that rewrites dotted paths must still not demand the locale guard -- got ${JSON.stringify(run.findings)}`,
+    );
+    assert(
+      run.findings.length === 1 && /IS matched by proxy\.ts's matcher/.test(run.findings[0]),
+      `widening the matcher must be reported by the OG limb, not left green -- got ${JSON.stringify(run.findings)}`,
+    );
+
+    // 6b. RED, THE ABLATION FROM THE PROXY SIDE. Nothing but the matcher moves:
+    //     the guard is present, the marker still ends in `image.png`, every
+    //     other limb is satisfied and the two conditional limbs have relaxed
+    //     themselves. The surface is broken anyway, and this is the reading that
+    //     says so -- taken from the built URL, not from either side alone.
+    paths = writeFixture(dir, { proxy: `export const config = { matcher: ['/((?!api|_next/static).*)'] };\n` });
+    run = checkApp(paths);
+    assert(run.stats.ogFinalSegmentDotted === true, 'the marker must be untouched in the proxy-side ablation');
+    assert(run.stats.ogUrlSkipsProxy === false, 'the widened matcher must be read as now covering the OG card URL');
+    assert(
+      run.findings.length === 1 && /IS matched by proxy\.ts's matcher/.test(run.findings[0]),
+      `a matcher that swallowed the OG card URL must be reported once -- got ${JSON.stringify(run.findings)}`,
+    );
+
+    // 6c. GREEN control: the limb fires on the BREAK, not on the flag. This
+    //     matcher drops the dot exclusion -- so the catch-all requirement
+    //     relaxes exactly as in 6 -- but still excludes the `/og/` prefix, so
+    //     the cards are still served and there is nothing to report. A limb
+    //     wired to `dottedBypassesProxy` instead of to the URL would cry here.
+    paths = writeFixture(dir, {
+      proxy: `export const config = { matcher: ['/((?!api|_next/static|og/).*)'] };\n`,
+      layout: FIXTURE_LAYOUT.replace('  if (!isSupportedLanguage(lang)) notFound();\n', ''),
+    });
+    run = checkApp(paths);
+    assert(run.stats.dottedBypassesProxy === false, 'the og-excluding matcher must still be read as covering dotted paths');
+    assert(run.stats.ogUrlSkipsProxy === true, 'an excluded `/og/` prefix must be read as still escaping the matcher');
+    assert(run.findings.length === 0, `a widening that still excludes /og/ must stay green -- got ${JSON.stringify(run.findings)}`);
 
     // 7. RED: a matcher that stops rewriting the dotless probe is reported, not
     //    silently read as "everything bypasses".
@@ -625,8 +705,10 @@ function selfTest() {
     `✓ check-docs-locale-catch-all --self-test: ${checked} assertions over a temp fixture (real checkApp path); `
     + 'every limb -- deleted guard, guard behind the return, hollowed predicate, a new unguarded segment, '
     + 'an uncompilable matcher, an OG marker stripped of its dot, an OG marker dropped, an OG url that '
-    + 'stopped ending in its segments, a missing builder -- observed FAILING, the proxy condition observed '
-    + "flipping the catch-all requirement off, and the OG marker's NAME observed free while its dot is not.",
+    + 'stopped ending in its segments, a missing builder, and a matcher widened until it swallows the OG '
+    + 'card URL with the marker untouched -- observed FAILING, the proxy condition observed flipping the '
+    + "catch-all requirement off WITHOUT taking the run green, the OG marker's NAME observed free while "
+    + 'its dot is not, and a widening that still excludes /og/ observed staying green.',
   );
 }
 

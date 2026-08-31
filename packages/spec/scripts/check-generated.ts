@@ -121,6 +121,13 @@ const GATED: ReadonlyArray<{
   // and a non-deterministic timeout that ejected unrelated PRs from the merge
   // queue), so its freshness is what those pins mean.
   { check: 'check:export-origins', gen: 'gen:export-origins', artifact: 'export-origins/' },
+  // The TS-declaration-name → registry-name map (#13712). Composed from the two
+  // artifacts above it in this list — json-schema.manifest/ (via
+  // check:authorable-surface) and export-origins/ — plus a syntactic pass over
+  // src/ for module-private base declarations (ObjectSchemaBase → data/Object),
+  // so it runs AFTER both inputs' own gates and a `--fix` regenerates it after
+  // them. Reads src/ and committed artifacts only: no build needed.
+  { check: 'check:declaration-map', gen: 'gen:declaration-map', artifact: 'declaration-map/' },
   {
     check: 'check:docs',
     gen: 'gen:docs',

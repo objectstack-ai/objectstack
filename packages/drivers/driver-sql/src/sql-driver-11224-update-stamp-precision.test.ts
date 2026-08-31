@@ -104,6 +104,41 @@
  * the measured span and the arithmetic that rules a fast runner out, so the red
  * discriminates itself instead of requiring a reader to check §1 and §2 first.
  *
+ * ## [#13691] §3's validity ceiling had to move with §3's conclusion
+ *
+ * The `span` bound sitting above §3's distinctness assertion is a VALIDITY
+ * PRECONDITION, not a claim about the product: it establishes that truncation
+ * could not have produced the distinctness §3 then concludes from. Its correct
+ * value is therefore whatever the CONCLUSION needs — and #11572 changed the
+ * conclusion.
+ *
+ * #11224's §3 asked for two distinct stamps out of {@link ROUNDS}, and two
+ * truncated values need one whole second, so `span < 1000` was the TIGHT bound
+ * for it. #11572 strengthened the conclusion to `ROUNDS` distinct stamps —
+ * `ROUNDS` multiples of a second cannot span less than `ROUNDS - 1` of them —
+ * and wrote exactly that arithmetic into {@link MIN_GAP_MS}'s note in the same
+ * commit ("the 5 whole SECONDS second-precision stamps would need to yield
+ * `ROUNDS` distinct values"), while leaving the executable bound on the
+ * superseded number. From then on this file's prose and its code disagreed by
+ * a factor of `ROUNDS - 1`.
+ *
+ * The cost of that is one-sided, which is what makes it worth a section rather
+ * than a comment. An over-strict validity precondition cannot fail in a way
+ * that says anything about the product; it can only red on time this test did
+ * not have, on somebody else's PR. It did: a merge-queue build on a diff
+ * touching no file under `packages/drivers/` reported `span = 1006` — six
+ * milliseconds over — while the real invariant (monotonicity, asserted on the
+ * line above) HELD, and the same commit passed on a re-queue with nothing
+ * changed. Meanwhile #11572's fix spends real wall-clock time inside that same
+ * budget by design, so the two guards had come to bound §3 from both sides.
+ *
+ * {@link MAX_SPAN_MS} is now DERIVED from `ROUNDS` and the truncation grain
+ * instead of written as a literal, and the derivation is pinned by arithmetic
+ * at the foot of this file, so the two halves cannot drift apart in silence
+ * again. ⛔ Nothing #11572 established was traded for it: the clock is still
+ * DRIVEN, both gap assertions still run, and the conclusion is still `ROUNDS`
+ * distinct stamps.
+ *
  * ## Reverse verification (direction predicted before running)
  *
  * Restoring `main`'s `updatedAtStamp()` body turns §1, §2 and §3 red on the
@@ -155,8 +190,51 @@ const ROUNDS = 6;
  *    SECONDS second-precision stamps would need to yield `ROUNDS` distinct
  *    values — which is what makes §3's distinctness unreachable by truncation
  *    instead of merely unlikely under it.
+ *
+ * ⚠️ [#13691] `ROUNDS - 1` gaps of this size is the FLOOR of what the spacing
+ * costs, never an estimate of it. {@link awaitClockAdvance} waits with
+ * `setTimeout`, whose delivery is bounded by the event loop rather than by the
+ * clock, so the spacing is `>= 25 ms` and grows with load with no upper bound
+ * in the code. Measured on the container #13691 was fixed on, over 300 trials
+ * of the five gaps §3 takes: 26 ms median (64 ms max) on an idle loop, and
+ * 60 ms median (86 ms max) with the loop held by a re-scheduling 12 ms hog.
+ * That is why {@link MAX_SPAN_MS} is derived from the truncation arithmetic and
+ * not from this floor — a budget sized on `ROUNDS * MIN_GAP_MS` would be a
+ * budget sized on a number the machine is free to exceed.
  */
 const MIN_GAP_MS = 5;
+
+/**
+ * [#13691] The grain a SECOND-precision stamp truncates to — the defect class
+ * §3 exists to catch, on every cell it runs on.
+ *
+ * One grain covers the whole matrix because the defect has one shape wherever
+ * it can occur: on MySQL an unqualified `CURRENT_TIMESTAMP` truncates to whole
+ * seconds (#11224 itself), and the SQLite ablation this file's head note
+ * prescribes is that same truncation written into the branch that cell
+ * executes (`new Date().toISOString()` forced to `.000Z`). Postgres stamps at
+ * microsecond precision and has nothing to truncate, so the bound is vacuous
+ * there rather than wrong.
+ */
+const TRUNCATED_STAMP_GRAIN_MS = 1_000;
+
+/**
+ * [#13691] §3's validity ceiling: the span at or above which second-precision
+ * truncation could ITSELF have produced the distinctness §3 concludes from.
+ *
+ * Derived, not chosen. {@link ROUNDS} truncated stamps are `ROUNDS` multiples
+ * of {@link TRUNCATED_STAMP_GRAIN_MS}, so they cannot span less than
+ * `ROUNDS - 1` whole grains; below that, truncation cannot reach `ROUNDS`
+ * distinct values at all, which is precisely what makes §3's distinctness
+ * assertion readable as a statement about resolution.
+ *
+ * ⛔ This is not a raised ceiling. The literal it replaces was the TIGHT bound
+ * for the assertion §3 used to make — see the `[#13691]` section of the head
+ * note for the drift, and `maxDistinctUnderTruncation` at the foot of this file
+ * for the pin that keeps this constant and §3's conclusion from parting company
+ * again.
+ */
+const MAX_SPAN_MS = (ROUNDS - 1) * TRUNCATED_STAMP_GRAIN_MS;
 
 /**
  * [#11572] Block until the process clock has ADVANCED by at least `ms`, and
@@ -382,13 +460,27 @@ function measure(cell: DialectCell): void {
       ).toBeGreaterThanOrEqual(MIN_GAP_MS);
 
       // Monotone regardless (the invariant), and — the point — the run spans
-      // less than the full second a truncated stamp would need to distinguish
-      // any two of these at all.
+      // less than the `ROUNDS - 1` whole grains a truncated stamp would need to
+      // reach the `ROUNDS` distinct values concluded below. See
+      // {@link MAX_SPAN_MS} for why that is `ROUNDS - 1` grains and not one.
       for (let i = 1; i < stamps.length; i++) expect(stamps[i]).toBeGreaterThanOrEqual(stamps[i - 1]);
       const span = stamps[stamps.length - 1] - stamps[0];
-      expect(span, 'this run took over a second, so second-precision stamps could have differed too').toBeLessThan(
-        1_000,
-      );
+      // [#13691] Reported in the failure, because the first question a reader
+      // has is which half of the budget went where — and neither half is a
+      // product signal.
+      const deliberate = gaps.reduce((total, gap) => total + gap, 0);
+      expect(
+        span,
+        `[#13691] §3's VALIDITY PRECONDITION failed, which says nothing about the product: the ` +
+          `run spanned ${span} ms, at or above the ${MAX_SPAN_MS} ms (${ROUNDS} - 1 grains of ` +
+          `${TRUNCATED_STAMP_GRAIN_MS} ms) a second-precision stamp would need to reach the ` +
+          `${ROUNDS} distinct values asserted below — so truncation is no longer ruled out and ` +
+          `the distinctness below is unreadable, whichever way it lands. Of that span, ` +
+          `${deliberate} ms was clock-advance spacing this cell spent ON PURPOSE ` +
+          `(${gaps.join('/')} ms) and ${span - deliberate} ms was everything else (round-trips ` +
+          `and scheduling). The ordering invariant asserted on the line above is unaffected ` +
+          `either way — read this as a slow runner, not as a regression.`,
+      ).toBeLessThan(MAX_SPAN_MS);
 
       // The property, now entailed rather than raced: with every update spaced
       // by a measured gap five times the declared resolution, a stamp that kept
@@ -479,3 +571,61 @@ function measure(cell: DialectCell): void {
 for (const cell of DIALECT_CELLS) {
   declareDialectCell(cell, 'update stamp precision (#11224)', measure);
 }
+
+/**
+ * [#13691] The most distinct values SECOND-precision truncation can show across
+ * a span of `ms` — the model {@link MAX_SPAN_MS} is derived from.
+ *
+ * Truncated stamps are multiples of {@link TRUNCATED_STAMP_GRAIN_MS}, so a span
+ * of `ms` covers at most `floor(ms / grain) + 1` of them.
+ */
+function maxDistinctUnderTruncation(ms: number): number {
+  return Math.floor(ms / TRUNCATED_STAMP_GRAIN_MS) + 1;
+}
+
+// ── The coupling #11572 broke, asserted instead of commented ─────────────────
+//
+// §3's ceiling and §3's conclusion are two halves of one argument, and they
+// drifted apart in silence: #11572 strengthened the conclusion from "at least
+// two distinct" to "`ROUNDS` distinct" and left the ceiling on the number that
+// had been tight for the OLD conclusion. Nothing failed at the time — the
+// precondition merely became `ROUNDS - 1` times stricter than its own argument
+// needed, and stayed that way until a slow runner paid for it on an unrelated
+// PR.
+//
+// So the relationship is pinned. It runs on every runner with no server and no
+// clock: this is arithmetic about the defect class, not a measurement of the
+// machine, and it is the assertion that reds if the ceiling is ever put back on
+// a literal belonging to a superseded conclusion.
+describe("#13691 — §3's span ceiling is the tight bound for §3's conclusion", () => {
+  it('rules truncation out below the ceiling, and is not stricter than that above it', () => {
+    // SOUND — one millisecond under the ceiling, truncation cannot reach the
+    // `ROUNDS` distinct values §3 concludes from. This is the whole reason the
+    // precondition exists, and it is the leg a LOOSENED ceiling reds.
+    expect(
+      maxDistinctUnderTruncation(MAX_SPAN_MS - 1),
+      `a span of ${MAX_SPAN_MS - 1} ms must leave second-precision truncation unable to reach ` +
+        `${ROUNDS} distinct stamps, or §3's distinctness assertion concludes nothing`,
+    ).toBeLessThan(ROUNDS);
+
+    // TIGHT — at the ceiling truncation CAN reach them, so the ceiling is not
+    // stricter than the argument requires. This is the leg a ceiling restored
+    // to `1_000` reds, and over-strictness here is not conservatism: a validity
+    // precondition cannot fail informatively, so every millisecond of slack it
+    // demands is a false red carrying no product signal.
+    expect(
+      maxDistinctUnderTruncation(MAX_SPAN_MS),
+      `the ceiling is ${MAX_SPAN_MS} ms, but second-precision truncation still cannot reach ` +
+        `${ROUNDS} distinct stamps at that span — so the precondition is stricter than §3's own ` +
+        `argument needs, and the excess can only ever red on time the run did not have`,
+    ).toBeGreaterThanOrEqual(ROUNDS);
+  });
+
+  it("is the number #11224's superseded conclusion needed, one grain for two stamps", () => {
+    // Why `1_000` was right until #11572 and wrong after it, kept executable so
+    // the head note's history is checkable rather than remembered: the original
+    // §3 asked for TWO distinct stamps, and two need exactly one grain.
+    expect(maxDistinctUnderTruncation(TRUNCATED_STAMP_GRAIN_MS - 1)).toBe(1);
+    expect(maxDistinctUnderTruncation(TRUNCATED_STAMP_GRAIN_MS)).toBe(2);
+  });
+});

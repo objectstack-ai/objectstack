@@ -232,6 +232,7 @@ All layouts use a responsive grid that divides space into columns.
 {/* os:check-yaml FormSectionSchema key=section */}
 ```yaml
 section:
+  name: contact_information
   label: Contact Information
   columns: 2  # two fields per row (50% width each)
   fields:
@@ -260,6 +261,7 @@ field from its widget type and the current column count.
 {/* os:check-yaml FormSectionSchema key=section */}
 ```yaml
 section:
+  name: product_details
   label: Product Details
   columns: 3
   fields:
@@ -292,6 +294,7 @@ Grid automatically collapses on smaller screens:
 {/* os:check-yaml FormSectionSchema key=section */}
 ```yaml
 section:
+  name: responsive_grid
   columns: 3  # Desktop: 3 columns, Tablet: 2 columns, Mobile: 1 column
   fields: [field_a, field_b, field_c, field_d, field_e, field_f]
 ```

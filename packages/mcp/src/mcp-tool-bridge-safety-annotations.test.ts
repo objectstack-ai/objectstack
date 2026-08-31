@@ -65,7 +65,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
 import { PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
 
-import { MCPServerRuntime } from './mcp-server-runtime.js';
+import * as serverRuntimeModule from './mcp-server-runtime.js';
+import {
+  MCPServerRuntime,
+  PLATFORM_READ_ONLY_TOOL_NAMES,
+  PLATFORM_DESTRUCTIVE_TOOL_NAMES,
+} from './mcp-server-runtime.js';
 import type { ToolRegistry, ToolExecutionResult } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -278,11 +283,18 @@ describe('bridgeTools — the safety annotations a client receives', () => {
   });
 
   /**
-   * The invariant that keeps the name fallback from drifting back into
-   * folklore, asserted from OUTSIDE the module (the two sets are private):
-   * only a name the platform itself registers may receive a hint it did not
-   * declare. Driving every platform name at once also proves the fallback is a
-   * SUBSET of that registry rather than merely overlapping it.
+   * ONE of the two directions that keep the name fallback from drifting back
+   * into folklore: only a name the platform itself registers may receive a
+   * hint it did not declare. Driving every platform name at once also proves
+   * the fallback is a SUBSET of that registry rather than merely overlapping
+   * it.
+   *
+   * ⚠️ Its ITERATION SOURCE is the registry, which is exactly what bounds it.
+   * A name WITHDRAWN from `PLATFORM_TOOLS_BY_PACKAGE` while it stays in a
+   * local set is not among the tools bridged here, so nothing drives it,
+   * `annotated` never contains it, and this case stays green. The other
+   * direction is pinned by the sibling describe at the foot of this file,
+   * which iterates the local sets instead.
    */
   it('no tool outside `PLATFORM_PROVIDED_TOOL_NAMES` receives a hint it did not declare', async () => {
     const platform = [...PLATFORM_PROVIDED_TOOL_NAMES].map((name) => tool(name));
@@ -402,5 +414,89 @@ describe('bridgeTools — the safety annotations a client receives', () => {
     // membership test widened to `PLATFORM_TOOL_FAMILY_PREFIXES` would put
     // this bridge back to claiming a closed world over app-defined behaviour.
     expect(hasHint(s.byName.action_close_deal.annotations, 'openWorldHint')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * THE DIRECTION THE CASE ABOVE CANNOT SEE (#13486).
+ *
+ * `safetyAnnotations` keeps two literal name sets that are hand copies of
+ * `PLATFORM_TOOLS_BY_PACKAGE`. The registry-driven pin above catches a name
+ * added to a set but never registered. It is structurally blind to the
+ * reverse: a name REMOVED from the registry while it stays in a set is simply
+ * not one of the tools that pin bridges, so nothing drives it and the case
+ * stays green.
+ *
+ * ⚠️ WHY THAT REVERSE MATTERS WHILE THE DATA IS CLEAN. The harm is not "a tool
+ * the platform no longer registers keeps a hint" — that tool is gone. These
+ * sets annotate BY NAME, so once a name leaves the registry, a PLUGIN
+ * registering a tool of that name inherits a `readOnlyHint` it never declared.
+ * A safety annotation acquired by name collision, from a stale literal.
+ *
+ * THE ITERATION SOURCE IS THE POINT. These cases iterate the two sets — the
+ * thing that can drift — and check each name against the registry. ⛔ The
+ * names are never re-typed here: a hard-coded list of the six would be a THIRD
+ * hand copy, i.e. the defect this pins, and it would pin a copy against a copy
+ * without ever reading what `safetyAnnotations` actually consults.
+ *
+ * These cases deliberately do not drive the transport. The wire behaviour of
+ * both sets is already pinned by the two CONTROL cases at the head of this
+ * file; what is unpinned is the CONTENT of the sets, which is data.
+ */
+describe('the hand-maintained safety name sets cannot drift out of the registry', () => {
+  /**
+   * The sets under test, keyed by their module-export name so a failure names
+   * the set to edit. VALUES are imported, never re-typed — see above.
+   */
+  const COVERED_SETS: Readonly<Record<string, ReadonlySet<string>>> = {
+    PLATFORM_READ_ONLY_TOOL_NAMES,
+    PLATFORM_DESTRUCTIVE_TOOL_NAMES,
+  };
+
+  it('every name in the two safety sets is still a name the platform registers', () => {
+    // Non-vacuity first, on both sides: an empty registry would make every
+    // `has()` below false rather than silently true, but an empty SET would
+    // make the loop run zero times and pass saying nothing.
+    expect(PLATFORM_PROVIDED_TOOL_NAMES.size).toBeGreaterThan(0);
+
+    const checked: string[] = [];
+    for (const [setName, names] of Object.entries(COVERED_SETS)) {
+      expect(names.size).toBeGreaterThan(0);
+      for (const name of names) {
+        checked.push(name);
+        expect(
+          PLATFORM_PROVIDED_TOOL_NAMES.has(name),
+          `\`${setName}\` still carries \`${name}\`, which \`PLATFORM_TOOLS_BY_PACKAGE\` no longer registers. ` +
+            `Delete the name from the set — do NOT widen the registry to match it. ` +
+            `Left there, any plugin registering a tool called \`${name}\` inherits a safety hint it never declared.`,
+        ).toBe(true);
+      }
+    }
+    expect(checked.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * ⚠️ The case above can only iterate the sets it was told about. A third
+   * name-keyed set added to `mcp-server-runtime.ts` would be annotating tools
+   * with nothing holding its contents to the registry, and no existing
+   * assertion would notice — the same silence, one set over.
+   *
+   * This guard closes that by discovering the sets from the module's own
+   * exports. It cannot see a set that is left PRIVATE, which is why the source
+   * docblock instructs the author to export it; what it can do is refuse to
+   * let an exported one go unpinned.
+   */
+  it('COVERAGE GUARD: every name-keyed safety set the module exports is covered above', () => {
+    const exported = Object.entries(serverRuntimeModule)
+      .filter(([name, value]) => /^PLATFORM_[A-Z0-9_]*_TOOL_NAMES$/.test(name) && value instanceof Set)
+      .map(([name]) => name)
+      .sort();
+
+    // Non-vacuity: without this, a regex that matches nothing would leave two
+    // empty arrays agreeing with each other.
+    expect(exported.length).toBeGreaterThan(0);
+    expect(exported).toEqual(Object.keys(COVERED_SETS).sort());
   });
 });

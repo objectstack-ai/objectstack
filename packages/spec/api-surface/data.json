@@ -245,6 +245,7 @@
     "ExternalTable (type)",
     "ExternalTableParsed (type)",
     "ExternalTableSchema (const)",
+    "FIELD_GROUP_KEY_PATTERN (const)",
     "FIELD_GROUP_SYSTEM_FIELDS (const)",
     "FIELD_KEY_GUIDANCE (const)",
     "FIELD_MASKING_PRESETS (const)",

@@ -402,6 +402,81 @@ export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
 } as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
 
 /**
+ * Every context collection some row above routes into.
+ *
+ * Read off the table rather than restated: the `as const` keeps the values a
+ * union of literal keys, and the `satisfies` clause above has already pinned
+ * that each one is a real {@link RuntimeStackContext} key. So this union
+ * cannot name a collection the context does not have, and the only remaining
+ * question is the one below.
+ */
+type RoutedContextCollections =
+    (typeof CLOSURE_CONTEXT_KEY_BY_TYPE)[keyof typeof CLOSURE_CONTEXT_KEY_BY_TYPE];
+
+/** Context collections with NO row above. Must be empty — see the assertion. */
+type UnroutedContextCollections = Exclude<keyof RuntimeStackContext, RoutedContextCollections>;
+
+/**
+ * `never`, or a compile error naming the collection nobody routes into.
+ *
+ * The constraint is the whole mechanism: a non-empty
+ * {@link UnroutedContextCollections} cannot satisfy `never`, so `tsc` reports
+ * `Type '"<collection>"' does not satisfy the constraint 'never'` at the
+ * assertion below — the missing key, by name, at the file that owns the table.
+ */
+type NoUnroutedContextCollection<Unrouted extends never> = Unrouted;
+
+/**
+ * COMPLETENESS — the half {@link CLOSURE_CONTEXT_KEY_BY_TYPE}'s `satisfies`
+ * clause cannot state, and the last one of this set that was still missing.
+ *
+ * ## What the `satisfies` above does NOT ask
+ *
+ * It asks that every key the table NAMES is a real `RuntimeStackContext` key.
+ * It does not ask that every collection needing a row HAS one — validity, not
+ * completeness. That is exactly the asymmetry `NAME_KEYED_STACK_KEYS` carried
+ * in `@objectstack/lint` before #13390 derived it, one package over.
+ *
+ * ## Why it is worth an assertion when nothing is broken
+ *
+ * The set is correct as it stands. #13390's ruling is about what "correct
+ * today" costs: adding the `pages` collection had to touch FIVE spellings of
+ * this one set and only ONE announced itself, and the unguarded spelling
+ * produced correct-LOOKING findings whose `path` the caller could not resolve,
+ * with no test and no gate going red. Four of the five can no longer be
+ * forgotten. This was the fifth.
+ *
+ * ## What goes red, and when
+ *
+ * Add a key to `RuntimeStackContext` in `@objectstack/lint` without adding the
+ * row that routes a metadata type into it, and this package stops building:
+ * the dts build reports `TS2344` here. Measured, not assumed — a type error
+ * confined to this file fails `pnpm --filter @objectstack/metadata-protocol
+ * build` with `DTS Build error`, which is what CI's workspace build runs.
+ *
+ * The red arrives after `@objectstack/lint` is REBUILT, because the type
+ * crosses the package wall through `dist/runtime.d.ts`. That is inherent to
+ * the boundary and is the same latency the `satisfies` clause above and
+ * `protocol.ts`'s `-?` accumulator already have; turbo's dependency order
+ * makes it unconditional in CI.
+ *
+ * ## Why an assertion rather than a derivation
+ *
+ * A derivation would have to read the context-collection set as a VALUE, and
+ * `metadata-protocol` cannot: `CONTEXT_STACK_KEYS` is module-private in
+ * `runtime-gate.ts` and appears on neither of `@objectstack/lint`'s entries.
+ * Reaching it would mean widening the deliberately narrow
+ * `@objectstack/lint/runtime` entry — a package-boundary change — to buy the
+ * same red this costs nothing to get. The TYPE is already here; only the
+ * completeness question needed asking.
+ *
+ * Exported because `noUnusedLocals` is on: a local alias nothing reads is a
+ * hard `TS6196` here, so an unexported guard would not compile at all.
+ */
+export type ClosureRoutingCoversEveryContextCollection =
+    NoUnroutedContextCollection<UnroutedContextCollections>;
+
+/**
  * The live collection with this batch's pending drafts folded in — REPLACING
  * by name, never appended beside.
  *

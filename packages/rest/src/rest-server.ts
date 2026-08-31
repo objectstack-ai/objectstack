@@ -824,6 +824,68 @@ export interface MountedRoute extends RouteEntry {
     readonly source: MountedRouteSource;
 }
 
+/**
+ * Reach a HOST-WIRED provider seam so that a SYNCHRONOUS throw and a REJECTED
+ * promise reach the SAME answer.
+ *
+ * ## Why this exists
+ *
+ * `provider(environmentId).catch(() => undefined)` attaches its handler to the
+ * promise the call RETURNS, so the handler can only ever see a *rejection*. A
+ * provider that throws BEFORE returning a promise — an ordinary non-`async`
+ * function, which the seam's own type (`(environmentId?: string) =>
+ * Promise<T>`) does not and cannot prevent a host from wiring — throws while
+ * the expression is still being evaluated, so there is no promise to attach to
+ * and the `.catch` is never reached. The throw escapes to
+ * {@link RestServer.computeExecCtx}'s outer `catch`, which discards the ENTIRE
+ * execution context, identity included.
+ *
+ * Measured at one and the same seam (`settingsServiceProvider`), on a real
+ * `RestServer` with a real `registerPackageRoutes`, both callers holding a
+ * valid session and identical grants — the fault differing ONLY in how the
+ * provider fails:
+ *
+ * | `settingsServiceProvider` | `GET /api/v1/packages` (before) |
+ * |:--|:--|
+ * | `async () =>` throws (a rejecting promise) | **200** — caller keeps `manage_metadata` + `studio.access` |
+ * | `() =>` throws (synchronous)               | **401 UNAUTHENTICATED** |
+ *
+ * ⇒ the wire answer was decided by whether the host happened to declare its
+ * provider `async`. That is the defect: not which of the two answers is right,
+ * but that one fault had two.
+ *
+ * ## What this normalisation does and does NOT decide
+ *
+ * It makes the SYNCHRONOUS path agree with the path the `.catch` already
+ * defines — absorb, resolve `undefined`, let the caller degrade. It does NOT
+ * touch `computeExecCtx`'s outer `catch`, and it does not re-decide whether a
+ * post-identity fault SHOULD discard identity; that is a behaviour change on a
+ * public door and is deliberately left unruled here.
+ *
+ * ⚠️ Absorbing here cannot weaken the #13279 loud path: an
+ * `AuthzStoreUnavailableError` has exactly one construction site
+ * (`tryFind`, in `@objectstack/core`'s `resolve-authz-context.ts`), which is
+ * reached from `resolveAuthzContext` — never from a provider seam — so no
+ * branded outage travels through this helper in either direction.
+ *
+ * ⚠️ `call` is invoked SYNCHRONOUSLY (an async function body runs to its first
+ * `await` synchronously), so this changes when a provider *fails*, never when
+ * it is *called* — deliberately not `Promise.resolve().then(call)`, which
+ * would defer every provider by a microtask for no gain.
+ *
+ * ⛔ Not for the seams that carry NO `.catch` at all — `kernelManager
+ * .getOrCreate()` and `authService.getApi()` lose the context in BOTH
+ * directions, so they are already symmetric and giving them a swallow would be
+ * a new policy rather than a normalisation.
+ */
+async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
+    try {
+        return await call();
+    } catch {
+        return undefined;
+    }
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
@@ -1978,7 +2040,7 @@ export class RestServer {
             let authEnvironmentId: string | undefined;
             if (environmentId && environmentId !== 'platform' && this.kernelManager) {
                 kernel = await this.kernelManager.getOrCreate(environmentId);
-                authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                authService = await seamOrUndefined(() => kernel.getServiceAsync('auth'));
                 if (authService) authEnvironmentId = environmentId;
             }
             if (!authService && this.defaultEnvironmentIdProvider && this.kernelManager) {
@@ -1986,7 +2048,7 @@ export class RestServer {
                     const def = this.defaultEnvironmentIdProvider();
                     if (def) {
                         kernel = await this.kernelManager.getOrCreate(def);
-                        authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                        authService = await seamOrUndefined(() => kernel.getServiceAsync('auth'));
                         // ⚠️ The CROSS-ENVIRONMENT branch. The request resolved to
                         // `environmentId`, but the credential is being checked
                         // against `def`'s auth service — so a session minted in the
@@ -2001,7 +2063,7 @@ export class RestServer {
             // the plugin wired an `authServiceProvider` that hits the
             // local kernel directly.
             if (!authService && this.authServiceProvider) {
-                authService = await this.authServiceProvider(environmentId).catch(() => undefined);
+                authService = await seamOrUndefined(() => this.authServiceProvider!(environmentId));
                 // The provider is asked FOR this environment and answers for it
                 // (`rest-api-plugin` wires it to the lone local kernel), so the
                 // credential is anchored where the request resolved.
@@ -2036,8 +2098,8 @@ export class RestServer {
 
             // Resolve the data engine for this scope (shared by the resolver below).
             const ql: any = kernel
-                ? await kernel.getServiceAsync('objectql').catch(() => undefined)
-                : (this.objectQLProvider ? await this.objectQLProvider(environmentId).catch(() => undefined) : undefined);
+                ? await seamOrUndefined(() => kernel.getServiceAsync('objectql'))
+                : (this.objectQLProvider ? await seamOrUndefined(() => this.objectQLProvider!(environmentId)) : undefined);
 
             // Delegate ALL identity + role/permission/RLS aggregation to the SINGLE
             // shared resolver (`resolveAuthzContext`, @objectstack/core) — the same one
@@ -2067,7 +2129,7 @@ export class RestServer {
             if (!authz.userId) return undefined;
 
             const settings = this.settingsServiceProvider
-                ? await this.settingsServiceProvider(environmentId).catch(() => undefined)
+                ? await seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
                 : undefined;
             const localization = await resolveLocalizationContext({
                 ql,
@@ -6172,6 +6234,45 @@ export class RestServer {
                     const limit = req.query?.limit !== undefined
                         ? Number(req.query.limit)
                         : undefined;
+                    // [#13406] STATE THE ORG PARTITION. `sys_metadata_history`
+                    // is a per-org log — `SysMetadataRepository.history()`
+                    // filters `organization_id = this.organizationId` by strict
+                    // equality (no `$or`), and `event_seq` is documented as a
+                    // "Per-organization monotonic event log cursor". So a door
+                    // that names no organization does not read "everything": it
+                    // reads the ENV partition (`organizationId ?? null` in
+                    // `historyMetaItem`), and an item whose overlay was authored
+                    // org-scoped answered `{ events: [] }` while its log was
+                    // full. The write door that produced those rows has stated
+                    // the org since #8805; only the read door had not.
+                    //
+                    // ⭐ `organizationIdForMetaRead`, NOT the audit twin's raw
+                    // `ctx?.tenantId ?? null`, and the difference is measured
+                    // rather than stylistic. `auditMetaItem` reads with
+                    // `$or: [{organization_id: org}, {organization_id: null}]`,
+                    // so naming an org there can only ADD rows. This door's
+                    // repository does strict equality, so a raw tenant id would
+                    // ask the org partition for the history of a type whose
+                    // rows land ENV-WIDE — every `allowOrgOverride: false` type
+                    // that is still runtime-writable (`object`, `hook`, `page`,
+                    // `app`, `dataset`), because `organizationIdForMetaWrite`
+                    // deliberately writes those env-wide (#6190). That would
+                    // turn a working read into `{ events: [] }` for them: the
+                    // card's own defect, newly minted one type family over.
+                    // Gating the read on the same registry predicate the WRITE
+                    // uses is what makes the two sides incapable of drifting —
+                    // the reasoning `organizationIdForMetaRead` was written for.
+                    //
+                    // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
+                    // memoised per request (WeakMap keyed by `req`), the same
+                    // result the audit twin and 40+ handlers here already share.
+                    const historyCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    const historyOrganizationId = organizationIdForMetaRead(
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), historyCtx?.tenantId,
+                    );
                     // Typed through `TransportScopedMetaRequest` like the
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
                     // like the audit door below: this door still spreads the
@@ -6182,10 +6283,39 @@ export class RestServer {
                     // member on. Every OTHER key is compiled against the spec
                     // contract — an undeclared member here is now TS2353
                     // instead of a payload member no contract has ever seen.
+                    //
+                    // ⛔ [#13406] `organizationId` is SPREAD, never written as
+                    // `organizationId: x ?? null`. `HistoryMetaItemRequestSchema`
+                    // declares it `z.string().optional()` — optional plain
+                    // string, NOT nullable, mirroring the implementation's
+                    // `organizationId?: string` — and the spec's own describe
+                    // text names the asymmetry against the audit twin, which
+                    // declares `string | null`. Copying the audit door's
+                    // expression here is a **TS2322** compile error, measured:
+                    // `error TS2322: Type 'string | null' is not assignable to
+                    // type 'string | undefined'`. It is also a no-op at runtime
+                    // (`null ?? null` is `null`).
+                    //
+                    // ⚠️ TS2322, NOT the TS2353 the paragraph directly above
+                    // names, and the difference is the whole point: TS2353 is
+                    // the UNDECLARED-member code, and `organizationId` IS
+                    // declared — so this is an assignability failure, not an
+                    // unknown-property one. This comment said TS2353 when it
+                    // landed, copied from its neighbour nine lines up, which is
+                    // correct in ITS context and wrong here. Comment drift by
+                    // adjacency; named so the next reader standing in the same
+                    // spot does not repeat it.
+                    //
+                    // ⚠️ And the guard is WEAKER one door over, not stronger:
+                    // the `/diff` twin reaches `diffMetaItem` through
+                    // `(p as any)`, so `?? null` there reddens with NOTHING and
+                    // is a silent runtime no-op. Do not generalise "the
+                    // compiler catches this" from here to that door.
                     const historyRequest: TransportScopedMetaRequest<HistoryMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
+                        ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
                         ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
                         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
                     };
@@ -6677,10 +6807,45 @@ export class RestServer {
                     if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
                     const fromVersion = parseV(req.query?.from ?? req.query?.fromVersion);
                     const toVersion = parseV(req.query?.to ?? req.query?.toVersion);
+                    // [#13406] STATE THE ORG PARTITION — the history twin's
+                    // omission, on the door that reads the SAME table. See the
+                    // history door above for why the predicate is
+                    // `organizationIdForMetaRead` and not the audit twin's raw
+                    // `ctx?.tenantId ?? null`; both arguments carry over
+                    // unchanged, because `diffMetaItem` reads
+                    // `sys_metadata_history` with the identical strict-equality
+                    // `where` (`organization_id: orgId`, no `$or`) and derives
+                    // `orgId` from the identical `request.organizationId ?? null`.
+                    //
+                    // Version identity is the second reason the partition is
+                    // strict rather than unioned here, and it is sharper on this
+                    // door than on `/history`: `version` is a PER-(org,type,name)
+                    // lineage counter, so an org revision 1 and an env revision 1
+                    // both exist. `?from=1&to=2` unioned across partitions would
+                    // have two candidate bodies per bound and would answer a diff
+                    // between revisions of two different lineages — a well-formed
+                    // 200 that is simply not the comparison anyone asked for.
+                    //
+                    // ⚠️ This door reaches `diffMetaItem` through `(p as any)`,
+                    // so — unlike the history twin — the compiler checks NOTHING
+                    // about this literal; measured, not assumed. The omit-spread
+                    // is therefore load-bearing by RUNTIME contract alone: the
+                    // implementation declares `organizationId?: string` and does
+                    // `request.organizationId ?? null`, so an `?? null` copied
+                    // from the audit door would type-check here and still be a
+                    // silent no-op — the exact fix-shaped-non-fix this card is.
+                    const diffCtx = await this.resolveExecCtx(environmentId, req)
+                        .catch(rethrowAuthzStoreUnavailable);
+                    const diffOrganizationId = organizationIdForMetaRead(
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), diffCtx?.tenantId,
+                    );
                     const result = await (p as any).diffMetaItem({
                         type: req.params.type,
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
+                        ...(diffOrganizationId ? { organizationId: diffOrganizationId } : {}),
                         ...(fromVersion !== undefined ? { fromVersion } : {}),
                         ...(toVersion !== undefined ? { toVersion } : {}),
                     });

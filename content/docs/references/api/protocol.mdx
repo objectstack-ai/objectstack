@@ -581,7 +581,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **id** | `string` | ✅ | Record ID to delete |
-| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. |
+| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted. |
 
 
 ---
@@ -1674,8 +1674,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1759,8 +1759,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2712,7 +2712,7 @@ Uninstall package response
 | **object** | `string` | ✅ | The object name. |
 | **id** | `string` | ✅ | The ID of the record to update. |
 | **data** | `Record<string, any>` | ✅ | The fields to update (partial update). |
-| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. |
+| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted. |
 
 
 ---

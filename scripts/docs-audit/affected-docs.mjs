@@ -1238,6 +1238,64 @@ function noteFrom(map, token, clause) {
   set.add(clause);
 }
 
+/**
+ * Is this quoted span identifier-shaped enough to mint a `literal` anchor?
+ *
+ * FOUR SHAPES. Three of them say "an identifier starts lowercase" — snake_case,
+ * camelCase, a dotted client path. A quoted English word (`'ignore'`, `'utf8'`) is not a
+ * surface anyone documents by that spelling, and those three keep it out.
+ *
+ * THE FOURTH IS SCREAMING_SNAKE, AND IT IS HERE TO END A DISAGREEMENT (#13471). While the
+ * three lowercase-initial shapes were the whole rule, this predicate and `isCodeShaped`
+ * contradicted each other on every constant name: `isCodeShaped('OS_MODE')` is `true` —
+ * pinned as `SCREAMING_SNAKE` in the shape cases below since the guard was written — while
+ * this test declined to mint an anchor from it at all. One predicate in the pair called the
+ * token an identifier, the other silently called it prose, and nothing reported the split.
+ * A page that names env vars and essentially nothing else (`deployment/environment-variables.mdx`)
+ * has no other `literal` route onto an advisory.
+ *
+ * The fourth shape is earned by the same argument that earns `PHRASE_ANCHOR_KINDS` its
+ * exemption — DISTINCTIVE BY CONSTRUCTION, not by inspection. `OS_TENANCY_POSTURE` cannot
+ * be the English word this guard exists to drop: prose does not shout in underscores. Note
+ * the shape is MULTI-SEGMENT by construction (the `_` is required), so a bare all-caps word
+ * is not admitted by it — see the deliberate-disagreement pins in `--self-test`.
+ *
+ * MEASURED BOTH WAYS before widening, over the 60 most recent `packages/**` commits, using
+ * the per-row provenance #12824 published so each added row could be attributed to the
+ * declaration that minted it rather than counted in a lump:
+ *   - rows 374 -> 383 (+9, +2.4%), and ZERO rows lost;
+ *   - `overbroadAnchors` 8 -> 8: the corpus-share guard caught no new hub term, so the
+ *     widening minted no term broad enough to need catching;
+ *   - only 2 of the 60 runs moved at all. Every new anchor named its declaration:
+ *     `FlowRefusalCode`, `AUTHZ_STORE_UNAVAILABLE_CODE`, `codes`.
+ *   - GROUND TRUTH on `b6d3d76b5`, whose own commit edited three docs pages: the advisory
+ *     went from 0 of those 3 (it listed two `releases/**` pages and nothing else) to 2 of 3
+ *     — `api/client-sdk.mdx` and `automation/flows.mdx`, both minted from `FlowRefusalCode`.
+ *   - the four vendor codes in that window (`ER_DUP_KEYNAME` and friends, from a MySQL
+ *     driver table) minted anchors and matched NO page, so they cost nothing: an anchor
+ *     no doc names is not a row.
+ *
+ * BLAST RADIUS, KEPT HONEST. `4d98d9eab` is the commit this was found on, and the widening
+ * adds ZERO rows there: `environment-variables.mdx` was already listed through the `route`
+ * anchor `/api/v1/runtime/config`, so all the fourth shape adds is a second `via` clause
+ * saying `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED` also pointed at it. The recall win is
+ * real and it is `b6d3d76b5`-shaped, not `4d98d9eab`-shaped.
+ *
+ * DO NOT COLLAPSE THIS INTO `isCodeShaped`. It looks like the same question and it is not,
+ * because the two run over DIFFERENT POPULATIONS: `isCodeShaped` judges a token already
+ * known to be a declaration NAME, while this one judges an arbitrary quoted span, which may
+ * be prose someone quoted. Measured on the same 60 commits, delegating this test to
+ * `isCodeShaped` gives rows 374 -> 408 (+9.1%, versus +2.4%) and admits `'unchanged.'`,
+ * `'means.'` and `'version.'` — sentence fragments that reach `isCodeShaped`'s `.` arm.
+ * Those three are pinned as non-anchors in `--self-test` so the collapse goes red.
+ */
+function isLiteralAnchorShape(lit) {
+  return /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(lit)          // snake_case
+    || /^[a-z]+(?:[A-Z][A-Za-z0-9]*)+$/.test(lit)             // camelCase
+    || /^[a-z][a-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/.test(lit)   // a dotted client path
+    || /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(lit);           // SCREAMING_SNAKE (#13471)
+}
+
 /** Route tails and identifier-shaped string literals appearing on the changed lines. */
 function literalAnchorsFromLines(lines, changed) {
   const routes = new Set();
@@ -1266,9 +1324,7 @@ function literalAnchorsFromLines(lines, changed) {
     for (const m of line.matchAll(/['"]([A-Za-z][\w.$-]{3,63})['"]/g)) {
       const lit = m[1];
       if (GENERIC_ANCHOR_NAMES.has(lit.toLowerCase())) continue;
-      // Identifier-shaped only: snake_case, camelCase or dotted. A quoted English word
-      // ('ignore', 'utf8') is not a surface anyone documents by that spelling.
-      if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(lit) && !/^[a-z]+(?:[A-Z][A-Za-z0-9]*)+$/.test(lit) && !/^[a-z][a-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+$/.test(lit)) continue;
+      if (!isLiteralAnchorShape(lit)) continue;
       literals.add(lit);
       const where = enclosingName();
       noteFrom(from, lit, where ? `a string literal in ${where}` : 'a string literal on a changed line');
@@ -4348,14 +4404,49 @@ function selfTest() {
   check('PHRASE_ANCHOR_KINDS', 'a rule expression is distinctive by construction', 'rule', true, PHRASE_ANCHOR_KINDS.has('rule'));
 
   // String literals on a changed line: an identifier-shaped one is surface, English is not.
-  const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');"];
-  const lits = literalAnchorsFromLines(litLines, [1, 2, 3]).literals;
+  const litLines = ["  if (rule === 'controlled_by_parent') return maskFieldValue(v);", "  fs.readFileSync(p, 'utf8');", "  logger.warn('ignore');",
+    "  const ENV = 'OS_TENANCY_POSTURE';", "  if (c === 'FLOW_NO_START_NODE') return refuse(c);",
+    "  // the shape is 'unchanged.' in that arm", "  throw new Error('EEXIT');"];
+  const lits = literalAnchorsFromLines(litLines, [1, 2, 3, 4, 5, 6, 7]).literals;
   const literalCases = [
     ['controlled_by_parent', true, 'a snake_case literal IS an authoring surface'],
     ['utf8', false, 'an encoding name is not surface'],
     ['ignore', false, 'an English word is not surface'],
+    // #13471. The env-var name is the case the whole card was filed on: a page that names
+    // env vars and essentially nothing else has no other `literal` route onto an advisory.
+    ['OS_TENANCY_POSTURE', true, 'a SCREAMING_SNAKE env-var name IS an authoring surface'],
+    ['FLOW_NO_START_NODE', true, 'and so is a refusal code — the measured recall win'],
+    // ⛔ The guard rail on the widening, both halves measured on the same 60 commits.
+    ['unchanged.', false, 'a quoted sentence fragment is still not surface'],
+    ['EEXIT', false, 'a bare all-caps word is not SCREAMING_SNAKE — the shape needs a segment break'],
   ];
   for (const [lit, want, label] of literalCases) check('literalAnchorsFromLines', label, lit, want, lits.has(lit));
+
+  // ── THE PAIR MUST AGREE ON SCREAMING_SNAKE (#13471) ──
+  // The defect this closed was not "recall too low", it was TWO PREDICATES CONTRADICTING
+  // each other with nothing reporting the split: `isCodeShaped` called `OS_MODE` an
+  // identifier (pinned in `shapeCases` above) while `literalAnchorsFromLines` declined to
+  // mint any anchor from it. Pin the agreement itself, so neither side can drift back out
+  // of step silently — a check on one predicate alone could not have caught this.
+  for (const t of ['OS_CLOUD_URL', 'OS_MODE', 'OS_TENANCY_POSTURE', 'ERROR_CODE_LEDGER', 'FLOW_INPUT_SCHEMA_INVALID']) {
+    check('isCodeShaped/isLiteralAnchorShape', 'the pair agrees on a SCREAMING_SNAKE token', t,
+      true, isCodeShaped(t) === isLiteralAnchorShape(t) && isLiteralAnchorShape(t));
+  }
+
+  // ⛔ AND THE DISAGREEMENTS THAT REMAIN ARE DELIBERATE, so the next reader does not
+  // "finish the job" by collapsing this test into `isCodeShaped`. The two run over
+  // DIFFERENT POPULATIONS — a declaration NAME versus an arbitrary quoted span that may be
+  // prose — and delegating measured rows 374 -> 408 (+9.1%, versus +2.4% for the shape
+  // above) on the same 60 commits. These three fragments are what it admits.
+  const deliberateSplits = [
+    ['unchanged.', 'a sentence fragment reaches isCodeShaped through its `.` arm'],
+    ['means.', 'ditto — measured, not hypothetical'],
+    ['version.', 'ditto'],
+    ['IHttpRequest', 'a PascalCase name is already reachable through the `symbol` kind'],
+  ];
+  for (const [t, label] of deliberateSplits) {
+    check('isCodeShaped/isLiteralAnchorShape', label, t, true, isCodeShaped(t) && !isLiteralAnchorShape(t));
+  }
 
   // ── `computedOn` (#9519): the record that names WHICH TREE the answer is about ──
   // Pinned on the pure shaper, so these stay hermetic; the probing wrapper reads real

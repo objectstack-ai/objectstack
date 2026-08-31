@@ -545,7 +545,13 @@ declareDialectCell(MYSQL_CELL, 'orphan shadow column cleanup (#13056)', (cell) =
       const V = 'k'.repeat(900);
       await knex(TABLE).insert({ id: 'a', kept: V });
       await expect(knex(TABLE).insert({ id: 'b', kept: V })).rejects.toThrow(/duplicate/i);
-    });
+      // #13688: 3 full new SqlDriver() -> initObjects() -> disconnect() cycles
+      // against live MySQL, plus 4 information_schema reads and 2 inserts — the
+      // inherited vitest default (5000ms) is not a chosen budget for that, and
+      // reddens unrelated PRs when the runner is merely a bit slow. Sized like
+      // this file's siblings (60_000 is 3 of the 4 sibling budgets); not an
+      // assertion that this test is normally anywhere near that slow.
+    }, 60_000);
 
     /**
      * The differ must go quiet afterwards for the right reason: with the column
@@ -570,6 +576,9 @@ declareDialectCell(MYSQL_CELL, 'orphan shadow column cleanup (#13056)', (cell) =
       expect(again.filter((d) => d.kind === 'unmapped_column')).toEqual([]);
       const after = await catalog(TABLE);
       expect(after.columns).not.toContain(hashShadowColumnFor(`uniq_${TABLE}_retired`));
-    });
+      // #13688: 2 full new SqlDriver() -> initObjects() -> disconnect() cycles
+      // against live MySQL, plus detect/apply/detect and a catalog read — same
+      // inherited-default defect as the sibling test above; budgeted the same.
+    }, 60_000);
   });
 });

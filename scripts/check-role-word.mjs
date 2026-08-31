@@ -278,27 +278,28 @@ function vendorWireClaim(line, ext) {
 const FENCE_OPEN = /^ {0,3}(`{3,})([^`]*)$/;
 
 /**
- * Every vendor-wire exemption in one file, plus the two ways a marker can be
- * present and mean nothing.
+ * Every CommonMark fence in a file: the spans, and the line mask they cover.
+ *
+ * Extracted from `analyzeVendorWire` so the generated-region exemption below
+ * reads fences from the SAME pass rather than re-deriving them. Two markers
+ * disagreeing about where a fence ends would be a silent divergence: each is
+ * documentable inside these very roots, and "shown inside a fence" is the test
+ * that keeps that documentation from being read as a claim. One scan, one
+ * answer.
  *
  * The backtick RUN LENGTH is tracked, not just "a fence": today's corpus holds
  * four ```` fences that wrap ``` examples, and a closer that ignored length
- * would end such a block on its own contents — scoping the exemption to a
- * fragment of what the author claimed, or past it.
+ * would end such a block on its own contents — scoping an exemption to a
+ * fragment of what was claimed, or past it.
  *
- * @param {string} text
- * @param {string} ext
- * @returns {{blocks: number, occurrences: number, orphans: number[], unterminated: number[]}}
+ * @param {string[]} lines
+ * @returns {{spans: {open: number, close: number}[], mask: boolean[]}} `close` is
+ *   the closing fence's index, or `lines.length` when the fence is never closed
+ *   (CommonMark: an unclosed fence runs to the end of the document).
  */
-function analyzeVendorWire(text, ext) {
-  const lines = text.split('\n');
-  const inFence = new Array(lines.length).fill(false);
-  const claimed = new Set();
-  const orphans = [];
-  const unterminated = [];
-  let blocks = 0;
-  let occurrences = 0;
-
+function scanFences(lines) {
+  const mask = new Array(lines.length).fill(false);
+  const spans = [];
   for (let i = 0; i < lines.length; i++) {
     const open = FENCE_OPEN.exec(lines[i]);
     if (!open) continue;
@@ -306,7 +307,41 @@ function analyzeVendorWire(text, ext) {
     const closeFence = new RegExp(`^ {0,3}\`{${run},}[ \\t]*$`);
     let end = i + 1;
     while (end < lines.length && !closeFence.test(lines[end])) end++;
-    const vendor = i > 0 && !inFence[i - 1] ? vendorWireClaim(lines[i - 1], ext) : null;
+    spans.push({ open: i, close: end });
+    for (let s = i; s < Math.min(end + 1, lines.length); s++) mask[s] = true;
+    i = end;
+  }
+  return { spans, mask };
+}
+
+/**
+ * Every vendor-wire exemption in one file, plus the two ways a marker can be
+ * present and mean nothing.
+ *
+ * @param {string} text
+ * @param {string} ext
+ * @param {boolean[]} [generated] lines already exempt as GENERATED content. A
+ *   vendor-wire claim there is not an author's claim — nothing inside a
+ *   generated region is author-written — and honouring it would also make the
+ *   two exemptions overlap, double-subtracting the same occurrence and driving
+ *   the counted total NEGATIVE. Disjoint by construction, so the two volumes the
+ *   green line publishes add up.
+ * @returns {{blocks: number, occurrences: number, orphans: number[], unterminated: number[]}}
+ */
+function analyzeVendorWire(text, ext, generated) {
+  const lines = text.split('\n');
+  const { spans, mask } = scanFences(lines);
+  const exempt = generated ?? new Array(lines.length).fill(false);
+  const claimed = new Set();
+  const orphans = [];
+  const unterminated = [];
+  let blocks = 0;
+  let occurrences = 0;
+
+  for (const { open: i, close: end } of spans) {
+    if (exempt[i]) continue;
+    const vendor = i > 0 && !mask[i - 1] && !exempt[i - 1]
+      ? vendorWireClaim(lines[i - 1], ext) : null;
     if (vendor) {
       if (end >= lines.length) {
         // An unclosed fence runs to the end of the document (CommonMark), so
@@ -320,15 +355,13 @@ function analyzeVendorWire(text, ext) {
         for (let b = i + 1; b < end; b++) occurrences += countMatches(lines[b]);
       }
     }
-    for (let s = i; s < Math.min(end + 1, lines.length); s++) inFence[s] = true;
-    i = end;
   }
 
   for (let i = 0; i < lines.length; i++) {
     // Top level only. A marker shown INSIDE a fence is example text, and this
     // gate's own convention has to be documentable — in these very roots —
     // without the documentation tripping it.
-    if (inFence[i] || claimed.has(i)) continue;
+    if (mask[i] || claimed.has(i) || exempt[i]) continue;
     if (looksLikeVendorWireClaim(lines[i])) orphans.push(i + 1);
   }
 
@@ -366,6 +399,258 @@ function unterminatedFenceMessage(file, line) {
     `${file}:${line}: a ${VENDOR_WIRE_TOKEN} marker claims a code fence that is never closed. `
     + 'An unclosed fence runs to the end of the document, so honouring it would exempt the whole '
     + 'rest of the file from a single marker. Close the fence.'
+  );
+}
+
+// ── The generated-region exemption (#13586) ─────────────────────────────────
+//
+// SKIP_DIRS already states this gate's position on machine-written content: the
+// fix site for a generated occurrence is its GENERATOR, never the page. But it
+// states it as a directory NAME (`references`), and a name can only exempt a
+// whole file. The repo's actual shape for derived content is finer than that —
+// a machine-written REGION inside a hand-written page, delimited by a marker
+// pair that a generator writes and rewrites:
+//
+//   BEGIN GENERATED: <region> (<generator>) -- DO NOT EDIT
+//   …emitted rows…
+//   END GENERATED: <region>
+//
+// A directory-level exclusion cannot express that page. Neither can any of the
+// three remedies this gate offers, once the emitted content is a source PATH:
+// rewording falsifies a path the generator will re-emit on its next run; the
+// vendor-wire fence admits declared UPSTREAMS and a repo's own generator is not
+// one; and the baseline is maintainer-only and says so.
+//
+// Not a reading of this gate — a reading of the repo. `scripts/tenant-audit-census.mjs`
+// wrote its 140-odd rows to `docs/audits/` rather than onto its own page, and
+// its docblock gives this exact reason: a prose ratchet has "no way to tell an
+// emitted source path from an author's sentence", `check-role-word` "already
+// excludes content/docs/references/ for exactly that reason", and "a hybrid page
+// is a shape its directory-level exclusion cannot express". That relocation is
+// why this gate is green today. Green is the workaround, not the gap closing.
+//
+// ## What this shares with the vendor-wire marker, and what it must not
+//
+// SHARED, because the reasons are the same one:
+//   • MARKER_SYNTAX — the comment spelling is keyed by EXTENSION. Measured, not
+//     assumed: the live corpus carries both, and the generator itself branches
+//     on file type for the same reason this gate does (MDX cannot parse HTML
+//     comments; the MDX form renders as literal text in a `.md` file).
+//   • scanFences — a marker shown INSIDE a fence is example text, so this
+//     convention stays documentable in the very roots it governs.
+//   • The generous-detector / strict-claim split: a line that ATTEMPTS the
+//     marker and is not recognised becomes a LOUD orphan. A marker that
+//     silently checks nothing while reading as intentional is the worse
+//     failure, and it is the failure this direction is chosen against.
+//   • The volume is PUBLISHED on every run (#9910). A suppressed occurrence is
+//     invisible in every ledger number, so "how far has this widened?" is
+//     printed rather than rediscovered.
+//
+// DELIBERATELY NOT SHARED, and each divergence is a decision:
+//   • The token is not this gate's to rename. `VENDOR_WIRE_TOKEN` is spelled
+//     once here because this gate INVENTED it. `BEGIN GENERATED:` is a repo-wide
+//     convention owned by the generators that emit it and by the gates that
+//     regenerate those regions; this gate is a consumer of it. Spelled once all
+//     the same, so a diagnostic cannot point at a marker nothing recognises —
+//     but if the convention is ever renamed, the rename happens at the
+//     generators and arrives here, not the other way round.
+//   • No closed allowlist of region ids. VENDOR_BOUNDARIES is closed because
+//     "which third party's vocabulary do we carry literally" is a POLICY
+//     decision with an ADR carve-out behind it. "Which generators exist" is not;
+//     generators are added routinely, and a list here would put a gate edit in
+//     front of every new census page — reinstating, one layer down, exactly the
+//     maintainer bottleneck this card exists to remove.
+//   • It is NOT offered as a remedy. `newUseMessage` and `grewMessage` name the
+//     vendor-wire marker because an author may legitimately reach for it. This
+//     marker is not a remedy an author may take: it is a FACT about who wrote
+//     the text, asserted by the generator that writes both the region and its
+//     markers. Naming it in a refusal would read as an invitation to wrap prose
+//     in a marker pair and launder it. If a page's region is genuinely
+//     generated, its occurrences were already skipped — so an author reading a
+//     refusal is by construction looking at their own prose.
+//
+// Requiring the marker to name a generator path that EXISTS was considered as a
+// floor and rejected: any existing path would satisfy it, so it would check
+// provenance in appearance only while coupling a vocabulary ratchet to file
+// layout — a phantom check, which this file refuses elsewhere on the same
+// grounds. What bounds this exemption is the matched PAIR, every malformed one
+// refused loudly, and the volume printed on every run.
+
+/**
+ * The convention's two tokens, spelled once each.
+ *
+ * Like `VENDOR_WIRE_TOKEN`, neither contains any form of the reserved word — a
+ * marker that matched WORD would contribute occurrences of its own and defeat
+ * itself. Unlike it, that property is not this gate's to preserve by renaming:
+ * the tokens belong to the generators. The self-test pins the property here so
+ * a convention rename that broke it is met with a named failure rather than a
+ * quietly self-paying exemption.
+ */
+const GENERATED_BEGIN_TOKEN = 'BEGIN GENERATED:';
+const GENERATED_END_TOKEN = 'END GENERATED:';
+
+/**
+ * Does this line ATTEMPT a generated-region marker? Deliberately generous — any
+ * comment in either format carrying either token — for the reason
+ * `looksLikeVendorWireClaim` is: generosity is the fail-safe direction. A line
+ * this recognises but `generatedMarker()` refuses becomes a LOUD orphan; a line
+ * neither recognises is a marker that silently delimits nothing while reading as
+ * intentional.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function looksLikeGeneratedMarker(line) {
+  const t = line.trim();
+  if (!t.includes(GENERATED_BEGIN_TOKEN) && !t.includes(GENERATED_END_TOKEN)) return false;
+  return (t.startsWith('<!--') && t.endsWith('-->'))
+    || (t.startsWith('{/*') && t.endsWith('*/}'));
+}
+
+/**
+ * The region this line opens or closes, or null if it delimits nothing.
+ *
+ * The region name is the FIRST word after the token, and that is measured
+ * rather than tidy: the live pair is asymmetric. A BEGIN carries
+ * `<region> (<generator path>) -- DO NOT EDIT` while its END carries the bare
+ * `<region>`, so matching on the whole payload would pair nothing in the corpus
+ * this exists to serve. The first word is the part both sides actually agree on.
+ *
+ * @param {string} line
+ * @param {string} ext
+ * @returns {{kind: 'begin' | 'end', region: string} | null}
+ */
+function generatedMarker(line, ext) {
+  const syntax = MARKER_SYNTAX[ext];
+  if (!syntax) return null;
+  const t = line.trim();
+  if (!t.startsWith(syntax.open) || !t.endsWith(syntax.close)) return null;
+  const inner = t.slice(syntax.open.length, t.length - syntax.close.length).trim();
+  for (const [kind, token] of [['begin', GENERATED_BEGIN_TOKEN], ['end', GENERATED_END_TOKEN]]) {
+    if (!inner.startsWith(token)) continue;
+    const region = inner.slice(token.length).trim().split(/\s+/)[0] ?? '';
+    return region ? { kind, region } : null;
+  }
+  return null;
+}
+
+/**
+ * Every generated region in one file, and every way the pair can be broken.
+ *
+ * THE DIRECTION OF ERROR, stated: this exemption fails CLOSED. A marker that
+ * does not resolve into a matched pair exempts NOTHING and is reported as its
+ * own class of problem, which stops the run before any verdict and before
+ * `--update` writes. The alternative — treat an unpaired BEGIN as opening a
+ * region that runs to the end of the file — would hand one line the whole
+ * remainder of a page, turning a ratchet into a suggestion. That is the same
+ * refusal the vendor-wire unclosed-fence leg makes, for the same reason.
+ *
+ * The span COVERS ITS OWN MARKER LINES, and that is deliberate. Both markers are
+ * emitted by the generator (`out.push(BEGIN_MARKER, …)` … `out.push(END_MARKER)`),
+ * so they are machine-written on exactly the same footing as the rows between
+ * them — and the BEGIN line interpolates a generator PATH, which is precisely
+ * the kind of string that trips this gate. Leaving the marker line counted would
+ * make a region unshippable whenever its generator's own filename carries the
+ * word, and the only fix would be renaming the generator: the single-instance
+ * remedy this exemption exists to replace.
+ *
+ * @param {string} text
+ * @param {string} ext
+ * @returns {{regions: number, occurrences: number, covered: boolean[],
+ *   orphans: number[], unterminated: number[], strayEnds: number[]}}
+ */
+function analyzeGeneratedRegions(text, ext) {
+  const lines = text.split('\n');
+  const { mask } = scanFences(lines);
+  const covered = new Array(lines.length).fill(false);
+  const orphans = [];
+  const unterminated = [];
+  const strayEnds = [];
+  let regions = 0;
+  let occurrences = 0;
+  /** @type {{region: string, line: number} | null} */
+  let open = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    // A marker shown inside a fence is example text — the vendor-wire rule,
+    // reached through the shared scan. An UNCLOSED fence inside a region
+    // therefore swallows the region's own END and the pair is reported broken:
+    // loud, and correct, since that fence is a defect in the generator's output.
+    if (mask[i]) continue;
+    const marker = generatedMarker(lines[i], ext);
+    if (!marker) {
+      if (looksLikeGeneratedMarker(lines[i])) orphans.push(i + 1);
+      continue;
+    }
+    if (marker.kind === 'begin') {
+      // A second BEGIN before the first closed: the first never got its END.
+      if (open) unterminated.push(open.line + 1);
+      open = { region: marker.region, line: i };
+    } else if (open && open.region === marker.region) {
+      for (let b = open.line; b <= i; b++) {
+        covered[b] = true;
+        occurrences += countMatches(lines[b]);
+      }
+      regions += 1;
+      open = null;
+    } else {
+      // An END with no BEGIN open, or one naming a different region. Closing on
+      // a mismatched name is the fail-OPEN direction — it would silently pair
+      // markers their own authors did not pair — so it is refused instead.
+      strayEnds.push(i + 1);
+    }
+  }
+  if (open) unterminated.push(open.line + 1);
+
+  return { regions, occurrences, covered, orphans, unterminated, strayEnds };
+}
+
+/**
+ * A comment attempting the convention that this gate does not recognise. Same
+ * class, and same reasoning, as `orphanMarkerMessage`: inert-but-intentional is
+ * worse than absent.
+ *
+ * @param {string} file
+ * @param {number} line
+ * @param {string} ext
+ * @returns {string}
+ */
+function generatedOrphanMessage(file, line, ext) {
+  const s = MARKER_SYNTAX[ext];
+  return (
+    `${file}:${line}: a generated-region marker that delimits NOTHING. It must use this file `
+    + `type's comment syntax (${s.open} … ${s.close}) and name a region after the token — `
+    + `\`${GENERATED_BEGIN_TOKEN} <region>\` / \`${GENERATED_END_TOKEN} <region>\`. A `
+    + 'placed-but-inert marker reads as intentional while everything it appears to delimit is '
+    + 'still fully counted. Generated regions are written by their generator: fix it there.'
+  );
+}
+
+/**
+ * @param {string} file
+ * @param {number} line
+ * @returns {string}
+ */
+function generatedUnterminatedMessage(file, line) {
+  return (
+    `${file}:${line}: \`${GENERATED_BEGIN_TOKEN}\` opens a region that is never closed by a `
+    + `matching \`${GENERATED_END_TOKEN}\` naming the same region. It exempts NOTHING: honouring `
+    + 'it would run the exemption to the end of the document, handing one line the whole rest of '
+    + 'the page. Close the region in the generator that writes it.'
+  );
+}
+
+/**
+ * @param {string} file
+ * @param {number} line
+ * @returns {string}
+ */
+function generatedStrayEndMessage(file, line) {
+  return (
+    `${file}:${line}: \`${GENERATED_END_TOKEN}\` closes a region that is not open — no `
+    + `\`${GENERATED_BEGIN_TOKEN}\` above it names the same region. Exempting up to it would `
+    + 'take in prose nothing claimed, so it exempts NOTHING. Region names must match on both '
+    + 'sides; fix the generator that writes the pair.'
   );
 }
 
@@ -570,6 +855,31 @@ function exemptClause(exempt) {
 }
 
 /**
+ * The generated-region volume, as its own clause beside `exemptClause` (#13586).
+ *
+ * A SECOND clause rather than one merged total, because the two exemptions
+ * answer different questions and widen for different reasons: one is an author
+ * claiming a third party's wire vocabulary, the other is a generator's output
+ * passing through a page. A single number could move for either reason and a
+ * reader could not tell which — and a merged clause would also break the pins
+ * that already read `exemptClause` in isolation.
+ *
+ * A zero here is as informative as a large number, for the #9910 reason: it says
+ * no page in the corpus carries a generated region at all, which — given that
+ * two live pages and one skills index do — would be an alarm about the parser,
+ * not about the corpus.
+ *
+ * @param {{regions: number, occurrences: number}} generated
+ * @returns {string}
+ */
+function generatedClause(generated) {
+  return (
+    `${generated.regions} generated region(s) suppressed ${generated.occurrences} `
+    + 'occurrence(s)'
+  );
+}
+
+/**
  * The GREEN body, named and pure so the self-test can assert on the sentence an
  * author actually reads — the counts are interpolated, so reading this file's
  * SOURCE is not evidence about the rendered text.
@@ -578,15 +888,19 @@ function exemptClause(exempt) {
  * @param {Record<string, number>} ledger files still carrying the word (== the
  *   baseline on any run that reaches this line)
  * @param {{blocks: number, occurrences: number}} exempt vendor-wire suppressions
+ * @param {{regions: number, occurrences: number}} generated generated-region
+ *   suppressions. REQUIRED, not defaulted: a caller that forgot to pass it would
+ *   print zeros over a live exemption, which is the unobserved widening the
+ *   clause exists to prevent — so the omission is a crash, not a quiet zero.
  * @returns {string}
  */
-function successSummary(scanned, ledger, exempt) {
+function successSummary(scanned, ledger, exempt, generated) {
   const fileCount = Object.keys(ledger).length;
   const occurrences = Object.values(ledger).reduce((n, c) => n + c, 0);
   return (
     'check-role-word: OK, no new occurrences of the reserved word.\n'
     + `  Scanned: ${scanClause(scanned)}.\n`
-    + `  Exempt: ${exemptClause(exempt)}.\n`
+    + `  Exempt: ${exemptClause(exempt)}; ${generatedClause(generated)}.\n`
     + `  Ledger: ${fileCount} baselined file(s) still carrying it `
     + `(${occurrences} occurrence(s)) in ${BASELINE_PATH}.`
   );
@@ -607,12 +921,16 @@ function successSummary(scanned, ledger, exempt) {
  * @param {{root: string, files: number}[]} scanned per-ROOT counts, in ROOTS order
  * @param {Record<string, number>} ledger the freshly written baseline
  * @param {{blocks: number, occurrences: number}} exempt vendor-wire suppressions
+ * @param {{regions: number, occurrences: number}} generated generated-region
+ *   suppressions, required for the reason `successSummary`'s is — and with more
+ *   at stake, since this line describes a ledger that has just been rewritten
+ *   from counts both exemptions already reduced.
  * @returns {string}
  */
-function updateSummary(scanned, ledger, exempt) {
+function updateSummary(scanned, ledger, exempt, generated) {
   return (
     `role-word baseline updated: ${Object.keys(ledger).length} file(s) baselined `
-    + `from ${scanClause(scanned)}, with ${exemptClause(exempt)}.`
+    + `from ${scanClause(scanned)}, with ${exemptClause(exempt)} and ${generatedClause(generated)}.`
   );
 }
 
@@ -773,9 +1091,14 @@ function selfTest() {
   // claims the boundary); `SOME_EXEMPT` is the state a future one reaches.
   const NO_EXEMPT = { blocks: 0, occurrences: 0 };
   const SOME_EXEMPT = { blocks: 2, occurrences: 3 };
+  // The same, one exemption over (#13586): `NO_GEN` is a corpus whose pages
+  // carry no generated region, `SOME_GEN` one where a generator's output passes
+  // through. Closed fixtures, never a reading of the tree.
+  const NO_GEN = { regions: 0, occurrences: 0 };
+  const SOME_GEN = { regions: 3, occurrences: 4 };
 
-  const greenPaid = successSummary(SCANNED, PAID_OFF, NO_EXEMPT);
-  const greenDead = successSummary(DEAD_SCAN, PAID_OFF, NO_EXEMPT);
+  const greenPaid = successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN);
+  const greenDead = successSummary(DEAD_SCAN, PAID_OFF, NO_EXEMPT, NO_GEN);
 
   // (1) THE property this card exists for, pinned as a property and not as
   // text: once the debt is paid — the state this ratchet is BUILT to reach — a
@@ -799,7 +1122,7 @@ function selfTest() {
   // AWAY is refused before this line renders, so what this fixture stands for
   // now is the residual case: a root that exists and contributed nothing.
   const oneRootGone = successSummary(
-    [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 0 }], PAID_OFF, NO_EXEMPT);
+    [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 0 }], PAID_OFF, NO_EXEMPT, NO_GEN);
   expect('#9910 — a root that contributed NOTHING is still named, with its zero (a root can '
     + 'exist and read empty; dropping it from the line hides that behind the other root\'s total)',
     /\bskills 0\b/.test(oneRootGone) && oneRootGone !== greenPaid);
@@ -809,7 +1132,7 @@ function selfTest() {
   // tree it just read.
   expect('#9910 — the --update confirmation states its input volume too, so re-baselining '
     + 'over a dead scan cannot read like a debt fully paid',
-    updateSummary(DEAD_SCAN, PAID_OFF, NO_EXEMPT) !== updateSummary(SCANNED, PAID_OFF, NO_EXEMPT));
+    updateSummary(DEAD_SCAN, PAID_OFF, NO_EXEMPT, NO_GEN) !== updateSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN));
 
   // ── A missing ROOT is REFUSED, per root (#9932) ───────────────────────────
   //
@@ -1114,13 +1437,13 @@ function selfTest() {
   // count alike, so "how far has this widened?" is printed, not rediscovered.
   expect('#10533 — the GREEN body states the exemption volume, and renders DIFFERENTLY when the '
     + 'exemption moves (a corpus that quietly grew claims cannot print the same green)',
-    successSummary(SCANNED, PAID_OFF, NO_EXEMPT)
-      !== successSummary(SCANNED, PAID_OFF, SOME_EXEMPT));
+    successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN)
+      !== successSummary(SCANNED, PAID_OFF, SOME_EXEMPT, NO_GEN));
   expect('#10533 — the --update confirmation states it too (it re-baselines from counts the '
     + 'exemption already reduced)',
-    updateSummary(SCANNED, PAID_OFF, NO_EXEMPT) !== updateSummary(SCANNED, PAID_OFF, SOME_EXEMPT));
+    updateSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN) !== updateSummary(SCANNED, PAID_OFF, SOME_EXEMPT, NO_GEN));
   expect('#10533 — a corpus claiming NOTHING says so outright, rather than omitting the clause',
-    successSummary(SCANNED, PAID_OFF, NO_EXEMPT).includes(exemptClause(NO_EXEMPT)));
+    successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN).includes(exemptClause(NO_EXEMPT)));
 
   // ── The exemption at the PROGRAM level ─────────────────────────────────────
   //
@@ -1171,8 +1494,13 @@ function selfTest() {
     // not left to surface as a bare count the author cannot connect to it.
     const orphanTree = buildTree('orphan', { [MDX]: FENCED.replace(`${VW_MDX}\n`, `${VW_MDX}\n\n`) });
     const orphan = runIn(orphanTree);
+    // The refusal HEADER is generic since #13586 — two marker conventions now
+    // report through this one list, and a header naming vendor wire over a
+    // generated-region defect would misdescribe it. What proves this refusal is
+    // still about THIS marker is the message naming its own token, which is
+    // where the claim belonged all along.
     expect('#10533 — a marker that opts nothing in fails as a MARKER problem, naming the token',
-      orphan.status === 1 && orphan.out.includes('vendor-wire marker problem')
+      orphan.status === 1 && orphan.out.includes('marker problem')
         && orphan.out.includes(VENDOR_WIRE_TOKEN));
 
     // And that refusal precedes the write, pinned as byte-identity rather than
@@ -1189,6 +1517,304 @@ function selfTest() {
       orphanUpdate.status === 1 && readFileSync(vwLedgerPath, 'utf8') === vwLedgerBefore);
   } finally {
     rmSync(vwSandbox, { recursive: true, force: true });
+  }
+
+  // ── The generated-region exemption (#13586) ────────────────────────────────
+  //
+  // The card's shape: a hand-written page carrying a machine-generated region
+  // that emits a SOURCE PATH. `member-role-canonical.ts` counts, because the
+  // hyphen is a word boundary — and none of this gate's three remedies fit an
+  // emitted path (rewording falsifies what the generator re-emits, the
+  // vendor-wire fence admits declared upstreams, and the baseline is the
+  // maintainer's).
+  //
+  // Fixtures differ from each other in exactly ONE line wherever possible, so a
+  // failure names the property and not the fixture. The marker payloads carry no
+  // path SEPARATOR on purpose: a path-shaped literal here would feed the
+  // dispatch-gates hint extractor described at the top of this file a population
+  // this gate does not read.
+  const GEN_BEGIN = '{/* BEGIN GENERATED: census (gen-census.mjs) — DO NOT EDIT */}';
+  const GEN_END = '{/* END GENERATED: census */}';
+  const GEN_BEGIN_MD = '<!-- BEGIN GENERATED: census (gen-census.mjs) — DO NOT EDIT -->';
+  const GEN_END_MD = '<!-- END GENERATED: census -->';
+
+  /**
+   * The counted total, assembled exactly as the main scan assembles it —
+   * generated regions first, the vendor-wire scan told what they cover. A helper
+   * that ran the two independently could not see the double-subtraction this
+   * ordering exists to prevent.
+   */
+  const countedTotal = (text, ext) => {
+    const g = analyzeGeneratedRegions(text, ext);
+    const vw = analyzeVendorWire(text, ext, g.covered);
+    return countMatches(text) - vw.occurrences - g.occurrences;
+  };
+
+  const REGION = [
+    '# Tenant write call sites',
+    '',
+    'This page is hand-written; the table below is not.',
+    '',
+    GEN_BEGIN,
+    '',
+    '| call site | tenancy |',
+    '| :--- | :--- |',
+    '| `member-role-canonical.ts:41` | enabled |',
+    '',
+    GEN_END,
+    '',
+    'Hand-written again from here.',
+    '',
+  ].join('\n');
+  // One line different: the same page with an author sentence added.
+  const REGION_PROSE = REGION.replace(
+    'This page is hand-written; the table below is not.',
+    'This page is hand-written; the table below is not.\n\nEvery member carries a role, said the prose.',
+  );
+  // One line different: the markers removed, the emitted row unchanged.
+  const NO_MARKERS = REGION.replace(`${GEN_BEGIN}\n`, '').replace(`${GEN_END}\n`, '');
+
+  // (G0) THE POSITIVE CONTROL, first because every leg below is vacuous without
+  // it: the fixtures really do carry the reserved word, so a zero from (G1) is
+  // the exemption working and not an empty fixture.
+  expect('#13586 (G0, positive control) — the fixtures CARRY the reserved word (the emitted path '
+    + '`member-role-canonical.ts` counts because the hyphen is a word boundary)',
+    countMatches(REGION) === 1 && countMatches(REGION_PROSE) === 2
+      && countMatches(NO_MARKERS) === 1);
+
+  // (G1) The new behaviour — and the leg that pins the pair's measured
+  // ASYMMETRY: this BEGIN carries `<region> (<generator>) — DO NOT EDIT` while
+  // its END carries the bare region name, exactly as the live corpus does.
+  // Matching on the whole payload would pair nothing in the tree this serves.
+  expect('#13586 (G1) — an emitted path inside a generated region is NOT counted, with the live '
+    + 'asymmetric pair (BEGIN carries a generator and DO NOT EDIT; END carries the bare region)',
+    countedTotal(REGION, '.mdx') === 0);
+
+  // (G2) D3's actual target, untouched, in the very same file.
+  expect('#13586 (G2) — a PROSE occurrence on the SAME page still counts (the exemption '
+    + 'suppresses a delimited region, never a file)',
+    countedTotal(REGION_PROSE, '.mdx') === 1);
+
+  // (G3) The leg that carries the design. Without it the exemption keys on "is a
+  // table" or "is a page that mentions a generator", and the marker pair — the
+  // thing a reviewer sees in a diff — would not be what bounds it.
+  expect('#13586 (G3) — the identical emitted row with the marker pair REMOVED still counts (the '
+    + 'exemption keys on the greppable PAIR, never on the content looking generated)',
+    countedTotal(NO_MARKERS, '.mdx') === 1);
+
+  // The tally the green line publishes has to be real.
+  const regionReport = analyzeGeneratedRegions(REGION, '.mdx');
+  expect('#13586 — the exemption REPORTS itself: one region, one suppressed occurrence, no '
+    + 'marker problems',
+    regionReport.regions === 1 && regionReport.occurrences === 1
+      && regionReport.orphans.length === 0 && regionReport.unterminated.length === 0
+      && regionReport.strayEnds.length === 0);
+
+  // (G4) ⭐ The span COVERS ITS OWN MARKER LINES. The BEGIN line interpolates a
+  // generator name, so a generator whose own filename carries the word would
+  // otherwise make its region unshippable — and the only remedy left would be
+  // renaming the generator, the single-instance fix this exemption replaces.
+  // Pinned in both halves: the marker is exempt, and it really did carry the
+  // word (or the leg would pass by saying nothing).
+  const SELF_TRIPPING_BEGIN = '{/* BEGIN GENERATED: census (member-role-census.mjs) — DO NOT EDIT */}';
+  const SELF_TRIPPING = REGION.replace(GEN_BEGIN, SELF_TRIPPING_BEGIN);
+  expect('#13586 (G4a, positive control) — the self-tripping BEGIN marker really does carry the '
+    + 'reserved word, so (G4b) is not passing over an inert fixture',
+    countMatches(SELF_TRIPPING_BEGIN) === 1 && countMatches(SELF_TRIPPING) === 2);
+  expect('#13586 (G4b) — the span covers its OWN opening marker, so a region whose generator is '
+    + 'itself named with the reserved word is still exempt (the alternative remedy would be '
+    + 'renaming the generator)',
+    countedTotal(SELF_TRIPPING, '.mdx') === 0);
+
+  // ── Direction of error: every malformed pair fails CLOSED and LOUD ─────────
+  //
+  // The question this exemption is judged on. An exemption that fails OPEN turns
+  // a ratchet into a suggestion, so each fixture must (a) exempt NOTHING and
+  // (b) be REPORTED — never silently ignored, which reads as intentional while
+  // checking nothing.
+  const UNTERMINATED = REGION.replace(`${GEN_END}\n`, '');
+  const untermReport = analyzeGeneratedRegions(UNTERMINATED, '.mdx');
+  expect('#13586 (D) — a BEGIN with no matching END exempts NOTHING and is REPORTED (honouring '
+    + 'it would run the exemption to end of document, handing one line the whole rest of a page)',
+    countedTotal(UNTERMINATED, '.mdx') === 1 && untermReport.regions === 0
+      && untermReport.unterminated.length === 1);
+
+  const STRAY_END = REGION.replace(`${GEN_BEGIN}\n`, '');
+  const strayReport = analyzeGeneratedRegions(STRAY_END, '.mdx');
+  expect('#13586 (D) — an END with no BEGIN open exempts NOTHING and is REPORTED (exempting up '
+    + 'to it would take in prose that nothing claimed)',
+    countedTotal(STRAY_END, '.mdx') === 1 && strayReport.regions === 0
+      && strayReport.strayEnds.length === 1);
+
+  const MISMATCHED = REGION.replace(GEN_END, '{/* END GENERATED: ledger */}');
+  const mismatchReport = analyzeGeneratedRegions(MISMATCHED, '.mdx');
+  expect('#13586 (D) — an END naming a DIFFERENT region does not close the open one: nothing is '
+    + 'exempt, and BOTH halves are reported (pairing markers their authors did not pair is the '
+    + 'fail-OPEN direction)',
+    countedTotal(MISMATCHED, '.mdx') === 1 && mismatchReport.regions === 0
+      && mismatchReport.strayEnds.length === 1 && mismatchReport.unterminated.length === 1);
+
+  const REOPENED = REGION.replace(GEN_BEGIN, `${GEN_BEGIN}\n${GEN_BEGIN}`);
+  const reopenedReport = analyzeGeneratedRegions(REOPENED, '.mdx');
+  expect('#13586 (D) — a second BEGIN before the first closes reports the first as unterminated '
+    + '(it never got its END) rather than nesting silently',
+    reopenedReport.unterminated.length === 1 && reopenedReport.regions === 1);
+
+  // Near-miss markers: recognised as an ATTEMPT, refused as a claim, named.
+  const genNearMisses = [
+    ['the .md spelling in an .mdx file', REGION.replace(GEN_BEGIN, GEN_BEGIN_MD)],
+    ['a BEGIN naming no region at all', REGION.replace(GEN_BEGIN, '{/* BEGIN GENERATED: */}')],
+  ];
+  for (const [label, text] of genNearMisses) {
+    const report = analyzeGeneratedRegions(text, '.mdx');
+    expect(`#13586 — ${label} delimits NOTHING (the region stays counted)`,
+      countedTotal(text, '.mdx') === 1 && report.regions === 0);
+    expect(`#13586 — ${label} is REPORTED, not ignored (a placed-but-inert marker reads as `
+      + 'intentional)',
+      report.orphans.length + report.strayEnds.length + report.unterminated.length >= 1);
+  }
+
+  // The `.md` half — the shape `skills/README.md` actually carries on `main`,
+  // and the reason the syntax is keyed by EXTENSION rather than by root.
+  const REGION_MD = REGION.replace(GEN_BEGIN, GEN_BEGIN_MD).replace(GEN_END, GEN_END_MD);
+  expect('#13586 — the HTML-comment spelling opts in for a .md file (the live skills index uses '
+    + 'it; the generator branches on file type for the same reason this gate does)',
+    countedTotal(REGION_MD, '.md') === 0
+      && analyzeGeneratedRegions(REGION_MD, '.md').regions === 1);
+  expect('#13586 — and the .mdx spelling in a .md file delimits nothing, as an orphan (it would '
+    + 'render as literal text there)',
+    countedTotal(REGION, '.md') === 1
+      && analyzeGeneratedRegions(REGION, '.md').orphans.length === 2);
+
+  // This convention has to be documentable IN the roots it governs — the
+  // vendor-wire rule, reached through the SHARED fence scan.
+  const GEN_ILLUSTRATED = ['```md', GEN_BEGIN, '| `member-role-canonical.ts` |', GEN_END, '```', '']
+    .join('\n');
+  const illustratedGen = analyzeGeneratedRegions(GEN_ILLUSTRATED, '.mdx');
+  expect('#13586 — markers shown INSIDE a fence are example text: they delimit nothing, are not '
+    + 'orphans, and the row between them stays counted (this gate\'s conventions must be '
+    + 'documentable in content/docs and skills)',
+    illustratedGen.regions === 0 && illustratedGen.orphans.length === 0
+      && illustratedGen.strayEnds.length === 0 && illustratedGen.unterminated.length === 0
+      && countedTotal(GEN_ILLUSTRATED, '.mdx') === 1);
+
+  // The two exemptions must be DISJOINT. Overlapping them would subtract the
+  // same occurrence twice and drive the counted total NEGATIVE — a page that
+  // paid a NEGATIVE amount into the ledger, which the ratchet has no way to read.
+  const GEN_WRAPS_VW = [
+    '# Page', '',
+    GEN_BEGIN,
+    '',
+    VW_MDX,
+    '```http',
+    '{ "role": "member" }',
+    '```',
+    '',
+    GEN_END,
+    '',
+  ].join('\n');
+  const wrapGen = analyzeGeneratedRegions(GEN_WRAPS_VW, '.mdx');
+  const wrapVw = analyzeVendorWire(GEN_WRAPS_VW, '.mdx', wrapGen.covered);
+  expect('#13586 — a vendor-wire fence INSIDE a generated region is counted by the region only: '
+    + 'the two exemptions are disjoint, so the total is 0 and never negative',
+    countMatches(GEN_WRAPS_VW) === 1 && wrapGen.occurrences === 1
+      && wrapVw.blocks === 0 && wrapVw.occurrences === 0 && wrapVw.orphans.length === 0
+      && countedTotal(GEN_WRAPS_VW, '.mdx') === 0);
+  // Discrimination: without the mask the vendor-wire scan DOES claim that fence,
+  // so the leg above is about the wiring and not about a fence nothing matches.
+  expect('#13586 — and that same fence IS a vendor-wire claim when the region mask is withheld '
+    + '(proving the disjointness above comes from the wiring, not from an inert fixture)',
+    analyzeVendorWire(GEN_WRAPS_VW, '.mdx').blocks === 1);
+
+  // The tokens carry no form of the reserved word — the `VENDOR_WIRE_TOKEN`
+  // property, pinned here too. This gate cannot fix a violation by renaming
+  // (the generators own these tokens), which is exactly why it must be told.
+  expect('#13586 — neither convention token contains a form of the reserved word (a marker that '
+    + 'did would pay for every region it exempts, and this gate cannot rename it)',
+    countMatches(GENERATED_BEGIN_TOKEN) === 0 && countMatches(GENERATED_END_TOKEN) === 0);
+
+  // The file-NAME half is untouched: a path cannot be inside a region, so a
+  // `role-*` slug is still UI copy and still counts.
+  expect('#13586 — the exemption never reaches the file-NAME half (a page that is entirely one '
+    + 'generated region still pays for a reserved word in its own URL)',
+    countMatches('content/docs/permissions/role-census.mdx') === 1);
+
+  // Reporting (#9910): a suppressed occurrence is invisible in every ledger
+  // number, so the volume is printed rather than rediscovered.
+  expect('#13586 — the GREEN body states the generated-region volume, and renders DIFFERENTLY '
+    + 'when it moves (a corpus that quietly grew regions cannot print the same green)',
+    successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN)
+      !== successSummary(SCANNED, PAID_OFF, NO_EXEMPT, SOME_GEN));
+  expect('#13586 — the --update confirmation states it too (it re-baselines from counts this '
+    + 'exemption already reduced)',
+    updateSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN)
+      !== updateSummary(SCANNED, PAID_OFF, NO_EXEMPT, SOME_GEN));
+  expect('#13586 — a corpus with NO generated region says so outright rather than omitting the '
+    + 'clause, and the two volumes stay separately readable',
+    successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN).includes(generatedClause(NO_GEN))
+      && successSummary(SCANNED, PAID_OFF, NO_EXEMPT, NO_GEN).includes(exemptClause(NO_EXEMPT)));
+
+  // ── The exemption at the PROGRAM level ────────────────────────────────────
+  //
+  // Everything above drives predicates. A predicate the program never consults
+  // would satisfy all of it, so these build real trees and read a child
+  // process's real exit status, never a pipe's.
+  const genSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-generated-'));
+  try {
+    const [root] = ROOTS;
+    const PAGE = `${root}/census.mdx`;
+    const buildGenTree = (name, files) => {
+      const dir = join(genSandbox, name);
+      for (const r of ROOTS) mkdirSync(join(dir, r), { recursive: true });
+      for (const [rel, body] of Object.entries(files)) writeFileSync(join(dir, rel), body);
+      return dir;
+    };
+
+    // (G1, program) No baseline exists in these trees, so ANY counted occurrence
+    // is a NEW use and exit 1 — which makes exit 0 exactly the claim "nothing
+    // was counted".
+    const genPass = runIn(buildGenTree('pass', { [PAGE]: REGION }));
+    expect('#13586 (G1, program) — a page whose only occurrence is an emitted path inside a '
+      + 'generated region is GREEN, with no baseline entry for it',
+      genPass.status === 0);
+    expect('#13586 (G1, program) — and the run PUBLISHES what it suppressed, so the exemption '
+      + 'cannot widen unobserved',
+      genPass.out.includes(generatedClause({ regions: 1, occurrences: 1 })));
+
+    // (G2, program) — the other direction, on the same page.
+    const genProse = runIn(buildGenTree('prose', { [PAGE]: REGION_PROSE }));
+    expect('#13586 (G2, program) — one PROSE occurrence on a page whose region is exempt still '
+      + 'fails, and is reported as a NEW use',
+      genProse.status === 1 && genProse.out.includes('NEW use of the reserved word'));
+
+    // (G3, program) — the leg that carries the design.
+    const genBare = runIn(buildGenTree('bare', { [PAGE]: NO_MARKERS }));
+    expect('#13586 (G3, program) — the SAME emitted row with its marker pair removed still fails '
+      + '(so the green above came from the pair, not from the content)',
+      genBare.status === 1 && genBare.out.includes('NEW use of the reserved word'));
+
+    // (D, program) — a broken pair fails as a MARKER problem naming its token,
+    // not as a bare count the author cannot connect to it.
+    const untermTree = buildGenTree('unterminated', { [PAGE]: UNTERMINATED });
+    const genUnterm = runIn(untermTree);
+    expect('#13586 (D, program) — an unterminated region fails as a MARKER problem naming the '
+      + 'convention token, and exempts nothing',
+      genUnterm.status === 1 && genUnterm.out.includes('marker problem')
+        && genUnterm.out.includes(GENERATED_BEGIN_TOKEN));
+
+    // And that refusal precedes the write, pinned as byte-identity — the #9932
+    // discipline: re-baselining from counts whose author misunderstood them
+    // freezes the misunderstanding into a ledger that is shrink-only.
+    mkdirSync(join(untermTree, dirname(BASELINE_PATH)), { recursive: true });
+    const genLedgerPath = join(untermTree, BASELINE_PATH);
+    const genLedgerBefore = '{\n  "pinned": 13\n}\n';
+    writeFileSync(genLedgerPath, genLedgerBefore);
+    const genUpdate = runIn(untermTree, ['--update']);
+    expect('#13586 (D, program) — `--update` over a tree holding a broken region pair refuses '
+      + 'BEFORE writing, leaving the baseline byte-identical',
+      genUpdate.status === 1 && readFileSync(genLedgerPath, 'utf8') === genLedgerBefore);
+  } finally {
+    rmSync(genSandbox, { recursive: true, force: true });
   }
 
   if (failures.length) {
@@ -1212,7 +1838,17 @@ function selfTest() {
     + 'above prose) opts nothing in AND is refused as an orphan, an unclosed claimed fence '
     + 'exempts nothing, and both refusal messages name the marker in the spelling for the file '
     + 'they name — all of it also driven through a real child process, so a predicate the '
-    + 'program never consulted could not pass it.',
+    + 'program never consulted could not pass it. The generated-region exemption is pinned the '
+    + 'same way and in the same directions: an emitted source path inside a BEGIN/END pair is '
+    + 'exempt, a prose occurrence on the SAME page still counts, and the identical row with its '
+    + 'pair removed still counts \u2014 so what bounds it is the greppable pair, never the '
+    + 'content looking generated. The span covers its own opening marker, so a generator whose '
+    + 'name carries the reserved word cannot make its own region unshippable. Every malformed '
+    + 'pair \u2014 unterminated, a stray END, a mismatched region name, a reopened region, the '
+    + 'other format\'s spelling, a nameless marker \u2014 exempts NOTHING and is REPORTED: this '
+    + 'exemption fails CLOSED, refusing before the verdict and before `--update` writes. The two '
+    + 'exemptions are disjoint, proven against a fixture the vendor-wire scan DOES claim once '
+    + 'the region mask is withheld, and both volumes are published separately on every run.',
   );
   process.exit(0);
 }
@@ -1250,20 +1886,34 @@ const current = {};
  * can see is an exemption that widens unobserved, which is the failure mode the
  * marking was chosen to prevent in the first place. */
 const exempt = { blocks: 0, occurrences: 0 };
+/* Generated-region exemptions, tallied in the same pass and published beside the
+ * vendor-wire ones (#13586) — for the identical reason, and against the identical
+ * failure: an exemption nobody can see is an exemption that widens unobserved. */
+const generatedExempt = { regions: 0, occurrences: 0 };
 const markerProblems = [];
 for (const f of files.sort()) {
   const rel = relative('.', f).replace(/\\/g, '/');
   // File/dir names are URLs — a `role-*` slug is UI copy (counts once). A path
-  // cannot be inside a fence, so the exemption never reaches this half.
+  // cannot be inside a fence or a generated region, so neither exemption ever
+  // reaches this half.
   const nameHits = countMatches(rel);
   const text = readFileSync(f, 'utf8');
   const ext = extensionOf(rel);
-  const vendorWire = analyzeVendorWire(text, ext);
+  /* Generated regions FIRST, and the vendor-wire scan is told what they cover.
+   * The two exemptions must be disjoint: a marked fence inside a generated
+   * region would otherwise be subtracted twice and drive `bodyHits` negative. */
+  const generated = analyzeGeneratedRegions(text, ext);
+  const vendorWire = analyzeVendorWire(text, ext, generated.covered);
   exempt.blocks += vendorWire.blocks;
   exempt.occurrences += vendorWire.occurrences;
+  generatedExempt.regions += generated.regions;
+  generatedExempt.occurrences += generated.occurrences;
   for (const n of vendorWire.orphans) markerProblems.push(orphanMarkerMessage(rel, n, ext));
   for (const n of vendorWire.unterminated) markerProblems.push(unterminatedFenceMessage(rel, n));
-  const bodyHits = countMatches(text) - vendorWire.occurrences;
+  for (const n of generated.orphans) markerProblems.push(generatedOrphanMessage(rel, n, ext));
+  for (const n of generated.unterminated) markerProblems.push(generatedUnterminatedMessage(rel, n));
+  for (const n of generated.strayEnds) markerProblems.push(generatedStrayEndMessage(rel, n));
+  const bodyHits = countMatches(text) - vendorWire.occurrences - generated.occurrences;
   const total = nameHits + bodyHits;
   if (total > 0) current[rel] = total;
 }
@@ -1274,14 +1924,14 @@ for (const f of files.sort()) {
  * misunderstanding into the ledger — silently, and in the one direction this
  * shrink-only ratchet cannot walk back. */
 if (markerProblems.length) {
-  console.error(`check-role-word: ${markerProblems.length} vendor-wire marker problem(s)\n`);
+  console.error(`check-role-word: ${markerProblems.length} marker problem(s)\n`);
   for (const e of markerProblems) console.error('  • ' + e);
   process.exit(1);
 }
 
 if (update) {
   writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + '\n');
-  console.log(updateSummary(scanned, current, exempt));
+  console.log(updateSummary(scanned, current, exempt, generatedExempt));
   process.exit(0);
 }
 
@@ -1312,4 +1962,4 @@ if (errors.length) {
   for (const e of errors) console.error('  • ' + e);
   process.exit(1);
 }
-console.log(successSummary(scanned, current, exempt));
+console.log(successSummary(scanned, current, exempt, generatedExempt));

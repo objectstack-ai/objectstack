@@ -531,12 +531,16 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       for (const value of Object.values(rec)) corrupt(value);
     };
     corrupt(corrupted.views);
-    // The count tracks the CORPUS, not an issue: 49 today because #13216 added
+    // The count tracks the CORPUS, not an issue: 49 after #13216 added
     // a `page` section to `view.form.ts` — the surface block for the new `page`
     // view type, gated by `visibleWhen: "data.type == 'page'"` exactly as every
     // other surface block is — so the walk has one more predicate to reach.
+    // It is 51 today: objectui#6140 (maintainer ruling 2026-08-25, Option A)
+    // declared `rows` on the multiline editor types, adding one
+    // `data.type in […]`-gated row to the field form AND one to the object
+    // form's fields repeater — two more predicates for the walk to reach.
     // Earlier measurements stay what they were: history, not the census.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(49);
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(51);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -630,11 +634,15 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // form ships — the class the issue measured, and the class this rule exists
     // to have caught before it shipped.
     //
-    // The count tracks the CORPUS, not the issue: it is 17 today because
+    // The count tracks the CORPUS, not the issue: it was 17 after
     // #11410 split `deleteBehavior` into two declarations with disjoint
     // `visibleWhen` (`lookup` / `master_detail`), so a `master_detail` author is
-    // no longer offered a `set_null` the schema refuses. #6254's own measurement
-    // was 16 and stays 16 — that number is history, this one is a census.
+    // no longer offered a `set_null` the schema refuses. It is 18 today:
+    // objectui#6140 added a `rows` row to the object form's fields repeater,
+    // gated by `data.type in ['textarea','markdown','html','richtext']` — one
+    // more `data.type`-rooted predicate for the debare walk to restore. #6254's
+    // own measurement was 16 and stays 16 — that number is history, this one
+    // is a census.
     const objectForm = structuredClone(METADATA_FORM_REGISTRY.object) as Record<string, unknown>;
     let restored = 0;
     const debare = (node: unknown): void => {
@@ -664,10 +672,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(
       restored,
       "the object form's `data.type`-rooted predicates are no longer where this test looks",
-    ).toBe(17);
+    ).toBe(18);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(17);
+    expect(findings).toHaveLength(18);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

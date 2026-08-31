@@ -399,3 +399,115 @@ describe('MetadataManager — a cluster peer write invalidates local caches (#51
         expect(cachedTypes(a)).toEqual(['view']);
     });
 });
+
+/**
+ * #13609 — the seam behind "delete keeps being served cluster-wide, longer
+ * than any TTL", measured statically (no live multi-node deployment
+ * available; see the issue for the full write-up).
+ *
+ * Every test above in this file shares ONE `TestPubSub` bus between A and
+ * B — the correct model of a WORKING cross-node transport (a real `redis` /
+ * `postgres` cluster driver), and it is why `unregister()`'s cluster fan-out
+ * (`notifyWatchers` → `CLUSTER_CHANNEL` → the peer's `invalidateForForeignWrite`)
+ * checks out as correct: register() and unregister() call it identically, so
+ * the #13405 reading ("create broadcasts, delete does not mirror") is false
+ * as a claim about this mechanism.
+ *
+ * But `Runtime`'s shipped DEFAULT (`cluster` option omitted) is
+ * `defineCluster({})` → `driver: 'memory'`, and `MemoryPubSub`'s own
+ * doc-comment is explicit: "No cross-process delivery — use the redis /
+ * postgres / nats driver for real multi-node setups." Each of N replica
+ * PROCESSES constructs its OWN `MemoryPubSub` instance; nothing wires them
+ * together. The split-brain guard (`assertClusterDriverSafeForTopology`,
+ * `split-brain-guard.ts`) only fires when the operator has *declared*
+ * multi-node via `OS_EXPECT_MULTI_NODE` / `OS_CLUSTER_REPLICAS>1` — silent
+ * otherwise, by design (ADR-0010, path A).
+ *
+ * So the below gives A and B *separate* `TestPubSub` instances instead of
+ * `makeCluster()`'s shared one — the faithful in-process stand-in for two
+ * real OS processes each on the shipped default driver. No live cluster is
+ * needed to observe the isolation: it is a property of the transport object
+ * (no socket, no IPC — see `MemoryPubSub`'s full implementation), identical
+ * whether the two instances live in one test process or two real ones.
+ *
+ * Both replicas locally `register()` the row before the delete, matching
+ * what `restoreRuntimeDatasources` does on every replica's own boot: each
+ * reads the same durable `sys_metadata` row and calls `metadata.register()`
+ * LOCALLY — not via a broadcast. That is also the reconciling condition for
+ * the three-way tension: `readListUncached()` merges the in-memory registry
+ * BEFORE the loader and never overwrites a registry hit with a loader
+ * answer (see `metadata-manager.ts`). A **new** name a peer's registry has
+ * never seen falls through to the (shared, authoritative) loader on every
+ * read, so a create looks like it "reaches" peers within one `list()` call —
+ * no propagation required. A name a peer's registry already holds POSITIVE
+ * is never re-checked against the loader at all, so a stale positive
+ * survives every list-cache TTL window forever, not for ~30s. That asymmetry
+ * — not "delete doesn't broadcast" — is what #13405 actually observed.
+ */
+describe('MetadataManager — default `memory` cluster driver does not cross OS processes (#13609)', () => {
+    const dsRow = (name: string) => ({ name, driver: 'postgres', origin: 'runtime' as const });
+
+    it('control: WITH a working cross-node transport, unregister() on A evicts B immediately', async () => {
+        // `makeCluster()` shares one bus — models a real redis/postgres driver.
+        const { store, a, b } = makeCluster();
+        await store.save('datasource', 'ds_doomed', dsRow('ds_doomed'));
+        // Both replicas locally register at "boot", exactly like
+        // `restoreRuntimeDatasources` reading the same `sys_metadata` row.
+        await a.register('datasource', 'ds_doomed', dsRow('ds_doomed'));
+        await b.register('datasource', 'ds_doomed', dsRow('ds_doomed'));
+        expect(await b.get('datasource', 'ds_doomed')).toBeTruthy();
+
+        await a.unregister('datasource', 'ds_doomed');
+
+        // Positive control: the probe below (get + list, same door
+        // `/api/v1/meta/datasource` reads through) WOULD have seen this.
+        expect(await b.get('datasource', 'ds_doomed')).toBeUndefined();
+        expect(viewNames(await b.list('datasource'))).toEqual([]);
+    });
+
+    it('WITHOUT it (the shipped default across real replicas): B keeps serving the deleted row past 10 list-cache TTL windows', async () => {
+        vi.useFakeTimers();
+        try {
+            const store = new SharedStoreLoader();
+            const a = new MetadataManager({ formats: ['json'], loaders: [store] });
+            const b = new MetadataManager({ formats: ['json'], loaders: [store] });
+            // Two INDEPENDENT pubsub instances, not shared — the isolation
+            // `defineCluster({ driver: 'memory' })` (the omitted-config
+            // default) actually ships with across two real processes.
+            a.attachClusterPubSub(new TestPubSub(), 'node-A');
+            b.attachClusterPubSub(new TestPubSub(), 'node-B');
+
+            await store.save('datasource', 'ds_doomed', dsRow('ds_doomed'));
+            await a.register('datasource', 'ds_doomed', dsRow('ds_doomed'));
+            await b.register('datasource', 'ds_doomed', dsRow('ds_doomed'));
+            expect(await b.get('datasource', 'ds_doomed')).toBeTruthy();
+
+            // DELETE lands on A (e.g. the admin REST door). Storage-first,
+            // in-memory second (#5259): A is correct immediately, and the
+            // shared DB row is gone too.
+            await a.unregister('datasource', 'ds_doomed');
+            expect(await a.get('datasource', 'ds_doomed')).toBeUndefined();
+            expect(store.storage.get('datasource')?.has('ds_doomed')).toBe(false);
+
+            // B's broadcast never arrives (separate pubsub instance). Advance
+            // WAY past the list-cache TTL this manager applies to `list()` —
+            // if this were TTL-bound (the #5109 / A2.3 shape) it would have
+            // cleared by now. It has not: the stale entry lives in the
+            // REGISTRY, which carries no TTL at all, and every fresh
+            // `readListUncached()` re-derives the same answer because the
+            // registry hit is never checked against the (correct) loader.
+            const ttl = (MetadataManager as unknown as { LIST_CACHE_TTL_MS: number })
+                .LIST_CACHE_TTL_MS;
+            vi.advanceTimersByTime(ttl * 10);
+
+            // This is exactly what `/api/v1/meta/datasource` reads through
+            // (`MetadataProtocol` → `metadataService.list('datasource')`) and
+            // what the admin `listDatasourceRecords` reads for the
+            // detail/admin registry (`metadataOf()?.list('datasource')`).
+            expect(await b.get('datasource', 'ds_doomed')).toBeTruthy();
+            expect(viewNames(await b.list('datasource'))).toEqual(['ds_doomed']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});

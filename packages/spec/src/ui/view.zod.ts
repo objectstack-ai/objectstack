@@ -56,6 +56,10 @@ import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../share
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
+// [#13855] The section → field-group reference form, shared with the
+// `record:details` section shape (component.zod.ts) so one mixing rule serves
+// both layout escape hatches.
+import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../shared/section-group-reference';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -2422,6 +2426,16 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // to rename it in place. The reader can only tell which answer is theirs if
   // the rejection names the shape, so each of the three shapes names itself.
   surface: 'this form section',
+  // [#13855] Both are the author reaching for the field-group reference form
+  // with the word a neighbouring surface uses: the object declares
+  // `fieldGroups`, and a field points back with `group`. Neither is a typo edit
+  // distance reaches. Spread the inherited table first so nothing it carries is
+  // dropped by re-declaring the key.
+  aliases: {
+    ...VISIBILITY_ONLY_STRICT_OPTIONS.aliases,
+    fieldGroup: 'group',
+    groupKey: 'group',
+  },
 }, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
@@ -2502,11 +2516,65 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   pane: z.enum(['primary', 'secondary']).optional().describe(
     "Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'.",
   ),
+  /**
+   * [#13855] Reference a declared field GROUP instead of enumerating members —
+   * the delta form ruled 2026-08-31 (maintainer: 「直接处理b」).
+   *
+   * `{ group: 'contact_info' }` inherits the bound object's `fieldGroups` entry
+   * with that key: its members (every visible field whose `Field.group` points
+   * at it, in field-declaration order) and its own presentation (label,
+   * description, `collapse`, `visibleWhen`, and the drop when the group has no
+   * visible members) all come from `deriveFieldGroupLayout` (ADR-0085 §5). The
+   * section restates none of it — see {@link sectionGroupReferenceRefinement}
+   * for the mixing rule, and for why the keys the group owns are refused beside
+   * `group` rather than given a precedence.
+   *
+   * Existence is NOT a parse question: the key names something on a DIFFERENT
+   * schema, so it follows the `UserFilterFieldSchema.field` precedent — parse
+   * takes any well-formed key, and `form-section-group-unknown`
+   * (`@objectstack/lint`) reports one that resolves to no declared group.
+   *
+   * ⛔ Not on a wizard step — refused by the {@link FormViewSchema} refinement,
+   * for the reason #13704 refused the step keys themselves: a group carries
+   * `visibleWhen` and `collapse`, and a wizard step has no slot for either.
+   */
+  group: SectionGroupKeySchema.optional().describe(
+    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
+  ),
+  /**
+   * The section's members, enumerated.
+   *
+   * Optional since #13855 — and optional ONLY in the sense that `group` is the
+   * other way to declare the same fact. A section carrying neither is refused
+   * (see {@link sectionGroupReferenceRefinement}), so no section reaches a
+   * renderer without a member source, which is what the previously-required key
+   * guaranteed.
+   */
   fields: z.array(z.union([
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
-  ])),
-}).transform(normalizeVisibleWhen));
+  ])).optional(),
+}).superRefine(sectionGroupReferenceRefinement({
+  surface: 'this form section',
+  // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
+  // in the list because the derived section's `key` IS the group key, which is
+  // already this surface's i18n anchor (`metadataForms.<type>.sections.<name>`)
+  // — a second name would give one section two lookup identities. `visibleOn`
+  // rides along because this refinement runs BEFORE the `.transform` that folds
+  // it onto `visibleWhen`, so the deprecated spelling must be named here or it
+  // would be the one way to smuggle a section-level predicate past the rule.
+  //
+  // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
+  // form lays the section out and the group declares nothing about them, so
+  // there is no second source to create.
+  derivedKeys: ['name', 'label', 'description', 'visibleWhen', 'visibleOn'],
+  // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
+  // is already indistinguishable from the default by the time this runs — the
+  // same asymmetry #13704 records for the wizard step keys, and it costs
+  // nothing: `false` declares exactly what a group with `collapse: 'none'`
+  // delivers. Only `true` declares presentation the group owns.
+  trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
+})).transform(normalizeVisibleWhen));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -2899,6 +2967,16 @@ function refineFormFieldFeaturesRoot(
 export const FormViewSchema = lazySchema(() => strictObject({
   surface: 'this form view',
   history: VIEW_HISTORY,
+  // [#13704] `steps` is the word the wizard's own vocabulary teaches (and the
+  // deleted fake tutorial taught) — a guidance-refusal with the ruled spelling
+  // (#13622 T1, 2026-08-31: ⛔ never an accepted alias; the `groups` alias is
+  // history being paid down, not a precedent). The #5099-family shape: the
+  // unknown-key rejection itself carries the prescription.
+  guidance: {
+    steps: 'A wizard\'s steps are its `sections` — there is no `steps` key. '
+      + 'Write `type: \'wizard\'` with `sections: [{ label, fields: [...] }, …]`: '
+      + 'each section renders as one gated step, and array order is step order.',
+  },
 }, {
   type: z.enum([
     'simple',  // Single column or sections
@@ -2921,9 +2999,52 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** Tabbed (`type: 'tabbed'`). */
   defaultTab: z.string().optional().describe('Initially active tab (tabbed forms)'),
   tabPosition: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Tab strip position (tabbed forms)'),
-  /** Wizard (`type: 'wizard'`). */
-  allowSkip: z.boolean().optional().describe('Allow skipping steps (wizard forms)'),
-  showStepIndicator: z.boolean().optional().describe('Show the step indicator (wizard forms)'),
+  /**
+   * Wizard (`type: 'wizard'`) — the step-sequenced form variant. Ruled contract
+   * (#13622 proposal D4–D8, maintainer 2026-08-31 「同意」; renderer semantics
+   * measured in that proposal against objectui's WizardForm):
+   *
+   * - **Sections ARE the steps, and array order IS step order (D8).** There is
+   *   no `steps:` key (refused with a prescription — see this surface's
+   *   `guidance`) and no `order` key: an integer beside the array would be a
+   *   second source of truth that a reordering edit silently contradicts.
+   * - **The step gate is the DEFAULT semantics of the type (D4).** With
+   *   `allowSkip` absent/false, step N+1 opens only after step N submits and
+   *   passes validation; going back, and re-entering completed steps, is always
+   *   free. `allowSkip: true` grants **navigation freedom, not a validation
+   *   exemption** — the final submit still re-validates every step's declared
+   *   fields and returns the author to the first failing step. The gate is a
+   *   UI admission rule, **never authorization**: nothing server-side evaluates
+   *   it, and the server re-validates the submitted record in both modes.
+   * - **Per-step validation binds ONLY the existing field-level vocabulary
+   *   (D6)**: `required` / `requiredWhen` / `readonlyWhen` / per-option
+   *   `visibleWhen`, evaluated by the same canonical rule engine the plain form
+   *   renderer and the server share. There is no step-level `ValidationRule`
+   *   binding — cross-field/script rules stay write-time vocabulary the server
+   *   enforces at final submit.
+   * - **Progress is DERIVED state (D5).** Each step's completed / current /
+   *   upcoming / invalid standing derives from the gate; `showStepIndicator`
+   *   is the only authorable progress surface — no progress object, no
+   *   percentages, no custom step-state text.
+   * - **Wizard steps carry no predicate slot and do not collapse (D2).**
+   *   `visibleWhen` (and its deprecated `visibleOn` alias) and
+   *   `collapsible` / `collapsed: true` on a wizard section are refused at
+   *   parse — see the superRefine below; it is the spec-door upgrade of
+   *   objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
+   *   No"). A wizard with absent/empty `sections` is refused too (D7): it used
+   *   to silently render as a plain simple form.
+   */
+  allowSkip: z.boolean().optional().describe(
+    'Wizard step-gate opt-out: allow entering a later step without submitting the one before it. '
+    + 'Navigation freedom, NOT a validation exemption — the final submit still re-validates every '
+    + 'step and returns to the first failing one. Default (absent/false): steps unlock in array '
+    + 'order as each prior step submits validly. UI admission only, never authorization.',
+  ),
+  showStepIndicator: z.boolean().optional().describe(
+    'Show the wizard step indicator (renderer default: shown). Step progress '
+    + '(completed/current/upcoming/invalid) is derived from the step gate — this boolean is the '
+    + 'only authorable progress surface.',
+  ),
   /** Split (`type: 'split'`). */
   splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split orientation (split forms)'),
   splitSize: z.number().optional().describe('Primary split panel size, % (split forms)'),
@@ -3165,7 +3286,116 @@ export const FormViewSchema = lazySchema(() => strictObject({
       section?.fields?.forEach((field, fieldIndex) => {
         refineFormFieldFeaturesRoot(field, [key, index, 'fields', fieldIndex], ctx);
       });
+      // [#13704] Wizard steps carry no predicate slot and do not collapse —
+      // objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
+      // No"), upgraded from a renderer fact to a parse refusal (#13622 D2/T2,
+      // ruled 2026-08-31). Breadth is ruled NARROW: exactly this step-key
+      // family — no per-type presentation-key matrix.
+      //
+      // Post-parse observability decides the spellings checked here:
+      // `FormSectionSchema` folds `visibleOn` → `visibleWhen` (its
+      // `.transform(normalizeVisibleWhen)`) before this refinement runs, so
+      // one check answers both spellings (the message says so, since the
+      // reported path can only name the canonical key). `collapsible` /
+      // `collapsed` carry `.default(false)`, so an authored `false` is
+      // indistinguishable from the default here — and needs no refusal: it
+      // declares exactly the behavior a wizard delivers. Only `true` declares
+      // behavior a wizard step does not have.
+      if (view.type === 'wizard' && section != null) {
+        if (section.visibleWhen != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'visibleWhen'],
+            message:
+              '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
+              + '— steps are entered in array order behind the step gate, '
+              + 'never conditionally. Put the predicate on the fields inside the step, or use a '
+              + "`simple`/`tabbed` form for section-level visibility. (The deprecated `visibleOn` "
+              + 'alias folds into `visibleWhen` and is refused the same way.)',
+          });
+        }
+        for (const collapseKey of ['collapsible', 'collapsed'] as const) {
+          if (section[collapseKey] === true) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [key, index, collapseKey],
+              message:
+                `\`${collapseKey}\` on a wizard step is refused: wizard steps do not collapse — `
+                + 'the wizard shows exactly the current step. Remove the key; collapsible '
+                + 'grouping belongs to `simple`/`tabbed` sections.',
+            });
+          }
+        }
+        // [#13855] The field-group REFERENCE form is refused on a wizard step
+        // for the same reason the two refusals above exist, one layer back: a
+        // `fieldGroups` entry carries `visibleWhen` and `collapse`, and
+        // `deriveFieldGroupLayout` passes both through to the derived section.
+        // Accepting `group` here would hand a wizard step exactly the predicate
+        // and collapse state #13704 just finished refusing — reached through
+        // the object's declaration instead of the step's own keys, so the
+        // refusals above would report clean while the behaviour arrived anyway.
+        // The section schema cannot see the group (that is cross-schema), so
+        // the honest answer at parse is to refuse the reference on this form
+        // type, not to guess what the group declares.
+        //
+        // Deliberately the CONSERVATIVE direction: a wizard step whose group
+        // declares neither key is legal metadata this refuses today, and
+        // allowing it later (once the renderer half lands and a ruling covers a
+        // derived predicate on a step) is additive.
+        if (section.group != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'group'],
+            message:
+              '`group` on a wizard step is refused: a field group carries `visibleWhen` and '
+              + '`collapse`, and `deriveFieldGroupLayout` passes both through to the section it '
+              + 'derives — neither of which a wizard step has a slot for (steps are entered in '
+              + 'array order behind the step gate, and the wizard shows exactly the current step). '
+              + 'Enumerate the step with `fields: [...]`, or use a `simple`/`tabbed` form to '
+              + 'inherit the group.',
+          });
+        }
+      }
     });
+  }
+  // [#13704] A wizard must declare its steps (#13622 D7, ruled 2026-08-31).
+  // Before this refusal, `type: 'wizard'` with absent/empty `sections`
+  // silently fell back to plain simple rendering (objectui RecordFormPage's
+  // conditional spread + ObjectForm's `sections?.length` guard) — the
+  // accepted-but-ignored shape. ⛔ No "at least 2 steps" floor: a one-step
+  // wizard is legal and renders.
+  //
+  // Scoped to the doors where the body claims to be a COMPLETE authored form
+  // view (`ViewSchema.form` / `formViews`, the ViewItem config arms). The
+  // flattened runtime-overlay member (`FormViewOverlayWireSchema` =
+  // `.extend(flattenedViewOverlayFields()).strip()`) is exempt: an overlay is
+  // a partial patch over a shadowed registry entry — `{ type: 'wizard' }`
+  // beside the required `object`+`viewKind` binding, with `sections` supplied
+  // by the base view, is its load-bearing round-trip shape (#7025 pins that
+  // membership; moving it needs its own ruling, per #7741's precedent). The
+  // extension's required `viewKind` is the structural marker of that door: on
+  // THIS strict shape the key can never be present (unknown keys are refused
+  // before acceptance), so reading it distinguishes the doors mechanically.
+  // The step-KEY refusals above run on every door on purpose — they fire only
+  // on a key the author wrote, which is never a partial-overlay artifact.
+  if (view.type === 'wizard' && typeof (view as { viewKind?: unknown }).viewKind !== 'string') {
+    // Mirror `foldFormGroupsIntoSections`' precedence exactly (`sections`
+    // wins even when empty), and report at the bucket the author wrote —
+    // canonical `sections` when neither bucket is present.
+    const steps = view.sections !== undefined ? view.sections : view.groups;
+    if (steps === undefined || steps.length === 0) {
+      const authoredKey =
+        view.sections !== undefined ? 'sections' : view.groups !== undefined ? 'groups' : 'sections';
+      ctx.addIssue({
+        code: 'custom',
+        path: [authoredKey],
+        message:
+          "A `type: 'wizard'` form view must declare its steps: `"
+          + authoredKey + '` is ' + (steps === undefined ? 'absent' : 'empty')
+          + ', and the wizard would silently render as a plain simple form. Declare at least one '
+          + 'step — `sections: [{ label, fields: [...] }]`; sections ARE the steps, in array order.',
+      });
+    }
   }
 }).overwrite(foldFormGroupsIntoSections));
 

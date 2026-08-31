@@ -16,7 +16,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
-import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -601,6 +601,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (typeof ctx.getReadScope !== 'function') return userFilter;
     const scope = ctx.getReadScope(objectName);
     if (scope === undefined || scope === null) return userFilter;
+    // [#13640] The mechanical guard between a spec-contract scope PRODUCER and
+    // the engine LOWERING. It stands here, at the merge boundary, because this
+    // is the last place the scope is still a distinguishable object: one line
+    // down it is `$and`-composed with the caller's own filter, and after that
+    // no consumer can tell whose half a clause came from. It is also the only
+    // place on this route where anything reads the scope at all — `execute()`
+    // hands the merged tree straight to `engine.aggregate`, so a scope that
+    // lowers to a boolean constant used to reach the driver unexamined and
+    // come back with the whole table (measured — `read-scope-sql.ts`'s #13640
+    // section carries the table). NativeSQL and the `/analytics/sql` echo get
+    // the same disposition from `compileScopedFilterToSql` itself (#13571);
+    // this is the same ruling at the door that compiler never sees.
+    assertReadScopeCannotVacate(scope, objectName);
     const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
@@ -1076,6 +1089,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `idFilter` is this method's own plumbing, not the caller's text — it
     // stays unmarked, which withholds, and that is correct for a filter no
     // author typed.
+    // [#13640] The SECOND engine-bound merge on this strategy, and the same
+    // door: the referenced object's own scope is `$and`-ed into a filter handed
+    // to `executeAggregate` without ever meeting `compileScopedFilterToSql`. A
+    // vacating scope here does not widen the aggregate — it widens the FK
+    // ATTRIBUTE MAP, so ids the policy hides resolve to their labels instead of
+    // landing in the RESTRICTED bucket. Guarded before the mark, so a refused
+    // scope is never stamped as vouched-for policy content.
+    if (scope != null) assertReadScopeCannotVacate(scope, refObject);
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {

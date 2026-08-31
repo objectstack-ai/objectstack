@@ -8,7 +8,7 @@
  *
  * The bridges re-dispatch into `@better-auth/sso` "so all of its gates run"
  * (register-sso-provider.ts). The premise this file pins is that the vendor's
- * gates are NOT a platform-admin gate. Measured on the INSTALLED
+ * gates are NOT a platform-admin gate. Measured on the THEN-INSTALLED
  * `@better-auth/sso` 1.7.1 (dist/index.mjs, `registerSSOProvider`):
  *
  *   • `/sso/register` requires a session — and nothing more — when the body

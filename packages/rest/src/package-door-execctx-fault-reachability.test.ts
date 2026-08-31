@@ -88,6 +88,33 @@
  * 5's first case is unchanged), and `DATA_ENGINE_UNRESOLVABLE` remains a 403.
  * Both are recorded here as measurements, exactly as before.
  *
+ * ## ⭐ [#13280] The SEAM ASYMMETRY is repaired; section 7 pins the repair
+ *
+ * Section 7 was filed as a finding of its own: at one and the same provider
+ * seam, a REJECTION was absorbed and a SYNCHRONOUS throw lost the whole
+ * execution context — `settingsServiceProvider` answered **200** when it
+ * returned a rejecting promise and **401** when it threw synchronously, both
+ * callers holding a valid session and identical grants. The wire answer was
+ * decided by whether the host happened to declare its provider `async`.
+ *
+ * `computeExecCtx` now reaches its seams through `seamOrUndefined`
+ * (`rest-server.ts`), so a sync throw and a rejection reach the same answer.
+ * Section 7 is INVERTED IN PLACE — it asserts agreement, and the superseded
+ * text is quoted beside it. Verifying the card's table also turned up a
+ * SECOND divergent seam it had not measured: `objectQLProvider`, 403 when
+ * rejecting and 401 when throwing synchronously; it now agrees at 403.
+ *
+ * ⚠️ What this did NOT change, deliberately: `computeExecCtx`'s outer `catch`.
+ * Whether a post-identity fault SHOULD discard identity is a behaviour change
+ * on a public door — the second of the two directions the finding recorded,
+ * and still unruled. Normalising the seams is decision-independent: under
+ * ANY answer to that question, one fault yielding 200 or 401 depending on how
+ * the host spelled its provider is a defect.
+ *
+ * ⚠️ `SETTINGS_PROVIDER_SYNC_THROW` is consequently GONE from the section-2
+ * class table — it is no longer a context-lost class. See the block that
+ * replaces it there before concluding that coverage was dropped.
+ *
  * ## Reading discipline
  *
  * Every class is driven beside a POSITIVE CONTROL that is the same wiring with
@@ -335,12 +362,25 @@ const CLASSES: FaultClass[] = [
     faulted: () => ({ ...healthy(), authServiceProvider: async () => ({ api: { getSession: async () => { throw new Error('session store down'); } } }) }),
     ctx: 'lost', read: DENY, write: DENY,
   },
-  {
-    id: 'SETTINGS_PROVIDER_SYNC_THROW',
-    what: 'a post-identity provider seam throws SYNCHRONOUSLY — the caller IS authenticated',
-    faulted: () => ({ ...healthy(), settingsServiceProvider: (() => { throw new Error('settings provider blew up'); }) as any }),
-    ctx: 'lost', read: DENY, write: DENY,
-  },
+  // ⭐ [#13280] `SETTINGS_PROVIDER_SYNC_THROW` USED TO LIVE HERE, and its
+  // removal from this table is the repair, not a gap in it. The row read:
+  //
+  //     id: 'SETTINGS_PROVIDER_SYNC_THROW',
+  //     what: 'a post-identity provider seam throws SYNCHRONOUSLY — the caller IS authenticated',
+  //     faulted: () => ({ ...healthy(), settingsServiceProvider: (() => { throw … }) as any }),
+  //     ctx: 'lost', read: DENY, write: DENY,
+  //
+  // i.e. a SYNCHRONOUS throw at a post-identity settings seam discarded the
+  // whole execution context and the authenticated caller was answered 401 —
+  // while the SAME seam rejecting asynchronously was absorbed and served 200.
+  // The seams are normalised now (`seamOrUndefined`, `rest-server.ts`), so the
+  // sync throw is absorbed exactly as the rejection always was: this is no
+  // longer a CONTEXT-LOST class at all, and a table of degraded classes is the
+  // wrong home for it. Its measurement did not disappear — it MOVED to
+  // section 7, which now pins the two shapes as EQUAL rather than recording
+  // them as divergent. ⛔ Do not re-add it here to "restore coverage": section
+  // 6's "no degraded class is ever served" would then be asserting that a
+  // repaired seam is still broken.
   {
     id: 'PERMISSION_STORE_DOWN',
     what: 'identity resolves, then every permission-store read throws',
@@ -618,26 +658,98 @@ describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a 
 });
 
 // ---------------------------------------------------------------------------
-// 7. ⭐ A SEAM ASYMMETRY worth recording: at one and the same provider seam, a
-//    REJECTION degrades softly and a SYNCHRONOUS THROW loses the whole
-//    identity. Same fault, two different wire answers.
+// 7. ⭐ [#13280] SEAM AGREEMENT — the same provider seam, the same fault, and
+//    now the SAME answer whichever way the provider fails.
+//
+//    ⭐ INVERTED IN PLACE, not re-baselined. As written for #13255 this section
+//    RECORDED a divergence and asserted it, under the heading "sync-throw and
+//    rejection do not agree":
+//
+//      it('a REJECTING settings provider is absorbed … the caller is still served')
+//          -> expect(captured.status).toBe(200)
+//      it('the SAME seam, throwing synchronously, escapes that `.catch` … refused 401')
+//          -> expect(captured.status).toBe(ANONYMOUS_DENY_STATUS)
+//
+//    Both callers held a valid session and identical grants; the wire answer
+//    was decided by whether the host happened to declare its provider `async`.
+//    `computeExecCtx` now reaches every one of these seams through
+//    `seamOrUndefined`, so the two shapes agree — the assertions are inverted
+//    rather than deleted, which is what keeps this a regression pin on the
+//    repair instead of a rubber stamp.
+//
+//    ⚠️ The pins below assert AGREEMENT and the AGREED VALUE, never merely
+//    "both are 200". Two of these seams do not agree at 200, and asserting a
+//    bare equality would let a future blanket-swallow regression — every seam
+//    degrading to a served 200 — pass this section unchanged.
 // ---------------------------------------------------------------------------
 
-describe('[#13255] at a post-identity provider seam, sync-throw and rejection do not agree', () => {
-  it('a REJECTING settings provider is absorbed by the seam\'s own `.catch` — the caller is still served', async () => {
-    const captured = await drive(
-      mount(serverWith({ ...healthy(), settingsServiceProvider: async () => { throw new Error('settings unavailable'); } })),
-      'GET', PKGS,
-    );
-    expect(captured.status).toBe(200);
+describe('[#13280] at a post-identity provider seam, sync-throw and rejection AGREE', () => {
+  /** The same seam, failed both ways; the door's answer to each. */
+  const bothShapes = async (seam: 'settingsServiceProvider' | 'objectQLProvider' | 'authServiceProvider') => {
+    const rejecting = await drive(
+      mount(serverWith({ ...healthy(), [seam]: async () => { throw new Error('seam unavailable'); } })), 'GET', PKGS);
+    const syncThrowing = await drive(
+      mount(serverWith({ ...healthy(), [seam]: (() => { throw new Error('seam unavailable'); }) as any })), 'GET', PKGS);
+    return { rejecting, syncThrowing };
+  };
+
+  it('⭐ settings — a POST-IDENTITY seam: both shapes are absorbed and the caller is SERVED', async () => {
+    const { rejecting, syncThrowing } = await bothShapes('settingsServiceProvider');
+    // The agreed value, named: identity survives a settings fault, because
+    // localization has nothing to do with authorization.
+    expect(rejecting.status).toBe(200);
+    expect(syncThrowing.status).toBe(200);
+    expect(syncThrowing.body?.success).toBe(true);
+    // ⭐ The card's headline, as an equality rather than a table: 401 vs 200
+    // was the defect, and this is the assertion that fails if it returns.
+    expect(syncThrowing.status).toBe(rejecting.status);
   });
 
-  it('the SAME seam, throwing synchronously, escapes that `.catch` and the caller is refused 401', async () => {
-    const captured = await drive(
-      mount(serverWith({ ...healthy(), settingsServiceProvider: (() => { throw new Error('settings unavailable'); }) as any })),
-      'GET', PKGS,
+  it('⭐ objectQL — the SECOND divergent seam the card did not measure: both shapes answer 403', async () => {
+    // [#13280] Not in the card's table, found while verifying it: this seam
+    // diverged too, 403 (reject) vs 401 (sync throw). It agrees at 403 — the
+    // engine is unresolvable either way, so the caller reaches an EMPTY grant
+    // set and is refused on capability, NOT on identity.
+    const { rejecting, syncThrowing } = await bothShapes('objectQLProvider');
+    expect(rejecting.status).toBe(403);
+    expect(syncThrowing.status).toBe(403);
+    expect(syncThrowing.body?.error?.code).toBe('FORBIDDEN');
+    expect(syncThrowing.status).toBe(rejecting.status);
+  });
+
+  it('auth — a PRE-IDENTITY seam: both shapes were ALREADY 401, and still are', async () => {
+    // ⚠️ This seam was mechanically asymmetric too (the sync throw escaped its
+    // `.catch` to the outer one) but never OBSERVABLY so: an absorbed auth
+    // provider yields `undefined`, and the next line is `if (!authService)
+    // return undefined`. Pinned precisely because it must NOT move — it is the
+    // control showing the normalisation did not turn every seam into a 200.
+    const { rejecting, syncThrowing } = await bothShapes('authServiceProvider');
+    expect(rejecting.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(syncThrowing.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(syncThrowing.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
+    expect(syncThrowing.status).toBe(rejecting.status);
+  });
+
+  it('⭐ the three seams do NOT agree with EACH OTHER — 200 / 403 / 401, so agreement is not a blanket swallow', async () => {
+    // The guard against the rival repair. "Every seam absorbs everything"
+    // would satisfy each per-seam pin above; it would NOT satisfy this. Each
+    // seam still degrades according to what it supplies.
+    const answers = await Promise.all(
+      (['settingsServiceProvider', 'objectQLProvider', 'authServiceProvider'] as const)
+        .map(async (seam) => (await bothShapes(seam)).syncThrowing.status),
     );
-    expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
-    expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
+    expect(answers).toEqual([200, 403, ANONYMOUS_DENY_STATUS]);
+    expect(new Set(answers).size).toBe(3);
+  });
+
+  it('⭐ [#13279] the loud permission-store outage is NOT absorbed by the normalised seams', async () => {
+    // The regression that would matter most: `seamOrUndefined` swallows at the
+    // seam, so a reader must be able to see that the branded outage still
+    // travels. It does — `AuthzStoreUnavailableError` is raised by `tryFind`
+    // inside `resolveAuthzContext`, downstream of every seam here, so no
+    // normalised seam is on its path.
+    const captured = await drive(mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS);
+    expect(captured.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect(captured.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
   });
 });
