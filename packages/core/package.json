@@ -26,10 +26,10 @@
   "devDependencies": {
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/refd-timer-testkit": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@objectstack/spec": "workspace:*",
