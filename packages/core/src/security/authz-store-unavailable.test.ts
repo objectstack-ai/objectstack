@@ -192,23 +192,94 @@ const isScaffolding = (rel: string) =>
   || /\.fixtures?\.ts$/.test(rel) || rel.includes(`${sep}dogfood${sep}`);
 
 function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === 'dist' || entry === '.turbo') continue;
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
+  // `withFileTypes` answers "is this a directory?" from the `readdir` result
+  // itself, so the walk costs one syscall per DIRECTORY instead of one per
+  // ENTRY (5,926 `statSync` calls on this tree). The symlink limb preserves the
+  // old `statSync` semantics exactly, and is not optional: `Dirent.isDirectory()`
+  // describes the LINK, not its target, so without it a symlinked directory
+  // would stop being descended and a transport behind one would drop out of the
+  // ledger's reach — the one silence this suite exists to prevent.
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.turbo') continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory() || (entry.isSymbolicLink() && statSync(full).isDirectory())) walk(full, out);
     else if (full.endsWith('.ts')) out.push(full);
   }
   return out;
 }
 
+/**
+ * The call this ledger tracks, as BYTES. `readFileSync(f)` hands back the
+ * file's bytes with no UTF-8 decode, and `Buffer.prototype.includes` searches
+ * them directly.
+ *
+ * The two spellings cannot disagree: the needle is pure ASCII, and an ASCII
+ * byte never occurs inside a multi-byte UTF-8 sequence (continuation bytes are
+ * all >= 0x80), so a byte hit and a decoded-string hit are the same hit — with
+ * no lossy-replacement step in between. Measured on this tree, decoding was
+ * 147 MB of transient JS strings per suite run and roughly half the scan's cost.
+ */
+const TRANSPORT_CALL = Buffer.from('resolveAuthzContext({');
+
 /** Every PRODUCTION file that calls `resolveAuthzContext`, rebuilt from source. */
-function discoverTransports(): string[] {
+function scanTransports(): string[] {
   return walk(join(REPO_ROOT, 'packages'))
-    .filter((f) => readFileSync(f, 'utf8').includes('resolveAuthzContext({'))
     .map((f) => relative(REPO_ROOT, f).split(sep).join('/'))
+    // ⭐ The scaffolding filter runs BEFORE the read, not after it. A path
+    // belongs to the result iff it BOTH contains the call AND is not
+    // scaffolding; set intersection does not care which half is tested first,
+    // so the reordering is semantically free. What it removes is 2,979 of
+    // 5,076 files (56% of the bytes) that were read into memory in full and
+    // only then thrown away for their path.
     .filter((rel) => !isScaffolding(rel.split('/').join(sep)))
+    .filter((rel) => readFileSync(join(REPO_ROOT, rel)).includes(TRANSPORT_CALL))
     .sort();
 }
+
+/**
+ * ⛔ Computed once per PROCESS, and only ever FROM SOURCE.
+ *
+ * Both tests below need the whole enumeration, and deriving it twice walked and
+ * read the tree twice for one answer — the cost that timed this suite out at
+ * the default 5000 ms and aborted the shard around it.
+ *
+ * What this cache must NEVER become is a checked-in list, a snapshot fixture,
+ * or a cache keyed on anything that can outlive a commit. The enumeration is
+ * rebuilt from source on every run precisely so a transport added later cannot
+ * inherit the old silence unnoticed; a curated list would answer only "the
+ * doors I remembered". A fresh process — that is, every run of this suite —
+ * walks the tree again. The copy is returned so no caller can mutate the
+ * enumeration out from under the other test.
+ */
+let SCANNED: readonly string[] | undefined;
+function discoverTransports(): string[] {
+  return [...(SCANNED ??= scanTransports())];
+}
+
+/**
+ * The budget for the two tests that SCAN, stated rather than inherited.
+ *
+ * vitest's default 5000 ms is the budget for a test that does no I/O, and this
+ * suite inherited it silently. It was not a decision, and it was measurably the
+ * wrong one: the scan blew it on CI while passing on a developer box, so the
+ * only signal anyone got was `Test timed out in 5000ms` on PRs that had not
+ * touched authorization — and because a timeout ABORTS THE SHARD, one slow test
+ * cost eleven other packages their entire run.
+ *
+ * That asymmetry is why this number is generous rather than tight. A budget set
+ * close to the observed cost buys nothing (the scan is not a thing we want to
+ * race) and risks the catastrophic, non-local failure again on a slow runner; a
+ * generous one costs nothing when the test passes. Measured on this tree with a
+ * COLD page cache, the scan is 255 ms, so this is ~118x its measured cost.
+ *
+ * ⛔ This is a BUDGET, not an assertion about speed — deliberately not
+ * `expect(elapsed).toBeLessThan(n)`, which on a shared CI runner is flaky by
+ * construction and would just re-file this card's successor. And it is not the
+ * repair: the repair is that the scan reads 2,097 files once instead of 5,076
+ * twice. If this budget is ever reached, the tree has outgrown a linear scan and
+ * the answer is to re-engineer it, ⛔ never to raise this number.
+ */
+const SCAN_BUDGET_MS = 30_000;
 
 describe('[#13279] every transport that authorizes through resolveAuthzContext', () => {
   it('CONTROL: the scanner finds transports at all, and finds THIS repo', () => {
@@ -217,14 +288,14 @@ describe('[#13279] every transport that authorizes through resolveAuthzContext',
     const found = discoverTransports();
     expect(found.length).toBeGreaterThanOrEqual(8);
     expect(found).toContain('packages/rest/src/rest-server.ts');
-  });
+  }, SCAN_BUDGET_MS);
 
   it('⭐ SET EQUALITY: the ledger names exactly the transports source contains', () => {
     // A NEW transport is red here until it is classified — which is the whole
     // point: the ruling is about every transport, including the ones written
     // after it.
     expect(discoverTransports()).toEqual(Object.keys(TRANSPORT_LEDGER).sort());
-  });
+  }, SCAN_BUDGET_MS);
 
   it.each(Object.entries(TRANSPORT_LEDGER))(
     '%s (%s) — a fail-closed catch re-raises the outage instead of degrading it',

@@ -10,6 +10,7 @@
     "ActionResultDialogTranslation": "src/system/translation.zod.ts#ActionResultDialogTranslation (type)",
     "ActionResultDialogTranslationSchema": "src/system/translation.zod.ts#ActionResultDialogTranslationSchema (const)",
     "AddFieldOperation": "src/system/migration.zod.ts#AddFieldOperation (const)",
+    "AddressedPageComponentContext": "src/system/i18n-resolver.ts#AddressedPageComponentContext (interface)",
     "AdvancedAuthConfig": "src/system/auth-config.zod.ts#AdvancedAuthConfig (type)",
     "AdvancedAuthConfigSchema": "src/system/auth-config.zod.ts#AdvancedAuthConfigSchema (const)",
     "AnalyzerConfig": "src/system/search-engine.zod.ts#AnalyzerConfig (type)",
@@ -834,6 +835,7 @@
     "translateObject": "src/system/i18n-resolver.ts#translateObject (function)",
     "translatePage": "src/system/i18n-resolver.ts#translatePage (function)",
     "translateView": "src/system/i18n-resolver.ts#translateView (function)",
-    "validationMessageTranslationKey": "src/system/validation-message.ts#validationMessageTranslationKey (function)"
+    "validationMessageTranslationKey": "src/system/validation-message.ts#validationMessageTranslationKey (function)",
+    "walkAddressedPageComponents": "src/system/i18n-resolver.ts#walkAddressedPageComponents (function)"
   }
 }
