@@ -216,3 +216,96 @@ describe('compileCelToFilter — input shapes', () => {
     expect(r.ok && r.filter).toEqual({ dept: 'sales' });
   });
 });
+
+/**
+ * A null/undefined MEMBER of a resolved membership array fails closed, like the
+ * null SCALAR variable already pinned above (maintainer ruling, 2026-08-31).
+ *
+ * BOTH POLARITIES are pinned, and that is the point of the suite rather than a
+ * completeness flourish. The alternative repair — stripping the unresolved member
+ * — is safe in POSITIVE polarity (`$in` over the surviving members never grants
+ * more than those members grant) and INVERTS under the supported `not in` form:
+ * `!(x in y)` lowers to `$not` wrapping `$in`, and `$in: []` matching nothing makes
+ * `$not { $in: [] }` match the whole table. A positive-only suite is green for both
+ * repairs and therefore pins nothing about the one that was ruled on.
+ */
+describe('compileCelToFilter — a null MEMBER of a membership array fails closed', () => {
+  const vars = (org_user_ids: unknown[]) => ({ current_user: { id: 'u_me', org_user_ids } });
+  const expectUnresolved = (r: ReturnType<typeof compileCelToFilter>, path = 'current_user.org_user_ids') => {
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe('unresolved-variable');
+    expect(r.detail).toContain(path);
+    expect(r.detail).toContain('unresolved member');
+  };
+
+  // ---- POSITIVE polarity: `x in y` -> $in ---------------------------------
+  it('positive: null among resolved members → unresolved-variable (no $in emitted)', () => {
+    expectUnresolved(compileCelToFilter('id in current_user.org_user_ids', { variables: vars(['u_me', null]) }));
+  });
+  it('positive: a lone null member → unresolved-variable', () => {
+    expectUnresolved(compileCelToFilter('id in current_user.org_user_ids', { variables: vars([null]) }));
+  });
+  it('positive: an undefined member fails closed too (the scalar path refuses both)', () => {
+    expectUnresolved(compileCelToFilter('id in current_user.org_user_ids', { variables: vars(['u_me', undefined]) }));
+  });
+
+  // ---- NEGATIVE polarity: `!(x in y)` -> $not wrapping $in ----------------
+  // This is where stripping inverted into allow-all; refusing must reach the SAME
+  // result here as in positive polarity, with no polarity threading in the lowerer.
+  it('negated `not in`: null among resolved members → unresolved-variable (no $not{$in} emitted)', () => {
+    expectUnresolved(compileCelToFilter('!(id in current_user.org_user_ids)', { variables: vars(['u_me', null]) }));
+  });
+  it('negated `not in`: a lone null member → unresolved-variable, NOT $not{$in:[]} (whole table)', () => {
+    expectUnresolved(compileCelToFilter('!(id in current_user.org_user_ids)', { variables: vars([null]) }));
+  });
+  it('negated inside a disjunction: the surviving disjunct does not rescue the compile', () => {
+    expectUnresolved(
+      compileCelToFilter("!(id in current_user.org_user_ids) || owner == current_user.id", {
+        variables: vars([null]),
+      }),
+    );
+  });
+  it('negated inside a conjunction fails closed as well', () => {
+    expectUnresolved(
+      compileCelToFilter("!(id in current_user.org_user_ids) && owner == current_user.id", {
+        variables: vars(['u_me', null]),
+      }),
+    );
+  });
+
+  // ---- the two polarities agree, which is the ruling's "same treatment" ----
+  it('both polarities and the null SCALAR variable yield the identical reason', () => {
+    const scalar = compileCelToFilter('record.organization_id == current_user.organization_id', {
+      variables: { current_user: { organization_id: null } },
+    });
+    const positive = compileCelToFilter('id in current_user.org_user_ids', { variables: vars([null]) });
+    const negated = compileCelToFilter('!(id in current_user.org_user_ids)', { variables: vars([null]) });
+    const reasons = [scalar, positive, negated].map((r) => (r.ok ? 'ok' : r.reason));
+    expect(reasons).toEqual(['unresolved-variable', 'unresolved-variable', 'unresolved-variable']);
+  });
+
+  // ---- shapes this guard must NOT move --------------------------------------
+  it('a fully resolved membership array still compiles, in both polarities', () => {
+    expect(ok('id in current_user.org_user_ids', vars(['u_me', 'u_peer']))).toEqual({
+      id: { $in: ['u_me', 'u_peer'] },
+    });
+    expect(ok('!(id in current_user.org_user_ids)', vars(['u_me', 'u_peer']))).toEqual({
+      $not: { id: { $in: ['u_me', 'u_peer'] } },
+    });
+  });
+  it('an EMPTY membership array still compiles to $in:[] in both polarities (a declared predicate, unchanged here)', () => {
+    expect(ok('id in current_user.org_user_ids', vars([]))).toEqual({ id: { $in: [] } });
+    expect(ok('!(id in current_user.org_user_ids)', vars([]))).toEqual({ $not: { id: { $in: [] } } });
+  });
+  it('an AUTHORED literal null in a list is not an unresolved variable — out of this guard scope', () => {
+    // A declared predicate, the same way `record.x == null` lowers to `$null` rather
+    // than failing closed. What such a filter SELECTS is a separate open question;
+    // this pin records only that the compiler still lowers it, unchanged.
+    expect(ok("record.status in ['lost', null]")).toEqual({ status: { $in: ['lost', null] } });
+  });
+  it('isPushdownableCel is untouched: the authoring gate resolves no variables', () => {
+    expect(isPushdownableCel('id in current_user.org_user_ids').ok).toBe(true);
+    expect(isPushdownableCel('!(id in current_user.org_user_ids)').ok).toBe(true);
+  });
+});

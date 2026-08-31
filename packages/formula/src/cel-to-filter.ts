@@ -39,7 +39,10 @@
  *   `current_user.org_user_ids` → a pre-resolved membership array for `$in`
  *   (honours ADR-0055: the runtime pre-resolves the set; the compiler never emits
  *   a subquery). A variable that resolves to `undefined`/`null` yields
- *   `unresolved-variable` (the "no active org" fail-closed path).
+ *   `unresolved-variable` (the "no active org" fail-closed path) — and so does a
+ *   null/undefined MEMBER of a resolved membership array, which is the same
+ *   unresolved value one level in. See {@link lowerMembership} for why the member
+ *   is refused rather than dropped.
  */
 
 import type { ASTNode } from '@marcbachmann/cel-js';
@@ -365,6 +368,35 @@ function lowerMembership(elemNode: ASTNode, containerNode: ASTNode, ctx: Ctx): F
   const value = resolveValue(container, ctx);
   if (value !== SHAPE_VALUE && !Array.isArray(value)) {
     throw new CompileError('unsupported', `\`in\` requires an array/list on the right`);
+  }
+  // A null/undefined MEMBER of a RESOLVED membership variable fails closed, exactly
+  // as the scalar `resolveValue` path does one level up: the same unresolved value,
+  // the same `unresolved-variable` reason, the same deny sentinel downstream. Until
+  // this guard the member was emitted verbatim into a security `$in`, so the one
+  // shape that IS a permission predicate was the one shape that did not fail closed.
+  //
+  // Refused, never dropped. Stripping the member was measured to INVERT under the
+  // supported `not in` form (`!(x in y)` → `$not` wrapping `$in`): `$in: []` matches
+  // nothing, so `$not { $in: [] }` matches the WHOLE table. "Matches nothing" is
+  // fail-closed in POSITIVE polarity only, which makes stripping fail-OPEN precisely
+  // where the predicate is a blocklist. Refusing here needs no polarity awareness at
+  // all — it throws before any `$not` wrapper is built, so every enclosing shape
+  // (`!`, `&&`, `||`) collapses to the single `unresolved-variable` result.
+  //
+  // Deliberately NOT this guard's business: an AUTHORED literal null inside a list
+  // (`record.status in ['lost', null]`). That is a declared predicate rather than an
+  // unresolved variable — the same distinction `== null` already draws, where a
+  // literal null lowers to `$null` instead of failing closed — and what such a
+  // filter should SELECT is a separate open question this compiler does not answer.
+  if (container.kind === 'var' && Array.isArray(value)) {
+    const idx = value.findIndex((member) => member === null || member === undefined);
+    if (idx !== -1) {
+      throw new CompileError(
+        'unresolved-variable',
+        `variable "${container.path.join('.')}" has an unresolved member at index ${idx} ` +
+          `(${String(value[idx])}); a membership array must resolve every member`,
+      );
+    }
   }
   return { [(elem as { path: string }).path]: { $in: value } } as FilterCondition;
 }
