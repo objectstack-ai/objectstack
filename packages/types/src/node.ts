@@ -100,9 +100,9 @@
  * `packages/verify` `bootStack`, `packages/qa/dogfood`'s enterprise probe).
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isModuleNotFoundError } from './module-not-found.js';
 
@@ -383,6 +383,224 @@ function unresolvableMessage(declaration: HostDeclaration, cause: unknown): stri
 }
 
 /**
+ * ── #13330: the DECLARED leg must resolve with ESM semantics ─────────────────
+ *
+ * `hostRequire.resolve(pkg)` is a **CommonJS** resolution, and CJS resolution
+ * answers the `require` condition. Every `tsup` dual build in this repo — and
+ * essentially every dual build anywhere — publishes
+ *
+ *     "exports": { ".": { "import": "./dist/index.js", "require": "./dist/index.cjs" } }
+ *
+ * so that resolve returns `dist/index.cjs`, and `import()`ing a `.cjs` file
+ * evaluates the package's **CommonJS** build. Everything that build then
+ * `require`s is CJS too, all the way down.
+ *
+ * The importer's callers are ESM (`packages/cli` is `"type": "module"`), so
+ * anything they load through their OWN import chain is the ESM build of the
+ * same package. Loading a package here therefore produced a SECOND instance of
+ * every module it shares with the caller — with its own module-scope state.
+ *
+ * That is not a theoretical difference. `serve` loads a cluster driver through
+ * this leg; the driver's whole job is the side effect
+ * `registerClusterDriver('redis', …)` against `@objectstack/service-cluster`'s
+ * module-scope registry. Measured on the EE image, in one process:
+ *
+ *     ESM instance: redis REGISTERED     <- after a bare import() of the driver
+ *     CJS instance: NOT registered       <- after this leg loaded the driver
+ *
+ * The Runtime reads the ESM instance, so `OS_CLUSTER_DRIVER=redis` on a
+ * three-replica deployment died at `defineCluster()` with `Cluster driver
+ * "redis" is not registered` while the package was installed, declared and
+ * resolvable. Any module-scope registry crossing this seam has the same defect;
+ * the cluster driver is simply the one that shipped.
+ *
+ * The fix is to select the entry the `import` condition names. There is no
+ * flagless Node API that resolves a bare specifier against an arbitrary parent
+ * (`import.meta.resolve`'s parent argument is ignored without
+ * `--experimental-import-meta-resolve` — measured, see `createHostImporter`),
+ * so the host-anchored ANSWER still comes from the CJS resolver, and only the
+ * CONDITION is re-decided here: the CJS-resolved file locates the package on
+ * disk, and the `import` entry of THAT package is what gets imported.
+ *
+ * Deliberately narrow, so this cannot regress a load that works today:
+ *
+ *   - a package with no `exports` map is untouched — CJS resolution already
+ *     returned `main`, which is the only entry it publishes;
+ *   - a package whose `exports` names no import-condition target (CJS-only) is
+ *     untouched, and so is one whose two conditions name the same file;
+ *   - anything unreadable, unresolvable or absent on disk falls back to the
+ *     CJS-resolved path, i.e. to exactly the pre-#13330 behaviour.
+ *
+ * A residual split is still possible above this seam — an app and a framework
+ * package holding two PHYSICAL copies of the same package are two instances in
+ * any module system, and no resolver condition can merge them. That case is not
+ * silent any more: `serve` reads the registry after the load and reports it
+ * (`packages/cli/src/commands/serve.ts`, the cluster block).
+ */
+
+/**
+ * The conditions Node matches on an `import()` here.
+ *
+ * MEMBERSHIP, not priority: Node walks an exports object's KEYS in insertion
+ * order and takes the first that names an active condition, so the manifest
+ * decides precedence and this set only decides eligibility. `require` is absent
+ * on purpose — selecting it is the defect above.
+ */
+const ESM_IMPORT_CONDITIONS: ReadonlySet<string> = new Set([
+  'node-addons',
+  'node',
+  'import',
+  'default',
+]);
+
+/**
+ * Pick a target from one `exports` node under {@link ESM_IMPORT_CONDITIONS}.
+ *
+ * A string is a target; an array is a fallback list (first resolvable wins);
+ * `null` blocks the subpath; an object is a condition map. Nesting is arbitrary
+ * (`{ import: { types: …, default: … } }` is the shape `tsup` emits).
+ */
+function selectImportTarget(node: unknown): string | undefined {
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) {
+    for (const alternative of node) {
+      const hit = selectImportTarget(alternative);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (node === null || typeof node !== 'object') return undefined;
+  for (const entry of Object.entries(node as Record<string, unknown>)) {
+    if (!ESM_IMPORT_CONDITIONS.has(entry[0])) continue;
+    const hit = selectImportTarget(entry[1]);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve one subpath (`.`, `./node`, `./forms/x`) of an `exports` field to the
+ * relative target its import condition names.
+ *
+ * A map is recognised by its KEYS: exports whose keys all begin with `.` is a
+ * subpath map, anything else is the root-condition sugar for `"."` — the same
+ * test Node applies, and the reason `{ "import": …, "require": … }` needs no
+ * special case here.
+ */
+function resolveExportsSubpath(exportsField: unknown, subpath: string): string | undefined {
+  if (exportsField === undefined) return undefined;
+
+  const keys =
+    typeof exportsField === 'object' && exportsField !== null && !Array.isArray(exportsField)
+      ? Object.keys(exportsField as Record<string, unknown>)
+      : undefined;
+  const isSubpathMap =
+    keys !== undefined && keys.length > 0 && keys.every((key) => key === '.' || key.indexOf('./') === 0);
+
+  if (!isSubpathMap) return subpath === '.' ? selectImportTarget(exportsField) : undefined;
+
+  const map = exportsField as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(map, subpath)) return selectImportTarget(map[subpath]);
+
+  // Pattern keys (`"./*": "./dist/*.js"`). Node takes the key with the longest
+  // static prefix, breaking ties on the longest suffix, and substitutes the
+  // matched span into the target's own `*`.
+  let best: { prefix: string; suffix: string; target: unknown } | undefined;
+  for (const entry of Object.entries(map)) {
+    const star = entry[0].indexOf('*');
+    if (star < 0 || entry[0].indexOf('*', star + 1) >= 0) continue;
+    const prefix = entry[0].slice(0, star);
+    const suffix = entry[0].slice(star + 1);
+    if (subpath.indexOf(prefix) !== 0) continue;
+    if (suffix !== '' && subpath.slice(subpath.length - suffix.length) !== suffix) continue;
+    if (subpath.length < prefix.length + suffix.length) continue;
+    if (
+      best !== undefined &&
+      (best.prefix.length > prefix.length ||
+        (best.prefix.length === prefix.length && best.suffix.length >= suffix.length))
+    ) {
+      continue;
+    }
+    best = { prefix, suffix, target: entry[1] };
+  }
+  if (best === undefined) return undefined;
+  const matched = subpath.slice(best.prefix.length, subpath.length - best.suffix.length);
+  const target = selectImportTarget(best.target);
+  return target === undefined ? undefined : target.split('*').join(matched);
+}
+
+/**
+ * The directory of the package named `packageName` that owns `resolvedFile`.
+ *
+ * Walked up from the resolved entry rather than computed from the specifier,
+ * because the resolver's answer is a REALPATH: under pnpm that is inside
+ * `.pnpm/<pkg>@<version>/node_modules/<pkg>`, which is exactly the directory
+ * whose `node_modules` the package's own transitive imports resolve against —
+ * and exactly what makes one physical copy shared between the app and the
+ * framework.
+ */
+function packageRootOf(resolvedFile: string, packageName: string): string | undefined {
+  let dir = dirname(resolvedFile);
+  // Bounded on purpose: a package root is a few segments above its entry, and
+  // an unbounded walk on a broken layout would stat every ancestor up to `/`.
+  for (let hop = 0; hop < 64; hop += 1) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+        name?: unknown;
+      };
+      // A NESTED manifest — the `{"type":"commonjs"}` marker a dual build drops
+      // in `dist/` — carries no name, so it is walked THROUGH, not stopped at.
+      if (manifest.name === packageName) return dir;
+    } catch {
+      // Not a manifest, or not readable. Keep walking.
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * The file the `import` condition names for `specifier`, or `undefined` when
+ * this seam has nothing to change — see the narrowness list in the #13330 note.
+ *
+ * @param cjsResolved What `hostRequire.resolve(specifier)` answered. It is the
+ * host-anchored part of the answer and is never second-guessed here; only the
+ * CONDITION is re-decided.
+ */
+function esmEntryForDeclared(
+  specifier: string,
+  packageName: string,
+  cjsResolved: string,
+): string | undefined {
+  const root = packageRootOf(cjsResolved, packageName);
+  if (root === undefined) return undefined;
+
+  let exportsField: unknown;
+  try {
+    exportsField = (
+      JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { exports?: unknown }
+    ).exports;
+  } catch {
+    return undefined;
+  }
+  // No `exports` map ⇒ nothing to choose between: `main` is the only entry the
+  // package publishes and CJS resolution already returned it.
+  if (exportsField === undefined || exportsField === null) return undefined;
+
+  const subpath =
+    specifier === packageName ? '.' : `.${specifier.slice(packageName.length)}`;
+  const target = resolveExportsSubpath(exportsField, subpath);
+  if (typeof target !== 'string' || target.indexOf('./') !== 0) return undefined;
+
+  const entry = resolve(root, target);
+  // Node refuses an exports target that escapes its package; so does this.
+  if (entry.indexOf(root + sep) !== 0) return undefined;
+  return existsSync(entry) ? entry : undefined;
+}
+
+/**
  * Build an importer that loads a package **as the host app declares it**, and
  * otherwise falls back to the importing package's own resolution.
  *
@@ -492,7 +710,12 @@ export function createHostImporter(
           cause,
         );
       }
-      return import(pathToFileURL(resolved).href);
+      // #13330: re-decide the CONDITION, never the host anchor. `resolved`
+      // stays the authority on WHERE the package is; this asks that package
+      // which entry an `import()` gets, so the caller's ESM chain and this
+      // load share one instance of everything the package brings with it.
+      const entry = esmEntryForDeclared(pkg, declaration.packageName, resolved) ?? resolved;
+      return import(pathToFileURL(entry).href);
     }
 
     try {
