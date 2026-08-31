@@ -3,7 +3,7 @@
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -2345,9 +2345,42 @@ export class HttpDispatcher {
                     // Dropped from the response, not from the operator's reach.
                     console.warn(`[HttpDispatcher] PERMISSION_DENIED on ${method} ${cleanPath} — ${withheld}`);
                 }
+                // [#13623] The producer's marked user-facing text rides out —
+                // the SECOND door that dropped it. #13241 repaired the
+                // THROW-TRANSPARENT exit (`dispatcher-plugin.errorResponseBase`);
+                // a marked denial never reaches that exit, because this catch is
+                // not a pure rethrow: it recognises the denial and answers it
+                // from here, so the mark was dropped at a different door than the
+                // one that card fixed.
+                //
+                // `declaredUserMessage` is the ONE read every boundary applies
+                // (`@objectstack/types`), so this door cannot fork its own
+                // answer to "what counts as marked": the sibling
+                // {@link errorFromThrown} asks the same rule via
+                // `resolveThrownHttpError`, and `@objectstack/rest`'s
+                // `mapDataError` — whose 403 branch matches this same denial
+                // shape — already carries the field. Parity at the PERMISSION_DENIED
+                // 403 is what the 2026-08-11 ruling on #7450 asked of the two
+                // transports; before this the dispatcher's 403 was the one that
+                // differed.
+                //
+                // ⛔ This does NOT re-open #7450's disclosure withhold. That
+                // ruling is about `error.details` — the gate's `positions` /
+                // `permissionSets` / cascade-child `object`, which are
+                // SERVER-side diagnostics attached by `plugin-security` and are
+                // still dropped above. `userMessage` is the opposite by
+                // construction: it exists only because a producer wrote text
+                // FOR the caller, platform and driver code never set it, and it
+                // lands as a declared top-level sibling of `code`/`message`
+                // (`ApiErrorSchema.userMessage`), never inside `details`.
+                // The mark never moves the status or the `code` (#9934).
+                const userMessage = declaredUserMessage(e);
                 return {
                     handled: true,
-                    response: this.error(e.message, 403, permissionDeniedErrorDetails(cleanPath)),
+                    response: this.error(
+                        e.message, 403, permissionDeniedErrorDetails(cleanPath), undefined,
+                        userMessage !== undefined ? { userMessage } : undefined,
+                    ),
                 };
             }
             throw e;
