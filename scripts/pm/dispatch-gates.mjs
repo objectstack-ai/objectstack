@@ -1675,12 +1675,22 @@ export { maskComments };
  * comment convention: `function selfTest() {` at column 0, optionally `export`
  * and/or `async`, with any name that spells self-test (`selfTest`,
  * `fixtureSelfTest`, `selfTestReadSeams`, `prePushIsArmedSelfTest`,
- * `decisionTableSelfTest` — the five spellings this tree actually uses).
+ * `decisionTableSelfTest` — four of the 18 compound names this tree uses).
  *
- * Measured across the 61 scripts under `scripts/` that carry one: 53 write
- * `function selfTest() {`, 7 write `async function selfTest() {`, and the four
- * remaining names are the compound ones above — 61 of 61 at column 0, none of
- * them an arrow-function const. If a script ever spells one as
+ * Re-derived at 6193e576d across the 169 scripts under `scripts/` that carry
+ * one — 185 declarations: 111 `function selfTest(`, 28
+ * `export function selfTest(`, 19 `async function selfTest(`, 8
+ * `export async function selfTest(`, and 19 compound names — one of which is
+ * this module's own `maskSelfTests`, so this file's masker blanks its own body
+ * whenever it scans itself. That was true long before the helper follow below
+ * existed and it costs nothing today, because none of the functions it reaches
+ * spells a path; it is recorded because it is the kind of thing that stops
+ * being free the day one of them does. The load-bearing half holds: 185 of 185
+ * at column 0, and a column-0 scan for the const/arrow spelling finds ZERO.
+ * ⚠ The counts in this paragraph read 61/53/7/4 when it was written and had
+ * gone stale by a factor of three before anyone re-read them — re-derive them
+ * rather than quoting them; only the two PROPERTIES are what this pattern
+ * rests on. If a script ever spells one as
  * `const selfTest = () => {`, widen this pattern rather than reaching for a
  * comment marker; a declaration is a thing the language guarantees, a marker
  * comment is a thing an author has to remember.
@@ -1711,12 +1721,30 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  *
  * `skipParams` walks the parameter list first, and it is not a refinement: a
  * destructured default puts braces in the SIGNATURE, and counting those closes
- * the body before it opens. `release-rehearsal-clone.mjs` writes two of them —
- * `function makeSource(root, name, { branch = 'main', … } = {})` masked to 29
- * characters without this, i.e. to nothing. No self-test in this tree takes a
- * parameter (61 of 61 are `selfTest()`), so the self-test spans are unchanged
- * by it on today's corpus; a future `function selfTest({ verbose } = {})` is
- * the case it stops from silently masking nothing at all.
+ * the body before it opens. `release-rehearsal-clone.mjs` writes two of them
+ * among its fixture builders — and, the half this docblock asserted backwards
+ * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
+ * this repairs live files rather than guarding against a future spelling:
+ *
+ *   scripts/check-test-completeness.mjs:576
+ *   scripts/measure-position-name-fold-census.mjs:689
+ *       both `function selfTest({ quiet = false } = {})`
+ *   scripts/workspace-enumerator.mjs:328
+ *       `export function selfTest({ root = null } = {})`
+ *
+ * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
+ * module against a staged copy of the one on `origin/main`: 30 -> 14848,
+ * 30 -> 3961, 34 -> 6294. Thirty bytes is the destructured parameter and
+ * nothing else; the entire self-test body was surviving the mask. The control
+ * that makes those three a reading rather than an artifact is a self-test with
+ * no brace in its signature, identical both ways —
+ * `check-empty-changeset.mjs`, 48044 -> 48044.
+ *
+ * It did not move the hint census, and that is LUCK rather than design: those
+ * three bodies happen to carry no path literal their module bodies do not
+ * already carry, so `extractWatchHints` returns the same set on both sides
+ * (`[]`, `[]`, and the same 8 hints). A fourth file with the same signature
+ * shape and one fixture path in it would have been a live fabricated lead.
  */
 function bracedBodyEnd(source, scan, start, skipParams) {
   let i = start;
