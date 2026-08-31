@@ -144,25 +144,50 @@ describe('[#4483] $search auto field set — lead orders, never admits', () => {
 // and in opposite directions, so no single relaxation can make this pin vacuous.
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// [#13695] `SEARCHABLE_ENUM_TYPES` members must be real `FieldType`s.
+// [#13695] Every search type vocabulary in this file is a subset of `FieldType`.
 //
-// The #6934 disjointness pins above check the vocabularies against EACH OTHER
+// The #6934 disjointness pins below check the vocabularies against EACH OTHER
 // but never against `FieldType` itself, so a member that matches no real field
 // type at all — a pure ghost, distinct from an overlap — passed every existing
-// pin silently: `'status'` sat in this set matching nothing, for as long as it
-// took a docs sweep to notice by hand. This pin closes that probe gap for the
-// enum vocabulary specifically (the one the finding hit); it is deliberately
-// NOT extended to `SEARCH_AUTO_EXCLUDED_TYPES`, which is a separate, larger
-// finding of its own (`object`/`grid`/`geometry`/`encrypted` are ghosts there
-// too) filed out of scope for this fix.
+// pin silently: `'status'` sat in `SEARCHABLE_ENUM_TYPES` matching nothing for
+// as long as it took a docs sweep to notice by hand, and the same probe run
+// against the other sets found four more in `SEARCH_AUTO_EXCLUDED_TYPES`
+// (#13716: 'object', 'grid', 'geometry', 'encrypted' — never `FieldType`
+// members at any commit, so the fail-closed tiebreak comment was asserting a
+// safety property for names that cannot occur). This pin now holds ALL of the
+// file's type vocabularies to the enum: an exclusion or allowance spelled with
+// a name `FieldType` does not contain governs nothing.
+// (`SEARCH_AUTO_EXCLUDED_FIELDS` is deliberately absent — its members are
+// field NAMES, not types.)
 // ---------------------------------------------------------------------------
-describe('[#13695] SEARCHABLE_ENUM_TYPES ⊆ FieldType', () => {
+describe('[#13695] search type vocabularies ⊆ FieldType', () => {
   const validTypes: ReadonlySet<string> = new Set(FieldType.options);
+  const vocabularies: ReadonlyArray<[string, ReadonlySet<string>]> = [
+    ['SEARCHABLE_TEXTUAL_TYPES', SEARCHABLE_TEXTUAL_TYPES],
+    ['SEARCHABLE_ENUM_TYPES', SEARCHABLE_ENUM_TYPES],
+    ['SEARCH_AUTO_EXCLUDED_TYPES', SEARCH_AUTO_EXCLUDED_TYPES],
+    ['SEARCH_VIRTUAL_TYPES', SEARCH_VIRTUAL_TYPES],
+  ];
 
-  it('every member is a real FieldType — no ghost vocabulary entries', () => {
-    for (const t of SEARCHABLE_ENUM_TYPES) {
-      expect(validTypes.has(t), `'${t}' is in SEARCHABLE_ENUM_TYPES but not a FieldType member`).toBe(true);
+  it.each(vocabularies)('%s has no ghost members', (name, set) => {
+    const ghosts = [...set].filter((t) => !validTypes.has(t)).sort();
+    expect(ghosts, `${name} names types that are not FieldType members`).toEqual([]);
+  });
+
+  it('CONTROL — the subset assertions are not vacuous', () => {
+    // A broken `FieldType` import (empty `options`) or an accidentally emptied
+    // vocabulary would green every subset check above while pinning nothing.
+    expect(validTypes.size).toBeGreaterThan(0);
+    for (const [name, set] of vocabularies) {
+      expect(set.size, `${name} is unexpectedly empty`).toBeGreaterThan(0);
     }
+    // Positive control — one known-real member per vocabulary, so the pin is
+    // measuring membership, not an accident of empty intersections.
+    expect(validTypes.has('text')).toBe(true);
+    expect(SEARCHABLE_TEXTUAL_TYPES.has('text')).toBe(true);
+    expect(SEARCHABLE_ENUM_TYPES.has('select')).toBe(true);
+    expect(SEARCH_AUTO_EXCLUDED_TYPES.has('secret')).toBe(true);
+    expect(SEARCH_VIRTUAL_TYPES.has('formula')).toBe(true);
   });
 });
 
