@@ -1436,12 +1436,25 @@ export function refForRepo(window, repoId) {
  *
  * Returns `{ error }` for a window this sweep cannot parse. A window it cannot
  * parse is a hard failure, never a default (the `parseSince` rule, one level up).
+ *
+ * ⚠️ EVERY REF RESOLVES IN ITS OWN REPO (#13424). The refs are per-repo by
+ * construction — `<id>=<ref>` pins one repo, a bare ref is tried wherever it
+ * resolves — and the fallback DATE this function derives is now resolved the
+ * same way: `resolveRefDate(ref, repoId)` is asked per pair, an `<id>=<ref>`
+ * pin only in its own repo, a bare ref across `repoIds`. It used to be asked
+ * of the SELF checkout only, so a sweep pinning only sibling-repo tips
+ * (`--since-ref objectui=TIP`, no objectstack pin) exited 1 with `does not
+ * resolve to a commit` although every ref resolved perfectly in its own
+ * repository — a false red: a usable sweep rejected, the constraint
+ * undeclared and incidental. The hard failure survives exactly where it is
+ * honest: no named ref resolves in ANY repo it names.
  */
 export function resolveWindow({
   sinceRefArgs = [],
   sinceArg = null,
   now = new Date(),
   budgetSeconds = SKEW_BUDGET_SECONDS,
+  repoIds = GOVERNED_REPOS.map((r) => r.id),
   resolveRefDate = () => null,
 } = {}) {
   const pinnedRefs = new Map();
@@ -1463,11 +1476,24 @@ export function resolveWindow({
   // The topological window still carries a date: it is what a repo the ref does
   // not resolve in falls back to, and what `historyHorizon` is asked about
   // there. The OLDEST resolved ref date is the conservative choice — a wider
-  // fallback window over-lists, which this audit tolerates by design.
-  const named = [bareRef, ...pinnedRefs.values()].filter((r) => r != null);
-  const dates = named.map((r) => resolveRefDate(r)).filter((d) => typeof d === 'string' && d !== '' && !Number.isNaN(Date.parse(d)));
+  // fallback window over-lists, which this audit tolerates by design. Each
+  // pair resolves in ITS OWN repo (#13424): a pin in the repo it names, a bare
+  // ref in every governed checkout.
+  const pairs = [
+    ...[...pinnedRefs].map(([repoId, r]) => ({ repoId, ref: r })),
+    ...(bareRef !== null ? repoIds.map((repoId) => ({ repoId, ref: bareRef })) : []),
+  ];
+  const dates = pairs
+    .map(({ repoId, ref }) => resolveRefDate(ref, repoId))
+    .filter((d) => typeof d === 'string' && d !== '' && !Number.isNaN(Date.parse(d)));
   if (dates.length === 0) {
-    return { error: `--since-ref ${named.map((r) => `'${r}'`).join(', ')} does not resolve to a commit.` };
+    const named = [...new Set(pairs.map((p) => p.ref))];
+    return {
+      error:
+        `--since-ref ${named.map((r) => `'${r}'`).join(', ')} does not resolve to a commit in any repo it names ` +
+        `(an <id>=<ref> pin resolves in that repo's own checkout, a bare ref in every governed checkout — ` +
+        `never only in the self checkout, #13424).`,
+    };
   }
   const requestedIso = new Date(Math.min(...dates.map((d) => Date.parse(d)))).toISOString();
   return { mode: 'topological', bareRef, pinnedRefs, requestedIso, effectiveIso: backOff(requestedIso), budgetSeconds };
@@ -1981,15 +2007,33 @@ async function main() {
   }
   const repoSet = only.length > 0 ? GOVERNED_REPOS.filter((r) => only.includes(r.id)) : GOVERNED_REPOS;
 
+  // The checkouts resolve BEFORE the window (#13424): the window's fallback
+  // date is derived per repo, so the resolver needs to know where each repo's
+  // checkout is. This runs again in the re-exec'd child (below) — a handful of
+  // local `git rev-parse`/`config` reads per repo, paid twice by design rather
+  // than threaded through an exec boundary.
+  const repos = resolveRepoCheckouts({
+    repos: repoSet,
+    selfRoot,
+    siblingDir: dirname(selfRoot),
+    overrides,
+    probe: probeCheckout,
+  });
+  const repoById = new Map(repos.map((r) => [r.id, r]));
+
   // The window (#12633). `--since-ref` is topological and `--since` is a date
   // boundary backed off by the declared skew budget; both are resolved here as
-  // data so the report can SAY which one it ran and what it cost.
+  // data so the report can SAY which one it ran and what it cost. Each ref
+  // resolves in ITS OWN repo's checkout (#13424), never only in the self one.
   const window = resolveWindow({
     sinceRefArgs: argsOf('--since-ref'),
     sinceArg: argOf('--since'),
-    resolveRefDate: (r) => {
+    repoIds: repoSet.map((r) => r.id),
+    resolveRefDate: (r, repoId) => {
+      const repo = repoById.get(repoId);
+      if (!repo) return null;
       try {
-        return git(selfRoot, ['log', '-1', '--format=%cI', `${r}^{commit}`]).trim();
+        return git(repo.path, ['log', '-1', '--format=%cI', `${r}^{commit}`]).trim() || null;
       } catch {
         return null;
       }
@@ -2022,14 +2066,6 @@ async function main() {
     if (typeof child.status === 'number') return child.status;
     console.error(`⚠️  could not re-exec with ${rearm.flag} (${child.error?.message ?? 'no exit status'}); continuing in-process — attribution may fail.`);
   }
-
-  const repos = resolveRepoCheckouts({
-    repos: repoSet,
-    selfRoot,
-    siblingDir: dirname(selfRoot),
-    overrides,
-    probe: probeCheckout,
-  });
 
   const entries = [];
   let scanned = 0;
@@ -2368,6 +2404,47 @@ async function selfTest() {
   assert('an-unresolvable---since-ref-is-a-hard-failure-never-a-default-window',
     typeof resolveWindow({ sinceRefArgs: ['nope'], resolveRefDate: () => null }).error === 'string');
   assert('and-so-is-an-unparseable---since', typeof resolveWindow({ sinceArg: 'yesterday' }).error === 'string');
+  // ── #13424: every ref resolves in ITS OWN repo, never only in self ────────
+  // The measured defect: `--since-ref objectui=TIP` with no objectstack pin
+  // exited 1 `does not resolve to a commit`, because the DATE derivation asked
+  // the self checkout about a sibling's tip. The control below is the old
+  // self-only resolver, verbatim in behaviour: it still errors, which is what
+  // proves the fix moved the question and not the failure.
+  const uiOnly = resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectui' && r === 'uitip000000' ? '2026-08-14T05:55:02Z' : null),
+  });
+  assert('a-sweep-pinning-only-a-sibling-repo-tip-resolves-its-date-in-that-repo-and-is-not-an-error',
+    uiOnly.error === undefined && uiOnly.mode === 'topological' && uiOnly.requestedIso === '2026-08-14T05:55:02.000Z', JSON.stringify(uiOnly));
+  const selfOnlyControl = resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectstack' ? '2026-08-14T05:55:02Z' : null),
+  });
+  assert('control-a-resolver-that-answers-only-for-self-still-errors-the-defect-was-WHERE-the-question-went',
+    typeof selfOnlyControl.error === 'string' && selfOnlyControl.error.includes('does not resolve to a commit'), JSON.stringify(selfOnlyControl.error));
+  // A pin is asked ONLY of its own repo — asking self about a sibling's tip is
+  // the exact read the defect was made of, so the resolver records its calls.
+  const askedPairs = [];
+  resolveWindow({
+    sinceRefArgs: ['objectui=uitip000000', 'cloud=cloudtip0000'],
+    resolveRefDate: (r, repoId) => {
+      askedPairs.push(`${repoId}=${r}`);
+      return repoId === 'objectui' ? '2026-08-14T05:55:02Z' : null;
+    },
+  });
+  assert('a-pinned-ref-is-resolved-in-its-own-repo-only-never-in-self',
+    askedPairs.join(',') === 'objectui=uitip000000,cloud=cloudtip0000', JSON.stringify(askedPairs));
+  // A bare ref is tried in every governed checkout, and resolving ANYWHERE is
+  // enough — the old shape resolved it in self alone.
+  const bareAnywhere = resolveWindow({
+    sinceRefArgs: ['v9.9.9'],
+    repoIds: ['objectstack', 'objectui'],
+    resolveRefDate: (r, repoId) => (repoId === 'objectui' ? '2026-08-13T00:00:00Z' : null),
+  });
+  assert('a-bare-ref-that-resolves-in-any-governed-checkout-is-enough',
+    bareAnywhere.error === undefined && bareAnywhere.requestedIso === '2026-08-13T00:00:00.000Z', JSON.stringify(bareAnywhere));
+  assert('the-per-repo-error-says-where-refs-are-resolved-so-the-constraint-is-declared-not-incidental',
+    selfOnlyControl.error.includes('its own') || selfOnlyControl.error.includes('own checkout'), selfOnlyControl.error);
   // The enumeration itself: topological consults NO date, and a repo the ref
   // does not resolve in says why it took the date window instead.
   const topoWalk = mainlineCommitsInWindow('/w/objectstack', 'origin/main', topo, {
@@ -2633,6 +2710,20 @@ async function selfTest() {
     assert('the-SWEEP-refuses-a-checkout-whose-origin-parses-to-no-slug',
       localSweep.status !== 0 && localOut.includes('does not parse') && localOut.includes('NOT MEASURED') && !auditedRow.test(localOut) && !localOut.includes('✅'),
       `status=${localSweep.status} out=${localOut.slice(0, 500)}`);
+
+    // ── #13424, end to end: a sweep pinning ONLY a sibling repo's tip — no
+    // pin for the self repo — must produce a report, not exit 1. This exact
+    // invocation shape used to answer `does not resolve to a commit` because
+    // the window's date derivation asked the self checkout about the pin.
+    const siblingPinSweep = spawnSync(
+      process.execPath,
+      [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${coLive}`, '--since-ref', `cloud=${localTip}`],
+      { encoding: 'utf8', env: sweepEnv },
+    );
+    const siblingPinOut = `${siblingPinSweep.stdout ?? ''}${siblingPinSweep.stderr ?? ''}`;
+    assert('a-sweep-pinning-only-a-sibling-tip-produces-a-report-instead-of-exit-1',
+      siblingPinSweep.status === 0 && auditedRow.test(siblingPinOut) && siblingPinOut.includes('window topological') && !siblingPinOut.includes('does not resolve'),
+      `status=${siblingPinSweep.status} out=${siblingPinOut.slice(0, 500)}`);
 
     // Freshness by IDENTITY: advance the remote, leave the mirror untouched.
     const pusher = join(fxRoot, 'pusher');
