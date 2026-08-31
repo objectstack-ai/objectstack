@@ -314,18 +314,24 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
         "admin"
       ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
+        ]
+      },
       "steps": [
         "boot showcase with the console; open Studio → object designer and the permission matrix on an object belonging to a read-only (installed/locked) package",
         "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
         "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
         "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
-        "repeat the same PUT against a WRITABLE (draft/app-local) object to prove the guard discriminates by package writability, not by blanket denial"
+        "POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base into a writable target, then repeat the same PUT against an object in that writable package to prove the guard discriminates by package writability, not by blanket denial"
       ],
       "acceptance": [
         {
@@ -341,9 +347,9 @@
           "evidence": "PUT trace"
         },
         {
-          "clause": "the same PUT against a writable object SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
+          "clause": "the same PUT against a writable object — obtained through the platform's own duplicate-base route, not a stock fixture — SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
           "oracle": "api",
-          "verify": "writable-target PUT answers 2xx and a follow-up GET shows the change",
+          "verify": "POST /packages/com.example.showcase/duplicate (ADR-0070 D4) to clone the showcase base into a writable target package, then PUT on an object in that target answers 2xx and a follow-up GET shows the change",
           "evidence": "both traces"
         },
         {
@@ -363,7 +369,9 @@
       "source": [
         "#3358 §5",
         "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
-        "ADR-0010 §3.3 (_lock)"
+        "ADR-0010 §3.3 (_lock)",
+        "packages/runtime/src/domains/packages.ts (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
         {
@@ -377,6 +385,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-31",
+          "change": "retargeted the writable-package contrast side (step 5, acceptance clause 3) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」; reaffirmed 2026-08-25, 「其他接受」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get the writable contrast object. Added a fixtures.requires line naming the runtime route explicitly, since the item previously left the writable side as an unqualified 'a WRITABLE (draft/app-local) object'. Mirrors the sibling half landed for automation.rollup-summary-filter (PR #11913, bb62d4d08).",
+          "ref": "#9788"
         }
       ]
     },
