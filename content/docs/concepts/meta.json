@@ -1,7 +1,6 @@
 {
   "title": "Core Concepts",
   "pages": [
-    "index",
     "architecture",
     "metadata-driven",
     "metadata-lifecycle",

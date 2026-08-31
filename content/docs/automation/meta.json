@@ -1,7 +1,6 @@
 {
   "title": "Automation",
   "pages": [
-    "index",
     "hooks",
     "hook-bodies",
     "flows",

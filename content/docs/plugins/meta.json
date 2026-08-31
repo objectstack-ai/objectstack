@@ -1,7 +1,6 @@
 {
   "title": "Plugins & Packages",
   "pages": [
-    "index",
     "anatomy",
     "development",
     "packages",
