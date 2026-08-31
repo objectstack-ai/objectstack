@@ -15,9 +15,50 @@
  */
 
 /**
+ * The manifest that owns a row's `gen:`/`check:` names when the row does not say.
+ *
+ * Every row declared this implicitly until #13585, and the reconciliation read it
+ * and nothing else — see `REGEN_ARTIFACTS` for what that cost.
+ */
+export const DEFAULT_OWNER = '@objectstack/spec';
+
+/**
+ * The ROOT manifest, by the name it gives itself.
+ *
+ * Spelled as a name rather than as a path so it reads the same way as any other
+ * owner, and pinned against the real root `package.json` by
+ * `git-merge-regen.mjs --self-test` so the two cannot drift apart silently. The
+ * root is the one owner that is not a workspace member, which is why `ownerDir`
+ * answers it directly instead of looking for it.
+ */
+export const ROOT_OWNER = '@objectstack/spec-monorepo';
+
+/**
  * Artifacts the driver takes over. `check` proves currency, `gen` restores it.
- * Both names are verified against `packages/spec/package.json` by `--self-test`,
- * so a renamed script fails loudly here instead of silently disarming a path.
+ *
+ * `owner` names the manifest that defines those two script names, and defaults to
+ * `DEFAULT_OWNER`. `--self-test` verifies each name against THAT manifest, so a
+ * renamed script fails loudly here instead of silently disarming a path.
+ *
+ * ## Why the owner is declared and not searched for (#13585)
+ *
+ * Until #13585 the verification read `packages/spec/package.json` alone, so an
+ * artifact owned by ROOT tooling could not be registered at all: its `gen:`/
+ * `check:` live in the root manifest, and the reconciliation reported them as
+ * scripts that "no longer exist". That refusal was correct about the tree and
+ * wrong about the world, and an author following it literally moves root tooling
+ * into a package it does not belong to, purely to satisfy a lookup path.
+ *
+ * Widening the lookup to "resolve the name in any manifest" would have fixed the
+ * refusal and left a worse seam behind, because the name is not what the other two
+ * consumers need. The driver prints a regeneration command and the `pre-commit`
+ * gate SPAWNS one, and both were bound to `packages/spec`; a row that resolved
+ * somewhere else would be registered and unreconcilable — self-test green, while
+ * the hook ran the gate in a directory that does not define it and refused the
+ * commit forever. Measured before this field existed: `pnpm -s check:sdui-lockstep`
+ * exits 254 (`Command not found`) in the gate's spawn directory and 0 at the repo
+ * root. So the owner is a declaration all three consumers read, which is what keeps
+ * the reconciliation two-way rather than merely permissive.
  */
 export const REGEN_ARTIFACTS = Object.freeze([
   // Deliberately NOT sharded (#5837): keyed by version, so two PRs append under
@@ -240,6 +281,63 @@ export const GIT_SETTINGS = Object.freeze([
   { key: `merge.${DRIVER_NAME}.driver`, value: `node ${DRIVER_SCRIPT_EXPR} %O %A %B %P` },
   { key: 'core.hooksPath', value: '.githooks' },
 ]);
+
+/**
+ * The manifest name that owns an entry's `gen:`/`check:` scripts.
+ *
+ * Pure, and the single place the default is applied — a consumer that spelled
+ * `entry.owner ?? '@objectstack/spec'` inline would be a second definition of the
+ * default, and the one that wins would be whichever consumer the reader opened.
+ *
+ * @param {{ owner?: string }} entry
+ * @returns {string}
+ */
+export function ownerOf(entry) {
+  return entry.owner ?? DEFAULT_OWNER;
+}
+
+/**
+ * The repo-relative directory an owner's `package.json` sits in, or `null` when no
+ * such owner exists.
+ *
+ * Pure on purpose: it takes an ALREADY-enumerated workspace rather than reading one,
+ * so this module keeps its "constants and pure functions, no top-level statement that
+ * runs" shape (the property `check:entry-guard` relies on to leave it alone). Callers
+ * pass `workspacePackages(REPO_ROOT)` from `workspace-enumerator.mjs`, which is the
+ * repo's one parse of the workspace globs.
+ *
+ * `null` is a REFUSAL, never a skip: an owner nobody can resolve means a row whose
+ * scripts were never verified, which is the state this whole reconciliation exists to
+ * make impossible.
+ *
+ * @param {string} owner
+ * @param {Array<{ dir: string, manifest: Record<string, unknown> }>} workspacePkgs
+ * @returns {string | null}
+ */
+export function ownerDir(owner, workspacePkgs) {
+  if (owner === ROOT_OWNER) return '.';
+  const hit = workspacePkgs.find((p) => p?.manifest?.name === owner);
+  return hit ? hit.dir : null;
+}
+
+/**
+ * The pnpm invocation that runs `script` for `owner`, FROM THE REPO ROOT.
+ *
+ * One builder, because the string the driver PRINTS and the command the
+ * `pre-commit` gate SPAWNS have to be the same command; #13585 is what happens when
+ * a lookup and its consumers disagree about which package a row belongs to. The root
+ * manifest takes no `--filter`: it is not a workspace member, and `pnpm <script>` at
+ * the root is how its scripts run.
+ *
+ * @param {string} owner
+ * @param {string} script
+ * @param {{ silent?: boolean }} [options] `silent` adds `-s`, for a spawn rather than advice
+ * @returns {string}
+ */
+export function ownerRunCommand(owner, script, { silent = false } = {}) {
+  const s = silent ? ' -s' : '';
+  return owner === ROOT_OWNER ? `pnpm${s} ${script}` : `pnpm${s} --filter ${owner} ${script}`;
+}
 
 /** Resolve the entry that owns a path, or undefined. Handles the one `**` entry. */
 export function entryForPath(p) {
