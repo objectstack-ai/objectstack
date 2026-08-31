@@ -642,10 +642,10 @@
     },
     {
       "id": "api-backend.route-ledger-live-parity",
-      "title": "Every ledgered route family — REST, dispatcher, auth, storage/i18n services — and the non-ledgered mounts (/api/settings, /api/v1/datasources) are actually mounted on the live server — no route that exists only in unit tests",
+      "title": "Every route family across all ELEVEN route ledgers — REST, dispatcher, auth, storage/i18n/settings/datasource services, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -654,7 +654,8 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "packages/rest/src/rest-route-ledger.ts — the audited route inventory (route-manager + direct-mount rows, full wire paths at /api/v1)"
+          "packages/rest/src/rest-route-ledger.ts — the audited route inventory (route-manager + direct-mount rows, full wire paths at /api/v1)",
+          "the other ten ledgers named in the steps — the ledger universe is ELEVEN files at head (grep the repo for '*route-ledger.ts' at run time rather than trusting this list to stay complete: a twelfth ledger landing is exactly the drift this item exists to catch)"
         ]
       },
       "steps": [
@@ -662,7 +663,8 @@
         "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
         "capture status + code per route",
         "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
-        "fire the NON-LEDGERED mounts: GET /api/settings (note the /api/settings base — NOT /api/v1), GET /api/v1/datasources/drivers, GET /api/v1/datasources",
+        "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts:66-75, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts:138-165, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
+        "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts:104-122 — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
         "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
         "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control",
         "compare GET /api/v1/discovery capability bits against the families that answered (search/export/transactionalBatch at minimum)"
@@ -711,10 +713,22 @@
           "evidence": "the per-ledger traces"
         },
         {
-          "clause": "the NON-LEDGERED mounts answer too, and their absence from any route ledger is recorded as the finding: GET /api/settings (service-settings, mounted at /api/settings — NOT under /api/v1) answers non-404, and GET /api/v1/datasources/drivers (always-available static catalog) plus GET /api/v1/datasources (200, or 503 SERVICE_UNAVAILABLE when the admin service is unwired) answer non-404 — yet neither /api/settings nor the /api/v1/datasources admin CRUD appears in packages/rest/src/rest-route-ledger.ts (the tranche-3 route-ledger discipline gap, PENDING-GAPS §E)",
+          "clause": "the formerly-unledgered mounts are LEDGERED at head and answer live: GET /api/settings answers non-404 and its four routes are ledgered in packages/services/service-settings/src/settings-route-ledger.ts (#7526, guarded by the parity dogfood gate); the /api/v1/datasources admin family answers non-404 and its eleven routes are ledgered in packages/services/service-datasource/src/datasource-route-ledger.ts (#7744, guarded by its own conformance test). ⛔ A run that files the pre-revision-3 'unledgered mount / tranche-3 discipline gap' finding is filing a FALSE finding — that gap closed; the assertion is now parity WITH those ledgers",
           "oracle": "api",
-          "verify": "the /api/settings and /api/v1/datasources traces are non-routing-404; the run record notes both mounts are unledgered",
-          "evidence": "the two traces + the unledgered-mount finding"
+          "verify": "the /api/settings and /api/v1/datasources traces are non-routing-404; the run record cites both ledger files instead of the retired unledgered-mount finding",
+          "evidence": "the two traces + the ledger-file citations"
+        },
+        {
+          "clause": "the datasource-admin floor holds on BOTH sides (#9391/#9593): every sampled /api/v1/datasources route — the drivers catalog INCLUDED (its pre-#9391 posture was 'always-available static catalog'; that is history, kept in the ledger header on purpose) — answers 401 UNAUTHENTICATED anonymous and 403 PERMISSION_DENIED to an authed caller without manage_platform_settings, BEFORE any service is resolved (admin-routes.ts:85-99), while the admin's same request answers the real payload. An anonymous prober must read the 401 as 'mounted, floor holds', never as 'route missing' and never as a regression of the old open catalog",
+          "oracle": "api",
+          "verify": "three-persona trace of GET /api/v1/datasources/drivers (anonymous 401 / non-admin 403 / admin 200) plus one more family route anonymous → 401; compare the 401/403 bodies against the routing-404 control to prove they are handler answers",
+          "evidence": "the per-persona traces + the control diff"
+        },
+        {
+          "clause": "the RAW-APP families answer live — metadata HMR (dev-posture), trigger-api hooks, cloud-connection/runtime-config, console static: each sampled route answers non-routing-404 (for the SSE stream, the status/headers of the initial response). These mounts go through getRawApp(), so 'routes an adapter mounts on its framework-native handle are outside this table by construction' (spec contracts/http-server.ts) — the #7526 parity gate is structurally blind to them and their per-package ledgers are source-scan/conformance guards, making this item's probes the only LIVE-HTTP observation of the family. Dev-posture caveat: /api/v1/dev/metadata-events mounts only under a literal NODE_ENV=development (#12140; unset means production per the #5673 ruling) — on the os dev boot it MUST answer; on a production-shaped boot its absence is the gate holding, recorded as posture, never as a missing mount",
+          "oracle": "api",
+          "verify": "per-family status table (metadata-hmr GET+POST, trigger-api POST with a bogus flow → structured JSON refusal, GET /api/v1/runtime/config → anonymous 200, GET /api/v1/cloud-connection/status, GET /_console) vs the 404 control; the run env records NODE_ENV posture next to the HMR verdict",
+          "evidence": "the raw-app status table + control trace + posture note"
         },
         {
           "clause": "the dispatcher meta state route is live AND correct: GET /api/v1/meta/object/showcase_task/state/status?from=in_review (dispatcher ledger meta.getLegalNextStates, ADR-0020 D3.3) answers non-404 and returns next == ['done','in_progress'] — exactly the declared task_status_flow transition set for that state; ?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null, and an unknown object → 404",
@@ -756,22 +770,32 @@
         "ledger:auth (AUTH_ROUTE_LEDGER)",
         "ledger:storage-service",
         "ledger:i18n-service",
-        "unledgered:/api/settings",
-        "unledgered:/api/v1/datasources"
+        "ledger:settings-service (settings-route-ledger.ts, #7526 — /api/settings base)",
+        "ledger:datasource-service (datasource-route-ledger.ts, #7744 — behind the #9391 manage_platform_settings floor)",
+        "ledger:metadata-hmr (metadata-route-ledger.ts — raw-app mount, dev-posture #12140)",
+        "ledger:trigger-api (trigger-api-route-ledger.ts, #11863 — raw-app mount)",
+        "ledger:cloud-connection (cloud-connection-route-ledger.ts, #11882 — raw-app mount, 16 rows)",
+        "ledger:console-static (console-route-ledger.ts, #11882 — raw-app mount, static-asset disposition)"
       ],
       "traps": [
-        "dispatcher-vs-hono-route"
+        "dispatcher-vs-hono-route",
+        "absence-inference"
       ],
       "source": [
         "packages/rest/src/rest-route-ledger.ts (variant source — the 19 REST families)",
         "packages/rest/src/rest-route-ledger.conformance.test.ts",
         "packages/runtime/src/route-ledger.ts (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
         "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
-        "packages/services/service-settings/src/settings-routes.ts (/api/settings — non-/api/v1 mount, UNLEDGERED)",
-        "packages/services/service-datasource/src/admin-routes.ts (/api/v1/datasources admin CRUD — UNLEDGERED, tranche-3 gap)",
+        "packages/services/service-settings/src/settings-route-ledger.ts (#7526 — the /api/settings family, ledgered; guarded by the parity dogfood gate, no per-package test by design)",
+        "packages/services/service-datasource/src/datasource-route-ledger.ts + datasource-route-ledger.conformance.test.ts (#7744 — the admin family, ledgered)",
+        "packages/services/service-datasource/src/admin-routes.ts:85-99 (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
+        "packages/metadata/src/metadata-route-ledger.ts:104-122 (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
+        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
+        "packages/cloud-connection/src/cloud-connection-route-ledger.ts (#11882 — 16 rows / four registrar families, raw-app mounts unfindable by the parity gate by construction)",
+        "packages/cli/src/utils/console-route-ledger.ts (#11882 — the four static-asset rows)",
+        "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
         "examples/app-showcase/src/data/objects/task.object.ts (task_status_flow transitions for the meta state-route clause)",
-        "docs/qa/platform-checklist/PENDING-GAPS.md §D/§E",
         "#3587",
         "#3361"
       ],
@@ -787,6 +811,12 @@
           "date": "2026-08-08",
           "change": "extended the sweep beyond the 19 REST families to the OTHER ledgers + non-ledgered mounts: dispatcher ledger (share-links/keys/notifications/suggested-bindings/i18n/analytics), AUTH_ROUTE_LEDGER, storage/i18n service ledgers, /api/settings, /api/v1/datasources; added a live-mount clause per ledger with a 404 control (the #3361 dispatcher-vs-hono class), and folded in the meta.getLegalNextStates state route (legal next states == declared task_status_flow set) since api-backend is its natural home",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-30",
+          "change": "de-staled against the head ledger universe, re-derived from source (find '*route-ledger.ts' — ELEVEN files). Three revision-2 claims had gone false and a run following them files false findings: (a) the 'unledgered:/api/settings' and 'unledgered:/api/v1/datasources' variants/clauses/sources — both families are ledgered at head (settings-route-ledger.ts #7526; datasource-route-ledger.ts + conformance test #7744) and the tranche-3 discipline-gap finding is retired; (b) step 5's 'always-available static catalog' for GET /datasources/drivers — since #9391/#9593 ALL eleven datasource-admin routes (catalog included) answer 401/403 without manage_platform_settings, so the step now drives all three personas and pins the 401-means-mounted reading; (c) the PENDING-GAPS.md source refs — that file was deleted after the 2026-08 sweep (FOLLOW-UPS.md records it). Extended the sweep to the five raw-app ledgers the revision-2 universe missed (metadata HMR with its #12140 dev posture, trigger-api #11863, cloud-connection #11882 with 16 rows, console static #11882 — each header states getMountedRoutes() cannot see them, making this item their only live-HTTP observation); added the corresponding variants and the absence-inference trap",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     },
@@ -1554,6 +1584,340 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §8 activation door is the only non-invocation shape /actions serves, is absent from every REST-ledger sweep (server-only, servedBy reconstruction), and none of its arms were in the ledger. Register corrections folded in during source verification: the 400-shape message carries a '(use `global` for an object-less action)' tail; a 4-segment path 404s at the ROUTER rather than reaching the door's 400 (no mount pattern matches); the authority gates run ahead of even the path-shape check, not just body/lookup; an empty body ENABLES by contract (a trap for a runner reading it as a refusal); and the ambiguity arm's no-stock-fixture status was verified across both showcase action files rather than assumed",
           "ref": "#12438"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.aggregate-contract-matrix",
+      "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (known-answer runs over the seeded baseline)",
+        "a restricted non-admin persona for the secured-aggregate leg (Mei Phone phone.demo@example.com or Ada Auditor auditor.demo@example.com, DEMO_PERSONA_PASSWORD 'showcase123' — same seeded personas api-backend.error-envelope-ledger names)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_account rows (numeric annual_revenue, date signed_on, select status/sales_region) — the same known-answer dataset api-backend.query-contract-matrix uses; expected values are ALWAYS computed locally from an unfiltered baseline read, never hardcoded",
+          "a boolean field for the #11152 min/max-over-boolean leg (showcase_field_zoo carries checkbox-typed fields)"
+        ],
+        "knownGaps": [
+          "Stock seed dates may not spread signed_on across enough DISTINCT buckets for every granularity to be answer-discriminating (e.g. all rows in one ISO week proves week-bucketing resolved, not that it bucketed correctly). Same discipline as api-backend.date-range-preset-matrix: record which granularities were answer-discriminating vs merely well-formed; seeding a few rows at known date offsets during the run is the honest close — record it if done.",
+          "Whether a given aggregate is answered by driver pushdown or by the in-memory path (packages/objectql/src/in-memory-aggregation.ts) depends on driver + timezone (tz≠UTC date buckets take the in-memory path per the #1982 note); the two paths must label identically (#3773/#3839 seam). Record which path answered when it is observable (e.g. via the timezone lever), and score the CONTRACT, which is path-independent."
+        ]
+      },
+      "steps": [
+        "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts:149 — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg at :86-96/:157-161) and DateGranularity (:174 — 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
+        "boot showcase isolated; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
+        "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
+        "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string)",
+        "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts:52): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
+        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist, :8883); aggregations as a non-array → the shape refusal with the worked example",
+        "secured-aggregate leg: run one grouped count as the restricted persona over an object where their visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts:328 states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
+      ],
+      "acceptance": [
+        {
+          "clause": "every AggregationFunction returns exactly the locally-computed answer over the seeded rows, grouped and ungrouped, including count's fieldless/'*' spelling (count-all) vs its per-field spelling (non-null count) — value equality per group, not row-count smoke",
+          "oracle": "api",
+          "verify": "per-function diff table of returned values vs baseline-computed expectations; the count-'*' vs count-field distinction is asserted with a row whose aggregated field is null",
+          "evidence": "the per-function diff table"
+        },
+        {
+          "clause": "every DateGranularity buckets to the ISO-8601 shapes with weeks starting MONDAY (week 1 contains the first Thursday), quarter as YYYY-Qn, and null/unparseable instants sharing one real-null bucket key (#3839) — bucket keys AND counts both reconcile against the locally computed windows from the recorded clock+zone",
+          "oracle": "api",
+          "verify": "per-granularity table: returned bucket keys/counts vs local computation; the week leg includes at least one date whose ISO week differs from its naive Sunday-start week",
+          "evidence": "the 5-row bucket table + the recorded clock/zone"
+        },
+        {
+          "clause": "empty-set values are the RULED identities, on both the empty-where and the #10576 measure-scoped-filter paths: count/count_distinct/sum → 0 (measured facts), avg/min/max → null (undefined, never flattened to a zero that reads as a measurement) — matching emptyGroupValueFor, the contract in-memory-aggregation.ts:180-246 implements",
+          "oracle": "api",
+          "verify": "the six per-function empty-set values on both paths; a sibling unfiltered measure in the same request keeps its full-bucket value (the #10576 isolation half)",
+          "evidence": "both responses + the expected-value table"
+        },
+        {
+          "clause": "retired functions refuse with their PRESCRIPTIONS and unknown functions with the enum listing: array_agg/string_agg answer 400 carrying their registered retirement messages (query.zod.ts:86-96 — no replacement exists; the message says to reshape and names 'os migrate meta --from 16'), while an invented function gets zod's own enum error listing the six legal members — the two error classes must not blur (the enum error map returns the retirement text ONLY for the two spellings that used to be legal)",
+          "oracle": "api",
+          "verify": "the three rejection bodies: two carry the retirement prescriptions, the third lists count/sum/avg/min/max/count_distinct; all are 400, never 500",
+          "evidence": "the three rejections"
+        },
+        {
+          "clause": "aggregation is SECURED: the restricted persona's aggregate equals the expectation computed from THEIR visible rows only — an aggregate that matches the admin's over rows the persona cannot read is the raw-driver bypass (the exact hazard action-execution.ts:328 forbids: only the engine's middleware chain injects RLS/tenant scoping and the FLS aggregate-input gate)",
+          "oracle": "api",
+          "verify": "restricted persona's grouped count vs their own filtered baseline AND vs the admin's differing answer — both comparisons recorded",
+          "evidence": "both personas' responses + both baselines"
+        },
+        {
+          "clause": "every variant below carries a recorded verdict — 6 functions and 5 granularities, none sampled away; granularities that were not answer-discriminating on the seeded data are recorded as such, never silently passed",
+          "oracle": "api",
+          "verify": "run record has one row per variant with the discriminating/well-formed-only flag on the granularity rows",
+          "evidence": "the 11-row run record"
+        }
+      ],
+      "negative": [
+        "a refused/unknown aggregation degrading to RAW ROWS with a 200 is the catastrophic direction — the aggregate action door's own rule ('grouped/aggregated output must stay the only thing this action can ever return', action-execution.ts) exists because the engine's in-memory path degrades to raw rows when neither aggregations nor groupBy survive, and the FLS result masker does not cover the aggregate op",
+        "an aggregation over a nonexistent field answering 200 (a computed value over nothing) instead of the located refusal is the #4134 class applied to the aggregation axis",
+        "the two bucket paths (driver pushdown vs in-memory) labeling the same instant differently is the #3773 seam — record both labels if the timezone lever exposes the divergence; it is a FAIL even when each path is self-consistent"
+      ],
+      "variants": [
+        "fn:count",
+        "fn:sum",
+        "fn:avg",
+        "fn:min",
+        "fn:max",
+        "fn:count_distinct",
+        "gran:day",
+        "gran:week (ISO — Monday start)",
+        "gran:month",
+        "gran:quarter",
+        "gran:year"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/query.zod.ts",
+        "export": "AggregationFunction",
+        "expect": 6
+      },
+      "traps": [
+        "seed-data-thin",
+        "single-datapoint",
+        "timezone-boundary",
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/spec/src/data/query.zod.ts:86-165 (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), :174 (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
+        "packages/objectql/src/in-memory-aggregation.ts (:180-246 the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; :300-347 bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
+        "packages/spec/src/data/aggregation-policy.ts:52 (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
+        "packages/runtime/src/action-execution.ts:328 (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
+        "packages/rest/src/rest-server.ts:7086 (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
+        "packages/metadata-protocol/src/protocol.ts:8883 (assertAggregationFieldsExist — the located unknown-field refusal)",
+        "#10576, #11152, #3839, #3773"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the aggregation vocabulary (6 functions × 5 granularities) had no matrix item: api-backend.query-contract-matrix covers the filter/select/sort axes of the same door and stops short of groupBy/aggregations. Register claims verified against source before authoring: the 6/5 member counts, the empty-set ruling (count/count_distinct/sum→0, avg/min/max→null — the register's 'count→0, avg/min/max→null' was correct but incomplete), the ISO-Monday week rule, the two retirement messages, and the engine-only security rule at action-execution.ts:328. Only one enumSource pin fits an item, so AggregationFunction carries it and DateGranularity (also a named export, pinnable in principle) is hand-counted in step 1",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.formula-stdlib-matrix",
+      "title": "CEL formula stdlib: all 27 registered functions give known answers against the BUILT package — calendar-day timezone contract, addMonths month-end clamp, floor(-1.2)==-2, null-dropping joins, mixed int/double arithmetic — and the unregistered-function silent-null fault is RECORDED, never ticked",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "build-time harness (no session — the matrix runs against the built @objectstack/formula package)",
+        "admin (the live read-path parity leg)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the two stock formula fields for the live leg: showcase_field_zoo.f_formula (field-zoo.object.ts:130) and showcase_project.budget_remaining (project.object.ts:65)",
+          "runtime metadata authoring (PUT /meta/object on a scratch object) for the stdlib-through-the-live-door leg"
+        ],
+        "knownGaps": [
+          "The stock formulas exercise only null-guard ternaries and arithmetic — NOT the stdlib catalog. The 27-function matrix therefore runs in a harness against the BUILT package (the same discipline as api-backend.formula-gates), and the live-door leg proves the same evaluator serves reads, not each function individually; a scratch formula field authored through the metadata channel carries two representative stdlib calls onto the live path. Record which oracle each function's verdict rests on."
+        ]
+      },
+      "steps": [
+        "count the registration chain: packages/formula/src/stdlib.ts registerStdLib (:101-236) registers exactly 27 functions by registerFunction call — now, today, daysFromNow, daysAgo, isBlank, coalesce, trim, joinNonEmpty, daysBetween, addDays, addMonths, date, datetime, abs, round, floor, ceil, min, max, upper, lower, contains, startsWith, endsWith, matches, len, isEmpty. NOT enumSource-pinnable (a builder chain, not a named z.enum) — re-count the calls in source at run time and fail the matrix stale if the count moved; cross-check the docs catalog (content/docs/data-modeling/formulas.mdx:171-190) advertises the same set, no more, no fewer",
+        "build the workspace (or confirm dist freshness — the stale-dist trap is the known false-negative here, same as api-backend.formula-gates); the harness must import the BUILT package and record the resolved module path",
+        "drive every one of the 27 with a pinned now and a known-answer expectation, at minimum: floor(-1.2)==-2 and ceil(-1.2)==-1 (round toward −∞/+∞, NOT toward zero); addMonths(date('2026-01-31'), 1) == 2026-02-28T00:00:00Z (month-end clamp, never a March overflow); daysBetween(a,b) sign convention (b−a, negative when b earlier); date()/datetime() alias parity on the same ISO input; coalesce(null,'x')=='x' but coalesce('', 'x')=='' (null/undefined only); joinNonEmpty(['a', null, ' ', 'b'], '-')=='a-b' (null AND blank-after-trim dropped); isBlank vs isEmpty on null/''/[]; trim(null)==''; upper/lower/contains/startsWith/endsWith on mixed input; matches regex truthiness; len over string/list/map; min/max returning the SMALLER/LARGER OPERAND VERBATIM (type preserved, numeric comparison); abs/round; now() === the pinned instant",
+        "calendar-day timezone contract (ADR-0053 Phase 2 D1): pin now to an instant whose calendar day DIFFERS between UTC and the reference zone (e.g. 2026-08-30T22:00:00Z with timezone Asia/Shanghai — locally already 08-31) and assert today() == 2026-08-31T00:00:00Z (the reference-tz calendar day expressed as UTC MIDNIGHT — never an instant carrying wall-clock time), daysFromNow/daysAgo offset from that same day; an unknown zone falls back to the UTC calendar day, never throws",
+        "mixed-arithmetic overloads (registerNumericCoercions, stdlib.ts:262-276): a double-typed record field divided/multiplied by an int literal (record.amount / 100) evaluates to the promoted double instead of faulting 'no such overload' to silent null (#1928), while pure int 7/2 == 3 keeps integer-division semantics untouched",
+        "live-door parity: GET a showcase_project row and confirm budget_remaining materializes (read-path evaluation); author a scratch object through the metadata channel whose formula field composes two stdlib calls (e.g. joinNonEmpty + upper) and read back the known answer — the stdlib reaching the LIVE read path, not just the harness",
+        "the expected-fail probe: author (or evaluate in-harness) a formula calling an UNregistered function (e.g. sqrt(4)); capture what actually happens at each door driven. At head the runtime contract is: a formula that compiles but does not EVALUATE yields null — applyFormulaPlan's own `r.ok ? … : null` (packages/objectql/src/engine.ts:1331-1348) — so the read answers 200 with the field null and no error surfaced (#3306 class; stdlib.ts:205-211 documents this exact failure mode as the reason floor/ceil got registered). Record the observed shape verbatim; if an authoring-time gate refuses the formula before it is stored, record THAT as the (better) behavior instead"
+      ],
+      "acceptance": [
+        {
+          "clause": "all 27 advertised functions evaluate to their known answers against the BUILT package — the matrix is exhaustive over the hand-counted registration chain, and the docs catalog matches it in both directions (an advertised-but-unregistered function or a registered-but-undocumented one each fail this clause)",
+          "oracle": "test",
+          "verify": "harness output: one known-answer row per function, resolved module path pointing into dist/node_modules; the source count and the docs-table cross-check recorded",
+          "evidence": "the 27-row harness table + the resolved path + the two counts"
+        },
+        {
+          "clause": "the calendar-day trio (today/daysFromNow/daysAgo) resolves to the REFERENCE-TIMEZONE calendar day expressed as UTC midnight (ADR-0053 D1) — proven with an instant whose calendar day differs between UTC and the zone, so a UTC-only implementation cannot pass by accident; unknown zone falls back to UTC without throwing",
+          "oracle": "test",
+          "verify": "the boundary-instant run: today() equals the zone's calendar day at UTC midnight, not the UTC calendar day; the invalid-zone run returns the UTC day",
+          "evidence": "both runs' outputs vs expectations"
+        },
+        {
+          "clause": "the documented sharp edges hold exactly: addMonths clamps to the target month's last day (Jan 31 + 1mo → Feb 28); floor/ceil round toward −∞/+∞ (floor(-1.2)==-2); joinNonEmpty drops null AND blank-after-trim entries; coalesce falls back on null/undefined ONLY (empty string passes through); min/max return the operand verbatim with numeric comparison",
+          "oracle": "test",
+          "verify": "the five named known-answer rows from the harness table",
+          "evidence": "the rows"
+        },
+        {
+          "clause": "mixed int/double arithmetic works without the #1928 silent null — record.amount / 100 evaluates (promoted double) — while pure int/int keeps integer division (7/2 == 3): the overloads fire only when the operands are genuinely mixed",
+          "oracle": "test",
+          "verify": "both arithmetic probes: the mixed one returns the double, the int one returns 3",
+          "evidence": "both results"
+        },
+        {
+          "clause": "the SAME evaluator serves the live read path: the stock formula fields materialize on GET, and a scratch formula composed of stdlib calls reads back its known answer through the data API — read-your-write included (#5504: the write response carries the materialized formula too)",
+          "oracle": "api",
+          "verify": "the scratch-formula GET (and the create response) carry the locally-computed expected value",
+          "evidence": "the responses vs the expectation"
+        },
+        {
+          "clause": "EXPECTED-FAIL — the unregistered-function fault is silent-null at head, and this clause exists to RECORD that, not to bless it: the probe's actual behavior (200, field null, no surfaced error — applyFormulaPlan's r.ok?…:null; or a louder authoring-time refusal if one has since landed) is captured verbatim. A run must NOT tick this clause green: silent-null is the standing #3306-class hazard, and the clause flips to a positive assertion only when the platform grows a loud refusal",
+          "oracle": "api",
+          "verify": "the probe's captured behavior, compared against the engine.ts:1331-1348 contract; any run recording 'pass' here without a platform change is a false green",
+          "evidence": "the captured probe trace + the run-record note naming which behavior was observed"
+        }
+      ],
+      "negative": [
+        "a harness that silently resolved src/ instead of dist is not-run, not pass — the resolved module path is part of the evidence (the api-backend.formula-gates discipline)",
+        "today() returning an instant with wall-clock time (or the UTC calendar day under a non-UTC zone) breaks the one representation `record.date == today()` equality depends on — the exact drift ADR-0053 D1 exists to prevent",
+        "the silent-null probe ticked as a pass is a false green (the clause is expected-fail); equally, filing it as a NEW defect is wrong — it is a known standing class (#3306), recorded on the item"
+      ],
+      "traps": [
+        "stale-dist",
+        "clock-skew",
+        "timezone-boundary"
+      ],
+      "source": [
+        "packages/formula/src/stdlib.ts:101-236 (registerStdLib — the 27 registerFunction calls; calendarDayUtc :41-51 ADR-0053 D1; addMonthsUtc clamp :83-91; the floor/ceil #3306 note :205-211), :262-276 (registerNumericCoercions #1928)",
+        "packages/objectql/src/engine.ts:1331-1348 (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
+        "content/docs/data-modeling/formulas.mdx:171-190 (the advertised catalog the matrix cross-checks)",
+        "examples/app-showcase/src/data/objects/field-zoo.object.ts:130 + project.object.ts:65 (the stock live-leg formulas)",
+        "ADR-0053 Phase 2 D1 (calendar-day timezone contract)",
+        "#3306, #1928, #5504",
+        "sibling item api-backend.formula-gates (runtime shapes + the date-arithmetic build gate — this item covers the FUNCTION CATALOG that item samples three members of)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the stdlib catalog (27 registered CEL functions) had no matrix: api-backend.formula-gates proves three runtime shapes and the build gate, and nothing asserted the advertised function set evaluates to its documented answers. Count verified by reading stdlib.ts (exactly 27 registerFunction calls — the register's '~27' resolved); the docs table (formulas.mdx) groups them into 18 rows covering the same 27. Not enum-pinnable (a registration chain, not a z.enum) — the count pin is a step-1 source re-count, stated on the item per the enumSource rules. The unregistered-function negative is authored as an expected-fail probe: engine.ts's applyFormulaPlan demonstrably nulls evaluate-faults, so a run records that behavior and must not tick it",
+          "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.api-methods-verb-gate",
+      "title": "enable.apiMethods three-state whitelist on the REST boundary: 404 hides apiEnabled:false, 405 OBJECT_API_METHOD_NOT_ALLOWED carries the EFFECTIVE derived set, bulk∧child + writeMode-precise import, legacy 8-value strip-and-WARN (deny-all cliff), the object gate answers ahead of the caller's 403, batch gated per-op before the txn",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (proves the gate is OBJECT-level: even admin_full_access answers 405/404 on a narrowed object)",
+        "a non-admin member for the ordering leg (Mei Phone phone.demo@example.com / Ada Auditor auditor.demo@example.com, DEMO_PERSONA_PASSWORD 'showcase123')",
+        "anonymous (the 401 baseline control)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock system objects as free negatives — no provisioning at all: sys_session apiMethods ['get','list'] (sys-session.object.ts:300), sys_device_code ['get'] (sys-device-code.object.ts:159), sys_api_key ['get','list','update'] (sys-api-key.object.ts:369), and sys_oauth_consent enable.apiEnabled false (sys-oauth-consent.object.ts:108) for the 404 fork",
+          "runtime metadata authoring (manage_metadata) for the scratch-object legs"
+        ],
+        "knownGaps": [
+          "NO showcase user object narrows apiMethods (grepped examples/app-showcase/src — zero declarations), so the subset-whitelist / deny-all / legacy-strip / bulk∧child legs on a USER object need a scratch object authored through the metadata channel (qa_verb_gate_probe). The system objects above cover the 405/404 forks and the ordering leg with no provisioning; record per clause whether the verdict rests on a system object or the scratch object."
+        ]
+      },
+      "steps": [
+        "read the contract sources: ApiMethod (packages/spec/src/data/object.zod.ts:18-22 — SIX authored primitives get/list/create/update/delete/bulk) and the derivation table (packages/spec/src/data/api-derivation.ts — resolveEffectiveApiMethods :264: undefined/null → unrestricted, [] or stripped-to-empty or NON-ARRAY → deny-all, subset → restricted closure; isApiOperationAllowed :327: bulk∧child, writeMode-precise import, restore/purge permanently closed)",
+        "free negatives, as ADMIN (the gate keys on the object, not the caller): PATCH /api/v1/data/sys_session/{id} → 405 OBJECT_API_METHOD_NOT_ALLOWED with the allowed[] array; GET /api/v1/data/sys_device_code (list against a get-only whitelist) → 405; GET /api/v1/data/sys_oauth_consent → 404 OBJECT_API_DISABLED (existence hidden); capture full bodies",
+        "ordering leg: repeat the sys_session PATCH as the NON-ADMIN member and compare with the admin's 405 — the object-level gate answers before any caller-level 403 (the identity-auth.session-list-revoke precedent, '405 before 403'); the anonymous twin answers the 401 floor first",
+        "scratch subset leg: author qa_verb_gate_probe with enable.apiMethods ['get','list','create']; verify update/delete → 405 whose allowed[] is the EFFECTIVE closure in API_OPERATION_ORDER (get, list, create + derived aggregate/search/export/import — and NEVER restore/purge, and NOT the raw 3-element whitelist); POST createMany → refused (bulk not granted); re-author adding 'bulk' → createMany passes the gate, updateMany still refused (bulk∧child: the child verb must itself be granted)",
+        "import precision leg (on the scratch object granting create but not update): the import door with writeMode insert clears the gate, writeMode update → 405 (rest-server.ts:7383 — the writeMode-precise check, not the coarse create∨update)",
+        "legacy strip leg: author enable.apiMethods ['upsert'] and capture BOTH the parse-time warning (object.zod.ts:98-126 — names the FROM→TO guidance 'declare [create,update] — upsert derives from create ∧ update' AND the deny-all cliff sentence, since stripping leaves []) and the runtime effect (every op → 405, allowed: []); then ['get','history'] → kept ['get'], warn names the history derivation; the registration-time diagnostic (packages/objectql/src/registry.ts:1020 warnStrippedLegacyApiMethods) adds the per-object line for schemas that skip Zod",
+        "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (rest-server.ts:11298-11311) and the valid sibling row never lands",
+        "both-sides control: GET and list on sys_session as an entitled caller still answer 200 — the whitelist GRANTS what it lists"
+      ],
+      "acceptance": [
+        {
+          "clause": "the 404/405 fork holds: enable.apiEnabled false answers 404 OBJECT_API_DISABLED (existence hidden — 'is not exposed via the API'), while a whitelist miss on an exposed object answers 405 OBJECT_API_METHOD_NOT_ALLOWED naming the operation and object — both codes ledgered (error-code-ledger.zod.ts:202-203), and the fork is decided by apiExposureDenialReason's two-step order: apiEnabled first and independently, the whitelist second (#7912)",
+          "oracle": "api",
+          "verify": "the sys_oauth_consent 404 vs the sys_session/sys_device_code 405s — codes, messages, and the fork per apiAccessDenialFromEnable (rest-server.ts:316-347)",
+          "evidence": "the captured bodies"
+        },
+        {
+          "clause": "the 405 body's allowed[] is the EFFECTIVE derived operation set in API_OPERATION_ORDER — never the raw whitelist: granted primitives plus their derived closure (aggregate/search from list, export from list, import from create/update, history only with trackHistory), with restore/purge absent even for an unrestricted object (permanently-off trash flags)",
+          "oracle": "api",
+          "verify": "the scratch object's 405 allowed[] equals effectiveOperationsArray(resolveEffectiveApiMethods({apiMethods:['get','list','create']})) computed locally from the spec table — element-for-element, order included",
+          "evidence": "the allowed[] vs the locally-computed closure"
+        },
+        {
+          "clause": "the three-state contract: undefined → unrestricted (a stock object with no whitelist serves every verb — no regression); a whitelist that is [] — authored empty, stripped-to-empty, or a NON-ARRAY value (fails CLOSED, #3545) — → deny-all (every op 405, allowed: []); a subset → exactly its closure. The flipped #3391 semantics: empty means expose NOTHING, not 'no restriction'",
+          "oracle": "api",
+          "verify": "one probe per state; the deny-all leg via the stripped-pure-legacy scratch object",
+          "evidence": "the three per-state traces"
+        },
+        {
+          "clause": "bulk∧child and writeMode precision: a bulk door (createMany/updateMany/deleteMany, per-object batch — each passes bulkChild, rest-server.ts:11445-11551) requires the bulk primitive AND the child verb; the import door refines to the exact writeMode (insert⇒create, update⇒update, upsert⇒both)",
+          "oracle": "api",
+          "verify": "the four scratch-object probes: createMany refused without bulk, allowed with bulk+create, updateMany still refused, import insert-vs-update fork",
+          "evidence": "the four traces"
+        },
+        {
+          "clause": "legacy values are STRIPPED-AND-WARNED, never parse-rejected (a PERMANENT compatibility layer — real metadata does not upgrade in lockstep with the spec): the warning carries the per-value FROM→TO prescription and, when stripping empties the whitelist, the loud deny-all-cliff sentence; the runtime effect matches the stripped whitelist exactly",
+          "oracle": "log",
+          "verify": "the parse/registration warnings for ['upsert'] (cliff sentence present) and ['get','history'] (kept ['get'], history guidance) + the runtime 405s agreeing with the stripped state; a hard parse rejection of a legacy value is a FAIL of the tolerance contract",
+          "evidence": "the warning lines + the runtime traces"
+        },
+        {
+          "clause": "the object gate answers ahead of the caller's authorization: the non-admin's refused verb gets the SAME 405 as the admin's (never a 403 that would leak the whitelist only to the entitled), and the anonymous probe gets the 401 floor before either — while granted verbs still serve the entitled caller (both sides of the gate)",
+          "oracle": "api",
+          "verify": "admin-vs-member 405 comparison on sys_session PATCH + the anonymous 401 + the entitled 200 on get/list",
+          "evidence": "the four traces"
+        },
+        {
+          "clause": "the cross-object batch door enforces the same gate PER-OP BEFORE opening the transaction: a batch containing one whitelist-refused op is refused up front and no sibling op's row lands (each distinct object×action checked once, rest-server.ts:11298-11311)",
+          "oracle": "api",
+          "verify": "the batch refusal + a follow-up read proving the valid sibling create never persisted",
+          "evidence": "the trace + the absent-row read"
+        }
+      ],
+      "negative": [
+        "a whitelist-refused operation that lands data-side effects (row created/updated before the 405) is a write-then-refuse FAIL",
+        "allowed[] echoing the RAW whitelist (or containing restore/purge) means the wire is leaking the authored form instead of the effective contract the frontend consumes",
+        "the gate is the EXTERNAL REST boundary only — internal callers (hooks, flows, raw objectql) are deliberately unaffected ('apiEnabled controls automatic API exposure, not data access'); a run must not file an internal write on a narrowed object as a bypass",
+        "a legacy apiMethods value HARD-REJECTED at parse is a FAIL in the opposite direction — the strip-and-warn tolerance is the contract (#3543: canonicalize-and-warn, never reject)"
+      ],
+      "variants": [
+        "verb:get",
+        "verb:list",
+        "verb:create",
+        "verb:update",
+        "verb:delete",
+        "verb:bulk"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/data/object.zod.ts",
+        "export": "ApiMethod",
+        "expect": 6
+      },
+      "traps": [
+        "wrong-persona",
+        "dispatcher-vs-hono-route",
+        "auth-state-leak"
+      ],
+      "source": [
+        "packages/spec/src/data/object.zod.ts:18-22 (ApiMethod — the six primitives), :34-56 (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), :98-126 (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), :265 (the z.preprocess wiring)",
+        "packages/spec/src/data/api-derivation.ts:264-380 (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
+        "packages/rest/src/rest-server.ts:316-347 (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), :1276-1331 (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), :7383 (writeMode-precise import), :11298-11311 (batch per-op before txn), :11445-11551 (bulk doors with bulkChild)",
+        "packages/objectql/src/registry.ts:1020 (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
+        "packages/spec/src/api/error-code-ledger.zod.ts:202-203 (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
+        "packages/platform-objects/src/identity/sys-session.object.ts:300 + sys-device-code.object.ts:159 + sys-api-key.object.ts:369 + sys-oauth-consent.object.ts:108 (the stock narrowed objects)",
+        "ADR-0049 / #1889 (shipping a non-enforcing apiEnabled is false security), #3391 (three-state), #3543 (enum shrink + strip), #3545 (non-array fails closed), #7912 (apiExposureDenialReason order)",
+        "sibling clause: identity-auth.session-list-revoke (the sys_session 405-before-403 precedent this item generalizes)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-30",
+          "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts:98-126 wired via z.preprocess at :265 (the register's ':70-85' pointed at the guidance table); the enforcement docblock is rest-server.ts:1276-1331 with the denial producer at :316-347; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
+          "ref": "#sweep-2026-08-30"
         }
       ]
     }

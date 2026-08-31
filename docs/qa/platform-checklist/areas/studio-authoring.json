@@ -1253,6 +1253,113 @@
       "history": [
         { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts:787 before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" }
       ]
+    },
+    {
+      "id": "studio-authoring.metadata-diagnostics-sweep",
+      "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (the governance surface is Studio's)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a console bundle matching the .objectui-sha pin (the DiagnosticsPage / DirectoryPage halves are objectui code)",
+          "the stock metadata corpus (any booted showcase — the sweep runs over whatever the store holds)"
+        ],
+        "knownGaps": [
+          "THE POSITIVE ENTRY LEG IS FIXTURE-BLOCKED ON STOCK, BY CONSTRUCTION: every authoring door validates at save (the 422 gate studio-authoring.authoring-validation-not-persisted proves), so a stock boot's store holds NO invalid item and the sweep legitimately answers clean — entries:[], total:0. An invalid STORED row exists only via spec evolution (a row saved under an older spec the current schema rejects — the population POST /meta/_migrate-stored exists for), and sys_metadata is a storage table, not a data-plane object, so a runner cannot plant one through /api/v1/data either. The invalid-entry clause therefore scores blocked(fixture) until a stale-row fixture exists (a pre-seeded DB snapshot from an older spec revision is the honest recipe candidate); the CLEAN-store empty state is the live positive in the meantime, and the outage/spelling refusals are pinned at the unit layer",
+          "severity=warning ADDS NO ROWS ON TODAY'S PRODUCERS: the sweep's contract includes warning-only entries (protocol.ts getMetaDiagnostics: valid items with diagnostics.warnings), but computeMetadataDiagnostics emits errors only and the docstring reserves warnings 'for a future lint layer' — no read-decoration producer emits a warning at head. The severity clause asserts the MECHANISM (param accepted, error rows unchanged), not warning rows; a warning row appearing is a finding that the lint layer landed (revise this item), never noise",
+          "REPO OWNERSHIP (ADR-0054): the API half — route, sweep, stats, refusals — is objectstack's; the page markup, grouping, deep links, badges are objectui's (metadata-admin/DiagnosticsPage.tsx, DirectoryPage.tsx, useMetadata.ts). A locator or copy fix goes to objectui"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "GET /api/v1/meta/diagnostics on the live REST server and record the BARE body — { entries, total, scannedTypes, scannedItems, stats } with NO { success, data } envelope on this surface (rest-route-ledger.ts:146-148); ⛔ the route is REST-server-only, so a simulated dispatch is not an oracle here",
+        "stats parity probe: for two or three types (object, view, flow), GET /api/v1/meta/<type> and compare stats[<type>].count against the list's item count and stats[<type>].packages against the sorted distinct _packageId set of those items",
+        "package scoping: GET /api/v1/meta/diagnostics?package=com.example.showcase and record how stats narrows; then open Studio's metadata directory (/apps/<app>/metadata?package=com.example.showcase) and compare the tile counts against the scoped stats (DirectoryPage feeds its tiles from the package-scoped sweep)",
+        "severity mechanism: GET /api/v1/meta/diagnostics?severity=warning — capture that it answers 200 and that the error entries are unchanged (no warning producer exists at head; see knownGaps)",
+        "refusal probes: GET /api/v1/meta/diagnostics?type=viewes (an unrecognised spelling of a DECLARED type) and capture the 400; GET /api/v1/meta/diagnostics?severity=error&severity=warning (a repeated query param) and capture that refusal too",
+        "browser, clean store: open /apps/<app>/metadata/_diagnostics — screenshot it settled; on a clean corpus the DESIGNED empty state must render (title + the scanned-items/types counts), never a blank region; back on the directory page confirm the red diagnostics-link button is ABSENT (it renders only when total > 0)",
+        "outage clause: run the unit pin (packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts) and cite its output — driving a live store outage is not attempted",
+        "blocked leg (only when an invalid-stored-row fixture exists): re-GET the sweep — the planted row must appear as { type, name, diagnostics: { errors: [{ path, message }] } } with the LOCATED path, the page must group it under its type with a deep link to ../<type>/<name> (the item's editor), and the directory badge count must include it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the sweep contract holds on the live server: the bare body carries entries/total/scannedTypes/scannedItems/stats, total === entries.length, and scannedTypes covers exactly the registry types with a registered Zod schema (schema-less types are skipped as 'no opinion' — never counted valid, never failing the sweep)",
+          "oracle": "api",
+          "verify": "the recorded body parses against GetMetaDiagnosticsResponseSchema's shape (protocol.zod.ts:1461); total equals the entries length; scannedTypes is the registry-with-schema count, not the full registry count (getMetaDiagnostics filters on getMetadataTypeSchema)",
+          "evidence": "the /meta/diagnostics body"
+        },
+        {
+          "clause": "stats tell the directory's truth: per sampled type, stats[type].count equals the type's own list length and stats[type].packages equals the sorted distinct _packageId set — the one-round-trip aggregate the Studio directory tiles render from",
+          "oracle": "api",
+          "verify": "side-by-side of stats[<type>] against the GET /meta/<type> list for each sampled type (count, packages; locked counts rows whose _lock != 'none')",
+          "evidence": "the stats excerpt + the list reads"
+        },
+        {
+          "clause": "?package= scoping narrows the whole sweep and the Studio directory tiles match it: with the sweep scoped to com.example.showcase, stats reflect only that package's items, and the rendered tile counts on the package-scoped directory equal the scoped stats — tile numbers match the scoped list pages, not the global corpus",
+          "oracle": "api",
+          "verify": "the ?package= body's stats vs the unscoped body; then the directory tiles (rendered only after the screenshot confirms the page settled) vs stats[<type>].count — DirectoryPage drives them from useGlobalDiagnostics(client, 'warning', activePackage), so a mismatch is a real seam defect",
+          "evidence": "scoped + unscoped stats, and the tile screenshot annotated with the compared counts"
+        },
+        {
+          "clause": "an unrecognised spelling of a declared type is REFUSED, never absorbed: ?type=viewes answers the 400 INVALID_REQUEST that names both accepted spellings — not 200 {\"scannedTypes\":1,\"stats\":{}}, which objectui's page paints as 'All clear' (#8924: the producer classified the caller's mistake; the sweep may not overrule a verdict into silence)",
+          "oracle": "api",
+          "verify": "the ?type=viewes response is 400 with the canonicalizeMetaRequestType refusal (the same one every sibling /meta door gives); the ?severity=error&severity=warning probe is refused too (refuseRepeatedQueryParams, #6877 — severity/type/package are all single-valued)",
+          "evidence": "the two refusal bodies"
+        },
+        {
+          "clause": "severity=warning is accepted and widens only by contract: the response is 200, the error entries are byte-identical to the severity=error sweep, and no warning rows appear — because no producer emits warnings at head ('reserved for a future lint layer'); the clause records that posture so a future warning row is recognised as the lint layer landing, not a defect",
+          "oracle": "api",
+          "verify": "diff the two sweeps' entries; identical at head. A NEW warning-only entry appearing is not a FAIL — it is the trigger to revise this item (and the UI already wires it: warn-only rows get the amber badge, error rows dominate)",
+          "evidence": "the two bodies diffed"
+        },
+        {
+          "clause": "the clean store renders the DESIGNED empty state, and absence is honest in both directions: the DiagnosticsPage shows its all-clear title with the scanned counts (never a blank region), and the directory's red diagnostics-link button does not render while total is 0",
+          "oracle": "screenshot",
+          "verify": "the settled /metadata/_diagnostics screenshot shows the Empty state with the scannedItems/scannedTypes numbers matching the API body; the directory header has no diagnostics button (DirectoryPage renders it only when diagSummary.total > 0)",
+          "evidence": "the two screenshots + the API body's counts"
+        },
+        {
+          "clause": "an invalid STORED item surfaces with a located error and a working deep link: the sweep lists it as type+name+errors[{path,message}] (union failures named per-branch via zodIssuesToMetadataIssues — never one rootless 'Invalid input', #5598), the page groups it under its type, and the row's link lands on that item's editor — blocked(fixture) on stock (see knownGaps: the save gates make an invalid stored row unplantable in-run)",
+          "oracle": "api",
+          "verify": "with the stale-row fixture: the entry's diagnostics.errors carry the failing path; clicking the row navigates to ../<type>/<name> (the ResourceEditPage for the item); the DirectoryPage invalid badge for that type increments to match",
+          "evidence": "the sweep entry + the deep-link navigation screenshot"
+        },
+        {
+          "clause": "a store outage is a loud 503, never '0 problems': when the metadata store read fails for a non-benign reason, getMetaDiagnostics rethrows the classified 503 instead of publishing an unreadable store as a clean sweep (#8855; ADR-0110 D3 — a miss and an outage are different facts)",
+          "oracle": "test",
+          "verify": "run packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts and cite its output — the pin drives the outage this item does not stage live",
+          "evidence": "the test run output"
+        }
+      ],
+      "negative": [
+        "a 200 {\"scannedTypes\":1,\"stats\":{}} for a misspelled declared type is the #8924 silence regressed — the page would paint it 'All clear' — FAIL",
+        "an outage answered as a clean sweep (total 0 from a store nobody could read) is the #8855 / ADR-0110 D3 FAIL shape — a diagnostics endpoint whose job is reporting problems must not answer '0 problems' precisely when it cannot read anything",
+        "a blank diagnostics region on a clean store (instead of the designed empty state) is a FAIL of the page, not proof of health — and conversely, do NOT read the clean answer itself as 'the feature is missing': a store with no invalid rows is the healthy norm the save gates enforce (absence-inference)",
+        "consulting the dispatcher for this route is a recording error — the ledger marks GET /meta/diagnostics REST-server-only, so a simulated dispatch 404 says nothing about the live server (dispatcher-vs-hono-route)",
+        "SCOPE: per-item _diagnostics badges on list rows and the editor banner are the item-grain surfaces (ResourceListPage/ResourceEditPage) — this item owns only the cross-type sweep + directory/diagnostics pages; the save-time 422 gate is studio-authoring.authoring-validation-not-persisted — cite, don't duplicate"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "hydration-race", "absence-inference", "stale-console-bundle"],
+      "automated": {
+        "kind": "test",
+        "ref": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts — pins the outage clause ONLY (503 rethrown, never '0 problems'); the live sweep, scoping parity, refusals, and both browser surfaces still need the run"
+      },
+      "source": [
+        "packages/rest/src/rest-server.ts:4094-4138 (the route: registered BEFORE /meta/:type so 'diagnostics' is not captured as a type; severity defaults 'error'; ?type/?severity/?package each single-valued via refuseRepeatedQueryParams #6877; 501 NOT_IMPLEMENTED when the kernel's protocol lacks getMetaDiagnostics; answers res.json(result) BARE)",
+        "packages/rest/src/rest-route-ledger.ts:146-148 (REST-only route, bare body = GetMetaDiagnosticsResponseSchema, client meta.getDiagnostics, #12038)",
+        "packages/metadata-protocol/src/protocol.ts:5539-5732 (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
+        "packages/metadata-protocol/src/metadata-diagnostics.ts (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
+        "packages/spec/src/api/protocol.zod.ts:1450-1470 (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
+        "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link ../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts:239-370 (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx:133-158,242-254 (package-scoped sweep drives tile badges; diagnostics link only when total > 0) + console/AppContent.tsx:882,982 (the metadata/_diagnostics route)",
+        "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" }
+      ]
     }
   ]
 }
