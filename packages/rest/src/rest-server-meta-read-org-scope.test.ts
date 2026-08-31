@@ -69,6 +69,9 @@ const NON_OVERRIDABLE = 'object';
 /** The value every read assertion looks for. */
 const MARKER = 'AUTHORED_AT_RUNTIME';
 
+/** The second revision's marker — two PUTs, two history events. */
+const MARKER_2 = 'AUTHORED_AT_RUNTIME_REV2';
+
 /**
  * A SPEC-VALID body per type, carrying `label` as the marker the reads assert
  * on. Real bodies, not `{ label }` stubs: the write door runs full spec
@@ -77,8 +80,8 @@ const MARKER = 'AUTHORED_AT_RUNTIME';
  * nothing to do with org scoping. Each shape was measured against the real
  * validator, not guessed.
  */
-function bodyFor(type: string, name: string): Record<string, unknown> {
-    const marker = { name, label: MARKER };
+function bodyFor(type: string, name: string, label = MARKER): Record<string, unknown> {
+    const marker = { name, label };
     switch (type) {
         case 'view':
             // [#7741] the inline arm requires the object-binding pair.
@@ -203,7 +206,7 @@ function makeStubEngine() {
             isPackageDisabled: () => false,
         },
     };
-    return { engine, rows };
+    return { engine, rows, historyRows };
 }
 
 // ── REST harness: real protocol, real routes, one boot ────────────────────
@@ -236,7 +239,7 @@ function mockRes() {
  * can read the same store on the same boot (the cross-tenant control).
  */
 function boot() {
-    const { engine, rows } = makeStubEngine();
+    const { engine, rows, historyRows } = makeStubEngine();
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
     protocol.getDiscovery = async () => ({
         version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
@@ -269,17 +272,24 @@ function boot() {
 
     return {
         rows,
+        historyRows,
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
                 : { userId: 'u1', systemPermissions: ['manage_metadata'], tenantId };
         },
-        put: (type: string, name: string) =>
-            drive('PUT', `${META}/:type/:name`, { params: { type, name }, body: bodyFor(type, name) }),
+        put: (type: string, name: string, label = MARKER) =>
+            drive('PUT', `${META}/:type/:name`, { params: { type, name }, body: bodyFor(type, name, label) }),
         get: (type: string, name: string) =>
             drive('GET', `${META}/:type/:name`, { params: { type, name } }),
         list: (type: string) =>
             drive('GET', `${META}/:type`, { params: { type } }),
+        history: (type: string, name: string) =>
+            drive('GET', `${META}/:type/:name/history`, { params: { type, name }, query: {} }),
+        /** The fixture proof every history assertion below is gated on. */
+        historyRowsFor: (type: string, name: string, org: string | null) =>
+            historyRows.filter((h) => h.type === type && h.name === name
+                && (h.organization_id ?? null) === org),
     };
 }
 
@@ -405,5 +415,89 @@ describe('#9454 every REST /meta read door serves what the write door persisted'
             ).toBeDefined();
             expect(row?.organization_id).toBe(ORG_A);
         });
+    });
+});
+
+// ── #13764 — the instrument's own discriminating power, pinned ────────────
+//
+// This file's stub used to DISCARD `opts.where` on both `sys_metadata_history`
+// seams: `findOne` answered `null` unconditionally and `find` handed back every
+// history row unfiltered. `SysMetadataRepository.history()` and `diffMetaItem`
+// filter `organization_id` by STRICT EQUALITY and post-filter nothing, so over
+// that stub the org predicate was a NO-OP — an org-scoping assertion for
+// `/history` was green whether or not the door forwarded the organization.
+//
+// ⭐ THE ASSERTION THAT HOLDS THE STUB RIGHT is `does not serve org A history to
+// org B`. The positive case below cannot do that job: un-partition the stub
+// again and it stays GREEN, because an unfiltered read still contains the rows
+// it looks for. Only the cross-tenant case reddens, because only it asks for an
+// answer the unfiltered stub cannot give. It is here for the stub, not for the
+// door.
+//
+// ⛔ These are NOT this file's pins for the two doors' behaviour — those live in
+// `rest-server-meta-history-diff-org-scope.test.ts` (#13406), whose partitioned
+// stub is the positive control this repair was calibrated against, and which
+// owns `?limit=`, `/diff`, and the non-overridable env-wide control. What is
+// asserted here is the narrow fact that THIS harness can now tell a forwarded
+// org from a dropped one.
+describe('#13764 the history seams of this harness honour the org partition', () => {
+    let b: ReturnType<typeof boot>;
+    beforeEach(() => { b = boot(); });
+
+    it('serves the org-scoped change log of an item the active org authored', async () => {
+        // The measurement that names the repair: with the door's org dropped
+        // this reads the ENV partition and answers zero events. Over the old
+        // unfiltered stub it answered two in BOTH states.
+        const first = await b.put(CACHED_ARM, 'authored_at_runtime');
+        expect(first.status, 'the fixture never wrote').toBe(200);
+        await b.put(CACHED_ARM, 'authored_at_runtime', MARKER_2);
+
+        // Fixture proof first — "the read is org-scoped" is worthless if the
+        // fixture never created an org-scoped row.
+        expect(
+            b.historyRowsFor(CACHED_ARM, 'authored_at_runtime', ORG_A).length,
+            'nothing landed in the org partition; the read below would then pass '
+            + 'or fail for a reason unrelated to org scoping',
+        ).toBe(2);
+        expect(
+            b.historyRowsFor(CACHED_ARM, 'authored_at_runtime', null).length,
+            'the write also landed env-wide — the partition is not real',
+        ).toBe(0);
+
+        const read = await b.history(CACHED_ARM, 'authored_at_runtime');
+        expect(read.thrown, `GET /history threw: ${read.thrown?.message}`).toBeUndefined();
+        expect(read.status).toBe(200);
+        expect(
+            read.body?.events?.length,
+            'the door answered an empty change log for an item whose org partition holds two events',
+        ).toBe(2);
+    });
+
+    it('does not serve org A history to org B on the same boot', async () => {
+        // ⭐ The one that reddens if the stub is ever un-partitioned again.
+        await b.put(UNCACHED_ARM, 'tenant_bound');
+        await b.put(UNCACHED_ARM, 'tenant_bound', MARKER_2);
+        expect(b.historyRowsFor(UNCACHED_ARM, 'tenant_bound', ORG_A).length).toBe(2);
+
+        b.as(ORG_B);
+        const read = await b.history(UNCACHED_ARM, 'tenant_bound');
+        expect(read.status).toBe(200);
+        expect(
+            read.body?.events ?? [],
+            'org B was served org A\'s change log',
+        ).toEqual([]);
+    });
+
+    it('does not serve an org-scoped change log to a caller that named no org', async () => {
+        await b.put(CACHED_ARM, 'org_a_only');
+        expect(b.historyRowsFor(CACHED_ARM, 'org_a_only', ORG_A).length).toBe(1);
+
+        b.as(undefined);
+        const read = await b.history(CACHED_ARM, 'org_a_only');
+        expect(read.status).toBe(200);
+        expect(
+            read.body?.events ?? [],
+            'an org-less caller was served an org-scoped change log',
+        ).toEqual([]);
     });
 });
