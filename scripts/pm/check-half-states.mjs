@@ -7023,7 +7023,14 @@ export function renderClosedResidueCensus(census, { markdown = false } = {}) {
   const figures = census.rows
     .map((row) => `${row.label} ${row.truncated ? `≥${row.total}` : row.total}`)
     .join(', ');
-  const oldest = census.rows.find((row) => row.oldest)?.oldest;
+  // The GLOBAL oldest closure, not the biggest label's. `rows` is sorted by
+  // size, so `find` would silently answer "oldest among pm:dispatched" and
+  // present it as the population's floor — the age claim is about the whole
+  // residue or it is about nothing.
+  const oldest = census.rows.reduce(
+    (min, row) => (row.oldest && (min === null || row.oldest.at < min.at) ? row.oldest : min),
+    null,
+  );
   const since = oldest ? `, oldest closed ${new Date(oldest.at).toISOString().slice(0, 10)}` : '';
   const pairs = `${census.pairs.length} carrying both \`pm:queue\` and \`pm:dispatched\``;
   // The two instrument caveats, folded into one parenthesis.
@@ -7034,7 +7041,7 @@ export function renderClosedResidueCensus(census, { markdown = false } = {}) {
       : ' (not read — the control query returned no rows; not counts)';
 
   return line(
-    `${LEAD}: ${figures}; ${pairs}${since}${caveat}. Archive, not state — no cleanup is owed ` +
+    `${LEAD}: ${figures}${since}; ${pairs}${caveat}. Archive, not state — no cleanup is owed ` +
       `and none is planned (ruled 2026-08-31, 批 #13); readers scope \`pm:*\` queries to open cards.`,
   );
 }
@@ -14957,6 +14964,15 @@ function selfTest() {
   // The figures still reach a reader who wants them — demoted, not deleted.
   t('批 #13: the per-label figure survives on the line', censusText(baseCensus).includes('pm:dispatched 3'), true);
   t('批 #13: …and so does the contradictory-pair count', censusText(baseCensus).includes('1 carrying both'), true);
+  // ⛔ The age claim is about the WHOLE residue. `rows` is sorted by size, so a
+  // `find` here answers "oldest among the biggest label" and reads as the
+  // population's floor — the smaller label below carries the real one.
+  const oldestElsewhere = censusOf([
+    ['pm:dispatched', corpus([censusCard(1, DEVX, '2026-08-20T00:00:00Z'), censusCard(2, DEVX, '2026-08-20T00:00:00Z')])],
+    ['pm:queue', corpus([censusCard(9, ['pm:queue'], '2026-08-02T00:00:00Z')])],
+  ]);
+  t('批 #13: the oldest closure is the GLOBAL one, not the biggest label\'s', censusText(oldestElsewhere).includes('oldest closed 2026-08-02'), true);
+  t('批 #13: …so the larger label\'s later date is not presented as the floor', censusText(oldestElsewhere).includes('oldest closed 2026-08-20'), false);
 
   // -- 批 #13 item ① — the open-state scoping that MAKES the residue harmless -
   //
