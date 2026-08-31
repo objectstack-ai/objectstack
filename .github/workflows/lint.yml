@@ -1767,6 +1767,28 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #13582: a LEXICAL anti-drift ratchet over the same corpus, and the
+      # sibling of the step above rather than a duplicate of it. That one asks
+      # whether a reserved WORD appears at all; this one asks whether a spelling
+      # the platform implements is standing next to prose describing a semantic
+      # it does not have. #13539 taught `$exists` as a key-presence test when it
+      # asks whether the field HAS A VALUE, and the false line was a `//` comment
+      # INSIDE an `os:check` block: `check-skill-examples.ts` type-checked that
+      # exact block green, because "has a value" and "the key is present" type
+      # identically. Both `skills/**` sites shipped to customers.
+      #
+      # Table-driven by the #13582 triage ruling, carrying the `$exists` family
+      # ONLY — each further word (the retired `$regex` spelling, #13532's
+      # `visibleWhen` claims) pays its own baseline on its own card.
+      #
+      # It lives in this job for the reason every other docs guard does
+      # (`check:doc-anchors`, `check:docs-audit-scope`, `check:role-word` above):
+      # this job carries the whole `check:*` gate family and has no paths filter,
+      # which matters here because one of the gate's two roots is `skills/**` and
+      # a `content/docs/**` filter would blind it to half its population.
+      - name: Teaching-corpus lexical anti-drift ratchet
+        run: pnpm check:corpus-claim-drift
+
       # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
       # source string rewrites `en` and strands the previous source text in every
       # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK

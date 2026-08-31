@@ -1,4 +1,4 @@
 {
   "title": "Service Contracts",
-  "pages": ["index", "metadata-service", "auth-service", "storage-service", "data-engine", "cache-service"]
+  "pages": ["metadata-service", "auth-service", "storage-service", "data-engine", "cache-service"]
 }

@@ -215,14 +215,13 @@ When building paginated REST endpoints:
 
 ## DISTINCT Queries
 
-> ⚠️ **The top-level `distinct: true` flag is schema-reserved — NOT executed
-> by the engine yet.** Neither the engine nor the SQL driver reads it from a
-> `QueryAST`; the query returns duplicate rows as if the flag were absent.
-> **Working alternative:** group by the fields — each unique combination
-> becomes one result row:
+> ⛔ **`query.distinct` was REMOVED in `@objectstack/spec` 17.** No driver ever
+> rendered `SELECT DISTINCT`. The key is tombstoned — a query carrying it fails
+> to parse with the prescription — and `QueryBuilder.distinct()` is gone. Group
+> by the fields instead: each unique combination becomes one result row.
 
 ```typescript
-// ❌ distinct is silently ignored
+// ❌ tombstoned — this query is refused at parse
 // { object: 'order', fields: ['customer_id', 'product_category'], distinct: true }
 
 // ✅ groupBy collapses duplicates
