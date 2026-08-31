@@ -3589,7 +3589,7 @@ export function commonDirectory(paths) {
  *
  * ## The test, and why it is FILES and not a shape heuristic
  *
- * Every declared literal must collapse to a path the tree tracks as a FILE. A
+ * Every declared literal must NAME a path the tree tracks as a FILE. A
  * gate that names one directory has declared a population, whatever else it
  * names; a gate that names only files has declared ARTIFACTS — a baseline it
  * maintains, an allowlist of current members, a sibling tool it reads — and
@@ -3597,6 +3597,53 @@ export function commonDirectory(paths) {
  * test rather than needing to be told apart: one artifact is the "names only
  * its baseline artifact" case the residue prose already describes, and several
  * under a common root is the enumeration above.
+ *
+ * ## Why it asks `declaredFileTarget` and holds no answer of its own (#13520)
+ *
+ * "NAME" above used to read "collapse to", and the difference was a whole
+ * category. The test was `trackedFiles.has(collapseHint(h))` — a private,
+ * weaker copy of a question this file already has an owner for. `hintCovers`
+ * resolves a module specifier through `MODULE_SPECIFIER_EXTENSIONS` (#12514)
+ * and `extensionlessModuleTarget` names the file it resolves to (#12299); this
+ * predicate followed neither, so a family whose whole roster is extensionless
+ * import targets — `packages/spec/scripts/lib/dist-freshness`, while the tree
+ * holds `…/dist-freshness.ts` — failed the every-literal test and printed as
+ * an ORDINARY silence, which this file's header calls a different fact.
+ *
+ * ⚠️ Note the failure direction, which is why it survived: it threw nothing and
+ * printed no error. It returned a coherent, plausible, WRONG category, and the
+ * `--residue` block printed both halves of the contradiction on one line — the
+ * dead-hint sweep (`hintCovers`) marking every literal as reaching the tree,
+ * and this predicate declining to call the family a roster.
+ *
+ * The repair is not a list of the families it got wrong. It is that this
+ * predicate no longer decides the question at all: `declaredFileTarget` is the
+ * one owner of "the tracked FILE this declared literal names", and every
+ * spelling that owner learns is learned here in the same edit, for every
+ * family at once. The self-test holds the two EQUAL over the live fleet, so a
+ * future widening of the covering rule that forgets this reader reds instead of
+ * silently re-categorising families — the class, not the gate names.
+ *
+ * ## Blast radius, measured over the WHOLE fleet before widening (#13520)
+ *
+ * On 192 discovered families × 754 distinct hints × 7605 tracked files, at
+ * `16c3601d2`:
+ *
+ *   artifact-roster families            30 -> 39   (+9, and ZERO lost)
+ *   rosters whose membership or dir moved        0
+ *   literals where the covering rule and this predicate disagree   40 -> 0
+ *
+ * All nine gained are `packages/spec` families whose rosters are `.ts` module
+ * specifiers; no family loses the verdict it had, and no existing roster's
+ * `artifacts` or `dir` changes, because resolution is the identity on a literal
+ * that already spells its file. The card that filed this named six; the sweep
+ * it asked for found nine.
+ *
+ * The widening cannot reach a declared POPULATION: `extensionlessModuleTarget`
+ * refuses any hint the tree has as a prefix, so a directory literal never
+ * resolves, and a pattern is refused up front (measured: 18 pattern-judged
+ * hints in the fleet, 0 of which collapse to a tracked file — the refusal is
+ * structural rather than lucky).
  *
  * Deliberately NOT inferred: whether the author meant the roster as the
  * population. Intent is not in the tree — the same refusal `unreachableFamilies`
@@ -3614,12 +3661,26 @@ export function commonDirectory(paths) {
  *
  * @param {{hints?: string[]}} entry
  * @param {string[]} paths the card's file surface
- * @param {Set<string>} trackedFiles every file git tracks, repo-relative
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree the `watchHintTree` bundle
  */
-export function artifactOnlySilence(entry, paths, trackedFiles) {
-  const artifacts = [...new Set(entry.hints ?? [])].map(collapseHint);
-  if (artifacts.length === 0) return null;
-  if (!artifacts.every((a) => trackedFiles.has(a))) return null;
+export function artifactOnlySilence(entry, paths, tree) {
+  // A bare file set is exactly what this predicate used to take, and it is the
+  // shape that loses every literal naming its file through a dropped
+  // extension. Refused loudly rather than read as an empty answer (#4690's
+  // rule, applied to a caller instead of to a corpus): a wrong CATEGORY is the
+  // failure this parameter was widened to stop, and it prints as a plausible
+  // sentence when it happens.
+  if (!(tree?.files instanceof Set) || !(tree?.prefixes instanceof Set)) {
+    throw new TypeError(
+      'artifactOnlySilence needs the watch-hint TREE bundle ({files, prefixes}) from watchHintTree(), ' +
+        'not a bare file set — the pair is meaningless apart, and files alone silently mis-categorises ' +
+        'every family whose roster is spelled as extensionless module specifiers.',
+    );
+  }
+  const declared = [...new Set(entry.hints ?? [])];
+  if (declared.length === 0) return null;
+  const artifacts = declared.map((h) => declaredFileTarget(h, tree));
+  if (!artifacts.every(Boolean)) return null;
   const dir = commonDirectory(artifacts);
   const coversYourPath = Boolean(dir) && paths.some((p) => p === dir || p.startsWith(`${dir}/`));
   return { artifacts, dir, coversYourPath };
@@ -3652,7 +3713,11 @@ export function artifactOnlySilence(entry, paths, trackedFiles) {
  */
 export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
   const what =
-    `⚠ artifact roster: all ${artifacts.length} declared literal(s) are tracked FILES` +
+    // "NAME", not "are" (#13520). A literal may name its file through a
+    // dropped extension, so the roster is a list of files the literals RESOLVE
+    // to, and a sentence saying the literals ARE those files stopped being true
+    // the moment the classifier learned to follow the resolution.
+    `⚠ artifact roster: all ${artifacts.length} declared literal(s) name tracked FILES` +
     (dir ? `, under ${dir}` : '') +
     ' — artifacts this gate names (a baseline, an allowlist of current members), not a population it declares.';
   if (!coversYourPath) {
@@ -4558,6 +4623,66 @@ export function extensionlessModuleTarget(hint, files, prefixes) {
   if (!plain || prefixes.has(plain)) return null;
   for (const ext of MODULE_SPECIFIER_EXTENSIONS) if (files.has(plain + ext)) return plain + ext;
   return null;
+}
+
+/**
+ * The tracked FILE a declared literal NAMES, or `null` when it names anything
+ * else — a directory, a pattern, a path this tree does not have. The one owner
+ * of that question, for every reader in this file that has it (#13520).
+ *
+ * ## Why it exists: the question had three answers and they disagreed
+ *
+ * Three places in this file ask some form of "does this literal name a tracked
+ * file", and until this function they answered it three different ways:
+ *
+ *   - `hintCovers` — the covering rule, which follows a dropped extension
+ *     through `MODULE_SPECIFIER_EXTENSIONS` (#12514);
+ *   - `extensionlessModuleTarget` — which NAMES the file such a specifier
+ *     resolves to, and is what the residue printer says "the tree HAS this
+ *     file" with (#12299);
+ *   - `artifactOnlySilence` — which asked `trackedFiles.has(collapseHint(h))`
+ *     and so followed nothing.
+ *
+ * The third is a private copy of a rule that lives elsewhere, and a copy that
+ * drifts is the defect this file refuses everywhere else — `extractWatchHints`
+ * was refused the same widening on exactly this ground ("a SECOND answer to a
+ * question `extensionlessModuleTarget` already owns — the drift this file
+ * refuses everywhere else"). Measured over the fleet, the copy disagreed with
+ * the covering rule about 40 of 754 declared literals, silently, in the
+ * direction that prints a coherent wrong category rather than an error.
+ *
+ * ## What it composes, and why the composition is total
+ *
+ * A literal names a tracked file in exactly two ways, and they are mutually
+ * exclusive by construction rather than by luck: it IS the file, or it is that
+ * file's module specifier with the extension dropped.
+ * `extensionlessModuleTarget` refuses any hint the tree has as a prefix, and a
+ * tracked file is a tracked prefix, so the second branch can never re-answer
+ * the first. That exclusion is already pinned; this function is where the two
+ * halves are joined so no third caller has to join them again.
+ *
+ * ## Why a PATTERN is refused before either branch
+ *
+ * A glob is a declared population — the opposite of an artifact — and a
+ * mangled collapse must never be able to smuggle one in through the file
+ * branch. `globInNonFinalSegment` and `globCarriesLiteralSuffix` both splice
+ * strings that were never adjacent (`skills/*\/references/_index.md` →
+ * `skills//references/_index.md`, `.changeset/*.md` → `.changeset/.md`), and
+ * a splice that happened to land on a tracked file would enter here as an
+ * artifact. Measured on this tree: 18 pattern-judged hints in the fleet, none
+ * of which collapses to a tracked file — so the refusal costs nothing today and
+ * makes the exclusion structural, the standard this file holds its other
+ * boundaries to.
+ *
+ * @param {string} hint one declared literal, as the family spells it
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree the `watchHintTree` bundle
+ */
+export function declaredFileTarget(hint, tree) {
+  if (judgedAsPattern(hint)) return null;
+  const plain = collapseHint(hint);
+  if (!plain) return null;
+  if (tree.files.has(plain)) return plain;
+  return extensionlessModuleTarget(hint, tree.files, tree.prefixes);
 }
 
 /**
@@ -6940,7 +7065,12 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
-  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree: watchHintTree(swept) });
+  // Held in a name rather than built inline: the artifact-roster split needs
+  // the SAME bundle the discovery was handed. Built twice it would be two
+  // readings of one listing, which is the drift `watchHintTree`'s own docblock
+  // refuses ("the pair is meaningless apart").
+  const tree = watchHintTree(swept);
+  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
   // #13312) — so the two cannot disagree about which literals are dead.
@@ -6950,18 +7080,13 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   const matched = new Map();
   const undetermined = [];
   const silent = [];
-  // The corpus the reachability sweep already read, as a membership test: the
-  // artifact-roster split asks whether a declared literal is a tracked FILE,
-  // and re-reading the tree for it would be a second answer to a question this
-  // run has already asked once.
-  const trackedSet = new Set(swept);
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = classifyEntry(entry, paths);
     if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
-  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, trackedSet)).filter(Boolean);
+  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, tree)).filter(Boolean);
 
   // ONE structured answer, rendered three ways below. The human block, the
   // `--commands` list and the `--json` document are readings of these same
@@ -7068,7 +7193,7 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
         // said the same words in this listing as one that really does not read
         // your file. The note says which, and raises its voice only where the
         // roster was taken from a directory the card edits.
-        const roster = withHints ? artifactOnlySilence(entry, paths, trackedSet) : null;
+        const roster = withHints ? artifactOnlySilence(entry, paths, tree) : null;
         if (roster) for (const line of artifactOnlyNote(roster)) console.log(line);
       }
     };
@@ -9553,7 +9678,7 @@ function selfTest() {
   t('files with nothing above the repo root share no directory', commonDirectory(['README.md', 'AGENTS.md']) === '');
   t('one file is its own directory', commonDirectory(['scripts/pm/a.mjs']) === 'scripts/pm');
 
-  const rosterTree = new Set(['scripts/a.mjs', 'scripts/b.mjs', 'scripts/pm/c.mjs']);
+  const rosterTree = watchHintTree(['scripts/a.mjs', 'scripts/b.mjs', 'scripts/pm/c.mjs']);
   const rosterFam = (hints) => ({ hints, files: [], workflows: new Set(['lint.yml']) });
   const roster = artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), [unwrittenScript], rosterTree);
   t('a population of nothing but tracked FILES is an artifact roster', roster?.artifacts.length === 2 && roster.dir === 'scripts');
@@ -9585,6 +9710,138 @@ function selfTest() {
     artifactOnlyNote(artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree))
       .join('\n')
       .includes('ordinary one'),
+  );
+
+  // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
+  //
+  // ⚠️ Every case below asserts the CATEGORY, never "it did not crash" and
+  // never "it still classifies". This defect threw nothing and printed no
+  // error — it answered `null` where the answer is a roster, so a case that
+  // only checked for an answer would have been GREEN against the bug. Each
+  // assertion therefore names the bucket AND its contents: which tracked files,
+  // under which directory, and for the negatives, `null` exactly.
+  const extlessTree = watchHintTree([
+    'packages/spec/scripts/lib/dist-freshness.ts',
+    'packages/spec/scripts/lib/sharded-artifacts.ts',
+    'packages/spec/scripts/lib/notes.md',
+    'packages/spec/src/index.ts',
+  ]);
+  const extlessRoster = artifactOnlySilence(
+    rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib/sharded-artifacts']),
+    ['packages/spec/scripts/lib/dist-freshness.ts'],
+    extlessTree,
+  );
+  t(
+    'a roster spelled as extensionless module specifiers is an artifact ROSTER, not an ordinary silence',
+    extlessRoster !== null,
+    JSON.stringify(extlessRoster),
+  );
+  t(
+    '…and the CATEGORY is pinned by its contents: the tracked files those specifiers name',
+    JSON.stringify(extlessRoster?.artifacts) ===
+      JSON.stringify(['packages/spec/scripts/lib/dist-freshness.ts', 'packages/spec/scripts/lib/sharded-artifacts.ts']),
+    JSON.stringify(extlessRoster?.artifacts),
+  );
+  t(
+    '…under the directory those files really sit in, not the one the specifier stops short at',
+    extlessRoster?.dir === 'packages/spec/scripts/lib',
+    String(extlessRoster?.dir),
+  );
+  t(
+    '…and for a card in that directory it is the INVERTED silence, which is the whole point of the split',
+    extlessRoster?.coversYourPath === true,
+  );
+  t(
+    'a roster mixing both spellings of the same claim resolves to the same category',
+    JSON.stringify(
+      artifactOnlySilence(
+        rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib/notes.md']),
+        [],
+        extlessTree,
+      )?.artifacts,
+    ) === JSON.stringify(['packages/spec/scripts/lib/dist-freshness.ts', 'packages/spec/scripts/lib/notes.md']),
+  );
+  // The negatives, which are what stop the widening from becoming a second
+  // defect pointing the other way: a POPULATION must still refuse the roster
+  // category however resolvable its siblings are.
+  t(
+    'a declared DIRECTORY beside resolvable specifiers is still a population, not a roster',
+    artifactOnlySilence(
+      rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib']),
+      [],
+      extlessTree,
+    ) === null,
+  );
+  t(
+    'a specifier that resolves to nothing is not an artifact — that is still the unreachable species',
+    artifactOnlySilence(rosterFam(['packages/spec/scripts/lib/gone']), [], extlessTree) === null,
+  );
+  t(
+    'a PATTERN whose collapse would land on a tracked file is refused before the file branch',
+    declaredFileTarget('packages/spec/scripts/lib/dist-freshness*.ts', extlessTree) === null &&
+      extlessTree.files.has(collapseHint('packages/spec/scripts/lib/dist-freshness*.ts')),
+  );
+  t(
+    '…non-vacuously: that hint really is judged as a pattern, and the same literal without the glob resolves',
+    judgedAsPattern('packages/spec/scripts/lib/dist-freshness*.ts') &&
+      declaredFileTarget('packages/spec/scripts/lib/dist-freshness', extlessTree) ===
+        'packages/spec/scripts/lib/dist-freshness.ts',
+  );
+  // The bare file set is the OLD parameter, and it is the one input that
+  // reproduces the defect exactly. It must not be readable as an empty answer.
+  let rosterRefusedBareSet = false;
+  try {
+    artifactOnlySilence(rosterFam(['scripts/a.mjs']), [], new Set(['scripts/a.mjs']));
+  } catch {
+    rosterRefusedBareSet = true;
+  }
+  t('a bare file set is REFUSED, never answered — it is the shape that mis-categorises silently', rosterRefusedBareSet);
+
+  // ⭐ THE CLASS GUARD, and the reason this card is not "nine gate names added
+  // to a table". The defect was one predicate holding a private, weaker copy
+  // of the covering rule; the copy is gone, and this holds the two EQUAL over
+  // the LIVE fleet, per declared literal:
+  //
+  //   for every literal `hintCovers` judges as a LITERAL and the tree does not
+  //   have as a DIRECTORY — `declaredFileTarget` names a file exactly when the
+  //   covering rule reaches exactly one tracked file, and it is that file.
+  //
+  // Non-tautological on purpose: the two sides are computed by different code
+  // (a membership test plus the extension resolver, against a full sweep of the
+  // corpus through `hintCovers`). Measured while writing this: BEFORE the
+  // repair the two disagreed about 40 of 754 declared literals; after it, 0.
+  // The day someone teaches `hintCovers` a further spelling — the way #12514
+  // taught it the extension list — and forgets this reader, this reds, for
+  // whatever family happens to carry it. No gate name appears in it.
+  const classFiles = trackedFiles();
+  const classTree = watchHintTree(classFiles);
+  const classHints = new Set();
+  for (const [, entry] of discoverFamilies({ tree: classTree }).byCheck) {
+    for (const h of entry.hints ?? []) classHints.add(h);
+  }
+  const isTrackedDirHint = (h) => {
+    const plain = collapseHint(h);
+    return classTree.prefixes.has(plain) && !classTree.files.has(plain);
+  };
+  const coveringRuleFile = (h) => {
+    if (judgedAsPattern(h) || isTrackedDirHint(h)) return null;
+    const reached = classFiles.filter((f) => hintCovers(h, f));
+    return reached.length === 1 ? reached[0] : null;
+  };
+  const classDisagreements = [...classHints].filter((h) => coveringRuleFile(h) !== declaredFileTarget(h, classTree));
+  t(
+    `the roster classifier and the covering rule name the SAME file for every declared literal in the fleet (${classHints.size} literals)`,
+    classDisagreements.length === 0,
+    classDisagreements
+      .slice(0, 5)
+      .map((h) => `${h}: rule=${coveringRuleFile(h)} classifier=${declaredFileTarget(h, classTree)}`)
+      .join(' · '),
+  );
+  // Non-vacuity for the case above — an empty population would assert nothing,
+  // and the fleet really does carry the shape this card was filed for.
+  t(
+    '…non-vacuously: the fleet really contains literals that name their file only through a dropped extension',
+    [...classHints].some((h) => declaredFileTarget(h, classTree) && !classTree.files.has(collapseHint(h))),
   );
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
