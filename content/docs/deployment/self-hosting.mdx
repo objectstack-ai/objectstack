@@ -402,13 +402,74 @@ decrypt each other's secrets. All replicas must share the same
 
 ## First boot: create the admin
 
-On a fresh production database there are no users yet. Open the deployment's
-root URL and **sign up — the very first account to register becomes the
-bootstrap admin** (this works even with `OS_DISABLE_SIGNUP=true`, which only
-blocks sign-ups after that first account exists). Do this immediately after
-the first deploy, before sharing the URL; then create your real user accounts
-and lock sign-up down via `OS_AUTH_SIGNUP_ENABLED` /
-[SSO](/docs/permissions/sso) as policy dictates.
+How the first administrator is created depends on the deployment's
+[tenancy posture](/docs/deployment/tenancy-modes), and the two paths are not
+interchangeable.
+
+**`single` (the default) — the first account wins.** On a fresh production
+database there are no users yet. Open the deployment's root URL and **sign up —
+the very first account to register becomes the bootstrap admin** (this works
+even with `OS_DISABLE_SIGNUP=true`, which only blocks sign-ups after that first
+account exists). Do this immediately after the first deploy, before sharing the
+URL; then create your real user accounts and lock sign-up down via
+`OS_AUTH_SIGNUP_ENABLED` / [SSO](/docs/permissions/sso) as policy dictates.
+
+**Walled postures (`group` / `isolated`) — you name the administrators in
+configuration.** First-registrant promotion is removed there: with
+self-registration reachable, whoever posts to the sign-up endpoint first would
+otherwise receive cross-tenant access. No grant row is written on those
+postures, ever. Declare the administrators **before first boot** instead:
+
+```bash
+# one address, or a comma-separated list
+OS_PLATFORM_OWNER_EMAIL=ops@example.com,backup-admin@example.com
+```
+
+Then have each of those people register with exactly that address and **verify
+their email**. Standing is recomputed on every request from the configured list
+and the account's own stored record, so it appears the moment verification
+completes — there is nothing to grant and nothing to click.
+
+The rules below are enforced by the runtime, not advisory:
+
+- **Declare more than one address.** A single mailbox is a single point of
+  human failure; losing it leaves the deployment with no administrator and no
+  in-product recovery.
+- **Verified only.** An account that holds a declared address but whose email
+  is not verified is **not** an administrator. A record that predates the
+  verification column, or that arrived through an import without it, reads
+  unverified rather than verified.
+- **Case and spacing do not matter.** Entries are trimmed and lower-cased on
+  both sides of the comparison, duplicates collapse, and a trailing separator
+  or a blank entry is ignored.
+- **One bad entry refuses the whole variable.** If any entry is not an email
+  address, the deployment gets **zero** configured administrators — not the
+  remaining good ones. Dropping just the bad entry would leave a *narrower*
+  administrator set than you declared with nothing anywhere to notice, which is
+  the more dangerous failure. The runtime names the offending entry in the log;
+  fix or remove it, then reload.
+- **Empty is fail-closed, and a walled boot refuses it.** Unset or blank under
+  a walled posture **aborts startup**, naming the variable, rather than
+  silently reverting to promoting the first registrant. A value that is set but
+  *refused* for a bad entry gets past that startup check — it is not blank — so
+  the process starts and then has no administrators. Confirm from the boot log,
+  not from the fact that the process came up.
+- **Revocation is a configuration change plus a reload.** No endpoint, UI
+  action or API call adds or removes a platform administrator; that surface
+  deliberately does not exist. Edit the variable and roll the process — the
+  next resolution reads the new value.
+- **You cannot quietly remove the last one through the user record, either.**
+  Changing the last remaining administrator's email address, or clearing their
+  verified flag, is refused, and the refusal points at the configuration as the
+  remedy — the same guard that refuses deleting or banning the last
+  administrator.
+
+On a walled boot the runtime logs the resolved list: per declared address,
+whether an account exists, whether it is verified, and which account holds
+standing. That line is the fastest check that the configuration and the real
+accounts agree. The same answer is available read-only to Setup, discovery and
+health surfaces; see
+[who holds `admin_full_access`](/docs/permissions/permission-sets#built-in-permission-sets).
 
 Note the production server seeds **no** dev credentials — the
 `admin@objectos.ai` / `admin123` account you may know from `os dev` exists only
