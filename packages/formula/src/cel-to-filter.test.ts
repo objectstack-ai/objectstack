@@ -231,6 +231,16 @@ describe('compileCelToFilter — input shapes', () => {
  */
 describe('compileCelToFilter — a null MEMBER of a membership array fails closed', () => {
   const vars = (org_user_ids: unknown[]) => ({ current_user: { id: 'u_me', org_user_ids } });
+  /**
+   * `ok` above pins its second argument to the exact shape of the module-level
+   * `VARS`, so it cannot take these partial contexts. Same assertion, same throw
+   * on an unexpected refusal, widened only where this suite needs it.
+   */
+  const filterOf = (src: string, v: Record<string, unknown>) => {
+    const r = compileCelToFilter(src, { variables: v });
+    if (!r.ok) throw new Error(`expected ok for "${src}" but got ${r.reason}: ${r.detail}`);
+    return r.filter;
+  };
   const expectUnresolved = (r: ReturnType<typeof compileCelToFilter>, path = 'current_user.org_user_ids') => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -287,16 +297,16 @@ describe('compileCelToFilter — a null MEMBER of a membership array fails close
 
   // ---- shapes this guard must NOT move --------------------------------------
   it('a fully resolved membership array still compiles, in both polarities', () => {
-    expect(ok('id in current_user.org_user_ids', vars(['u_me', 'u_peer']))).toEqual({
+    expect(filterOf('id in current_user.org_user_ids', vars(['u_me', 'u_peer']))).toEqual({
       id: { $in: ['u_me', 'u_peer'] },
     });
-    expect(ok('!(id in current_user.org_user_ids)', vars(['u_me', 'u_peer']))).toEqual({
+    expect(filterOf('!(id in current_user.org_user_ids)', vars(['u_me', 'u_peer']))).toEqual({
       $not: { id: { $in: ['u_me', 'u_peer'] } },
     });
   });
   it('an EMPTY membership array still compiles to $in:[] in both polarities (a declared predicate, unchanged here)', () => {
-    expect(ok('id in current_user.org_user_ids', vars([]))).toEqual({ id: { $in: [] } });
-    expect(ok('!(id in current_user.org_user_ids)', vars([]))).toEqual({ $not: { id: { $in: [] } } });
+    expect(filterOf('id in current_user.org_user_ids', vars([]))).toEqual({ id: { $in: [] } });
+    expect(filterOf('!(id in current_user.org_user_ids)', vars([]))).toEqual({ $not: { id: { $in: [] } } });
   });
   it('an AUTHORED literal null in a list is not an unresolved variable — out of this guard scope', () => {
     // A declared predicate, the same way `record.x == null` lowers to `$null` rather
