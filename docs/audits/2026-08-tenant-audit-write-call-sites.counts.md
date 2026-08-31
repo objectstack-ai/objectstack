@@ -39,7 +39,7 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Threading a decidably elevated context | 46 |
 | Threading a decidably non-elevated context | 8 |
 | Threading a context of undecidable elevation | 77 |
-| Sources scanned | 533 |
+| Sources scanned | 534 |
 | Engine-shaped types recognised | 56 |
 | Declared objects in the registry | 297 |
 | Same-named calls subtracted as non-engine | 119 |
