@@ -51,6 +51,14 @@ Maintainer ruling 2026-08-30 (option **A** of three):
   locally-thrown plain `Error`: this CLI's own input refusals get no code,
   deliberately, because ADR-0112's ledger is the authority on who may mint one.
 
+One value-space note, stated so the declaration matches what ships: `code` is a
+**pass-through**, never minted or filtered. On wire failures it is the semantic
+ADR-0112 string the SDK attached; on local I/O failures inside the same `try`
+(`os validate` reading a `src/docs` that is a file, say) it is the Node errno
+(`ENOENT`, `ENOTDIR`, …). The two vocabularies are disjoint — errnos are
+`E`-prefixed OS names — so a consumer branching on ADR-0112 codes cannot
+false-match an errno, but not every emitted `code` is ledger-owned.
+
 Human (`table`) output is untouched.
 
 **Why `minor` and not `patch`.** Maintainer-set, and it overrides the obvious

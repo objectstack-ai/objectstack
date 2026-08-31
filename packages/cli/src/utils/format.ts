@@ -226,7 +226,18 @@ export function isExitSignal(error: unknown): boolean {
  *       }
  */
 export interface ErrorCodeFields {
-  /** The semantic ADR-0112 code the failure carried, when it carried one. */
+  /**
+   * The machine code the failure carried, when it carried one — passed
+   * through, never minted or filtered. For wire failures this is the semantic
+   * ADR-0112 string the SDK attached (`METADATA_CONFLICT`, `FORBIDDEN`, …);
+   * for local I/O failures it is the Node errno (`ENOENT`, `ENOTDIR`, …),
+   * which `os validate` / `os compile` / `os lint` really do throw from
+   * inside the same `try`. The two vocabularies are disjoint (errnos are
+   * `E`-prefixed OS names), so an ADR-0112 branch cannot false-match an
+   * errno — but a consumer must not assume every `code` is ledger-owned.
+   * Declared honestly here per the 2026-08-31 contract review: narrowing
+   * this field to ADR-0112-only later would be breaking.
+   */
   code?: string;
   /** The HTTP status the failure carried, when it carried one. */
   httpStatus?: number;
