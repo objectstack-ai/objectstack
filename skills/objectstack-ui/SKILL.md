@@ -688,7 +688,7 @@ allowed joins, intrinsic filter, dimensions, and certified measures. The legacy
 per-widget inline query (`object` + `categoryField` + `valueField` + `aggregate`)
 **was removed** — a widget now requires `dataset` + `values`; the closed schema
 REJECTS the inline keys by name, and one lacking `dataset` fails `os validate`.
-Reports bind the same way (`dataset` + `rows` + `values` + `runtimeFilter`). The dataset shape is
+The dataset shape is
 `DatasetSchema` — see `node_modules/@objectstack/spec/src/ui/dataset.zod.ts`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
@@ -1404,8 +1404,9 @@ Use this CRM-style structure as the canonical UI assembly reference:
 | Multi-view object UI | `src/views/*.view.ts` | Define default `list` + `form`, then named `listViews` / `formViews` for scenarios |
 | **Public / anonymous form** | `src/views/*.view.ts` (formView with `sharing.allowAnonymous: true`) | Web-to-Lead / Web-to-Case. Auto-exposed at `GET/POST /api/v1/forms/:slug` |
 | App navigation | `src/apps/*.app.ts` | Use grouped nav trees, `viewName` shortcuts, and `requiresObject` for capability-aware visibility |
+| **Analytics dataset** | `src/datasets/*.dataset.ts` | One per object you want reportable — dashboards and reports bind a **declared** dataset by name, so an object without one has no analytics face |
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
-| Reports | `src/reports/*.report.ts` | Bind a `dataset` + `rows` (dimensions) + `values` (measures) for tabular/summary/matrix/joined analytics |
+| Reports | `src/reports/*.report.ts` | Select `rows` (dimensions) + `values` (measures) from that dataset; tabular/summary/matrix/joined |
 | Record pages | `src/pages/*.page.ts` | Compose `regions` + components (`page:header`, `record:highlights`, related lists, tabs) |
 | User actions | `src/actions/*.actions.ts` | Use `flow` for orchestration and `modal` for parameterized bulk mutations |
 
