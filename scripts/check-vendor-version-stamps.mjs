@@ -113,6 +113,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 // ── Configuration ───────────────────────────────────────────────────────────
@@ -437,6 +439,26 @@ export function censusLine(total, drifted, resolved, familyId) {
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
+function walk(dir, out) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (e.name.startsWith('.') && e.name !== '.claude') continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      walk(p, out);
+    } else if (EXTENSIONS.has(p.slice(p.lastIndexOf('.')))) {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
 function selfTest() {
   const failures = [];
   let ran = 0;
@@ -582,141 +604,132 @@ function selfTest() {
   process.exit(0);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// ── Entry point ─────────────────────────────────────────────────────────────
+//
+// ONE guard around the WHOLE chain, per the #4690 convention. This file exports
+// its analysis functions so other tools and its own self-test can drive them,
+// and a scripts/** module that exports bindings can be imported FOR those
+// exports — at which point an unguarded top level runs inside the importer and
+// can end it mid-import, with exit 0. `isEntrypoint` is the shared answer to
+// "was I run, or imported?"; a hand-typed argv comparison gets it wrong through
+// a symlink, silently.
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
 
-// ── Main ────────────────────────────────────────────────────────────────────
+  // ── Main ────────────────────────────────────────────────────────────────────
 
-function walk(dir, out) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    if (e.name.startsWith('.') && e.name !== '.claude') continue;
-    const p = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      walk(p, out);
-    } else if (EXTENSIONS.has(p.slice(p.lastIndexOf('.')))) {
-      out.push(p);
-    }
-  }
-  return out;
-}
+  const listMode = process.argv.includes('--list');
+  const censusMode = process.argv.includes('--census');
+  const jsonMode = process.argv.includes('--json');
+  const sweepMode = process.argv.includes('--window-sweep');
 
-const listMode = process.argv.includes('--list');
-const censusMode = process.argv.includes('--census');
-const jsonMode = process.argv.includes('--json');
-const sweepMode = process.argv.includes('--window-sweep');
-
-const lockPath = join(REPO_ROOT, 'pnpm-lock.yaml');
-if (!existsSync(lockPath)) {
-  console.error('check:vendor-version-stamps: pnpm-lock.yaml not found — cannot resolve any pin.');
-  process.exit(1);
-}
-const lockText = readFileSync(lockPath, 'utf8');
-
-const files = [];
-for (const root of ROOTS) {
-  const abs = join(REPO_ROOT, root);
-  if (existsSync(abs) && statSync(abs).isDirectory()) walk(abs, files);
-}
-files.sort();
-
-const SELF = join(REPO_ROOT, 'scripts', 'check-vendor-version-stamps.mjs');
-
-const errors = [];
-const report = [];
-let scanned = 0;
-
-for (const family of WATCHED_FAMILIES) {
-  const resolvedMap = resolveInstalledVersions(lockText, family.packages);
-  const resolved = resolvedMap.get(family.pinnedBy);
-  if (!resolved) {
-    console.error(
-      `check:vendor-version-stamps: family "${family.id}" resolves to nothing in pnpm-lock.yaml.\n` +
-      `    Its pinnedBy member is "${family.pinnedBy}". Either the family left the tree — in which\n` +
-      `    case remove it from WATCHED_FAMILIES — or the member was renamed.`,
-    );
+  const lockPath = join(REPO_ROOT, 'pnpm-lock.yaml');
+  if (!existsSync(lockPath)) {
+    console.error('check:vendor-version-stamps: pnpm-lock.yaml not found — cannot resolve any pin.');
     process.exit(1);
   }
+  const lockText = readFileSync(lockPath, 'utf8');
 
-  const sites = [];
-  for (const file of files) {
-    if (file === SELF) continue;
-    const text = readFileSync(file, 'utf8');
-    scanned++;
-    for (const site of findStampSites(text, family, { window: WINDOW })) {
-      const verdict = classifySite(site, text, (pkg) => resolvedMap.get(pkg));
-      const rel = relative(REPO_ROOT, file).split(sep).join('/');
-      sites.push({ file: rel, ...site, ...verdict, window: undefined });
-    }
+  const files = [];
+  for (const root of ROOTS) {
+    const abs = join(REPO_ROOT, root);
+    if (existsSync(abs) && statSync(abs).isDirectory()) walk(abs, files);
   }
+  files.sort();
 
-  if (sweepMode) {
-    console.log(`\nwindow sweep — ${family.id}`);
-    for (const w of [1, 2, 3, 4, 6, 8, 12, 20]) {
-      let n = 0;
-      let failing = 0;
-      for (const file of files) {
-        if (file === SELF) continue;
-        const text = readFileSync(file, 'utf8');
-        for (const site of findStampSites(text, family, { window: w })) {
-          n++;
-          if (classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict === 'live-stale') failing++;
-        }
+  const SELF = join(REPO_ROOT, 'scripts', 'check-vendor-version-stamps.mjs');
+
+  const errors = [];
+  const report = [];
+  let scanned = 0;
+
+  for (const family of WATCHED_FAMILIES) {
+    const resolvedMap = resolveInstalledVersions(lockText, family.packages);
+    const resolved = resolvedMap.get(family.pinnedBy);
+    if (!resolved) {
+      console.error(
+        `check:vendor-version-stamps: family "${family.id}" resolves to nothing in pnpm-lock.yaml.\n` +
+        `    Its pinnedBy member is "${family.pinnedBy}". Either the family left the tree — in which\n` +
+        `    case remove it from WATCHED_FAMILIES — or the member was renamed.`,
+      );
+      process.exit(1);
+    }
+
+    const sites = [];
+    for (const file of files) {
+      if (file === SELF) continue;
+      const text = readFileSync(file, 'utf8');
+      scanned++;
+      for (const site of findStampSites(text, family, { window: WINDOW })) {
+        const verdict = classifySite(site, text, (pkg) => resolvedMap.get(pkg));
+        const rel = relative(REPO_ROOT, file).split(sep).join('/');
+        sites.push({ file: rel, ...site, ...verdict, window: undefined });
       }
-      // Both numbers, because only the second one is a DECISION. The site count
-      // climbs with any window — more tokens fall near a family mention — so a
-      // plateau in it was never going to exist. What the width has to leave
-      // alone is the FAILING set, and that is what this column reports.
-      console.log(`  window ${String(w).padStart(2)}: ${String(n).padStart(4)} site(s), ${failing} failing`);
     }
-    continue;
+
+    if (sweepMode) {
+      console.log(`\nwindow sweep — ${family.id}`);
+      for (const w of [1, 2, 3, 4, 6, 8, 12, 20]) {
+        let n = 0;
+        let failing = 0;
+        for (const file of files) {
+          if (file === SELF) continue;
+          const text = readFileSync(file, 'utf8');
+          for (const site of findStampSites(text, family, { window: w })) {
+            n++;
+            if (classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict === 'live-stale') failing++;
+          }
+        }
+        // Both numbers, because only the second one is a DECISION. The site count
+        // climbs with any window — more tokens fall near a family mention — so a
+        // plateau in it was never going to exist. What the width has to leave
+        // alone is the FAILING set, and that is what this column reports.
+        console.log(`  window ${String(w).padStart(2)}: ${String(n).padStart(4)} site(s), ${failing} failing`);
+      }
+      continue;
+    }
+
+    const drifted = sites.filter((s) => s.drifted);
+    const liveStale = sites.filter((s) => s.verdict === 'live-stale');
+    report.push({ family: family.id, resolved, total: sites.length, drifted: drifted.length, liveStale: liveStale.length, sites });
+
+    for (const s of liveStale) errors.push(liveStaleMessage(s.file, s, s.resolved));
+
+    if (listMode || censusMode) {
+      console.log(`\n${family.id} — resolved ${resolved}`);
+      const shown = censusMode ? drifted : sites;
+      for (const s of shown) {
+        console.log(`  [${s.verdict.padEnd(12)}] ${s.file}:${s.line}  ${s.pkg ?? '(unattributed)'}@${s.version}  ${s.text.slice(0, 88)}`);
+      }
+    }
   }
 
-  const drifted = sites.filter((s) => s.drifted);
-  const liveStale = sites.filter((s) => s.verdict === 'live-stale');
-  report.push({ family: family.id, resolved, total: sites.length, drifted: drifted.length, liveStale: liveStale.length, sites });
+  if (sweepMode) process.exit(0);
 
-  for (const s of liveStale) errors.push(liveStaleMessage(s.file, s, s.resolved));
-
-  if (listMode || censusMode) {
-    console.log(`\n${family.id} — resolved ${resolved}`);
-    const shown = censusMode ? drifted : sites;
-    for (const s of shown) {
-      console.log(`  [${s.verdict.padEnd(12)}] ${s.file}:${s.line}  ${s.pkg ?? '(unattributed)'}@${s.version}  ${s.text.slice(0, 88)}`);
-    }
+  if (jsonMode) {
+    // `process.exitCode`, never `process.exit()`. stdout to a PIPE is async, so
+    // exiting immediately after a large write truncates it — measured here: the
+    // JSON came back cut mid-string at ~65KB through a pipe while the identical
+    // run redirected to a file was complete. A gate whose machine-readable output
+    // is silently short under exactly the usage that consumes it is worse than one
+    // with no JSON mode at all.
+    console.log(JSON.stringify({ scanned, report }, null, 2));
+    process.exitCode = errors.length > 0 ? 1 : 0;
   }
-}
 
-if (sweepMode) process.exit(0);
-
-if (jsonMode) {
-  // `process.exitCode`, never `process.exit()`. stdout to a PIPE is async, so
-  // exiting immediately after a large write truncates it — measured here: the
-  // JSON came back cut mid-string at ~65KB through a pipe while the identical
-  // run redirected to a file was complete. A gate whose machine-readable output
-  // is silently short under exactly the usage that consumes it is worse than one
-  // with no JSON mode at all.
-  console.log(JSON.stringify({ scanned, report }, null, 2));
-  process.exitCode = errors.length > 0 ? 1 : 0;
-}
-
-if (jsonMode) {
-  // nothing further to print; the JSON above is the whole report
-} else if (errors.length > 0) {
-  console.error(`\ncheck:vendor-version-stamps: ${errors.length} live-reading stamp(s) name a version that is not installed.\n`);
-  for (const e of errors) console.error(`  ✗ ${e}\n`);
-  process.exitCode = 1;
-} else {
-  console.log(`check:vendor-version-stamps: OK — ${scanned} file(s) scanned.`);
-  for (const r of report) console.log(censusLine(r.total, r.drifted, r.resolved, r.family));
-  console.log(
-  '  Drifted stamps are ANCHORED (they carry a measurement date or an issue reference), so they\n' +
-  '  are reported and not enforced: restamping them without re-measuring would manufacture\n' +
-    '  attestations. Re-verify one and you may restamp it; otherwise it stays a historical fact.',
-  );
+  if (jsonMode) {
+    // nothing further to print; the JSON above is the whole report
+  } else if (errors.length > 0) {
+    console.error(`\ncheck:vendor-version-stamps: ${errors.length} live-reading stamp(s) name a version that is not installed.\n`);
+    for (const e of errors) console.error(`  ✗ ${e}\n`);
+    process.exitCode = 1;
+  } else {
+    console.log(`check:vendor-version-stamps: OK — ${scanned} file(s) scanned.`);
+    for (const r of report) console.log(censusLine(r.total, r.drifted, r.resolved, r.family));
+    console.log(
+    '  Drifted stamps are ANCHORED (they carry a measurement date or an issue reference), so they\n' +
+    '  are reported and not enforced: restamping them without re-measuring would manufacture\n' +
+      '  attestations. Re-verify one and you may restamp it; otherwise it stays a historical fact.',
+    );
+  }
 }
