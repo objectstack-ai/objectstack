@@ -412,9 +412,9 @@ not decoration:**
   2026-08-04:这是创业项目,核心能力优先):能力扩张默认从紧,无拉动的声明面按
   implementation-first 处置,已发布零消费的能力不因沉没成本获得豁免。
 
-Your recommendation must be justified on all four axes;四轴冲突时如实呈现权衡,交维护
-者拍板。同样,`main` 在你脚下碎了、依赖未合并、CI 基础设施故障时,返回 `blocked`(附证
-据)—— 先重试到足以确认不是你的改动。
+Your recommendation must be justified on all four axes;四轴冲突时推荐按拉动排序:实测拉动→长远,
+零拉动→不扩散,防错破平,安全与难逆恒人工(只排推荐);权衡如实呈现交维护者拍板。`main`
+在你脚下碎了、依赖未合并、CI 基础设施故障⇒`blocked`(附证据),重试到足以排除你的改动。
 
 ## 终报消息 —— 恰好这段 JSON,不带任何环绕散文
 
