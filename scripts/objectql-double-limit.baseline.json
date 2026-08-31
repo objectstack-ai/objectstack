@@ -714,9 +714,6 @@
     "packages/rest/src/rest-exec-ctx-principal-kind.test.ts": {
       "unjudged": 1
     },
-    "packages/rest/src/rest-server-meta-read-org-scope.test.ts": {
-      "blind": 1
-    },
     "packages/rest/src/rest-server-timing.test.ts": {
       "unjudged": 1
     },

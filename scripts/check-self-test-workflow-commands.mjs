@@ -309,9 +309,69 @@ function main() {
 // only a label, never the offending line.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The self-test's own battery registry, floor and verdict (#13489)
+// ---------------------------------------------------------------------------
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line. And
+// the dispatch below was `if (--self-test) selfTest()`, which discards the
+// call's completion: an early `return` anywhere above the verdict printed
+// NOTHING and still exited 0. Measured on 597020aa5 by injecting `return;` as
+// the first statement of `selfTest()` -- exit 0, zero bytes of output.
+//
+// Both holes are closed the way PR #13487 validated on check-doc-authoring:
+// what is pinned is the registered NAMES, not a number. Every section opens
+// with `battery('<name>')`, every `ok()` is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count. A set difference names
+// WHICH battery stopped running; a count says only that something did -- and a
+// pinned TOTAL rots the moment a sibling battery grows.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running, and the
+// remedy is to find what stopped registering -- never to lower the number.
+//
+// Measured on 597020aa5 by instrumenting `ok` and printing the per-battery
+// tally.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the measured defect': 2,
+  'legacy form, anywhere in a line': 4,
+  'current form, line start only': 3,
+  'innocent output': 4,
+  'prefilter reads CODE, never prose': 5,
+  'end to end on the real defect site': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the registry's own size is pinned too. Adding a battery raises
+// this number; removing one is the same ⛔ deliberate edit as lowering a count.
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// Returned by `selfTest()` only after the floor has been evaluated and the
+// verdict printed. The dispatch refuses anything else: a `return` that leaves
+// the function early prints nothing and exits 0, which is the same
+// nothing-ran-nothing-complained pass one level up.
+const SELF_TEST_VERDICT = 'check-self-test-workflow-commands self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
+  const seen = new Map();
+  let openBattery = null;
+  // Declare the battery the following assertions belong to. The name must be a
+  // key of SELF_TEST_BATTERIES -- an unknown one reds by set difference,
+  // naming itself, rather than being counted somewhere it is not floored.
+  const battery = (name) => {
+    openBattery = name;
+  };
   const ok = (cond, label) => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
     if (!cond) failures.push(label);
   };
   const HASHES = '#'.repeat(2);
@@ -320,6 +380,7 @@ function selfTest() {
   const v2 = (name) => `${COLONS}${name}${COLONS}`;
 
   // ── The measured defect itself, reproduced from the real annotation ──────
+  battery('the measured defect');
   {
     const real = `    tail with no \`${v1('error')}\` in it is labelled a window rather than an anchor. And a \`fix\``;
     const got = scanOutput(real);
@@ -328,12 +389,14 @@ function selfTest() {
   }
 
   // ── Measurement 1: the legacy form is parsed ANYWHERE in a line ──────────
+  battery('legacy form, anywhere in a line');
   ok(scanOutput(`${v1('error')}boom`).length === 1, 'a legacy command at column 0 was not flagged');
   ok(scanOutput(`prose about ${v1('error')} here`).length === 1, 'a legacy command MID-LINE was not flagged — the measured defect walks straight through');
   ok(scanOutput(`   ${v1('warning')} x`).length === 1, 'an indented legacy command was not flagged');
   ok(scanOutput(`x ${v1('group')} y`).length === 1, 'a legacy `group` was not flagged');
 
   // ── Measurement 2: the current form is parsed only at LINE START ─────────
+  battery('current form, line start only');
   ok(scanOutput(`${v2('error')}boom`).length === 1, 'a current-form command at line start was not flagged');
   ok(scanOutput(`${COLONS}error file=a.ts,line=1${COLONS}boom`).length === 1, 'a current-form command WITH PROPERTIES was not flagged');
   ok(
@@ -342,12 +405,14 @@ function selfTest() {
   );
 
   // ── Innocent output must stay innocent, or the gate gets weakened ────────
+  battery('innocent output');
   ok(scanOutput('✓ check-foo: 12 file(s) scanned, nothing to report').length === 0, 'an ordinary success line was flagged');
   ok(scanOutput('  see docs/x.md ## Heading and packages/spec [ok]').length === 0, 'a markdown heading plus a bracket was flagged');
   ok(scanOutput(`Time${COLONS}HiRes${COLONS}time()`).length === 0, 'a Perl namespace was flagged as a workflow command');
   ok(scanOutput('').length === 0, 'empty output produced a finding');
 
   // ── The prefilter selects on CODE, never on prose ────────────────────────
+  battery('prefilter reads CODE, never prose');
   ok(
     !isCandidate('scripts/x.mjs', `// the runner spells it ${v1('error')}\nconst a = 1;\n`),
     'a token that exists only in a JS comment selected the script — comments are never printed',
@@ -370,6 +435,7 @@ function selfTest() {
   );
 
   // ── End to end: the real tree's real defect site, run for real ───────────
+  battery('end to end on the real defect site');
   {
     const target = 'scripts/pm/ci-failure.mjs';
     const source = existsSync(join(ROOT, target)) ? readFileSync(join(ROOT, target), 'utf8') : null;
@@ -381,19 +447,79 @@ function selfTest() {
     ok(scanOutput(r.output).length === 0, `${target} --self-test still prints a line the runner would parse — this is the #11886 defect, live`);
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases ─────────────
+  //
+  // Evaluated here, after every battery has had its chance and BEFORE the
+  // verdict -- so the line below can only be printed by a run in which the set
+  // of batteries that registered assertions equals the set declared.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  const totalCases = [...seen.values()].reduce((a, b) => a + b, 0);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    failures.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the registry takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    failures.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    failures.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed they hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+
   if (failures.length > 0) {
     console.error('check-self-test-workflow-commands --self-test FAILED:');
     for (const f of failures) console.error(`  - ${f}`);
+    if (floorBreached) {
+      console.error(
+        '\nA battery at or below its floor means cases STOPPED RUNNING — the battery is the bug,\n' +
+          'not the number. Find what stopped registering (an early return, a deleted block, a guard\n' +
+          'that now skips) and restore it. Raising a floor after ADDING cases is ordinary work;\n' +
+          'LOWERING one is not a co-equal option — "the count legitimately moved" and "something\n' +
+          'stopped running" need different edits, and only a measurement tells them apart.\n',
+      );
+    }
     process.exit(1);
   }
   console.log(
     'check-self-test-workflow-commands --self-test: both measured parse rules pinned (legacy form ' +
       'anywhere in a line, current form only at line start), the innocent-output and Perl-namespace ' +
-      'cases, the comment mask in both directions, and one end-to-end run of the real defect site.',
+      'cases, the comment mask in both directions, and one end-to-end run of the real defect site' +
+      ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery` +
+      ' at or above its pinned floor.',
   );
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else main();
+  if (process.argv.includes('--self-test')) {
+    // ⛔ Never `selfTest();` bare, and never `return selfTest()`. A `return`
+    // anywhere above that verdict prints nothing, evaluates no floor and exits
+    // 0 — the same nothing-ran-nothing-complained pass the battery floor
+    // refuses, one level up (#13489).
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-self-test-workflow-commands self-test: selfTest() returned without reaching its\n' +
+          'verdict, so no battery floor was evaluated and no success line was printed. Exiting 0 here\n' +
+          'would report a self-test that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else main();
 }
