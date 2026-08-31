@@ -403,8 +403,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1795,8 +1795,8 @@ Tab configuration for multi-tab view interface
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1880,8 +1880,8 @@ Tab configuration for multi-tab view interface
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2155,8 +2155,8 @@ This schema accepts one of the following structures:
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2341,8 +2341,8 @@ This schema accepts one of the following structures:
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |

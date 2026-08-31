@@ -458,9 +458,24 @@ export class StorageServicePlugin implements Plugin {
       // Allows the admin UI to swap adapters / credentials without
       // restart. Env-locked fields still win at the resolver layer.
       if (this.options.bindToSettings === false) return;
+      // [#12981] The settings service being ABSENT and the settings binding
+      // FAILING are two different outcomes, and one `try` used to spell them
+      // identically -- `catch { }` with a comment that named only the first.
+      // Resolving the service on its own line leaves the catch below covering
+      // exactly the second.
+      let settings: StorageSettingsSlot | undefined;
       try {
-        const settings = ctx.getService<any>('settings');
-        if (!settings || typeof settings.createClient !== 'function') return;
+        settings = ctx.getService<StorageSettingsSlot>('settings');
+      } catch {
+        // A DECLARED absence, and silence is correct here: a bare kernel
+        // registers no `settings` service, so nothing ever claimed the admin
+        // UI could swap adapters at runtime, and the manifest fallback handler
+        // stays. Reporting it would put a line on every bare-kernel boot --
+        // the "warn nobody reads" that makes the real one below unreadable.
+        return;
+      }
+      if (!settings || typeof settings.createClient !== 'function') return;
+      try {
 
         const applySettings = async () => {
           if (!this.storage) return;
@@ -554,18 +569,87 @@ export class StorageServicePlugin implements Plugin {
                 message: `Storage round-trip succeeded (adapter=${adapter}).`,
               };
             } catch (err: any) {
-              // Best-effort cleanup
-              try { await (proxy as IStorageService).delete(probeKey); } catch { /* ignore */ }
+              // Best-effort cleanup. [#12981] The cleanup's OWN failure used to
+              // be swallowed by `catch { /* ignore */ }`. The `return` below
+              // reports the PROBE's failure, which is a different failure: the
+              // operator is told the round-trip did not work and is told
+              // nothing at all about the probe object that is still sitting in
+              // the bucket. One stray key accrues per failed test, with the
+              // only record of its name -- `probeKey` is minted per call from a
+              // timestamp and a random suffix -- lost when this frame returns.
+              //
+              // `warn`, not `error`: nothing the system claims to a caller as
+              // persisted was lost. This is housekeeping that did not happen,
+              // and the AGENTS.md rule is explicit that escalating a
+              // non-durability degradation is how `error` stops being read.
+              try {
+                await (proxy as IStorageService).delete(probeKey);
+              } catch (cleanupErr: any) {
+                ctx.logger.warn(
+                  `StorageServicePlugin: the storage/test probe object '${probeKey}' was NOT removed — `
+                    + `the cleanup delete was refused (${cleanupErr?.message ?? cleanupErr}). The probe `
+                    + 'result returned below is unaffected and still reports the original failure. '
+                    + 'This object is inert probe content that no record references and nothing '
+                    + 'retries or later collects; delete it by hand if stray keys under '
+                    + '`__objectstack_probe__/` matter in this bucket.',
+                );
+              }
               return { ok: false, severity: 'error', message: err?.message ?? String(err) };
             }
           });
           ctx.logger.info('StorageServicePlugin: registered settings action storage/test');
         }
-      } catch {
-        // settings service not present — manifest fallback handler stays
+      } catch (err: any) {
+        // [#12981] Reached only when the settings service IS present and the
+        // binding above failed part-way -- `subscribe` or `registerAction`
+        // threw, or `applySettings`'s first call did. The plugin then finishes
+        // `start()` and the kernel reports a healthy boot, while the storage
+        // settings screen is wired to nothing: an operator's adapter or
+        // credential change is accepted by the form and never reaches this
+        // service, and the `storage/test` button answers "no action".
+        //
+        // `warn` and not `error`, by the AGENTS.md question: this is a
+        // FUNCTIONAL degradation, not a durability one. Nothing claimed to be
+        // persisted was dropped -- the adapter this plugin constructed keeps
+        // serving every upload and download, and the next person to use the
+        // missing capability finds out. Escalating it would train readers to
+        // skim `error`, which is what made the founding incident's `warn`
+        // unreadable.
+        ctx.logger.warn(
+          'StorageServicePlugin: the `storage` settings namespace binding FAILED — '
+            + (err?.message ?? String(err))
+            + '. The settings service IS present, so this is not a bare kernel: adapter and '
+            + 'credential changes made in the admin UI will be saved but NOT applied to this '
+            + 'service, and the live `storage/test` probe may be unregistered. Storage itself is '
+            + 'unaffected — the adapter built from this plugin\'s own options keeps serving. Fix: '
+            + 'restart after repairing the settings service, or pass `bindToSettings: false` to '
+            + 'make the static configuration deliberate.',
+        );
       }
     });
   }
+}
+
+/**
+ * [#12981] The slice of the `settings` service `start()` uses.
+ *
+ * Named rather than erased to `any` because splitting the lookup from the
+ * declaration is exactly `check:slot-lookup`'s FOURTH erasure shape (#4251):
+ * `let x: any; try { x = ctx.getService('…'); }` erases the contract in a
+ * position none of the rule's other selectors reach. Everything past
+ * `createClient` is feature-detected at its call site, so it is declared
+ * OPTIONAL here rather than assumed — the declaration says what the code
+ * actually requires, which is the property that makes it worth writing.
+ */
+interface StorageSettingsSlot {
+  createClient(namespace: string): unknown;
+  getNamespace(namespace: string): Promise<{ values: Record<string, unknown> }>;
+  subscribe?(namespace: string, listener: () => void): void;
+  registerAction?(
+    namespace: string,
+    id: string,
+    handler: (input: any) => Promise<unknown>,
+  ): void;
 }
 
 /**
