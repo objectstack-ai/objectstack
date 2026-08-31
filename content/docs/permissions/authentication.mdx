@@ -1276,7 +1276,7 @@ The dispatcher used to carry a **mock fallback**: with no auth service in the sl
 
 It was never an authentication bypass — no session store backed that token, so the identity path still resolved anonymous and anonymous data access was still denied. The problem was that it told the client it had authenticated someone when it had not, while discovery simultaneously reported `auth: unavailable` and advertised no `routes.auth`. A capability the runtime does not have must not be advertised by pretending to serve it (ADR-0076 D12, ADR-0115).
 
-A service registered in the slot but not implementing the contract's `handleRequest` takes the same 501.
+A service registered in the slot but not implementing [`handleRequest` from the `IAuthService` contract](/docs/kernel/contracts/auth-service) takes the same 501.
 
 **If you were relying on the mock** for a browser-only or MSW build: mock at the HTTP client layer, or with an MSW handler in your own test setup, which is what the console does. Load `AuthPlugin` (it needs no HTTP server — see above) and the real service answers instead.
 

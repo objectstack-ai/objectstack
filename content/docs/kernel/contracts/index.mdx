@@ -29,8 +29,8 @@ Service contracts are **TypeScript interfaces** that define the boundaries betwe
 
 | Contract | Interface | Description |
 |:---|:---|:---|
-| Data Engine | `IDataEngine` | Core data persistence — CRUD, queries, aggregations, transactions |
-| Metadata Service | `IMetadataService` | Object and field definition management, schema registry |
+| [Data Engine](/docs/kernel/contracts/data-engine) | `IDataEngine` | Core data persistence — CRUD, queries, aggregations, transactions |
+| [Metadata Service](/docs/kernel/contracts/metadata-service) | `IMetadataService` | Object and field definition management, schema registry |
 | Search Service | `ISearchService` | Full-text search indexing and querying |
 | Data Driver | `IDataDriver` | Low-level database adapter (SQL, NoSQL, API) |
 
@@ -38,7 +38,7 @@ Service contracts are **TypeScript interfaces** that define the boundaries betwe
 
 | Contract | Interface | Description |
 |:---|:---|:---|
-| Auth Service | `IAuthService` | Authentication — login, verify, logout, session management |
+| [Auth Service](/docs/kernel/contracts/auth-service) | `IAuthService` | Authentication — login, verify, logout, session management |
 | Security Service | `ISecurityService` | Query surface for access decisions — row-level read scope, readable-field projection, effective permission sets, access explanation |
 | Sharing Service | `ISharingService` | Record sharing rules and access grants |
 
@@ -46,8 +46,8 @@ Service contracts are **TypeScript interfaces** that define the boundaries betwe
 
 | Contract | Interface | Description |
 |:---|:---|:---|
-| Storage Service | `IStorageService` | File upload, download, and management |
-| Cache Service | `ICacheService` | Key-value caching with TTL support |
+| [Storage Service](/docs/kernel/contracts/storage-service) | `IStorageService` | File upload, download, and management |
+| [Cache Service](/docs/kernel/contracts/cache-service) | `ICacheService` | Key-value caching with TTL support |
 
 ### System Contracts
 
