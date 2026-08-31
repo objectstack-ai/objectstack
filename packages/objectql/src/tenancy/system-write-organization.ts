@@ -65,15 +65,25 @@
  *    org-less rows is `tenancy: { enabled: false }` — a metadata declaration,
  *    loud and checkable — never a per-write bypass flag, which is exactly the
  *    lenient-consumer accommodation Prime Directive #12 forbids.
- *  - **The platform namespaces `sys_` / `cloud_` / `ai_`** ({@link
- *    isPlatformNamespaceObject}). Their rows are deliberately global /
- *    cross-organization: this is #8672's reasoning ("an org-less row is
- *    defensible for `sys_permission_set`"), which the #8844 ruling confirms
- *    holds for platform objects and does NOT generalize to application objects.
- *    The same regexp is the seed loader's own rule for which seeds it will
- *    stamp, and #8686's backfill re-spells it for the same reason this module
- *    does: the three write paths have to agree about the platform namespace, or
- *    one of them manufactures a new disagreement while claiming to remove one.
+ *  - **Platform-namespace objects the inventory did not admit** ({@link
+ *    isPlatformObjectOutOfTenantAuditScope}, `platform-object-tenancy.ts`).
+ *
+ *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
+ *    NAMESPACE, on #8672's reasoning that "an org-less row is defensible for
+ *    `sys_permission_set`". The maintainer WITHDREW the wholesale form on
+ *    2026-08-31 (#13491, 联案 #13497): that reasoning inherits **per object**,
+ *    and the same namespace also holds objects whose org-less rows are a
+ *    defect — five instances (#12745, #12928, #10673, #8617, cloud#1239, one a
+ *    credentials table), every one found by a person reading call sites and
+ *    none by this control. So the exclusion is now a per-object verdict, and an
+ *    object nobody has adjudicated stays excluded and stays ON THE LIST.
+ *
+ *    ⚠️ The seed loader (`/^(sys_|cloud_|ai_)/` in `seed-loader.ts`) and
+ *    #8686's backfill (`seed-tenancy-backfill.ts`) still carry the NAMESPACE
+ *    form. That divergence is deliberate and NOT resolved here: #13491's
+ *    landing is the runtime write path, and re-cutting the seed and backfill
+ *    paths is a separate decision about rows those paths already wrote. Read
+ *    the three together before changing any of them.
  *  - **Writes that already carry an organization** — on the execution context
  *    or on the row itself. That IS "carrying an explicit organization"; the
  *    ruling asks for nothing more.
@@ -125,7 +135,16 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
 
-/** Is this object in a platform namespace whose rows stay org-less by design? */
+/**
+ * Is this object in one of the platform namespaces?
+ *
+ * ⚠️ NAME-SHAPE ONLY, since #13491. This answers "does the name carry a
+ * platform prefix", NOT "do its rows stay org-less" — the 2026-08-31 ruling
+ * separated those two questions, and the second one is
+ * {@link isPlatformObjectOutOfTenantAuditScope} in `platform-object-tenancy.ts`.
+ * ⛔ Never reach for this predicate to decide tenancy: doing so is the
+ * wholesale exemption the ruling withdrew.
+ */
 export function isPlatformNamespaceObject(object: string): boolean {
   return PLATFORM_NAMESPACE.test(object);
 }
