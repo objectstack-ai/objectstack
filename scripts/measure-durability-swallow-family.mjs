@@ -509,23 +509,27 @@ const RESOLUTION_CONTROLS = [
     why:
       'DROPPED direction, on the SAME collision as the control above — which is why the pair is worth '
       + 'more than either half. `collectBundleActions` calls its OWN `const push`, and that hop must '
-      + 'survive: a resolver that answered the refusal control by declining every ambiguous name would '
+      + 'survive: a resolver that answered the refusal control by declining every AMBIGUOUS name would '
       + 'silently narrow the census, and nothing in the output would show it. One name, one file, one '
-      + 'collision, refused from outside and resolved from inside.',
+      + 'collision, refused from outside and resolved from inside. ⚠️ Its scope is measured, not '
+      + 'assumed: this control does NOT pin the one-declaration departure — `push` has two bodies here '
+      + '— and an ablation that removes that departure leaves it green. The control below covers it.',
   },
   {
-    file: 'packages/runtime/src/http-dispatcher.ts',
-    callee: 'getService',
-    enclosing: 'resolveService',
-    resolvesIn: 'HttpDispatcher',
+    file: 'packages/plugins/plugin-email/src/email-plugin.ts',
+    callee: 'update',
+    enclosing: 'upsertTemplate',
+    resolvesIn: 'EmailServicePlugin',
     why:
-      'Departure ONE — one declaration, unchanged. `getService` has exactly one body in this file '
-      + '(`HttpDispatcher`\'s method) and this call site is not inside it: the call is '
-      + '`(kernel as any).getService?.(name)`, which `calleePath` reduces to a bare name. A strict '
-      + 'lexical resolver would decline it. This control does NOT claim that hop is semantically right '
-      + '— it is an artifact of the receiver being erased. It pins the INVARIANT that this repair only '
-      + 'ever touches COLLISIONS: tighten the resolver past that and this control goes red, forcing '
-      + 'the census delta to be re-measured instead of narrowing in silence.',
+      'Departure ONE — one declaration, unchanged — and this site was CHOSEN BY MEASUREMENT, after an '
+      + 'ablation showed the two controls above stay green when that departure is removed. Exactly 7 '
+      + 'call sites in the scan root depend on it; this is one of the four whose callee is in '
+      + '`WRITE_SHAPED_CALLEES`. `update` has a single body in this file, declared as a method of an '
+      + 'object literal, so the object literal is its scope and is NOT on this call site\'s ancestor '
+      + 'chain — a strict lexical resolver DECLINES the hop. This control does not claim the hop is '
+      + 'semantically right (the call is `(engine as any).update(...)`, whose receiver `calleePath` '
+      + 'erases). It pins the INVARIANT that this repair touches only COLLISIONS: tighten past that '
+      + 'and this goes red, forcing the census delta to be re-measured instead of narrowed in silence.',
   },
 ];
 
