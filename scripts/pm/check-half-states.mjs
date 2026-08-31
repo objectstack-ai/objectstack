@@ -6866,15 +6866,33 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 // "nothing is there" — #4690, on a leg whose whole output is counts. The
 // renderer refuses to present a clean census when the control came back empty.
 //
-// ## ⛔ What this leg must never grow into
+// ## ⚖️ RULED 2026-08-31 — the cleanup this leg was counting FOR is rejected
 //
-// ⛔ NO relabelling. The remedy for hundreds of closed cards across three-plus
-// lanes is a maintainer decision and a per-label DELETE (a whole-set label PUT
-// silently strips concurrent labels — the standing hazard this board records),
-// and it belongs to its own card. This file writes no label anywhere, and this
-// leg — which is the one that finally makes the population visible — is exactly
-// where that discipline would be most tempting to break. The census comes
-// first; the cleanup is a separate decision with its own approval.
+// The separate decision this leg deferred to has been made, and it went the
+// other way. Maintainer ruling, 第 6 场总监席决裁批 #13, verbatim and
+// untranslated: 「13605 已关卡 为什么要清理。普查时不应该只看open的卡片吗，其他
+// 同意」.
+//
+// So there is no cleanup, now or later: ⛔ no bulk strip, ⛔ no backfill of old
+// cards, ⛔ no sweep, ⛔ no reaper. A closed card is ARCHIVE, not state, and
+// ~3,000 label writes to tidy an archive is machinery serving the instrument.
+// The residue is made harmless READER-side instead — every query that selects
+// by a `pm:*` label scopes itself to open cards (`pmLabelListingPath` carries
+// that scoping and the self-test pins it).
+//
+// ⇒ What that costs THIS leg is its verdict, not its existence. The numbers
+// below are no longer a to-do, a backlog, or a problem: they are one
+// informational reading about a population nobody is expected to act on. So
+// the renderer emits exactly ONE line, and ⛔ never renders red, an alarm, or a
+// finding row — a patrol that keeps shouting a number after the number has
+// been ruled harmless trains its readers to stop reading the whole report.
+// Close-time hygiene (strip `pm:*` in the same stroke as the close) stays the
+// convention, and H22 — bounded to a 3-day closure window, where the paired
+// write is still a live duty — stays the leg that observes it.
+//
+// ⛔ NO relabelling remains true and is now doubly settled: this file writes no
+// label anywhere, and the write it might have been tempted into has been
+// refused by name.
 //
 // ⚠️ The `issues` endpoint returns PULL REQUESTS too, and they are filtered out
 // by `pull_request` presence — a PR counted as a card would inflate every
@@ -6965,75 +6983,60 @@ export function censusIsCountable(census) {
 }
 
 /**
- * The census block, in either medium. Returns [] when no census ran, so a
- * caller that did not gather one renders nothing rather than an empty table
- * that reads as a clean board.
+ * The census line, in either medium — ONE informational line, by ruling.
+ *
+ * ## Why one line, and why it is styled like the healthy rate premise
+ *
+ * Ruled 2026-08-31 (批 #13; the section header above carries the verbatim
+ * quote): closed-card `pm:*` residue is not a problem, not a to-do, and not a
+ * backlog — it is archive, made harmless by open-scoped readers rather than by
+ * three thousand label writes. A leg that renders it as a table of per-lane
+ * counts, page-cap warnings and a contradictory-pair roster is asserting the
+ * opposite with its typography whatever its words say, four times a day, in
+ * the same body as the findings that DO need action.
+ *
+ * So this returns at most `['', <one line>]` and, in markdown, the italic
+ * `_…_` the healthy `renderRatePremise` uses — deliberately NOT the bold
+ * heading that every finding block wears. ⛔ No `⚠️`, no `⛔`, no heading, no
+ * row per label, no finding code. A reader skimming for what to do must be
+ * able to skip this line, and a reader who wants the number must find it.
+ *
+ * ## The instrument caveats survive, demoted to a parenthesis
+ *
+ * A page cap is still not a count and an empty control still means "not read",
+ * because #4690 is about the INSTRUMENT and the ruling was about the BOARD —
+ * it did not license quoting an unread zero. Both are now one qualifier on the
+ * same line instead of two blocks, and `censusIsCountable` stays the predicate
+ * a caller consults before repeating any figure.
  */
 export function renderClosedResidueCensus(census, { markdown = false } = {}) {
   if (!census) return [];
-  const h = (s) => (markdown ? `**${s}**` : s);
-  // A census that could not RUN must not render as a census that found nothing
-  // — the same inversion this file refuses everywhere (#4690), and the exact
-  // failure the filing card was written about.
+  const line = (text) => ['', markdown ? `_${text}_` : `  ${text}`];
+  const LEAD = 'Closed-card `pm:*` residue (H39 census, informational)';
+  // Ruled harmless, so a census that could not run is a missing reading rather
+  // than an alarm — but it must still never read as a clean population (#4690).
   if (census.failed) {
-    return [
-      '',
-      h('Closed cards still carrying `pm:*` state (H39 census, #13526)'),
-      '',
-      `  ⚠️ CENSUS DID NOT RUN — ${census.failed}. ⛔ This is not a clean population: it is no reading.`,
-    ];
+    return line(`${LEAD}: not read this run — ${census.failed}. No figure, and none is owed.`);
   }
   if (!Array.isArray(census.rows) || census.rows.length === 0) return [];
-  const out = [];
-  out.push('');
-  out.push(h('Closed cards still carrying `pm:*` state (H39 census, #13526)'));
-  out.push('');
 
-  if (Number(census.controlRows ?? 0) <= 0) {
-    out.push(
-      `⚠️ CONTROL FAILED — the control query (closed issues, no \`pm:*\` filter) returned 0 rows, so ` +
-        `this instrument read NOTHING. Every figure below is "not read", ⛔ not "not there" (#4690).`,
-    );
-    out.push('');
-  }
+  const figures = census.rows
+    .map((row) => `${row.label} ${row.truncated ? `≥${row.total}` : row.total}`)
+    .join(', ');
+  const oldest = census.rows.find((row) => row.oldest)?.oldest;
+  const since = oldest ? `, oldest closed ${new Date(oldest.at).toISOString().slice(0, 10)}` : '';
+  const pairs = `${census.pairs.length} carrying both \`pm:queue\` and \`pm:dispatched\``;
+  // The two instrument caveats, folded into one parenthesis.
+  const caveat = censusIsCountable(census)
+    ? ''
+    : census.truncated
+      ? ` (lower bounds — a label hit the ${CENSUS_PAGE_CEILING}-page cap; not counts)`
+      : ' (not read — the control query returned no rows; not counts)';
 
-  for (const row of census.rows) {
-    // ⛔ The one formatting rule this leg exists to enforce.
-    const figure = row.truncated
-      ? `≥${row.total} (PAGE CAP at ${CENSUS_PAGE_CEILING} pages — ⛔ NOT a count)`
-      : `${row.total}`;
-    const oldest = row.oldest
-      ? `, oldest closed ${new Date(row.oldest.at).toISOString().slice(0, 10)} (#${row.oldest.number})`
-      : '';
-    out.push(`  ${row.label}: ${figure}${oldest}`);
-    for (const [lane, n] of row.lanes) out.push(`      ${lane}: ${n}`);
-  }
-
-  out.push('');
-  if (census.pairs.length === 0) {
-    out.push('  contradictory `pm:queue` + `pm:dispatched` on a closed card: none');
-  } else {
-    const shown = census.pairs.slice(0, CENSUS_PAIR_LIST_CAP);
-    const rest = census.pairs.length - shown.length;
-    out.push(
-      `  contradictory \`pm:queue\` + \`pm:dispatched\` on a closed card: ${census.pairs.length}` +
-        ` — ${shown.map((n) => `#${n}`).join(', ')}${rest > 0 ? `, and ${rest} more` : ''}`,
-    );
-  }
-  out.push('');
-  out.push(
-    census.truncated
-      ? '  ⛔ At least one label hit the page cap. A cap is NOT a count — the true figures are larger' +
-          ' and unknown, and no reader may quote these as exact (the three cards whose capped bounds' +
-          ' were quoted back as exact are why this sentence is here).'
-      : '  Fully paginated: every figure above is a real count, not a page cap.',
+  return line(
+    `${LEAD}: ${figures}; ${pairs}${since}${caveat}. Archive, not state — no cleanup is owed ` +
+      `and none is planned (ruled 2026-08-31, 批 #13); readers scope \`pm:*\` queries to open cards.`,
   );
-  out.push(
-    '  ⛔ Report-only, and ⛔ census only: no label is written by this script. A bulk strip of closed' +
-      " cards is a maintainer decision on its own card — a whole-set label PUT silently strips" +
-      ' concurrent labels, so the cleanup is per-label DELETE and is not this leg.',
-  );
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -8593,14 +8596,38 @@ export function noteOpenListing(stats, name, pages, truncated) {
   }
 }
 
+/**
+ * The path of ONE page of a `pm:*`-label listing — and the single place the
+ * `state=open` scoping on it is asserted.
+ *
+ * ## Why this is a named, pinned function rather than an inline template
+ *
+ * Maintainer ruling 2026-08-31 (第 6 场总监席决裁批 #13), verbatim and
+ * untranslated: 「13605 已关卡 为什么要清理。普查时不应该只看open的卡片吗，其他
+ * 同意」. The ~3,000 closed cards still carrying `pm:*` are NOT cleaned up — no
+ * bulk strip, no backfill, no reaper — because a closed card is ARCHIVE, not
+ * state. What makes that residue harmless is entirely reader-side: every
+ * census, patrol, candidate and mutex query that selects by a `pm:*` label
+ * must scope itself to OPEN cards. `state=open` here is therefore no longer an
+ * incidental detail of one listing helper; it is the whole mechanism by which
+ * the ruling holds, and the self-test pins it (search `批 #13`).
+ *
+ * ⛔ Never widen this to `state=all` or drop the parameter. A `pm:*` label page
+ * without it returns two thousand archived cards as though they were in-flight
+ * claims, and every predicate downstream reads them as live state — which is
+ * precisely the corruption the ruling chose to fix HERE instead of by writing
+ * three thousand labels.
+ */
+export function pmLabelListingPath(repo, label, page) {
+  return `/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`;
+}
+
 async function listIssues(label, stats = {}) {
   const out = [];
   let exhausted = false;
   let page = 1;
   for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
-    const batch = await rest(
-      `/repos/${OWNER_REPO}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
-    );
+    const batch = await rest(pmLabelListingPath(OWNER_REPO, label, page));
     out.push(...batch.filter((i) => !i.pull_request));
     if (batch.length < 100) {
       exhausted = true;
@@ -14848,22 +14875,30 @@ function selfTest() {
   t('H39: …and names the card carrying both', baseCensus.pairs[0], 1);
   t('H39: a card in only one set is not a pair', baseCensus.pairs.includes(9), false);
 
-  // ⛔ The page-cap rule, in both directions.
+  // ⛔ The page-cap rule, in both directions. The RENDER's spelling of it moved
+  // into the one-line qualifier at the 批 #13 re-judgment (below); the
+  // countability predicate behind it is unchanged and is what callers consult.
   const cappedCensus = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)], true)]]);
   t('H39 cap: a truncated corpus marks the census truncated', cappedCensus.truncated, true);
   t('H39 cap: …and its figures are NOT countable', censusIsCountable(cappedCensus), false);
-  t('H39 cap: …and the render says PAGE CAP, not a bare number', renderClosedResidueCensus(cappedCensus).join('\n').includes('PAGE CAP'), true);
-  t('H39 cap: …and says NOT a count in as many words', renderClosedResidueCensus(cappedCensus).join('\n').includes('NOT a count'), true);
+  t('H39 cap: …and the render says lower bounds, not a bare number', renderClosedResidueCensus(cappedCensus).join('\n').includes('lower bounds'), true);
+  t('H39 cap: …and says not counts in as many words', renderClosedResidueCensus(cappedCensus).join('\n').includes('not counts'), true);
   t('H39 cap: …and prefixes the figure with ≥ rather than stating it', renderClosedResidueCensus(cappedCensus).join('\n').includes('≥1'), true);
+  t('H39 cap: …and names the cap that produced the bound', renderClosedResidueCensus(cappedCensus).join('\n').includes(`${CENSUS_PAGE_CEILING}-page cap`), true);
   t('H39 cap: a fully paginated census IS countable', censusIsCountable(baseCensus), true);
-  t('H39 cap: …and says so, so a reader can quote it', renderClosedResidueCensus(baseCensus).join('\n').includes('Fully paginated'), true);
-  t('H39 cap: …and does NOT cry page cap', renderClosedResidueCensus(baseCensus).join('\n').includes('PAGE CAP'), false);
+  t('H39 cap: …and carries no bound qualifier at all', renderClosedResidueCensus(baseCensus).join('\n').includes('lower bounds'), false);
 
   // The control the filing card prescribed: without rows, a zero is "not read".
+  // #4690 is about the INSTRUMENT, so the ruling did not retire it — it only
+  // demoted its typography from a block to a parenthesis.
   const noControl = censusOf([['pm:dispatched', corpus([censusCard(1, DEVX)])]], 0);
   t('H39 control: an empty control makes the census uncountable', censusIsCountable(noControl), false);
-  t('H39 control: …and the render says the instrument read nothing', renderClosedResidueCensus(noControl).join('\n').includes('CONTROL FAILED'), true);
-  t('H39 control: …and refuses the "not there" reading explicitly', renderClosedResidueCensus(noControl).join('\n').includes('not "not there"'), true);
+  t('H39 control: …and the render says the instrument read nothing', renderClosedResidueCensus(noControl).join('\n').includes('not read'), true);
+  t('H39 control: …and names the control as the reason', renderClosedResidueCensus(noControl).join('\n').includes('control query returned no rows'), true);
+  t('H39 control: …and still refuses to be quoted as a count', renderClosedResidueCensus(noControl).join('\n').includes('not counts'), true);
+  // ⛔ The two caveats are mutually exclusive: a capped census must not also
+  // claim the control failed, which is what a naive `||` of the two would print.
+  t('H39 control: a capped census does not blame the control', renderClosedResidueCensus(cappedCensus).join('\n').includes('control query'), false);
 
   // ⚠️ The `issues` endpoint returns PRs too — one counted as a card inflates
   // every figure in the direction that makes the problem look worse.
@@ -14882,12 +14917,62 @@ function selfTest() {
   t('H39 lanes: an unrouted card is bucketed, not dropped', censusLanesOf(censusCard(1, ['pm:queue']))[0], '(no lane)');
 
   // ⛔ A census that could not RUN must not render as a clean population.
-  t('H39 failure: a failed census says it did not run', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('CENSUS DID NOT RUN'), true);
-  t('H39 failure: …and refuses the clean reading', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('no reading'), true);
+  t('H39 failure: a failed census says it was not read', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('not read this run'), true);
+  t('H39 failure: …and carries the status so a reader can act on it', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('HTTP 403'), true);
+  t('H39 failure: …and states no figure rather than implying zero', renderClosedResidueCensus({ failed: 'HTTP 403' }).join('\n').includes('No figure'), true);
   t('H39 failure: no census at all renders nothing', renderClosedResidueCensus(null).length, 0);
-  // ⛔ And the discipline that must never be relaxed here.
-  t('H39: the block states that it writes no label', renderClosedResidueCensus(baseCensus).join('\n').includes('no label is written'), true);
-  t('H39: …and that cleanup is a separate decision', renderClosedResidueCensus(baseCensus).join('\n').includes('maintainer decision'), true);
+
+  // -- 批 #13 (2026-08-31) — the census is INFORMATIONAL, never an alarm ------
+  //
+  // Maintainer ruling: closed-card residue is archive, not state; it is made
+  // harmless reader-side and no cleanup is owed. These pins are the ruling's
+  // mechanical half — the render may state the number and must not campaign
+  // about it. Each one below was a real property of the pre-ruling block.
+  const censusLines = (c) => renderClosedResidueCensus(c);
+  const censusText = (c) => censusLines(c).join('\n');
+  t('批 #13: the census renders ONE line (plus its leading blank)', censusLines(baseCensus).length, 2);
+  t('批 #13: …a capped census is one line too', censusLines(cappedCensus).length, 2);
+  t('批 #13: …a failed census is one line too', censusLines({ failed: 'HTTP 403' }).length, 2);
+  t('批 #13: no alarm glyph anywhere in the line', /[⚠⛔]/u.test(censusText(baseCensus)), false);
+  t('批 #13: …not on the capped reading either', /[⚠⛔]/u.test(censusText(cappedCensus)), false);
+  t('批 #13: …nor on the unread one', /[⚠⛔]/u.test(censusText({ failed: 'HTTP 403' })), false);
+  t('批 #13: the line says the residue is archive, not state', censusText(baseCensus).includes('Archive, not state'), true);
+  t('批 #13: …and that no cleanup is owed', censusText(baseCensus).includes('no cleanup is owed'), true);
+  t('批 #13: …and that none is planned, so nobody re-opens it', censusText(baseCensus).includes('none is planned'), true);
+  t('批 #13: …and cites the ruling that says so', censusText(baseCensus).includes('批 #13'), true);
+  t('批 #13: …and names the reader-side mechanism that replaces the cleanup', censusText(baseCensus).includes('open cards'), true);
+  t('批 #13: the line is marked informational rather than a heading', censusText(baseCensus).includes('informational'), true);
+  t('批 #13: markdown renders it italic, like the healthy rate premise', renderClosedResidueCensus(baseCensus, { markdown: true })[1].startsWith('_'), true);
+  t('批 #13: …and never bold', renderClosedResidueCensus(baseCensus, { markdown: true })[1].startsWith('**'), false);
+  // ⛔ The census must never become a finding row. The load-bearing half of
+  // that is arithmetic, not wording: a clean board with a large census must
+  // still report ZERO findings, because the count is what a patrol reader acts
+  // on and what "the board is clean" means. (The lead legitimately names H39 —
+  // that is the leg's identity, not a per-card finding code.)
+  const cleanBoardWithCensus = renderPlain([], {}, { census: baseCensus });
+  t('批 #13: a clean board with a census still summarises ZERO findings', cleanBoardWithCensus.includes(summaryLine({}, 0)), true);
+  t('批 #13: …and the census line is still present in that report', cleanBoardWithCensus.includes('Closed-card `pm:*` residue'), true);
+  t('批 #13: …and no finding row was manufactured for it', /^ {2}H\d\d #/mu.test(cleanBoardWithCensus), false);
+  t('批 #13: …and it gives no strip/cleanup imperative', /\bStrip\b/u.test(censusText(baseCensus)), false);
+  // The figures still reach a reader who wants them — demoted, not deleted.
+  t('批 #13: the per-label figure survives on the line', censusText(baseCensus).includes('pm:dispatched 3'), true);
+  t('批 #13: …and so does the contradictory-pair count', censusText(baseCensus).includes('1 carrying both'), true);
+
+  // -- 批 #13 item ① — the open-state scoping that MAKES the residue harmless -
+  //
+  // The reader audit's whole finding was that this one query is the mechanism.
+  // It was already correct; these pins are what stop it being silently widened.
+  t('批 #13: the pm:* label listing is scoped to OPEN cards', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=open'), true);
+  t('批 #13: …and never to all states', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=all'), false);
+  t('批 #13: …nor to closed', pmLabelListingPath('o/r', 'pm:dispatched', 1).includes('state=closed'), false);
+  t('批 #13: the label is URL-encoded, so `pm:*` survives the colon', pmLabelListingPath('o/r', 'pm:on-hold', 1).includes('labels=pm%3Aon-hold'), true);
+  t('批 #13: the path is repo-relative, keeping the sweeper repo-agnostic', pmLabelListingPath('o/r', 'pm:queue', 2).startsWith('/repos/o/r/issues?'), true);
+  t('批 #13: …and carries the page it was asked for', pmLabelListingPath('o/r', 'pm:queue', 7).includes('page=7'), true);
+  // Every residue label is reachable through the open-scoped path — the audit's
+  // population, asserted rather than described.
+  for (const label of PM_RESIDUE_LABELS) {
+    t(`批 #13: ${label} is listed open-scoped`, pmLabelListingPath('o/r', label, 1).includes('state=open'), true);
+  }
 
   // The rate-premise renderer — the healthy state prints too, because a check
   // visible only when it fires is indistinguishable from a deleted one.
