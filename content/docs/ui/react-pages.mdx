@@ -176,8 +176,7 @@ function Page() {
         $filter: ['status', '!=', 'paid'],
         $top: 200,
       });
-      const records = result?.data ?? (Array.isArray(result) ? result : []);
-      if (alive) setRows(records);
+      if (alive) setRows(result.data);
     })();
     return () => { alive = false; };
   }, [adapter]);
@@ -185,6 +184,11 @@ function Page() {
   return <ul>{rows.map((r) => <li key={r.id}>{r.name}</li>)}</ul>;
 }
 ```
+
+`find()` always resolves to the same envelope — a `QueryResult` carrying the rows
+under `data`. A backend that answers with a bare array is folded into that envelope
+before your code sees it, so `result.data` is the only row shape a page is ever handed:
+read it directly, with no fallback for a shape the adapter cannot produce.
 
 <Callout type="warn">
 The `$` prefixes are load-bearing. An unprefixed `top:` or a `filters:` key is not a
