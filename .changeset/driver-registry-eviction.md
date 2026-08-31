@@ -1,10 +1,22 @@
 ---
 "@objectstack/objectql": patch
 "@objectstack/service-datasource": patch
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
 Deleting a datasource now evicts its driver from the data-engine registry, so `/api/v1/ready` recovers without a process restart
+
+**BREAKING** `IObjectQLEngine` gains a REQUIRED member, shipped as `minor`
+under the repo's launch-window convention for breaking changes.
+
+`unregisterDriver(name: string): boolean` is additive for CONSUMERS — nothing
+they already call changes — but it breaks any third-party *implementer* of
+`IObjectQLEngine` at compile time, and the interface is on the published
+surface (`packages/spec/src/contracts/index.ts` re-exports it and `./contracts`
+is a published export path). Graded `minor` to match this contract's own
+precedent: the three prior changes to it all took `minor`, including one that
+added five members that were **all optional** and therefore broke nobody by
+construction. A required member grading below that would be inconsistent.
 
 The ObjectQL driver registry had a `registerDriver` door and no counterpart, so
 nothing could ever leave it. Deleting a datasource emptied the admin door while
