@@ -953,9 +953,11 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 
 // NOTE: there is intentionally no scim mapping constant here, and no
 // `buildScimPluginSchema()`. `@better-auth/scim` hardcodes its models and exposes
-// NO `schema` option — still true of the installed stable `@better-auth/scim@1.7.1`
-// (`SCIMOptions` declares no `schema` / `modelName` / `fields` member at all;
-// measured 2026-08-19 on the rc, re-measured 2026-08-27 on stable, #3653), so
+// NO `schema` option — still true of the installed stable `@better-auth/scim@1.7.2`
+// (`SCIMOptions` declares no `schema` / `modelName` / `fields` member at all — its
+// six members are connections, authentication, managedConnections, identity,
+// projection, compatibility; measured 2026-08-19 on the rc, re-measured
+// 2026-08-27 on stable 1.7.1, and again 2026-08-31 on 1.7.2 for #13940), so
 // there is nowhere to hand one. This is no longer true
 // of `@better-auth/sso@1.7.1`, which now accepts one (#8224) — for scim, and for
 // scim alone, the ADAPTER layer is the only available route.

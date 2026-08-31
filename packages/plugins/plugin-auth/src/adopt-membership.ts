@@ -70,7 +70,7 @@
  * membership**, so a `create` naming an (org, user) pair that already exists is
  * not a second membership — it is that membership.
  *
- * Blast radius, measured against the installed better-auth (re-measured on
+ * Blast radius, measured against the then-installed better-auth (re-measured on
  * 1.7.1) rather than assumed — accept-invitation is the ONLY `member` create
  * that can reach an existing pair:
  *

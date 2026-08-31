@@ -46,7 +46,7 @@
  *
  * The two optional fields are NOT symmetric. `organizationId` defaults to the
  * caller's active organization when omitted; `teamId` has no such fallback —
- * omit it and the member simply joins no team. Measured on the installed
+ * omit it and the member simply joins no team. Measured on the then-installed
  * better-auth 1.7.1 (`dist/plugins/organization/routes/crud-members.mjs`,
  * inside `addMember`'s handler):
  *

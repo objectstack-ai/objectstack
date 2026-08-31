@@ -382,7 +382,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'foreign-vocabulary',
         why:
-            "better-auth 1.7.1's own admin-plugin vocabulary — verified in the installed vendor at " +
+            "better-auth 1.7.1's own admin-plugin vocabulary — verified in the then-installed vendor at " +
             '`dist/plugins/admin/error-codes`, spelled there exactly as it is here — and read at runtime ' +
             'off `plugin.$ERROR_CODES`, never retyped. The caller-side refusal, raised ' +
             "`APIError.from('FORBIDDEN', notAllowed)` inside a better-auth endpoint, so it leaves as the " +

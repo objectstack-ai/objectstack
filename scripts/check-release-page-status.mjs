@@ -721,6 +721,7 @@ function selfTest() {
       '## Landed since 17.0.0-rc.0',
       '',
       'The 17.0.0 train is currently published as `17.0.0-rc.6`; nothing reaches the `latest` tag.',
+      // vendor-stamp:fixture — synthetic page text; this version is assertion input, not a claim about this tree
       'This paragraph is history, not status, and pins `better-auth 1.7.0-rc.2`.',
     ].join('\n');
     const bq = statusBlockquote(page);

@@ -88,7 +88,7 @@ export const SysMember = ObjectSchema.create({
       // The two optional fields are NOT symmetric. `organizationId` defaults
       // to the caller's active organization when omitted; `teamId` has no such
       // fallback — omit it and the member simply joins no team. Measured on the
-      // installed better-auth 1.7.1
+      // then-installed better-auth 1.7.1
       // (`dist/plugins/organization/routes/crud-members.mjs`, `addMember`):
       // `ctx.body.organizationId || session?.session.activeOrganizationId`
       // against `"teamId" in ctx.body ? ctx.body.teamId : void 0`, and no
