@@ -2365,6 +2365,191 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
   });
 });
 
+import { SaveMetaItemRequestSchema } from './protocol.zod';
+import type { SaveMetaItemRequest, SaveMetaItemResponse } from './protocol.zod';
+
+describe('SaveMetaItemRequestSchema declares the contract members the save door sends (#12004)', () => {
+  // The biggest remaining member of the request-shape family the reset twin
+  // above belongs to: `saveMetaItem` is a REQUIRED protocol member (so a scan
+  // for undeclared members walked past it), while the request schema declared
+  // 3 of the ~11 members `PUT /meta/:type/:name` sends — which is why the
+  // call-site cast could not come off (TS2353 on every undeclared key, pure
+  // request-shape smuggling, never feature detection). The measure is the
+  // implementation's parameter type in `@objectstack/metadata-protocol` —
+  // `{ type, name, item?, organizationId?, parentVersion?, actor?, force?,
+  // mode?, packageId?, source?, writeFace? }` — and the REST door's actual
+  // sends. As in the sibling blocks above, accept-pins assert the parsed
+  // VALUE: this is a non-strict object, so `success` alone is exactly the
+  // silent-strip state this family of cards closes.
+
+  // `item` rides every fixture: the untouched `z.unknown()` member is
+  // measured key-REQUIRED at parse (absent key refused; a present `null`
+  // parses and is then refused 400 by the implementation's own guard) —
+  // pre-existing contract behaviour this card deliberately does not move.
+  const base = { type: 'view', name: 'account_list', item: { label: 'Account list' } } as const;
+
+  it('accepts the full request and PRESERVES every member through parse', () => {
+    const full = {
+      ...base,
+      organizationId: 'org_alpha',
+      parentVersion: 'sha256:abc123',
+      actor: 'admin@objectos.ai',
+      force: true,
+      mode: 'draft',
+      packageId: 'com.example.crm',
+      writeFace: 'meta-envelope',
+    };
+    const result = SaveMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(full);
+    }
+  });
+
+  it('requires type AND name — the save addresses one item', () => {
+    expect(SaveMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(SaveMetaItemRequestSchema.safeParse({ type: 'view', item: {} }).success).toBe(false);
+    expect(SaveMetaItemRequestSchema.safeParse({ name: 'account_list', item: {} }).success).toBe(false);
+  });
+
+  it('keeps item key-required at parse — the measured pre-existing contract', () => {
+    // Absent key is refused at parse; an explicit `null` PARSES (the
+    // implementation's own opening guard then refuses it 400) — so the
+    // wire-reachable "explicitly null envelope" keeps reaching the guard
+    // that owns its error message rather than dying as an anonymous parse
+    // failure.
+    expect(SaveMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list' }).success).toBe(false);
+    expect(SaveMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list', item: null }).success).toBe(true);
+  });
+
+  it('the two optional strings stay optional and reject non-strings — values, not bags', () => {
+    for (const key of ['organizationId', 'actor'] as const) {
+      const absent = SaveMetaItemRequestSchema.safeParse(base);
+      expect(absent.success).toBe(true);
+      if (absent.success) {
+        expect(key in (absent.data as object)).toBe(false);
+      }
+      expect(SaveMetaItemRequestSchema.safeParse({ ...base, [key]: 42 }).success).toBe(false);
+      expect(SaveMetaItemRequestSchema.safeParse({ ...base, [key]: { v: 'x' } }).success).toBe(false);
+    }
+  });
+
+  it('parentVersion is the nullable OCC pin — string pins, null is the first-write pin, absent is unpinned', () => {
+    // Unlike the reset twin above (plain optional string — its implementation
+    // folds a present `null` back to the current hash), the save verb passes
+    // `null` through to the repository conflict check unchanged, so the
+    // absent-vs-null distinction is a real, enforced contract member here and
+    // the schema mirrors the implementation's `string | null`.
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, parentVersion: 'sha256:abc' }).success).toBe(true);
+    const withNull = SaveMetaItemRequestSchema.safeParse({ ...base, parentVersion: null });
+    expect(withNull.success).toBe(true);
+    if (withNull.success) {
+      // Preserved as null, never stripped to absent — the two spell
+      // different pins.
+      expect('parentVersion' in (withNull.data as object)).toBe(true);
+      expect((withNull.data as { parentVersion: unknown }).parentVersion).toBeNull();
+    }
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, parentVersion: 42 }).success).toBe(false);
+  });
+
+  it('keeps force boolean and the mode / writeFace vocabularies closed', () => {
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, force: false }).success).toBe(true);
+    // The REST door only ever SENDS `force: true` (conditional spread), but
+    // the contract member is a boolean, mirroring the implementation.
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, force: 'true' }).success).toBe(false);
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'draft' }).success).toBe(true);
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'publish' }).success).toBe(true);
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, mode: 'stage' }).success).toBe(false);
+    for (const face of ['package-duplicate', 'meta-envelope', 'meta-dispatch'] as const) {
+      expect(SaveMetaItemRequestSchema.safeParse({ ...base, writeFace: face }).success).toBe(true);
+    }
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, writeFace: 'rest' }).success).toBe(false);
+  });
+
+  it('packageId mirrors the implementation nullable — and null is preserved, not stripped', () => {
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, packageId: 'com.example.crm' }).success).toBe(true);
+    const withNull = SaveMetaItemRequestSchema.safeParse({ ...base, packageId: null });
+    expect(withNull.success).toBe(true);
+    if (withNull.success) {
+      expect('packageId' in (withNull.data as object)).toBe(true);
+      expect((withNull.data as { packageId: unknown }).packageId).toBeNull();
+    }
+    expect(SaveMetaItemRequestSchema.safeParse({ ...base, packageId: 42 }).success).toBe(false);
+  });
+
+  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+    // Same regression guard as the meta-read, publish, audit, history and
+    // reset blocks above: the save door DOES spread `environmentId` into its
+    // outgoing payload, and that member rides `packages/rest`'s
+    // `TransportScopedMetaRequest` envelope — never this schema. If someone
+    // declares it, this test names the ruling they are overturning
+    // (2026-08-18 on #9741).
+    const result = SaveMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+    const shape = (SaveMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+
+  it('does not declare source — implementation-internal provenance with no producer on this contract', () => {
+    // The implementation declares `source?: string` (its own
+    // `migrateStoredMetadata` call sends 'migrate-stored'), but NO door sends
+    // it and the REST layer deliberately never reads a client-supplied
+    // provenance — the publish-door precedent (#11426) leaves such a member
+    // undeclared until a producer on THIS contract pulls it. Declaring it
+    // would advertise a wire-authorable provenance channel that does not
+    // exist.
+    const result = SaveMetaItemRequestSchema.safeParse({ ...base, source: 'studio' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('source' in (result.data as object)).toBe(false);
+    }
+    const shape = (SaveMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('source');
+  });
+});
+
+describe('MetadataProtocol.saveMetaItem types against the caught-up request schema (#12004)', () => {
+  // The member declaration itself long predates this card — `saveMetaItem`
+  // is REQUIRED on `MetadataProtocol` — so these pins are the request-shape
+  // half: what turns red if the schema drops back to `{ type, name, item }`
+  // (the member would still exist; the door literal would stop compiling) or
+  // if a key drifts off the implementation's vocabulary.
+
+  it('declares the member REQUIRED, against the save request/response schemas', () => {
+    expectTypeOf<MetadataProtocol['saveMetaItem']>().toEqualTypeOf<
+      (request: SaveMetaItemRequest) => Promise<SaveMetaItemResponse>
+    >();
+  });
+
+  it('refuses an undeclared key at the member call shape — the TS2353 half this card names', () => {
+    const good: SaveMetaItemRequest = {
+      type: 'view',
+      name: 'account_list',
+      item: { label: 'Account list' },
+      organizationId: 'org_alpha',
+      parentVersion: null,
+      actor: 'admin',
+      force: true,
+      mode: 'draft',
+      packageId: null,
+      writeFace: 'meta-dispatch',
+    };
+    expect(good.type).toBe('view');
+    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
+    const withEnv: SaveMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
+    expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error `source` is implementation-internal provenance — no producer on this contract sends it, and the REST layer never reads it off the wire.
+    const withSource: SaveMetaItemRequest = { type: 'view', name: 'account_list', source: 'studio' };
+    expect(withSource.name).toBe('account_list');
+    // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
+    const misspelt: SaveMetaItemRequest = { type: 'view', name: 'account_list', writeface: 'meta-envelope' };
+    expect(misspelt.name).toBe('account_list');
+  });
+});
+
 // ==========================================
 // Meta history / diagnostics response conformance (#12038)
 // ==========================================
