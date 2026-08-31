@@ -8644,7 +8644,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * ADR-0061: expand `search` into a server-resolved cross-field `$or` of
-   * `$contains`, AND it with any caller `where`, then strip the search keys off
+   * `$icontains`, AND it with any caller `where`, then strip the search keys off
    * the AST.
    *
    * Shared by `find` and `findOne` (#4419). It lived inline in `find` and
@@ -8661,7 +8661,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Field resolution is server-side (declared `searchableFields` →
    * auto-default); the optional `searchFields` override is intersected with the
-   * allowed set, never widened. All drivers already execute `$or`/`$contains`,
+   * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
    * The keys are deleted whether or not anything expanded — leaving them on
