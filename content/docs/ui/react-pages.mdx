@@ -70,6 +70,9 @@ never executed in the first place, which is the whole point of the split.
 
 ## What is in scope
 
+Everything from here down is the **`react` tier's** authoring guide unless a section says
+otherwise, and each section below opens by naming the tier it is for.
+
 Nothing is imported. A react page's source is evaluated with a closure scope the runtime
 builds for it:
 
@@ -81,7 +84,11 @@ builds for it:
 | `useAdapter` | The live data source: `find` / `findOne` / `create` / `update`. |
 | `data`, `variables`, `page` | The page's data, its `variables` map, and its own schema. |
 
-**On this tier** blocks are referenced by the **PascalCase form of their registered
+**On the `react` tier only.** A `kind:'html'` page's source is parsed and never evaluated,
+so it has no closure scope at all and none of the names above exist there: its source is
+one JSX element tree, not an expression the runtime runs.
+
+**On the `react` tier** blocks are referenced by the **PascalCase form of their registered
 type**: `object-form` → `<ObjectForm>`, `list-view` → `<ListView>`, `object-chart` →
 `<ObjectChart>`. A `kind:'html'` page writes the registered name itself instead —
 `<object-form>`, `<list-view>`, `<object-chart>`.
@@ -101,6 +108,11 @@ place for the contract to rot.
 
 ## Blocks take flat props
 
+**On the `react` tier.** A `kind:'html'` page writes flat props too, but only *values*:
+its parser rejects every `on…` handler outright — `Attribute "onRowClick" is not allowed
+on <list-view>` — so the callback wiring below has no html counterpart. Needing one block
+to drive another is itself a reason to reach for `react`.
+
 An injected block folds its JSX props into the block's schema, so you write flat props
 rather than a nested `schema` object:
 
@@ -118,9 +130,16 @@ another:
 One collision is worth knowing. `type` is the SDUI envelope's component discriminator
 **and** a legitimate prop name on some blocks — a chart's family, for instance. The
 discriminator wins the `type` slot and your value is preserved beside it as `specType`
-for the block to read, so `<ObjectChart type="bar">` works as written.
+for the block to read, so `<ObjectChart type="bar">` works as written. That rescue is the
+react runtime's. On an `html` page the tag name *is* the node's `type`, a `type` attribute
+overwrites it, and `<object-chart>` declares no `type` input to write in the first place.
 
 ### `Block` — the escape hatch
+
+**On the `react` tier.** `Block` is a component the react scope injects, not a registered
+type, so it is not one of the tags an `html` page may write. An `html` page reaches the
+same components by writing the registered name directly —
+`<object-kanban objectName="showcase_task" />`.
 
 Any registered component, including ones outside the curated contract:
 
@@ -135,6 +154,12 @@ escape hatch — `<ListView viewType="kanban" …>` selects the visualization di
 [below](#record-blocks-not-in-react).
 
 ## Live data
+
+**On the `react` tier.** `useAdapter` and React's hooks exist only where the source is
+executed, and the sample below is refused on an `html` page before any of that matters —
+it does not begin with an element. A `kind:'html'` page binds data declaratively instead:
+each block declares its own `objectName` and narrows it with that block's own `filter`
+input.
 
 `useAdapter()` returns the same data source the rest of the app queries through. Query
 options are OData-shaped — `$filter`, `$top`, `$skip`, `$select`, `$orderby`, `$search`:
@@ -174,6 +199,10 @@ compounds spelled `['and', [...], [...]]`.
 
 ## Styling — a page's source is metadata, not source code [#styling]
 
+**Both tiers.** The rule in the callout holds for `html` and `react` alike. The two
+remedies after it are the react tier's; an `html` page styles with its components'
+structured props plus a JSON `style` object carrying the same theme tokens.
+
 <Callout type="warn">
 **Do not write Tailwind utility classes in page source.** A page's `source` is *runtime
 metadata*. The console's Tailwind is JIT-compiled at **build** time by scanning the
@@ -182,7 +211,7 @@ name in page source produces CSS only if that exact class happens to appear some
 the console's own source, and otherwise **produces nothing, with no error anywhere**.
 </Callout>
 
-This is the single most expensive mistake on this tier, because the failure mode is a
+This is the single most expensive mistake on either tier, because the failure mode is a
 page that renders — correct structure, correct data, no styling — and reports nothing.
 It is recorded as an amendment to ADR-0080 under
 [ADR-0065](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0065-sdui-styling-model.md):
@@ -237,6 +266,11 @@ styling; you only style the layout around them.
 
 ## Accepted source shapes
 
+**On the `react` tier.** None of these shapes carries over. An `html` page's source is a
+single root element and nothing else, so `function Page() { … }`, `() => …` and a
+trailing `export default Page;` are each refused at save time — `Expected a single root
+element` for the first two, `A page must have exactly one root element` for the export.
+
 The page renders the source's **default export**. The runtime inserts an implicit
 `export default` when the source *starts with* JSX, a `function` declaration, `()`, or
 `class`:
@@ -255,15 +289,24 @@ throws with a message naming the fix.
 
 ## When something throws
 
+**On the `react` tier**, because the source is executed. A `kind:'html'` page never gets
+that far: its source is parsed against the block manifest when you save it, and the same
+three commands below report the parse and manifest diagnostics instead —
+`jsx-forbidden-tag`, `jsx-forbidden-attr`, `jsx-unknown-component`, `jsx-no-root` and the
+rest.
+
 Transpile errors, evaluation errors and errors thrown during render all surface in a
 **React page error** panel carrying the message. The error is held until the source or
 its data changes, so it neither flickers nor escapes into the generic renderer error.
 
 Referencing an identifier that is not in scope is the common case, and reads as
-`ReferenceError: <Name> is not defined` — usually a layout container (there are none on
-this tier — use HTML) or a block outside the public registry (use `<Block>`).
+`ReferenceError: <Name> is not defined` — usually a layout container (the `react` tier
+injects none — use HTML) or a block outside the public registry (use `<Block>`).
 
 ## Page state
+
+**On the `react` tier.** A `kind:'html'` page holds no state — its source is compiled once
+to the SDUI tree — so interactivity that needs state is itself a reason to choose `react`.
 
 A react page keeps its own `React.useState` across re-renders and across lazily loaded
 plugin chunks. The parent record on a react page is not a framework concept — it is
@@ -276,7 +319,14 @@ blocks inside it, so a host that constructs an adapter inline on every render re
 every react page on every render. Hosts should provide the adapter from state or a
 module constant.
 
-## `record:*` blocks are not in this tier [#record-blocks-not-in-react]
+## `record:*` blocks are not on the `react` tier [#record-blocks-not-in-react]
+
+**On the `react` tier only.** The withdrawal below is this one tier's: `os validate`
+applies the rule to `kind:'react'` pages and to nothing else. Everywhere else the
+`record:*` family is the normal way to compose a record surface — `<record:details>` and
+`<record:related_list>` are registered tags an `html` page may write like any other. Put
+them on a `type:'record'` page, which is what mounts the context they read; see
+[Page Metadata](/docs/ui/pages#components).
 
 `<RecordDetails>`, `<RecordHighlights>`, `<RecordRelatedList>`, `<RecordPath>` and the
 rest of the `record:*` family are **record-page composition blocks**. Each one reads its
@@ -302,6 +352,9 @@ for a related list — or read the record with `useAdapter().findOne` and lay it
 To use the family itself, author the page as `type:'record'` instead.
 
 ## How you check your work
+
+**Both tiers** go through the same three commands. A `kind:'html'` page's source is parsed
+against the block manifest; the rule names quoted below are the `react` tier's.
 
 Every `kind:'react'` page is parsed and checked at author time. `os validate`,
 `os lint` and `os build` all run the same rule set, so what one accepts the others do
@@ -348,9 +401,9 @@ rule set.
 
 ## A complete page
 
-A master/detail console: a filtered list on the left drives a summary, a chart and a
-related list on the right, with edits in a drawer. Every binding is an ordinary prop —
-there is no record context involved.
+A `kind:'react'` master/detail console: a filtered list on the left drives a summary, a
+chart and a related list on the right, with edits in a drawer. Every binding is an
+ordinary prop — there is no record context involved.
 
 {/* os:check */}
 ```typescript
