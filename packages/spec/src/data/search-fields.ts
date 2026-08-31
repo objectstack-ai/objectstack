@@ -39,7 +39,7 @@ export const SEARCHABLE_TEXTUAL_TYPES: ReadonlySet<string> = new Set([
   'text', 'email', 'phone', 'url', 'autonumber', 'textarea', 'markdown',
 ]);
 /** Enumerated types searched by mapping the query to option values via labels. */
-export const SEARCHABLE_ENUM_TYPES: ReadonlySet<string> = new Set(['select', 'status']);
+export const SEARCHABLE_ENUM_TYPES: ReadonlySet<string> = new Set(['select']);
 /** System / audit / heavy fields never auto-included. */
 export const SEARCH_AUTO_EXCLUDED_FIELDS: ReadonlySet<string> = new Set([
   'id', '_id', 'created', 'modified', 'created_at', 'updated_at',

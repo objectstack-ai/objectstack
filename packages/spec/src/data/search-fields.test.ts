@@ -11,6 +11,7 @@ import {
   SEARCHABLE_ENUM_TYPES,
   SEARCHABLE_TEXTUAL_TYPES,
 } from './search-fields';
+import { FieldType } from './field.zod';
 
 // ---------------------------------------------------------------------------
 // [#4483] The auto-default's "lead" field ORDERS the set; it must not ADMIT one.
@@ -142,6 +143,29 @@ describe('[#4483] $search auto field set — lead orders, never admits', () => {
 // two resolution assertions below go red on an overlap independently of them,
 // and in opposite directions, so no single relaxation can make this pin vacuous.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// [#13695] `SEARCHABLE_ENUM_TYPES` members must be real `FieldType`s.
+//
+// The #6934 disjointness pins above check the vocabularies against EACH OTHER
+// but never against `FieldType` itself, so a member that matches no real field
+// type at all — a pure ghost, distinct from an overlap — passed every existing
+// pin silently: `'status'` sat in this set matching nothing, for as long as it
+// took a docs sweep to notice by hand. This pin closes that probe gap for the
+// enum vocabulary specifically (the one the finding hit); it is deliberately
+// NOT extended to `SEARCH_AUTO_EXCLUDED_TYPES`, which is a separate, larger
+// finding of its own (`object`/`grid`/`geometry`/`encrypted` are ghosts there
+// too) filed out of scope for this fix.
+// ---------------------------------------------------------------------------
+describe('[#13695] SEARCHABLE_ENUM_TYPES ⊆ FieldType', () => {
+  const validTypes: ReadonlySet<string> = new Set(FieldType.options);
+
+  it('every member is a real FieldType — no ghost vocabulary entries', () => {
+    for (const t of SEARCHABLE_ENUM_TYPES) {
+      expect(validTypes.has(t), `'${t}' is in SEARCHABLE_ENUM_TYPES but not a FieldType member`).toBe(true);
+    }
+  });
+});
+
 describe('[#6934] search type vocabularies are pairwise disjoint', () => {
   const overlap = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
     [...a].filter((t) => b.has(t)).sort();
