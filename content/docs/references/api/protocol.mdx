@@ -581,7 +581,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
 | **id** | `string` | ✅ | Record ID to delete |
-| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. |
+| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted. |
 
 
 ---
@@ -2712,7 +2712,7 @@ Uninstall package response
 | **object** | `string` | ✅ | The object name. |
 | **id** | `string` | ✅ | The ID of the record to update. |
 | **data** | `Record<string, any>` | ✅ | The fields to update (partial update). |
-| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. |
+| **expectedVersion** | `string` | optional | Optimistic concurrency token (typically the `updated_at` value the client read). When provided, the server compares it against the current record version and returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted. |
 
 
 ---
