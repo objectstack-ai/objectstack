@@ -579,28 +579,79 @@ export function tenantContextOf(node, sf, decls) {
   return { carries: false, how: 'no-context-key', system: false };
 }
 
-/** Is this context expression an ELEVATED (`isSystem: true`) one? */
-function elevationOf(value, sf, decls) {
-  if (value == null) return 'undecidable';
-  const literalSaysSystem = (node) => {
-    if (!node || !ts.isObjectLiteralExpression(node)) return null;
-    for (const prop of node.properties) {
+/**
+ * Is this context expression an ELEVATED (`isSystem: true`) one?
+ *
+ * ## ⛔ A SPREAD is not evidence of absence
+ *
+ * The first edition of this walked an object literal's named properties looking
+ * for `isSystem`, skipped anything that was not a `PropertyAssignment`, and
+ * returned `false` when the loop ended. A `SpreadAssignment` carries no `name`,
+ * so `{ ...SYSTEM_CTX }` fell through every branch and was reported as
+ * **decidably NOT elevated** -- the exact opposite of the truth, since every
+ * `SYSTEM_CTX` in the tree is `{ isSystem: true, … }`.
+ *
+ * That is the worst direction a classifier can fail in, and it is this repo's
+ * recurring shape: a thing the walker could not read, scored as a thing with
+ * nothing to report. It was measured, not reasoned about -- six sites across
+ * `service-storage` were published as "decidably not elevated" while all six
+ * spread an elevated context.
+ *
+ * So a spread is resolved, and an unresolvable one makes the whole answer
+ * `undecidable`. It can never contribute `false`.
+ *
+ * `as const` is unwrapped on the way: the constants this has to read are
+ * declared `{ isSystem: true } as const`, which is an `AsExpression` wrapping
+ * the literal, not a literal.
+ */
+function elevationOf(value, sf, decls, depth = 0) {
+  if (value == null || depth > 4) return 'undecidable';
+
+  /** `{ … } as const` / `({ … })` down to the literal. */
+  const unwrapLiteral = (n) => {
+    if (!n) return null;
+    if (ts.isAsExpression(n) || ts.isParenthesizedExpression(n)) return unwrapLiteral(n.expression);
+    return n;
+  };
+
+  /** The object literal an expression resolves to in this file, or null. */
+  const literalFor = (n) => {
+    const bare = unwrapLiteral(n);
+    if (!bare) return null;
+    if (ts.isObjectLiteralExpression(bare)) return bare;
+    if (ts.isIdentifier(bare)) return unwrapLiteral(decls?.locals.get(bare.text)?.node) ?? null;
+    return null;
+  };
+
+  const readLiteral = (node, d) => {
+    const lit = literalFor(node);
+    if (!lit || !ts.isObjectLiteralExpression(lit)) return null;
+    let sawUnresolvableSpread = false;
+    // Later properties win in an object literal, so the LAST answer decides.
+    let verdict = false;
+    for (const prop of lit.properties) {
+      if (ts.isSpreadAssignment(prop)) {
+        if (d > 4) { sawUnresolvableSpread = true; continue; }
+        const inner = readLiteral(prop.expression, d + 1);
+        // ⛔ `null` here means "could not read it", NOT "it said no".
+        if (inner === null || inner === 'undecidable') sawUnresolvableSpread = true;
+        else verdict = inner;
+        continue;
+      }
       if (!ts.isPropertyAssignment(prop) || !prop.name || !ts.isIdentifier(prop.name)) continue;
       if (prop.name.text !== 'isSystem') continue;
-      if (prop.initializer.kind === ts.SyntaxKind.TrueKeyword) return true;
-      if (prop.initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
-      return 'undecidable';
+      if (prop.initializer.kind === ts.SyntaxKind.TrueKeyword) verdict = true;
+      else if (prop.initializer.kind === ts.SyntaxKind.FalseKeyword) verdict = false;
+      else return 'undecidable';
     }
-    return false;
+    // An unread spread can only be resolved DOWNWARD to uncertainty: it may have
+    // carried the flag this literal never mentions.
+    if (sawUnresolvableSpread && verdict !== true) return 'undecidable';
+    return verdict;
   };
-  const direct = literalSaysSystem(value);
-  if (direct !== null) return direct;
-  if (ts.isIdentifier(value)) {
-    const entry = decls?.locals.get(value.text);
-    const viaConst = literalSaysSystem(entry?.node);
-    if (viaConst !== null) return viaConst;
-  }
-  return 'undecidable';
+
+  const answer = readLiteral(value, depth);
+  return answer === null ? 'undecidable' : answer;
 }
 
 /**
@@ -1058,7 +1109,97 @@ export function spliceRegion(pageText, region) {
   return pageText.slice(0, begin) + region + pageText.slice(end + END_MARKER.length);
 }
 
+// ---------------------------------------------------------------------------
+// Self-test -- the only instrument on the elevation classifier
+// ---------------------------------------------------------------------------
+
+/**
+ * The classifier's defect class is a MATCHING RULE over shapes a clean tree
+ * contains only by accident, so a production run cannot tell a working rule from
+ * a weakened one: green means "no unplaceable receiver", and the elevation
+ * verdicts are not part of that verdict at all. They are published, and nothing
+ * else reads them.
+ *
+ * These cases are the shapes that were measured wrong. The first edition scored
+ * `{ ...SYSTEM_CTX }` as decidably NOT elevated and every `context: SYSTEM_CTX`
+ * as undecidable -- 51 sites' verdicts, six of them inverted outright -- because
+ * it skipped spreads and never unwrapped `as const`. Both are pinned here in the
+ * direction that failed, plus the direction that must NOT be over-claimed: a
+ * spread this cannot read makes the answer `undecidable`, never `false`.
+ */
+export function selfTest() {
+  const cases = [];
+  const t = (name, actual, expected) => cases.push({
+    name, ok: String(actual) === String(expected), detail: `got ${actual}, want ${expected}`,
+  });
+
+  /** Classify the `context:` of the single write call in a synthetic source. */
+  const classify = (src) => {
+    const sf = parseSourceFile('selftest.ts', src);
+    const decls = declaredTypesIn(sf);
+    let out = 'NO-CALL';
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const ctx = tenantContextOf(node, sf, decls);
+        out = ctx.carries ? String(ctx.system) : 'NO-CONTEXT';
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out;
+  };
+
+  const call = (opts) => `declare const e: any;\ne.insert('o', {}, ${opts});\n`;
+
+  // ── the shapes that were measured WRONG ────────────────────────────────────
+  t('a `const … as const` context resolves through the assertion',
+    classify(`const SYSTEM_CTX = { isSystem: true } as const;\n${call('{ context: SYSTEM_CTX }')}`), true);
+  t('a SPREAD of an elevated const is elevated -- not "no isSystem key, so false"',
+    classify(`const SYSTEM_CTX = { isSystem: true } as const;\n${call('{ context: { ...SYSTEM_CTX } }')}`), true);
+  t('a spread of an elevated const survives extra keys beside it',
+    classify(`const S = { isSystem: true } as const;\n${call('{ context: { ...S, raw: true } }')}`), true);
+
+  // ── the direction that must not be OVER-claimed ────────────────────────────
+  t('an UNRESOLVABLE spread is undecidable, never false',
+    classify(`${call('{ context: { ...someImportedThing } }')}`), 'undecidable');
+  t('an unresolvable spread beside an unrelated key is still undecidable',
+    classify(`${call('{ context: { ...whatever, raw: true } }')}`), 'undecidable');
+  t('a spread of a const that does NOT mention the flag is undecidable, not false',
+    classify(`const C = { raw: true } as const;\n${call('{ context: { ...C, ...other } }')}`), 'undecidable');
+
+  // ── the ordinary verdicts, so the fix did not swallow them ─────────────────
+  t('an inline elevated literal is elevated',
+    classify(call('{ context: { isSystem: true } }')), true);
+  t('an inline literal that names the flag false is NOT elevated',
+    classify(call('{ context: { isSystem: false } }')), false);
+  t('an inline literal with no flag and no spread is NOT elevated',
+    classify(call('{ context: { userId: "u1" } }')), false);
+  t('a context from a helper CALL is undecidable',
+    classify(call('{ context: systemWriteContext(orgId) }')), 'undecidable');
+  t('a later key wins over an earlier spread',
+    classify(`const S = { isSystem: true } as const;\n${call('{ context: { ...S, isSystem: false } }')}`), false);
+  t('a write with no options argument carries no context',
+    classify(`declare const e: any;\ne.insert('o', {});\n`), 'NO-CONTEXT');
+  t('an options object with no context key carries no context',
+    classify(call('{ raw: true }')), 'NO-CONTEXT');
+
+  const failed = cases.filter((c) => !c.ok);
+  for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
+  if (failed.length > 0) {
+    console.error(`✗ tenant-audit-census self-test: ${failed.length} of ${cases.length} case(s) failed.`);
+    return 1;
+  }
+  console.log(
+    `✓ tenant-audit-census self-test: ${cases.length} cases pass (an \`as const\` context, an `
+    + 'elevated SPREAD, an unresolvable spread refusing to answer `false`, and the ordinary verdicts).',
+  );
+  return 0;
+}
+
 function main(argv) {
+  if (argv.includes('--self-test')) return selfTest();
+
   const c = runCensus();
   if (argv.includes('--write')) {
     for (const [rel, next] of [
