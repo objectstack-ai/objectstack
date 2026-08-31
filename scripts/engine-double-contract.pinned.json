@@ -2114,7 +2114,7 @@
     {
       "file": "packages/plugins/plugin-auth/src/durability-swallow-repair.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-auth/src/first-session-membership-ordering.test.ts",
