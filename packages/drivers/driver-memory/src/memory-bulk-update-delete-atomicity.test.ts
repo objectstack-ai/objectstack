@@ -328,3 +328,109 @@ describe('[#13435] non-regression — updateMany and bulkCreate still behave as 
     expect(await driver.count('doc')).toBe(3);
   });
 });
+
+/**
+ * [#13875] The batch's two id lookups must AGREE.
+ *
+ * `IDataDriver.bulkUpdate` declares `id: string | number`, so a caller may
+ * legitimately name a row with an id whose JS type differs from the stored
+ * row's — and `update`/`bulkUpdate` resolve ids with a LOOSE `==` precisely so
+ * that `'1'` still finds stored `1`. The first cut of #13435 then built its
+ * untouched-row set (`settled`) from the CALLER's ids with a STRICT `Set.has`,
+ * so for a mixed-type id the two disagreed: `findIndex` resolved the row (it
+ * got updated) while `settled` still carried that row's PRE-image. The row sat
+ * in the projected check set twice — once stale, once pending — and a batch
+ * that merely MOVES a unique value between rows was refused with a false
+ * `UNIQUE_VIOLATION`.
+ *
+ * The sibling `updateMany` never had this gap: its `targetIds` come from table
+ * ROWS and its `findIndex` is strict `===`, so both sides agree by
+ * construction. The fix restores that property here the other way round —
+ * keeping the loose resolution (narrowing it would silently change which ids
+ * resolve at all) and drawing the touched set from the RESOLVED rows' own ids.
+ *
+ * ⛔ The discriminating fact is that a legitimate batch SUCCEEDS. A test that
+ * only asserted "a collision still refuses" would pass against the defect.
+ */
+describe('[#13875] caller id TYPE never changes the outcome of a batch', () => {
+  let driver: InMemoryDriver;
+
+  /** Numeric stored ids — the caller may still name them as strings. */
+  beforeEach(async () => {
+    driver = new InMemoryDriver();
+    await driver.syncSchema('doc', DOC_SCHEMA);
+    await driver.create('doc', { id: 1, doc_no: 'D-0001', title: 'One' });
+    await driver.create('doc', { id: 2, doc_no: 'D-0002', title: 'Two' });
+  });
+
+  it('POSITIVE CONTROL: the same hand-off with CONSISTENT id types succeeds', async () => {
+    // Row 1 vacates D-0001; row 2 takes it. Nothing about this batch is
+    // unusual — it is here so the mixed-type case below cannot pass vacuously.
+    const out = await driver.bulkUpdate('doc', [
+      { id: 1, data: { doc_no: 'D-0900' } },
+      { id: 2, data: { doc_no: 'D-0001' } },
+    ]);
+
+    expect(out).toHaveLength(2);
+    const rows = await snapshot(driver, 'doc');
+    expect(rows.map((r: any) => [r.id, r.doc_no])).toEqual([
+      [1, 'D-0900'],
+      [2, 'D-0001'],
+    ]);
+  });
+
+  it('a STRING id naming a NUMERIC row still hands a unique value over cleanly', async () => {
+    // Identical to the control except the first id is a string. It resolves
+    // (loose `==`), so row 1 really does vacate D-0001 — and row 2 taking it
+    // must therefore NOT collide. Against the defect this threw a false
+    // UNIQUE_VIOLATION, because row 1's stale pre-image stayed in `settled`.
+    const out = await driver.bulkUpdate('doc', [
+      { id: '1', data: { doc_no: 'D-0900' } },
+      { id: 2, data: { doc_no: 'D-0001' } },
+    ]);
+
+    expect(out).toHaveLength(2);
+    const rows = await snapshot(driver, 'doc');
+    expect(rows.map((r: any) => [r.id, r.doc_no])).toEqual([
+      [1, 'D-0900'],
+      [2, 'D-0001'],
+    ]);
+  });
+
+  it('the stored id KEEPS its own type — a string id in the batch does not restamp it', async () => {
+    await driver.bulkUpdate('doc', [{ id: '1', data: { title: 'Renamed' } }]);
+
+    const row: any = (await driver.find('doc', { where: { id: 1 } }))[0];
+    expect(row.id).toBe(1);
+    expect(row.title).toBe('Renamed');
+  });
+
+  it('a REAL collision is still refused when the id types are mixed', async () => {
+    // The fix must not turn the check off: row 2 keeps D-0002, so row 1 taking
+    // it is a genuine violation however the caller spelled row 1's id.
+    const before = await snapshot(driver, 'doc');
+
+    const err = await refusalOf(() => driver.bulkUpdate('doc', [{ id: '1', data: { doc_no: 'D-0002' } }]));
+
+    expect(err.code).toBe('UNIQUE_VIOLATION');
+    expect(err.status).toBe(409);
+    expect(await snapshot(driver, 'doc')).toEqual(before);
+  });
+
+  it('bulkDelete: a mixed-type id removes exactly its own row', async () => {
+    await driver.bulkDelete('doc', ['1']);
+
+    const rows = await snapshot(driver, 'doc');
+    expect(rows.map((r: any) => r.id)).toEqual([2]);
+  });
+
+  it('bulkDelete: the SAME row named twice in two id types is removed once, and only it', async () => {
+    // `bulkDelete` dedups on the RESOLVED table index, not on the caller's id.
+    // Keying the set on caller input instead would make '1' and 1 two entries
+    // and splice index 0 twice — taking row 2 with it.
+    await driver.bulkDelete('doc', ['1', 1]);
+
+    const rows = await snapshot(driver, 'doc');
+    expect(rows.map((r: any) => [r.id, r.doc_no])).toEqual([[2, 'D-0002']]);
+  });
+});

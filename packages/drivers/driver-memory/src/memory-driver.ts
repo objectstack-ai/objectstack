@@ -907,14 +907,33 @@ export class InMemoryDriver implements IDataDriver {
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
 
     const table = this.getTable(object);
-    const touchedIds = new Set(updates.map((u) => u.id));
+
+    // [#13875] Resolve every id to its table row FIRST, then draw the touched
+    // set from the RESOLVED rows' OWN ids — never from caller input. Ids are
+    // resolved with a loose `==` (matching `update`, one method up), but a
+    // `Set` membership test is always strict, so a caller naming a stored `1`
+    // as `'1'` — which `IDataDriver.bulkUpdate` explicitly allows, `id` being
+    // `string | number` — used to satisfy the resolving lookup while failing
+    // the `settled` one. That row was then updated AND left in `settled`
+    // carrying its PRE-image, so it faced the uniqueness check twice and a
+    // batch merely HANDING a unique value from one row to another was refused
+    // with a false `UNIQUE_VIOLATION`. Both lookups now read the same stored
+    // value, so they cannot disagree — the property `updateMany` gets for free
+    // by drawing its `targetIds` from table rows.
+    const resolvedIndexes = updates.map((u) => table.findIndex((r) => r.id == u.id));
+    const touchedIds = new Set(
+      resolvedIndexes.filter((index) => index !== -1).map((index) => table[index].id),
+    );
     const settled = table.filter((r) => !touchedIds.has(r.id));
 
     const perUpdate: Array<{ index: number; row: Record<string, any> } | null> = [];
     const pending: Record<string, any>[] = [];
 
-    for (const u of updates) {
-      const index = table.findIndex((r) => r.id == u.id);
+    // Indexed rather than `for…of`, to read each id's ALREADY-resolved index:
+    // resolving a second time here is what let the two lookups drift apart.
+    for (let position = 0; position < updates.length; position++) {
+      const u = updates[position];
+      const index = resolvedIndexes[position];
       if (index === -1) {
         if (this.config.strictMode) {
           this.logger.warn('Record not found for bulk update', { object, id: u.id });
