@@ -15,8 +15,12 @@
  * `maybeSeedDevAdmin`: "provisioned by the deployment's own boot command with
  * operator-known credentials — not an unknown self-registrant") to
  * production walled boots, whose owner previously had NO in-product way to
- * ever satisfy the verified-elevation invariant when no mail transport and
+ * ever satisfy the verified-standing invariant when no mail transport and
  * no federated sign-in were wired (`WALLED_OWNER_NO_VERIFICATION_PATH`).
+ * ([#11973] Post-#11663-L4 the invariant is enforced at the derivation site
+ * — `resolve-authz-context.ts` §6b-config, an unverified declared address
+ * resolves non-admin per request — rather than by an elevation write; the
+ * stamp's value is unchanged.)
  * Rejected alternatives, from the same ruling: mandating a mail transport
  * out of the box, and a separate CLI stamp command.
  *
@@ -64,11 +68,12 @@
  * ## The bounds (the contract, not suggestions)
  *
  *  - ONLY under the walled posture family (`postureEnforcesWall` over the
- *    REQUESTED posture — the same input the elevation gate reads, for the
+ *    REQUESTED posture — the same input the walled bootstrap reads, for the
  *    same fail-stricter reason documented in `bootstrapPlatformAdmin`).
  *  - ONLY the account whose email equals the declared
- *    `OS_PLATFORM_OWNER_EMAIL`, compared the way the elevation gate compares
- *    (trimmed, case-insensitive — mirrored, not reinvented).
+ *    `OS_PLATFORM_OWNER_EMAIL`, compared the way the derivation site compares
+ *    (the one shared parser + membership predicate — mirrored, not
+ *    reinvented).
  *  - ONLY at CREATION, through the seam below. A later email UPDATE to the
  *    owner address inherits nothing: the decision is staged from the
  *    creation-time admission gate and consumed once by the `user.create`
@@ -85,9 +90,13 @@
  * admission seam every creation path flows through, where the vendor's own
  * `source.method` signal and the bootstrap probe already exist) and consumes
  * it in the composed `user.create.before` database hook, so the row is BORN
- * `emailVerified: true` — the same shape as a trusted-SSO insert. The
- * elevation itself needs no new trigger: the creation write already replays
- * `bootstrapPlatformAdmin` (`shouldReplayBootstrapFor`, `create` arm).
+ * `emailVerified: true` — the same shape as a trusted-SSO insert. ([#11973]
+ * No follow-on trigger is needed: standing is DERIVED per request from the
+ * verified row — there is no elevation write since #11663 L4, and
+ * `shouldReplayBootstrapFor` deliberately never replays on walled postures —
+ * while the default-organization bootstrap picks the same creation up through
+ * its own trigger predicate, `isDefaultOrganizationBootstrapTrigger` in
+ * `ensure-default-organization.ts`.)
  */
 
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -110,8 +119,9 @@ export function isOperatorProvisionedCreation(
 /**
  * The whole stamp decision: walled posture family + declared-owner email
  * match + operator-provisioned creation. `false` for every other shape —
- * including every shape on an unwalled deployment, where elevation never
- * demands a verified owner and the stamp would be an unearned state change.
+ * including every shape on an unwalled deployment, where platform-admin
+ * standing never demands a verified owner (`single` promotes the first human
+ * user, Choice 4A) and the stamp would be an unearned state change.
  *
  * [#13147] The email comparison does not mirror `bootstrapPlatformAdmin`'s
  * owner match by re-spelling it — it IS that match: both ask the one shared
