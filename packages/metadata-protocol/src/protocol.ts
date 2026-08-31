@@ -6512,6 +6512,41 @@ export class ObjectStackProtocolImplementation implements
                     );
                 });
 
+                // [#13407] Expand any aggregated `defineView` container this
+                // READ just merged in, INLINE into this response's own `items`
+                // — never into the SchemaRegistry. This is what actually closes
+                // the card: {@link hydrateExpandedViewItems} below is
+                // registry-mutating and is therefore gated off for exactly the
+                // rows the card's own repro used (an org-scoped write, on any
+                // kernel; ANY write on a real environment-scoped kernel) — see
+                // that method's "#13407 scope boundary" note for why widening
+                // those gates was rejected rather than attempted. This pass
+                // has no such gate to worry about: `overlays` is already this
+                // request's own correctly org/environment-scoped read (the
+                // `queryByOrg` merge above), so expanding it into the RETURNED
+                // list — and only the returned list — cannot leak one
+                // org/environment's container into another's.
+                //
+                // Upserted by name (not appended) so this stays idempotent
+                // against the registry-hydration path below: on an unscoped,
+                // env-wide kernel that path may have ALREADY registered the
+                // same expansion (from this or an earlier write's write-
+                // through), and re-deriving here from the row this call just
+                // read is a byte-identical, never-stale restatement of the
+                // same items — not a duplicate.
+                if (isView) {
+                    const byName = new Map<string, unknown>();
+                    for (const it of items as any[]) {
+                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
+                    }
+                    for (const { data, packageId: recPkg } of overlays) {
+                        for (const vi of this.expandRuntimeViewContainer(request.type, data, { packageId: recPkg })) {
+                            byName.set(vi.name as string, vi);
+                        }
+                    }
+                    items = Array.from(byName.values());
+                }
+
                 // Only hydrate the global registry for unscoped (control-plane)
                 // calls — scoped project entries must not leak process-wide.
                 // #4521 — this loop is no longer the ONLY way an overlay reaches
@@ -12871,10 +12906,74 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#7736] Expand an aggregated `defineView` container that arrived through
-     * the RUNTIME door into the same independent ViewItems the two SOURCE
-     * registrars produce — at the one hydration choke point all three runtime
-     * callers already share.
+     * [#7736, #13407] Expand an aggregated `defineView` container that arrived
+     * through the RUNTIME door into the same independent, fully-enriched
+     * ViewItems the two SOURCE registrars produce — object binding, artifact-
+     * protection merge and package provenance all applied, but nothing
+     * REGISTERED. Returns `[]` (never throws) for a non-view type, a body that
+     * is not a container, or a container with no derivable object binding —
+     * exactly the "no expansion" outcomes the two callers below already
+     * decide on independently.
+     *
+     * Pure and side-effect-free on purpose: it is shared by two callers with
+     * DIFFERENT scope rules for what may be registered where —
+     * {@link hydrateExpandedViewItems} (registry-mutating, org/environment-
+     * gated) and `getMetaItems`' inline per-request expansion (registry-free,
+     * ungated) — see the #13407 note on {@link hydrateExpandedViewItems} for
+     * why the registry path could not simply be widened instead.
+     *
+     * ## Object-name derivation (#13407 fix)
+     *
+     * The container's OWN top-level `object` field — `ViewSchema.object`,
+     * documented there as "how a stack-level `views: [...]` entry says which
+     * object its views belong to; read by `getViewsByObject()` /
+     * `GET /meta/view?object=`" — is the authorial, explicit signal and is
+     * consulted FIRST. Before #13407 this walked only `list.data.object` →
+     * `form.data.object` → the row's own name (mirroring `plugin.ts`) and
+     * never read `container.object` at all, so a container that set the
+     * top-level field but not `list.data.object` (or whose save `name` is not
+     * the object it binds — the two are the same value only by convention)
+     * expanded under the WRONG key or not at all. The three-deep fallback is
+     * kept, unchanged, for every container written before this field was
+     * consulted here.
+     */
+    private expandRuntimeViewContainer(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null },
+    ): Record<string, unknown>[] {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
+        if (!isAggregatedViewContainer(data)) return [];
+        const container = data as Record<string, any>;
+        const viewObject =
+            (typeof container.object === 'string' && container.object ? container.object : undefined)
+            ?? container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return [];
+        const out: Record<string, unknown>[] = [];
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            out.push(mergeArtifactProtection(item, viArtifact) as Record<string, unknown>);
+        }
+        return out;
+    }
+
+    /**
+     * [#7736] Register an aggregated `defineView` container's expansion
+     * ({@link expandRuntimeViewContainer}) into the SchemaRegistry — at the
+     * one hydration choke point all three runtime callers already share.
      *
      * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
      * DUAL-READ: register the container under the bare `<object>` key for
@@ -12894,27 +12993,41 @@ export class ObjectStackProtocolImplementation implements
      * items that WOULD match the switcher, and both object-bound exits answered
      * zero.
      *
-     * Here rather than at either read exit deliberately. There are two
-     * independent object-bound readers — the REST route reads through
-     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
-     * — so expanding at one of them fixes the card's literal repro and leaves
-     * its sibling exit answering empty. This function is the ONE place all
-     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
-     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
-     * funnel through, so one expansion serves every reader, survives a restart,
-     * and keeps read-your-writes — the "single, universally-applied location"
-     * #7163 asked for after the same defect was fixed one seam further in.
-     *
      * The canonical-shape filter in `getMetaItems` is deliberately left alone:
      * its invariant ("a container's expanded items are also present") is what
      * was false here, and this restores it rather than loosening the filter —
      * which would surface the legacy wrapper shape to every list consumer and
      * still show the switcher nothing, since a container carries no `viewKind`.
      *
-     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
-     * `form.data.object`), falling back to the row's own name — for a container
-     * the metadata door's save name IS the object. No derivable object means no
-     * expansion, exactly as the artifact loader already decides.
+     * ## [#13407] This function's OWN scope boundary — the reason it is not
+     * ## the whole fix
+     *
+     * This is registry-MUTATING, and both its callers gate it off exactly
+     * where {@link hydrateOverlayIntoRegistry}'s own comments say why:
+     * write-through (`applyRegistryWriteThrough`) never calls it when
+     * `this.environmentId !== undefined` (a real per-environment kernel —
+     * `assembleMetadataProtocol`'s own comment: "per-project (cloud) kernels
+     * source metadata from the control plane"), and `hydrateOverlayIntoRegistry`
+     * itself refuses ANY org-scoped row before ever reaching this function
+     * ("[#6602] a per-org overlay is served on demand, never grafted into the
+     * registry every org in this process shares") — REGARDLESS of
+     * `environmentId`. Both gates are deliberate isolation boundaries (ADR-0005
+     * per-org isolation; the registry is shared by every org/request a given
+     * kernel serves) and #13407 does not touch either one.
+     *
+     * That is precisely why #7736's fix — this function, reached only through
+     * the registry-hydration callers — never helped the card's own repro ("a
+     * signed-in user with an ACTIVE ORG" on "a live multi-node EE deployment"):
+     * an org-scoped write NEVER reaches this function, on ANY kernel, container
+     * shape or object-derivation notwithstanding. #13407's actual fix is
+     * `getMetaItems`' separate, registry-free call to
+     * {@link expandRuntimeViewContainer} (below, in the overlay-merge section)
+     * — safe for org/environment isolation because it operates only on rows
+     * `getMetaItems` already read for THIS request's own scope, and never
+     * writes them anywhere shared. This function keeps serving the case it
+     * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
+     * combination #7736's own pin ever exercised), now with the corrected
+     * derivation chain.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -12922,28 +13035,8 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
-        if (!isAggregatedViewContainer(data)) return;
-        const container = data as Record<string, any>;
-        const viewObject =
-            container?.list?.data?.object
-            ?? container?.form?.data?.object
-            ?? (typeof container.name === 'string' ? container.name : undefined);
-        if (!viewObject) return;
-        for (const vi of expandViewContainer(viewObject, container)) {
-            // Carry the container's package provenance onto each expanded item
-            // so the package-disable filter and ADR-0048 artifact scoping judge
-            // them by the same owner the container has.
-            const item: Record<string, unknown> = { ...(vi as any) };
-            if (container._packageId !== undefined && item._packageId === undefined) {
-                item._packageId = container._packageId;
-            }
-            const viArtifact = this.lookupArtifactItem(
-                type,
-                vi.name,
-                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
-            );
-            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+            registry.registerItem(type, item, 'name' as any);
         }
     }
 
