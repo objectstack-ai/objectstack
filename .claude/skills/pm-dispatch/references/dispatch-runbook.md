@@ -259,13 +259,7 @@ monitor 按自己的 deadline 触发;身份 = 三元组 `(issue, 分支, PR head
   ⇒ 派发令写明「⛔ 测量存在之前不写修复」—— 测量姿态让 dev 看得见卡面没列的探针,
   实现姿态只看得见要交的 diff。
 
-## security-object 无判决枚举(座位贴常设 ⑦)的方法与校准
+## security-object 无判决枚举(座位贴常设 ⑦)的方法
 
 - **表面半边(⛔ 不比总数)**:`git diff <基线ref> origin/main -- '<两插件>/src/objects/*.object.ts'` 过
   `grep -E "^[+-]    [a-z_][a-z0-9_]*: Field\."`;零命中 = 成员级同一,必记基线 ref(2026-08-26 `b000ab59`)。
-- **读者半边**:`git grep -I -n -w "<键>" -- . ':(exclude)<声明该列的 *.object.ts>' ':(exclude).claude'`(⛔
-  缺后者会命中本节),逐命中行计一次:① `*.generated.ts` 不是读者;
-  ② `packages/spec` 契约声明**算**读点;③ 裸字面量 `key:` 拼写**算**。
-- **正对照恒先跑**:`sys_share_link.email_allowlist` = **3**(2026-08-26 记;
-  漏 ① 得 7,多减 ② 得 2)—— 跑不出 3 即仪器坏了,⛔ 记下任何零之前停;
-  ⛔ 无对照的零记「没读到」不记 0(`name` 这类列名到处匹配,未校准的仪器平凡地回 0)。
