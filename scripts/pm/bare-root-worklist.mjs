@@ -394,6 +394,31 @@ const TRIAGE = new Map([
       + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
+  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS packages', {
+    verdict: 'REFUSE-WIDE',
+    why: 'every text file under the root is walked and any one of them could name the #13419 '
+      + 'fixture — 5562 of 5625 (99%), measured 2026-08-31. The population is not a subset of the '
+      + 'root that a narrower glob could describe; it IS the root. A true declaration here would '
+      + 'name this gate on every card touching a package, which is the precision trade this '
+      + 'verdict refuses',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS examples', {
+    verdict: 'REFUSE-WIDE',
+    why: '240 of 243 (99%). Refused with its packages half rather than split from it: the loader '
+      + 'this gate hunts is a COMPOSITION site, and nothing says one lands under examples/ rather '
+      + 'than packages/ — declaring only the small root would read as a claim about where that '
+      + 'happens, which is exactly what is not known',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS apps', {
+    verdict: 'REFUSE-WIDE',
+    why: '36 of 40 (90%) — same trade, same reason as the examples half',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS scripts', {
+    verdict: 'REFUSE-WIDE',
+    why: '295 of 298 (99%). This root is where the gate own allowed readers live '
+      + '(DECLARED_INSTRUMENTS), so it is walked wholesale for the same reason as the others: a '
+      + 'new reader is found, then classified, never assumed absent',
+  }],
   ['check:authz-resolver SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%). True, and it would '

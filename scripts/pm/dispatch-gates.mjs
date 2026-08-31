@@ -3313,38 +3313,74 @@ export function coveringJobFilter(entry, inputPath) {
  * not the family's own file, not a `paths:` pattern, not a job filter, and its
  * own path is not a literal the gate spells.
  *
- * The gap is real and was measured over the live tree, 183 families x 7347
- * tracked files:
+ * The gap is real. Its SIZE is a fact about this tree rather than about this
+ * argument, so it is not written down here: `--self-test` re-derives it on
+ * every run and prints it, and one run yields all four quantities the refusal
+ * turns on —
  *
- *   (family, imported module) pairs      273
- *   ...another key already answers        41   15%, mostly a `scripts/**` hint
- *                                              a gate declares for other reasons
- *   ...NOVEL, no key reaches them        232   swept over the whole corpus with
- *                                              the candidate key consulted LAST:
- *                                              ADDED 232, RE-ATTRIBUTED 0, LOST 0
+ *   node scripts/pm/dispatch-gates.mjs --self-test \
+ *     | grep -A7 'the refused import-edge class'
  *
- * So the key would be additive by construction, the way #13000's is, and it is
- * still refused. The reason is PRECISION and the numbers are not close. #13000
- * bought its class for 5 novel leads on this same corpus; this one costs 232,
- * and 201 of the 232 (87%) land on five shared utilities that nearly every gate
- * links:
+ * which puts the refused key's whole block on stdout. Four of its lines carry
+ * the quantities, each naming its own in the sentence it prints:
  *
- *   scripts/invoked-as.mjs             a card that names 14 families names 118
- *   scripts/import-prerequisite.mjs    14 -> 55
- *   scripts/ts-parse.mjs               13 -> 37
- *   scripts/js-comment-mask.mjs        17 -> 38
- *   scripts/workspace-enumerator.mjs   12 -> 23
+ *   "the refused import-edge class is real and NOVEL — N pair(s) no key
+ *    reaches, of M"
+ *        M = every (family, imported module) pair this tree has; N = the NOVEL
+ *        half, the pairs no existing key answers, i.e. what the key would ADD
+ *   "and the split the refusal quotes is not invented: K pair(s) another key
+ *    already answers"
+ *        K = M - N, which is why N is a measurement and not a raw edge count
+ *   "the refusal is still earned — a card editing MOD would name F families
+ *    under the refused key"
+ *        MOD = the worst head utility; F = the single largest lead the key
+ *        would print, for a card that edits it
+ *   "and the class is still concentrated: C of N novel pair(s) land on 5
+ *    module(s)"
+ *        C of N = the concentration this whole refusal rests on
+ *
+ * Those four were once written into this docblock as literals, and all four
+ * had drifted — the novel half alone has now been measured at four sizes on
+ * four days — while the run printed the true ones a few lines below and
+ * nothing compared the two (#13468). Pinning them instead would red on every
+ * legitimate tree change, which is how an assertion gets weakened later. The
+ * run is the instrument, this prose is the argument, and only the argument
+ * keeps.
+ *
+ * Every OTHER size in this section — the tail, the two narrowings, the
+ * lower-bound shapes, the witness's own family count — is #13126's
+ * measurement over that day's tree (183 families x 7347 tracked files).
+ * Nothing re-derives those, so they are dated evidence for a decision already
+ * taken and NOT a description of this tree: re-measure from the commands on
+ * that card, never from this prose. Same rule the aggregate section below
+ * states for its own firing rates.
+ *
+ * So the key would be additive by construction, the way #13000's is: the sweep
+ * was run over the whole corpus with the candidate key consulted LAST, and it
+ * RE-ATTRIBUTED 0 and LOST 0. It is still refused. The reason is PRECISION and
+ * the numbers are not close — #13000 bought its class for 5 novel leads on
+ * this same corpus, this one costs the entire novel half, and the run's
+ * concentration line says most of that half lands on five shared utilities
+ * nearly every gate links:
+ *
+ *   scripts/invoked-as.mjs
+ *   scripts/import-prerequisite.mjs
+ *   scripts/ts-parse.mjs
+ *   scripts/js-comment-mask.mjs
+ *   scripts/workspace-enumerator.mjs
  *
  * Every one of those leads is TRUE — editing `invoked-as.mjs` really can turn
- * all 118 red. A 118-gate list is still the failure this file's header names:
- * the dev who gets one stops reading it, which ends exactly where a list that
- * omits the one gate that matters ends. The tail is the opposite shape and is
- * the half worth having — 21 modules carrying 31 pairs, the median card moving
- * from 14 families to 15 — and the ONLY property separating the two halves is
- * fan-in. This file draws its lines on provenance rather than on volume
- * (`firstPartyImportTargets` says so where it refuses an imported gate file),
- * and a fan-in cut has no provenance to state: `invoked-as.mjs` and
- * `dispatch-gates.mjs` are the same KIND of edge, one link apart.
+ * every family that imports it red, and the run's `would name F families` line
+ * says how many that is today. A list that size is still the failure this
+ * file's header names: the dev who gets one stops reading it, which ends
+ * exactly where a list that omits the one gate that matters ends. The tail is
+ * the opposite shape and is the half worth having — 21 modules carrying 31
+ * pairs, the median card moving from 14 families to 15 — and the ONLY property
+ * separating the two halves is fan-in. This file draws its lines on provenance
+ * rather than on volume (`firstPartyImportTargets` says so where it refuses an
+ * imported gate file), and a fan-in cut has no provenance to state:
+ * `invoked-as.mjs` and `dispatch-gates.mjs` are the same KIND of edge, one
+ * link apart.
  *
  * Two narrowings were measured and neither earns it either:
  *
@@ -3361,8 +3397,9 @@ export function coveringJobFilter(entry, inputPath) {
  * THIS file, and a card editing this file derives 14 families without naming
  * it. That gate gets run by hand, but lint.yml runs it on every PR too, so the
  * miss costs one CI round, which is the side this file's header errs on
- * everywhere, and it is a far smaller cost than the 118-lead card the general
- * key prints for the module all 118 import.
+ * everywhere, and it is a far smaller cost than the card the general key
+ * prints for the module nearly every family imports — the run's `would name F
+ * families` line is what prices that one.
  *
  * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
  * price and an AVERAGE over the class, and the next reader will quote it as the
@@ -3390,16 +3427,16 @@ export function coveringJobFilter(entry, inputPath) {
  * says the exception changed shape and this paragraph is due a re-read, not
  * that the derivation broke.
  *
- * Two shapes make 232 a LOWER bound rather than an exact size, both already
- * refused upstream for their own measured reasons: a dynamic `import()` of a
- * `scripts/` module (3 live family-module pairs) and a relative target outside
- * `scripts/` (3, all `eslint.config.mjs`).
+ * Two shapes make that novel half a LOWER bound rather than an exact size,
+ * both already refused upstream for their own measured reasons: a dynamic
+ * `import()` of a `scripts/` module (3 live family-module pairs) and a
+ * relative target outside `scripts/` (3, all `eslint.config.mjs`).
  *
  * ## The AGGREGATE line over the same edges, measured and refused too (#13251)
  *
  * The follow-up to this refusal asked whether ONE summary line per edited
  * module ("imported by N discovered families; a change to its exports breaks
- * them at load") could carry the information the 232 refused leads carry.
+ * them at load") could carry the information the refused leads carry.
  * Measured over the live card population — 1,862 first-parent commits on
  * origin/main, 2026-08-16..30, window proven by git-history.mjs, at 71627f7b
  * — and refused as well:

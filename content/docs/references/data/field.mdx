@@ -65,6 +65,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes, discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
 | **maxLength** | `integer` | optional | Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
 | **minLength** | `integer` | optional | Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. |
+| **rows** | `integer` | optional | Height of the INLINE multiline editor, in text rows (positive integer — the HTML textarea `rows` attribute; fullscreen/dialog editor surfaces size themselves and ignore it). Only authorable on multiline editor types: textarea, markdown, html, richtext. Omit it for the widget default height. |
 | **precision** | `integer` | optional | Total digits (non-negative integer) |
 | **scale** | `integer` | optional | Decimal places (non-negative integer) |
 | **min** | `number` | optional | Minimum value |
@@ -72,7 +73,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **useGrouping** | `boolean` | optional | Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on. |
 | **accept** | `string[]` | optional | Permitted upload types for media fields, as MIME types or extensions (e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write. |
 | **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
-| **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Static options for select/multiselect |
 | **reference** | `string` | optional | Target object name (snake_case) for lookup/master_detail fields. Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. |
 | **referenceVia** | `string` | optional | Declares this text field as the id half of a polymorphic pointer pair (ADR-0052 §5 ActivityPointer): the value is a record id of the object named by the SIBLING FIELD this key names — e.g. `record_id` with `referenceVia: 'object_name'`. The sibling must be a declared field on the same object holding an object machine name. Text fields only; mutually exclusive with `reference` (a static and a per-record target contradict). Enforced today at seed load: the value resolves as a natural key against the object the sibling column names, and an unresolvable pointer is refused loudly instead of stored verbatim. Adds no referential integrity or $expand behavior. |
 | **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
@@ -189,6 +190,7 @@ const result = CurrencyConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
@@ -400,6 +402,7 @@ Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |

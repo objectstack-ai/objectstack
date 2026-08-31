@@ -87,14 +87,14 @@ that silently does not happen.
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–6 at once — this is the single largest behaviour on the page | `security-plugin.ts:1585` |
-| 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | guard at `security-plugin.ts:2511` (the step 3.5 block), skipped by `:1585` |
-| 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `security-plugin.ts:4314` |
-| 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `security-plugin.ts:4465` |
-| 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `security-plugin.ts:4543` |
-| 6 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `security-plugin.ts:1412`, `:1434` |
+| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–6 at once — this is the single largest behaviour on the page | `security-plugin.ts:1615` |
+| 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | guard at `security-plugin.ts:2541` (the step 3.5 block), skipped by `:1615` |
+| 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `security-plugin.ts:4344` |
+| 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `security-plugin.ts:4495` |
+| 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `security-plugin.ts:4573` |
+| 6 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `security-plugin.ts:1442`, `:1464` |
 | 7 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `object-schema-fls.ts:228` |
-| 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3827` |
+| 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:3857` |
 | 9 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `anonymous-deny.ts:154` |
 | 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:1015` |
 | 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1296` |
@@ -158,7 +158,7 @@ The largest single consumer — **20 of the 109 sites**.
 |:--|:---|:---|:---|:---|
 | 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:136` |
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:399` |
-| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4408`, `:5771`, `:6019`, `:6382`, `:6575` |
+| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4408`, `:5771`, `:6019`, `:6450`, `:6643` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
 | 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:246`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
@@ -196,7 +196,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:1909` (rationale at `:1819`–`1821`, #3760), `flow.zod.ts:685` |
 | "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `objectql/src/engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
 | "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:9588`–`9605` |
-| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1451` (#3493 / #6640) |
+| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1514` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:286` |
 | "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1240`, `:1269`; `domains/actions.ts:404` |

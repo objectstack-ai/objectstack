@@ -180,7 +180,7 @@ Column footer summary configuration
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; color?: string; visibleWhen?: string \| object }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -268,6 +268,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
 
@@ -343,7 +344,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; color?: string; visibleWhen?: string \| object }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -384,6 +385,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
 
@@ -403,8 +405,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1795,8 +1797,8 @@ Tab configuration for multi-tab view interface
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -1880,8 +1882,8 @@ Tab configuration for multi-tab view interface
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2155,8 +2157,8 @@ This schema accepts one of the following structures:
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
@@ -2341,8 +2343,8 @@ This schema accepts one of the following structures:
 | **description** | `string` | optional | Form description |
 | **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
 | **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
-| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard forms) |
-| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
 | **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
 | **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |

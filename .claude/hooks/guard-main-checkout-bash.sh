@@ -533,6 +533,14 @@ for seg in "${segments[@]}"; do
       [ "${abs#/}" = "$abs" ] && abs="$cwd/$t"
       root="$(git -C "$(dirname "$abs")" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$abs")"
       name="$(basename "$root")"
+      # ⭐ The recipe printed below is the HIGHEST-leverage copy of AGENTS.md PD#11's
+      # worktree recipe: it reaches an agent at the exact moment it is about to create one,
+      # so an agent following it lands wherever this string points. Keep it aligned with the
+      # prescribed form there — both halves are adjudicated, and this copy carried NEITHER
+      # until #13663: `git fetch origin main` first (an unfetched local `main` bases the new
+      # tree on a stale commit — the ui#6208 class), and `--no-track` on the add (plain `-b`
+      # writes branch.NAME.remote/merge into the .git/config that every worktree of this repo
+      # SHARES — the #13052 / ui#6880 class). Its twin lives in guard-main-checkout.sh.
       cat >&2 <<EOF
 ⛔ Blocked: this Bash command WRITES into the shared PRIMARY checkout, not a worktree.
    command: $offending
@@ -545,7 +553,7 @@ only, so the identical edit expressed as a shell command used to slip through in
 switched and its tree reset under you, clobbering uncommitted work. A feature branch on
 the shared checkout is NOT enough; you need a dedicated worktree:
 
-  git worktree add ../${name}-<task> -b <branch> main
+  git fetch origin main && git worktree add --no-track ../${name}-<task> -b <branch> origin/main
   cd ../${name}-<task> && pnpm install    # then re-run the command there
 
 Always fine, no flag needed:

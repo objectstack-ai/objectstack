@@ -54,7 +54,7 @@
     },
     "options": {
       "status": "live",
-      "note": "select options {label,value,color,default} — renderers + validation."
+      "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options."
     },
     "deleteBehavior": {
       "status": "live",
@@ -220,6 +220,13 @@
       "verifiedAt": "2026-08-28",
       "evidence": "packages/objectql/src/validation/record-validator.ts#validateOne (`if (def.minLength !== undefined && s.length < def.minLength) return fail('min_length', { minLength: def.minLength, actual: s.length })`)",
       "note": "CAVEAT — server camel; client form reads min_length. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:130` had rotted onto `export class ValidationError extends Error`, the error class rather than any check; its sibling `maxLength` cited `:127` three lines above, so the pair had drifted together. Re-closed by hand against 8cb96ec41."
+    },
+    "rows": {
+      "status": "live",
+      "verifiedAt": "2026-08-31",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/fields/src/widgets/RichTextField.tsx:283 (`const rows = richField?.rows || 8;`, applied at :321 as `rows={rows}` on the inline editor surface — the one widget behind the `markdown`/`html`/`richtext` registry keys, objectui#5498); objectui: packages/fields/src/widgets/TextAreaField.tsx:94 (`const rows = textareaField?.rows || 4;`, applied at :126) — the objectui#6140 measurement table, re-confirmed 2026-08-31 on a local objectui checkout (e3d117a)",
+      "note": "Inline multiline-editor height (the HTML textarea rows attribute; fullscreen/dialog surfaces size themselves and ignore it). Declared 2026-08-31 (objectui#6140, maintainer ruling 2026-08-25 Option A): the consumers shipped first, reached through an `as any` on the metadata carrier — the declaration was the missing half, aligning the TextareaFieldMetadata precedent. Authorable only on the multiline editor types (textarea/markdown/html/richtext — MULTILINE_EDITOR_FIELD_TYPES superRefine in field.zod.ts)."
     },
     "displayField": {
       "status": "live",
