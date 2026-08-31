@@ -24,18 +24,18 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json"
   },
   "dependencies": {
-    "@better-auth/core": "^1.7.1",
-    "@better-auth/oauth-provider": "^1.7.1",
-    "@better-auth/scim": "1.7.1",
-    "@better-auth/sso": "^1.7.1",
-    "@noble/hashes": "^2.3.0",
+    "@better-auth/core": "^1.7.2",
+    "@better-auth/oauth-provider": "^1.7.2",
+    "@better-auth/scim": "1.7.2",
+    "@better-auth/sso": "^1.7.2",
+    "@noble/hashes": "^2.4.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/rest": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "better-auth": "^1.7.1",
-    "jose": "^6.2.8"
+    "better-auth": "^1.7.2",
+    "jose": "^6.2.10"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
@@ -43,7 +43,7 @@
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.2.0",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

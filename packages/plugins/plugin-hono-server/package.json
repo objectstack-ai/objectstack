@@ -23,7 +23,7 @@
     "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "hono": "^4.13.2"
+    "hono": "^4.13.5"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

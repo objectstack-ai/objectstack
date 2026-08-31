@@ -101,7 +101,7 @@
     "@objectstack/trigger-schedule": "workspace:*",
     "@objectstack/types": "workspace:*",
     "@objectstack/verify": "workspace:*",
-    "@oclif/core": "^4.13.3",
+    "@oclif/core": "^4.14.0",
     "bundle-require": "^5.1.0",
     "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
