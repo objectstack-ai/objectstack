@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { extractHookBody, HookBodyExtractionError } from './extract-hook-body.js';
 import { lowerCallables } from './lower-callables.js';
 
-const TERRITORY = { US: 'na', DE: 'eu' };
+const TERRITORY: Record<string, string> = { US: 'na', DE: 'eu' };
 
 describe('HookBodyExtractionError', () => {
   it('classifies a module-scope reference as free-identifiers and names them', () => {

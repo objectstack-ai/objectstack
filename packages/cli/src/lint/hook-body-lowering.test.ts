@@ -19,7 +19,7 @@ import {
 import { lowerCallables } from '../utils/lower-callables.js';
 
 // Module scope — exactly what a lowered body cannot reach.
-const SLA_MATRIX = { high: 4, low: 48 };
+const SLA_MATRIX: Record<string, number> = { high: 4, low: 48 };
 
 const freeIdentifierHook = {
   name: 'case_sla',
