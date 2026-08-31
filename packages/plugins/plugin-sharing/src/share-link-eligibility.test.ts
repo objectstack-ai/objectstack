@@ -37,6 +37,27 @@
  * `maxExpiryDays`) had no pin in this package before. That set is what makes
  * the ablation meaningful: with the new predicate removed, the eligibility
  * cases must flip red and these five must stay green.
+ *
+ * ## [#13608] The second seam: the same policy, held again at REDEMPTION
+ *
+ * Enforcing at mint alone left the adjacent half open, and the state the
+ * predicate reads is exactly the state an editor changes: publish an article
+ * `public`, mint a link, then flip `audience` to `internal` or `status` back to
+ * `draft`, and the token minted before the flip kept resolving — serving the
+ * record in full to a caller with no principal. The maintainer ruled
+ * (2026-08-31) that `resolveToken` re-evaluates the predicate before serving,
+ * fail-closed, and that the refusal reuses the undifferentiated `null` a
+ * revoked link already gets rather than inventing a distinguishable "no longer
+ * eligible" answer for an anonymous caller — that distinction is an existence
+ * oracle.
+ *
+ * So the redemption block below pins three things the mint block cannot: the
+ * reclassification repro on BOTH flips, the refusal's SHAPE (measured at the
+ * service seam and again at the HTTP seam an anonymous holder actually
+ * reaches), and the fail-closed arm asserted by its REASON rather than by its
+ * outcome — a predicate that cannot compile can never be merely false, and the
+ * reason it refuses is read off the server-side log, which is the only place
+ * the ruling leaves it.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -46,7 +67,12 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 // with this cannot accept a call the real engine refuses
 // (`check:engine-double-contract`).
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { ShareLinkService } from './share-link-service.js';
+// [#13608] The PUBLIC seam an anonymous holder actually reaches. The refusal's
+// shape is a claim about what that caller can observe, so it is measured there
+// and not only on the service's return value.
+import { registerShareLinkRoutes } from './share-link-routes.js';
 import { SysShareLink } from './objects/sys-share-link.object.js';
 
 /**
@@ -94,6 +120,9 @@ afterEach(async () => {
   }
 });
 
+/** A refusal line the service wrote to its server-side log. */
+interface LoggedRefusal { msg: string; meta?: Record<string, any> }
+
 interface BootOptions {
   /**
    * The object definition the DRIVER is initialised from, when it must differ
@@ -109,6 +138,12 @@ interface BootOptions {
    * own-key-`undefined` block for what is reproduced and why it is real.
    */
   shapeRow?: (row: any) => any;
+  /**
+   * [#13608] Collect the service's server-side log. The redemption refusal is
+   * deliberately silent on the wire, so this is where the REASON it refused
+   * becomes assertable — and where the ruling says the reason belongs.
+   */
+  logger?: { warn: (msg: string, meta?: Record<string, any>) => void };
 }
 
 /**
@@ -129,9 +164,16 @@ async function boot(article: any = ARTICLE, options: BootOptions = {}) {
   for (const row of ROWS) await driver.create('article', row);
 
   const schemas: Record<string, any> = { article, sys_share_link: SysShareLink };
+  /**
+   * [#13608] Every read the service issues, in order. Two claims are measured
+   * off it: the `id`-only probe is UNCHANGED for an object with no predicate,
+   * and the eligibility path widens that same read rather than adding a second.
+   */
+  const findCalls: Array<{ object: string; query: any }> = [];
   const engine = {
     getSchema: (name: string) => schemas[name],
     find: async (object: string, query: any) => {
+      findCalls.push({ object, query });
       const rows = await driver.find(object, query);
       if (!options.shapeRow || object !== 'article' || !Array.isArray(rows)) return rows;
       return rows.map(options.shapeRow);
@@ -148,8 +190,11 @@ async function boot(article: any = ARTICLE, options: BootOptions = {}) {
       return driver.update(object, dispatch.id as string, data);
     },
   };
-  const service = new ShareLinkService({ engine: engine as any });
-  return { driver, service };
+  const service = new ShareLinkService({
+    engine: engine as any,
+    ...(options.logger ? { logger: options.logger } : {}),
+  });
+  return { driver, service, engine, schemas, findCalls };
 }
 
 /** Every row currently in the share-link table — the thing that must stay empty. */
@@ -547,3 +592,352 @@ describe('[#7861] publicSharing.eligibility is enforced at createLink', () => {
     });
   });
 });
+
+
+/**
+ * [#13608] The redemption seam.
+ *
+ * `resolveToken` checked `revoked_at`, `expires_at`, the audience gates, the
+ * password and record EXISTENCE — and served whatever survived, under
+ * `SYSTEM_CTX`, to a caller with no principal. The object's declared
+ * eligibility policy was consulted at mint and never again, so a record could
+ * be reclassified out of the policy and keep being published by a token minted
+ * while it was in.
+ */
+describe('[#13608] publicSharing.eligibility is enforced again at REDEMPTION', () => {
+  /** A token minted while `a_ok` still qualifies — the pre-condition of every case below. */
+  async function mintOn(service: ShareLinkService, recordId = 'a_ok', extra: Record<string, unknown> = {}) {
+    const link = await service.createLink(
+      { object: 'article', recordId, audience: 'public', permission: 'view', ...extra },
+      CALLER,
+    );
+    expect(link.token).toBeTruthy();
+    return link;
+  }
+
+  /** The row as the table holds it now — usage counters included. */
+  async function linkRow(driver: SqlDriver, id: string): Promise<any> {
+    const rows = await driver.find('sys_share_link', {} as DriverQuery);
+    return rows.find((r: any) => r.id === id);
+  }
+
+  describe('THE REPRO — a record reclassified after mint stops being served', () => {
+    it('`audience` flipped to internal: the same token resolves, then does not', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service);
+
+      // Minted while eligible, and serving.
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+
+      // The editor's flip — the exact step the card measured.
+      await driver.update('article', 'a_ok', { audience: 'internal' });
+
+      // Pre-fix this still returned the record in full to an anonymous caller.
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+    });
+
+    it('`status` reverted to draft: the same token resolves, then does not', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service);
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+
+      await driver.update('article', 'a_ok', { status: 'draft' });
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+    });
+  });
+
+  /**
+   * Ruling item 2 (maintainer, 2026-08-31): the refusal REUSES the answer a
+   * revoked / expired link already gets. Distinguishing "does not exist" from
+   * "revoked" from "no longer eligible" for a caller with no principal is an
+   * existence oracle, judged the way this repo's `RESOURCE_NOT_FOUND` pins
+   * judge one.
+   *
+   * "It refuses" does not cover that, so the shape itself is asserted — twice,
+   * because the claim is about two different observers.
+   */
+  describe('the refusal is the answer revoked / expired / unknown already give', () => {
+    it('at the service seam it is `null` — the identical value, not a lookalike', async () => {
+      const { driver, service } = await boot();
+      const live = await mintOn(service);
+      const revoked = await mintOn(service);
+      const expired = await mintOn(service);
+      const gone = await mintOn(service, 'a_ok');
+
+      await service.revokeLink(revoked.token, { isSystem: true } as any);
+      await driver.update('sys_share_link', expired.id, {
+        expires_at: new Date(Date.now() - 60_000).toISOString(),
+      });
+
+      // The reclassification, applied after every token above was minted.
+      await driver.update('article', 'a_ok', { audience: 'internal' });
+      // …and one record removed outright, for the #5190 arm of the same door.
+      await driver.delete('article', 'a_ok');
+
+      const answers = {
+        reclassified: await service.resolveToken(live.token, {}),
+        revoked: await service.resolveToken(revoked.token, {}),
+        expired: await service.resolveToken(expired.token, {}),
+        recordGone: await service.resolveToken(gone.token, {}),
+        unknown: await service.resolveToken('zzzzzzzzzzzzzzzzzzzzzz', {}),
+      };
+
+      // Identity, not deep equality: every arm returns the SAME value, so
+      // there is nothing on the wire to tell them apart.
+      for (const [name, answer] of Object.entries(answers)) {
+        expect(answer, `${name} must answer with the shared refusal`).toBeNull();
+      }
+      expect(Object.values(answers).every((a) => a === answers.revoked)).toBe(true);
+    });
+
+    it('the ineligible arm returns — it never throws a code an anonymous caller could read', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service);
+      await driver.update('article', 'a_ok', { audience: 'internal' });
+
+      // `assertEligible` throws `RECORD_NOT_ELIGIBLE`; letting that escape here
+      // would hand the route a 422 with the policy's own text in it.
+      await expect(service.resolveToken(link.token, {})).resolves.toBeNull();
+    });
+
+    /**
+     * The HTTP seam, driven end-to-end on the real service through the real
+     * route, with the route's SECURE default context — every request below is
+     * anonymous.
+     *
+     * What this measures, and why it is the honest reading of ruling item 2:
+     * the reclassified link lands in the route's generic "invalid / expired /
+     * revoked" answer, byte-for-byte the same one a token that NEVER EXISTED
+     * gets. It does not land in the 410 `EXPIRED_OR_REVOKED` branch, and it
+     * must not: the route picks that branch off `revoked_at` / `expires_at` on
+     * the row itself, so reaching it would require the service to hand the
+     * route a distinguishable "ineligible" answer — exactly what the ruling
+     * forbids. The bucket it does land in is the strictly LESS informative of
+     * the two: 410 would confirm to a holder that the token was real.
+     */
+    it('at the HTTP seam an anonymous caller cannot tell it from an unknown token', async () => {
+      const { driver, service, engine } = await boot();
+      const live = await mintOn(service);
+      const revoked = await mintOn(service);
+      await service.revokeLink(revoked.token, { isSystem: true } as any);
+
+      const resolve = mountResolveRoute(service, engine);
+
+      // Before the flip: the link serves the record.
+      const served = await resolve(live.token);
+      expect(served.status).toBe(200);
+
+      await driver.update('article', 'a_ok', { audience: 'internal' });
+
+      const reclassified = await resolve(live.token);
+      const unknown = await resolve('zzzzzzzzzzzzzzzzzzzzzz');
+      const revokedAnswer = await resolve(revoked.token);
+
+      // The equality that IS ruling item 2 at this seam.
+      expect(reclassified).toEqual(unknown);
+      expect(reclassified.status).toBe(404);
+      expect(reclassified.body?.error?.code).toBe('INVALID_OR_EXPIRED');
+      // Nothing about the policy, the predicate or the record reaches the wire.
+      expect(JSON.stringify(reclassified.body).toLowerCase()).not.toContain('eligib');
+      expect(JSON.stringify(reclassified.body).toLowerCase()).not.toContain('audience');
+
+      // The pre-existing revoked bucket, recorded as measured rather than
+      // assumed: it is a DIFFERENT status, and this change does not move it.
+      expect(revokedAnswer.status).toBe(410);
+      expect(revokedAnswer.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
+    });
+
+    it('a refused redemption stamps no usage — exactly like a revoked one', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service);
+      await driver.update('article', 'a_ok', { audience: 'internal' });
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+
+      const row = await linkRow(driver, link.id);
+      expect(row.use_count ?? 0).toBe(0);
+      expect(row.last_used_at ?? null).toBeNull();
+    });
+  });
+
+  /**
+   * The fail-closed arm, asserted by the REASON it refuses.
+   *
+   * A case whose predicate is false anyway would pass with the whole
+   * fail-closed branch deleted, so each case here uses a record that WOULD
+   * qualify under the predicate it was minted with, and a predicate that
+   * cannot be false at all — it can only fault. The reason is read off the
+   * server-side log, which is the only place the ruling leaves it.
+   */
+  describe('fail-closed: an unanswered predicate refuses, and says why only in the log', () => {
+    /** Mint under the working policy, then swap the object's predicate underneath the token. */
+    async function mintThenBreakPredicate(eligibility: string) {
+      const logged: LoggedRefusal[] = [];
+      const { driver, service, schemas } = await boot(ARTICLE, {
+        logger: { warn: (msg, meta) => { logged.push({ msg, meta }); } },
+      });
+      const link = await mintOn(service);
+
+      // The control: this token, this record, resolves under the declared
+      // policy. So a later refusal is about the SWAP, not about the record.
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+
+      schemas.article = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, eligibility } };
+      return { driver, service, link, logged };
+    }
+
+    it('a predicate that no longer compiles refuses a record that still qualifies', async () => {
+      const { service, link, logged } = await mintThenBreakPredicate('record.status ===== ');
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+
+      // The reason, and the only place it exists. `a_ok` is `published` +
+      // `public`, so no false verdict is available here — this refusal can
+      // only have come from the unevaluable arm.
+      expect(logged).toHaveLength(1);
+      expect(logged[0].meta?.reason).toBe('ELIGIBILITY_UNEVALUABLE');
+      expect(logged[0].meta?.link).toBe(link.id);
+      expect(logged[0].meta?.record).toBe('a_ok');
+    });
+
+    it('a predicate naming an UNDECLARED key refuses as a fault, not as a verdict', async () => {
+      const { service, link, logged } = await mintThenBreakPredicate("record.nope == 'x'");
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+      expect(logged[0].meta?.reason).toBe('ELIGIBILITY_UNEVALUABLE');
+    });
+
+    it('a predicate resolving to a non-boolean has not consented', async () => {
+      const { service, link, logged } = await mintThenBreakPredicate('record.title');
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+      expect(logged[0].meta?.reason).toBe('RECORD_NOT_ELIGIBLE');
+    });
+
+    it('the refusal reason names the two things an operator needs, and stays server-side', async () => {
+      const { service, link, logged } = await mintThenBreakPredicate('record.status ===== ');
+      await service.resolveToken(link.token, {});
+
+      expect(logged[0].msg).toContain('publicSharing.eligibility');
+      expect(logged[0].meta?.detail).toContain('record.status ===== ');
+    });
+  });
+
+  /**
+   * The other half of the guarantee: everything that was serving before must
+   * still serve, and the read must not have grown a second query.
+   */
+  describe('nothing else moved', () => {
+    it('a record that stays eligible resolves exactly as before, redaction included', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service, 'a_ok', { redactFields: ['title'] });
+
+      // A write that does NOT cross the policy — the record still qualifies.
+      await driver.update('article', 'a_ok', { title: 'Renamed, still published + public' });
+
+      const resolved = await service.resolveToken(link.token, {});
+      expect(resolved).not.toBeNull();
+      expect(resolved!.link.record_id).toBe('a_ok');
+      // object default ∪ per-link, unchanged by this card.
+      expect(resolved!.redactFields).toEqual(['owner_id', 'title']);
+
+      const row = await linkRow(driver, link.id);
+      expect(row.use_count).toBe(1);
+      expect(row.last_used_at).toBeTruthy();
+    });
+
+    it('an object with NO eligibility key is untouched by a reclassification', async () => {
+      const noEligibility = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, eligibility: undefined } };
+      const { driver, service } = await boot(noEligibility);
+      const link = await mintOn(service);
+
+      await driver.update('article', 'a_ok', { audience: 'internal', status: 'draft' });
+
+      // No declared policy, so nothing to hold: the link keeps serving.
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+    });
+
+    it('the existence probe keeps its `id`-only projection when no predicate is declared', async () => {
+      const noEligibility = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, eligibility: undefined } };
+      const { service, findCalls } = await boot(noEligibility);
+      const link = await mintOn(service);
+
+      findCalls.length = 0;
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+
+      const articleReads = findCalls.filter((c) => c.object === 'article');
+      expect(articleReads).toHaveLength(1);
+      expect(articleReads[0].query.fields).toEqual(['id']);
+    });
+
+    it('the eligibility read WIDENS the same probe rather than adding a second query', async () => {
+      const { service, findCalls } = await boot();
+      const link = await mintOn(service);
+
+      findCalls.length = 0;
+      expect(await service.resolveToken(link.token, {})).not.toBeNull();
+
+      const articleReads = findCalls.filter((c) => c.object === 'article');
+      expect(articleReads).toHaveLength(1);
+      expect(articleReads[0].query.fields).toBeUndefined();
+    });
+
+    it('[#5190] a deleted record still refuses — the probe survived the refactor', async () => {
+      const { driver, service } = await boot();
+      const link = await mintOn(service);
+      await driver.delete('article', 'a_ok');
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+    });
+
+    it('[#5190] a deleted record refuses even with NO predicate declared', async () => {
+      const noEligibility = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, eligibility: undefined } };
+      const { driver, service } = await boot(noEligibility);
+      const link = await mintOn(service);
+      await driver.delete('article', 'a_ok');
+
+      expect(await service.resolveToken(link.token, {})).toBeNull();
+    });
+  });
+});
+
+/**
+ * [#13608] Mount the real PUBLIC resolve route on the real service.
+ *
+ * Only the verbs `registerShareLinkRoutes` calls are implemented, and the
+ * SECURE default `contextFromRequest` is deliberately left in place: it reads
+ * no identity header, so every request driven through the returned function is
+ * anonymous — the caller the refusal shape is a claim about.
+ */
+function mountResolveRoute(service: ShareLinkService, engine: unknown) {
+  const routes = new Map<string, RouteHandler>();
+  const http: any = {
+    get: (path: string, h: RouteHandler) => { routes.set(`GET ${path}`, h); return http; },
+    post: (path: string, h: RouteHandler) => { routes.set(`POST ${path}`, h); return http; },
+    put: (path: string, h: RouteHandler) => { routes.set(`PUT ${path}`, h); return http; },
+    delete: (path: string, h: RouteHandler) => { routes.set(`DELETE ${path}`, h); return http; },
+    patch: (path: string, h: RouteHandler) => { routes.set(`PATCH ${path}`, h); return http; },
+    use: () => http,
+    listen: async () => undefined,
+    close: async () => undefined,
+    getInstance: () => null,
+  };
+  registerShareLinkRoutes(http as IHttpServer, service, engine as any);
+
+  const handler = routes.get('GET /api/v1/share-links/:token/resolve');
+  if (!handler) throw new Error('the public resolve route was not mounted');
+
+  return async (token: string): Promise<{ status: number; body: any }> => {
+    const captured: { status: number; body: any } = { status: 200, body: undefined };
+    const res: any = {
+      status: (code: number) => { captured.status = code; return res; },
+      json: (data: any) => { captured.body = data; return res; },
+      send: () => res,
+      header: () => res,
+    };
+    const req: any = { params: { token }, query: {}, headers: {}, method: 'GET', path: '/' };
+    await handler(req as IHttpRequest, res as IHttpResponse);
+    return captured;
+  };
+}
