@@ -1087,7 +1087,18 @@ const TEST_DEBT = {
       + 'still import. One older claim is now false and is corrected rather than carried: '
       + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
-  '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
+  '@objectstack/formula': {
+    errors: 17,
+    note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
+      + 'at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again '
+      + 'rather than five new defects. The TS2739 was inside that 17 from the start and simply went '
+      + 'UNLISTED, so this tally read 16 over a field of 17 until #13631 re-measured 17 at cc837dbfec '
+      + 'and restored it -- COMPOSITION reads tier itemisations and does not sum per-code tallies, so '
+      + 'nothing mechanical read the gap. It is the only one of the 17 in `src/cel-to-filter.test.ts` '
+      + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
+      + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
+      + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
+  },
   '@objectstack/verify': {
     errors: 3,
     note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '
