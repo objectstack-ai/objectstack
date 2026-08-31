@@ -37,3 +37,5 @@ and docs samples all declare targets; the census and its positive controls are
 recorded on the PR). No key is removed or renamed, so there is no ADR-0087
 registry entry — the key stays authorable with the same meaning; only the
 missing/empty hole closes.
+
+<!-- adr-0087: not-required (no-migration-prescription) A validity narrowing over an existing key: `reference` is not removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. The parse refusal is the channel that reaches an affected author, at the parse site, carrying the remedy; which target object a targetless `lookup` / `master_detail` was meant to point at is authoring intent no migration entry can decide on an upgrader's behalf — and the measured population of affected sources is zero in every in-tree corpus (census on the PR). Mirrors the disposition of the #11519 / #11842 ActionSchema narrowings and the #13733 wizard tightening. -->
