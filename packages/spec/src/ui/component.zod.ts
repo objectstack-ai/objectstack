@@ -996,7 +996,7 @@ export const RecordDetailsProps = strictObject({
     // `headerColor`. Those are how THIS page lays the section out and the group
     // declares nothing about them, so there is no second source to create.
     derivedKeys: ['name', 'label', 'icon', 'description', 'collapsible', 'defaultCollapsed'],
-  }))).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }` — or the #13855 reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry.'),
+  }))).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5).'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
